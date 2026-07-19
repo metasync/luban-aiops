@@ -1,1 +1,1 @@
-"""Release 0 agent service placeholder."""
+"""Agent platform runtime service modules."""

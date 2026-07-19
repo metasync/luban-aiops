@@ -31,11 +31,16 @@ Current implementation artifacts:
 
 - `pyproject.toml`
 - `src/agent_service/main.py`
+- `src/agent_service/runtime_settings.py`
+- `src/agent_service/runtime_kernel.py`
+- `src/agent_service/agent_app.py`
 
 Current scaffold status:
 
 - uses `uv` packaging with `uv_build`
-- keeps the outer HTTP service layer in `FastAPI`
+- keeps the existing outer HTTP adapter in `FastAPI` for current workspace integration
+- centralizes AgentScope runtime construction in reusable kernel modules
+- adds a native `AgentScope` runtime service entrypoint via `agent-service-runtime`
 - routes chat and streaming calls through an initial AgentScope runtime adapter when credentials are configured
 - falls back to deterministic placeholder responses when AgentScope model credentials are not yet configured
 

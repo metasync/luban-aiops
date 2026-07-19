@@ -5,6 +5,7 @@ description = "Release 0 placeholder runtime service for the Luban AIOps agent p
 requires-python = ">=3.11"
 dependencies = [
   "agentscope>=2.0.4,<3.0",
+  "agentscope-runtime>=1.1,<2.0",
   "fastapi>=0.115,<1.0",
   "pydantic>=2.8,<3.0",
   "uvicorn[standard]>=0.30,<1.0"
@@ -12,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 agent-service = "agent_service.main:run"
+agent-service-runtime = "agent_service.agent_app:run"
 
 [build-system]
 requires = ["uv_build>=0.8.14,<0.9.0"]
