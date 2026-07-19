@@ -27,6 +27,12 @@ This project currently provides the workspace placeholder and boundary definitio
 - approval queue and approval response UX
 - operator-visible audit and status views
 
+Current implementation artifacts:
+
+- `web-ui/index.html`
+- `web-ui/app.js`
+- `web-ui/styles.css`
+
 ## Expected Integration Points
 
 - `identity-broker` for `SSO` and normalized identity context

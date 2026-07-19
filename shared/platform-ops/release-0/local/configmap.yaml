@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: release-0-runtime-config
+data:
+  AGENT_SERVICE_URL: http://agent-service:8000
+  IDENTITY_SERVICE_URL: http://identity-service:8000
+  KEYCLOAK_BASE_URL: https://keycloak.example.com
+  KEYCLOAK_REALM: luban
+  OIDC_CLIENT_ID: luban-portal
+  OIDC_REDIRECT_URI: http://localhost:8080/callback

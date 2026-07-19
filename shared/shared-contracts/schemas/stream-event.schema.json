@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/stream-event.schema.json",
+  "title": "Stream Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "request_id", "session_id"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "enum": ["message_start", "message_delta", "message_end", "error"]
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "delta": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    }
+  }
+}

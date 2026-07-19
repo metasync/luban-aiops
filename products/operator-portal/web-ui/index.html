@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Luban AIOps Portal Placeholder</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="panel hero">
+        <p class="eyebrow">Release 0 Placeholder</p>
+        <h1>Luban AIOps Operator Portal</h1>
+        <p class="subtitle">
+          Minimal shell for login entry, session creation, prompt submission, and streamed response rendering.
+        </p>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>Gateway</h2>
+          <label for="gateway-url">Gateway base URL</label>
+          <input id="gateway-url" value="http://localhost:8080" />
+
+          <label for="user-id">User ID</label>
+          <input id="user-id" value="demo.operator" />
+
+          <div class="actions">
+            <button id="login-button" type="button">Get Login URL</button>
+            <button id="normalize-button" type="button">Normalize Identity</button>
+            <button id="session-button" type="button">Create Session</button>
+          </div>
+        </article>
+
+        <article class="panel">
+          <h2>Prompt</h2>
+          <label for="prompt-input">Message</label>
+          <textarea id="prompt-input" rows="6">Summarize the current Release 0 platform baseline.</textarea>
+
+          <div class="actions">
+            <button id="send-button" type="button">Send Prompt</button>
+            <button id="stream-button" type="button">Stream Prompt</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>Session</h2>
+          <dl class="metadata">
+            <div>
+              <dt>Session ID</dt>
+              <dd id="session-id">Not created</dd>
+            </div>
+            <div>
+              <dt>Request ID</dt>
+              <dd id="request-id">Pending</dd>
+            </div>
+          </dl>
+        </article>
+
+        <article class="panel">
+          <h2>Identity / Login</h2>
+          <pre id="identity-output">No identity request yet.</pre>
+        </article>
+      </section>
+
+      <section class="panel">
+        <h2>Response</h2>
+        <pre id="response-output">No response yet.</pre>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

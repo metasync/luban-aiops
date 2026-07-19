@@ -27,6 +27,15 @@ This module currently provides the workspace placeholder and boundary definition
 - policy, approval, execution, and audit models
 - versioned contracts consumed across workspace products
 
+Current implementation artifacts:
+
+- `schemas/chat-request.schema.json`
+- `schemas/chat-response.schema.json`
+- `schemas/session.schema.json`
+- `schemas/stream-event.schema.json`
+- `schemas/health-response.schema.json`
+- `schemas/identity-context.schema.json`
+
 ## Expected Integration Points
 
 - all `products/` modules that publish or consume shared interfaces

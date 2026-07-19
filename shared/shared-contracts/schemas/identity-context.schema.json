@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/identity-context.schema.json",
+  "title": "Identity Context",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["subject", "username", "roles"],
+  "properties": {
+    "subject": {
+      "type": "string"
+    },
+    "username": {
+      "type": "string"
+    },
+    "email": {
+      "type": "string",
+      "format": "email"
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

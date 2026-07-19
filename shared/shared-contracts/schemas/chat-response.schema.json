@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/chat-response.schema.json",
+  "title": "Chat Response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "request_id", "response"],
+  "properties": {
+    "session_id": {
+      "type": "string"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "response": {
+      "type": "string",
+      "description": "Agent reply body returned by the runtime."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "partial", "error"],
+      "default": "ok"
+    }
+  }
+}

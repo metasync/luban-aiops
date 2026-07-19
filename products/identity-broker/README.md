@@ -27,6 +27,11 @@ This project currently provides the workspace placeholder and boundary definitio
 - downstream identity context propagation
 - platform-wide identity contract alignment
 
+Current implementation artifacts:
+
+- `pyproject.toml`
+- `src/identity_service/main.py`
+
 ## Expected Integration Points
 
 - `operator-portal` for login initiation and session establishment

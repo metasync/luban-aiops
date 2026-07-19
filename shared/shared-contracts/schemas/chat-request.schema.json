@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/chat-request.schema.json",
+  "title": "Chat Request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["message"],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Optional session identifier used to continue an existing conversation."
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Operator prompt sent to the agent runtime."
+    },
+    "user_id": {
+      "type": "string",
+      "description": "Normalized user identifier propagated from the identity layer."
+    },
+    "request_id": {
+      "type": "string",
+      "description": "Correlation identifier shared across portal, gateway, and runtime."
+    }
+  }
+}

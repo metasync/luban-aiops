@@ -27,6 +27,11 @@ This project currently provides the workspace placeholder and boundary definitio
 - read-only and future bounded-action connector pathways
 - connector execution metadata and health reporting
 
+Current implementation artifacts:
+
+- `pyproject.toml`
+- `src/api_gateway/main.py`
+
 ## Expected Integration Points
 
 - `agent-platform` for tool invocation requests

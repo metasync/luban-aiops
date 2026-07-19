@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/health-response.schema.json",
+  "title": "Health Response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "service"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ok", "degraded"]
+    },
+    "service": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    }
+  }
+}

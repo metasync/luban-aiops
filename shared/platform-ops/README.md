@@ -26,6 +26,14 @@ This module currently provides the workspace placeholder and boundary definition
 - environment overlays and release wiring
 - shared operational conventions across workspace products
 
+Current implementation artifacts:
+
+- `release-0/local/README.md`
+- `release-0/local/kustomization.yaml`
+- `release-0/local/namespace.yaml`
+- `release-0/local/configmap.yaml`
+- `release-0/local/deployments.yaml`
+
 ## Expected Integration Points
 
 - all deployable `products/` services

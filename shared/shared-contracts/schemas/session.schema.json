@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/session.schema.json",
+  "title": "Session",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "created_at", "status"],
+  "properties": {
+    "session_id": {
+      "type": "string"
+    },
+    "user_id": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "closed"],
+      "default": "active"
+    }
+  }
+}

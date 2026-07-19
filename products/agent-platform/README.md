@@ -27,6 +27,11 @@ This project currently provides the workspace placeholder and boundary definitio
 - streaming response and event fan-out paths
 - orchestration across identity, policy, knowledge, and tool services
 
+Current implementation artifacts:
+
+- `pyproject.toml`
+- `src/agent_service/main.py`
+
 ## Expected Integration Points
 
 - `identity-broker` for normalized identity context
