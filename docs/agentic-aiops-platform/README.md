@@ -15,10 +15,11 @@ Read the documents in this sequence:
 5. `authorization-matrix.md`
 6. `policy-specification.md`
 7. `implementation-backlog.md`
-8. `delivery-roadmap.md`
-9. `../workspace/workspace-model.md`
-10. `../workspace/product-boundaries.md`
-11. `../workspace/repository-reorganization-plan.md`
+8. `release-0-implementation-checklist.md`
+9. `delivery-roadmap.md`
+10. `../workspace/workspace-model.md`
+11. `../workspace/product-boundaries.md`
+12. `../workspace/repository-reorganization-plan.md`
 
 ## Document Set
 
@@ -53,6 +54,10 @@ Read the documents in this sequence:
   - Release-oriented implementation backlog with self-contained epics, integration points, and validation scenarios
   - Translates the design set into executable platform work
 
+- `release-0-implementation-checklist.md`
+  - Execution-oriented checklist for the first platform foundation release
+  - Maps `Release 0` work into workspace products, shared modules, and validation gates
+
 - `delivery-roadmap.md`
   - Stacked delivery roadmap with self-contained releases, value themes, and operator validation checkpoints
   - Shows how capabilities should be introduced one by one
@@ -75,6 +80,7 @@ Read the documents in this sequence:
 - Authorization matrix: completed and documented
 - Policy specification: completed and documented
 - Implementation backlog: completed and documented
+- Release 0 implementation checklist: completed and documented
 - Delivery roadmap: completed and documented
 - Workspace model: completed and documented
 - Product boundaries: completed and documented
@@ -103,6 +109,7 @@ The goal of this document set is to provide a durable design record for:
 - `Authorization matrix` translates identity and approval design into explicit operational permissions
 - `Policy specification` describes how those permissions should be enforced by the platform
 - `Implementation backlog` translates the design set into buildable work grouped by self-contained releases
+- `Release 0 implementation checklist` turns the first release into a product-mapped execution guide
 - `Delivery roadmap` shows how those releases stack into a practical adoption path
 - `Workspace model` defines how the platform should be represented as a modular repository workspace
 - `Product boundaries` define ownership and interfaces for each workspace project
