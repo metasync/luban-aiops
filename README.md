@@ -53,6 +53,7 @@ The workspace is organized as a modular platform made up of multiple product-ori
 - Workspace docs index: [README.md](docs/workspace/README.md)
 - GitHub governance baseline: [github-repository-governance.md](docs/workspace/github-repository-governance.md)
 - Release 0 checklist: [release-0-implementation-checklist.md](docs/agentic-aiops-platform/release-0-implementation-checklist.md)
+- Agent platform runtime options: [agent-platform-runtime-options.md](docs/agentic-aiops-platform/agent-platform-runtime-options.md)
 
 ## Design Rules
 
