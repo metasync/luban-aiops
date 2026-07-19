@@ -2,6 +2,7 @@ import os
 from uuid import uuid4
 
 import httpx
+import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
@@ -124,3 +125,7 @@ async def chat_stream(
                     yield chunk
 
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+def run() -> None:
+    uvicorn.run("api_gateway.main:app", host="0.0.0.0", port=8000)

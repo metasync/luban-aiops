@@ -1,6 +1,7 @@
 import os
 from urllib.parse import urlencode
 
+import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
@@ -78,3 +79,7 @@ def normalize_identity(payload: ClaimsPayload) -> IdentityContext:
         groups=payload.groups,
         roles=resolve_roles(payload.groups),
     )
+
+
+def run() -> None:
+    uvicorn.run("identity_service.main:app", host="0.0.0.0", port=8000)

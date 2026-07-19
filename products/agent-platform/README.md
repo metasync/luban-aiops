@@ -32,6 +32,13 @@ Current implementation artifacts:
 - `pyproject.toml`
 - `src/agent_service/main.py`
 
+Current scaffold status:
+
+- uses `uv` packaging with `uv_build`
+- keeps the outer HTTP service layer in `FastAPI`
+- routes chat and streaming calls through an initial AgentScope runtime adapter when credentials are configured
+- falls back to deterministic placeholder responses when AgentScope model credentials are not yet configured
+
 ## Expected Integration Points
 
 - `identity-broker` for normalized identity context
