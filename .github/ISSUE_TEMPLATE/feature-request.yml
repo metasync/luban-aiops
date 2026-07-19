@@ -1,0 +1,55 @@
+name: Feature request
+description: Propose a release slice, workspace enhancement, or product capability.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: dropdown
+    id: product
+    attributes:
+      label: Owning area
+      description: Which product or shared module should own this work?
+      options:
+        - operator-portal
+        - agent-platform
+        - policy-center
+        - identity-broker
+        - skills-hub
+        - tool-gateway
+        - execution-runtime
+        - shared-contracts
+        - shared-sdk
+        - platform-ops
+        - docs
+    validations:
+      required: true
+  - type: input
+    id: release
+    attributes:
+      label: Target release
+      description: Which release should this land in?
+      placeholder: "Release 0 through Release 5"
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What user, operator, or platform problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the capability or slice to add.
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Boundary and control considerations
+      description: Note any impact on identity, policy, approval, audit, or execution boundaries.
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation scenario
+      description: Describe how operations teams or reviewers should verify the value of this slice.

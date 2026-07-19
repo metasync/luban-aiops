@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a bug in the workspace docs, structure, or product scaffolding.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which workspace area is affected?
+      options:
+        - docs
+        - operator-portal
+        - agent-platform
+        - policy-center
+        - identity-broker
+        - skills-hub
+        - tool-gateway
+        - execution-runtime
+        - shared
+        - repository-governance
+    validations:
+      required: true
+  - type: input
+    id: release
+    attributes:
+      label: Release slice
+      description: Which release or roadmap slice is affected?
+      placeholder: "Release 0, Release 1, or unknown"
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the bug and the observed behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include commands, files, or navigation steps when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Identity or control impact
+      description: Note whether identity, policy, approval, execution, or audit behavior is affected.
