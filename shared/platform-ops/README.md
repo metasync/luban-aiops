@@ -34,6 +34,8 @@ Current implementation artifacts:
 - `release-0/local/configmap.yaml`
 - `release-0/local/deployments.yaml`
 
+The current local baseline includes an in-cluster `Redis` deployment for the native `AgentScope` runtime path.
+
 ## Expected Integration Points
 
 - all deployable `products/` services

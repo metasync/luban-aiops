@@ -4,8 +4,14 @@ metadata:
   name: release-0-runtime-config
 data:
   AGENT_SERVICE_URL: http://agent-service:8000
+  AGENT_SERVICE_PORT: "8000"
   IDENTITY_SERVICE_URL: http://identity-service:8000
   KEYCLOAK_BASE_URL: https://keycloak.example.com
   KEYCLOAK_REALM: luban
   OIDC_CLIENT_ID: luban-portal
   OIDC_REDIRECT_URI: http://localhost:8080/callback
+  AGENTSCOPE_REDIS_HOST: redis
+  AGENTSCOPE_REDIS_PORT: "6379"
+  AGENTSCOPE_REDIS_DB: "0"
+  AGENTSCOPE_WORKSPACE_DIR: /var/lib/luban-aiops/workspaces/agent-platform
+  AGENTSCOPE_WORKSPACE_TTL_SECONDS: "3600"

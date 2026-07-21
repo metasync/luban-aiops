@@ -56,7 +56,8 @@ Local run options:
   - runs the `AgentApp`-based entrypoint
 - `uv run --directory products/agent-platform agent-service-native`
   - runs the native `AgentScope 2.0` service built with `create_app`
-  - expects a reachable local `Redis` instance using `AGENTSCOPE_REDIS_HOST`, `AGENTSCOPE_REDIS_PORT`, and related env vars if you override defaults
+  - expects a reachable `Redis` instance using `AGENTSCOPE_REDIS_HOST`, `AGENTSCOPE_REDIS_PORT`, and related env vars if you override defaults
+  - the default local Kubernetes baseline provisions this dependency at `shared/platform-ops/release-0/local`
 
 Testing note:
 

@@ -1,6 +1,48 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.2-alpine
+          ports:
+            - containerPort: 6379
+          args:
+            - redis-server
+            - --appendonly
+            - "no"
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+      volumes:
+        - name: redis-data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: web-ui
 spec:
   replicas: 1
@@ -82,8 +124,17 @@ spec:
       containers:
         - name: agent-service
           image: ghcr.io/metasync/luban-aiops/agent-service:release-0-dev
+          envFrom:
+            - configMapRef:
+                name: release-0-runtime-config
           ports:
             - containerPort: 8000
+          volumeMounts:
+            - name: agent-workspaces
+              mountPath: /var/lib/luban-aiops/workspaces
+      volumes:
+        - name: agent-workspaces
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
