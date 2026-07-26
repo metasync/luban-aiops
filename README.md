@@ -49,8 +49,11 @@ The workspace is organized as a modular platform made up of multiple product-ori
 
 ## Key Documents
 
+- Repository changelog: [CHANGELOG.md](CHANGELOG.md)
 - Platform study index: [README.md](docs/agentic-aiops-platform/README.md)
+- Release notes index: [README.md](docs/agentic-aiops-platform/release-notes/README.md)
 - Workspace docs index: [README.md](docs/workspace/README.md)
+- Python container strategy: [python-container-strategy.md](docs/workspace/python-container-strategy.md)
 - GitHub governance baseline: [github-repository-governance.md](docs/workspace/github-repository-governance.md)
 - Release 0 checklist: [release-0-implementation-checklist.md](docs/agentic-aiops-platform/release-0-implementation-checklist.md)
 - Agent platform runtime options: [agent-platform-runtime-options.md](docs/agentic-aiops-platform/agent-platform-runtime-options.md)
@@ -62,6 +65,13 @@ The workspace is organized as a modular platform made up of multiple product-ori
 - keep shared modules small and dependency-light
 - prefer API and event contracts over direct internal coupling
 - expand capabilities release by release with clear validation points
+
+## Python Toolchain
+
+- Python services standardize on `uv` for environment and package management
+- the workspace pins the preferred interpreter version with `.python-version`
+- Python product directories also carry `.python-version` so product-local container builds can honor the same interpreter target
+- the current backend images use the official `uv` Python base for simplicity, but the codebase is now aligned for future CI or runtime images that install `uv` on top of an environment-specific base and let `uv` manage both the interpreter and packages
 
 ## Current State
 

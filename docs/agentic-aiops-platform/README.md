@@ -17,10 +17,11 @@ Read the documents in this sequence:
 7. `implementation-backlog.md`
 8. `release-0-implementation-checklist.md`
 9. `agent-platform-runtime-options.md`
-10. `delivery-roadmap.md`
-11. `../workspace/workspace-model.md`
-12. `../workspace/product-boundaries.md`
-13. `../workspace/repository-reorganization-plan.md`
+10. `release-notes/README.md`
+11. `delivery-roadmap.md`
+12. `../workspace/workspace-model.md`
+13. `../workspace/product-boundaries.md`
+14. `../workspace/repository-reorganization-plan.md`
 
 ## Document Set
 
@@ -67,6 +68,10 @@ Read the documents in this sequence:
   - Stacked delivery roadmap with self-contained releases, value themes, and operator validation checkpoints
   - Shows how capabilities should be introduced one by one
 
+- `release-notes/README.md`
+  - Index for milestone-oriented release notes captured during implementation
+  - Links the current implementation wave back to the design and checklist documents
+
 - `../workspace/workspace-model.md`
   - Defines the repository as a modular workspace with product-oriented projects and shared modules
 
@@ -88,6 +93,7 @@ Read the documents in this sequence:
 - Release 0 implementation checklist: completed and documented
 - Agent platform runtime options: completed and documented
 - Delivery roadmap: completed and documented
+- Release notes index: completed and documented
 - Workspace model: completed and documented
 - Product boundaries: completed and documented
 - Repository reorganization plan: completed and documented
@@ -118,6 +124,7 @@ The goal of this document set is to provide a durable design record for:
 - `Release 0 implementation checklist` turns the first release into a product-mapped execution guide
 - `Agent platform runtime options` clarifies the implementation path for the runtime kernel service
 - `Delivery roadmap` shows how those releases stack into a practical adoption path
+- `Release notes` summarize concrete implementation waves and validation outcomes
 - `Workspace model` defines how the platform should be represented as a modular repository workspace
 - `Product boundaries` define ownership and interfaces for each workspace project
 - `Repository reorganization plan` shows how to evolve from the current study repository into the target workspace

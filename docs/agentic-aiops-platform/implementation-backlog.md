@@ -85,7 +85,7 @@ The platform needs a stable control-plane baseline before higher-value operation
 ### Key Backlog Items
 
 - create monorepo or workspace layout for core services
-- create Kubernetes manifests or Helm charts for local and target cluster deployment
+- create Kubernetes manifests or Helm charts for development and target-cluster deployment profiles
 - stand up `web-ui`, `api-gateway`, and `agent-service`
 - implement basic `SSE` path from runtime to web UI
 - integrate portal login with `Keycloak`
