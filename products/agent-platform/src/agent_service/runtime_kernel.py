@@ -2,6 +2,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 
+from agent_service.providers import get_provider
 from agent_service.runtime_settings import RuntimeSettings
 
 LOGGER = logging.getLogger(__name__)
@@ -51,8 +52,10 @@ def extract_text(value: object) -> str:
 class AgentKernel:
     def __init__(self, settings: RuntimeSettings | None = None) -> None:
         self.settings = settings or RuntimeSettings.from_env()
+        self._provider = get_provider(self.settings.provider)
         self._agent = None
         self._user_msg_cls = None
+        self._last_error: str | None = None
 
     def mode(self) -> str:
         return "agentscope" if self.is_configured() else "placeholder"
@@ -60,29 +63,69 @@ class AgentKernel:
     def is_configured(self) -> bool:
         return self.settings.is_configured()
 
+    def runtime_state(self) -> str:
+        if not self.is_configured():
+            return "not_configured"
+        if self._last_error:
+            return "provider_error"
+        return "ready"
+
+    def provider_name(self) -> str:
+        return self._provider.provider_name
+
+    def provider_description(self) -> str:
+        return self._provider.describe(self.settings)
+
+    def last_error(self) -> str | None:
+        return self._last_error
+
+    def runtime_metadata(self) -> dict[str, object]:
+        return {
+            "runtime_mode": self.mode(),
+            "runtime_state": self.runtime_state(),
+            "agentscope_enabled": self.is_configured(),
+            "profile": self.settings.profile,
+            "provider": self.provider_name(),
+            "provider_description": self.provider_description(),
+            "model_name": self._provider.resolved_model_name(self.settings),
+            "base_url": self._provider.resolved_base_url(self.settings),
+            "provider_options": make_serializable(self.settings.provider_options),
+            "hint": self.configuration_hint(),
+            "last_error": self.last_error(),
+        }
+
     def configuration_hint(self) -> str:
-        if self.is_configured():
-            return "AgentScope runtime enabled through DashScope credentials."
-        return (
-            "AgentScope runtime is not configured. "
-            "Set DASHSCOPE_API_KEY to enable the runtime kernel."
-        )
+        if not self.is_configured():
+            return (
+                "AgentScope runtime is not configured. "
+                "Set AGENTSCOPE_API_KEY to enable the runtime kernel."
+            )
+        if self._last_error:
+            return (
+                "AgentScope runtime is configured through the "
+                f"{self.provider_name()} provider, but the last provider call failed: "
+                f"{self._last_error}"
+            )
+        return f"AgentScope runtime ready through {self.provider_description()}."
+
+    def remember_error(self, exc: Exception) -> None:
+        self._last_error = str(exc)
+
+    def clear_error(self) -> None:
+        self._last_error = None
+
+    def _build_model(self):
+        return self._provider.build_model(self.settings)
 
     def _build_agent(self):
         from agentscope.agent import Agent
-        from agentscope.credential import DashScopeCredential
         from agentscope.message import UserMsg
-        from agentscope.model import DashScopeChatModel
         from agentscope.tool import Toolkit
 
-        model = DashScopeChatModel(
-            credential=DashScopeCredential(api_key=self.settings.dashscope_api_key),
-            model=self.settings.model_name,
-        )
         agent = Agent(
             name=self.settings.agent_name,
             system_prompt=self.settings.system_prompt,
-            model=model,
+            model=self._build_model(),
             toolkit=Toolkit(),
         )
         return agent, UserMsg
@@ -92,18 +135,26 @@ class AgentKernel:
             self._agent, self._user_msg_cls = self._build_agent()
         return self._agent, self._user_msg_cls
 
-    def build_placeholder_message(self, message: str, session_id: str) -> str:
+    def build_unconfigured_message(self, message: str, session_id: str) -> str:
         return (
-            "Release 0 placeholder response. "
+            "Platform baseline placeholder response. "
             f"AgentScope runtime not configured for session {session_id}. "
             f"Received '{message}'."
         )
 
-    async def placeholder_stream(
+    def build_provider_error_message(self, message: str, session_id: str) -> str:
+        detail = self._last_error or "Unknown provider error."
+        return (
+            "Platform runtime fallback response. "
+            f"AgentScope provider {self.provider_name()} failed for session {session_id}. "
+            f"Received '{message}'. Last error: {detail}"
+        )
+
+    async def fallback_stream(
         self,
-        message: str,
         request_id: str,
         session_id: str,
+        delta: str,
     ) -> AsyncIterator[dict[str, object]]:
         yield {
             "event": "message_start",
@@ -114,7 +165,7 @@ class AgentKernel:
             "event": "message_delta",
             "request_id": request_id,
             "session_id": session_id,
-            "delta": self.build_placeholder_message(message, session_id),
+            "delta": delta,
         }
         yield {
             "event": "message_end",
@@ -125,15 +176,17 @@ class AgentKernel:
 
     async def reply_text(self, message: str, session_id: str, user_name: str) -> str:
         if not self.is_configured():
-            return self.build_placeholder_message(message, session_id)
+            return self.build_unconfigured_message(message, session_id)
 
         try:
             agent, user_msg_cls = self.ensure_agent()
             reply_msg = await agent.reply(user_msg_cls(name=user_name, content=message))
+            self.clear_error()
             return extract_text(getattr(reply_msg, "content", reply_msg))
         except Exception as exc:  # pragma: no cover - defensive fallback
-            LOGGER.exception("AgentScope reply failed; falling back to placeholder mode: %s", exc)
-            return self.build_placeholder_message(message, session_id)
+            self.remember_error(exc)
+            LOGGER.exception("AgentScope reply failed; falling back to runtime error response: %s", exc)
+            return self.build_provider_error_message(message, session_id)
 
     def normalize_event(
         self,
@@ -170,15 +223,25 @@ class AgentKernel:
         user_name: str,
     ) -> AsyncIterator[dict[str, object]]:
         if not self.is_configured():
-            async for event in self.placeholder_stream(message, request_id, session_id):
+            async for event in self.fallback_stream(
+                request_id=request_id,
+                session_id=session_id,
+                delta=self.build_unconfigured_message(message, session_id),
+            ):
                 yield event
             return
 
         try:
             agent, user_msg_cls = self.ensure_agent()
             async for event in agent.reply_stream(user_msg_cls(name=user_name, content=message)):
+                self.clear_error()
                 yield self.normalize_event(event, request_id, session_id)
         except Exception as exc:  # pragma: no cover - defensive fallback
-            LOGGER.exception("AgentScope streaming failed; falling back to placeholder mode: %s", exc)
-            async for event in self.placeholder_stream(message, request_id, session_id):
+            self.remember_error(exc)
+            LOGGER.exception("AgentScope streaming failed; falling back to runtime error response: %s", exc)
+            async for event in self.fallback_stream(
+                request_id=request_id,
+                session_id=session_id,
+                delta=self.build_provider_error_message(message, session_id),
+            ):
                 yield event

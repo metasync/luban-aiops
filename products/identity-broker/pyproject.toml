@@ -1,7 +1,7 @@
 [project]
 name = "identity-service"
 version = "0.1.0"
-description = "Release 0 placeholder identity broker for Luban AIOps."
+description = "Identity broker for Luban AIOps."
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115,<1.0",
@@ -11,6 +11,11 @@ dependencies = [
 
 [project.scripts]
 identity-service = "identity_service.main:run"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3,<9.0"
+]
 
 [build-system]
 requires = ["uv_build>=0.8.14,<0.9.0"]

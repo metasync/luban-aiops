@@ -1,1 +1,5 @@
-"""Release 0 identity broker placeholder."""
+"""Identity broker package."""
+
+from identity_service.app import app, create_app
+
+__all__ = ["app", "create_app"]

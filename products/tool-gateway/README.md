@@ -30,7 +30,19 @@ This project currently provides the workspace placeholder and boundary definitio
 Current implementation artifacts:
 
 - `pyproject.toml`
-- `src/api_gateway/main.py`
+- `Dockerfile`
+- `src/api_gateway/app.py`
+- `src/api_gateway/api/routes/`
+- `src/api_gateway/core/`
+- `src/api_gateway/services/`
+
+Current scaffold status:
+
+- proxies the current portal contract to backend services
+- defaults to `auto` backend resolution for `agent-service`
+- prefers the transitional runtime surface when available and falls back to the native AgentScope service surface when needed
+- routes session and chat bridging through backend adapters instead of scattering mode checks across each endpoint
+- organizes the FastAPI package by app bootstrap, route modules, shared request/config helpers, and backend orchestration services
 
 ## Expected Integration Points
 

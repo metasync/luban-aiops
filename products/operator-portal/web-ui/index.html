@@ -9,7 +9,7 @@
   <body>
     <main class="app-shell">
       <section class="panel hero">
-        <p class="eyebrow">Release 0 Placeholder</p>
+        <p class="eyebrow">Platform Baseline</p>
         <h1>Luban AIOps Operator Portal</h1>
         <p class="subtitle">
           Minimal shell for login entry, session creation, prompt submission, and streamed response rendering.
@@ -20,7 +20,7 @@
         <article class="panel">
           <h2>Gateway</h2>
           <label for="gateway-url">Gateway base URL</label>
-          <input id="gateway-url" value="http://localhost:8080" />
+          <input id="gateway-url" placeholder="Defaults to the current portal origin" />
 
           <label for="user-id">User ID</label>
           <input id="user-id" value="demo.operator" />
@@ -35,7 +35,7 @@
         <article class="panel">
           <h2>Prompt</h2>
           <label for="prompt-input">Message</label>
-          <textarea id="prompt-input" rows="6">Summarize the current Release 0 platform baseline.</textarea>
+          <textarea id="prompt-input" rows="6">Summarize the current Luban AIOps platform baseline.</textarea>
 
           <div class="actions">
             <button id="send-button" type="button">Send Prompt</button>

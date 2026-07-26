@@ -30,7 +30,21 @@ This project currently provides the workspace placeholder and boundary definitio
 Current implementation artifacts:
 
 - `pyproject.toml`
-- `src/identity_service/main.py`
+- `Dockerfile`
+- `src/identity_service/app.py`
+- `src/identity_service/api/routes/`
+- `src/identity_service/core/`
+- `src/identity_service/schemas/`
+- `src/identity_service/services/`
+- `tests/test_identity_service.py`
+
+Current scaffold status:
+
+- organizes the `FastAPI` package by app bootstrap, route modules, config helpers, schemas, and normalization services
+- keeps `main.py` as a thin runtime bootstrap entrypoint
+- centralizes `Keycloak` and `OIDC` login URL construction behind settings-aware service code
+- isolates group-to-role mapping and identity normalization from the HTTP route layer
+- adds focused tests for role normalization and login URL composition
 
 ## Expected Integration Points
 

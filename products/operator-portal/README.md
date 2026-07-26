@@ -29,6 +29,8 @@ This project currently provides the workspace placeholder and boundary definitio
 
 Current implementation artifacts:
 
+- `Dockerfile`
+- `nginx.conf`
 - `web-ui/index.html`
 - `web-ui/app.js`
 - `web-ui/styles.css`

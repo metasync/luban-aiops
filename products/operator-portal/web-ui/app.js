@@ -6,13 +6,23 @@ const requestIdOutput = document.querySelector("#request-id");
 const identityOutput = document.querySelector("#identity-output");
 const responseOutput = document.querySelector("#response-output");
 
+function defaultGateway() {
+  if (window.location.protocol === "http:" || window.location.protocol === "https:") {
+    return window.location.origin;
+  }
+  return "http://localhost:8080";
+}
+
 function buildRequestId() {
   return `req-${crypto.randomUUID()}`;
 }
 
 function currentGateway() {
-  return gatewayInput.value.replace(/\/$/, "");
+  const explicitValue = gatewayInput.value.trim().replace(/\/$/, "");
+  return explicitValue || defaultGateway();
 }
+
+gatewayInput.value = defaultGateway();
 
 async function requestJson(path, options = {}) {
   const requestId = buildRequestId();
