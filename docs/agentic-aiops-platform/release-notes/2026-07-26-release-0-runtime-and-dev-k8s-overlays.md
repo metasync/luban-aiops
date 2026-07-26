@@ -8,8 +8,8 @@ This implementation wave advances `Release 0` in two related areas:
 - the Kubernetes development overlay path for the Release 0 baseline stack
 
 Together, these changes make provider switching easier, reduce gateway coupling
-to the transitional runtime shape, and make development-overlay image rollout
-more predictable.
+to the transitional runtime shape, and make the development-overlay rollout
+path more predictable, maintainable, and GitOps-friendly.
 
 ## Change Set 1: Runtime Provider And Gateway Refactor
 
@@ -51,26 +51,41 @@ more predictable.
 - added an `nginx` proxy baseline for `products/operator-portal`
 - updated the portal browser baseline to use the current origin by default for
   API traffic
-- added deterministic image build and deploy scripts for the Release 0
-  development Kubernetes overlays
+- added deterministic image build and deploy scripts for both
+  `dev-k8s-transitional` and `dev-k8s-native`
+- moved the active operational assets to the durable
+  `shared/platform-ops/gitops/` root and kept `Release 0` as milestone wording
+  in planning documents only
+- added shared runtime profile overlays plus selector and verification helpers
+  so provider choice is declared in Git
 - updated development-overlay config and runbook documentation to match the new
-  rollout path
+  rollout path, product-oriented manifest layout, and stable runtime profile
+  contract
+- added overlay-specific image tag generation and per-overlay `.images.env`
+  state tracking for clearer rollout traceability
+- aligned native-overlay image build and deploy wrappers with the documented
+  direct-execution workflow
 
 ### Why It Matters
 
 - development Kubernetes rollout is now more repeatable and closer to the
   intended Kubernetes-first deployment model
-- image rollout no longer depends on reusing a static development tag
+- image rollout no longer depends on reusing a static development tag and now
+  makes the active overlay visible directly in the image tag
 - browser validation is simpler because the development portal and gateway can
   be exercised through a single entrypoint
+- operational assets are now easier to evolve because product ownership,
+  profile selection, and overlay state are separated more cleanly
 
 ### Validation
 
-- fresh development-overlay images built with an explicit timestamped tag
+- fresh development-overlay images built with explicit overlay-aware tags
 - deployments rolled out successfully in the `dev-luban-aiops` namespace
 - session creation and chat requests succeeded through the refreshed
   development-overlay
   `api-gateway` path
+- both `dev-k8s-transitional` and `dev-k8s-native` overlays render cleanly via
+  `kubectl kustomize`
 
 ## Known Limitations
 
@@ -80,6 +95,9 @@ more predictable.
 - the sibling `dev-k8s-native` overlay exists for native AgentScope service
   validation, but the broader request path still defaults to the transitional
   profile
+- native image/build wrapper parity is now in place, but manual local smoke
+  runs still need care because regenerating `.images.env` updates local
+  deployment state by design
 - native AgentScope service mode still depends on later agent bootstrap and
   surrounding request-path alignment work
 - model output should not be treated as the source of truth for runtime

@@ -9,4 +9,4 @@ waves and validation outcomes rather than published product releases.
 
 - `2026-07-26-release-0-runtime-and-dev-k8s-overlays.md`
   - summarizes the current Release 0 runtime/provider refactor and the
-    development Kubernetes overlay rollout improvements
+    GitOps-oriented development Kubernetes overlay and rollout improvements
