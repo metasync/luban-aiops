@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-runtime-profile
+data:
+  AGENTSCOPE_PROFILE: openai
+  AGENTSCOPE_PROVIDER: openai
+  AGENTSCOPE_MODEL_NAME: gpt-4.1-mini
+  AGENTSCOPE_BASE_URL: https://api.openai.com/v1

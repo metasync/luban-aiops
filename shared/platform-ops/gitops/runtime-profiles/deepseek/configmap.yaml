@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-runtime-profile
+data:
+  AGENTSCOPE_PROFILE: deepseek
+  AGENTSCOPE_PROVIDER: deepseek
+  AGENTSCOPE_MODEL_NAME: deepseek-v4-flash
+  AGENTSCOPE_BASE_URL: https://api.deepseek.com

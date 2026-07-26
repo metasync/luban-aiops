@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: dev-luban-aiops
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: platform-runtime-config
+    envs:
+      - agent-platform/runtime-config.env
+      - tool-gateway/runtime-config.env
+      - identity-broker/runtime-config.env
+resources:
+  - shared/namespace.yaml
+  - infra/redis-deployment.yaml
+  - infra/redis-service.yaml
+  - operator-portal/web-ui-deployment.yaml
+  - operator-portal/web-ui-service.yaml
+  - tool-gateway/api-gateway-deployment.yaml
+  - tool-gateway/api-gateway-service.yaml
+  - agent-platform/agent-service-deployment.yaml
+  - agent-platform/agent-service-service.yaml
+  - identity-broker/identity-service-deployment.yaml
+  - identity-broker/identity-service-service.yaml

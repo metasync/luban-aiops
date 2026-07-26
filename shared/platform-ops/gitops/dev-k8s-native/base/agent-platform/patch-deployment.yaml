@@ -1,0 +1,16 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-service
+spec:
+  template:
+    spec:
+      containers:
+        - name: agent-service
+          command:
+            - uv
+          args:
+            - run
+            - agent-service-native
+          ports:
+            - containerPort: 8080

@@ -18,5 +18,10 @@ venv/
 __pycache__/
 .pytest_cache/
 .mypy_cache/
+**/.workspaces/
 
 *.log
+
+# Local runtime profile secrets and local image-tag state.
+shared/platform-ops/gitops/**/runtime-secrets.env
+shared/platform-ops/gitops/**/.images.env
