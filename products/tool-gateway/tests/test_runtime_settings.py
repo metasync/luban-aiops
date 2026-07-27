@@ -34,6 +34,21 @@ class GatewayRunSettingsTests(unittest.TestCase):
         self.assertEqual(settings.host, "127.0.0.1")
         self.assertEqual(settings.port, 9100)
 
+    def test_gateway_run_settings_ignore_kubernetes_service_link_port(self) -> None:
+        import os
+
+        old_port = os.environ.get("API_GATEWAY_PORT")
+        os.environ["API_GATEWAY_PORT"] = "tcp://192.168.194.145:8000"
+        try:
+            settings = GatewayRunSettings.from_env()
+        finally:
+            if old_port is None:
+                os.environ.pop("API_GATEWAY_PORT", None)
+            else:
+                os.environ["API_GATEWAY_PORT"] = old_port
+
+        self.assertEqual(settings.port, 8000)
+
 
 if __name__ == "__main__":
     unittest.main()

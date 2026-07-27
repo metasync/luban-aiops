@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 import httpx
+from fastapi import HTTPException
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
@@ -64,6 +65,49 @@ async def fetch_login_url(settings: GatewaySettings, request_id: str) -> dict:
     return response.json()
 
 
+async def start_login(settings: GatewaySettings, request_id: str) -> dict:
+    headers = build_service_headers(request_id)
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            f"{settings.identity_service_url}/api/v1/auth/login",
+            headers=headers,
+        )
+    response.raise_for_status()
+    return response.json()
+
+
+async def complete_login(
+    settings: GatewaySettings,
+    request_id: str,
+    payload: dict,
+) -> dict:
+    headers = build_service_headers(request_id)
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(
+            f"{settings.identity_service_url}/api/v1/auth/callback",
+            json=payload,
+            headers=headers,
+        )
+    response.raise_for_status()
+    return response.json()
+
+
+async def build_logout_url(
+    settings: GatewaySettings,
+    request_id: str,
+    payload: dict,
+) -> dict:
+    headers = build_service_headers(request_id)
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(
+            f"{settings.identity_service_url}/api/v1/auth/logout-url",
+            json=payload,
+            headers=headers,
+        )
+    response.raise_for_status()
+    return response.json()
+
+
 async def normalize_identity(
     settings: GatewaySettings,
     request: Request,
@@ -78,6 +122,35 @@ async def normalize_identity(
         )
     response.raise_for_status()
     return response.json()
+
+
+async def fetch_current_identity(
+    settings: GatewaySettings,
+    request_id: str,
+    authorization: str,
+) -> dict:
+    headers = build_service_headers(request_id)
+    headers["authorization"] = authorization
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            f"{settings.identity_service_url}/api/v1/identity/me",
+            headers=headers,
+        )
+    if response.status_code == 401:
+        raise HTTPException(status_code=401, detail="authentication required")
+    response.raise_for_status()
+    return response.json()
+
+
+async def resolve_authenticated_identity(
+    settings: GatewaySettings,
+    request: Request,
+    request_id: str,
+) -> dict | None:
+    authorization = request.headers.get("authorization")
+    if not authorization:
+        return None
+    return await fetch_current_identity(settings, request_id, authorization)
 
 
 async def create_session(

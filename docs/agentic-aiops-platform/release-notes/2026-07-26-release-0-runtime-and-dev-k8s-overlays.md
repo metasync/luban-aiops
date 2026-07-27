@@ -2,14 +2,68 @@
 
 ## Summary
 
-This implementation wave advances `Release 0` in two related areas:
+This implementation wave advances `Release 0` in three related areas:
 
 - the runtime/provider path inside `products/agent-platform`
 - the Kubernetes development overlay path for the Release 0 baseline stack
+- the authenticated portal-to-gateway-to-runtime path needed for formal closure
 
 Together, these changes make provider switching easier, reduce gateway coupling
 to the transitional runtime shape, and make the development-overlay rollout
-path more predictable, maintainable, and GitOps-friendly.
+path more predictable, maintainable, and GitOps-friendly. With the live
+Kubernetes validation path and the final closure-document cleanup now in place,
+`Release 0` is complete.
+
+## Change Set 3: Authenticated Portal Closure Path
+
+### Highlights
+
+- added a minimal `OIDC` authorization-code login flow for
+  `products/operator-portal` using browser `sessionStorage`
+- added `identity-broker` endpoints for login start, authorization-code
+  exchange, logout URL generation, and bearer-backed current-identity
+  resolution
+- updated `api-gateway` so authenticated bearer identity overrides manual
+  `user_id` values for session creation, prompt submission, and streaming
+- added optional `identity-service-runtime-secrets` injection and
+  `OIDC_POST_LOGOUT_REDIRECT_URI` configuration to the GitOps baseline overlay
+- added structured JSON access and session logs across the core services so
+  `request_id`, `session_id`, and authenticated user identity are visible in
+  the request chain
+- added a Git-tracked Keycloak browser-client reconciliation step for
+  `dev-k8s-transitional` so the validated portal client redirect and identity
+  claim settings remain durable across later overlay deploys
+
+### Why It Matters
+
+- the portal no longer stops at "get login URL"; it can now complete a real
+  callback and hold an authenticated browser session for downstream calls
+- the gateway can now derive runtime identity from an authenticated bearer
+  token instead of depending only on manually supplied usernames
+- the deployment baseline now has a clear configuration contract for the
+  identity-service `OIDC` flow, including optional client-secret injection
+- the validated sandbox `Keycloak` browser client no longer drifts away from
+  the portal's required redirect and identity-claim contract after redeploys
+- request tracing is more useful during closure validation because the same
+  identifiers now show up in service logs as well as response payloads
+
+### Validation
+
+- `identity-broker`: focused auth and identity tests passed
+- `tool-gateway`: focused authenticated-identity propagation tests passed
+- `agent-platform`: focused runtime/session tests passed with the new logging
+  hooks in place
+- both `dev-k8s-transitional` and `dev-k8s-native` overlays still render
+  cleanly via `kubectl kustomize`
+- live browser validation now passes in Kubernetes for:
+  - `SSO` login through the shared sandbox `Keycloak` realm
+  - portal callback completion in `operator-portal`
+  - session creation through `api-gateway`
+  - streamed prompt completion through `agent-service`
+- live validation environment:
+  - overlay: `dev-k8s-transitional`
+  - namespace: `dev-luban-aiops`
+  - portal entry: `kubectl port-forward service/web-ui 18080:80`
 
 ## Change Set 1: Runtime Provider And Gateway Refactor
 
@@ -98,8 +152,8 @@ path more predictable, maintainable, and GitOps-friendly.
 - native image/build wrapper parity is now in place, but manual local smoke
   runs still need care because regenerating `.images.env` updates local
   deployment state by design
-- native AgentScope service mode still depends on later agent bootstrap and
-  surrounding request-path alignment work
+- the streaming request completes successfully, but the browser still reports
+  a client-side `net::ERR_ABORTED` entry after the final `SSE` event
 - model output should not be treated as the source of truth for runtime
   provider state; `/api/v1/runtime` remains authoritative
 

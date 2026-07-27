@@ -60,6 +60,38 @@ In the source tree this shared config is now assembled from product-scoped env f
 - `shared/platform-ops/gitops/dev-k8s-transitional/base/tool-gateway/runtime-config.env`
 - `shared/platform-ops/gitops/dev-k8s-transitional/base/identity-broker/runtime-config.env`
 
+The identity-broker config fragment defines the browser callback and logout redirect defaults for the first `OIDC` flow. The committed `dev-k8s-transitional` baseline now matches the validated shared development IdP path in `dev-luban-aiops`:
+
+- `KEYCLOAK_BASE_URL=https://idp.apps.metasync.cc`
+- `KEYCLOAK_REALM=snd`
+- `OIDC_CLIENT_ID=snd-luban-aiops-portal`
+- `OIDC_REDIRECT_URI=http://localhost:18080/callback`
+- `OIDC_POST_LOGOUT_REDIRECT_URI=http://localhost:18080/`
+- `OIDC_SCOPES=openid groups`
+
+The corresponding keys remain:
+
+- `KEYCLOAK_BASE_URL`
+- `KEYCLOAK_REALM`
+- `OIDC_CLIENT_ID`
+- `OIDC_REDIRECT_URI`
+- `OIDC_POST_LOGOUT_REDIRECT_URI`
+- `OIDC_SCOPES`
+
+The overlay also carries a Git-tracked reconciliation script for the shared
+Keycloak browser client:
+
+- `shared/platform-ops/gitops/dev-k8s-transitional/reconcile-portal-oidc-client.sh`
+
+That script treats the overlay `identity-broker/runtime-config.env` values as
+the desired browser client contract for `snd-luban-aiops-portal`. It reconciles:
+
+- client existence and PKCE/public-client settings
+- `redirectUris`
+- `webOrigins`
+- `post.logout.redirect.uris`
+- client protocol mappers for `preferred_username` and `email`
+
 `AGENT_BACKEND_MODE` controls how `api-gateway` talks to `agent-service`:
 
 - `transitional`
@@ -165,6 +197,12 @@ shared/platform-ops/gitops/verify-runtime-profile.sh
 
 The runtime settings layer also validates that `AGENTSCOPE_PROFILE` matches `AGENTSCOPE_PROVIDER`, so a mismatched overlay fails fast at service startup.
 
+For confidential `OIDC` clients, the `identity-service` deployment also supports an optional Kubernetes secret named `identity-service-runtime-secrets`.
+
+At minimum, provide:
+
+- `OIDC_CLIENT_SECRET`
+
 ## Build Images
 
 ```bash
@@ -202,13 +240,26 @@ AUTO_LOAD_KIND=true KIND_CLUSTER_NAME=<your-kind-cluster> \
 shared/platform-ops/gitops/dev-k8s-transitional/deploy.sh
 ```
 
-This apply path uses the latest `IMAGE_TAG` from `.images.env`, applies the active root GitOps overlay, then updates each deployment to the explicit image tag and waits for rollout completion.
+This apply path uses the latest `IMAGE_TAG` from `.images.env`, applies the active root GitOps overlay, updates each deployment to the explicit image tag, waits for rollout completion, then reconciles the shared Keycloak browser client for the committed `OIDC` settings.
 
 If you need to override the namespace or image tag manually:
 
 ```bash
 NAMESPACE=dev-luban-aiops IMAGE_TAG=<explicit-tag> \
   shared/platform-ops/gitops/dev-k8s-transitional/deploy.sh
+```
+
+If you want to skip the Keycloak step temporarily:
+
+```bash
+RECONCILE_OIDC_PORTAL_CLIENT=false \
+  shared/platform-ops/gitops/dev-k8s-transitional/deploy.sh
+```
+
+To reconcile only the browser client without redeploying the workloads:
+
+```bash
+shared/platform-ops/gitops/dev-k8s-transitional/reconcile-portal-oidc-client.sh
 ```
 
 ## Verify
@@ -221,12 +272,17 @@ kubectl -n dev-luban-aiops logs deployment/redis
 To reach the portal in this development cluster through a single browser entrypoint:
 
 ```bash
-kubectl -n dev-luban-aiops port-forward service/web-ui 8080:80
+kubectl -n dev-luban-aiops port-forward service/web-ui 18080:80
 ```
 
-Then open `http://localhost:8080`. The portal defaults its gateway URL to the current origin, and `nginx` forwards `/api/` calls to `api-gateway`.
+Then open `http://localhost:18080`. The committed `OIDC` redirect URIs in this overlay assume that same local browser entrypoint, and `nginx` forwards `/api/` calls to `api-gateway`.
 
-Once the pods are running, verify that `agent-service` starts successfully and that the portal can create a session and stream a response through the proxied gateway path.
+Once the pods are running, verify that `agent-service` starts successfully and that the portal can:
+
+- start `SSO` login
+- complete the callback back into the portal shell
+- create a session through `api-gateway`
+- send one prompt and receive one streamed response through the proxied gateway path
 
 You can also verify the gateway-side backend resolution directly:
 

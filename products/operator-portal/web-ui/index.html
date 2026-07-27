@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Luban AIOps Portal Placeholder</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260727-final-cleanup" />
   </head>
   <body>
     <main class="app-shell">
@@ -22,11 +22,12 @@
           <label for="gateway-url">Gateway base URL</label>
           <input id="gateway-url" placeholder="Defaults to the current portal origin" />
 
-          <label for="user-id">User ID</label>
+          <label for="user-id">Resolved User ID</label>
           <input id="user-id" value="demo.operator" />
 
           <div class="actions">
-            <button id="login-button" type="button">Get Login URL</button>
+            <button id="login-button" type="button">Login With SSO</button>
+            <button id="logout-button" type="button">Logout</button>
             <button id="normalize-button" type="button">Normalize Identity</button>
             <button id="session-button" type="button">Create Session</button>
           </div>
@@ -61,7 +62,7 @@
 
         <article class="panel">
           <h2>Identity / Login</h2>
-          <pre id="identity-output">No identity request yet.</pre>
+          <pre id="identity-output">No authenticated identity yet.</pre>
         </article>
       </section>
 
@@ -71,6 +72,6 @@
       </section>
     </main>
 
-    <script src="./app.js"></script>
+    <script src="./app.js?v=20260727-final-cleanup"></script>
   </body>
 </html>

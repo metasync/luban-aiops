@@ -25,9 +25,18 @@ published product versions.
   layer.
 - Added Dockerfiles for the Release 0 development overlay services and an
   `nginx` proxy baseline for `products/operator-portal`.
+- Added a minimal `OIDC` authorization-code callback path across
+  `products/operator-portal`, `products/identity-broker`, and
+  `products/tool-gateway`.
+- Added configurable `OIDC_SCOPES` support so the shared identity flow can work
+  against realms that do not expose the default `profile` and `email` scopes.
 - Added focused tests for runtime settings, runtime metadata, provider registry
   behavior, and gateway backend resolution.
 - Added release notes under `docs/agentic-aiops-platform/release-notes/`.
+- Added a Git-tracked Keycloak browser-client reconciliation script for
+  `dev-k8s-transitional` so the portal client redirect URIs, PKCE/public-client
+  settings, and `preferred_username` / `email` mappers stay durable across
+  overlay deploys.
 
 ### Changed
 
@@ -46,6 +55,13 @@ published product versions.
   current origin and route them through the local `nginx` proxy.
 - Changed backend package layout across `agent-platform`, `tool-gateway`, and
   `identity-broker` to follow a clearer FastAPI-by-responsibility structure.
+- Changed the gateway and portal request path so authenticated bearer identity
+  now overrides manually entered user IDs for session and chat operations.
+- Changed the GitOps overlay roots to set the deployment namespace explicitly so
+  shared runtime-profile config maps are created in the same namespace as the
+  services that consume them.
+- Changed the committed `dev-k8s-transitional` OIDC baseline to match the live
+  shared sandbox `Keycloak` validation path used for `Release 0` closure.
 
 ### Fixed
 
@@ -58,3 +74,17 @@ published product versions.
   documented and writes to the correct overlay-specific image-state file.
 - Fixed local runtime artifact hygiene by ignoring generated `**/.workspaces/`
   directories.
+- Fixed the remaining `Release 0` auth gap by adding identity-broker token
+  exchange, portal callback handling, optional identity-service secret
+  injection, and structured request/session logs across the core services.
+- Fixed fresh-namespace startup for `api-gateway` and `identity-service` by
+  ignoring Kubernetes service-link `*_PORT=tcp://...` values when parsing their
+  listen ports.
+- Fixed the live `Release 0` overlay wiring so `agent-platform-runtime-profile`
+  is created in the target namespace instead of `default`.
+- Fixed the portal SSO identity contract in the shared sandbox realm by making
+  the browser client emit durable `preferred_username` and `email` claims, so
+  authenticated identity no longer falls back to the UUID subject value.
+- Fixed the remaining `Release 0` documentation drift so the checklist,
+  release notes, and closure status now consistently describe `Release 0` as
+  completed with only post-closure follow-up items remaining.

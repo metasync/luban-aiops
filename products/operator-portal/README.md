@@ -35,6 +35,15 @@ Current implementation artifacts:
 - `web-ui/app.js`
 - `web-ui/styles.css`
 
+Current browser baseline capabilities:
+
+- `OIDC` login start through `api-gateway`
+- authorization-code callback completion through `identity-broker`
+- authenticated portal logout entry point
+- session creation, prompt send, and streamed response rendering through the
+  proxied gateway path
+- request ID visibility for debug-oriented validation
+
 ## Expected Integration Points
 
 - `identity-broker` for `SSO` and normalized identity context

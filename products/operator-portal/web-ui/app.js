@@ -5,6 +5,9 @@ const sessionIdOutput = document.querySelector("#session-id");
 const requestIdOutput = document.querySelector("#request-id");
 const identityOutput = document.querySelector("#identity-output");
 const responseOutput = document.querySelector("#response-output");
+const AUTH_SESSION_KEY = "luban.portal.authSession";
+const AUTH_REQUEST_KEY = "luban.portal.authRequest";
+let authCallbackNavigationPending = false;
 
 function defaultGateway() {
   if (window.location.protocol === "http:" || window.location.protocol === "https:") {
@@ -24,11 +27,67 @@ function currentGateway() {
 
 gatewayInput.value = defaultGateway();
 
+function loadAuthSession() {
+  const raw = window.sessionStorage.getItem(AUTH_SESSION_KEY);
+  return raw ? JSON.parse(raw) : null;
+}
+
+function saveAuthSession(session) {
+  window.sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
+}
+
+function clearAuthSession() {
+  window.sessionStorage.removeItem(AUTH_SESSION_KEY);
+}
+
+function loadPendingAuthRequest() {
+  const raw = window.sessionStorage.getItem(AUTH_REQUEST_KEY);
+  return raw ? JSON.parse(raw) : null;
+}
+
+function savePendingAuthRequest(payload) {
+  window.sessionStorage.setItem(AUTH_REQUEST_KEY, JSON.stringify(payload));
+}
+
+function clearPendingAuthRequest() {
+  window.sessionStorage.removeItem(AUTH_REQUEST_KEY);
+}
+
+function currentAuthenticatedUser() {
+  return loadAuthSession()?.identity?.username || null;
+}
+
+function syncResolvedUser() {
+  const authenticatedUser = currentAuthenticatedUser();
+  if (authenticatedUser) {
+    userInput.value = authenticatedUser;
+    userInput.setAttribute("disabled", "disabled");
+    return;
+  }
+  userInput.removeAttribute("disabled");
+}
+
+function renderIdentity(payload) {
+  identityOutput.textContent = JSON.stringify(payload, null, 2);
+  syncResolvedUser();
+}
+
+function authHeaders() {
+  const session = loadAuthSession();
+  if (!session?.access_token) {
+    return {};
+  }
+  return {
+    authorization: `Bearer ${session.access_token}`
+  };
+}
+
 async function requestJson(path, options = {}) {
   const requestId = buildRequestId();
   requestIdOutput.textContent = requestId;
   const headers = {
     "x-request-id": requestId,
+    ...authHeaders(),
     ...(options.headers || {})
   };
 
@@ -48,9 +107,154 @@ async function requestJson(path, options = {}) {
   return response.json();
 }
 
-async function getLoginUrl() {
-  const payload = await requestJson("/api/v1/auth/login-url", { method: "GET" });
-  identityOutput.textContent = JSON.stringify(payload, null, 2);
+function clearAuthCallbackQuery() {
+  const url = new URL(window.location.href);
+  for (const key of ["code", "state", "session_state", "iss", "error", "error_description"]) {
+    url.searchParams.delete(key);
+  }
+  if (url.pathname === "/callback") {
+    authCallbackNavigationPending = true;
+    window.location.replace(`${url.origin}/`);
+    return;
+  }
+  window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+}
+
+function renderError(target, error) {
+  target.textContent = error instanceof Error ? error.message : String(error);
+}
+
+function shouldAppendStreamDelta(payload) {
+  const event = String(payload.event || "").toLowerCase();
+  return Boolean(payload.delta) && ["message_delta", "text_block_start", "text_block_delta"].includes(event);
+}
+
+function isStreamComplete(payload) {
+  const event = String(payload.event || "").toLowerCase();
+  return event === "message_end" || event === "reply_end";
+}
+
+async function refreshAuthenticatedIdentity() {
+  const session = loadAuthSession();
+  if (!session?.access_token) {
+    renderIdentity({ authenticated: false });
+    return;
+  }
+
+  try {
+    const payload = await requestJson("/api/v1/auth/me", { method: "GET" });
+    if (!payload.authenticated) {
+      clearAuthSession();
+      renderIdentity({ authenticated: false });
+      return;
+    }
+    const refreshedSession = {
+      ...session,
+      identity: payload.identity
+    };
+    saveAuthSession(refreshedSession);
+    renderIdentity({ authenticated: true, identity: payload.identity });
+  } catch (error) {
+    if (session.identity) {
+      renderIdentity({
+        authenticated: true,
+        identity: session.identity,
+        warning: "Using cached identity until session refresh succeeds again."
+      });
+      return;
+    }
+    clearAuthSession();
+    renderIdentity({ authenticated: false, error: error.message });
+  }
+}
+
+async function startLogin() {
+  const payload = await requestJson("/api/v1/auth/login", { method: "GET" });
+  savePendingAuthRequest({
+    state: payload.state,
+    code_verifier: payload.code_verifier,
+    redirect_uri: payload.redirect_uri
+  });
+  renderIdentity({
+    authenticated: false,
+    login_start: payload
+  });
+  window.location.assign(payload.authorization_url);
+}
+
+async function completeLoginFromCallback() {
+  const url = new URL(window.location.href);
+  const onCallbackPath = url.pathname === "/callback";
+  const authError = url.searchParams.get("error");
+  if (authError) {
+    clearAuthSession();
+    clearPendingAuthRequest();
+    renderIdentity({
+      authenticated: false,
+      error: authError,
+      error_description: url.searchParams.get("error_description")
+    });
+    clearAuthCallbackQuery();
+    return false;
+  }
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  if (!code || !state) {
+    if (onCallbackPath) {
+      clearAuthCallbackQuery();
+    }
+    return false;
+  }
+
+  const pendingRequest = loadPendingAuthRequest();
+  if (!pendingRequest || pendingRequest.state !== state) {
+    clearAuthSession();
+    clearPendingAuthRequest();
+    clearAuthCallbackQuery();
+    throw new Error("OIDC state validation failed.");
+  }
+
+  const session = await requestJson("/api/v1/auth/callback", {
+    method: "POST",
+    body: JSON.stringify({
+      code,
+      code_verifier: pendingRequest.code_verifier,
+      redirect_uri: pendingRequest.redirect_uri
+    })
+  });
+  saveAuthSession(session);
+  clearPendingAuthRequest();
+  clearAuthCallbackQuery();
+  renderIdentity({ authenticated: true, identity: session.identity });
+  responseOutput.textContent = "Signed in.";
+  return true;
+}
+
+async function logout() {
+  const session = loadAuthSession();
+  clearAuthSession();
+  clearPendingAuthRequest();
+  sessionIdOutput.textContent = "Not created";
+  responseOutput.textContent = "Signed out.";
+
+  if (!session) {
+    renderIdentity({ authenticated: false });
+    return;
+  }
+
+  try {
+    const payload = await requestJson("/api/v1/auth/logout-url", {
+      method: "POST",
+      body: JSON.stringify({
+        id_token_hint: session.id_token,
+        post_logout_redirect_uri: `${currentGateway()}/`
+      })
+    });
+    renderIdentity({ authenticated: false });
+    window.location.assign(payload.logout_url);
+  } catch (error) {
+    renderIdentity({ authenticated: false, error: error.message });
+  }
 }
 
 async function normalizeIdentity() {
@@ -58,18 +262,21 @@ async function normalizeIdentity() {
     method: "POST",
     body: JSON.stringify({
       sub: "user-123",
-      preferred_username: userInput.value,
-      email: `${userInput.value}@example.com`,
+      preferred_username: currentAuthenticatedUser() || userInput.value,
+      email: `${(currentAuthenticatedUser() || userInput.value)}@example.com`,
       groups: ["ops-operators"]
     })
   });
-  identityOutput.textContent = JSON.stringify(payload, null, 2);
+  renderIdentity({
+    authenticated: Boolean(currentAuthenticatedUser()),
+    normalized_identity: payload
+  });
 }
 
 async function createSession() {
   const payload = await requestJson("/api/v1/sessions", {
     method: "POST",
-    body: JSON.stringify({ user_id: userInput.value })
+    body: JSON.stringify({ user_id: currentAuthenticatedUser() || userInput.value })
   });
   sessionIdOutput.textContent = payload.session_id;
   responseOutput.textContent = JSON.stringify(payload, null, 2);
@@ -80,7 +287,7 @@ async function sendPrompt() {
     method: "POST",
     body: JSON.stringify({
       session_id: sessionIdOutput.textContent === "Not created" ? null : sessionIdOutput.textContent,
-      user_id: userInput.value,
+      user_id: currentAuthenticatedUser() || userInput.value,
       message: promptInput.value
     })
   });
@@ -95,80 +302,108 @@ async function streamPrompt() {
 
   const params = new URLSearchParams({
     message: promptInput.value,
-    user_id: userInput.value
+    user_id: currentAuthenticatedUser() || userInput.value
   });
 
   if (sessionIdOutput.textContent !== "Not created") {
     params.set("session_id", sessionIdOutput.textContent);
   }
 
-  const response = await fetch(`${currentGateway()}/api/v1/chat/stream?${params.toString()}`, {
-    headers: {
-      "x-request-id": requestId
-    }
-  });
-
-  if (!response.ok || !response.body) {
-    throw new Error("Stream request failed.");
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
+  let streamCompleted = false;
+  try {
+    const response = await fetch(`${currentGateway()}/api/v1/chat/stream?${params.toString()}`, {
+      headers: {
+        "x-request-id": requestId,
+        ...authHeaders()
+      }
+    });
+    if (!response.ok || !response.body) {
+      throw new Error("Stream request failed.");
     }
 
-    buffer += decoder.decode(value, { stream: true });
-    const events = buffer.split("\n\n");
-    buffer = events.pop() || "";
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
 
-    for (const event of events) {
-      if (!event.startsWith("data: ")) {
-        continue;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
       }
-      const payloadText = event.slice(6);
-      const payload = JSON.parse(payloadText);
-      sessionIdOutput.textContent = payload.session_id || sessionIdOutput.textContent;
-      if (payload.delta) {
-        responseOutput.textContent += payload.delta;
-      }
-      if (payload.message && payload.event === "message_end") {
-        responseOutput.textContent += "\n\n[stream complete]";
+
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+
+      for (const event of events) {
+        if (!event.startsWith("data: ")) {
+          continue;
+        }
+        const payloadText = event.slice(6);
+        const payload = JSON.parse(payloadText);
+        sessionIdOutput.textContent = payload.session_id || sessionIdOutput.textContent;
+        if (shouldAppendStreamDelta(payload)) {
+          responseOutput.textContent += payload.delta;
+        }
+        if (!streamCompleted && isStreamComplete(payload)) {
+          streamCompleted = true;
+          responseOutput.textContent += "\n\n[stream complete]";
+        }
       }
     }
+    if (!streamCompleted && !responseOutput.textContent.trim()) {
+      responseOutput.textContent = "[stream completed with no visible text]";
+    }
+  } catch (error) {
+    throw error;
   }
 }
 
 document.querySelector("#login-button").addEventListener("click", () => {
-  getLoginUrl().catch((error) => {
-    identityOutput.textContent = error.message;
+  startLogin().catch((error) => {
+    renderError(identityOutput, error);
+  });
+});
+
+document.querySelector("#logout-button").addEventListener("click", () => {
+  logout().catch((error) => {
+    renderError(identityOutput, error);
   });
 });
 
 document.querySelector("#normalize-button").addEventListener("click", () => {
   normalizeIdentity().catch((error) => {
-    identityOutput.textContent = error.message;
+    renderError(identityOutput, error);
   });
 });
 
 document.querySelector("#session-button").addEventListener("click", () => {
   createSession().catch((error) => {
-    responseOutput.textContent = error.message;
+    renderError(responseOutput, error);
   });
 });
 
 document.querySelector("#send-button").addEventListener("click", () => {
   sendPrompt().catch((error) => {
-    responseOutput.textContent = error.message;
+    renderError(responseOutput, error);
   });
 });
 
 document.querySelector("#stream-button").addEventListener("click", () => {
   streamPrompt().catch((error) => {
-    responseOutput.textContent = error.message;
+    renderError(responseOutput, error);
   });
 });
+
+completeLoginFromCallback()
+  .catch((error) => {
+    renderError(responseOutput, error);
+  })
+  .finally(() => {
+    if (authCallbackNavigationPending) {
+      return;
+    }
+    refreshAuthenticatedIdentity().catch((error) => {
+      renderError(identityOutput, error);
+    });
+  });

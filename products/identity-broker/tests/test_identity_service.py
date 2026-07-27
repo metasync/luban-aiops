@@ -1,13 +1,53 @@
 import unittest
+from unittest.mock import patch
 
 from identity_service.core.config import IdentitySettings
 from identity_service.core.runtime import IdentityRunSettings
+from identity_service.schemas.auth import AuthorizationCodeExchangeRequest, LogoutRequest
 from identity_service.schemas.identity import ClaimsPayload
 from identity_service.services.identity_service import (
-    build_login_url,
+    build_login_start,
+    build_logout_response,
+    exchange_authorization_code,
+    fetch_identity_from_authorization,
     normalize_identity,
+    normalize_userinfo,
     resolve_roles,
 )
+
+
+class FakeResponse:
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+        self.status_code = 200
+
+    def json(self) -> dict:
+        return self._payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class FakeAsyncClient:
+    def __init__(self, token_payload: dict | None = None, userinfo_payload: dict | None = None) -> None:
+        self.token_payload = token_payload or {}
+        self.userinfo_payload = userinfo_payload or {}
+        self.posts: list[dict] = []
+        self.gets: list[dict] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def post(self, url: str, data: dict | None = None, headers: dict | None = None):
+        self.posts.append({"url": url, "data": data or {}, "headers": headers or {}})
+        return FakeResponse(self.token_payload)
+
+    async def get(self, url: str, headers: dict | None = None):
+        self.gets.append({"url": url, "headers": headers or {}})
+        return FakeResponse(self.userinfo_payload)
 
 
 class IdentityServiceTests(unittest.TestCase):
@@ -20,18 +60,22 @@ class IdentityServiceTests(unittest.TestCase):
             ["approver", "platform-admin"],
         )
 
-    def test_build_login_url_uses_settings(self) -> None:
-        payload = build_login_url(
+    def test_build_login_start_uses_settings(self) -> None:
+        payload = build_login_start(
             IdentitySettings(
                 keycloak_base_url="https://sso.example.com",
                 keycloak_realm="luban-local",
                 oidc_client_id="portal-client",
+                oidc_scopes="openid groups",
                 oidc_redirect_uri="http://localhost:8080/callback",
             )
         )
 
-        self.assertIn("https://sso.example.com/realms/luban-local", payload["login_url"])
-        self.assertIn("client_id=portal-client", payload["login_url"])
+        self.assertIn("https://sso.example.com/realms/luban-local", payload.authorization_url)
+        self.assertIn("client_id=portal-client", payload.authorization_url)
+        self.assertIn("scope=openid+groups", payload.authorization_url)
+        self.assertIn("code_challenge=", payload.authorization_url)
+        self.assertEqual(payload.redirect_uri, "http://localhost:8080/callback")
 
     def test_normalize_identity_returns_expected_context(self) -> None:
         result = normalize_identity(
@@ -46,6 +90,34 @@ class IdentityServiceTests(unittest.TestCase):
         self.assertEqual(result.subject, "user-123")
         self.assertEqual(result.username, "alice")
         self.assertEqual(result.roles, ["operator"])
+
+    def test_normalize_userinfo_uses_profile_claims(self) -> None:
+        result = normalize_userinfo(
+            {
+                "sub": "user-123",
+                "preferred_username": "alice",
+                "email": "alice@example.com",
+                "groups": ["ops-admins"],
+            }
+        )
+
+        self.assertEqual(result.username, "alice")
+        self.assertEqual(result.roles, ["platform-admin"])
+
+    def test_build_logout_response_uses_defaults(self) -> None:
+        payload = build_logout_response(
+            IdentitySettings(
+                keycloak_base_url="https://sso.example.com",
+                keycloak_realm="luban-local",
+                oidc_client_id="portal-client",
+                oidc_post_logout_redirect_uri="http://localhost:8080/",
+            ),
+            LogoutRequest(id_token_hint="id-token"),
+        )
+
+        self.assertIn("protocol/openid-connect/logout", payload.logout_url)
+        self.assertIn("id_token_hint=id-token", payload.logout_url)
+        self.assertIn("client_id=portal-client", payload.logout_url)
 
     def test_identity_run_settings_read_env(self) -> None:
         import os
@@ -69,6 +141,92 @@ class IdentityServiceTests(unittest.TestCase):
 
         self.assertEqual(settings.host, "127.0.0.1")
         self.assertEqual(settings.port, 9200)
+
+    def test_identity_run_settings_ignore_kubernetes_service_link_port(self) -> None:
+        import os
+
+        old_port = os.environ.get("IDENTITY_SERVICE_PORT")
+        os.environ["IDENTITY_SERVICE_PORT"] = "tcp://192.168.194.189:8000"
+        try:
+            settings = IdentityRunSettings.from_env()
+        finally:
+            if old_port is None:
+                os.environ.pop("IDENTITY_SERVICE_PORT", None)
+            else:
+                os.environ["IDENTITY_SERVICE_PORT"] = old_port
+
+        self.assertEqual(settings.port, 8000)
+
+class IdentityAsyncServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_exchange_authorization_code_returns_normalized_identity(self) -> None:
+        fake_client = FakeAsyncClient(
+            token_payload={
+                "access_token": "access-token",
+                "token_type": "Bearer",
+                "expires_in": 300,
+                "refresh_token": "refresh-token",
+                "id_token": "id-token",
+            },
+            userinfo_payload={
+                "sub": "user-123",
+                "preferred_username": "alice",
+                "email": "alice@example.com",
+                "groups": ["ops-operators"],
+            },
+        )
+        settings = IdentitySettings(
+            keycloak_base_url="https://sso.example.com",
+            keycloak_realm="luban",
+            oidc_client_id="portal-client",
+            oidc_client_secret="secret",
+            oidc_redirect_uri="http://localhost:8080/callback",
+        )
+
+        with patch(
+            "identity_service.services.identity_service.httpx.AsyncClient",
+            return_value=fake_client,
+        ):
+            result = await exchange_authorization_code(
+                settings,
+                AuthorizationCodeExchangeRequest(
+                    code="auth-code",
+                    code_verifier="verifier",
+                ),
+            )
+
+        self.assertEqual(result.access_token, "access-token")
+        self.assertEqual(result.identity.username, "alice")
+        self.assertEqual(result.identity.roles, ["operator"])
+        self.assertEqual(fake_client.posts[0]["data"]["client_secret"], "secret")
+        self.assertEqual(
+            fake_client.gets[0]["headers"]["authorization"],
+            "Bearer access-token",
+        )
+
+    async def test_fetch_identity_from_authorization_returns_normalized_identity(self) -> None:
+        fake_client = FakeAsyncClient(
+            userinfo_payload={
+                "sub": "user-123",
+                "preferred_username": "alice",
+                "email": "alice@example.com",
+                "groups": ["ops-observers"],
+            }
+        )
+        with patch(
+            "identity_service.services.identity_service.httpx.AsyncClient",
+            return_value=fake_client,
+        ):
+            identity = await fetch_identity_from_authorization(
+                IdentitySettings(),
+                "Bearer access-token",
+            )
+
+        self.assertEqual(identity.username, "alice")
+        self.assertEqual(identity.roles, ["read-only-observer"])
+
+    async def test_fetch_identity_from_authorization_requires_bearer_token(self) -> None:
+        with self.assertRaises(ValueError):
+            await fetch_identity_from_authorization(IdentitySettings(), "Basic abc")
 
 
 if __name__ == "__main__":

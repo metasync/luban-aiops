@@ -11,7 +11,10 @@ def resolve_user_id(
     default_user_id: str,
     explicit_user_id: str | None = None,
     header_user_id: str | None = None,
+    authenticated_user_id: str | None = None,
 ) -> str:
+    if authenticated_user_id:
+        return authenticated_user_id
     if explicit_user_id:
         return explicit_user_id
     if header_user_id:

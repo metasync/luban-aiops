@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 from agent_service.runtime_kernel import AgentKernel
 from agent_service.runtime_settings import RuntimeSettings
@@ -116,3 +117,53 @@ def test_configuration_hint_mentions_provider_error():
         "AgentScope runtime is configured through the deepseek provider, "
         "but the last provider call failed: model rejected request"
     )
+
+
+def test_normalize_event_omits_delta_for_non_text_control_events():
+    kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
+
+    event = SimpleNamespace(type="REPLY_START", reply_id="reply-1")
+
+    payload = kernel.normalize_event(
+        event,
+        request_id="req-123",
+        session_id="ses-123",
+    )
+
+    assert payload["event"] == "reply_start"
+    assert "delta" not in payload
+
+
+def test_normalize_event_omits_delta_for_text_block_start_without_text():
+    kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
+
+    event = SimpleNamespace(
+        type="TEXT_BLOCK_START",
+        id="block-1",
+        reply_id="reply-1",
+        metadata={},
+    )
+
+    payload = kernel.normalize_event(
+        event,
+        request_id="req-123",
+        session_id="ses-123",
+    )
+
+    assert payload["event"] == "text_block_start"
+    assert "delta" not in payload
+
+
+def test_normalize_event_keeps_delta_for_text_block_events():
+    kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
+
+    event = SimpleNamespace(type="TEXT_BLOCK_DELTA", delta="STREAM OK")
+
+    payload = kernel.normalize_event(
+        event,
+        request_id="req-123",
+        session_id="ses-123",
+    )
+
+    assert payload["event"] == "text_block_delta"
+    assert payload["delta"] == "STREAM OK"

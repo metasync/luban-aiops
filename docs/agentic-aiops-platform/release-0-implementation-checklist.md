@@ -30,6 +30,27 @@ Create a runnable and observable baseline platform in Kubernetes with:
 - session-aware streaming
 - traceable logs and request IDs
 
+## Current Closure Status
+
+As of `2026-07-27`, `Release 0` closure is validated in a live Kubernetes
+environment:
+
+- the portal completes `OIDC` login, callback handling, and logout entry points
+- `identity-broker` exchanges authorization codes, normalizes user info, and
+  resolves bearer-backed identity
+- `api-gateway` propagates authenticated identity to session and chat routes
+  instead of relying only on manual `user_id` entry
+- core services emit structured JSON access and session logs with `request_id`
+  and `session_id` fields
+- the authenticated request path was verified live against the shared sandbox
+  `Keycloak` realm in the `dev-k8s-transitional` overlay deployed to the
+  `dev-luban-aiops` namespace
+
+Focused unit tests, GitOps overlay render checks, and live browser validation
+now pass for the `Release 0` acceptance path. Remaining work is limited to
+post-`Release 0` follow-up items and non-blocking UX polish, not acceptance
+blockers.
+
 ## Release 0 Scope
 
 This release covers the first-wave workspace projects:
@@ -65,12 +86,12 @@ Primary owners:
 
 Checklist:
 
-- [ ] define initial service names and repository placement for `web-ui`, `api-gateway`, and `agent-service`
-- [ ] define shared request and response schemas for chat, session, and health endpoints
-- [ ] define shared correlation and trace metadata fields
-- [ ] create initial Kubernetes or Helm layout for one target environment
-- [ ] define environment variable conventions for local and cluster deployment
-- [ ] document initial service ports, routes, and ingress expectations
+- [x] define initial service names and repository placement for `web-ui`, `api-gateway`, and `agent-service`
+- [x] define shared request and response schemas for chat, session, and health endpoints
+- [x] define shared correlation and trace metadata fields
+- [x] create initial Kubernetes or Helm layout for one target environment
+- [x] define environment variable conventions for local and cluster deployment
+- [x] document initial service ports, routes, and ingress expectations
 
 Outputs:
 
@@ -91,12 +112,12 @@ Supporting owners:
 
 Checklist:
 
-- [ ] create the first portal application skeleton
-- [ ] add a basic authenticated shell with room for chat and session views
-- [ ] add login entry and logout entry points
-- [ ] define the initial portal-to-gateway API contract
-- [ ] add a minimal session page for sending one prompt and rendering one streamed reply
-- [ ] expose correlation IDs or request references in a debug-friendly way
+- [x] create the first portal application skeleton
+- [x] add a basic authenticated shell with room for chat and session views
+- [x] add login entry and logout entry points
+- [x] define the initial portal-to-gateway API contract
+- [x] add a minimal session page for sending one prompt and rendering one streamed reply
+- [x] expose correlation IDs or request references in a debug-friendly way
 
 Outputs:
 
@@ -118,12 +139,12 @@ Supporting owners:
 
 Checklist:
 
-- [ ] create an `api-gateway` service boundary in the workspace
-- [ ] define routes for portal auth handoff, session creation, prompt send, and streaming
-- [ ] validate token forwarding or session propagation to backend services
-- [ ] add health endpoints for gateway readiness and liveness
-- [ ] add request ID propagation and structured access logging
-- [ ] document ingress or internal service exposure assumptions
+- [x] create an `api-gateway` service boundary in the workspace
+- [x] define routes for portal auth handoff, session creation, prompt send, and streaming
+- [x] validate token forwarding or session propagation to backend services
+- [x] add health endpoints for gateway readiness and liveness
+- [x] add request ID propagation and structured access logging
+- [x] document ingress or internal service exposure assumptions
 
 Outputs:
 
@@ -144,12 +165,12 @@ Supporting owners:
 
 Checklist:
 
-- [ ] create an `agent-service` skeleton aligned to the selected runtime approach
-- [ ] add a simple prompt handler that returns deterministic placeholder output
-- [ ] define session creation and session retrieval behavior
-- [ ] add health and readiness endpoints
-- [ ] emit structured logs with request ID and session ID
-- [ ] prepare runtime configuration for later tool and policy integration without implementing those paths yet
+- [x] create an `agent-service` skeleton aligned to the selected runtime approach
+- [x] add a simple prompt handler that returns deterministic placeholder output
+- [x] define session creation and session retrieval behavior
+- [x] add health and readiness endpoints
+- [x] emit structured logs with request ID and session ID
+- [x] prepare runtime configuration for later tool and policy integration without implementing those paths yet
 
 Outputs:
 
@@ -170,12 +191,12 @@ Supporting owners:
 
 Checklist:
 
-- [ ] choose the initial session store strategy for the first environment
-- [ ] define the event format for streamed responses
-- [ ] implement a basic `SSE` path from runtime to portal
-- [ ] preserve request ID and session ID across the full streaming path
-- [ ] verify reconnect or refresh behavior for an in-progress session
-- [ ] log session lifecycle events in a traceable way
+- [x] choose the initial session store strategy for the first environment
+- [x] define the event format for streamed responses
+- [x] implement a basic `SSE` path from runtime to portal
+- [x] preserve request ID and session ID across the full streaming path
+- [x] defer reconnect or refresh behavior for an in-progress session to post-`Release 0` follow-up
+- [x] log session lifecycle events in a traceable way
 
 Outputs:
 
@@ -196,12 +217,12 @@ Supporting owners:
 
 Checklist:
 
-- [ ] define `OIDC` client configuration expectations for the portal
-- [ ] integrate the first `Keycloak` login flow
-- [ ] normalize essential identity fields needed by downstream services
-- [ ] document how user identity is passed from portal to gateway and runtime
-- [ ] add logout behavior for the initial portal scope
-- [ ] validate the login flow in one Kubernetes environment
+- [x] define `OIDC` client configuration expectations for the portal
+- [x] integrate the first `Keycloak` login flow
+- [x] normalize essential identity fields needed by downstream services
+- [x] document how user identity is passed from portal to gateway and runtime
+- [x] add logout behavior for the initial portal scope
+- [x] validate the login flow in one Kubernetes environment
 
 Outputs:
 
@@ -211,31 +232,37 @@ Outputs:
 
 ## Cross-Product Integration Checklist
 
-- [ ] `operator-portal` can authenticate through `identity-broker`
-- [ ] `operator-portal` can call `api-gateway`
-- [ ] `api-gateway` can forward the request to `agent-platform`
-- [ ] `agent-platform` can create and retrieve session state
-- [ ] streamed responses can reach the portal over the agreed `SSE` path
-- [ ] request IDs, session IDs, and user identity are visible in logs across the request chain
+- [x] `operator-portal` can authenticate through `identity-broker`
+- [x] `operator-portal` can call `api-gateway`
+- [x] `api-gateway` can forward the request to `agent-platform`
+- [x] `agent-platform` can create and retrieve session state
+- [x] streamed responses can reach the portal over the agreed `SSE` path
+- [x] request IDs, session IDs, and user identity are visible in logs across the request chain
 
 ## Validation Checklist
 
-- [ ] operator can log in through `SSO`
-- [ ] operator can open a portal session
-- [ ] operator can send one prompt and receive one streamed response
-- [ ] core services expose health endpoints
-- [ ] logs show request ID and session ID
-- [ ] deployment works in one target Kubernetes environment
+- [x] operator can log in through `SSO`
+- [x] operator can open a portal session
+- [x] operator can send one prompt and receive one streamed response
+- [x] core services expose health endpoints
+- [x] logs show request ID and session ID
+- [x] deployment works in one target Kubernetes environment
 
 ## Exit Criteria
 
 Release 0 is complete when all of the following are true:
 
-- [ ] the workspace contains initial runnable placeholders for `web-ui`, `api-gateway`, and `agent-service`
-- [ ] one end-to-end authenticated request path works in Kubernetes
-- [ ] session-aware streaming is functional
-- [ ] structured logs and trace metadata exist for core services
-- [ ] the implementation artifacts remain aligned with the workspace boundary model
+- [x] the workspace contains initial runnable placeholders for `web-ui`, `api-gateway`, and `agent-service`
+- [x] one end-to-end authenticated request path works in Kubernetes
+- [x] session-aware streaming is functional
+- [x] structured logs and trace metadata exist for core services
+- [x] the implementation artifacts remain aligned with the workspace boundary model
+
+## Post-Release 0 Follow-Up
+
+- verify reconnect or refresh behavior for an in-progress session
+- continue portal UX polish that does not change the validated authenticated
+  request path or closure decision
 
 ## Recommended First Implementation Cut
 

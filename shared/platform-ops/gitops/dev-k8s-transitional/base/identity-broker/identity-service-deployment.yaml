@@ -19,5 +19,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: platform-runtime-config
+            - secretRef:
+                name: identity-service-runtime-secrets
+                optional: true
           ports:
             - containerPort: 8000

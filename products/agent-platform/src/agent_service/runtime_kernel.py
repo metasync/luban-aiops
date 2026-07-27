@@ -6,6 +6,13 @@ from agent_service.providers import get_provider
 from agent_service.runtime_settings import RuntimeSettings
 
 LOGGER = logging.getLogger(__name__)
+TEXT_DELTA_EVENTS = {
+    "message_delta",
+    "text_block_start",
+    "text_block_delta",
+    "thinking_block_start",
+    "thinking_block_delta",
+}
 
 
 def make_serializable(value: object) -> object:
@@ -47,6 +54,25 @@ def extract_text(value: object) -> str:
                     return text
         return json.dumps(normalized, default=str)
     return str(normalized)
+
+
+def extract_stream_text(value: object) -> str:
+    normalized = make_serializable(value)
+    if normalized is None:
+        return ""
+    if isinstance(normalized, str):
+        return normalized
+    if isinstance(normalized, list):
+        parts = [extract_stream_text(item) for item in normalized]
+        return " ".join(part for part in parts if part).strip()
+    if isinstance(normalized, dict):
+        for key in ("text", "delta", "message", "content"):
+            if key in normalized:
+                text = extract_stream_text(normalized[key])
+                if text:
+                    return text
+        return ""
+    return ""
 
 
 class AgentKernel:
@@ -210,8 +236,8 @@ class AgentKernel:
             "payload": payload,
         }
 
-        text = extract_text(payload)
-        if text:
+        text = extract_stream_text(payload)
+        if event_type in TEXT_DELTA_EVENTS and text:
             data["delta"] = text
         return data
 
