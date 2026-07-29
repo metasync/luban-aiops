@@ -140,9 +140,17 @@ Current runtime environment knobs:
 - `OPENAI_THINKING_ENABLE`, `OPENAI_REASONING_EFFORT`, `OPENAI_PARALLEL_TOOL_CALLS`
   - OpenAI-compatible runtime options
 - `SESSION_TTL_SECONDS`
-  - idle lifetime for in-memory sessions; defaults to `3600`
+  - idle lifetime for sessions; defaults to `3600`; used by both backends
 - `SESSION_MAX_ENTRIES`
-  - maximum concurrent in-memory sessions before oldest-first eviction; defaults to `1000`
+  - maximum concurrent in-memory sessions before oldest-first eviction; defaults to `1000`; only applies to the `memory` backend
+- `SESSION_STORE_BACKEND`
+  - selects the session store backend: `redis` or `memory`; defaults to `memory` (deployed overlays set `redis`)
+- `SESSION_REDIS_HOST`
+  - Redis host for the session store; defaults to `127.0.0.1`
+- `SESSION_REDIS_PORT`
+  - Redis port for the session store; defaults to `6379`
+- `SESSION_REDIS_DB`
+  - Redis DB number for session keys; defaults to `1` (separate from AgentScope's DB `0`)
 - `OTEL_ENABLED`
   - master switch for the OTLP push pipeline (traces + metrics); defaults to `false`; when disabled, the `/metrics` surface is unaffected
 - `OTEL_EXPORTER_OTLP_ENDPOINT`
@@ -150,9 +158,11 @@ Current runtime environment knobs:
 - `OTEL_SERVICE_NAME`
   - logical service name reported to the collector; defaults to the agent-platform's metadata name
 
-Session store limitations:
+Session store (SPEC-006):
 
-- sessions are kept in process memory only: state is lost on restart, and the service cannot run with multiple replicas until a shared store lands
+- sessions are persisted to Redis when `SESSION_STORE_BACKEND=redis`; sessions survive pod restarts and are shared across replicas
+- when Redis is unreachable at startup, the store falls back to in-memory with a warning and a Prometheus counter (`session_store_fallbacks_total`)
+- the in-memory backend (`SESSION_STORE_BACKEND=memory`) keeps sessions in process memory only, with TTL and max-entry eviction
 - sessions are scoped to the creating user (via `X-User-ID` header); unknown or foreign `session_id` values return `404`
 - the native runtime path delegates session state to the AgentScope runtime services instead
 
@@ -161,7 +171,7 @@ Current runtime status surface:
 - `/api/v2/runtime`
   - returns provider, resolved model, runtime state, and the last provider error if one exists
 - `/api/v2/health`
-  - returns runtime mode, runtime state, provider, and whether the runtime is configured
+  - returns runtime mode, runtime state, provider, configured status, session store backend, and session store readiness
 - `/metrics`
   - always-on Prometheus exposition endpoint (auth-exempt), reporting standard HTTP RED metrics plus `agent_sessions_created_total` and `agent_chat_requests_total`; opt-in OTLP push via `opentelemetry-instrumentation-fastapi` + `opentelemetry-exporter-otlp` when `OTEL_ENABLED=true` (fail-open); see `SPEC-005` and `shared/shared-contracts/observability-conventions.md`
 - `x-request-id` remains the log/portal correlation key; when OTel tracing is active it equals the W3C `trace_id`

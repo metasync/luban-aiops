@@ -15,6 +15,7 @@ from fastapi import FastAPI, Request, Response
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     Counter,
+    Gauge,
     Histogram,
     generate_latest,
 )
@@ -78,3 +79,39 @@ def record_session_created() -> None:
 
 def record_chat_request() -> None:
     CHAT_REQUESTS.inc()
+
+
+# --- Session store observability (SPEC-006 R-3/R-4) ---
+
+SESSION_STORE_BACKEND_GAUGE = Gauge(
+    "session_store_backend",
+    "Active session store backend (1 = active).",
+    ["backend"],
+)
+
+SESSION_STORE_ERRORS = Counter(
+    "session_store_errors_total",
+    "Session store operation failures.",
+    ["operation"],
+)
+
+SESSION_STORE_FALLBACKS = Counter(
+    "session_store_fallbacks_total",
+    "Times the session store fell back to in-memory due to Redis failure.",
+)
+
+
+def record_session_store_backend(backend: str) -> None:
+    """Set the active backend gauge (1 for active, 0 for others)."""
+    for label in ("redis", "memory"):
+        SESSION_STORE_BACKEND_GAUGE.labels(backend=label).set(
+            1 if label == backend else 0
+        )
+
+
+def record_session_store_error(operation: str) -> None:
+    SESSION_STORE_ERRORS.labels(operation=operation).inc()
+
+
+def record_session_store_fallback() -> None:
+    SESSION_STORE_FALLBACKS.inc()

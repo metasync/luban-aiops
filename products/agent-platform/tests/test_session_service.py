@@ -3,11 +3,11 @@ from fastapi.testclient import TestClient
 
 from agent_service.app import create_app
 from agent_service.services import session_service
-from agent_service.services.session_store import SessionStore
+from agent_service.services.session_store import InMemorySessionStore
 
 
 def test_create_and_get_session_round_trip(monkeypatch):
-    monkeypatch.setattr(session_service, "SESSION_STORE", SessionStore())
+    monkeypatch.setattr(session_service, "SESSION_STORE", InMemorySessionStore())
 
     created = session_service.create_session("alice")
     fetched = session_service.get_session(created.session_id)
@@ -17,7 +17,7 @@ def test_create_and_get_session_round_trip(monkeypatch):
 
 
 def test_get_session_raises_for_missing_session(monkeypatch):
-    monkeypatch.setattr(session_service, "SESSION_STORE", SessionStore())
+    monkeypatch.setattr(session_service, "SESSION_STORE", InMemorySessionStore())
 
     try:
         session_service.get_session("missing-session")
@@ -29,7 +29,7 @@ def test_get_session_raises_for_missing_session(monkeypatch):
 
 
 def test_ensure_session_rejects_unknown_client_supplied_id(monkeypatch):
-    monkeypatch.setattr(session_service, "SESSION_STORE", SessionStore())
+    monkeypatch.setattr(session_service, "SESSION_STORE", InMemorySessionStore())
 
     try:
         session_service.ensure_session("ses-attacker-chosen", "alice")
@@ -40,7 +40,7 @@ def test_ensure_session_rejects_unknown_client_supplied_id(monkeypatch):
 
 
 def test_session_is_not_readable_by_another_user(monkeypatch):
-    monkeypatch.setattr(session_service, "SESSION_STORE", SessionStore())
+    monkeypatch.setattr(session_service, "SESSION_STORE", InMemorySessionStore())
 
     created = session_service.create_session("alice")
 
@@ -68,7 +68,7 @@ def test_session_store_evicts_expired_sessions(monkeypatch):
     clock = {"now": 100.0}
     monkeypatch.setattr(store_module.time, "monotonic", lambda: clock["now"])
 
-    store = SessionStore(ttl_seconds=10.0)
+    store = InMemorySessionStore(ttl_seconds=10.0)
     record = store.create_session("alice")
 
     clock["now"] = 105.0
@@ -80,7 +80,7 @@ def test_session_store_evicts_expired_sessions(monkeypatch):
 
 
 def test_session_store_enforces_max_entries():
-    store = SessionStore(max_entries=2)
+    store = InMemorySessionStore(max_entries=2)
 
     first = store.create_session("alice")
     second = store.create_session("alice")
@@ -96,8 +96,12 @@ def test_session_store_reads_env_configuration(monkeypatch):
     monkeypatch.setenv("SESSION_TTL_SECONDS", "120")
     monkeypatch.setenv("SESSION_MAX_ENTRIES", "5")
 
-    store = SessionStore.from_env()
+    from agent_service.services.session_store import build_session_store
 
+    monkeypatch.setenv("SESSION_STORE_BACKEND", "memory")
+    store = build_session_store()
+
+    assert isinstance(store, InMemorySessionStore)
     assert store.ttl_seconds == 120.0
     assert store.max_entries == 5
 

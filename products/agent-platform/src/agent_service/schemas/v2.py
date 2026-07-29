@@ -78,3 +78,5 @@ class AgentHealth(BaseModel):
     runtime_state: Literal["ready", "not_configured", "provider_error"] | None = None
     provider: str | None = None
     configured: bool
+    session_store: str | None = None
+    session_store_ready: bool | None = None

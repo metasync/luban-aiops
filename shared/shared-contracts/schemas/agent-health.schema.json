@@ -25,6 +25,15 @@
     "configured": {
       "type": "boolean",
       "description": "Whether the kernel has valid credentials configured."
+    },
+    "session_store": {
+      "type": "string",
+      "enum": ["redis", "memory"],
+      "description": "Active session store backend (SPEC-006)."
+    },
+    "session_store_ready": {
+      "type": "boolean",
+      "description": "Whether the session store backend is reachable."
     }
   }
 }

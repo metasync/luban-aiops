@@ -119,3 +119,4 @@ Mechanical enforcement (delivered by `SPEC-001`):
 | `SPEC-003` | Identity trust hardening | `delivered` |
 | `SPEC-004` | Deny-by-default policy enforcement | `delivered` |
 | `SPEC-005` | Observability baseline — metrics, tracing, and request correlation | `delivered` |
+| `SPEC-006` | Session durability — Redis-backed session store | `delivered` |

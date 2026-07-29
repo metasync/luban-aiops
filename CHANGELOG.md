@@ -8,7 +8,7 @@ published product versions.
 
 ## Unreleased
 
-### Added — Release 1 (SPEC-001 .. SPEC-005)
+### Added — Release 1 (SPEC-001 .. SPEC-006)
 
 - Added `SPEC-001` release-1 platform hardening (delivered): gateway authentication
   enforcement behind `GATEWAY_REQUIRE_AUTH`, role propagation in structured logs,
@@ -44,10 +44,17 @@ published product versions.
   domain counters (`agent_sessions_created_total`, `identity_tokens_issued_total`,
   `gateway_policy_decisions_total`, `gateway_token_verification_total`), and
   Prometheus scrape annotations on every deployment manifest.
+- Added `SPEC-006` session durability (delivered): Redis-backed session store
+  with strategy-pattern interface (`InMemorySessionStore` for dev/CI,
+  `RedisSessionStore` for deployed environments); backend selection via
+  `SESSION_STORE_BACKEND` env; graceful fallback to in-memory when Redis is
+  unreachable; session store backend and readiness reported in `/health`;
+  `session_store_backend`, `session_store_errors_total`, and
+  `session_store_fallbacks_total` Prometheus metrics.
 - Added ADR-0001 (SDD adoption), ADR-0002 (AgentScope 2.0 kernel), and
   ADR-0003 (platform-owned agent-service contract) under `docs/adr/`.
 - Added spec-driven development workflow under `docs/specs/` with plan/spec/tasks
-  templates and delivered specs for SPEC-001 through SPEC-005.
+  templates and delivered specs for SPEC-001 through SPEC-006.
 - Added `docs/agentic-aiops-platform/part-1b-framework-revalidation.md`.
 
 ### Added — Release 0

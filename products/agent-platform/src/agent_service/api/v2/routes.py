@@ -23,6 +23,7 @@ from agent_service.schemas.v2 import (
 )
 from agent_service.services.runtime_dependencies import get_runtime_kernel
 from agent_service.services.session_service import ensure_session, get_session
+from agent_service.services.session_store import SESSION_STORE
 
 router = APIRouter(prefix="/api/v2")
 
@@ -162,4 +163,6 @@ async def health() -> AgentHealth:
         runtime_state=kernel.runtime_state(),  # type: ignore[arg-type]
         provider=kernel.provider_name(),
         configured=configured,
+        session_store=SESSION_STORE.backend_name,
+        session_store_ready=SESSION_STORE.is_ready(),
     )
