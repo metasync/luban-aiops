@@ -9,6 +9,10 @@ configMapGenerator:
     envs:
       - agent-platform/runtime-config.env
       - tool-gateway/runtime-config.env
+  - name: gateway-policy
+    behavior: replace
+    files:
+      - tool-gateway/policy.yaml
 resources:
   - ../../dev-k8s-transitional/base
 patches:

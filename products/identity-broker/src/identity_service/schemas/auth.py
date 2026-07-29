@@ -32,3 +32,16 @@ class LogoutRequest(BaseModel):
 
 class LogoutResponse(BaseModel):
     logout_url: str
+
+
+class TokenRequest(BaseModel):
+    username: str
+    email: str | None = None
+    roles: list[str] | None = None
+    groups: list[str] | None = None
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "Bearer"
+    expires_in: int

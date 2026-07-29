@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/agent-chat-response.schema.json",
+  "title": "Agent Chat Response (v2)",
+  "description": "Response body for POST /api/v2/chat. Simplified envelope: 'content' replaces the v1 'response' field.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "request_id", "content"],
+  "properties": {
+    "session_id": {
+      "type": "string"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string",
+      "description": "Agent reply text."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "partial", "error"],
+      "default": "ok"
+    }
+  }
+}

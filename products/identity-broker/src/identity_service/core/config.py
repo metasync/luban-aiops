@@ -14,6 +14,9 @@ class IdentitySettings:
     oidc_scopes: str = "openid profile email"
     oidc_redirect_uri: str = "http://localhost:8080/callback"
     oidc_post_logout_redirect_uri: str = "http://localhost:8080/"
+    jwt_private_key_path: str | None = None
+    jwt_token_ttl_seconds: int = 900
+    jwt_issuer: str = "luban-identity-broker"
 
     @classmethod
     def from_env(cls) -> "IdentitySettings":
@@ -34,6 +37,11 @@ class IdentitySettings:
                 "OIDC_POST_LOGOUT_REDIRECT_URI",
                 "http://localhost:8080/",
             ),
+            jwt_private_key_path=os.getenv("IDENTITY_JWT_PRIVATE_KEY_PATH") or None,
+            jwt_token_ttl_seconds=int(
+                os.getenv("IDENTITY_TOKEN_TTL_SECONDS", "900")
+            ),
+            jwt_issuer=os.getenv("IDENTITY_TOKEN_ISSUER", "luban-identity-broker"),
         )
 
 

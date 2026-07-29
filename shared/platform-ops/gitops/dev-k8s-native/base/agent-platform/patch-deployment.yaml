@@ -4,6 +4,9 @@ metadata:
   name: agent-service
 spec:
   template:
+    metadata:
+      annotations:
+        prometheus.io/port: "8080"
     spec:
       containers:
         - name: agent-service

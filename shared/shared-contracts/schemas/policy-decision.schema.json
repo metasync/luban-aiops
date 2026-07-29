@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/policy-decision.schema.json",
+  "title": "Policy Decision (v1)",
+  "description": "Decision object returned by policy evaluation. Matches the Tier-1 minimum decision response (docs/agentic-aiops-platform/policy-specification.md). approval_tier and conditions are reserved for a future schema revision.",
+  "type": "object",
+  "required": ["decision", "matched_rule_ids", "reason"],
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": ["allow", "deny"],
+      "description": "Final outcome. deny is the default when no rule matches."
+    },
+    "matched_rule_ids": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Identifiers of the rules that matched the request. Empty when denied by default."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human-readable explanation of the decision."
+    },
+    "action": {
+      "type": "string",
+      "description": "The action that was evaluated."
+    },
+    "subject": {
+      "type": "string",
+      "description": "The principal subject the decision applies to."
+    }
+  },
+  "additionalProperties": false
+}

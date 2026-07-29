@@ -1,27 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
-from agent_service.entrypoints import native, runtime, transitional
-
-
-def test_transitional_service_settings_reads_env(monkeypatch):
-    monkeypatch.setenv("AGENT_TRANSITIONAL_HOST", "127.0.0.1")
-    monkeypatch.setenv("AGENT_TRANSITIONAL_PORT", "9000")
-
-    settings = transitional.TransitionalServiceSettings.from_env()
-
-    assert settings.host == "127.0.0.1"
-    assert settings.port == 9000
-
-
-def test_transitional_service_settings_default_values(monkeypatch):
-    monkeypatch.delenv("AGENT_TRANSITIONAL_HOST", raising=False)
-    monkeypatch.delenv("AGENT_TRANSITIONAL_PORT", raising=False)
-
-    settings = transitional.TransitionalServiceSettings.from_env()
-
-    assert settings.host == transitional.DEFAULT_HTTP_HOST
-    assert settings.port == transitional.DEFAULT_HTTP_PORT
+from agent_service.entrypoints import native, runtime
 
 
 def test_native_service_settings_read_surface_specific_env(monkeypatch):
@@ -179,7 +159,7 @@ def test_build_agent_app_streams_messages_when_configured(monkeypatch):
         def is_configured(self) -> bool:
             return True
 
-        def ensure_agent(self):
+        def ensure_agent(self, session_id):
             return fake_agent, None
 
         def clear_error(self) -> None:
@@ -265,7 +245,7 @@ def test_build_agent_app_preserves_multiple_reply_blocks(monkeypatch):
         def is_configured(self) -> bool:
             return True
 
-        def ensure_agent(self):
+        def ensure_agent(self, session_id):
             return FakeAgent(), None
 
         def clear_error(self) -> None:
@@ -352,7 +332,7 @@ def test_build_agent_app_returns_provider_fallback_when_streaming_fails(monkeypa
         def is_configured(self) -> bool:
             return True
 
-        def ensure_agent(self):
+        def ensure_agent(self, session_id):
             return FakeAgent(), None
 
         def clear_error(self) -> None:

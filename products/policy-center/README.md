@@ -26,6 +26,12 @@ This project currently provides the workspace placeholder and boundary definitio
 - environment and role-based control logic
 - future integration points for bounded action authorization
 
+Current implementation status:
+
+- `policy-center` is still a stub with no running service
+- the policy contract it will serve is already defined in `shared/shared-contracts` (`schemas/policy-rule.schema.json`, `schemas/policy-decision.schema.json`, `policies/policy-default.yaml`) per `SPEC-004`
+- the `action_authz` slice (`allow`/`deny`, deny-by-default) is currently evaluated inside `tool-gateway` (`services/policy_engine.py`); when this product becomes a service, that module lifts behind a `POST /policy/evaluate` endpoint returning the same decision object
+
 ## Expected Integration Points
 
 - `identity-broker` for normalized user and group context

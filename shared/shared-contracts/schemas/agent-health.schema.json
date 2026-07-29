@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/agent-health.schema.json",
+  "title": "Agent Health (v2)",
+  "description": "Response body for GET /health/ready. Used by orchestrators and the gateway for liveness/readiness.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "runtime_mode", "configured"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ready", "not_ready"],
+      "description": "Overall readiness signal."
+    },
+    "runtime_mode": {
+      "type": "string"
+    },
+    "runtime_state": {
+      "type": "string",
+      "enum": ["ready", "not_configured", "provider_error"]
+    },
+    "provider": {
+      "type": "string"
+    },
+    "configured": {
+      "type": "boolean",
+      "description": "Whether the kernel has valid credentials configured."
+    }
+  }
+}

@@ -29,12 +29,71 @@ This module currently provides the workspace placeholder and boundary definition
 
 Current implementation artifacts:
 
-- `schemas/chat-request.schema.json`
-- `schemas/chat-response.schema.json`
-- `schemas/session.schema.json`
-- `schemas/stream-event.schema.json`
-- `schemas/health-response.schema.json`
+- `schemas/chat-request.schema.json` (v1 portal/gateway contract)
+- `schemas/chat-response.schema.json` (v1)
+- `schemas/session.schema.json` (v1)
+- `schemas/stream-event.schema.json` (v1)
+- `schemas/health-response.schema.json` (v1)
 - `schemas/identity-context.schema.json`
+- `schemas/agent-chat-request.schema.json` (v2 platform-owned agent-service contract)
+- `schemas/agent-chat-response.schema.json` (v2)
+- `schemas/agent-stream-event.schema.json` (v2)
+- `schemas/agent-session.schema.json` (v2)
+- `schemas/agent-runtime-metadata.schema.json` (v2)
+- `schemas/agent-health.schema.json` (v2)
+- `schemas/identity-token.schema.json` (JWT claim set issued by identity-broker)
+- `schemas/policy-rule.schema.json` (action-authorization rule, v1)
+- `schemas/policy-decision.schema.json` (policy decision object, v1)
+- `policies/policy-default.yaml` (default action-authorization bundle, v1)
+- `observability-conventions.md` (metrics naming, OTel switch semantics, correlation bridging)
+
+## Agent-Service Contract Conventions (v2)
+
+The `agent-*` schemas define the platform-owned boundary between `tool-gateway` and `agent-platform` (see `ADR-0003`).
+
+Header conventions (required on all v2 requests):
+
+- `X-User-ID`: the authenticated or resolved user identifier; the agent-service uses this for session ownership
+- `x-request-id`: correlation identifier shared across portal, gateway, and runtime for tracing
+
+Design rules:
+
+- identity travels in headers, never in request bodies
+- response envelopes do not expose framework-specific types (no AgentScope `Msg`, `payload`, or event internals)
+- the `content` field (v2) replaces the v1 `response` field for naming consistency with streaming `delta` terminology
+- stream events use `type` (v2) instead of `event` (v1) to avoid collision with the SSE `event:` field name
+
+## Identity Token Conventions
+
+The `identity-token.schema.json` documents the JWT claim set issued by `identity-broker` and verified locally by `tool-gateway` via JWKS (RFC 7517). This schema is for documentation and contract alignment — the token is transported as a compact JWT string, not a JSON body.
+
+Verification model:
+
+- identity-broker signs with RSA-256 and publishes the public key at `/.well-known/jwks.json`
+- the gateway fetches and caches the JWKS (no per-request network call)
+- the `iss` claim is always validated against `IDENTITY_TOKEN_ISSUER`
+- the `username` claim becomes the `X-User-ID` header forwarded to downstream services
+
+## Policy Contract Conventions (v1)
+
+The `policy-*` schemas and `policies/policy-default.yaml` define the first enforceable slice of the Tier-1 policy design (`docs/agentic-aiops-platform/policy-specification.md`), scoped to the `action_authz` domain with `allow`/`deny` outcomes only.
+
+Action naming convention:
+
+- `<resource>:<verb>` for resource operations (e.g. `session:create`, `session:read`)
+- a bare noun for the primary conversational surface (`chat`)
+
+Evaluation semantics (implemented by the consumer, currently `tool-gateway`):
+
+- deny by default: no matching rule yields `deny`
+- explicit `deny` overrides `allow`; higher `priority` wins between allows; disabled rules are ignored
+- the decision object carries `decision`, `matched_rule_ids`, and `reason`
+
+`policy-center` is currently a stub; when it becomes a service it will serve this same contract, so consumers swap a local evaluation call for a network call without contract changes.
+
+## Observability Conventions
+
+Metrics naming, label/cardinality rules, the `OTEL_*` switch semantics, and the `x-request-id` ↔ `trace_id` bridging rule are defined in [observability-conventions.md](observability-conventions.md). All three Python services implement these conventions (`SPEC-005`): an always-on `/metrics` Prometheus surface plus an opt-in OTLP push pipeline gated by `OTEL_ENABLED`.
 
 ## Expected Integration Points
 

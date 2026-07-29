@@ -9,9 +9,9 @@ from api_gateway.services.gateway_service import (
     build_logout_url,
     complete_login,
     fetch_login_url,
-    fetch_current_identity,
     start_login,
 )
+from api_gateway.services.token_verifier import TokenVerificationError, verify_token
 
 router = APIRouter()
 LOGGER = logging.getLogger(__name__)
@@ -65,14 +65,20 @@ async def auth_me(
     request_id = resolve_request_id(x_request_id)
     if authorization is None:
         return {"authenticated": False}
-    identity = await fetch_current_identity(settings, request_id, authorization)
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return {"authenticated": False}
+    try:
+        identity = verify_token(settings, token)
+    except TokenVerificationError:
+        return {"authenticated": False}
     log_event(
         LOGGER,
         "auth_identity_resolved",
         request_id=request_id,
-        user_id=identity["username"],
+        user_id=identity.username,
     )
-    return {"authenticated": True, "identity": identity}
+    return {"authenticated": True, "identity": identity.model_dump(exclude_none=True)}
 
 
 @router.post("/api/v1/auth/logout-url")

@@ -25,3 +25,6 @@ __pycache__/
 # Local runtime profile secrets and local image-tag state.
 shared/platform-ops/gitops/**/runtime-secrets.env
 shared/platform-ops/gitops/**/.images.env
+
+# Auto-generated dev signing keys (identity-broker JWT).
+.dev-keys/

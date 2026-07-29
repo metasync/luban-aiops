@@ -18,6 +18,7 @@ from identity_service.schemas.auth import (
     LogoutResponse,
 )
 from identity_service.schemas.identity import ClaimsPayload, IdentityContext
+from identity_service.services.token_service import issue_token
 
 ROLE_MAPPINGS = {
     "ops-admins": "platform-admin",
@@ -166,10 +167,22 @@ async def exchange_authorization_code(
         userinfo_payload = userinfo_response.json()
         identity = normalize_userinfo(userinfo_payload)
 
+    # Issue a platform JWT as the primary access token.
+    platform_token, expires_in = issue_token(
+        settings,
+        {
+            "sub": identity.subject,
+            "username": identity.username,
+            "email": identity.email,
+            "roles": identity.roles,
+            "groups": identity.groups,
+        },
+    )
+
     return AuthenticatedSession(
-        access_token=access_token,
-        token_type=str(token_payload.get("token_type", "Bearer")),
-        expires_in=token_payload.get("expires_in"),
+        access_token=platform_token,
+        token_type="Bearer",
+        expires_in=expires_in,
         refresh_token=token_payload.get("refresh_token"),
         id_token=token_payload.get("id_token"),
         identity=identity,

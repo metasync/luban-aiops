@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/agent-stream-event.schema.json",
+  "title": "Agent Stream Event (v2)",
+  "description": "SSE frame payload for GET /api/v2/chat/stream. Simplified: 'type' replaces 'event'; no freeform 'payload' field.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "session_id", "request_id"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["message_start", "message_delta", "message_end", "error"]
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "delta": {
+      "type": "string",
+      "description": "Incremental text chunk. Present on message_delta frames."
+    },
+    "message": {
+      "type": "string",
+      "description": "Terminal metadata. Present on message_end and error frames."
+    }
+  }
+}

@@ -194,7 +194,10 @@ class IdentityAsyncServiceTests(unittest.IsolatedAsyncioTestCase):
                 ),
             )
 
-        self.assertEqual(result.access_token, "access-token")
+        # access_token is now a platform JWT (not the raw OIDC token).
+        self.assertTrue(result.access_token.startswith("eyJ"))
+        self.assertEqual(result.token_type, "Bearer")
+        self.assertEqual(result.expires_in, 900)
         self.assertEqual(result.identity.username, "alice")
         self.assertEqual(result.identity.roles, ["operator"])
         self.assertEqual(fake_client.posts[0]["data"]["client_secret"], "secret")

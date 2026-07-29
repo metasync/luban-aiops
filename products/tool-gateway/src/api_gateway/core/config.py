@@ -4,11 +4,6 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 
-from api_gateway.services.agent_backends import (
-    AgentBackendContext,
-    ConfiguredAgentBackendMode,
-)
-
 DEFAULT_AGENT_SERVICE_HOST = "agent-service"
 DEFAULT_AGENT_SERVICE_PORT = 8000
 DEFAULT_IDENTITY_SERVICE_HOST = "identity-service"
@@ -19,20 +14,23 @@ DEFAULT_AGENT_SERVICE_URL = (
 DEFAULT_IDENTITY_SERVICE_URL = (
     f"http://{DEFAULT_IDENTITY_SERVICE_HOST}:{DEFAULT_IDENTITY_SERVICE_PORT}"
 )
+DEFAULT_IDENTITY_JWKS_URL = (
+    f"http://{DEFAULT_IDENTITY_SERVICE_HOST}:{DEFAULT_IDENTITY_SERVICE_PORT}"
+    "/.well-known/jwks.json"
+)
 
 
 @dataclass(frozen=True)
 class GatewaySettings:
     agent_service_url: str = DEFAULT_AGENT_SERVICE_URL
     identity_service_url: str = DEFAULT_IDENTITY_SERVICE_URL
-    agent_backend_mode: str = "auto"
-    default_agent_name: str = "Luban AIOps Runtime Agent"
-    default_agent_system_prompt: str = (
-        "You are the Luban AIOps runtime agent. "
-        "Answer clearly, stay grounded, and favor operationally useful responses."
-    )
-    default_user_id: str = "demo.operator"
+    identity_jwks_url: str = DEFAULT_IDENTITY_JWKS_URL
+    identity_jwks_cache_seconds: int = 300
+    identity_token_issuer: str = "luban-identity-broker"
+    dev_user: str = "dev.operator"
+    policy_path: str = ""
     chat_response_timeout_seconds: float = 30.0
+    require_auth: bool = False
 
     @classmethod
     def from_env(cls) -> "GatewaySettings":
@@ -45,42 +43,23 @@ class GatewaySettings:
                 "IDENTITY_SERVICE_URL",
                 DEFAULT_IDENTITY_SERVICE_URL,
             ),
-            agent_backend_mode=os.getenv("AGENT_BACKEND_MODE", "auto").strip().lower(),
-            default_agent_name=os.getenv(
-                "AGENTSCOPE_DEFAULT_AGENT_NAME",
-                "Luban AIOps Runtime Agent",
+            identity_jwks_url=os.getenv(
+                "IDENTITY_JWKS_URL",
+                DEFAULT_IDENTITY_JWKS_URL,
             ),
-            default_agent_system_prompt=os.getenv(
-                "AGENTSCOPE_DEFAULT_AGENT_SYSTEM_PROMPT",
-                (
-                    "You are the Luban AIOps runtime agent. "
-                    "Answer clearly, stay grounded, and favor operationally useful responses."
-                ),
+            identity_jwks_cache_seconds=int(
+                os.getenv("IDENTITY_JWKS_CACHE_SECONDS", "300")
             ),
-            default_user_id=os.getenv("DEFAULT_USER_ID", "demo.operator"),
+            identity_token_issuer=os.getenv(
+                "IDENTITY_TOKEN_ISSUER", "luban-identity-broker"
+            ),
+            dev_user=os.getenv("GATEWAY_DEV_USER", "dev.operator"),
+            policy_path=os.getenv("GATEWAY_POLICY_PATH", ""),
             chat_response_timeout_seconds=float(
                 os.getenv("CHAT_RESPONSE_TIMEOUT_SECONDS", "30")
             ),
-        )
-
-    def configured_agent_backend_mode(self) -> ConfiguredAgentBackendMode:
-        mode = self.agent_backend_mode.lower()
-        if mode in {"agentscope", "agentscope-native", "native"}:
-            return "native"
-        if mode in {"transitional", "fastapi"}:
-            return "transitional"
-        if mode == "auto":
-            return "auto"
-        raise ValueError(
-            "Unsupported AGENT_BACKEND_MODE. Expected one of: auto, transitional, native."
-        )
-
-    def backend_context(self) -> AgentBackendContext:
-        return AgentBackendContext(
-            agent_service_url=self.agent_service_url,
-            default_agent_name=self.default_agent_name,
-            default_agent_system_prompt=self.default_agent_system_prompt,
-            chat_response_timeout_seconds=self.chat_response_timeout_seconds,
+            require_auth=os.getenv("GATEWAY_REQUIRE_AUTH", "false").strip().lower()
+            in {"1", "true", "yes", "on"},
         )
 
 

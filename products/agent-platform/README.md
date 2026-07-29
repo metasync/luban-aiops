@@ -33,9 +33,9 @@ Current implementation artifacts:
 - `Dockerfile`
 - `src/agent_service/app.py`
 - `src/agent_service/main.py`
-- `src/agent_service/api/`
+- `src/agent_service/api/v2/` (platform-owned contract adapter)
 - `src/agent_service/core/`
-- `src/agent_service/entrypoints/`
+- `src/agent_service/entrypoints/` (native AgentScope entrypoints)
 - `src/agent_service/schemas/`
 - `src/agent_service/services/`
 - `src/agent_service/runtime_settings.py`
@@ -44,17 +44,15 @@ Current implementation artifacts:
 - `src/agent_service/agent_app.py`
 - `src/agent_service/native_service.py`
 - `src/agent_service/metadata.py`
-- `tests/test_app.py`
-- `tests/test_runtime_settings.py`
-- `tests/test_runtime_kernel.py`
-- `tests/test_runtime_providers.py`
+- `tests/`
 
 Current scaffold status:
 
 - uses `uv` packaging with `uv_build`
 - includes a container build path for the current service contract
-- keeps the existing outer HTTP adapter in `FastAPI` for current workspace integration
-- organizes the transitional adapter by responsibility so route wiring, schemas, request context, and service-layer logic are no longer mixed in a single module
+- exposes a single platform-owned HTTP+SSE contract at `/api/v2/` (see `ADR-0003`)
+- the AgentScope kernel sits behind an adapter; no framework types leak through the contract boundary
+- identity is conveyed via headers (`X-User-ID`, `x-request-id`), never in request bodies
 - centralizes AgentScope runtime construction in reusable kernel modules
 - isolates provider-specific AgentScope construction behind a registry and adapter modules
 - adds a native `AgentScope` runtime service entrypoint via `agent-service-runtime`
@@ -62,35 +60,32 @@ Current scaffold status:
 - routes chat and streaming calls through a provider-configurable AgentScope runtime adapter when credentials are configured
 - distinguishes between unconfigured runtime state and provider-call failures in runtime metadata
 - enables real runtime replies when `AGENTSCOPE_API_KEY` is supplied to the service environment
-- uses app-level provider adapters to choose and configure concrete AgentScope `*ChatModel` implementations, rather than replacing AgentScope's model layer
 
-Current transitional service layout:
+Service layout:
 
 - `src/agent_service/app.py`
-  - builds the `FastAPI` app and includes the shared router
+  - builds the `FastAPI` app and mounts the `/api/v2/` contract router
+- `src/agent_service/api/v2/routes.py`
+  - the adapter layer: validates requests, delegates to the kernel, shapes responses into contract-conformant models
 - `src/agent_service/entrypoints/`
-  - holds the concrete runtime entrypoint implementations for transitional, native `AgentApp`, and native `AgentScope 2.0` service modes
-- `src/agent_service/api/routes/`
-  - defines HTTP endpoints for health, runtime, sessions, and chat
+  - holds the native `AgentApp` and native `AgentScope 2.0` entrypoint implementations (for AgentScope-native consumers)
 - `src/agent_service/core/`
   - holds shared configuration and request-context helpers
 - `src/agent_service/schemas/`
-  - defines request and response models for the transitional HTTP contract
+  - `v2.py`: pydantic models bound to the platform-owned contract; `api.py`: internal session models
 - `src/agent_service/services/`
-  - contains transitional service-layer logic for runtime metadata, chat orchestration, cached runtime dependencies, and session handling
+  - session store, session service, runtime dependencies
 - `src/agent_service/runtime_*.py`, `providers/`, `agent_app.py`, `native_service.py`
-  - remain runtime-focused modules that configure and expose AgentScope-backed execution paths
+  - runtime-focused modules that configure and expose AgentScope-backed execution paths
 
 Entrypoint distinction:
 
-- `src/agent_service/app.py`
-  - assembles the transitional `FastAPI` application used by the current workspace HTTP contract
-- `src/agent_service/agent_app.py`
-  - compatibility wrapper that exposes the native `AgentScope` `AgentApp` runtime entrypoint
-- `src/agent_service/native_service.py`
-  - compatibility wrapper that exposes the native `AgentScope 2.0` service built with `create_app`
 - `src/agent_service/main.py`
-  - compatibility wrapper that runs the transitional `FastAPI` app
+  - default entrypoint: runs the platform-owned contract service (`/api/v2/`)
+- `src/agent_service/agent_app.py`
+  - native `AgentScope` `AgentApp` runtime entrypoint (for AgentScope Studio / runtime consumers)
+- `src/agent_service/native_service.py`
+  - native `AgentScope 2.0` service built with `create_app` (for AgentScope-native tooling)
 
 Configuration and singleton access:
 
@@ -104,20 +99,17 @@ Configuration and singleton access:
 Local run options:
 
 - `uv run --directory products/agent-platform agent-service`
-  - runs the transitional `FastAPI` adapter on port `8000`
-  - accepts `AGENT_TRANSITIONAL_HOST` and `AGENT_TRANSITIONAL_PORT`
+  - runs the platform-owned contract service on port `8000`
+  - accepts `AGENT_SERVICE_HOST` and `AGENT_SERVICE_PORT`
 - `uv run --directory products/agent-platform agent-service-runtime`
-  - runs the `AgentApp`-based entrypoint
-  - emits incremental native AgentScope reply events for text/thinking blocks
-  - reuses the same unconfigured/provider-error fallback behavior as the transitional runtime path
+  - runs the `AgentApp`-based entrypoint (for AgentScope-native consumers)
 - `uv run --directory products/agent-platform agent-service-native`
   - runs the native `AgentScope 2.0` service built with `create_app`
   - accepts `AGENT_NATIVE_HOST`, `AGENT_NATIVE_PORT`, `AGENT_NATIVE_TITLE`, and `AGENT_NATIVE_VERSION`
   - expects a reachable `Redis` instance using `AGENTSCOPE_REDIS_HOST`, `AGENTSCOPE_REDIS_PORT`, and related env vars if you override defaults
-  - the default development Kubernetes transitional overlay provisions this dependency at `shared/platform-ops/gitops/dev-k8s-transitional`
 - `docker build -t luban-aiops/agent-service:dev-local products/agent-platform`
   - builds the container image used by the development Kubernetes overlays
-  - defaults to the transitional `agent-service` entrypoint so the current gateway contract remains runnable
+  - defaults to the `agent-service` entrypoint (platform-owned contract)
 
 Current runtime environment knobs:
 
@@ -147,13 +139,32 @@ Current runtime environment knobs:
   - DeepSeek-specific runtime options
 - `OPENAI_THINKING_ENABLE`, `OPENAI_REASONING_EFFORT`, `OPENAI_PARALLEL_TOOL_CALLS`
   - OpenAI-compatible runtime options
+- `SESSION_TTL_SECONDS`
+  - idle lifetime for in-memory sessions; defaults to `3600`
+- `SESSION_MAX_ENTRIES`
+  - maximum concurrent in-memory sessions before oldest-first eviction; defaults to `1000`
+- `OTEL_ENABLED`
+  - master switch for the OTLP push pipeline (traces + metrics); defaults to `false`; when disabled, the `/metrics` surface is unaffected
+- `OTEL_EXPORTER_OTLP_ENDPOINT`
+  - OTLP collector URL used when `OTEL_ENABLED=true`
+- `OTEL_SERVICE_NAME`
+  - logical service name reported to the collector; defaults to the agent-platform's metadata name
+
+Session store limitations:
+
+- sessions are kept in process memory only: state is lost on restart, and the service cannot run with multiple replicas until a shared store lands
+- sessions are scoped to the creating user (via `X-User-ID` header); unknown or foreign `session_id` values return `404`
+- the native runtime path delegates session state to the AgentScope runtime services instead
 
 Current runtime status surface:
 
-- `/api/v1/runtime`
-  - returns provider, resolved model, resolved base URL, provider options, runtime state, and the last provider error if one exists
-- `/health/ready`
+- `/api/v2/runtime`
+  - returns provider, resolved model, runtime state, and the last provider error if one exists
+- `/api/v2/health`
   - returns runtime mode, runtime state, provider, and whether the runtime is configured
+- `/metrics`
+  - always-on Prometheus exposition endpoint (auth-exempt), reporting standard HTTP RED metrics plus `agent_sessions_created_total` and `agent_chat_requests_total`; opt-in OTLP push via `opentelemetry-instrumentation-fastapi` + `opentelemetry-exporter-otlp` when `OTEL_ENABLED=true` (fail-open); see `SPEC-005` and `shared/shared-contracts/observability-conventions.md`
+- `x-request-id` remains the log/portal correlation key; when OTel tracing is active it equals the W3C `trace_id`
 
 Testing note:
 

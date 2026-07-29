@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/agent-runtime-metadata.schema.json",
+  "title": "Agent Runtime Metadata (v2)",
+  "description": "Response body for GET /api/v2/runtime. Reports kernel state without exposing framework internals.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runtime_mode", "runtime_state", "provider"],
+  "properties": {
+    "runtime_mode": {
+      "type": "string",
+      "description": "Kernel mode identifier (e.g. 'agentscope', 'placeholder')."
+    },
+    "runtime_state": {
+      "type": "string",
+      "enum": ["ready", "not_configured", "provider_error"],
+      "description": "Current kernel health state."
+    },
+    "provider": {
+      "type": "string",
+      "description": "Active LLM provider name (e.g. 'dashscope', 'deepseek', 'openai')."
+    },
+    "model_name": {
+      "type": "string",
+      "description": "Resolved model identifier."
+    },
+    "hint": {
+      "type": "string",
+      "description": "Human-readable configuration or status hint."
+    },
+    "last_error": {
+      "type": ["string", "null"],
+      "description": "Last provider error message, if any."
+    }
+  }
+}

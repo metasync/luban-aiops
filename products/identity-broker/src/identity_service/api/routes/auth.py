@@ -11,12 +11,15 @@ from identity_service.schemas.auth import (
     LoginStartResponse,
     LogoutRequest,
     LogoutResponse,
+    TokenRequest,
+    TokenResponse,
 )
 from identity_service.services.identity_service import (
     build_login_start,
     build_logout_response,
     exchange_authorization_code,
 )
+from identity_service.services.token_service import issue_token, jwks_response
 
 router = APIRouter()
 LOGGER = logging.getLogger(__name__)
@@ -70,3 +73,33 @@ def logout_url(
     response = build_logout_response(settings, payload)
     log_event(LOGGER, "auth_logout_requested", request_id=x_request_id)
     return response
+
+
+@router.post("/api/v1/auth/token", response_model=TokenResponse)
+def issue_platform_token(
+    payload: TokenRequest,
+    x_request_id: str | None = Header(default=None),
+    settings: IdentitySettings = Depends(get_settings),
+) -> TokenResponse:
+    identity = {
+        "sub": payload.username,
+        "username": payload.username,
+        "email": payload.email,
+        "roles": payload.roles or ["developer"],
+        "groups": payload.groups or [],
+    }
+    token, expires_in = issue_token(settings, identity)
+    log_event(
+        LOGGER,
+        "platform_token_issued",
+        request_id=x_request_id,
+        user_id=payload.username,
+    )
+    return TokenResponse(access_token=token, expires_in=expires_in)
+
+
+@router.get("/.well-known/jwks.json")
+def jwks_endpoint(
+    settings: IdentitySettings = Depends(get_settings),
+) -> dict:
+    return jwks_response(settings)

@@ -8,7 +8,49 @@ published product versions.
 
 ## Unreleased
 
-### Added
+### Added — Release 1 (SPEC-001 .. SPEC-005)
+
+- Added `SPEC-001` release-1 platform hardening (delivered): gateway authentication
+  enforcement behind `GATEWAY_REQUIRE_AUTH`, role propagation in structured logs,
+  transitional session integrity (ownership scoping, 404 on unknown session IDs,
+  TTL/size-bounded store, per-session agent isolation), typed contract
+  enforcement bound to shared-contracts schemas, cached backend resolution with
+  bounded outbound timeouts, and the GitHub Actions CI baseline.
+- Added `SPEC-002` agent-service contract (delivered): platform-owned
+  agent-service contract (ADR-0003) with v2 envelope (`content` replacing
+  `response`, simplified stream events, header-based identity), `/api/v2/`
+  adapter in agent-platform over the AgentScope kernel, tool-gateway migrated to
+  a single agent-service client, retired the transitional `/api/v1/` surface,
+  and bidirectional contract tests.
+- Added `SPEC-003` identity-trust hardening (delivered): identity-broker now
+  issues RSA-signed platform JWTs (`POST /api/v1/auth/token`) and publishes a
+  JWKS endpoint (`GET /.well-known/jwks.json`, RFC 7517); the gateway verifies
+  tokens locally via PyJWKClient, validates the `iss` claim, and derives
+  `X-User-ID` exclusively from verified claims; removed `DEFAULT_USER_ID`
+  fallback in favour of explicit `GATEWAY_DEV_USER` with synthetic identity
+  logging.
+- Added `SPEC-004` deny-by-default policy enforcement (delivered): defined the
+  policy contract in shared-contracts (`policy-rule.schema.json`,
+  `policy-decision.schema.json`, `policies/policy-default.yaml`) as a strict
+  `action_authz` subset of the Tier-1 policy specification; the gateway
+  evaluates every business request (`chat`, `session:create`, `session:read`)
+  against a versioned role→action bundle, denying by default with a structured
+  403 and audit-logging every decision.
+- Added `SPEC-005` observability baseline (delivered): metrics naming
+  conventions, OTel switch semantics, and `x-request-id` ↔ `trace_id` bridging
+  rule in `shared/shared-contracts/observability-conventions.md`; all three
+  Python services expose an always-on `/metrics` Prometheus surface plus an
+  opt-in OTLP push pipeline gated by `OTEL_ENABLED`; standard HTTP RED metrics,
+  domain counters (`agent_sessions_created_total`, `identity_tokens_issued_total`,
+  `gateway_policy_decisions_total`, `gateway_token_verification_total`), and
+  Prometheus scrape annotations on every deployment manifest.
+- Added ADR-0001 (SDD adoption), ADR-0002 (AgentScope 2.0 kernel), and
+  ADR-0003 (platform-owned agent-service contract) under `docs/adr/`.
+- Added spec-driven development workflow under `docs/specs/` with plan/spec/tasks
+  templates and delivered specs for SPEC-001 through SPEC-005.
+- Added `docs/agentic-aiops-platform/part-1b-framework-revalidation.md`.
+
+### Added — Release 0
 
 - Added typed provider-specific runtime options for `products/agent-platform`,
   including provider-owned defaults for `dashscope`, `deepseek`, and `openai`.

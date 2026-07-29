@@ -21,6 +21,15 @@ Work in the directory that owns the capability you are changing:
 
 Do not move logic into `shared/` unless it is genuinely reusable and dependency-light.
 
+## Spec-Driven Development
+
+This workspace follows the spec-driven workflow defined in `docs/specs/README.md`:
+
+- qualifying changes (new capabilities, contract changes, cross-boundary or trust-model changes) require a spec under `docs/specs/` before implementation
+- architecturally significant decisions are recorded as ADRs under `docs/adr/`
+- implementation pull requests link the spec ID they serve
+- delivered specs are frozen; follow-up changes get a new spec
+
 ## Change Principles
 
 - keep identity, policy, orchestration, and execution concerns separated
@@ -33,10 +42,11 @@ Do not move logic into `shared/` unless it is genuinely reusable and dependency-
 Before opening a pull request:
 
 1. align the change to a workspace product or shared module
-2. describe the release or roadmap slice the change supports
-3. call out any impact on identity, policy, approvals, audit, or execution safety
-4. update related documentation and examples
-5. run the relevant local validation for the files you changed
+2. link the spec the change implements, or state why no spec is required per `docs/specs/README.md`
+3. describe the release or roadmap slice the change supports
+4. call out any impact on identity, policy, approvals, audit, or execution safety
+5. update related documentation and examples
+6. run the relevant local validation for the files you changed
 
 ## Recommended Branch Naming
 

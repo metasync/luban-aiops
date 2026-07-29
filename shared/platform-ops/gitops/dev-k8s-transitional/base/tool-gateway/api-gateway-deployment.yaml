@@ -11,6 +11,10 @@ spec:
     metadata:
       labels:
         app: api-gateway
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8000"
     spec:
       containers:
         - name: api-gateway
@@ -21,3 +25,11 @@ spec:
                 name: platform-runtime-config
           ports:
             - containerPort: 8000
+          volumeMounts:
+            - name: gateway-policy
+              mountPath: /etc/luban/policy
+              readOnly: true
+      volumes:
+        - name: gateway-policy
+          configMap:
+            name: gateway-policy

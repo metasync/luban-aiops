@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/policy-rule.schema.json",
+  "title": "Policy Rule (v1)",
+  "description": "A single action-authorization rule. Strict subset of the Tier-1 policy specification (docs/agentic-aiops-platform/policy-specification.md): action_authz domain only, allow/deny outcomes only. Forward-compatible with require_approval and conditions via schema revision.",
+  "type": "object",
+  "required": ["id", "domain", "description", "priority", "enabled", "match", "decision"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique, stable rule identifier."
+    },
+    "domain": {
+      "type": "string",
+      "const": "action_authz",
+      "description": "Policy domain. Only action_authz is supported in v1."
+    },
+    "description": {
+      "type": "string",
+      "description": "Short human-readable explanation of the rule."
+    },
+    "priority": {
+      "type": "integer",
+      "description": "Numeric precedence. Higher wins between allow rules; explicit deny always overrides allow."
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Whether the rule participates in evaluation."
+    },
+    "match": {
+      "type": "object",
+      "required": ["roles_any", "actions_any"],
+      "properties": {
+        "roles_any": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Rule matches if the principal holds any of these roles."
+        },
+        "actions_any": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Rule matches if the requested action is one of these."
+        }
+      },
+      "additionalProperties": false
+    },
+    "decision": {
+      "type": "object",
+      "required": ["outcome"],
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": ["allow", "deny"],
+          "description": "Decision outcome. require_approval and allow_with_conditions are reserved for a future schema revision."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

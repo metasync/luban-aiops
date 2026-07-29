@@ -167,3 +167,56 @@ def test_normalize_event_keeps_delta_for_text_block_events():
 
     assert payload["event"] == "text_block_delta"
     assert payload["delta"] == "STREAM OK"
+
+
+class FakeUserMsg:
+    def __init__(self, name, content):
+        self.name = name
+        self.content = content
+
+
+class FakeMemoryAgent:
+    def __init__(self):
+        self.history = []
+
+    async def reply(self, msg):
+        self.history.append(msg.content)
+        return SimpleNamespace(content=f"turn {len(self.history)}")
+
+
+def test_agent_conversation_state_never_crosses_sessions(monkeypatch):
+    kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
+    monkeypatch.setattr(kernel, "_build_agent", lambda: (FakeMemoryAgent(), FakeUserMsg))
+
+    reply_a1 = asyncio.run(kernel.reply_text("first", "ses-a", "alice"))
+    reply_b1 = asyncio.run(kernel.reply_text("hello", "ses-b", "bob"))
+    reply_a2 = asyncio.run(kernel.reply_text("second", "ses-a", "alice"))
+
+    # ses-b starts with fresh memory; ses-a keeps its own history
+    assert reply_a1 == "turn 1"
+    assert reply_b1 == "turn 1"
+    assert reply_a2 == "turn 2"
+
+
+def test_ensure_agent_reuses_instance_per_session(monkeypatch):
+    kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
+    monkeypatch.setattr(kernel, "_build_agent", lambda: (FakeMemoryAgent(), FakeUserMsg))
+
+    agent_a, _ = kernel.ensure_agent("ses-a")
+    agent_b, _ = kernel.ensure_agent("ses-b")
+
+    assert agent_a is not agent_b
+    assert kernel.ensure_agent("ses-a")[0] is agent_a
+
+
+def test_ensure_agent_cache_is_bounded(monkeypatch):
+    kernel = AgentKernel(
+        settings=RuntimeSettings(api_key="test-key"),
+        max_cached_agents=1,
+    )
+    monkeypatch.setattr(kernel, "_build_agent", lambda: (FakeMemoryAgent(), FakeUserMsg))
+
+    agent_a, _ = kernel.ensure_agent("ses-a")
+    kernel.ensure_agent("ses-b")
+
+    assert kernel.ensure_agent("ses-a")[0] is not agent_a

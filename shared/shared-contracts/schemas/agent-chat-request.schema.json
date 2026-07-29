@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/agent-chat-request.schema.json",
+  "title": "Agent Chat Request (v2)",
+  "description": "Request body for POST /api/v2/chat. Identity is conveyed via headers (X-User-ID, x-request-id), not the body.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["message"],
+  "properties": {
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Operator prompt sent to the agent runtime."
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Optional session identifier to continue an existing conversation. Omit to start a new session."
+    }
+  }
+}

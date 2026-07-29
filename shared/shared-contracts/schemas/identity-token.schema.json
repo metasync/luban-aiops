@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/identity-token.schema.json",
+  "title": "Identity Token Claims (v1)",
+  "description": "JWT claim set issued by identity-broker and verified locally by the gateway. Documented for contract alignment; not transported as a JSON body.",
+  "type": "object",
+  "required": ["iss", "sub", "username", "iat", "exp"],
+  "properties": {
+    "iss": {
+      "type": "string",
+      "description": "Token issuer. Must match IDENTITY_TOKEN_ISSUER (default: luban-identity-broker)."
+    },
+    "sub": {
+      "type": "string",
+      "description": "Subject identifier (unique user ID)."
+    },
+    "username": {
+      "type": "string",
+      "description": "Human-readable username. Used as X-User-ID downstream."
+    },
+    "email": {
+      "type": ["string", "null"],
+      "description": "User email address."
+    },
+    "roles": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Platform roles resolved from group membership."
+    },
+    "groups": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Raw group memberships from the identity provider."
+    },
+    "iat": {
+      "type": "integer",
+      "description": "Issued-at timestamp (Unix seconds)."
+    },
+    "exp": {
+      "type": "integer",
+      "description": "Expiry timestamp (Unix seconds). Default TTL: 900s."
+    }
+  },
+  "additionalProperties": false
+}

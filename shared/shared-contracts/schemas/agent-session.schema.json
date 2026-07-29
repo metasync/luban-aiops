@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/agent-session.schema.json",
+  "title": "Agent Session (v2)",
+  "description": "Session record returned by POST /api/v2/sessions and GET /api/v2/sessions/{id}.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "user_id", "created_at", "status"],
+  "properties": {
+    "session_id": {
+      "type": "string"
+    },
+    "user_id": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "expired"],
+      "default": "active"
+    }
+  }
+}

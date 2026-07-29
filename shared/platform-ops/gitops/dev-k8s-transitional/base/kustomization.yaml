@@ -6,9 +6,13 @@ generatorOptions:
 configMapGenerator:
   - name: platform-runtime-config
     envs:
+      - shared/observability.env
       - agent-platform/runtime-config.env
       - tool-gateway/runtime-config.env
       - identity-broker/runtime-config.env
+  - name: gateway-policy
+    files:
+      - tool-gateway/policy.yaml
 resources:
   - shared/namespace.yaml
   - infra/redis-deployment.yaml

@@ -4,9 +4,11 @@ import time
 from fastapi import FastAPI, Request
 
 from api_gateway.api.router import router
+from api_gateway.core.metrics import setup_metrics
 from api_gateway.core.observability import log_event
 from api_gateway.core.request_context import resolve_request_id
-from api_gateway.metadata import SERVICE_TITLE, SERVICE_VERSION
+from api_gateway.core.telemetry import setup_telemetry
+from api_gateway.metadata import SERVICE_NAME, SERVICE_TITLE, SERVICE_VERSION
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +35,8 @@ def create_app() -> FastAPI:
         return response
 
     app.include_router(router)
+    setup_metrics(app)
+    setup_telemetry(app, SERVICE_NAME)
     return app
 
 

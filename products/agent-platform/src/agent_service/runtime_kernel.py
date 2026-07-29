@@ -1,11 +1,13 @@
 import json
 import logging
+from collections import OrderedDict
 from collections.abc import AsyncIterator
 
 from agent_service.providers import get_provider
 from agent_service.runtime_settings import RuntimeSettings
 
 LOGGER = logging.getLogger(__name__)
+MAX_CACHED_AGENTS = 1000
 TEXT_DELTA_EVENTS = {
     "message_delta",
     "text_block_start",
@@ -76,11 +78,15 @@ def extract_stream_text(value: object) -> str:
 
 
 class AgentKernel:
-    def __init__(self, settings: RuntimeSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: RuntimeSettings | None = None,
+        max_cached_agents: int = MAX_CACHED_AGENTS,
+    ) -> None:
         self.settings = settings or RuntimeSettings.from_env()
         self._provider = get_provider(self.settings.provider)
-        self._agent = None
-        self._user_msg_cls = None
+        self._agents: OrderedDict[str, tuple[object, type]] = OrderedDict()
+        self._max_cached_agents = max_cached_agents
         self._last_error: str | None = None
 
     def mode(self) -> str:
@@ -156,10 +162,21 @@ class AgentKernel:
         )
         return agent, UserMsg
 
-    def ensure_agent(self):
-        if self._agent is None or self._user_msg_cls is None:
-            self._agent, self._user_msg_cls = self._build_agent()
-        return self._agent, self._user_msg_cls
+    def ensure_agent(self, session_id: str):
+        """Return the agent bound to `session_id`, creating it on first use.
+
+        Agents are keyed by session so conversation memory never crosses
+        sessions; the cache is LRU-bounded to match the session store.
+        """
+        cached = self._agents.get(session_id)
+        if cached is not None:
+            self._agents.move_to_end(session_id)
+            return cached
+        agent, user_msg_cls = self._build_agent()
+        self._agents[session_id] = (agent, user_msg_cls)
+        while len(self._agents) > self._max_cached_agents:
+            self._agents.popitem(last=False)
+        return agent, user_msg_cls
 
     def build_unconfigured_message(self, message: str, session_id: str) -> str:
         return (
@@ -205,7 +222,7 @@ class AgentKernel:
             return self.build_unconfigured_message(message, session_id)
 
         try:
-            agent, user_msg_cls = self.ensure_agent()
+            agent, user_msg_cls = self.ensure_agent(session_id)
             reply_msg = await agent.reply(user_msg_cls(name=user_name, content=message))
             self.clear_error()
             return extract_text(getattr(reply_msg, "content", reply_msg))
@@ -258,7 +275,7 @@ class AgentKernel:
             return
 
         try:
-            agent, user_msg_cls = self.ensure_agent()
+            agent, user_msg_cls = self.ensure_agent(session_id)
             async for event in agent.reply_stream(user_msg_cls(name=user_name, content=message)):
                 self.clear_error()
                 yield self.normalize_event(event, request_id, session_id)
