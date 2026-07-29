@@ -159,7 +159,6 @@ Kubernetes validation path and the final closure-document cleanup now in place,
 
 ## Related Documents
 
-- `../release-0-implementation-checklist.md`
 - `../agent-platform-runtime-options.md`
 - `../../workspace/product-boundaries.md`
 - `../../../CHANGELOG.md`

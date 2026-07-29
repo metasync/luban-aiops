@@ -9,7 +9,7 @@ Define a delivery roadmap for the enterprise-grade agentic AIOps platform where 
 - has explicit integration points
 - is straightforward for operations teams to verify
 
-This roadmap complements [implementation-backlog.md](implementation-backlog.md) by providing a release-by-release delivery view.
+This roadmap provides a release-by-release delivery view. Implementation details are tracked in feature specs under `docs/specs/`.
 
 ## Roadmap Principles
 

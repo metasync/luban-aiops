@@ -10,18 +10,15 @@ Read the documents in this sequence:
 
 1. `part-1-decision-matrix.md`
 2. `part-2-reference-architecture.md`
-3. `part-3-mvp-plan.md`
-4. `identity-and-authorization-design.md`
-5. `authorization-matrix.md`
-6. `policy-specification.md`
-7. `implementation-backlog.md`
-8. `release-0-implementation-checklist.md`
-9. `agent-platform-runtime-options.md`
-10. `release-notes/README.md`
-11. `delivery-roadmap.md`
-12. `../workspace/workspace-model.md`
-13. `../workspace/product-boundaries.md`
-14. `../workspace/repository-reorganization-plan.md`
+3. `identity-and-authorization-design.md`
+4. `authorization-matrix.md`
+5. `policy-specification.md`
+6. `agent-platform-runtime-options.md`
+7. `delivery-roadmap.md`
+8. `release-notes/README.md`
+9. `../workspace/workspace-model.md`
+10. `../workspace/product-boundaries.md`
+11. `../workspace/repository-reorganization-plan.md`
 
 ## Document Set
 
@@ -35,11 +32,6 @@ Read the documents in this sequence:
   - Completed and based on `AgentScope 2.0`
   - Defines the platform control plane, execution plane, security boundaries, and service layout
 
-- `part-3-mvp-plan.md`
-  - MVP scope, phases, and delivery plan
-  - Completed and aligned with the reference architecture
-  - Narrows the architecture into a safe and realistic first release
-
 - `identity-and-authorization-design.md`
   - Dedicated design for `SSO`, `Keycloak`, `AD` federation, authorization, approval identity, and audit attribution
   - Defines the enterprise identity and end-to-end attribution model
@@ -51,14 +43,6 @@ Read the documents in this sequence:
 - `policy-specification.md`
   - Machine-oriented policy rule model, evaluation flow, and sample policy objects
   - Turns the authorization design into enforceable policy structure
-
-- `implementation-backlog.md`
-  - Release-oriented implementation backlog with self-contained epics, integration points, and validation scenarios
-  - Translates the design set into executable platform work
-
-- `release-0-implementation-checklist.md`
-  - Execution-oriented checklist for the first platform foundation release
-  - Maps `Release 0` work into workspace products, shared modules, and validation gates
 
 - `agent-platform-runtime-options.md`
   - Decision note comparing a custom `FastAPI` shell with a more native AgentScope runtime service
@@ -85,18 +69,17 @@ Read the documents in this sequence:
 
 - Part 1: finalized and documented
 - Part 2: completed and documented
-- Part 3: completed and documented
 - Identity and authorization design: completed and documented
 - Authorization matrix: completed and documented
 - Policy specification: completed and documented
-- Implementation backlog: completed and documented
-- Release 0 implementation checklist: completed and documented
 - Agent platform runtime options: completed and documented
 - Delivery roadmap: completed and documented
 - Release notes index: completed and documented
 - Workspace model: completed and documented
 - Product boundaries: completed and documented
 - Repository reorganization plan: completed and documented
+- Spec-driven development (SDD): adopted as formal workflow (`docs/specs/`)
+- Delivered specs: SPEC-001 through SPEC-006 (see `docs/specs/README.md`)
 
 ## Goal
 
@@ -116,17 +99,13 @@ The goal of this document set is to provide a durable design record for:
 
 - `Part 1` selects the framework foundation
 - `Part 2` defines the target architecture built on that decision
-- `Part 3` defines the first release shape derived from the architecture
 - `Identity and authorization design` defines enterprise access and attribution requirements that support both the architecture and the MVP
 - `Authorization matrix` translates identity and approval design into explicit operational permissions
 - `Policy specification` describes how those permissions should be enforced by the platform
-- `Implementation backlog` translates the design set into buildable work grouped by self-contained releases
-- `Release 0 implementation checklist` turns the first release into a product-mapped execution guide
 - `Agent platform runtime options` clarifies the implementation path for the runtime kernel service
-- `Delivery roadmap` shows how those releases stack into a practical adoption path
+- `Delivery roadmap` shows how releases stack into a practical adoption path
 - `Release notes` summarize concrete implementation waves and validation outcomes
 - `Workspace model` defines how the platform should be represented as a modular repository workspace
 - `Product boundaries` define ownership and interfaces for each workspace project
 - `Repository reorganization plan` shows how to evolve from the current study repository into the target workspace
-
-This keeps the platform study versioned inside the project repository for future reference and iteration.
+- `docs/specs/` holds the SDD workflow and delivered specs (SPEC-001..006) that replaced the earlier MVP plan, backlog, and Release 0 checklist

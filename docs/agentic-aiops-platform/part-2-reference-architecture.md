@@ -12,7 +12,6 @@ This document defines the reference architecture for the selected framework from
 
 This document is complemented by the following supporting documents:
 
-- `part-3-mvp-plan.md` for the first-release delivery scope
 - `identity-and-authorization-design.md` for `SSO`, `Keycloak`, `AD`, and identity propagation
 - `authorization-matrix.md` for role, environment, and approval boundaries
 - `policy-specification.md` for machine-enforceable policy structure

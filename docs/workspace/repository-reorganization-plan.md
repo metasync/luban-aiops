@@ -88,11 +88,9 @@ If, in the future, some product projects need independent repositories, only ext
 |---|---|
 | `part-1-decision-matrix.md` | `agent-platform` selection and platform foundation |
 | `part-2-reference-architecture.md` | overall workspace architecture and service boundaries |
-| `part-3-mvp-plan.md` | early implementation scope across the first product projects |
 | `identity-and-authorization-design.md` | `identity-broker`, `operator-portal`, `policy-center` |
 | `authorization-matrix.md` | `policy-center` and approval-aware UI flows |
 | `policy-specification.md` | `policy-center`, `execution-runtime`, `agent-platform` control integration |
-| `implementation-backlog.md` | cross-project delivery sequencing |
 | `delivery-roadmap.md` | release stacking across the whole workspace |
 | `workspace-model.md` | workspace-wide structural guidance |
 | `product-boundaries.md` | per-project ownership and interfaces |
