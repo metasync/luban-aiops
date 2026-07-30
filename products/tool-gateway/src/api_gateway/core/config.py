@@ -31,6 +31,8 @@ class GatewaySettings:
     policy_path: str = ""
     chat_response_timeout_seconds: float = 30.0
     require_auth: bool = True
+    k8s_enabled: bool = False
+    k8s_namespace: str = ""
 
     @classmethod
     def from_env(cls) -> "GatewaySettings":
@@ -60,6 +62,9 @@ class GatewaySettings:
             ),
             require_auth=os.getenv("GATEWAY_REQUIRE_AUTH", "true").strip().lower()
             in {"1", "true", "yes", "on"},
+            k8s_enabled=os.getenv("GATEWAY_K8S_ENABLED", "false").strip().lower()
+            in {"1", "true", "yes", "on"},
+            k8s_namespace=os.getenv("GATEWAY_K8S_NAMESPACE", ""),
         )
 
 

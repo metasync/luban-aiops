@@ -38,3 +38,14 @@ rules:
       actions_any: ["chat", "session:create", "session:read"]
     decision:
       outcome: allow
+
+  - id: allow-operators-tools
+    domain: action_authz
+    description: Operational and developer roles may invoke read-only tools.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "operator", "developer"]
+      actions_any: ["tools:invoke"]
+    decision:
+      outcome: allow

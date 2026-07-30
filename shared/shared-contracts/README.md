@@ -44,6 +44,8 @@ Current implementation artifacts:
 - `schemas/identity-token.schema.json` (JWT claim set issued by identity-broker)
 - `schemas/policy-rule.schema.json` (action-authorization rule, v1)
 - `schemas/policy-decision.schema.json` (policy decision object, v1)
+- `schemas/tool-invocation.schema.json` (tool invocation request envelope, v1)
+- `schemas/tool-result.schema.json` (tool result evidence envelope, v1)
 - `policies/policy-default.yaml` (default action-authorization bundle, v1)
 - `observability-conventions.md` (metrics naming, OTel switch semantics, correlation bridging)
 
@@ -90,6 +92,22 @@ Evaluation semantics (implemented by the consumer, currently `tool-gateway`):
 - the decision object carries `decision`, `matched_rule_ids`, and `reason`
 
 `policy-center` is currently a stub; when it becomes a service it will serve this same contract, so consumers swap a local evaluation call for a network call without contract changes.
+
+## Tool Execution Contract Conventions (v1)
+
+The `tool-invocation.schema.json` and `tool-result.schema.json` define the wire format between `agent-platform` (caller) and `tool-gateway` (executor) for tool invocations (SPEC-007).
+
+Tool naming convention:
+
+- `<system>.<verb>_<noun>` (e.g. `k8s.list_pods`, `k8s.get_events`)
+- the system prefix identifies the external system; the verb/noun describe the operation
+
+Result semantics:
+
+- `status: success` — `data` contains the tool-specific payload
+- `status: error` — `error` contains a machine-readable code and message
+- `status: denied` — policy rejected the invocation; `error.code` is `POLICY_DENIED`
+- `evidence` is always present and carries execution provenance (timestamp, duration, risk level, source system)
 
 ## Observability Conventions
 

@@ -19,6 +19,7 @@ resources:
   - infra/redis-service.yaml
   - operator-portal/web-ui-deployment.yaml
   - operator-portal/web-ui-service.yaml
+  - tool-gateway/rbac.yaml
   - tool-gateway/api-gateway-deployment.yaml
   - tool-gateway/api-gateway-service.yaml
   - agent-platform/agent-service-deployment.yaml

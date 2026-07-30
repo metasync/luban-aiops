@@ -151,6 +151,8 @@ Current runtime environment knobs:
   - Redis port for the session store; defaults to `6379`
 - `SESSION_REDIS_DB`
   - Redis DB number for session keys; defaults to `1` (separate from AgentScope's DB `0`)
+- `TOOL_GATEWAY_URL`
+  - base URL of the tool-gateway for tool discovery and invocation (SPEC-007); when set, the AgentScope kernel registers gateway tools into the LLM Toolkit; when unset, the agent builds with an empty Toolkit
 - `OTEL_ENABLED`
   - master switch for the OTLP push pipeline (traces + metrics); defaults to `false`; when disabled, the `/metrics` surface is unaffected
 - `OTEL_EXPORTER_OTLP_ENDPOINT`

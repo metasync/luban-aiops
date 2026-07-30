@@ -4,17 +4,40 @@ import time
 from fastapi import FastAPI, Request
 
 from api_gateway.api.router import router
+from api_gateway.api.routes.tools import init_tool_registry
+from api_gateway.core.config import get_settings
 from api_gateway.core.metrics import setup_metrics
 from api_gateway.core.observability import log_event
 from api_gateway.core.request_context import resolve_request_id
 from api_gateway.core.telemetry import setup_telemetry
 from api_gateway.metadata import SERVICE_NAME, SERVICE_TITLE, SERVICE_VERSION
+from api_gateway.tools.registry import ToolRegistry
 
 LOGGER = logging.getLogger(__name__)
 
 
+def _build_tool_registry() -> ToolRegistry:
+    """Build and populate the tool registry from enabled connectors."""
+    settings = get_settings()
+    registry = ToolRegistry()
+
+    if settings.k8s_enabled:
+        from api_gateway.tools.k8s_connector import KubernetesConnector
+
+        connector = KubernetesConnector(
+            default_namespace=settings.k8s_namespace or None
+        )
+        connector.register_tools(registry)
+        LOGGER.info("kubernetes connector registered")
+
+    return registry
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title=SERVICE_TITLE, version=SERVICE_VERSION)
+
+    # Initialize tool registry.
+    init_tool_registry(_build_tool_registry())
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):

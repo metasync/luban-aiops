@@ -102,6 +102,7 @@ class RuntimeSettings:
     base_url: str | None = None
     organization: str | None = None
     provider_options: RuntimeProviderOptions | None = None
+    tool_gateway_url: str | None = None
 
     @staticmethod
     def default_provider_options(provider: RuntimeProvider) -> RuntimeProviderOptions:
@@ -210,6 +211,7 @@ class RuntimeSettings:
             base_url=_optional_str("AGENTSCOPE_BASE_URL"),
             organization=_optional_str("AGENTSCOPE_ORGANIZATION"),
             provider_options=cls._provider_options_from_env(provider),
+            tool_gateway_url=_optional_str("TOOL_GATEWAY_URL"),
         )
 
     def is_configured(self) -> bool:

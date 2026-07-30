@@ -8,6 +8,24 @@ published product versions.
 
 ## Unreleased
 
+### Added — Release 1 (SPEC-007: Tool Execution Framework)
+
+- Added tool execution framework to tool-gateway: `ToolRegistry`, `BaseTool`
+  abstraction, and structured `ToolResult` evidence envelope.
+- Added Kubernetes read-only connector with four tools: `k8s.list_pods`,
+  `k8s.get_pod`, `k8s.get_events`, `k8s.get_pod_logs` (kubernetes-client/python).
+- Added `GET /api/v2/tools` (discovery) and `POST /api/v2/tools/invoke`
+  (execution) endpoints with policy enforcement and audit logging.
+- Added `tools:invoke` policy action granted to platform-admin, operator, and
+  developer roles; read-only-observer is excluded.
+- Added agent-platform Toolkit integration: when `TOOL_GATEWAY_URL` is
+  configured, the AgentScope kernel discovers and registers gateway tools so
+  the LLM can autonomously invoke them.
+- Added shared contract schemas: `tool-invocation.schema.json` and
+  `tool-result.schema.json`.
+- Added RBAC (ServiceAccount + Role + RoleBinding) to dev-k8s overlay granting
+  tool-gateway read-only access to pods, events, and pods/log.
+
 ### Changed — Release 1 Close
 
 - Changed `GATEWAY_REQUIRE_AUTH` default from `false` to `true` in code and

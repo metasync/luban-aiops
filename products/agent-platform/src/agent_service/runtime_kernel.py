@@ -88,6 +88,7 @@ class AgentKernel:
         self._agents: OrderedDict[str, tuple[object, type]] = OrderedDict()
         self._max_cached_agents = max_cached_agents
         self._last_error: str | None = None
+        self._toolkit = None  # Lazily built Toolkit (shared across agents)
 
     def mode(self) -> str:
         return "agentscope" if self.is_configured() else "placeholder"
@@ -149,20 +150,39 @@ class AgentKernel:
     def _build_model(self):
         return self._provider.build_model(self.settings)
 
-    def _build_agent(self):
-        from agentscope.agent import Agent
-        from agentscope.message import UserMsg
+    async def _ensure_toolkit(self):
+        """Build (once) and return the Toolkit with gateway tools."""
+        if self._toolkit is not None:
+            return self._toolkit
+
         from agentscope.tool import Toolkit
 
+        if self.settings.tool_gateway_url:
+            from agent_service.tools.gateway_tools import build_toolkit
+
+            try:
+                self._toolkit = await build_toolkit(self.settings.tool_gateway_url)
+                return self._toolkit
+            except Exception as exc:
+                LOGGER.warning("failed to build gateway toolkit: %s", exc)
+
+        self._toolkit = Toolkit()
+        return self._toolkit
+
+    async def _build_agent(self):
+        from agentscope.agent import Agent
+        from agentscope.message import UserMsg
+
+        toolkit = await self._ensure_toolkit()
         agent = Agent(
             name=self.settings.agent_name,
             system_prompt=self.settings.system_prompt,
             model=self._build_model(),
-            toolkit=Toolkit(),
+            toolkit=toolkit,
         )
         return agent, UserMsg
 
-    def ensure_agent(self, session_id: str):
+    async def ensure_agent(self, session_id: str):
         """Return the agent bound to `session_id`, creating it on first use.
 
         Agents are keyed by session so conversation memory never crosses
@@ -172,7 +192,7 @@ class AgentKernel:
         if cached is not None:
             self._agents.move_to_end(session_id)
             return cached
-        agent, user_msg_cls = self._build_agent()
+        agent, user_msg_cls = await self._build_agent()
         self._agents[session_id] = (agent, user_msg_cls)
         while len(self._agents) > self._max_cached_agents:
             self._agents.popitem(last=False)
@@ -222,7 +242,7 @@ class AgentKernel:
             return self.build_unconfigured_message(message, session_id)
 
         try:
-            agent, user_msg_cls = self.ensure_agent(session_id)
+            agent, user_msg_cls = await self.ensure_agent(session_id)
             reply_msg = await agent.reply(user_msg_cls(name=user_name, content=message))
             self.clear_error()
             return extract_text(getattr(reply_msg, "content", reply_msg))
@@ -275,7 +295,7 @@ class AgentKernel:
             return
 
         try:
-            agent, user_msg_cls = self.ensure_agent(session_id)
+            agent, user_msg_cls = await self.ensure_agent(session_id)
             async for event in agent.reply_stream(user_msg_cls(name=user_name, content=message)):
                 self.clear_error()
                 yield self.normalize_event(event, request_id, session_id)

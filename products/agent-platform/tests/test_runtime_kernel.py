@@ -186,7 +186,11 @@ class FakeMemoryAgent:
 
 def test_agent_conversation_state_never_crosses_sessions(monkeypatch):
     kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
-    monkeypatch.setattr(kernel, "_build_agent", lambda: (FakeMemoryAgent(), FakeUserMsg))
+
+    async def fake_build_agent():
+        return (FakeMemoryAgent(), FakeUserMsg)
+
+    monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
 
     reply_a1 = asyncio.run(kernel.reply_text("first", "ses-a", "alice"))
     reply_b1 = asyncio.run(kernel.reply_text("hello", "ses-b", "bob"))
@@ -200,13 +204,17 @@ def test_agent_conversation_state_never_crosses_sessions(monkeypatch):
 
 def test_ensure_agent_reuses_instance_per_session(monkeypatch):
     kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
-    monkeypatch.setattr(kernel, "_build_agent", lambda: (FakeMemoryAgent(), FakeUserMsg))
 
-    agent_a, _ = kernel.ensure_agent("ses-a")
-    agent_b, _ = kernel.ensure_agent("ses-b")
+    async def fake_build_agent():
+        return (FakeMemoryAgent(), FakeUserMsg)
+
+    monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
+
+    agent_a, _ = asyncio.run(kernel.ensure_agent("ses-a"))
+    agent_b, _ = asyncio.run(kernel.ensure_agent("ses-b"))
 
     assert agent_a is not agent_b
-    assert kernel.ensure_agent("ses-a")[0] is agent_a
+    assert asyncio.run(kernel.ensure_agent("ses-a"))[0] is agent_a
 
 
 def test_ensure_agent_cache_is_bounded(monkeypatch):
@@ -214,9 +222,13 @@ def test_ensure_agent_cache_is_bounded(monkeypatch):
         settings=RuntimeSettings(api_key="test-key"),
         max_cached_agents=1,
     )
-    monkeypatch.setattr(kernel, "_build_agent", lambda: (FakeMemoryAgent(), FakeUserMsg))
 
-    agent_a, _ = kernel.ensure_agent("ses-a")
-    kernel.ensure_agent("ses-b")
+    async def fake_build_agent():
+        return (FakeMemoryAgent(), FakeUserMsg)
 
-    assert kernel.ensure_agent("ses-a")[0] is not agent_a
+    monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
+
+    agent_a, _ = asyncio.run(kernel.ensure_agent("ses-a"))
+    asyncio.run(kernel.ensure_agent("ses-b"))
+
+    assert asyncio.run(kernel.ensure_agent("ses-a"))[0] is not agent_a

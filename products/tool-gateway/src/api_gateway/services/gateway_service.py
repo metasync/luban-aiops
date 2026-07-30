@@ -10,11 +10,14 @@ from fastapi.responses import StreamingResponse
 
 from api_gateway.core.config import GatewaySettings
 from api_gateway.core.metrics import record_policy_decision, record_token_verification
+from api_gateway.core.observability import log_event
 from api_gateway.metadata import SERVICE_NAME, SERVICE_VERSION
 from api_gateway.schemas.api import IdentityContext
 from api_gateway.services import agent_client
 from api_gateway.services.policy_engine import PolicyLoadError, evaluate
 from api_gateway.services.token_verifier import TokenVerificationError, verify_token
+from api_gateway.tools.base import make_denied_result
+from api_gateway.tools.registry import ToolRegistry
 
 LOGGER = logging.getLogger(__name__)
 
@@ -284,3 +287,64 @@ def chat_stream(
             yield chunk
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+async def invoke_tool(
+    settings: GatewaySettings,
+    registry: ToolRegistry,
+    request: Request,
+    identity: IdentityContext | None,
+    request_id: str,
+) -> "JSONResponse":
+    """Orchestrate tool invocation: policy check -> dispatch -> audit log."""
+    from fastapi.responses import JSONResponse
+
+    body = await request.json()
+    tool_name = body.get("tool_name", "")
+    parameters = body.get("parameters", {})
+
+    # Policy enforcement.
+    if identity is None:
+        result = make_denied_result(tool_name, "no identity context")
+        return JSONResponse(content=result.to_dict(), status_code=403)
+
+    decision = evaluate(settings, identity.roles, "tools:invoke")
+    record_policy_decision("tools:invoke", decision.decision)
+
+    if decision.decision == "deny":
+        LOGGER.warning(
+            "tool invocation denied by policy",
+            extra={
+                "request_id": request_id,
+                "tool_name": tool_name,
+                "subject": identity.subject,
+                "roles": identity.roles,
+                "reason": decision.reason,
+            },
+        )
+        result = make_denied_result(tool_name, decision.reason)
+        return JSONResponse(content=result.to_dict(), status_code=403)
+
+    # Dispatch to registry.
+    identity_dict = {
+        "sub": identity.subject,
+        "username": identity.username,
+        "roles": identity.roles,
+    }
+    result = await registry.invoke(tool_name, parameters, identity_dict)
+
+    # Audit log.
+    log_event(
+        LOGGER,
+        "tool_invoked",
+        request_id=request_id,
+        tool_name=tool_name,
+        status=result.status,
+        duration_ms=result.evidence.get("duration_ms", 0),
+        user_id=identity.username,
+    )
+
+    status_code = 200 if result.status == "success" else 400
+    if result.status == "denied":
+        status_code = 403
+    return JSONResponse(content=result.to_dict(), status_code=status_code)

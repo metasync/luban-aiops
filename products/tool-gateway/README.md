@@ -55,8 +55,11 @@ Current scaffold status:
 - validates the `iss` claim against `IDENTITY_TOKEN_ISSUER`; rejects expired/malformed tokens with `401`
 - derives `X-User-ID` exclusively from verified token claims; caller-asserted headers are ignored
 - when auth is optional and no token is present, injects a synthetic dev identity (logged as `synthetic: true`)
-- enforces deny-by-default authorization on business routes (`chat`, `session:create`, `session:read`) against a versioned role→action policy bundle; denials return a structured `403` and are audit-logged
+- enforces deny-by-default authorization on business routes (`chat`, `session:create`, `session:read`, `tools:invoke`) against a versioned role→action policy bundle; denials return a structured `403` and are audit-logged
 - loads the policy bundle from `GATEWAY_POLICY_PATH`, falling back to a packaged default kept in sync with `shared/shared-contracts`
+- provides a tool execution framework (`src/api_gateway/tools/`) with a `ToolRegistry`, `BaseTool` abstraction, and structured evidence envelope (SPEC-007)
+- ships a Kubernetes read-only connector (`k8s.list_pods`, `k8s.get_pod`, `k8s.get_events`, `k8s.get_pod_logs`) using `kubernetes-client/python`
+- exposes `GET /api/v2/tools` (tool discovery) and `POST /api/v2/tools/invoke` (tool execution with policy enforcement and audit)
 - organizes the FastAPI package by app bootstrap, route modules, shared request/config helpers, and service orchestration
 - validates chat and session request bodies against `shared/shared-contracts` aligned `pydantic` models (`422` on malformed input)
 
@@ -78,6 +81,10 @@ Current runtime environment knobs:
   - synthetic identity username when auth is optional and no token is present; defaults to `dev.operator`
 - `GATEWAY_POLICY_PATH`
   - path to the action-authorization policy bundle (YAML); when unset, the packaged default bundle is used; a configured-but-invalid path fails readiness rather than falling back
+- `GATEWAY_K8S_ENABLED`
+  - when `true`, registers the Kubernetes read-only connector; defaults to `false`
+- `GATEWAY_K8S_NAMESPACE`
+  - default namespace for K8s tool operations; when unset, tools use the `namespace` parameter or fall back to `default`
 - `OTEL_ENABLED`
   - master switch for the OTLP push pipeline (traces + metrics); defaults to `false`; when disabled, the `/metrics` surface is unaffected
 - `OTEL_EXPORTER_OTLP_ENDPOINT`
