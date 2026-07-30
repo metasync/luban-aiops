@@ -1,8 +1,8 @@
-# Dev K8s Transitional Overlay
+# Dev K8s Overlay
 
 ## Purpose
 
-This directory contains the development-oriented Kubernetes transitional overlay for the current platform baseline services:
+This directory contains the development Kubernetes overlay for the platform baseline services:
 
 - `web-ui`
 - `api-gateway`
@@ -17,9 +17,9 @@ These manifests are intended to:
 - establish service names and ports
 - define baseline environment variables
 - show the expected request path between services
-- provide an in-cluster `Redis` dependency for `agent-service-native`
+- provide an in-cluster `Redis` dependency for session storage and AgentScope coordination
 
-The `dev-k8s-transitional` name means this overlay is for development workflows on Kubernetes and keeps the current transitional HTTP request path intact. The service images and product packages remain intended for other environments as well, with different overlays and configuration for those targets.
+The `dev-k8s` overlay is the single development deployment for the platform. It deploys the v2 agent-service contract surface consumed by `api-gateway`.
 
 These manifests do not yet provide:
 
@@ -43,24 +43,13 @@ This development baseline also uses the upstream `redis:7.2-alpine` image for in
 
 ## Runtime Wiring
 
-The `platform-runtime-config` `ConfigMap` keeps `agent-service` ready for a native AgentScope-compatible runtime path with:
+The `platform-runtime-config` `ConfigMap` is assembled from product-scoped env fragments:
 
-- `AGENT_BACKEND_MODE=auto`
-- `AGENT_TRANSITIONAL_PORT=8000`
-- `AGENTSCOPE_AGENT_NAME=LubanOpsRuntime`
-- `AGENTSCOPE_SYSTEM_PROMPT=...`
-- `AGENTSCOPE_REDIS_HOST=redis`
-- `AGENTSCOPE_REDIS_PORT=6379`
-- `AGENTSCOPE_REDIS_DB=0`
-- `AGENTSCOPE_WORKSPACE_DIR=/var/lib/luban-aiops/workspaces/agent-platform`
+- `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env`
+- `shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env`
+- `shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env`
 
-In the source tree this shared config is now assembled from product-scoped env fragments:
-
-- `shared/platform-ops/gitops/dev-k8s-transitional/base/agent-platform/runtime-config.env`
-- `shared/platform-ops/gitops/dev-k8s-transitional/base/tool-gateway/runtime-config.env`
-- `shared/platform-ops/gitops/dev-k8s-transitional/base/identity-broker/runtime-config.env`
-
-The identity-broker config fragment defines the browser callback and logout redirect defaults for the first `OIDC` flow. The committed `dev-k8s-transitional` baseline now matches the validated shared development IdP path in `dev-luban-aiops`:
+The identity-broker config fragment defines the browser callback and logout redirect defaults for the `OIDC` flow. The committed baseline matches the validated shared development IdP path in `dev-luban-aiops`:
 
 - `KEYCLOAK_BASE_URL=https://idp.apps.metasync.cc`
 - `KEYCLOAK_REALM=snd`
@@ -81,7 +70,7 @@ The corresponding keys remain:
 The overlay also carries a Git-tracked reconciliation script for the shared
 Keycloak browser client:
 
-- `shared/platform-ops/gitops/dev-k8s-transitional/reconcile-portal-oidc-client.sh`
+- `shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh`
 
 That script treats the overlay `identity-broker/runtime-config.env` values as
 the desired browser client contract for `snd-luban-aiops-portal`. It reconciles:
@@ -92,30 +81,9 @@ the desired browser client contract for `snd-luban-aiops-portal`. It reconciles:
 - `post.logout.redirect.uris`
 - client protocol mappers for `preferred_username` and `email`
 
-`AGENT_BACKEND_MODE` controls how `api-gateway` talks to `agent-service`:
+The `agent-service` deployment runs the v2 FastAPI adapter entrypoint (`uv run agent-service`). The `api-gateway` connects to `http://agent-service:8000` and consumes the `/api/v2/` contract exclusively (see SPEC-002 and ADR-0003).
 
-- `transitional`
-  - force the current `/api/v1/...` adapter path
-- `native`
-  - force the native `AgentScope` service surface
-- `auto`
-  - probe and resolve the backend mode at runtime
-
-The `agent-service` image in this overlay starts the transitional `FastAPI` adapter entrypoint so the existing `/api/v1/...` gateway contract continues to work end-to-end. The same image still contains `agent-service-native`, so the sibling native overlay can switch to the native AgentScope service once the surrounding request path is aligned.
-
-For entrypoint-specific overrides:
-
-- use `AGENT_TRANSITIONAL_HOST` and `AGENT_TRANSITIONAL_PORT` for the transitional `FastAPI` surface
-- use `AGENT_NATIVE_HOST`, `AGENT_NATIVE_PORT`, `AGENT_NATIVE_TITLE`, and `AGENT_NATIVE_VERSION` for the native `AgentScope 2.0` service surface
-- do not use the old `AGENT_SERVICE_*` entrypoint variables any more
-
-For the native-focused development variant, use the sibling overlay:
-
-- `shared/platform-ops/gitops/dev-k8s-native`
-
-The current `api-gateway` image now defaults to `auto` backend resolution. In this mode it prefers the transitional runtime metadata endpoint when available, but it can also fall back to the native AgentScope service surface without hardcoding that choice into every gateway route.
-
-The active runtime provider is no longer hardcoded in this overlay root. Instead, the root `kustomization.yaml` includes exactly one provider profile from:
+The active runtime provider is selected via the root `kustomization.yaml`, which includes exactly one provider profile from:
 
 - `shared/platform-ops/gitops/runtime-profiles/deepseek`
 - `shared/platform-ops/gitops/runtime-profiles/dashscope`

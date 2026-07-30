@@ -30,7 +30,7 @@ class GatewaySettings:
     dev_user: str = "dev.operator"
     policy_path: str = ""
     chat_response_timeout_seconds: float = 30.0
-    require_auth: bool = False
+    require_auth: bool = True
 
     @classmethod
     def from_env(cls) -> "GatewaySettings":
@@ -58,7 +58,7 @@ class GatewaySettings:
             chat_response_timeout_seconds=float(
                 os.getenv("CHAT_RESPONSE_TIMEOUT_SECONDS", "30")
             ),
-            require_auth=os.getenv("GATEWAY_REQUIRE_AUTH", "false").strip().lower()
+            require_auth=os.getenv("GATEWAY_REQUIRE_AUTH", "true").strip().lower()
             in {"1", "true", "yes", "on"},
         )
 

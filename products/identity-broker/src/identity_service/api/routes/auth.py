@@ -11,6 +11,7 @@ from identity_service.schemas.auth import (
     LoginStartResponse,
     LogoutRequest,
     LogoutResponse,
+    TokenRefreshRequest,
     TokenRequest,
     TokenResponse,
 )
@@ -18,6 +19,7 @@ from identity_service.services.identity_service import (
     build_login_start,
     build_logout_response,
     exchange_authorization_code,
+    refresh_session,
 )
 from identity_service.services.token_service import issue_token, jwks_response
 
@@ -103,3 +105,22 @@ def jwks_endpoint(
     settings: IdentitySettings = Depends(get_settings),
 ) -> dict:
     return jwks_response(settings)
+
+
+@router.post("/api/v1/auth/refresh", response_model=AuthenticatedSession)
+async def auth_refresh(
+    payload: TokenRefreshRequest,
+    x_request_id: str | None = Header(default=None),
+    settings: IdentitySettings = Depends(get_settings),
+) -> AuthenticatedSession:
+    try:
+        response = await refresh_session(settings, payload)
+        log_event(
+            LOGGER,
+            "auth_token_refreshed",
+            request_id=x_request_id,
+            user_id=response.identity.username,
+        )
+        return response
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=401, detail="token refresh failed") from exc

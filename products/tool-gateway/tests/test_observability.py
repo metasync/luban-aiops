@@ -63,7 +63,7 @@ class MetricsEndpointTests(unittest.TestCase):
 
 class DomainCounterTests(unittest.TestCase):
     def test_policy_decision_and_token_verification_counters_increment(self) -> None:
-        client = _client()
+        client = _client(require_auth=False)
         allow_before = _sample(
             "gateway_policy_decisions_total",
             {"action": "session:create", "decision": "allow"},

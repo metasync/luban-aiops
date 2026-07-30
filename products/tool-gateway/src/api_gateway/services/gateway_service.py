@@ -114,6 +114,22 @@ async def build_logout_url(
     return response.json()
 
 
+async def refresh_token(
+    settings: GatewaySettings,
+    request_id: str,
+    payload: dict,
+) -> dict:
+    headers = _service_headers(request_id)
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(
+            f"{settings.identity_service_url}/api/v1/auth/refresh",
+            json=payload,
+            headers=headers,
+        )
+    response.raise_for_status()
+    return response.json()
+
+
 async def normalize_identity(
     settings: GatewaySettings,
     request: Request,

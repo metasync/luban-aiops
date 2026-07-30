@@ -10,7 +10,7 @@ Each profile contributes:
 
 Luban CI or another deployment pipeline can inject the same `agent-platform-runtime-secrets` contract directly without relying on the local `runtime-secrets.env` files.
 
-The active `dev-k8s-transitional` and `dev-k8s-native` overlays each include exactly one runtime profile overlay at a time.
+The active `dev-k8s` overlay includes exactly one runtime profile overlay at a time.
 
 Current profiles:
 

@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from identity_service.core.config import IdentitySettings
 from identity_service.core.runtime import IdentityRunSettings
-from identity_service.schemas.auth import AuthorizationCodeExchangeRequest, LogoutRequest
+from identity_service.schemas.auth import AuthorizationCodeExchangeRequest, LogoutRequest, TokenRefreshRequest
 from identity_service.schemas.identity import ClaimsPayload
 from identity_service.services.identity_service import (
     build_login_start,
@@ -12,6 +12,7 @@ from identity_service.services.identity_service import (
     fetch_identity_from_authorization,
     normalize_identity,
     normalize_userinfo,
+    refresh_session,
     resolve_roles,
 )
 
@@ -230,6 +231,52 @@ class IdentityAsyncServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_fetch_identity_from_authorization_requires_bearer_token(self) -> None:
         with self.assertRaises(ValueError):
             await fetch_identity_from_authorization(IdentitySettings(), "Basic abc")
+
+    async def test_refresh_session_returns_new_platform_jwt(self) -> None:
+        fake_client = FakeAsyncClient(
+            token_payload={
+                "access_token": "new-oidc-access-token",
+                "token_type": "Bearer",
+                "expires_in": 300,
+                "refresh_token": "new-refresh-token",
+                "id_token": "new-id-token",
+            },
+            userinfo_payload={
+                "sub": "user-456",
+                "preferred_username": "bob",
+                "email": "bob@example.com",
+                "groups": ["ops-admins"],
+            },
+        )
+        settings = IdentitySettings(
+            keycloak_base_url="https://sso.example.com",
+            keycloak_realm="luban",
+            oidc_client_id="portal-client",
+            oidc_client_secret="secret",
+        )
+
+        with patch(
+            "identity_service.services.identity_service.httpx.AsyncClient",
+            return_value=fake_client,
+        ):
+            result = await refresh_session(
+                settings,
+                TokenRefreshRequest(refresh_token="old-refresh-token"),
+            )
+
+        self.assertTrue(result.access_token.startswith("eyJ"))
+        self.assertEqual(result.token_type, "Bearer")
+        self.assertEqual(result.expires_in, 900)
+        self.assertEqual(result.refresh_token, "new-refresh-token")
+        self.assertEqual(result.identity.username, "bob")
+        self.assertEqual(result.identity.roles, ["platform-admin"])
+        # Verify the refresh_token grant was used.
+        self.assertEqual(
+            fake_client.posts[0]["data"]["grant_type"], "refresh_token"
+        )
+        self.assertEqual(
+            fake_client.posts[0]["data"]["refresh_token"], "old-refresh-token"
+        )
 
 
 if __name__ == "__main__":

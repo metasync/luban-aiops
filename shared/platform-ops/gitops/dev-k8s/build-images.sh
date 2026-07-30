@@ -5,9 +5,9 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../../../.." && pwd)
 STATE_FILE="${STATE_FILE:-$SCRIPT_DIR/.images.env}"
-IMAGE_TAG_PREFIX="${IMAGE_TAG_PREFIX:-dev-k8s-transitional}"
+IMAGE_TAG_PREFIX="${IMAGE_TAG_PREFIX:-dev-k8s}"
 IMAGE_TAG_PROFILE="${IMAGE_TAG_PROFILE:-}"
-IMAGE_BUILD_LABEL="${IMAGE_BUILD_LABEL:-transitional overlay}"
+IMAGE_BUILD_LABEL="${IMAGE_BUILD_LABEL:-dev-k8s overlay}"
 
 resolve_tag_base() {
   if [ -n "$IMAGE_TAG_PROFILE" ]; then

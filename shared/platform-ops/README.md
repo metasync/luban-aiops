@@ -28,15 +28,12 @@ This module currently provides the workspace placeholder and boundary definition
 
 Current implementation artifacts:
 
-- `gitops/dev-k8s-transitional/README.md`
-- `gitops/dev-k8s-transitional/kustomization.yaml`
-- `gitops/dev-k8s-transitional/base/`
-- `gitops/dev-k8s-native/README.md`
-- `gitops/dev-k8s-native/kustomization.yaml`
-- `gitops/dev-k8s-native/base/`
+- `gitops/dev-k8s/README.md`
+- `gitops/dev-k8s/kustomization.yaml`
+- `gitops/dev-k8s/base/`
 - `gitops/runtime-profiles/`
 
-The current implementation provides development-oriented Kubernetes overlays under a durable `gitops/` root, while the milestone-specific `Release 0` naming remains in planning and release documentation. `dev-k8s-transitional` keeps the current gateway and portal contract running through the transitional HTTP adapter, while `dev-k8s-native` switches `agent-service` to the native `AgentScope` service surface. The transitional baseline includes an in-cluster `Redis` deployment so the native runtime path remains available in the same development cluster family. Provider choice is now modeled as a separate shared runtime profile layer so the active profile remains reviewable and Git-diffable. The source manifests are grouped by shared infrastructure and product ownership so each overlay stays maintainable as the workspace grows.
+The current implementation provides a single development Kubernetes overlay under a durable `gitops/` root. The `dev-k8s` overlay deploys all platform services (agent-platform, tool-gateway, identity-broker, operator-portal, Redis) into the `dev-luban-aiops` namespace. Provider choice is modeled as a separate shared runtime profile layer so the active profile remains reviewable and Git-diffable. The source manifests are grouped by shared infrastructure and product ownership so the overlay stays maintainable as the workspace grows.
 
 ## Expected Integration Points
 

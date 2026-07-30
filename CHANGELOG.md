@@ -8,6 +8,25 @@ published product versions.
 
 ## Unreleased
 
+### Changed — Release 1 Close
+
+- Changed `GATEWAY_REQUIRE_AUTH` default from `false` to `true` in code and
+  the dev overlay, completing the outstanding SPEC-001 release-close step.
+  Unauthenticated requests to business routes now return `401` by default.
+- Added `POST /api/v1/auth/refresh` to identity-broker: exchanges a Keycloak
+  refresh_token for a fresh platform JWT, re-fetching userinfo so role changes
+  are picked up on refresh.
+- Added gateway proxy route `POST /api/v1/auth/refresh` forwarding to
+  identity-broker.
+- Added silent token refresh in operator-portal: schedules a background refresh
+  60 seconds before JWT expiry; on failure, clears the session and prompts
+  re-authentication.
+- Collapsed the dual GitOps overlay (`dev-k8s-transitional` + `dev-k8s-native`)
+  into a single `shared/platform-ops/gitops/dev-k8s` overlay. The
+  transitional/native distinction no longer exists at the code level after
+  SPEC-002 retired the transitional surface; a single overlay removes
+  configuration drift and maintenance overhead.
+
 ### Added — Release 1 (SPEC-001 .. SPEC-006)
 
 - Added `SPEC-001` release-1 platform hardening (delivered): gateway authentication

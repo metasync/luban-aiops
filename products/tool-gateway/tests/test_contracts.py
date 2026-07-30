@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from api_gateway.app import create_app
+from api_gateway.core.config import GatewaySettings, get_settings
 from api_gateway.schemas.api import (
     ChatRequest,
     ChatResponse,
@@ -127,7 +128,11 @@ class RouteValidationTests(unittest.TestCase):
     """Malformed bodies must fail with 422 before any backend call happens."""
 
     def setUp(self) -> None:
-        self.client = TestClient(create_app())
+        app = create_app()
+        app.dependency_overrides[get_settings] = lambda: GatewaySettings(
+            require_auth=False
+        )
+        self.client = TestClient(app)
 
     def test_chat_missing_message_returns_422(self) -> None:
         response = self.client.post("/api/v1/chat", json={})

@@ -11,7 +11,7 @@ class GatewayRunSettingsTests(unittest.TestCase):
         self.assertEqual(settings.agent_service_url, "http://agent-service:8000")
         self.assertEqual(settings.identity_service_url, "http://identity-service:8000")
 
-    def test_gateway_settings_require_auth_defaults_to_false(self) -> None:
+    def test_gateway_settings_require_auth_defaults_to_true(self) -> None:
         import os
         from unittest.mock import patch
 
@@ -19,7 +19,7 @@ class GatewayRunSettingsTests(unittest.TestCase):
             os.environ.pop("GATEWAY_REQUIRE_AUTH", None)
             settings = GatewaySettings.from_env()
 
-        self.assertFalse(settings.require_auth)
+        self.assertTrue(settings.require_auth)
 
     def test_gateway_settings_require_auth_reads_env(self) -> None:
         import os

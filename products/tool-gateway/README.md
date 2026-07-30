@@ -73,7 +73,7 @@ Current runtime environment knobs:
 - `CHAT_RESPONSE_TIMEOUT_SECONDS`
   - bounded read timeout for non-streaming chat requests; defaults to `30` (streaming keeps unbounded read with a bounded connect timeout)
 - `GATEWAY_REQUIRE_AUTH`
-  - when `true`, all protected routes require a valid bearer token; defaults to `false`
+  - when `true`, all protected routes require a valid bearer token; defaults to `true` (set `false` explicitly for local development without SSO)
 - `GATEWAY_DEV_USER`
   - synthetic identity username when auth is optional and no token is present; defaults to `dev.operator`
 - `GATEWAY_POLICY_PATH`

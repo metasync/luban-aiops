@@ -118,3 +118,4 @@ None — all resolved (see Changelog).
 - 2026-07-28: resolved open questions — `GATEWAY_REQUIRE_AUTH` defaults to `false` until `Release 1` closes (then flips to `true`); R-2 stays observation-only and all denial semantics defer to `policy-center`; status → `approved`
 - 2026-07-28: implementation started; status → `in-progress`
 - 2026-07-28: all requirements implemented and validated (`agent-platform` 44, `identity-broker` 11, `tool-gateway` 41 tests passing; both overlays render); status → `delivered`. Outstanding release-close step (not spec scope): flip `GATEWAY_REQUIRE_AUTH` default to `true` after live validation of the auth-required path against the dev overlay
+- 2026-07-30: release-close step completed — `GATEWAY_REQUIRE_AUTH` default flipped to `true` in code and both dev overlays; token refresh flow added (identity-broker + gateway + portal) so sessions survive beyond the 900 s JWT TTL

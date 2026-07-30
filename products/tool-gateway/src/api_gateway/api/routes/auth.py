@@ -9,6 +9,7 @@ from api_gateway.services.gateway_service import (
     build_logout_url,
     complete_login,
     fetch_login_url,
+    refresh_token,
     start_login,
 )
 from api_gateway.services.token_verifier import TokenVerificationError, verify_token
@@ -90,4 +91,21 @@ async def logout_url(
     request_id = resolve_request_id(x_request_id)
     payload = await build_logout_url(settings, request_id, await request.json())
     log_event(LOGGER, "auth_logout_requested", request_id=request_id)
+    return payload
+
+
+@router.post("/api/v1/auth/refresh")
+async def auth_refresh(
+    request: Request,
+    x_request_id: str | None = Header(default=None),
+    settings: GatewaySettings = Depends(get_settings),
+) -> dict:
+    request_id = resolve_request_id(x_request_id)
+    payload = await refresh_token(settings, request_id, await request.json())
+    log_event(
+        LOGGER,
+        "auth_token_refreshed",
+        request_id=request_id,
+        user_id=payload.get("identity", {}).get("username"),
+    )
     return payload

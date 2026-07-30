@@ -16,6 +16,7 @@ from identity_service.schemas.auth import (
     LoginStartResponse,
     LogoutRequest,
     LogoutResponse,
+    TokenRefreshRequest,
 )
 from identity_service.schemas.identity import ClaimsPayload, IdentityContext
 from identity_service.services.token_service import issue_token
@@ -221,3 +222,54 @@ def build_logout_response(
     if payload.id_token_hint:
         query["id_token_hint"] = payload.id_token_hint
     return LogoutResponse(logout_url=f"{_logout_endpoint(settings)}?{urlencode(query)}")
+
+
+async def refresh_session(
+    settings: IdentitySettings,
+    payload: TokenRefreshRequest,
+) -> AuthenticatedSession:
+    """Exchange a Keycloak refresh_token for a fresh platform JWT session."""
+    form_data = {
+        "grant_type": "refresh_token",
+        "client_id": settings.oidc_client_id,
+        "refresh_token": payload.refresh_token,
+    }
+    if settings.oidc_client_secret:
+        form_data["client_secret"] = settings.oidc_client_secret
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        token_response = await client.post(
+            _token_endpoint(settings),
+            data=form_data,
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+        token_response.raise_for_status()
+        token_payload = token_response.json()
+        access_token = str(token_payload["access_token"])
+        userinfo_response = await client.get(
+            _userinfo_endpoint(settings),
+            headers={"authorization": f"Bearer {access_token}"},
+        )
+        userinfo_response.raise_for_status()
+        userinfo_payload = userinfo_response.json()
+        identity = normalize_userinfo(userinfo_payload)
+
+    platform_token, expires_in = issue_token(
+        settings,
+        {
+            "sub": identity.subject,
+            "username": identity.username,
+            "email": identity.email,
+            "roles": identity.roles,
+            "groups": identity.groups,
+        },
+    )
+
+    return AuthenticatedSession(
+        access_token=platform_token,
+        token_type="Bearer",
+        expires_in=expires_in,
+        refresh_token=token_payload.get("refresh_token"),
+        id_token=token_payload.get("id_token"),
+        identity=identity,
+    )

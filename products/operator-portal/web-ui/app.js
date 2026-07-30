@@ -8,6 +8,8 @@ const responseOutput = document.querySelector("#response-output");
 const AUTH_SESSION_KEY = "luban.portal.authSession";
 const AUTH_REQUEST_KEY = "luban.portal.authRequest";
 let authCallbackNavigationPending = false;
+let refreshTimerId = null;
+const REFRESH_MARGIN_SECONDS = 60;
 
 function defaultGateway() {
   if (window.location.protocol === "http:" || window.location.protocol === "https:") {
@@ -38,6 +40,7 @@ function saveAuthSession(session) {
 
 function clearAuthSession() {
   window.sessionStorage.removeItem(AUTH_SESSION_KEY);
+  cancelRefreshTimer();
 }
 
 function loadPendingAuthRequest() {
@@ -80,6 +83,53 @@ function authHeaders() {
   return {
     authorization: `Bearer ${session.access_token}`
   };
+}
+
+function tokenExpiresInSeconds(token) {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    if (!payload.exp) return null;
+    return payload.exp - Math.floor(Date.now() / 1000);
+  } catch {
+    return null;
+  }
+}
+
+function scheduleTokenRefresh(session) {
+  cancelRefreshTimer();
+  if (!session?.access_token || !session?.refresh_token) return;
+  const remaining = tokenExpiresInSeconds(session.access_token);
+  if (remaining === null) return;
+  const delayMs = Math.max((remaining - REFRESH_MARGIN_SECONDS) * 1000, 5000);
+  refreshTimerId = setTimeout(() => silentRefresh(), delayMs);
+}
+
+function cancelRefreshTimer() {
+  if (refreshTimerId !== null) {
+    clearTimeout(refreshTimerId);
+    refreshTimerId = null;
+  }
+}
+
+async function silentRefresh() {
+  const session = loadAuthSession();
+  if (!session?.refresh_token) {
+    clearAuthSession();
+    renderIdentity({ authenticated: false, reason: "session expired — please sign in again" });
+    return;
+  }
+  try {
+    const refreshed = await requestJson("/api/v1/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({ refresh_token: session.refresh_token })
+    });
+    saveAuthSession(refreshed);
+    scheduleTokenRefresh(refreshed);
+    renderIdentity({ authenticated: true, identity: refreshed.identity });
+  } catch {
+    clearAuthSession();
+    renderIdentity({ authenticated: false, reason: "session expired — please sign in again" });
+  }
 }
 
 async function requestJson(path, options = {}) {
@@ -223,6 +273,7 @@ async function completeLoginFromCallback() {
     })
   });
   saveAuthSession(session);
+  scheduleTokenRefresh(session);
   clearPendingAuthRequest();
   clearAuthCallbackQuery();
   renderIdentity({ authenticated: true, identity: session.identity });
@@ -402,6 +453,10 @@ completeLoginFromCallback()
   .finally(() => {
     if (authCallbackNavigationPending) {
       return;
+    }
+    const existingSession = loadAuthSession();
+    if (existingSession?.access_token) {
+      scheduleTokenRefresh(existingSession);
     }
     refreshAuthenticatedIdentity().catch((error) => {
       renderError(identityOutput, error);

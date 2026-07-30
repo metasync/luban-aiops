@@ -49,7 +49,8 @@ Current scaffold status:
 - issues RSA-signed platform JWTs (`POST /api/v1/auth/token`) with configurable TTL
 - publishes the public key set at `GET /.well-known/jwks.json` (RFC 7517)
 - the OIDC callback (`/auth/callback`) returns a platform JWT as the primary `access_token`
-- adds focused tests for role normalization, login URL composition, token issuance, and JWKS format
+- supports token refresh (`POST /api/v1/auth/refresh`): exchanges a Keycloak refresh_token for a new platform JWT with updated identity claims
+- adds focused tests for role normalization, login URL composition, token issuance, JWKS format, and token refresh
 
 Current runtime environment knobs:
 

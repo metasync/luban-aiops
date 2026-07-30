@@ -3,7 +3,7 @@
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-STATE_FILE="${STATE_FILE:-$SCRIPT_DIR/dev-k8s-transitional/.images.env}"
+STATE_FILE="${STATE_FILE:-$SCRIPT_DIR/dev-k8s/.images.env}"
 OVERLAY_DIR="${1:-}"
 NAMESPACE="${NAMESPACE:-dev-luban-aiops}"
 
