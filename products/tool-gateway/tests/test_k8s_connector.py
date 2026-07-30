@@ -193,6 +193,29 @@ class K8sConnectorExecutionTests(unittest.TestCase):
             name="web-1", namespace="test-ns", tail_lines=1000
         )
 
+    def test_get_pod_logs_rejects_non_integer_tail_lines(self) -> None:
+        """Untrusted LLM-supplied parameters must not raise out of the tool."""
+        registry = ToolRegistry()
+        self.connector.register_tools(registry)
+        result = _run(
+            registry.invoke("k8s.get_pod_logs", {"name": "web-1", "tail_lines": "many"}, {})
+        )
+
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "INVALID_PARAMETERS")
+        self.mock_api.read_namespaced_pod_log.assert_not_called()
+
+    def test_get_pod_logs_rejects_non_positive_tail_lines(self) -> None:
+        registry = ToolRegistry()
+        self.connector.register_tools(registry)
+        result = _run(
+            registry.invoke("k8s.get_pod_logs", {"name": "web-1", "tail_lines": 0}, {})
+        )
+
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "INVALID_PARAMETERS")
+        self.mock_api.read_namespaced_pod_log.assert_not_called()
+
     def test_k8s_api_error_returns_structured_error(self) -> None:
         self.mock_api.list_namespaced_pod.side_effect = Exception("connection refused")
 

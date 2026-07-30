@@ -6,31 +6,12 @@ from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
 
 from api_gateway.core.config import GatewaySettings, get_settings
+from api_gateway.core.dependencies import get_tool_registry
 from api_gateway.core.request_context import resolve_request_id
-from api_gateway.schemas.api import IdentityContext
-from api_gateway.services.gateway_service import (
-    enforce_policy,
-    resolve_request_identity,
-)
+from api_gateway.services.gateway_service import resolve_request_identity
 from api_gateway.tools.registry import ToolRegistry
 
 router = APIRouter(prefix="/api/v2/tools", tags=["tools"])
-
-# Module-level registry, populated at startup via init_tool_registry().
-_registry: ToolRegistry | None = None
-
-
-def init_tool_registry(registry: ToolRegistry) -> None:
-    """Set the module-level registry (called during app startup)."""
-    global _registry
-    _registry = registry
-
-
-def get_tool_registry() -> ToolRegistry:
-    """FastAPI dependency returning the active tool registry."""
-    if _registry is None:
-        return ToolRegistry()  # empty fallback
-    return _registry
 
 
 @router.get("")

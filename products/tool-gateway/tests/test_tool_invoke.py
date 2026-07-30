@@ -6,7 +6,6 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from api_gateway.app import create_app
-from api_gateway.api.routes.tools import init_tool_registry
 from api_gateway.core.config import GatewaySettings, get_settings
 from api_gateway.schemas.api import IdentityContext
 from api_gateway.services.policy_engine import reset_policy_state
@@ -33,9 +32,24 @@ class _EchoTool(BaseTool):
         )
 
 
+class _ExplodingTool(BaseTool):
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="test.explode",
+            description="Raises an unhandled exception.",
+            risk_level="read",
+            category="test",
+        )
+
+    async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+        raise RuntimeError("boom")
+
+
 def _build_registry() -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(_EchoTool())
+    registry.register(_ExplodingTool())
     return registry
 
 
@@ -51,7 +65,7 @@ class ToolListEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         reset_policy_state()
         app = create_app()
-        init_tool_registry(_build_registry())
+        app.state.tool_registry = _build_registry()
         app.dependency_overrides[get_settings] = lambda: GatewaySettings(
             require_auth=False
         )
@@ -59,22 +73,20 @@ class ToolListEndpointTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         reset_policy_state()
-        init_tool_registry(ToolRegistry())
 
     def test_list_tools_returns_definitions(self) -> None:
         response = self.client.get("/api/v2/tools")
         self.assertEqual(response.status_code, 200)
-        tools = response.json()
-        self.assertEqual(len(tools), 1)
-        self.assertEqual(tools[0]["name"], "test.echo")
-        self.assertEqual(tools[0]["risk_level"], "read")
+        tools = {tool["name"]: tool for tool in response.json()}
+        self.assertEqual(set(tools), {"test.echo", "test.explode"})
+        self.assertEqual(tools["test.echo"]["risk_level"], "read")
 
 
 class ToolInvokeEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         reset_policy_state()
         app = create_app()
-        init_tool_registry(_build_registry())
+        app.state.tool_registry = _build_registry()
         app.dependency_overrides[get_settings] = lambda: GatewaySettings(
             require_auth=True
         )
@@ -82,7 +94,6 @@ class ToolInvokeEndpointTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         reset_policy_state()
-        init_tool_registry(ToolRegistry())
 
     def _patch_identity(self, role: str):
         identity = _identity(role)
@@ -138,3 +149,30 @@ class ToolInvokeEndpointTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "success")
+
+    def test_invoke_tool_exception_returns_structured_error(self) -> None:
+        """A raising tool must still yield a tool-result envelope, not a 500."""
+        with self._patch_identity("operator"):
+            response = self.client.post(
+                "/api/v2/tools/invoke",
+                json={"tool_name": "test.explode", "parameters": {}, "request_id": "req-5"},
+            )
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertEqual(body["status"], "error")
+        self.assertEqual(body["error"]["code"], "TOOL_EXECUTION_ERROR")
+        self.assertIn("boom", body["error"]["message"])
+        self.assertEqual(body["evidence"]["risk_level"], "read")
+
+
+class ToolRegistryDependencyTests(unittest.TestCase):
+    def test_missing_registry_returns_service_unavailable(self) -> None:
+        """An app assembled without a registry fails loudly, not silently empty."""
+        from fastapi import FastAPI
+
+        from api_gateway.api.routes.tools import router
+
+        app = FastAPI()
+        app.include_router(router)
+        response = TestClient(app).get("/api/v2/tools")
+        self.assertEqual(response.status_code, 503)

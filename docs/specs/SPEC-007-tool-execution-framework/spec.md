@@ -115,7 +115,7 @@ Acceptance criteria:
 - the Role grants: `get`, `list` on `pods`, `events`, `pods/log` in the `dev-luban-aiops` namespace
 - the tool-gateway Deployment references the ServiceAccount
 - `runtime-config.env` sets `GATEWAY_K8S_ENABLED=true` and `GATEWAY_K8S_NAMESPACE=dev-luban-aiops`
-- agent-platform `runtime-config.env` sets `TOOL_GATEWAY_URL=http://api-gateway.dev-luban-aiops.svc:8080`
+- agent-platform `runtime-config.env` sets `TOOL_GATEWAY_URL=http://api-gateway:8000` (in-namespace Service DNS; matches the port exposed by `api-gateway-service.yaml`)
 - `kustomize build` renders without errors
 
 ## Non-Goals
@@ -137,8 +137,30 @@ Acceptance criteria:
 
 ## Open Questions
 
-(none — all decisions resolved during planning)
+### Q-1: how does agent-platform authenticate its loopback call to tool-gateway? (blocks R-4, R-6)
+
+The gateway forwards only `x-request-id` and `X-User-ID` to agent-platform — never the caller's bearer token — so agent-platform holds no credential it can present when calling `POST /api/v2/tools/invoke` back through the gateway. With `GATEWAY_REQUIRE_AUTH=true` (the Release 1 default) every tool call and every tool-discovery request is rejected with 401, and the graceful-degradation path silently leaves the agent with an empty Toolkit.
+
+Candidate directions:
+
+- forward the user's access token downstream from gateway to agent-platform and re-present it on the tool call (preserves end-user identity; widens token blast radius)
+- issue agent-platform a service credential and carry the end-user identity as a signed on-behalf-of assertion (narrower token exposure; new signing surface and trust rules)
+
+The decision governs whether `tools:invoke` decisions are made against the end user's roles or a service principal's, so it belongs in the identity-and-authorization design and likely warrants an ADR. Deliberately not resolved by a "skip auth for internal callers" flag, which would breach the deny-by-default model established by SPEC-004.
+
+### Q-2: does tool discovery require authorization, and under which action?
+
+R-4 requires both routes to be authenticated. `GET /api/v2/tools` is currently unauthenticated and unauthorized. Pending Q-1, decide whether discovery is gated by `tools:invoke` or by a distinct `tools:list` action, and record it in the policy bundle.
+
+### Q-3: should tool output be redacted before it reaches the model provider?
+
+`k8s.get_pod_logs` returns raw container logs, which are forwarded into the LLM context and therefore to a third-party model API. Line count is bounded; content is not inspected. A redaction or opt-in policy decision is deferred but should not be deferred past the first non-dev deployment.
+
+## Delivery Status
+
+R-1, R-2, R-3, R-5 and R-7 are implemented and covered by tests. R-4 and R-6 are partially implemented: the routes, policy enforcement, audit logging, Toolkit wiring and gateway discovery all exist, but the authenticated end-to-end path does not work pending Q-1, and identity context is not yet forwarded on invocation. The spec stays `draft` until those close.
 
 ## Changelog
 
 - 2026-07-30: created as `draft`
+- 2026-07-30: implementation landed for R-1/R-2/R-3/R-5/R-7; R-4 and R-6 blocked on Q-1 (service-to-service identity). R-7 acceptance criterion corrected to the Service DNS name and port actually exposed by the dev overlay.

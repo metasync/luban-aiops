@@ -186,6 +186,23 @@ def _container_state(state) -> str:
     return "unknown"
 
 
+def _coerce_tail_lines(value: object) -> tuple[int, str | None]:
+    """Clamp `tail_lines` into [1, MAX_TAIL_LINES], rejecting non-integer input.
+
+    LLM-supplied parameters are untrusted, so a bad value must surface as a
+    structured INVALID_PARAMETERS result rather than an exception.
+    """
+    if value is None:
+        return DEFAULT_TAIL_LINES, None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_TAIL_LINES, f"Parameter 'tail_lines' must be an integer, got {value!r}."
+    if parsed < 1:
+        return DEFAULT_TAIL_LINES, f"Parameter 'tail_lines' must be at least 1, got {parsed}."
+    return min(parsed, MAX_TAIL_LINES), None
+
+
 # --- Tool implementations ---
 
 
@@ -218,7 +235,7 @@ class ListPodsTool(BaseTool):
         label_selector = parameters.get("label_selector")
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             data = await loop.run_in_executor(
                 None,
                 partial(self._connector._list_pods_sync, namespace, label_selector),
@@ -269,7 +286,7 @@ class GetPodTool(BaseTool):
         namespace = self._connector._resolve_namespace(parameters)
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             data = await loop.run_in_executor(
                 None,
                 partial(self._connector._get_pod_sync, name, namespace),
@@ -316,7 +333,7 @@ class GetEventsTool(BaseTool):
         field_selector = parameters.get("field_selector")
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             data = await loop.run_in_executor(
                 None,
                 partial(self._connector._get_events_sync, namespace, field_selector),
@@ -352,7 +369,13 @@ class GetPodLogsTool(BaseTool):
                     "name": {"type": "string", "description": "Pod name."},
                     "namespace": {"type": "string", "description": "Target namespace (defaults to configured namespace)."},
                     "container": {"type": "string", "description": "Container name (optional for single-container pods)."},
-                    "tail_lines": {"type": "integer", "description": f"Number of recent log lines (default {DEFAULT_TAIL_LINES}, max {MAX_TAIL_LINES})."},
+                    "tail_lines": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAX_TAIL_LINES,
+                        "default": DEFAULT_TAIL_LINES,
+                        "description": f"Number of recent log lines (default {DEFAULT_TAIL_LINES}, max {MAX_TAIL_LINES}).",
+                    },
                 },
             },
         )
@@ -368,10 +391,12 @@ class GetPodLogsTool(BaseTool):
 
         namespace = self._connector._resolve_namespace(parameters)
         container = parameters.get("container")
-        tail_lines = min(int(parameters.get("tail_lines", DEFAULT_TAIL_LINES)), MAX_TAIL_LINES)
+        tail_lines, tail_lines_error = _coerce_tail_lines(parameters.get("tail_lines"))
+        if tail_lines_error:
+            return make_error_result("k8s.get_pod_logs", "INVALID_PARAMETERS", tail_lines_error, source_system=SOURCE_SYSTEM)
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             data = await loop.run_in_executor(
                 None,
                 partial(self._connector._get_pod_logs_sync, name, namespace, container, tail_lines),

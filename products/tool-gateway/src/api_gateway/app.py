@@ -4,7 +4,6 @@ import time
 from fastapi import FastAPI, Request
 
 from api_gateway.api.router import router
-from api_gateway.api.routes.tools import init_tool_registry
 from api_gateway.core.config import get_settings
 from api_gateway.core.metrics import setup_metrics
 from api_gateway.core.observability import log_event
@@ -35,9 +34,7 @@ def _build_tool_registry() -> ToolRegistry:
 
 def create_app() -> FastAPI:
     app = FastAPI(title=SERVICE_TITLE, version=SERVICE_VERSION)
-
-    # Initialize tool registry.
-    init_tool_registry(_build_tool_registry())
+    app.state.tool_registry = _build_tool_registry()
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):

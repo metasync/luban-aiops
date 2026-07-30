@@ -34,8 +34,8 @@ class ToolRegistry:
     async def invoke(self, name: str, parameters: dict, identity: dict) -> ToolResult:
         """Dispatch an invocation to the named tool.
 
-        Returns a structured error result for unknown tools rather than
-        raising an exception.
+        Unknown tools and tools that raise both yield a structured error
+        result, so callers always receive a tool-result envelope.
         """
         tool = self._tools.get(name)
         if tool is None:
@@ -44,4 +44,14 @@ class ToolRegistry:
                 code="TOOL_NOT_FOUND",
                 message=f"No tool registered with name '{name}'.",
             )
-        return await tool.execute(parameters, identity)
+        try:
+            return await tool.execute(parameters, identity)
+        except Exception as exc:
+            LOGGER.exception("tool execution failed: %s", name)
+            return make_error_result(
+                tool_name=name,
+                code="TOOL_EXECUTION_ERROR",
+                message=str(exc),
+                risk_level=tool.definition.risk_level,
+                source_system=tool.definition.category,
+            )

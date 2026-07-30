@@ -232,3 +232,35 @@ def test_ensure_agent_cache_is_bounded(monkeypatch):
     asyncio.run(kernel.ensure_agent("ses-b"))
 
     assert asyncio.run(kernel.ensure_agent("ses-a"))[0] is not agent_a
+
+
+def test_concurrent_ensure_agent_builds_one_agent_per_session(monkeypatch):
+    """Agent creation awaits, so concurrent turns must not each build an agent.
+
+    Without serialisation the loser's agent — and its conversation memory —
+    would be silently discarded.
+    """
+    kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
+    build_calls = 0
+
+    async def fake_build_agent():
+        nonlocal build_calls
+        build_calls += 1
+        # Yield control so a concurrent caller can interleave here.
+        await asyncio.sleep(0)
+        return (FakeMemoryAgent(), FakeUserMsg)
+
+    monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
+
+    async def race():
+        return await asyncio.gather(
+            kernel.ensure_agent("ses-a"),
+            kernel.ensure_agent("ses-a"),
+            kernel.ensure_agent("ses-a"),
+        )
+
+    results = asyncio.run(race())
+
+    assert build_calls == 1
+    first_agent = results[0][0]
+    assert all(agent is first_agent for agent, _ in results)

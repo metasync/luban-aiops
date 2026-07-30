@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -110,16 +109,3 @@ class BaseTool(ABC):
         Implementations should measure their own execution time and build
         the evidence envelope using build_evidence().
         """
-
-    async def _timed_execute(self, parameters: dict, identity: dict) -> ToolResult:
-        """Wrapper that times execution — convenience for simple tools."""
-        start = time.perf_counter()
-        result = await self.execute(parameters, identity)
-        elapsed_ms = int((time.perf_counter() - start) * 1000)
-        if not result.evidence:
-            result.evidence = build_evidence(
-                self.definition.risk_level,
-                self.definition.category,
-                elapsed_ms,
-            )
-        return result

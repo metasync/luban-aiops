@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from collections import OrderedDict
@@ -89,6 +90,8 @@ class AgentKernel:
         self._max_cached_agents = max_cached_agents
         self._last_error: str | None = None
         self._toolkit = None  # Lazily built Toolkit (shared across agents)
+        self._toolkit_lock = asyncio.Lock()
+        self._agent_lock = asyncio.Lock()
 
     def mode(self) -> str:
         return "agentscope" if self.is_configured() else "placeholder"
@@ -157,17 +160,22 @@ class AgentKernel:
 
         from agentscope.tool import Toolkit
 
-        if self.settings.tool_gateway_url:
-            from agent_service.tools.gateway_tools import build_toolkit
-
-            try:
-                self._toolkit = await build_toolkit(self.settings.tool_gateway_url)
+        async with self._toolkit_lock:
+            # Re-check: a concurrent caller may have built it while we waited.
+            if self._toolkit is not None:
                 return self._toolkit
-            except Exception as exc:
-                LOGGER.warning("failed to build gateway toolkit: %s", exc)
 
-        self._toolkit = Toolkit()
-        return self._toolkit
+            if self.settings.tool_gateway_url:
+                from agent_service.tools.gateway_tools import build_toolkit
+
+                try:
+                    self._toolkit = await build_toolkit(self.settings.tool_gateway_url)
+                    return self._toolkit
+                except Exception as exc:
+                    LOGGER.warning("failed to build gateway toolkit: %s", exc)
+
+            self._toolkit = Toolkit()
+            return self._toolkit
 
     async def _build_agent(self):
         from agentscope.agent import Agent
@@ -187,16 +195,24 @@ class AgentKernel:
 
         Agents are keyed by session so conversation memory never crosses
         sessions; the cache is LRU-bounded to match the session store.
+        Creation is serialised because it awaits: without the lock two
+        concurrent turns on the same session would each build an agent and
+        one would be discarded along with its memory.
         """
         cached = self._agents.get(session_id)
         if cached is not None:
             self._agents.move_to_end(session_id)
             return cached
-        agent, user_msg_cls = await self._build_agent()
-        self._agents[session_id] = (agent, user_msg_cls)
-        while len(self._agents) > self._max_cached_agents:
-            self._agents.popitem(last=False)
-        return agent, user_msg_cls
+        async with self._agent_lock:
+            cached = self._agents.get(session_id)
+            if cached is not None:
+                self._agents.move_to_end(session_id)
+                return cached
+            agent, user_msg_cls = await self._build_agent()
+            self._agents[session_id] = (agent, user_msg_cls)
+            while len(self._agents) > self._max_cached_agents:
+                self._agents.popitem(last=False)
+            return agent, user_msg_cls
 
     def build_unconfigured_message(self, message: str, session_id: str) -> str:
         return (
