@@ -148,9 +148,13 @@ Candidate directions:
 
 The decision governs whether `tools:invoke` decisions are made against the end user's roles or a service principal's, so it belongs in the identity-and-authorization design and likely warrants an ADR. Deliberately not resolved by a "skip auth for internal callers" flag, which would breach the deny-by-default model established by SPEC-004.
 
+**Resolution:** decided in ADR-0004 (broker-mediated token delegation) and implemented by SPEC-008. The gateway exchanges the verified user token for a short-lived, audience-bound delegated token (`sub` = user, `act` = `agent-platform`, `aud` = `tool-gateway`) which `agent-platform` relays as a bearer token; `agent-platform` signs nothing. This closes Q-1 and Q-2 and unblocks R-4 and R-6. This spec stays `draft` until SPEC-008 is delivered.
+
 ### Q-2: does tool discovery require authorization, and under which action?
 
 R-4 requires both routes to be authenticated. `GET /api/v2/tools` is currently unauthenticated and unauthorized. Pending Q-1, decide whether discovery is gated by `tools:invoke` or by a distinct `tools:list` action, and record it in the policy bundle.
+
+**Resolution:** SPEC-008 R-6 gates discovery behind a distinct `tools:list` action granted to the same roles as `tools:invoke`.
 
 ### Q-3: should tool output be redacted before it reaches the model provider?
 
@@ -164,3 +168,4 @@ R-1, R-2, R-3, R-5 and R-7 are implemented and covered by tests. R-4 and R-6 are
 
 - 2026-07-30: created as `draft`
 - 2026-07-30: implementation landed for R-1/R-2/R-3/R-5/R-7; R-4 and R-6 blocked on Q-1 (service-to-service identity). R-7 acceptance criterion corrected to the Service DNS name and port actually exposed by the dev overlay.
+- 2026-07-30: Q-1 resolved by ADR-0004 (broker-mediated token delegation); Q-2 (discovery authorization) folded into SPEC-008 R-6 as a `tools:list` action. R-4/R-6 remain blocked until SPEC-008 is delivered.
