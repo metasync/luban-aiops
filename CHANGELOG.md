@@ -8,6 +8,20 @@ published product versions.
 
 ## Unreleased
 
+### Changed — Single Image Build Path
+
+- Folded `build-images.sh` into `make build`: the root target now builds all
+  four product images (delegating to each product's Makefile) with a
+  coordinated `IMAGE_TAG`, writes `.images.env` for `make deploy`, and keeps
+  the `AUTO_LOAD_KIND` / `KIND_CLUSTER_NAME` kind-load support.
+- Removed `shared/platform-ops/gitops/dev-k8s/build-images.sh` and the separate
+  `build-images` Make target; `make build` is now the single build path.
+- Per-product `build` always tags the local image and adds a registry tag when
+  `REGISTRY` is set; `push` re-tags then pushes, so build and push stay
+  consistent.
+- Updated the dev-k8s README to use `make build` / `make deploy` and corrected
+  stale `dev-k8s-transitional` paths to `dev-k8s`.
+
 ### Changed — Build & Verification Tooling
 
 - Added a forge-agnostic root `Makefile` consolidating project routines:

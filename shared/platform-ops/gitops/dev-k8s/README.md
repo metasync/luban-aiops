@@ -37,7 +37,7 @@ The base deployment manifest uses neutral placeholder image tags:
 - `luban-aiops/agent-service:dev-local`
 - `luban-aiops/identity-service:dev-local`
 
-`build-images.sh` and `deploy.sh` replace those placeholders with the generated `IMAGE_TAG` for each rollout.
+`make build` and `make deploy` replace those placeholders with the generated `IMAGE_TAG` for each rollout.
 
 This development baseline also uses the upstream `redis:7.2-alpine` image for in-cluster runtime state and message coordination.
 
@@ -174,38 +174,36 @@ At minimum, provide:
 ## Build Images
 
 ```bash
-shared/platform-ops/gitops/dev-k8s-transitional/build-images.sh
+make build
 ```
 
-This script now emits an explicit `IMAGE_TAG` and saves the resulting image names in:
+This builds all four product images with a coordinated `IMAGE_TAG` (delegating to each product's Makefile) and saves the resulting image names in:
 
-- `shared/platform-ops/gitops/dev-k8s-transitional/.images.env`
+- `shared/platform-ops/gitops/dev-k8s/.images.env`
 
 By default the generated tag uses the overlay name for clarity:
 
-- clean build: `dev-k8s-transitional-<gitsha>`
-- dirty local build: `dev-k8s-transitional-<gitsha>-dirty-<timestamp>`
+- clean build: `dev-k8s-<gitsha>`
+- dirty local build: `dev-k8s-<gitsha>-dirty-<timestamp>`
 
 If you want extra traceability in local experiments, you can optionally add a profile suffix:
 
 ```bash
-IMAGE_TAG_PROFILE=deepseek \
-  shared/platform-ops/gitops/dev-k8s-transitional/build-images.sh
+make build IMAGE_TAG_PROFILE=deepseek
 ```
 
 That avoids the stale same-tag rollout problem caused by reusing a single static placeholder tag across multiple development rebuilds.
 
-If your development cluster does not automatically see Docker images from the host runtime, you can ask the build script to load the images into `kind` as part of the same step:
+If your development cluster does not automatically see Docker images from the host runtime, you can load the images into `kind` as part of the same step:
 
 ```bash
-AUTO_LOAD_KIND=true KIND_CLUSTER_NAME=<your-kind-cluster> \
-  shared/platform-ops/gitops/dev-k8s-transitional/build-images.sh
+make build AUTO_LOAD_KIND=true KIND_CLUSTER_NAME=<your-kind-cluster>
 ```
 
 ## Apply
 
 ```bash
-shared/platform-ops/gitops/dev-k8s-transitional/deploy.sh
+make deploy
 ```
 
 This apply path uses the latest `IMAGE_TAG` from `.images.env`, applies the active root GitOps overlay, updates each deployment to the explicit image tag, waits for rollout completion, then reconciles the shared Keycloak browser client for the committed `OIDC` settings.
@@ -214,20 +212,20 @@ If you need to override the namespace or image tag manually:
 
 ```bash
 NAMESPACE=dev-luban-aiops IMAGE_TAG=<explicit-tag> \
-  shared/platform-ops/gitops/dev-k8s-transitional/deploy.sh
+  shared/platform-ops/gitops/dev-k8s/deploy.sh
 ```
 
 If you want to skip the Keycloak step temporarily:
 
 ```bash
 RECONCILE_OIDC_PORTAL_CLIENT=false \
-  shared/platform-ops/gitops/dev-k8s-transitional/deploy.sh
+  shared/platform-ops/gitops/dev-k8s/deploy.sh
 ```
 
 To reconcile only the browser client without redeploying the workloads:
 
 ```bash
-shared/platform-ops/gitops/dev-k8s-transitional/reconcile-portal-oidc-client.sh
+shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh
 ```
 
 ## Verify

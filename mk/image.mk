@@ -27,10 +27,16 @@ help: ## Show available targets for this product
 	@grep -hE '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*## "} {printf "  %-16s %s\n", $$1, $$2}'
 
-build: ## Build this product's container image
-	docker build -t $(IMAGE_REF) $(IMAGE_CONTEXT)
+build: ## Build this product's container image (local tag; +registry tag if REGISTRY set)
+	docker build -t luban-aiops/$(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_CONTEXT)
+ifneq ($(REGISTRY),)
+	docker tag luban-aiops/$(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_REF)
+endif
 
 push: ## Push this product's container image (set REGISTRY to re-tag)
+ifneq ($(REGISTRY),)
+	docker tag luban-aiops/$(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_REF)
+endif
 	docker push $(IMAGE_REF)
 
 lint: ## Lint this product's Dockerfile (hadolint; docker-run fallback)

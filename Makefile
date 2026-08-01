@@ -23,8 +23,31 @@ OVERLAYS := dev-k8s \
 	runtime-profiles/deepseek \
 	runtime-profiles/openai
 
-# Coordinated deploy build state (written by build-images.sh, read by deploy).
+# Coordinated deploy build state (written by `make build`, read by `make deploy`).
 IMAGE_STATE := $(GITOPS_DIR)/dev-k8s/.images.env
+
+# Image build settings (override on the command line).
+IMAGE_TAG_PREFIX  ?= dev-k8s
+IMAGE_TAG_PROFILE ?=
+AUTO_LOAD_KIND    ?= false
+KIND_CLUSTER_NAME ?=
+
+# Compute the coordinated image tag once (mirrors the former build-images.sh):
+# clean tree -> <prefix>[-<profile>]-<gitsha>; dirty -> ...-dirty-<timestamp>.
+ifeq ($(origin IMAGE_TAG),undefined)
+IMAGE_TAG := $(shell \
+	base="$(IMAGE_TAG_PREFIX)$(if $(IMAGE_TAG_PROFILE),-$(IMAGE_TAG_PROFILE),)"; \
+	if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
+		sha=`git rev-parse --short HEAD 2>/dev/null || echo manual`; \
+		if [ -n "`git status --porcelain 2>/dev/null`" ]; then \
+			echo "$$base-$$sha-dirty-`date +%Y%m%d%H%M%S`"; \
+		else \
+			echo "$$base-$$sha"; \
+		fi; \
+	else \
+		echo "$$base-`date +%Y%m%d%H%M%S`"; \
+	fi)
+endif
 
 .DEFAULT_GOAL := help
 
@@ -50,8 +73,24 @@ lint: ## Lint every product Dockerfile (hadolint; docker-run fallback)
 	@for p in $(IMAGE_PRODUCTS); do $(MAKE) -C products/$$p lint || exit 1; done
 
 .PHONY: build
-build: ## Build every product container image (per-product, for iteration)
-	@for p in $(IMAGE_PRODUCTS); do $(MAKE) -C products/$$p build || exit 1; done
+build: ## Build all images (coordinated tag) and write .images.env for deploy
+	@for p in $(IMAGE_PRODUCTS); do $(MAKE) -C products/$$p build IMAGE_TAG=$(IMAGE_TAG) || exit 1; done
+	@echo "IMAGE_TAG=$(IMAGE_TAG)" > $(IMAGE_STATE)
+	@echo "AGENT_SERVICE_IMAGE=luban-aiops/agent-service:$(IMAGE_TAG)" >> $(IMAGE_STATE)
+	@echo "API_GATEWAY_IMAGE=luban-aiops/api-gateway:$(IMAGE_TAG)" >> $(IMAGE_STATE)
+	@echo "IDENTITY_SERVICE_IMAGE=luban-aiops/identity-service:$(IMAGE_TAG)" >> $(IMAGE_STATE)
+	@echo "WEB_UI_IMAGE=luban-aiops/web-ui:$(IMAGE_TAG)" >> $(IMAGE_STATE)
+	@echo "Built images with IMAGE_TAG=$(IMAGE_TAG); wrote $(IMAGE_STATE)"
+	@if [ "$(AUTO_LOAD_KIND)" = "true" ]; then \
+		if [ -z "$(KIND_CLUSTER_NAME)" ]; then \
+			echo "KIND_CLUSTER_NAME is required when AUTO_LOAD_KIND=true" >&2; exit 1; \
+		fi; \
+		kind load docker-image --name "$(KIND_CLUSTER_NAME)" \
+			"luban-aiops/web-ui:$(IMAGE_TAG)" \
+			"luban-aiops/api-gateway:$(IMAGE_TAG)" \
+			"luban-aiops/agent-service:$(IMAGE_TAG)" \
+			"luban-aiops/identity-service:$(IMAGE_TAG)"; \
+	fi
 
 .PHONY: push
 push: ## Push every product container image (set REGISTRY to re-tag)
@@ -68,10 +107,6 @@ overlays: ## Render every GitOps overlay (kustomize build check)
 
 .PHONY: verify
 verify: test overlays ## Verification gate: product tests + overlay render checks
-
-.PHONY: build-images
-build-images: ## Coordinated deploy build of all images (writes .images.env)
-	@$(GITOPS_DIR)/dev-k8s/build-images.sh
 
 .PHONY: deploy
 deploy: ## Deploy the dev-k8s overlay to the current cluster (wraps deploy.sh)

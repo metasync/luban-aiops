@@ -34,7 +34,7 @@ IDENTITY_SERVICE_IMAGE="${IDENTITY_SERVICE_IMAGE:-}"
 WEB_UI_IMAGE="${WEB_UI_IMAGE:-}"
 
 if [ -z "$IMAGE_TAG" ]; then
-  echo "IMAGE_TAG is not set. Run build-images.sh first or export IMAGE_TAG." >&2
+  echo "IMAGE_TAG is not set. Run 'make build' first or export IMAGE_TAG." >&2
   exit 1
 fi
 
