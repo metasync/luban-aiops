@@ -19,7 +19,7 @@ Recommended owner:
 
 ## Current Scope
 
-This module currently provides the workspace placeholder and boundary definition for:
+This module covers:
 
 - Kubernetes deployment assets
 - gateway and ingress configuration

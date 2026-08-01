@@ -142,14 +142,14 @@ You can verify that the runtime left placeholder mode by port-forwarding `agent-
 
 ```bash
 kubectl -n dev-luban-aiops port-forward service/agent-service 18000:8000
-curl http://127.0.0.1:18000/api/v1/runtime
+curl http://127.0.0.1:18000/api/v2/runtime
 ```
 
-When configured correctly, `agentscope_enabled` should become `true` and the response should also show the active provider, model, and runtime state.
+When configured correctly, `runtime_mode` should be `agentscope` and `runtime_state` should be `ready`, and the response shows the active provider and model. `/api/v2/health` reports `configured: true`.
 
 ## Profile Selection
 
-To switch the active provider profile for both `dev-k8s-transitional` and `dev-k8s-native`:
+To switch the active provider profile for the `dev-k8s` overlay:
 
 ```bash
 shared/platform-ops/gitops/select-runtime-profile.sh deepseek
@@ -250,15 +250,15 @@ Once the pods are running, verify that `agent-service` starts successfully and t
 - create a session through `api-gateway`
 - send one prompt and receive one streamed response through the proxied gateway path
 
-You can also verify the gateway-side backend resolution directly:
+You can also verify that the gateway proxies the agent-service runtime metadata directly:
 
 ```bash
 kubectl -n dev-luban-aiops port-forward service/api-gateway 18080:8000
 curl http://127.0.0.1:18080/api/v1/runtime
 ```
 
-The response should now include:
+The gateway's `/api/v1/runtime` mirrors the agent-service `/api/v2/runtime` metadata and should include:
 
-- `configured_agent_backend_mode`
-- `resolved_agent_backend_mode`
-- `resolution_reason`
+- `runtime_mode` (`agentscope` when configured)
+- `runtime_state` (`ready` when healthy)
+- `provider` and `model_name`

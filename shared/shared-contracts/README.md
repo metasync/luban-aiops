@@ -20,7 +20,7 @@ Recommended owner:
 
 ## Current Scope
 
-This module currently provides the workspace placeholder and boundary definition for:
+This module covers:
 
 - shared API schemas
 - event and streaming payloads

@@ -20,7 +20,7 @@ Recommended owner:
 
 ## Current Scope
 
-This project currently provides the workspace placeholder and boundary definition for:
+This project covers:
 
 - enterprise `SSO` entry and token normalization
 - group-to-role mapping and identity enrichment
@@ -40,7 +40,7 @@ Current implementation artifacts:
 - `tests/test_identity_service.py`
 - `tests/test_token_service.py`
 
-Current scaffold status:
+Current implementation status:
 
 - organizes the `FastAPI` package by app bootstrap, route modules, config helpers, schemas, and normalization services
 - keeps `main.py` as a thin runtime bootstrap entrypoint

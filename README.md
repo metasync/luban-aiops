@@ -50,6 +50,8 @@ The workspace is organized as a modular platform made up of multiple product-ori
 ## Key Documents
 
 - Repository changelog: [CHANGELOG.md](CHANGELOG.md)
+- Spec-driven development workflow and spec index: [README.md](docs/specs/README.md)
+- Architecture decision records: [README.md](docs/adr/README.md)
 - Platform study index: [README.md](docs/agentic-aiops-platform/README.md)
 - Release notes index: [README.md](docs/agentic-aiops-platform/release-notes/README.md)
 - Workspace docs index: [README.md](docs/workspace/README.md)
@@ -74,6 +76,10 @@ The workspace is organized as a modular platform made up of multiple product-ori
 
 ## Current State
 
-This workspace currently contains the platform design and planning documents plus the initial modular directory layout.
+Release 0 (platform foundation) and Release 1 (SPEC-001 through SPEC-006) are delivered: `agent-platform`, `identity-broker`, `tool-gateway`, and `operator-portal` are implemented, tested, and deployable to the `dev-k8s` overlay. SPEC-007 (read-only tool execution) and SPEC-008 (service-to-service identity) remain open.
 
-Implementation can now proceed by release and by product area without losing overall platform coherence.
+See [CHANGELOG.md](CHANGELOG.md) for delivered work and the [spec index](docs/specs/README.md) for the status of each spec.
+
+## Routines
+
+Day-to-day routines are driven by the root [Makefile](Makefile): `make verify` (the pre-commit/pre-push gate — all product test suites plus GitOps overlay rendering), `make test`, `make build`, `make lint`, and `make deploy`. Run `make help` for the full list, or `make -C products/<name> help` for per-product targets.

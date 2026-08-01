@@ -24,9 +24,10 @@ published product versions.
 
 ### Changed — Build & Verification Tooling
 
-- Added a forge-agnostic root `Makefile` consolidating project routines:
-  `verify` (the pre-commit/pre-push gate), `test`, `sync`, `overlays`,
-  `build-images`, `push-images`, `deploy`, and `clean`.
+- Added a forge-agnostic root `Makefile` (with per-product Makefiles and shared
+  `mk/` fragments) consolidating project routines: `verify` (the
+  pre-commit/pre-push gate), `test`, `sync`, `lint`, `build`, `push`,
+  `overlays`, `deploy`, and `clean`.
 - Removed the GitHub Actions workflows (`.github/workflows/ci.yml`,
   `overlays.yml`). The verification gate now lives in `make verify`,
   decoupling the project from GitHub-specific CI; the same checks run

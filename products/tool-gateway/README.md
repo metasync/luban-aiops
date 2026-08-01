@@ -30,7 +30,7 @@ Recommended owner:
 
 ## Current Scope
 
-This project currently provides the workspace placeholder and boundary definition for:
+This project covers:
 
 - connector abstraction and normalization
 - `MCP`-compatible tool exposure
@@ -46,7 +46,7 @@ Current implementation artifacts:
 - `src/api_gateway/core/`
 - `src/api_gateway/services/`
 
-Current scaffold status:
+Current implementation status:
 
 - proxies the current portal contract to backend services
 - targets the platform-owned agent-service contract (`/api/v2/`) directly; no dual-backend resolution

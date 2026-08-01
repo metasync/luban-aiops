@@ -20,7 +20,7 @@ Recommended owner:
 
 ## Current Scope
 
-This project currently provides the workspace placeholder and boundary definition for:
+This project covers:
 
 - portal shell and navigation
 - chat and evidence presentation flows
@@ -40,6 +40,9 @@ Current browser baseline capabilities:
 - `OIDC` login start through `api-gateway`
 - authorization-code callback completion through `identity-broker`
 - authenticated portal logout entry point
+- silent background token refresh roughly 60 seconds before JWT expiry (via
+  `POST /api/v1/auth/refresh`); on failure the session is cleared and
+  re-authentication is prompted
 - session creation, prompt send, and streamed response rendering through the
   proxied gateway path
 - request ID visibility for debug-oriented validation

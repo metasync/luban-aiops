@@ -20,7 +20,7 @@ Recommended owner:
 
 ## Current Scope
 
-This project currently provides the workspace placeholder and boundary definition for:
+This project covers:
 
 - AgentScope-based runtime services
 - session and conversation state handling
@@ -46,7 +46,7 @@ Current implementation artifacts:
 - `src/agent_service/metadata.py`
 - `tests/`
 
-Current scaffold status:
+Current implementation status:
 
 - uses `uv` packaging with `uv_build`
 - includes a container build path for the current service contract
