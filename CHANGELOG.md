@@ -8,6 +8,18 @@ published product versions.
 
 ## Unreleased
 
+### Changed — Build & Verification Tooling
+
+- Added a forge-agnostic root `Makefile` consolidating project routines:
+  `verify` (the pre-commit/pre-push gate), `test`, `sync`, `overlays`,
+  `build-images`, `push-images`, `deploy`, and `clean`.
+- Removed the GitHub Actions workflows (`.github/workflows/ci.yml`,
+  `overlays.yml`). The verification gate now lives in `make verify`,
+  decoupling the project from GitHub-specific CI; the same checks run
+  locally and under any CI provider.
+- Updated the SDD enforcement guidance (`docs/specs/README.md`) to name
+  `make verify` as the mechanical gate in place of the CI workflows.
+
 ### Added — Release 1 (SPEC-007: Tool Execution Framework)
 
 - Added tool execution framework to tool-gateway: `ToolRegistry`, `BaseTool`

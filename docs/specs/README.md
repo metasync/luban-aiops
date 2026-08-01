@@ -105,9 +105,9 @@ Current enforcement is by review discipline:
 - pull requests that qualify under `When A Spec Is Required` must link a spec
 - reviewers check acceptance criteria before marking a spec `delivered`
 
-Mechanical enforcement (delivered by `SPEC-001`):
+Mechanical enforcement:
 
-- CI runs product test suites and GitOps overlay render checks (`.github/workflows/ci.yml`, `overlays.yml`)
+- `make verify` is the verification gate: it runs every product test suite and renders every GitOps overlay (`kustomize build`). It is forge-agnostic — the same command runs locally before commit/push and under any CI, so the project does not couple to a specific provider's workflow format. (`SPEC-001` first delivered this gate as GitHub Actions workflows; they were replaced by the portable root `Makefile`.)
 - contract tests bind gateway models to `shared/shared-contracts` schemas
 
 ## Spec Index
