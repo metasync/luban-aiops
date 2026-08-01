@@ -2,9 +2,10 @@
 
 ## Status
 
-`proposed`
+`accepted`
 
 - date: 2026-07-30
+- accepted: 2026-07-30
 - deciders: workspace maintainers
 - related specs: `SPEC-003`, `SPEC-004`, `SPEC-007`, `SPEC-008`
 

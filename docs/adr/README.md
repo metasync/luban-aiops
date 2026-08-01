@@ -39,4 +39,4 @@ Do not write an ADR for decisions local to a single spec; record those in the sp
 | `ADR-0001` | Adopt spec-driven development with tiered documentation | `accepted` |
 | `ADR-0002` | Re-affirm AgentScope 2.0 as the runtime kernel | `accepted` |
 | `ADR-0003` | Platform-owned agent-service contract | `accepted` |
-| `ADR-0004` | Broker-mediated token delegation for service-to-service calls | `proposed` |
+| `ADR-0004` | Broker-mediated token delegation for service-to-service calls | `accepted` |

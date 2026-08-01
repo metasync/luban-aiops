@@ -121,4 +121,4 @@ Mechanical enforcement:
 | `SPEC-005` | Observability baseline — metrics, tracing, and request correlation | `delivered` |
 | `SPEC-006` | Session durability — Redis-backed session store | `delivered` |
 | `SPEC-007` | Read-only tool execution framework | `draft` |
-| `SPEC-008` | Service-to-service identity — broker-mediated token delegation | `draft` |
+| `SPEC-008` | Service-to-service identity — broker-mediated token delegation | `approved` |

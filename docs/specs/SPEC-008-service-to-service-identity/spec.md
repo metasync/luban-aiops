@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: workspace maintainers
 - created: 2026-07-30
 - release slice: `Release 1` (read-only operations copilot)
@@ -136,3 +136,4 @@ None — both resolved (see Changelog).
 - 2026-07-30: created as `draft`, implementing ADR-0004 and closing SPEC-007 Q-1/Q-2
 - 2026-07-30: resolved the delegated-token lifetime question — per-user TTL cache with re-exchange driven by the incoming request's user token; delegated TTL (300s) kept shorter than the user token TTL (900s) so an active user never gaps and no refresh mechanism is needed (the portal already sends a fresh token on every request and refreshes it ahead of expiry)
 - 2026-07-30: resolved the service-credential question — a static, audience-scoped client secret for Release 1 (it confers no user authority, since the exchange still requires a valid user token, so its blast radius is already narrow), with Kubernetes workload-identity-bound short-lived tokens as the documented upgrade path to be done once for all services at the first non-dev deployment or at Release 4
+- 2026-07-30: approved by workspace maintainers and ADR-0004 accepted; implementation may begin, sequenced issuer-first per `plan.md` (R-1 → R-2/R-3 → R-4/R-6 → R-5, with R-7 alongside)
