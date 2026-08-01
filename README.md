@@ -76,7 +76,7 @@ The workspace is organized as a modular platform made up of multiple product-ori
 
 ## Current State
 
-Release 0 (platform foundation) and Release 1 (SPEC-001 through SPEC-006) are delivered: `agent-platform`, `identity-broker`, `tool-gateway`, and `operator-portal` are implemented, tested, and deployable to the `dev-k8s` overlay. SPEC-007 (read-only tool execution) and SPEC-008 (service-to-service identity) remain open.
+Release 0 (platform foundation) and Release 1 (SPEC-001 through SPEC-008) are delivered: `agent-platform`, `identity-broker`, `tool-gateway`, and `operator-portal` are implemented, tested, and deployable to the `dev-k8s` overlay. Release 1 closes with the read-only tool execution framework (SPEC-007) and broker-mediated service-to-service identity (SPEC-008, implementing ADR-0004).
 
 See [CHANGELOG.md](CHANGELOG.md) for delivered work and the [spec index](docs/specs/README.md) for the status of each spec.
 

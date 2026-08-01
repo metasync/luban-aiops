@@ -3,6 +3,9 @@
 This module is the adapter layer between the HTTP boundary and the AgentScope
 kernel. No AgentScope types leak through route signatures or response bodies.
 Identity is conveyed via headers (X-User-ID, x-request-id), never in bodies.
+The gateway-forwarded delegated token arrives as ``Authorization: Bearer`` and
+is relayed opaquely to the kernel for tool calls (SPEC-008 R-5); the platform
+never inspects or signs it.
 """
 
 from __future__ import annotations
@@ -34,6 +37,16 @@ def _user_id(x_user_id: str | None) -> str:
     return x_user_id
 
 
+def _bearer_token(authorization: str | None) -> str | None:
+    """Extract the raw bearer token forwarded by the gateway (SPEC-008 R-5)."""
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return token
+
+
 # --- Chat ---
 
 
@@ -42,6 +55,7 @@ async def chat(
     body: AgentChatRequest,
     x_user_id: str | None = Header(None),
     x_request_id: str | None = Header(None),
+    authorization: str | None = Header(None),
 ) -> AgentChatResponse:
     user_id = _user_id(x_user_id)
     request_id = x_request_id or "untracked"
@@ -51,6 +65,7 @@ async def chat(
         message=body.message,
         session_id=session.session_id,
         user_name=user_id,
+        bearer_token=_bearer_token(authorization),
     )
     return AgentChatResponse(
         session_id=session.session_id,
@@ -65,11 +80,13 @@ async def chat_stream(
     session_id: str | None = None,
     x_user_id: str | None = Header(None),
     x_request_id: str | None = Header(None),
+    authorization: str | None = Header(None),
 ) -> StreamingResponse:
     user_id = _user_id(x_user_id)
     request_id = x_request_id or "untracked"
     record_chat_request()
     session = ensure_session(session_id, user_id)
+    bearer_token = _bearer_token(authorization)
 
     async def _events() -> AsyncIterator[str]:
         async for chunk in get_runtime_kernel().stream_events(
@@ -77,6 +94,7 @@ async def chat_stream(
             request_id=request_id,
             session_id=session.session_id,
             user_name=user_id,
+            bearer_token=bearer_token,
         ):
             event = _normalize_stream_event(chunk, session.session_id, request_id)
             yield f"data: {event.model_dump_json(exclude_none=True)}\n\n"

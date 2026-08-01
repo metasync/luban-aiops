@@ -49,3 +49,14 @@ class TokenResponse(BaseModel):
 
 class TokenRefreshRequest(BaseModel):
     refresh_token: str
+
+
+class TokenExchangeRequest(BaseModel):
+    subject_token: str
+    audience: str
+
+
+class TokenExchangeResponse(BaseModel):
+    access_token: str
+    token_type: str = "Bearer"
+    expires_in: int

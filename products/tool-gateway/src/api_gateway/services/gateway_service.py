@@ -269,8 +269,11 @@ async def chat(
     user_id: str,
     message: str,
     session_id: str | None,
+    delegated_token: str | None = None,
 ) -> dict:
-    return await agent_client.chat(settings, request_id, user_id, message, session_id)
+    return await agent_client.chat(
+        settings, request_id, user_id, message, session_id, delegated_token
+    )
 
 
 def chat_stream(
@@ -279,10 +282,11 @@ def chat_stream(
     user_id: str,
     message: str,
     session_id: str | None,
+    delegated_token: str | None = None,
 ) -> StreamingResponse:
     async def _stream() -> AsyncIterator[str]:
         async for chunk in agent_client.stream_chat(
-            settings, request_id, user_id, message, session_id
+            settings, request_id, user_id, message, session_id, delegated_token
         ):
             yield chunk
 
@@ -342,6 +346,8 @@ async def invoke_tool(
         status=result.status,
         duration_ms=result.evidence.get("duration_ms", 0),
         user_id=identity.username,
+        sub=identity.subject,
+        act=identity.actor,
     )
 
     status_code = 200 if result.status == "success" else 400

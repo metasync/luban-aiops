@@ -80,14 +80,32 @@ def reset_key_state() -> None:
     _kid = None
 
 
-def issue_token(settings: IdentitySettings, identity: dict[str, Any]) -> tuple[str, int]:
+def issue_token(
+    settings: IdentitySettings,
+    identity: dict[str, Any],
+    audience: str | list[str] | None = None,
+    actor: dict[str, Any] | None = None,
+    ttl_seconds: int | None = None,
+) -> tuple[str, int]:
     """Sign a JWT for the given identity claims.
+
+    ``audience`` binds the token to an intended recipient (R-1). When omitted,
+    it defaults to ``settings.jwt_audience`` (the gateway). The claim is always
+    emitted as a list so verifiers can match with a single expected audience.
+
+    ``actor`` (R-2) attaches an RFC 8693 ``act`` claim identifying the acting
+    service on delegated tokens; it is omitted on portal tokens. ``ttl_seconds``
+    overrides the default TTL so delegated tokens can be short-lived.
 
     Returns (token_string, expires_in_seconds).
     """
     key, kid = _ensure_key(settings)
     now = int(time.time())
-    ttl = settings.jwt_token_ttl_seconds
+    ttl = settings.jwt_token_ttl_seconds if ttl_seconds is None else ttl_seconds
+
+    if audience is None:
+        audience = settings.jwt_audience
+    aud = [audience] if isinstance(audience, str) else list(audience)
 
     claims: dict[str, Any] = {
         "iss": settings.jwt_issuer,
@@ -96,9 +114,12 @@ def issue_token(settings: IdentitySettings, identity: dict[str, Any]) -> tuple[s
         "email": identity.get("email"),
         "roles": identity.get("roles", []),
         "groups": identity.get("groups", []),
+        "aud": aud,
         "iat": now,
         "exp": now + ttl,
     }
+    if actor is not None:
+        claims["act"] = actor
 
     token = jwt.encode(claims, key, algorithm="RS256", headers={"kid": kid})
     record_token_issued()

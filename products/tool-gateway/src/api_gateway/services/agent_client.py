@@ -13,11 +13,20 @@ import httpx
 from api_gateway.core.config import GatewaySettings
 
 
-def _headers(request_id: str, user_id: str) -> dict[str, str]:
-    return {
+def _headers(
+    request_id: str,
+    user_id: str,
+    bearer_token: str | None = None,
+) -> dict[str, str]:
+    headers = {
         "x-request-id": request_id,
         "X-User-ID": user_id,
     }
+    if bearer_token:
+        # Forward the delegated token (SPEC-008 R-4) so agent-platform can
+        # present a least-privilege credential on its loopback tool calls.
+        headers["Authorization"] = f"Bearer {bearer_token}"
+    return headers
 
 
 async def create_session(
@@ -55,6 +64,7 @@ async def chat(
     user_id: str,
     message: str,
     session_id: str | None,
+    delegated_token: str | None = None,
 ) -> dict:
     timeout = httpx.Timeout(settings.chat_response_timeout_seconds, connect=5.0)
     payload: dict[str, str] = {"message": message}
@@ -64,7 +74,7 @@ async def chat(
         response = await client.post(
             f"{settings.agent_service_url}/api/v2/chat",
             json=payload,
-            headers=_headers(request_id, user_id),
+            headers=_headers(request_id, user_id, delegated_token),
         )
     response.raise_for_status()
     return response.json()
@@ -76,6 +86,7 @@ async def stream_chat(
     user_id: str,
     message: str,
     session_id: str | None,
+    delegated_token: str | None = None,
 ) -> AsyncIterator[str]:
     timeout = httpx.Timeout(connect=5.0, read=None, write=None, pool=None)
     params: dict[str, str] = {"message": message}
@@ -86,7 +97,7 @@ async def stream_chat(
             "GET",
             f"{settings.agent_service_url}/api/v2/chat/stream",
             params=params,
-            headers=_headers(request_id, user_id),
+            headers=_headers(request_id, user_id, delegated_token),
         ) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():

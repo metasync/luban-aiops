@@ -27,6 +27,10 @@
       "items": {
         "type": "string"
       }
+    },
+    "actor": {
+      "type": ["string", "null"],
+      "description": "Acting service identifier (from the RFC 8693 'act' claim). Present when the identity is carried by a delegated token (e.g. 'agent-platform'); null for direct portal tokens. Used for audit attribution only."
     }
   }
 }

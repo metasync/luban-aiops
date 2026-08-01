@@ -153,6 +153,7 @@ Current runtime environment knobs:
   - Redis DB number for session keys; defaults to `1` (separate from AgentScope's DB `0`)
 - `TOOL_GATEWAY_URL`
   - base URL of the tool-gateway for tool discovery and invocation (SPEC-007); when set, the AgentScope kernel registers gateway tools into the LLM Toolkit; when unset, the agent builds with an empty Toolkit
+  - tool calls relay the gateway-forwarded delegated token (SPEC-008) as `Authorization: Bearer`; the token is bound per-user into the toolkit closures (no cross-user sharing) and identity is never carried in the request body; without a token, discovery degrades to an empty Toolkit and invocation returns a structured error
 - `OTEL_ENABLED`
   - master switch for the OTLP push pipeline (traces + metrics); defaults to `false`; when disabled, the `/metrics` surface is unaffected
 - `OTEL_EXPORTER_OTLP_ENDPOINT`

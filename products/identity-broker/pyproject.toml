@@ -22,6 +22,7 @@ identity-service = "identity_service.main:run"
 
 [dependency-groups]
 dev = [
+  "jsonschema>=4.23,<5.0",
   "pytest>=8.3,<9.0"
 ]
 

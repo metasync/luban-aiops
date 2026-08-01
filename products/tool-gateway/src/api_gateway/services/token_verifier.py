@@ -67,12 +67,15 @@ def verify_token(settings: GatewaySettings, token: str) -> IdentityContext:
             signing_key.key,
             algorithms=["RS256"],
             issuer=settings.identity_token_issuer,
-            options={"require": ["exp", "iss", "sub"]},
+            audience=settings.token_audience,
+            options={"require": ["exp", "iss", "sub", "aud"]},
         )
     except jwt.ExpiredSignatureError as exc:
         raise TokenVerificationError("token expired") from exc
     except jwt.InvalidIssuerError as exc:
         raise TokenVerificationError("invalid token issuer") from exc
+    except jwt.InvalidAudienceError as exc:
+        raise TokenVerificationError("invalid token audience") from exc
     except jwt.InvalidTokenError as exc:
         raise TokenVerificationError(f"invalid token: {exc}") from exc
 
@@ -82,4 +85,14 @@ def verify_token(settings: GatewaySettings, token: str) -> IdentityContext:
         email=claims.get("email"),
         groups=claims.get("groups", []),
         roles=claims.get("roles", []),
+        actor=_extract_actor(claims.get("act")),
     )
+
+
+def _extract_actor(act: Any) -> str | None:
+    """Return the acting service subject from an RFC 8693 ``act`` claim."""
+    if isinstance(act, dict):
+        actor_sub = act.get("sub")
+        if isinstance(actor_sub, str) and actor_sub:
+            return actor_sub
+    return None

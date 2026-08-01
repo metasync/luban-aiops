@@ -24,6 +24,9 @@ spec:
           envFrom:
             - configMapRef:
                 name: platform-runtime-config
+            - secretRef:
+                name: api-gateway-runtime-secrets
+                optional: true
           ports:
             - containerPort: 8000
           volumeMounts:

@@ -55,6 +55,30 @@ class TokenIssuanceTests(unittest.TestCase):
         self.assertIn("exp", claims)
         self.assertEqual(claims["exp"] - claims["iat"], 900)
 
+    def test_issue_token_default_audience(self) -> None:
+        settings = _settings()
+        token, _ = issue_token(settings, {"sub": "u", "username": "u"})
+        claims = pyjwt.decode(token, options={"verify_signature": False})
+        self.assertEqual(claims["aud"], ["tool-gateway"])
+
+    def test_issue_token_custom_audience_string(self) -> None:
+        settings = _settings()
+        token, _ = issue_token(
+            settings, {"sub": "u", "username": "u"}, audience="agent-platform"
+        )
+        claims = pyjwt.decode(token, options={"verify_signature": False})
+        self.assertEqual(claims["aud"], ["agent-platform"])
+
+    def test_issue_token_custom_audience_list(self) -> None:
+        settings = _settings()
+        token, _ = issue_token(
+            settings,
+            {"sub": "u", "username": "u"},
+            audience=["tool-gateway", "agent-platform"],
+        )
+        claims = pyjwt.decode(token, options={"verify_signature": False})
+        self.assertEqual(claims["aud"], ["tool-gateway", "agent-platform"])
+
     def test_issue_token_custom_ttl(self) -> None:
         settings = _settings(jwt_token_ttl_seconds=300)
         token, expires_in = issue_token(settings, {"sub": "u", "username": "u"})

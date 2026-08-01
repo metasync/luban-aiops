@@ -89,7 +89,11 @@ class AgentKernel:
         self._agents: OrderedDict[str, tuple[object, type]] = OrderedDict()
         self._max_cached_agents = max_cached_agents
         self._last_error: str | None = None
-        self._toolkit = None  # Lazily built Toolkit (shared across agents)
+        # Per-token toolkit cache (SPEC-008 R-5): a toolkit is built per owning
+        # user's delegated token so one user's credential is never used for
+        # another user's session. Keyed by token; the gateway reuses the same
+        # delegated token for a user until near-expiry, so discovery is cached.
+        self._toolkits: dict[str, object] = {}
         self._toolkit_lock = asyncio.Lock()
         self._agent_lock = asyncio.Lock()
 
@@ -153,35 +157,46 @@ class AgentKernel:
     def _build_model(self):
         return self._provider.build_model(self.settings)
 
-    async def _ensure_toolkit(self):
-        """Build (once) and return the Toolkit with gateway tools."""
-        if self._toolkit is not None:
-            return self._toolkit
+    async def _ensure_toolkit(self, bearer_token: str | None = None):
+        """Build (once per token) and return the Toolkit with gateway tools.
+
+        Toolkits are cached per delegated token so the owning user's credential
+        is bound into the closures and never shared across users.
+        """
+        cache_key = bearer_token or ""
+        cached = self._toolkits.get(cache_key)
+        if cached is not None:
+            return cached
 
         from agentscope.tool import Toolkit
 
         async with self._toolkit_lock:
             # Re-check: a concurrent caller may have built it while we waited.
-            if self._toolkit is not None:
-                return self._toolkit
+            cached = self._toolkits.get(cache_key)
+            if cached is not None:
+                return cached
 
             if self.settings.tool_gateway_url:
                 from agent_service.tools.gateway_tools import build_toolkit
 
                 try:
-                    self._toolkit = await build_toolkit(self.settings.tool_gateway_url)
-                    return self._toolkit
+                    toolkit = await build_toolkit(
+                        self.settings.tool_gateway_url, bearer_token
+                    )
+                    self._toolkits[cache_key] = toolkit
+                    return toolkit
                 except Exception as exc:
                     LOGGER.warning("failed to build gateway toolkit: %s", exc)
 
-            self._toolkit = Toolkit()
-            return self._toolkit
+            toolkit = Toolkit()
+            self._toolkits[cache_key] = toolkit
+            return toolkit
 
-    async def _build_agent(self):
+    async def _build_agent(self, bearer_token: str | None = None):
         from agentscope.agent import Agent
         from agentscope.message import UserMsg
 
-        toolkit = await self._ensure_toolkit()
+        toolkit = await self._ensure_toolkit(bearer_token)
         agent = Agent(
             name=self.settings.agent_name,
             system_prompt=self.settings.system_prompt,
@@ -190,7 +205,7 @@ class AgentKernel:
         )
         return agent, UserMsg
 
-    async def ensure_agent(self, session_id: str):
+    async def ensure_agent(self, session_id: str, bearer_token: str | None = None):
         """Return the agent bound to `session_id`, creating it on first use.
 
         Agents are keyed by session so conversation memory never crosses
@@ -208,7 +223,7 @@ class AgentKernel:
             if cached is not None:
                 self._agents.move_to_end(session_id)
                 return cached
-            agent, user_msg_cls = await self._build_agent()
+            agent, user_msg_cls = await self._build_agent(bearer_token)
             self._agents[session_id] = (agent, user_msg_cls)
             while len(self._agents) > self._max_cached_agents:
                 self._agents.popitem(last=False)
@@ -253,12 +268,18 @@ class AgentKernel:
             "message": "complete",
         }
 
-    async def reply_text(self, message: str, session_id: str, user_name: str) -> str:
+    async def reply_text(
+        self,
+        message: str,
+        session_id: str,
+        user_name: str,
+        bearer_token: str | None = None,
+    ) -> str:
         if not self.is_configured():
             return self.build_unconfigured_message(message, session_id)
 
         try:
-            agent, user_msg_cls = await self.ensure_agent(session_id)
+            agent, user_msg_cls = await self.ensure_agent(session_id, bearer_token)
             reply_msg = await agent.reply(user_msg_cls(name=user_name, content=message))
             self.clear_error()
             return extract_text(getattr(reply_msg, "content", reply_msg))
@@ -300,6 +321,7 @@ class AgentKernel:
         request_id: str,
         session_id: str,
         user_name: str,
+        bearer_token: str | None = None,
     ) -> AsyncIterator[dict[str, object]]:
         if not self.is_configured():
             async for event in self.fallback_stream(
@@ -311,7 +333,7 @@ class AgentKernel:
             return
 
         try:
-            agent, user_msg_cls = await self.ensure_agent(session_id)
+            agent, user_msg_cls = await self.ensure_agent(session_id, bearer_token)
             async for event in agent.reply_stream(user_msg_cls(name=user_name, content=message)):
                 self.clear_error()
                 yield self.normalize_event(event, request_id, session_id)

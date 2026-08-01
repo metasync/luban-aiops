@@ -46,11 +46,12 @@ Current implementation status:
 - keeps `main.py` as a thin runtime bootstrap entrypoint
 - centralizes `Keycloak` and `OIDC` login URL construction behind settings-aware service code
 - isolates group-to-role mapping and identity normalization from the HTTP route layer
-- issues RSA-signed platform JWTs (`POST /api/v1/auth/token`) with configurable TTL
+- issues RSA-signed platform JWTs (`POST /api/v1/auth/token`) with configurable TTL; tokens are audience-bound (`aud`, default `["tool-gateway"]`) to prevent cross-service replay (SPEC-008)
 - publishes the public key set at `GET /.well-known/jwks.json` (RFC 7517)
 - the OIDC callback (`/auth/callback`) returns a platform JWT as the primary `access_token`
 - supports token refresh (`POST /api/v1/auth/refresh`): exchanges a Keycloak refresh_token for a new platform JWT with updated identity claims
-- adds focused tests for role normalization, login URL composition, token issuance, JWKS format, and token refresh
+- mints delegated tokens for service-to-service calls (`POST /api/v1/auth/exchange`, SPEC-008 / ADR-0004): authenticates a registered service credential, verifies the subject token, and issues a short-lived token with `sub`/`username`/`roles` copied (never elevated), an RFC 8693 `act` actor claim, and the requested `aud`
+- adds focused tests for role normalization, login URL composition, token issuance, JWKS format, token refresh, and the exchange endpoint
 
 Current runtime environment knobs:
 
@@ -64,6 +65,12 @@ Current runtime environment knobs:
   - platform JWT lifetime; defaults to `900`
 - `IDENTITY_TOKEN_ISSUER`
   - `iss` claim written into issued tokens; defaults to `luban-identity-broker`
+- `IDENTITY_TOKEN_AUDIENCE`
+  - default `aud` written into issued tokens and the audience used to verify exchange subject tokens; defaults to `tool-gateway`
+- `IDENTITY_DELEGATED_TOKEN_TTL_SECONDS`
+  - lifetime of delegated tokens minted by the exchange endpoint; defaults to `300` (kept shorter than the user token TTL)
+- `IDENTITY_SERVICE_CLIENTS`
+  - registry of service callers permitted to request delegated tokens; format `client_id:secret:aud1|aud2`, comma-separated; loaded from a K8s Secret, not committed
 - `OTEL_ENABLED`
   - master switch for the OTLP push pipeline (traces + metrics); defaults to `false`; when disabled, the `/metrics` surface is unaffected
 - `OTEL_EXPORTER_OTLP_ENDPOINT`
@@ -73,7 +80,7 @@ Current runtime environment knobs:
 
 Observability surface (see `SPEC-005` and `shared/shared-contracts/observability-conventions.md`):
 
-- `GET /metrics` — always-on Prometheus exposition endpoint (auth-exempt), reporting standard HTTP RED metrics plus `identity_tokens_issued_total` (incremented on every platform JWT issued)
+- `GET /metrics` — always-on Prometheus exposition endpoint (auth-exempt), reporting standard HTTP RED metrics plus `identity_tokens_issued_total` (incremented on every platform JWT issued) and `token_exchange_total{result}` (delegated-token exchange attempts/outcomes, SPEC-008)
 - opt-in OTLP push via `opentelemetry-instrumentation-fastapi` + `opentelemetry-exporter-otlp` when `OTEL_ENABLED=true`; fail-open
 - `x-request-id` remains the log/portal correlation key; when OTel tracing is active it equals the W3C `trace_id`
 

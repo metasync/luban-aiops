@@ -187,7 +187,7 @@ class FakeMemoryAgent:
 def test_agent_conversation_state_never_crosses_sessions(monkeypatch):
     kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
 
-    async def fake_build_agent():
+    async def fake_build_agent(bearer_token=None):
         return (FakeMemoryAgent(), FakeUserMsg)
 
     monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
@@ -205,7 +205,7 @@ def test_agent_conversation_state_never_crosses_sessions(monkeypatch):
 def test_ensure_agent_reuses_instance_per_session(monkeypatch):
     kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
 
-    async def fake_build_agent():
+    async def fake_build_agent(bearer_token=None):
         return (FakeMemoryAgent(), FakeUserMsg)
 
     monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
@@ -223,7 +223,7 @@ def test_ensure_agent_cache_is_bounded(monkeypatch):
         max_cached_agents=1,
     )
 
-    async def fake_build_agent():
+    async def fake_build_agent(bearer_token=None):
         return (FakeMemoryAgent(), FakeUserMsg)
 
     monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
@@ -243,7 +243,7 @@ def test_concurrent_ensure_agent_builds_one_agent_per_session(monkeypatch):
     kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
     build_calls = 0
 
-    async def fake_build_agent():
+    async def fake_build_agent(bearer_token=None):
         nonlocal build_calls
         build_calls += 1
         # Yield control so a concurrent caller can interleave here.
@@ -264,3 +264,72 @@ def test_concurrent_ensure_agent_builds_one_agent_per_session(monkeypatch):
     assert build_calls == 1
     first_agent = results[0][0]
     assert all(agent is first_agent for agent, _ in results)
+
+
+class TestPerTokenToolkitCache:
+    """SPEC-008 R-5: toolkits are cached per delegated token, never shared."""
+
+    def _kernel(self):
+        return AgentKernel(
+            settings=RuntimeSettings(
+                api_key="test-key",
+                tool_gateway_url="http://gw:8080",
+            )
+        )
+
+    def test_same_token_reuses_cached_toolkit(self, monkeypatch):
+        kernel = self._kernel()
+        calls = []
+
+        async def fake_build_toolkit(gateway_url, bearer_token=None):
+            calls.append((gateway_url, bearer_token))
+            return object()
+
+        monkeypatch.setattr(
+            "agent_service.tools.gateway_tools.build_toolkit", fake_build_toolkit
+        )
+
+        first = asyncio.run(kernel._ensure_toolkit("token-a"))
+        second = asyncio.run(kernel._ensure_toolkit("token-a"))
+
+        assert first is second
+        assert calls == [("http://gw:8080", "token-a")]
+
+    def test_different_tokens_get_distinct_toolkits(self, monkeypatch):
+        kernel = self._kernel()
+        seen_tokens = []
+
+        async def fake_build_toolkit(gateway_url, bearer_token=None):
+            seen_tokens.append(bearer_token)
+            return object()
+
+        monkeypatch.setattr(
+            "agent_service.tools.gateway_tools.build_toolkit", fake_build_toolkit
+        )
+
+        toolkit_a = asyncio.run(kernel._ensure_toolkit("token-a"))
+        toolkit_b = asyncio.run(kernel._ensure_toolkit("token-b"))
+
+        assert toolkit_a is not toolkit_b
+        assert seen_tokens == ["token-a", "token-b"]
+
+    def test_no_token_degrades_to_empty_toolkit_without_discovery(self, monkeypatch):
+        kernel = self._kernel()
+
+        async def fake_build_toolkit(gateway_url, bearer_token=None):
+            # build_toolkit is still invoked, but with no token discovery
+            # short-circuits to an empty Toolkit inside gateway_tools.
+            assert bearer_token is None
+            from agentscope.tool import Toolkit
+
+            return Toolkit()
+
+        monkeypatch.setattr(
+            "agent_service.tools.gateway_tools.build_toolkit", fake_build_toolkit
+        )
+
+        toolkit = asyncio.run(kernel._ensure_toolkit(None))
+
+        assert toolkit is not None
+        # Cached under the empty-key bucket.
+        assert asyncio.run(kernel._ensure_toolkit(None)) is toolkit

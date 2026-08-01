@@ -46,6 +46,18 @@ TOKEN_VERIFICATIONS = Counter(
     ["result"],
 )
 
+DELEGATION_EXCHANGES = Counter(
+    "delegation_exchange_total",
+    "Delegated-token exchange attempts at the gateway.",
+    ["result"],
+)
+
+DELEGATION_CACHE = Counter(
+    "delegation_cache_total",
+    "Per-user delegated-token cache lookups.",
+    ["result"],
+)
+
 
 def _handler_label(request: Request) -> str:
     # Templated route path (bounded cardinality), never the raw URL.
@@ -83,3 +95,11 @@ def record_policy_decision(action: str, decision: str) -> None:
 
 def record_token_verification(result: str) -> None:
     TOKEN_VERIFICATIONS.labels(result=result).inc()
+
+
+def record_delegation_exchange(result: str) -> None:
+    DELEGATION_EXCHANGES.labels(result=result).inc()
+
+
+def record_delegation_cache(result: str) -> None:
+    DELEGATION_CACHE.labels(result=result).inc()

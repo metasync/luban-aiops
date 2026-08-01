@@ -332,6 +332,17 @@ Workers should not accept arbitrary direct requests that bypass the control plan
 
 ## Service Identity Model
 
+> Implementation status (Release 1): the platform-to-platform service identity
+> pattern below is implemented as broker-mediated token delegation (ADR-0004,
+> SPEC-008). The gateway exchanges the verified user token for a short-lived,
+> audience-bound delegated token (`sub` = user, `act` = calling service,
+> `aud` = target audience) that `agent-platform` relays as a bearer token;
+> identity-broker remains the sole signing authority, roles are never elevated,
+> and audit logs record both the human subject (`sub`) and the acting service
+> (`act`). Platform JWTs are audience-bound (`aud`) to prevent cross-service
+> replay. Kubernetes workload-identity-bound short-lived tokens are the
+> documented upgrade path for the External Execution Identity.
+
 ### Human Identity
 
 Represents:

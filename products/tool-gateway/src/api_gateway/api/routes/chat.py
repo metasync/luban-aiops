@@ -7,6 +7,7 @@ from api_gateway.core.config import GatewaySettings, get_settings
 from api_gateway.core.observability import log_event
 from api_gateway.core.request_context import resolve_request_id
 from api_gateway.schemas.api import ChatRequest
+from api_gateway.services.delegation_client import obtain_delegated_token
 from api_gateway.services.gateway_service import (
     chat,
     chat_stream,
@@ -16,6 +17,17 @@ from api_gateway.services.gateway_service import (
 
 router = APIRouter()
 LOGGER = logging.getLogger(__name__)
+
+
+def _bearer_token(request: Request) -> str | None:
+    """Return the raw bearer token from the request, if present."""
+    authorization = request.headers.get("authorization")
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return token
 
 
 @router.post("/api/v1/chat")
@@ -29,12 +41,18 @@ async def chat_route(
     identity = await resolve_request_identity(settings, request, request_id)
     enforce_policy(settings, identity, "chat", request_id)
     user_id = identity.username  # type: ignore[union-attr]
+    delegated_token = await obtain_delegated_token(
+        settings,
+        identity.subject,  # type: ignore[union-attr]
+        _bearer_token(request),
+    )
     response = await chat(
         settings,
         request_id,
         user_id,
         body.message,
         body.session_id,
+        delegated_token,
     )
     log_event(
         LOGGER,
@@ -60,6 +78,11 @@ async def chat_stream_route(
     identity = await resolve_request_identity(settings, request, request_id)
     enforce_policy(settings, identity, "chat", request_id)
     user_id = identity.username  # type: ignore[union-attr]
+    delegated_token = await obtain_delegated_token(
+        settings,
+        identity.subject,  # type: ignore[union-attr]
+        _bearer_token(request),
+    )
     log_event(
         LOGGER,
         "chat_stream_started",
@@ -75,4 +98,5 @@ async def chat_stream_route(
         user_id=user_id,
         message=message,
         session_id=session_id,
+        delegated_token=delegated_token,
     )

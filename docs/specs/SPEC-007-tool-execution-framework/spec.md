@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `delivered`
 - owner: workspace maintainers
 - created: 2026-07-30
 - release slice: `Release 1` (read-only operations copilot)
@@ -162,10 +162,11 @@ R-4 requires both routes to be authenticated. `GET /api/v2/tools` is currently u
 
 ## Delivery Status
 
-R-1, R-2, R-3, R-5 and R-7 are implemented and covered by tests. R-4 and R-6 are partially implemented: the routes, policy enforcement, audit logging, Toolkit wiring and gateway discovery all exist, but the authenticated end-to-end path does not work pending Q-1, and identity context is not yet forwarded on invocation. The spec stays `draft` until those close.
+All requirements are delivered. R-1, R-2, R-3, R-5 and R-7 landed first; R-4 and R-6 were completed by SPEC-008 (broker-mediated token delegation, implementing ADR-0004), which closed Q-1 and Q-2: the gateway now exchanges the verified user token for a short-lived audience-bound delegated token that `agent-platform` relays as a bearer token, tool routes derive identity solely from the verified token, and discovery is gated behind a `tools:list` action. Q-3 (log redaction) remains a tracked deferral, not a blocker for this read-only release.
 
 ## Changelog
 
 - 2026-07-30: created as `draft`
 - 2026-07-30: implementation landed for R-1/R-2/R-3/R-5/R-7; R-4 and R-6 blocked on Q-1 (service-to-service identity). R-7 acceptance criterion corrected to the Service DNS name and port actually exposed by the dev overlay.
 - 2026-07-30: Q-1 resolved by ADR-0004 (broker-mediated token delegation); Q-2 (discovery authorization) folded into SPEC-008 R-6 as a `tools:list` action. R-4/R-6 remain blocked until SPEC-008 is delivered.
+- 2026-07-30: SPEC-008 delivered — R-4/R-6 complete, Q-1/Q-2 closed; status advanced to `delivered`. Q-3 (log redaction) remains a tracked deferral past the first non-dev deployment.

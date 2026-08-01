@@ -46,7 +46,9 @@ class PolicyEnforcementRouteTests(unittest.TestCase):
         )
 
     def test_operator_allowed_chat(self) -> None:
-        async def fake_chat(settings, request_id, user_id, message, session_id):
+        async def fake_chat(
+            settings, request_id, user_id, message, session_id, delegated_token=None
+        ):
             return {"session_id": "ses-1", "content": "ok", "status": "ok"}
 
         chat_patch, session_patch = self._patch_identity("operator")
@@ -60,7 +62,9 @@ class PolicyEnforcementRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_observer_allowed_chat(self) -> None:
-        async def fake_chat(settings, request_id, user_id, message, session_id):
+        async def fake_chat(
+            settings, request_id, user_id, message, session_id, delegated_token=None
+        ):
             return {"session_id": "ses-1", "content": "ok", "status": "ok"}
 
         chat_patch, session_patch = self._patch_identity("read-only-observer")
@@ -104,7 +108,9 @@ class PolicyEnforcementRouteTests(unittest.TestCase):
         self.assertEqual(response.json()["detail"]["action"], "chat")
 
     def test_synthetic_developer_allowed_all_actions(self) -> None:
-        async def fake_chat(settings, request_id, user_id, message, session_id):
+        async def fake_chat(
+            settings, request_id, user_id, message, session_id, delegated_token=None
+        ):
             return {"session_id": "ses-1", "content": "ok", "status": "ok"}
 
         async def fake_create(settings, request_id, user_id):

@@ -57,3 +57,4 @@ class IdentityContext(BaseModel):
     email: str | None = None
     groups: list[str] = Field(default_factory=list)
     roles: list[str]
+    actor: str | None = None

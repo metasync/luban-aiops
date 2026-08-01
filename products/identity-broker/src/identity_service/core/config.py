@@ -1,8 +1,52 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
+
+
+@dataclass(frozen=True)
+class ServiceClient:
+    """A registered service caller permitted to request delegated tokens (R-3).
+
+    ``allowed_audiences`` pins the audiences this client may request; the
+    exchange endpoint rejects any audience not in this list.
+    """
+
+    client_id: str
+    secret: str
+    allowed_audiences: tuple[str, ...] = ()
+
+
+def _parse_service_clients(raw: str) -> tuple[ServiceClient, ...]:
+    """Parse ``IDENTITY_SERVICE_CLIENTS``.
+
+    Format: comma-separated entries of ``client_id:secret:aud1|aud2``. The
+    audience segment is optional (defaults to no allowed audiences). Example:
+    ``tool-gateway:s3cr3t:tool-gateway``.
+    """
+    clients: list[ServiceClient] = []
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        parts = entry.split(":")
+        client_id = parts[0].strip()
+        secret = parts[1].strip() if len(parts) > 1 else ""
+        audiences = tuple(
+            aud.strip()
+            for aud in (parts[2].split("|") if len(parts) > 2 else [])
+            if aud.strip()
+        )
+        if client_id and secret:
+            clients.append(
+                ServiceClient(
+                    client_id=client_id,
+                    secret=secret,
+                    allowed_audiences=audiences,
+                )
+            )
+    return tuple(clients)
 
 
 @dataclass(frozen=True)
@@ -17,6 +61,9 @@ class IdentitySettings:
     jwt_private_key_path: str | None = None
     jwt_token_ttl_seconds: int = 900
     jwt_issuer: str = "luban-identity-broker"
+    jwt_audience: str = "tool-gateway"
+    delegated_token_ttl_seconds: int = 300
+    service_clients: tuple[ServiceClient, ...] = field(default_factory=tuple)
 
     @classmethod
     def from_env(cls) -> "IdentitySettings":
@@ -42,6 +89,13 @@ class IdentitySettings:
                 os.getenv("IDENTITY_TOKEN_TTL_SECONDS", "900")
             ),
             jwt_issuer=os.getenv("IDENTITY_TOKEN_ISSUER", "luban-identity-broker"),
+            jwt_audience=os.getenv("IDENTITY_TOKEN_AUDIENCE", "tool-gateway"),
+            delegated_token_ttl_seconds=int(
+                os.getenv("IDENTITY_DELEGATED_TOKEN_TTL_SECONDS", "300")
+            ),
+            service_clients=_parse_service_clients(
+                os.getenv("IDENTITY_SERVICE_CLIENTS", "")
+            ),
         )
 
 

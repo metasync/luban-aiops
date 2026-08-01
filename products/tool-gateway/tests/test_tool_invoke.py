@@ -1,16 +1,28 @@
-"""Tool invocation endpoint tests (SPEC-007 R-4)."""
+"""Tool endpoint tests (SPEC-007 R-4, re-pointed per SPEC-008 R-6).
 
+Invoke tests exercise the real token-verification path: a delegated-style
+token (audience ``tool-gateway``, RFC 8693 ``act`` actor) is minted and
+verified through ``verify_token`` (JWKS client patched to a controlled key),
+so the auth path that hid the original 401 is genuinely exercised rather than
+monkeypatched away.
+"""
+
+import time
 import unittest
 from unittest.mock import patch
 
+import jwt as pyjwt
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 from api_gateway.app import create_app
 from api_gateway.core.config import GatewaySettings, get_settings
-from api_gateway.schemas.api import IdentityContext
+from api_gateway.services import token_verifier
 from api_gateway.services.policy_engine import reset_policy_state
 from api_gateway.tools.base import BaseTool, ToolDefinition, ToolResult, build_evidence
 from api_gateway.tools.registry import ToolRegistry
+
+_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
 
 class _EchoTool(BaseTool):
@@ -53,38 +65,44 @@ def _build_registry() -> ToolRegistry:
     return registry
 
 
-def _identity(role: str) -> IdentityContext:
-    return IdentityContext(
-        subject=f"user-{role}",
-        username=f"{role}.user",
-        roles=[role],
+def _mint_delegated(role: str, audience: str = "tool-gateway") -> str:
+    """Mint a delegated-style token for a user acting via agent-platform."""
+    now = int(time.time())
+    claims = {
+        "iss": "luban-identity-broker",
+        "sub": f"user-{role}",
+        "username": f"{role}.user",
+        "roles": [role],
+        "groups": [],
+        "aud": [audience],
+        "act": {"sub": "agent-platform"},
+        "iat": now,
+        "exp": now + 300,
+    }
+    return pyjwt.encode(claims, _KEY, algorithm="RS256")
+
+
+def _patch_jwks():
+    """Patch the JWKS client to resolve the controlled test public key."""
+    public_key = _KEY.public_key()
+    fake_client = type(
+        "FakeClient",
+        (),
+        {
+            "get_signing_key_from_jwt": lambda _self, _t: type(
+                "K", (), {"key": public_key}
+            )()
+        },
+    )()
+    return patch.object(
+        token_verifier, "_get_jwks_client", return_value=fake_client
     )
 
 
 class ToolListEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         reset_policy_state()
-        app = create_app()
-        app.state.tool_registry = _build_registry()
-        app.dependency_overrides[get_settings] = lambda: GatewaySettings(
-            require_auth=False
-        )
-        self.client = TestClient(app)
-
-    def tearDown(self) -> None:
-        reset_policy_state()
-
-    def test_list_tools_returns_definitions(self) -> None:
-        response = self.client.get("/api/v2/tools")
-        self.assertEqual(response.status_code, 200)
-        tools = {tool["name"]: tool for tool in response.json()}
-        self.assertEqual(set(tools), {"test.echo", "test.explode"})
-        self.assertEqual(tools["test.echo"]["risk_level"], "read")
-
-
-class ToolInvokeEndpointTests(unittest.TestCase):
-    def setUp(self) -> None:
-        reset_policy_state()
+        token_verifier.reset_verifier_state()
         app = create_app()
         app.state.tool_registry = _build_registry()
         app.dependency_overrides[get_settings] = lambda: GatewaySettings(
@@ -94,23 +112,77 @@ class ToolInvokeEndpointTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         reset_policy_state()
+        token_verifier.reset_verifier_state()
 
-    def _patch_identity(self, role: str):
-        identity = _identity(role)
+    def test_list_tools_requires_authentication(self) -> None:
+        response = self.client.get("/api/v2/tools")
+        self.assertEqual(response.status_code, 401)
 
-        async def fake_identity(settings, request, request_id):
-            return identity
+    def test_list_tools_allowed_for_operator(self) -> None:
+        with _patch_jwks():
+            response = self.client.get(
+                "/api/v2/tools",
+                headers={"Authorization": f"Bearer {_mint_delegated('operator')}"},
+            )
+        self.assertEqual(response.status_code, 200)
+        tools = {tool["name"]: tool for tool in response.json()}
+        self.assertEqual(set(tools), {"test.echo", "test.explode"})
+        self.assertEqual(tools["test.echo"]["risk_level"], "read")
 
-        return patch(
-            "api_gateway.api.routes.tools.resolve_request_identity",
-            fake_identity,
+    def test_list_tools_denied_for_observer(self) -> None:
+        with _patch_jwks():
+            response = self.client.get(
+                "/api/v2/tools",
+                headers={
+                    "Authorization": f"Bearer {_mint_delegated('read-only-observer')}"
+                },
+            )
+        self.assertEqual(response.status_code, 403)
+
+    def test_list_tools_rejects_wrong_audience_before_policy(self) -> None:
+        with _patch_jwks():
+            response = self.client.get(
+                "/api/v2/tools",
+                headers={
+                    "Authorization": f"Bearer {_mint_delegated('operator', 'other')}"
+                },
+            )
+        self.assertEqual(response.status_code, 401)
+
+
+class ToolInvokeEndpointTests(unittest.TestCase):
+    def setUp(self) -> None:
+        reset_policy_state()
+        token_verifier.reset_verifier_state()
+        app = create_app()
+        app.state.tool_registry = _build_registry()
+        app.dependency_overrides[get_settings] = lambda: GatewaySettings(
+            require_auth=True
+        )
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        reset_policy_state()
+        token_verifier.reset_verifier_state()
+
+    def _invoke(self, token: str, tool_name: str, parameters: dict, request_id: str):
+        return self.client.post(
+            "/api/v2/tools/invoke",
+            json={"tool_name": tool_name, "parameters": parameters, "request_id": request_id},
+            headers={"Authorization": f"Bearer {token}"},
         )
 
+    def test_invoke_requires_authentication(self) -> None:
+        response = self.client.post(
+            "/api/v2/tools/invoke",
+            json={"tool_name": "test.echo", "parameters": {}, "request_id": "req-0"},
+        )
+        self.assertEqual(response.status_code, 401)
+
     def test_invoke_success_operator(self) -> None:
-        with self._patch_identity("operator"):
-            response = self.client.post(
-                "/api/v2/tools/invoke",
-                json={"tool_name": "test.echo", "parameters": {"msg": "hi"}, "request_id": "req-1"},
+        with _patch_jwks():
+            response = self._invoke(
+                _mint_delegated("operator"), "test.echo", {"msg": "hi"}, "req-1"
             )
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -120,10 +192,9 @@ class ToolInvokeEndpointTests(unittest.TestCase):
         self.assertEqual(body["evidence"]["risk_level"], "read")
 
     def test_invoke_denied_for_observer(self) -> None:
-        with self._patch_identity("read-only-observer"):
-            response = self.client.post(
-                "/api/v2/tools/invoke",
-                json={"tool_name": "test.echo", "parameters": {}, "request_id": "req-2"},
+        with _patch_jwks():
+            response = self._invoke(
+                _mint_delegated("read-only-observer"), "test.echo", {}, "req-2"
             )
         self.assertEqual(response.status_code, 403)
         body = response.json()
@@ -131,10 +202,9 @@ class ToolInvokeEndpointTests(unittest.TestCase):
         self.assertEqual(body["error"]["code"], "POLICY_DENIED")
 
     def test_invoke_unknown_tool(self) -> None:
-        with self._patch_identity("operator"):
-            response = self.client.post(
-                "/api/v2/tools/invoke",
-                json={"tool_name": "nonexistent", "parameters": {}, "request_id": "req-3"},
+        with _patch_jwks():
+            response = self._invoke(
+                _mint_delegated("operator"), "nonexistent", {}, "req-3"
             )
         self.assertEqual(response.status_code, 400)
         body = response.json()
@@ -142,20 +212,18 @@ class ToolInvokeEndpointTests(unittest.TestCase):
         self.assertEqual(body["error"]["code"], "TOOL_NOT_FOUND")
 
     def test_invoke_developer_allowed(self) -> None:
-        with self._patch_identity("developer"):
-            response = self.client.post(
-                "/api/v2/tools/invoke",
-                json={"tool_name": "test.echo", "parameters": {}, "request_id": "req-4"},
+        with _patch_jwks():
+            response = self._invoke(
+                _mint_delegated("developer"), "test.echo", {}, "req-4"
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "success")
 
     def test_invoke_tool_exception_returns_structured_error(self) -> None:
         """A raising tool must still yield a tool-result envelope, not a 500."""
-        with self._patch_identity("operator"):
-            response = self.client.post(
-                "/api/v2/tools/invoke",
-                json={"tool_name": "test.explode", "parameters": {}, "request_id": "req-5"},
+        with _patch_jwks():
+            response = self._invoke(
+                _mint_delegated("operator"), "test.explode", {}, "req-5"
             )
         self.assertEqual(response.status_code, 400)
         body = response.json()
@@ -163,6 +231,13 @@ class ToolInvokeEndpointTests(unittest.TestCase):
         self.assertEqual(body["error"]["code"], "TOOL_EXECUTION_ERROR")
         self.assertIn("boom", body["error"]["message"])
         self.assertEqual(body["evidence"]["risk_level"], "read")
+
+    def test_invoke_rejects_wrong_audience_before_policy(self) -> None:
+        with _patch_jwks():
+            response = self._invoke(
+                _mint_delegated("operator", "other-service"), "test.echo", {}, "req-6"
+            )
+        self.assertEqual(response.status_code, 401)
 
 
 class ToolRegistryDependencyTests(unittest.TestCase):
@@ -174,5 +249,14 @@ class ToolRegistryDependencyTests(unittest.TestCase):
 
         app = FastAPI()
         app.include_router(router)
+        # tools:list now requires auth; with no registry the dependency still
+        # resolves the registry first, yielding 503 once auth is satisfied.
+        app.dependency_overrides[get_settings] = lambda: GatewaySettings(
+            require_auth=False
+        )
         response = TestClient(app).get("/api/v2/tools")
         self.assertEqual(response.status_code, 503)
+
+
+if __name__ == "__main__":
+    unittest.main()

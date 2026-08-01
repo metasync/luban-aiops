@@ -49,3 +49,14 @@ rules:
       actions_any: ["tools:invoke"]
     decision:
       outcome: allow
+
+  - id: allow-operators-tools-list
+    domain: action_authz
+    description: Operational and developer roles may list available tools.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "operator", "developer"]
+      actions_any: ["tools:list"]
+    decision:
+      outcome: allow

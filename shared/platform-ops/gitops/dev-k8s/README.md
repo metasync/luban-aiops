@@ -171,6 +171,13 @@ At minimum, provide:
 
 - `OIDC_CLIENT_SECRET`
 
+For broker-mediated token delegation (SPEC-008), two optional secrets carry the service-identity credential. The non-secret halves (`GATEWAY_TOKEN_AUDIENCE`, `GATEWAY_SERVICE_CLIENT_ID`, `IDENTITY_TOKEN_AUDIENCE`, `IDENTITY_DELEGATED_TOKEN_TTL_SECONDS`) are committed in the `runtime-config.env` fragments above; only the secrets live here:
+
+- `api-gateway-runtime-secrets` (optional, referenced by the `api-gateway` deployment), providing `GATEWAY_SERVICE_CLIENT_SECRET` — see `base/tool-gateway/runtime-secrets.example.env`
+- `identity-service-runtime-secrets` (optional, referenced by the `identity-service` deployment), additionally providing `IDENTITY_SERVICE_CLIENTS` (the service-client registry, format `client_id:secret:aud1|aud2`) — see `base/identity-broker/runtime-secrets.example.env`
+
+The gateway's `GATEWAY_SERVICE_CLIENT_SECRET` must match the secret registered for client `tool-gateway` in the broker's `IDENTITY_SERVICE_CLIENTS`. The credential confers no user authority; it only authorizes the token-exchange operation. Kubernetes workload-identity-bound short-lived tokens are the documented upgrade path (ADR-0004).
+
 ## Build Images
 
 ```bash

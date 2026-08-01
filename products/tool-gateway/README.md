@@ -52,14 +52,15 @@ Current implementation status:
 - targets the platform-owned agent-service contract (`/api/v2/`) directly; no dual-backend resolution
 - routes session and chat bridging through a single `agent_client` module
 - verifies bearer tokens locally via JWKS (no per-request network call to identity-broker)
-- validates the `iss` claim against `IDENTITY_TOKEN_ISSUER`; rejects expired/malformed tokens with `401`
+- validates the `iss` claim against `IDENTITY_TOKEN_ISSUER` and the `aud` claim against `GATEWAY_TOKEN_AUDIENCE`; rejects expired/malformed/wrong-audience tokens with `401`
 - derives `X-User-ID` exclusively from verified token claims; caller-asserted headers are ignored
 - when auth is optional and no token is present, injects a synthetic dev identity (logged as `synthetic: true`)
-- enforces deny-by-default authorization on business routes (`chat`, `session:create`, `session:read`, `tools:invoke`) against a versioned role→action policy bundle; denials return a structured `403` and are audit-logged
+- performs broker-mediated token delegation (SPEC-008 / ADR-0004): on a verified chat request it exchanges the user token for a short-lived delegated token (cached per user subject) and forwards it downstream to `agent-platform` as `Authorization: Bearer`; exchange failure is non-fatal (chat proceeds tool-less)
+- enforces deny-by-default authorization on business routes (`chat`, `session:create`, `session:read`, `tools:list`, `tools:invoke`) against a versioned role→action policy bundle; denials return a structured `403` and are audit-logged
 - loads the policy bundle from `GATEWAY_POLICY_PATH`, falling back to a packaged default kept in sync with `shared/shared-contracts`
 - provides a tool execution framework (`src/api_gateway/tools/`) with a `ToolRegistry`, `BaseTool` abstraction, and structured evidence envelope (SPEC-007)
 - ships a Kubernetes read-only connector (`k8s.list_pods`, `k8s.get_pod`, `k8s.get_events`, `k8s.get_pod_logs`) using `kubernetes-client/python`
-- exposes `GET /api/v2/tools` (tool discovery) and `POST /api/v2/tools/invoke` (tool execution with policy enforcement and audit)
+- exposes `GET /api/v2/tools` (tool discovery, gated by `tools:list`) and `POST /api/v2/tools/invoke` (tool execution gated by `tools:invoke`); both derive identity solely from the verified token — any identity in a request body is never trusted
 - organizes the FastAPI package by app bootstrap, route modules, shared request/config helpers, and service orchestration
 - validates chat and session request bodies against `shared/shared-contracts` aligned `pydantic` models (`422` on malformed input)
 
@@ -85,6 +86,14 @@ Current runtime environment knobs:
   - when `true`, registers the Kubernetes read-only connector; defaults to `false`
 - `GATEWAY_K8S_NAMESPACE`
   - default namespace for K8s tool operations; when unset, tools use the `namespace` parameter or fall back to `default`
+- `GATEWAY_TOKEN_AUDIENCE`
+  - expected `aud` claim value enforced on inbound tokens; defaults to `tool-gateway`
+- `GATEWAY_SERVICE_CLIENT_ID`, `GATEWAY_SERVICE_CLIENT_SECRET`
+  - service credential used to authenticate to the identity-broker exchange endpoint for token delegation (SPEC-008); the secret is loaded from a K8s Secret, not committed; when unset, delegation is skipped and the agent runs tool-less
+- `GATEWAY_DELEGATION_AUDIENCE`
+  - audience requested for delegated tokens; defaults to `tool-gateway`
+- `GATEWAY_DEV_SIGNING_KEY_PATH`
+  - optional PEM key used to sign the synthetic dev subject token exchanged under the no-SSO path; when unset an ephemeral key is used
 - `OTEL_ENABLED`
   - master switch for the OTLP push pipeline (traces + metrics); defaults to `false`; when disabled, the `/metrics` surface is unaffected
 - `OTEL_EXPORTER_OTLP_ENDPOINT`
@@ -94,7 +103,7 @@ Current runtime environment knobs:
 
 Observability surface (see `SPEC-005` and `shared/shared-contracts/observability-conventions.md`):
 
-- `GET /metrics` — always-on Prometheus exposition endpoint (auth-exempt, policy-exempt), reporting standard HTTP RED metrics (`http_requests_total{method,handler,status}`, `http_request_duration_seconds{method,handler}`) plus `gateway_policy_decisions_total{action,decision}` and `gateway_token_verification_total{result}` (valid | invalid | expired | missing)
+- `GET /metrics` — always-on Prometheus exposition endpoint (auth-exempt, policy-exempt), reporting standard HTTP RED metrics (`http_requests_total{method,handler,status}`, `http_request_duration_seconds{method,handler}`) plus `gateway_policy_decisions_total{action,decision}`, `gateway_token_verification_total{result}` (valid | invalid | expired | missing), and delegation metrics `delegation_exchange_total{result}` and `delegation_cache_total{result}` (SPEC-008)
 - opt-in OTLP push via `opentelemetry-instrumentation-fastapi` + `opentelemetry-exporter-otlp` when `OTEL_ENABLED=true`; fail-open — an unreachable collector drops telemetry without affecting requests
 - `x-request-id` remains the log/portal correlation key; when OTel tracing is active it equals the W3C `trace_id`
 

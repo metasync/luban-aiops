@@ -36,6 +36,12 @@ TOKENS_ISSUED = Counter(
     "Platform JWTs issued by the identity broker.",
 )
 
+TOKEN_EXCHANGES = Counter(
+    "token_exchange_total",
+    "Delegated-token exchange attempts at the identity broker.",
+    ["result"],
+)
+
 
 def _handler_label(request: Request) -> str:
     # Templated route path (bounded cardinality), never the raw URL.
@@ -69,3 +75,8 @@ def setup_metrics(app: FastAPI) -> None:
 
 def record_token_issued() -> None:
     TOKENS_ISSUED.inc()
+
+
+def record_token_exchange(result: str) -> None:
+    """Record an exchange attempt outcome (``success`` or ``error``)."""
+    TOKEN_EXCHANGES.labels(result=result).inc()

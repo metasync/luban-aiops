@@ -27,6 +27,11 @@ class GatewaySettings:
     identity_jwks_url: str = DEFAULT_IDENTITY_JWKS_URL
     identity_jwks_cache_seconds: int = 300
     identity_token_issuer: str = "luban-identity-broker"
+    token_audience: str = "tool-gateway"
+    service_client_id: str = ""
+    service_client_secret: str = ""
+    delegation_audience: str = "tool-gateway"
+    dev_signing_key_path: str = ""
     dev_user: str = "dev.operator"
     policy_path: str = ""
     chat_response_timeout_seconds: float = 30.0
@@ -55,6 +60,11 @@ class GatewaySettings:
             identity_token_issuer=os.getenv(
                 "IDENTITY_TOKEN_ISSUER", "luban-identity-broker"
             ),
+            token_audience=os.getenv("GATEWAY_TOKEN_AUDIENCE", "tool-gateway"),
+            service_client_id=os.getenv("GATEWAY_SERVICE_CLIENT_ID", ""),
+            service_client_secret=os.getenv("GATEWAY_SERVICE_CLIENT_SECRET", ""),
+            delegation_audience=os.getenv("GATEWAY_DELEGATION_AUDIENCE", "tool-gateway"),
+            dev_signing_key_path=os.getenv("GATEWAY_DEV_SIGNING_KEY_PATH", ""),
             dev_user=os.getenv("GATEWAY_DEV_USER", "dev.operator"),
             policy_path=os.getenv("GATEWAY_POLICY_PATH", ""),
             chat_response_timeout_seconds=float(

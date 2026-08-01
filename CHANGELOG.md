@@ -8,6 +8,39 @@ published product versions.
 
 ## Unreleased
 
+### Added — Release 1 (SPEC-008: Service-to-Service Identity)
+
+- Implemented ADR-0004 broker-mediated token delegation, closing SPEC-007 R-4/R-6
+  and open questions Q-1/Q-2 and completing Release 1.
+- identity-broker: platform JWTs are now audience-bound (`aud`, default
+  `["tool-gateway"]`); added `POST /api/v1/auth/exchange` which authenticates a
+  registered service credential, verifies the subject token, and mints a
+  short-lived delegated token (`sub`/`username`/`roles` copied never elevated,
+  `act` naming the caller, `aud` = requested audience, TTL
+  `IDENTITY_DELEGATED_TOKEN_TTL_SECONDS` default 300s). New service-client
+  registry `IDENTITY_SERVICE_CLIENTS` and `token_exchange_total` metric.
+- tool-gateway: verifies token `aud` (`GATEWAY_TOKEN_AUDIENCE`); exchanges the
+  verified user token for a delegated token via a per-user TTL cache
+  (`delegation_exchange_total`, `delegation_cache_total` metrics) and forwards
+  it downstream as `Authorization: Bearer`; exchange failure is non-fatal
+  (chat proceeds tool-less). Tool routes derive identity solely from the
+  verified token (`identity_context` removed from the invoke contract);
+  `GET /api/v2/tools` is authenticated and gated by a new `tools:list` policy
+  action; audit logs record both `sub` and `act`.
+- agent-platform: relays the delegated token as a bearer token on tool
+  discovery and invocation, bound per-user into the toolkit closures (no
+  cross-user sharing); removed `identity_context` from the invoke payload;
+  no-token path degrades to an empty Toolkit / structured error.
+- contracts: `identity-token.schema.json` documents `aud` (required) and `act`
+  (optional) with a delegated-token note; `policy-default.yaml` adds
+  `tools:list`. Contract tests bind both gateway and identity-broker models to
+  the updated schema.
+- dev-k8s overlay: sets `GATEWAY_TOKEN_AUDIENCE`, `GATEWAY_SERVICE_CLIENT_ID`,
+  `IDENTITY_TOKEN_AUDIENCE`, `IDENTITY_DELEGATED_TOKEN_TTL_SECONDS`; the gateway
+  and broker service secrets are provisioned as optional K8s Secrets
+  (`api-gateway-runtime-secrets`, `identity-service-runtime-secrets`) and are
+  not committed.
+
 ### Changed — Single Image Build Path
 
 - Folded `build-images.sh` into `make build`: the root target now builds all

@@ -3,6 +3,8 @@
 import unittest
 from unittest.mock import patch
 
+import jwt as pyjwt
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -10,6 +12,7 @@ from starlette.requests import Request
 from api_gateway.app import create_app
 from api_gateway.core.config import GatewaySettings, get_settings
 from api_gateway.schemas.api import IdentityContext
+from api_gateway.services import token_verifier
 from api_gateway.services.gateway_service import resolve_request_identity
 from api_gateway.services.token_verifier import TokenVerificationError, verify_token
 
@@ -139,7 +142,9 @@ class RolePropagationTests(unittest.TestCase):
         async def fake_identity(settings, request, request_id):
             return identity
 
-        async def fake_chat(settings, request_id, user_id, message, session_id):
+        async def fake_chat(
+            settings, request_id, user_id, message, session_id, delegated_token=None
+        ):
             return {
                 "session_id": "ses-1",
                 "request_id": request_id,
@@ -166,6 +171,74 @@ class RolePropagationTests(unittest.TestCase):
         self.assertTrue(chat_events)
         self.assertIn('"roles": ["operator"]', chat_events[0])
         self.assertIn('"user_id": "alice"', chat_events[0])
+
+
+class TokenAudienceEnforcementTests(unittest.TestCase):
+    """R-1: verify_token enforces the configured audience."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    def setUp(self) -> None:
+        token_verifier.reset_verifier_state()
+
+    def tearDown(self) -> None:
+        token_verifier.reset_verifier_state()
+
+    def _mint(self, **claims) -> str:
+        payload = {
+            "iss": "luban-identity-broker",
+            "sub": "user-1",
+            "username": "alice",
+            "roles": ["operator"],
+            "aud": ["tool-gateway"],
+            "iat": 1_000_000,
+            "exp": 9_999_999_999,
+        }
+        payload.update(claims)
+        return pyjwt.encode(payload, self._key, algorithm="RS256")
+
+    def _verify(self, token: str) -> IdentityContext:
+        settings = GatewaySettings(token_audience="tool-gateway")
+        public_key = self._key.public_key()
+        fake_client = type(
+            "FakeClient",
+            (),
+            {
+                "get_signing_key_from_jwt": lambda _self, _t: type(
+                    "K", (), {"key": public_key}
+                )()
+            },
+        )()
+        with patch.object(
+            token_verifier, "_get_jwks_client", return_value=fake_client
+        ):
+            return verify_token(settings, token)
+
+    def test_valid_audience_is_accepted(self) -> None:
+        identity = self._verify(self._mint())
+        self.assertEqual(identity.subject, "user-1")
+        self.assertEqual(identity.roles, ["operator"])
+
+    def test_wrong_audience_is_rejected(self) -> None:
+        with self.assertRaises(TokenVerificationError) as ctx:
+            self._verify(self._mint(aud=["other-service"]))
+        self.assertIn("audience", ctx.exception.detail)
+
+    def test_missing_audience_is_rejected(self) -> None:
+        # Mint a token without the aud claim.
+        payload = {
+            "iss": "luban-identity-broker",
+            "sub": "user-1",
+            "username": "alice",
+            "roles": ["operator"],
+            "iat": 1_000_000,
+            "exp": 9_999_999_999,
+        }
+        token = pyjwt.encode(payload, self._key, algorithm="RS256")
+        with self.assertRaises(TokenVerificationError):
+            self._verify(token)
 
 
 if __name__ == "__main__":

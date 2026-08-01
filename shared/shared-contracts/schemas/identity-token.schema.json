@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/identity-token.schema.json",
   "title": "Identity Token Claims (v1)",
-  "description": "JWT claim set issued by identity-broker and verified locally by the gateway. Documented for contract alignment; not transported as a JSON body.",
+  "description": "JWT claim set issued by identity-broker and verified locally by the gateway. Documented for contract alignment; not transported as a JSON body. Two token kinds share this shape: portal tokens (issued at login/refresh, audience-bound to the gateway, no actor) and delegated tokens (minted by the exchange endpoint for service-to-service calls, carrying an RFC 8693 'act' actor claim; see SPEC-008 / ADR-0004).",
   "type": "object",
-  "required": ["iss", "sub", "username", "iat", "exp"],
+  "required": ["iss", "sub", "username", "aud", "iat", "exp"],
   "properties": {
     "iss": {
       "type": "string",
@@ -31,6 +31,16 @@
       "type": "array",
       "items": {"type": "string"},
       "description": "Raw group memberships from the identity provider."
+    },
+    "aud": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Intended audience(s). Portal tokens carry [\"tool-gateway\"]; delegated tokens carry the requested service audience. The gateway verifies this against GATEWAY_TOKEN_AUDIENCE and rejects tokens whose audience does not include it."
+    },
+    "act": {
+      "type": "object",
+      "description": "RFC 8693 actor claim. Present only on delegated tokens, where it identifies the acting service (e.g. {\"sub\": \"agent-platform\"}); absent on portal tokens. Logged for audit attribution but not used for policy decisions.",
+      "additionalProperties": true
     },
     "iat": {
       "type": "integer",
