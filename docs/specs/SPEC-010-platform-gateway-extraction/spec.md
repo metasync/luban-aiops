@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: chi
 - created: 2026-07-30
 - release slice: R2 start — structural prerequisite before any new edge
@@ -83,8 +83,9 @@ Acceptance criteria:
   service client (its own credential / workload-token path), and
   delegated tokens minted for the tool path keep `aud = tool-gateway`
   with `act` naming the edge — the tool side sees no claim-shape change
-- portal-issued platform tokens are audience-bound to the edge (per the
-  resolution of Q-3) and the edge enforces that audience on verification
+- portal-issued platform tokens are audience-bound to `platform-gateway`
+  (Q-3 resolved) and the edge enforces that audience on verification;
+  delegated tokens keep `aud = tool-gateway` unchanged
 - deny-by-default policy stays intact: the policy bundle is loaded by the
   edge (portal actions) and by `tool-gateway` (tool actions) with the same
   deny semantics; no action is granted that was not granted before
@@ -132,9 +133,9 @@ Acceptance criteria:
 - products touched: new `products/platform-gateway`; `products/tool-gateway`
   (removals); `products/identity-broker` (registry/audience entries);
   `products/operator-portal` (nginx proxy target)
-- contracts touched: `identity-token.schema.json` only if Q-3 renames the
-  portal audience; policy bundle split into edge-owned and tool-owned
-  action sets (same file convention)
+- contracts touched: `identity-token.schema.json` for the portal audience
+  rename (Q-3 resolution); policy bundle stays a single shared file loaded
+  by both services (same convention as today)
 - identity / policy / audit impact: no weakening — verification paths,
   audiences, deny-by-default, and audit fields preserved; one new service
   credential/workload subject registered at the broker
@@ -142,26 +143,22 @@ Acceptance criteria:
 
 ## Open Questions
 
-- **Q-1: env prefix scope.** Do the edge's `GATEWAY_*` environment names
-  rename to `PLATFORM_*` (clean naming, touches config, overlays, docs,
-  tests) or stay `GATEWAY_*` on the new product (minimal churn, name no
-  longer matches the product)? Recommendation pending discussion.
-- **Q-2: Kubernetes/image naming.** Rename the `api-gateway` deployment,
-  service, and image to `platform-gateway` (consistent, touches portal
-  nginx and operator habits like port-forward names) or keep `api-gateway`
-  as the deployed name (zero overlay churn, diverges from product name)?
-- **Q-3: portal token audience.** Platform JWTs issued for the portal are
-  audience-bound to `tool-gateway` today. After the split, rename the
-  audience to `platform-gateway` (accurate binding, a deliberate identity
-  contract change shipped together) or keep `tool-gateway` (no contract
-  change, but the audience name becomes false)?
-- **Q-4: edge's broker client id.** Register the edge's exchange client as
-  a new `platform-gateway` client (delegated tokens' `act.sub` becomes
-  `platform-gateway`, audit gets more accurate attribution) or reuse the
-  existing `tool-gateway` client entry (no broker-side rename, but `act`
-  misattributes the acting service)?
+None — all resolved (see Changelog).
 
 ## Changelog
 
 - 2026-07-30: created as `draft`, implementing ADR-0005; open questions
   Q-1…Q-4 recorded for maintainer resolution before approval
+- 2026-07-30: open questions resolved, all in favor of the clean rename
+  shipped together with the split. Q-1: the edge's env names rename
+  `GATEWAY_*` → `PLATFORM_GATEWAY_*`; `GATEWAY_*` stays only for
+  tool-gateway's tool-scoped settings. Q-2: the `api-gateway` deployment,
+  service, and image rename to `platform-gateway` (portal proxy target
+  included); the tool side deploys as the new `tool-gateway` service with
+  its own SA/RBAC, image `luban-aiops/tool-gateway`. Q-3: portal platform
+  JWTs change audience `tool-gateway` → `platform-gateway` (broker default,
+  overlay, schema note, edge verifier); delegated tokens keep
+  `aud = tool-gateway`. Q-4: the edge registers as a new `platform-gateway`
+  broker client, so delegated tokens' `act.sub` becomes `platform-gateway`
+  and the old `tool-gateway` client entry is removed. Approved by workspace
+  maintainers; implementation may begin per `plan.md`

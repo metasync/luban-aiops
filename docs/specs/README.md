@@ -123,4 +123,4 @@ Mechanical enforcement:
 | `SPEC-007` | Read-only tool execution framework | `delivered` |
 | `SPEC-008` | Service-to-service identity — broker-mediated token delegation | `delivered` |
 | `SPEC-009` | Pre-production hardening — tool output redaction and workload-identity service tokens | `delivered` |
-| `SPEC-010` | Platform gateway extraction — splitting `tool-gateway` into `platform-gateway` and `tool-gateway` | `draft` |
+| `SPEC-010` | Platform gateway extraction — splitting `tool-gateway` into `platform-gateway` and `tool-gateway` | `approved` |
