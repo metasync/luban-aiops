@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: chi
 - created: 2026-07-30
 - release slice: Release 1 closure gate — must be `delivered` before the first
@@ -155,3 +155,10 @@ None — all resolved (see Changelog).
   patterns; a generic key-substring matcher rejected as untestable and
   over-redaction-prone. Approved by workspace maintainers; implementation may
   begin per `plan.md`
+- 2026-07-30: delivered per `plan.md` — redaction engine at the `invoke_tool`
+  choke point with fail-closed `REDACTION_OVERFLOW` at the 20% bound,
+  `gateway_tool_redacted_spans_total` metric and `redacted_spans` audit field;
+  broker exchange accepts projected service-account tokens (cluster OIDC
+  issuer JWKS, audience check, workload-subject registry) and the gateway
+  prefers `GATEWAY_WORKLOAD_TOKEN_PATH` with a logged static-secret fallback;
+  overlays/docs aligned; `make verify` green (88 + 47 + 123 tests)

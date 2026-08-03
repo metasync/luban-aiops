@@ -58,6 +58,12 @@ DELEGATION_CACHE = Counter(
     ["result"],
 )
 
+TOOL_REDACTED_SPANS = Counter(
+    "gateway_tool_redacted_spans_total",
+    "Credential spans redacted from tool results (SPEC-009).",
+    ["tool"],
+)
+
 
 def _handler_label(request: Request) -> str:
     # Templated route path (bounded cardinality), never the raw URL.
@@ -103,3 +109,8 @@ def record_delegation_exchange(result: str) -> None:
 
 def record_delegation_cache(result: str) -> None:
     DELEGATION_CACHE.labels(result=result).inc()
+
+
+def record_redacted_spans(tool: str, spans: int) -> None:
+    if spans > 0:
+        TOOL_REDACTED_SPANS.labels(tool=tool).inc(spans)

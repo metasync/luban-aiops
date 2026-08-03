@@ -31,6 +31,7 @@ class GatewaySettings:
     service_client_id: str = ""
     service_client_secret: str = ""
     delegation_audience: str = "tool-gateway"
+    workload_token_path: str = ""
     dev_signing_key_path: str = ""
     dev_user: str = "dev.operator"
     policy_path: str = ""
@@ -38,6 +39,8 @@ class GatewaySettings:
     require_auth: bool = True
     k8s_enabled: bool = False
     k8s_namespace: str = ""
+    redaction_enabled: bool = True
+    redaction_overflow_fraction: float = 0.2
 
     @classmethod
     def from_env(cls) -> "GatewaySettings":
@@ -64,6 +67,7 @@ class GatewaySettings:
             service_client_id=os.getenv("GATEWAY_SERVICE_CLIENT_ID", ""),
             service_client_secret=os.getenv("GATEWAY_SERVICE_CLIENT_SECRET", ""),
             delegation_audience=os.getenv("GATEWAY_DELEGATION_AUDIENCE", "tool-gateway"),
+            workload_token_path=os.getenv("GATEWAY_WORKLOAD_TOKEN_PATH", ""),
             dev_signing_key_path=os.getenv("GATEWAY_DEV_SIGNING_KEY_PATH", ""),
             dev_user=os.getenv("GATEWAY_DEV_USER", "dev.operator"),
             policy_path=os.getenv("GATEWAY_POLICY_PATH", ""),
@@ -75,6 +79,13 @@ class GatewaySettings:
             k8s_enabled=os.getenv("GATEWAY_K8S_ENABLED", "false").strip().lower()
             in {"1", "true", "yes", "on"},
             k8s_namespace=os.getenv("GATEWAY_K8S_NAMESPACE", ""),
+            redaction_enabled=os.getenv("GATEWAY_REDACTION_ENABLED", "true")
+            .strip()
+            .lower()
+            in {"1", "true", "yes", "on"},
+            redaction_overflow_fraction=float(
+                os.getenv("GATEWAY_REDACTION_OVERFLOW_FRACTION", "0.2")
+            ),
         )
 
 

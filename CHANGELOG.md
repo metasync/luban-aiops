@@ -8,6 +8,37 @@ published product versions.
 
 ## Unreleased
 
+### Added — SPEC-009: Pre-Production Hardening (Tool Output Redaction and Workload-Identity Service Tokens)
+
+- Closes the two deadline-bound Release 1 deferrals before the first non-dev
+  deployment: SPEC-007 Q-3 (tool-output redaction) and the SPEC-008 R-3
+  workload-identity upgrade path.
+- tool-gateway: code-owned redaction engine applied at the single
+  `invoke_tool` choke point before both the response and the audit log —
+  value patterns (JWTs, `Bearer`/`Basic` values, PEM private keys, AWS-style
+  key IDs) plus a bounded explicit key list; clean output passes through
+  byte-identical. Fail-closed: results whose redacted fraction exceeds
+  `GATEWAY_REDACTION_OVERFLOW_FRACTION` (default 0.2) are withheld with a
+  `REDACTION_OVERFLOW` error. New `gateway_tool_redacted_spans_total{tool}`
+  metric and `redacted_spans` audit field; `GATEWAY_REDACTION_ENABLED`
+  (default `true`) is the dev-debugging opt-out.
+- identity-broker: the exchange endpoint now also accepts Kubernetes
+  projected service-account tokens as the service credential
+  (`Authorization: Bearer`), validated against the cluster OIDC issuer JWKS
+  (`IDENTITY_WORKLOAD_ISSUER_URL`, empty = feature off) with an audience
+  check (`IDENTITY_WORKLOAD_AUDIENCE`) and a workload-subject registry
+  (`IDENTITY_WORKLOAD_CLIENTS`); delegated-token claims are identical to the
+  static path. Invalid/expired/wrong-audience/unregistered tokens yield 401.
+- tool-gateway delegation: `GATEWAY_WORKLOAD_TOKEN_PATH` prefers the
+  projected token file (re-read per exchange; kubelet rotates it in place)
+  over the static secret; a missing file falls back to the static secret
+  with a once-per-process warning. Unsetting the path is the rollback
+  switch; the dev path is unchanged.
+- docs: dev-k8s README documents the redaction opt-out and the workload-token
+  contract (projected volume snippet, issuer/audience env names); the
+  gateway `runtime-secrets.example.env` marks the static secret as the dev
+  fallback.
+
 ### Added — Release 1 (SPEC-008: Service-to-Service Identity)
 
 - Implemented ADR-0004 broker-mediated token delegation, closing SPEC-007 R-4/R-6

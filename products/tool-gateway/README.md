@@ -61,6 +61,7 @@ Current implementation status:
 - provides a tool execution framework (`src/api_gateway/tools/`) with a `ToolRegistry`, `BaseTool` abstraction, and structured evidence envelope (SPEC-007)
 - ships a Kubernetes read-only connector (`k8s.list_pods`, `k8s.get_pod`, `k8s.get_events`, `k8s.get_pod_logs`) using `kubernetes-client/python`
 - exposes `GET /api/v2/tools` (tool discovery, gated by `tools:list`) and `POST /api/v2/tools/invoke` (tool execution gated by `tools:invoke`); both derive identity solely from the verified token — any identity in a request body is never trusted
+- redacts credential-shaped spans (JWTs, `Bearer`/`Basic` values, PEM private keys, key-list fields such as `token`/`password`/`api_key`) from every tool result at the single invoke choke point before both the response and the audit log; when the redacted fraction exceeds `GATEWAY_REDACTION_OVERFLOW_FRACTION` the output is withheld with a `REDACTION_OVERFLOW` error (fail-closed, SPEC-009)
 - organizes the FastAPI package by app bootstrap, route modules, shared request/config helpers, and service orchestration
 - validates chat and session request bodies against `shared/shared-contracts` aligned `pydantic` models (`422` on malformed input)
 
@@ -89,7 +90,13 @@ Current runtime environment knobs:
 - `GATEWAY_TOKEN_AUDIENCE`
   - expected `aud` claim value enforced on inbound tokens; defaults to `tool-gateway`
 - `GATEWAY_SERVICE_CLIENT_ID`, `GATEWAY_SERVICE_CLIENT_SECRET`
-  - service credential used to authenticate to the identity-broker exchange endpoint for token delegation (SPEC-008); the secret is loaded from a K8s Secret, not committed; when unset, delegation is skipped and the agent runs tool-less
+  - static service credential used to authenticate to the identity-broker exchange endpoint for token delegation (SPEC-008); the secret is loaded from a K8s Secret, not committed; kept as the dev fallback when the projected workload token is configured; when both this and `GATEWAY_WORKLOAD_TOKEN_PATH` are unset, delegation is skipped and the agent runs tool-less
+- `GATEWAY_WORKLOAD_TOKEN_PATH`
+  - path to a Kubernetes projected service-account token file (SPEC-009); when set, the file is re-read per exchange (kubelet rotates it in place) and sent as `Bearer` instead of the static credential; when unset, behavior is the static-secret path
+- `GATEWAY_REDACTION_ENABLED`
+  - master switch for tool-output redaction; defaults to `true`; the `false` setting is a dev-debugging opt-out only
+- `GATEWAY_REDACTION_OVERFLOW_FRACTION`
+  - redacted-character fraction above which tool output is withheld with `REDACTION_OVERFLOW`; defaults to `0.2`
 - `GATEWAY_DELEGATION_AUDIENCE`
   - audience requested for delegated tokens; defaults to `tool-gateway`
 - `GATEWAY_DEV_SIGNING_KEY_PATH`
@@ -103,7 +110,7 @@ Current runtime environment knobs:
 
 Observability surface (see `SPEC-005` and `shared/shared-contracts/observability-conventions.md`):
 
-- `GET /metrics` — always-on Prometheus exposition endpoint (auth-exempt, policy-exempt), reporting standard HTTP RED metrics (`http_requests_total{method,handler,status}`, `http_request_duration_seconds{method,handler}`) plus `gateway_policy_decisions_total{action,decision}`, `gateway_token_verification_total{result}` (valid | invalid | expired | missing), and delegation metrics `delegation_exchange_total{result}` and `delegation_cache_total{result}` (SPEC-008)
+- `GET /metrics` — always-on Prometheus exposition endpoint (auth-exempt, policy-exempt), reporting standard HTTP RED metrics (`http_requests_total{method,handler,status}`, `http_request_duration_seconds{method,handler}`) plus `gateway_policy_decisions_total{action,decision}`, `gateway_token_verification_total{result}` (valid | invalid | expired | missing), delegation metrics `delegation_exchange_total{result}` and `delegation_cache_total{result}` (SPEC-008), and `gateway_tool_redacted_spans_total{tool}` (credential spans redacted from tool results, SPEC-009)
 - opt-in OTLP push via `opentelemetry-instrumentation-fastapi` + `opentelemetry-exporter-otlp` when `OTEL_ENABLED=true`; fail-open — an unreachable collector drops telemetry without affecting requests
 - `x-request-id` remains the log/portal correlation key; when OTel tracing is active it equals the W3C `trace_id`
 

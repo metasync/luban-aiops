@@ -119,9 +119,12 @@ def exchange_delegated_token(
 ) -> TokenExchangeResponse:
     """Exchange a verified subject token for a short-lived delegated token (R-2).
 
-    The service credential is presented via HTTP Basic (``client_id:secret``)
-    in the ``Authorization`` header (R-3).
+    The service credential is presented in the ``Authorization`` header as
+    either HTTP Basic (``client_id:secret``, SPEC-008 R-3 — the dev fallback)
+    or a Bearer workload token (projected service-account token, SPEC-009
+    R-3).
     """
+    workload_token = _parse_bearer_credential(authorization)
     client_id, client_secret = _parse_basic_credential(authorization)
     try:
         token, expires_in = exchange_token(
@@ -130,6 +133,7 @@ def exchange_delegated_token(
             client_secret,
             payload.subject_token,
             payload.audience,
+            workload_token=workload_token,
         )
     except ExchangeError as exc:
         log_event(
@@ -144,10 +148,20 @@ def exchange_delegated_token(
         LOGGER,
         "token_exchange_completed",
         request_id=x_request_id,
-        client_id=client_id,
+        client_id=client_id if workload_token is None else "workload",
         audience=payload.audience,
     )
     return TokenExchangeResponse(access_token=token, expires_in=expires_in)
+
+
+def _parse_bearer_credential(authorization: str | None) -> str | None:
+    """Extract a Bearer workload token from the Authorization header, if any."""
+    if not authorization:
+        return None
+    scheme, _, value = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not value:
+        return None
+    return value
 
 
 def _parse_basic_credential(authorization: str | None) -> tuple[str | None, str | None]:

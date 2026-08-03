@@ -50,7 +50,7 @@ Current implementation status:
 - publishes the public key set at `GET /.well-known/jwks.json` (RFC 7517)
 - the OIDC callback (`/auth/callback`) returns a platform JWT as the primary `access_token`
 - supports token refresh (`POST /api/v1/auth/refresh`): exchanges a Keycloak refresh_token for a new platform JWT with updated identity claims
-- mints delegated tokens for service-to-service calls (`POST /api/v1/auth/exchange`, SPEC-008 / ADR-0004): authenticates a registered service credential, verifies the subject token, and issues a short-lived token with `sub`/`username`/`roles` copied (never elevated), an RFC 8693 `act` actor claim, and the requested `aud`
+- mints delegated tokens for service-to-service calls (`POST /api/v1/auth/exchange`, SPEC-008 / ADR-0004): authenticates a registered service credential (HTTP Basic) or a Kubernetes projected service-account token (`Authorization: Bearer`, validated against the cluster OIDC issuer JWKS, SPEC-009), verifies the subject token, and issues a short-lived token with `sub`/`username`/`roles` copied (never elevated), an RFC 8693 `act` actor claim, and the requested `aud`
 - adds focused tests for role normalization, login URL composition, token issuance, JWKS format, token refresh, and the exchange endpoint
 
 Current runtime environment knobs:
@@ -71,6 +71,12 @@ Current runtime environment knobs:
   - lifetime of delegated tokens minted by the exchange endpoint; defaults to `300` (kept shorter than the user token TTL)
 - `IDENTITY_SERVICE_CLIENTS`
   - registry of service callers permitted to request delegated tokens; format `client_id:secret:aud1|aud2`, comma-separated; loaded from a K8s Secret, not committed
+- `IDENTITY_WORKLOAD_ISSUER_URL`
+  - cluster OIDC issuer URL used to validate projected service-account tokens at the exchange endpoint (SPEC-009); empty (default) keeps the feature off and the static-credential path unchanged
+- `IDENTITY_WORKLOAD_AUDIENCE`
+  - required `aud` claim on projected workload tokens; defaults to `identity-broker`
+- `IDENTITY_WORKLOAD_CLIENTS`
+  - workload-subject registry for the bearer path; format `subject=client_id:aud1|aud2`, comma-separated (e.g. `system:serviceaccount:prod-luban:api-gateway=tool-gateway:tool-gateway`); a validated subject inherits the mapped client's audience allow-list
 - `OTEL_ENABLED`
   - master switch for the OTLP push pipeline (traces + metrics); defaults to `false`; when disabled, the `/metrics` surface is unaffected
 - `OTEL_EXPORTER_OTLP_ENDPOINT`

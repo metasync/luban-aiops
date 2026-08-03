@@ -9,14 +9,19 @@ from fastapi import Request
 from fastapi.responses import StreamingResponse
 
 from api_gateway.core.config import GatewaySettings
-from api_gateway.core.metrics import record_policy_decision, record_token_verification
+from api_gateway.core.metrics import (
+    record_policy_decision,
+    record_redacted_spans,
+    record_token_verification,
+)
 from api_gateway.core.observability import log_event
 from api_gateway.metadata import SERVICE_NAME, SERVICE_VERSION
 from api_gateway.schemas.api import IdentityContext
 from api_gateway.services import agent_client
 from api_gateway.services.policy_engine import PolicyLoadError, evaluate
 from api_gateway.services.token_verifier import TokenVerificationError, verify_token
-from api_gateway.tools.base import make_denied_result
+from api_gateway.tools.base import make_denied_result, make_error_result
+from api_gateway.tools.redaction import redact_result
 from api_gateway.tools.registry import ToolRegistry
 
 LOGGER = logging.getLogger(__name__)
@@ -337,6 +342,35 @@ async def invoke_tool(
     }
     result = await registry.invoke(tool_name, parameters, identity_dict)
 
+    # Redaction (SPEC-009 R-1/R-2): applied at the single choke point before
+    # both the response and the audit log. Fail-closed on overflow.
+    redacted_spans = 0
+    if settings.redaction_enabled:
+        redacted, stats = redact_result(result)
+        redacted_spans = stats.spans
+        record_redacted_spans(tool_name, stats.spans)
+        if stats.overflow(settings.redaction_overflow_fraction):
+            LOGGER.warning(
+                "tool output withheld: redaction overflow",
+                extra={
+                    "request_id": request_id,
+                    "tool_name": tool_name,
+                    "redacted_spans": stats.spans,
+                    "redaction_fraction": round(
+                        stats.redacted_chars / max(1, stats.original_chars), 3
+                    ),
+                },
+            )
+            result = make_error_result(
+                tool_name,
+                "REDACTION_OVERFLOW",
+                "tool output withheld: too much of the result appears to "
+                "contain credentials; re-run with tighter parameters",
+                duration_ms=result.evidence.get("duration_ms", 0),
+            )
+        else:
+            result = redacted
+
     # Audit log.
     log_event(
         LOGGER,
@@ -348,6 +382,7 @@ async def invoke_tool(
         user_id=identity.username,
         sub=identity.subject,
         act=identity.actor,
+        redacted_spans=redacted_spans,
     )
 
     status_code = 200 if result.status == "success" else 400

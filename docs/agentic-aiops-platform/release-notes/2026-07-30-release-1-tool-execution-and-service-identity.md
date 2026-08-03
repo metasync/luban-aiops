@@ -92,10 +92,14 @@ The release closes with two specs delivered together:
 
 - tool output (e.g. raw pod logs) reaches the model provider unredacted; a
   redaction decision is tracked as SPEC-007 Q-3 and must not be deferred past
-  the first non-dev deployment
+  the first non-dev deployment — resolved by SPEC-009: deterministic
+  redaction at the invoke choke point with fail-closed `REDACTION_OVERFLOW`
 - the gateway's service credential is a static audience-scoped client secret
   for Release 1; Kubernetes workload-identity-bound short-lived tokens are the
-  documented upgrade path (at the first non-dev deployment or Release 4)
+  documented upgrade path (at the first non-dev deployment or Release 4) —
+  resolved by SPEC-009: the exchange accepts projected service-account
+  tokens and the gateway prefers `GATEWAY_WORKLOAD_TOKEN_PATH` when
+  configured, with the static secret documented as the dev fallback
 - delegated tokens are cached in-memory per gateway replica; a replica restart
   simply re-exchanges on the next request
 - end-to-end dev-cluster wiring of the dev signing key for the synthetic
@@ -107,6 +111,7 @@ The release closes with two specs delivered together:
 
 - `../../specs/SPEC-007-tool-execution-framework/spec.md`
 - `../../specs/SPEC-008-service-to-service-identity/spec.md`
+- `../../specs/SPEC-009-pre-production-hardening/spec.md`
 - `../../adr/` (ADR-0003, ADR-0004)
 - `../identity-and-authorization-design.md`
 - `../../../CHANGELOG.md`

@@ -122,4 +122,4 @@ Mechanical enforcement:
 | `SPEC-006` | Session durability — Redis-backed session store | `delivered` |
 | `SPEC-007` | Read-only tool execution framework | `delivered` |
 | `SPEC-008` | Service-to-service identity — broker-mediated token delegation | `delivered` |
-| `SPEC-009` | Pre-production hardening — tool output redaction and workload-identity service tokens | `approved` |
+| `SPEC-009` | Pre-production hardening — tool output redaction and workload-identity service tokens | `delivered` |

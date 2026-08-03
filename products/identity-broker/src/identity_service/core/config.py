@@ -50,6 +50,54 @@ def _parse_service_clients(raw: str) -> tuple[ServiceClient, ...]:
 
 
 @dataclass(frozen=True)
+class WorkloadClient:
+    """A workload-identity subject mapped to a registered service client
+    (SPEC-009 R-3).
+
+    ``workload_subject`` is the validated token ``sub`` (for Kubernetes
+    projected tokens: ``system:serviceaccount:<ns>:<sa>``); it resolves to
+    the same ``client_id`` / audience allow-list semantics as the static
+    registry.
+    """
+
+    workload_subject: str
+    client_id: str
+    allowed_audiences: tuple[str, ...] = ()
+
+
+def _parse_workload_clients(raw: str) -> tuple[WorkloadClient, ...]:
+    """Parse ``IDENTITY_WORKLOAD_CLIENTS``.
+
+    Format: comma-separated entries of ``subject=client_id:aud1|aud2``.
+    ``subject`` may contain ``:`` (service-account subjects do), so the
+    entry is split on ``=`` first. Example:
+    ``system:serviceaccount:dev-luban-aiops:api-gateway=tool-gateway:tool-gateway``.
+    """
+    clients: list[WorkloadClient] = []
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry or "=" not in entry:
+            continue
+        subject, _, right = entry.partition("=")
+        parts = right.split(":")
+        client_id = parts[0].strip()
+        audiences = tuple(
+            aud.strip()
+            for aud in (parts[1].split("|") if len(parts) > 1 else [])
+            if aud.strip()
+        )
+        if subject.strip() and client_id:
+            clients.append(
+                WorkloadClient(
+                    workload_subject=subject.strip(),
+                    client_id=client_id,
+                    allowed_audiences=audiences,
+                )
+            )
+    return tuple(clients)
+
+
+@dataclass(frozen=True)
 class IdentitySettings:
     keycloak_base_url: str = "https://keycloak.example.com"
     keycloak_realm: str = "luban"
@@ -64,6 +112,9 @@ class IdentitySettings:
     jwt_audience: str = "tool-gateway"
     delegated_token_ttl_seconds: int = 300
     service_clients: tuple[ServiceClient, ...] = field(default_factory=tuple)
+    workload_issuer_url: str = ""
+    workload_audience: str = "identity-broker"
+    workload_clients: tuple[WorkloadClient, ...] = field(default_factory=tuple)
 
     @classmethod
     def from_env(cls) -> "IdentitySettings":
@@ -95,6 +146,13 @@ class IdentitySettings:
             ),
             service_clients=_parse_service_clients(
                 os.getenv("IDENTITY_SERVICE_CLIENTS", "")
+            ),
+            workload_issuer_url=os.getenv("IDENTITY_WORKLOAD_ISSUER_URL", ""),
+            workload_audience=os.getenv(
+                "IDENTITY_WORKLOAD_AUDIENCE", "identity-broker"
+            ),
+            workload_clients=_parse_workload_clients(
+                os.getenv("IDENTITY_WORKLOAD_CLIENTS", "")
             ),
         )
 

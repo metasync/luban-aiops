@@ -47,11 +47,13 @@ class DelegationClient:
     def __init__(self) -> None:
         self._cache: dict[str, _CacheEntry] = {}
         self._dev_key: rsa.RSAPrivateKey | None = None
+        self._workload_fallback_warned = False
 
     def reset(self) -> None:
         """Clear the cache and dev key (for tests)."""
         self._cache.clear()
         self._dev_key = None
+        self._workload_fallback_warned = False
 
     def get_cached(self, subject: str) -> str | None:
         """Return a still-valid (not near-expiry) delegated token, if any."""
@@ -77,18 +79,51 @@ class DelegationClient:
         """Exchange a subject token for a delegated token at the broker.
 
         Returns (delegated_token, expires_in_seconds). Raises on any failure.
+        The service credential is the projected workload token when available
+        (SPEC-009 R-3), else the static client credential (dev fallback).
         """
         url = f"{settings.identity_service_url}/api/v1/auth/exchange"
-        auth = (settings.service_client_id, settings.service_client_secret)
         payload = {
             "subject_token": subject_token,
             "audience": settings.delegation_audience,
         }
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(url, json=payload, auth=auth)
+        workload_token = self._read_workload_token(settings)
+        if workload_token is not None:
+            headers = {"Authorization": f"Bearer {workload_token}"}
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(url, json=payload, headers=headers)
+        else:
+            auth = (settings.service_client_id, settings.service_client_secret)
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(url, json=payload, auth=auth)
         response.raise_for_status()
         body = response.json()
         return str(body["access_token"]), int(body["expires_in"])
+
+    def _read_workload_token(self, settings: GatewaySettings) -> str | None:
+        """Read the projected workload token file, if configured (SPEC-009 R-3).
+
+        The kubelet rotates the projected file in place, so it is re-read on
+        every exchange. When the file is missing or unreadable the client
+        falls back to the static credential and warns once per process.
+        """
+        path_str = settings.workload_token_path
+        if not path_str:
+            return None
+        try:
+            token = Path(path_str).read_text().strip()
+        except OSError:
+            token = ""
+        if token:
+            return token
+        if not self._workload_fallback_warned:
+            LOGGER.warning(
+                "workload token unavailable; falling back to the static "
+                "service credential",
+                extra={"path": path_str},
+            )
+            self._workload_fallback_warned = True
+        return None
 
     def mint_dev_subject_token(self, settings: GatewaySettings) -> str:
         """Mint a local subject token for the synthetic dev identity (R-4).
@@ -169,9 +204,12 @@ async def obtain_delegated_token(
     if cached is not None:
         return cached
 
-    if not settings.service_client_id or not settings.service_client_secret:
-        # Delegation is not configured (no service credential); run tool-less
-        # rather than attempting an exchange that cannot authenticate.
+    if not settings.workload_token_path and (
+        not settings.service_client_id or not settings.service_client_secret
+    ):
+        # Delegation is not configured (no workload token path and no static
+        # service credential); run tool-less rather than attempting an
+        # exchange that cannot authenticate.
         return None
 
     try:

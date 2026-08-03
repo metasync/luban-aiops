@@ -1,6 +1,8 @@
 """Gateway delegation client tests (SPEC-008 R-4)."""
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import jwt as pyjwt
@@ -132,8 +134,13 @@ class ExchangeRequestTests(unittest.IsolatedAsyncioTestCase):
             async def __aexit__(self, *exc) -> bool:
                 return False
 
-            async def post(self, url, json=None, auth=None):
-                self.posts = {"url": url, "json": json, "auth": auth}
+            async def post(self, url, json=None, auth=None, headers=None):
+                self.posts = {
+                    "url": url,
+                    "json": json,
+                    "auth": auth,
+                    "headers": headers,
+                }
                 FakeHttp.last = self.posts  # type: ignore[attr-defined]
                 return FakeResponse()
 
@@ -149,6 +156,115 @@ class ExchangeRequestTests(unittest.IsolatedAsyncioTestCase):
             sent["json"],
             {"subject_token": "subject.jwt", "audience": "tool-gateway"},
         )
+        self.assertIsNone(sent["headers"])
+
+
+class WorkloadTokenTests(unittest.IsolatedAsyncioTestCase):
+    """Projected workload-token preference at exchange (SPEC-009 R-3)."""
+
+    def setUp(self) -> None:
+        dc.reset_delegation_state()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.token_path = Path(self._tmp.name) / "token"
+
+    def tearDown(self) -> None:
+        dc.reset_delegation_state()
+
+    def _patch_http(self) -> "type":
+        class FakeResponse:
+            status_code = 200
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict:
+                return {"access_token": "delegated-token", "expires_in": 300}
+
+        class FakeHttp:
+            last = None
+
+            def __init__(self, *args, **kwargs) -> None:
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc) -> bool:
+                return False
+
+            async def post(self, url, json=None, auth=None, headers=None):
+                FakeHttp.last = {
+                    "url": url,
+                    "json": json,
+                    "auth": auth,
+                    "headers": headers,
+                }
+                return FakeResponse()
+
+        return FakeHttp
+
+    async def test_projected_token_preferred_over_static_credential(self) -> None:
+        self.token_path.write_text("projected.jwt\n")
+        settings = _settings(workload_token_path=str(self.token_path))
+        client = dc.get_delegation_client()
+        fake_http = self._patch_http()
+
+        with patch.object(dc.httpx, "AsyncClient", fake_http):
+            token, _ = await client.exchange(settings, "subject.jwt")
+
+        self.assertEqual(token, "delegated-token")
+        sent = fake_http.last
+        self.assertEqual(sent["headers"], {"Authorization": "Bearer projected.jwt"})
+        self.assertIsNone(sent["auth"])
+
+    async def test_token_file_is_reread_each_exchange(self) -> None:
+        # The kubelet rotates the projected file in place; the client must
+        # pick up the new token without a restart.
+        self.token_path.write_text("first.jwt")
+        settings = _settings(workload_token_path=str(self.token_path))
+        client = dc.get_delegation_client()
+        fake_http = self._patch_http()
+
+        with patch.object(dc.httpx, "AsyncClient", fake_http):
+            await client.exchange(settings, "subject.jwt")
+            self.token_path.write_text("second.jwt")
+            await client.exchange(settings, "subject.jwt")
+
+        self.assertEqual(
+            fake_http.last["headers"], {"Authorization": "Bearer second.jwt"}
+        )
+
+    async def test_missing_file_falls_back_to_static_credential(self) -> None:
+        settings = _settings(workload_token_path=str(self.token_path))
+        client = dc.get_delegation_client()
+        fake_http = self._patch_http()
+
+        with (
+            patch.object(dc.httpx, "AsyncClient", fake_http),
+            self.assertLogs(dc.LOGGER, level="WARNING") as captured,
+        ):
+            await client.exchange(settings, "subject.jwt")
+            await client.exchange(settings, "subject.jwt")
+
+        sent = fake_http.last
+        self.assertIsNone(sent["headers"])
+        self.assertEqual(sent["auth"], ("tool-gateway", "gw-secret"))
+        # The fallback warning is emitted exactly once per process.
+        warnings = [r for r in captured.output if "falling back" in r]
+        self.assertEqual(len(warnings), 1)
+
+    async def test_delegation_enabled_with_workload_path_only(self) -> None:
+        self.token_path.write_text("projected.jwt")
+        settings = _settings(
+            workload_token_path=str(self.token_path),
+            service_client_id="",
+            service_client_secret="",
+        )
+        exchange = AsyncMock(return_value=("delegated-token", 300))
+        with patch.object(dc.DelegationClient, "exchange", exchange):
+            result = await dc.obtain_delegated_token(settings, "user-1", "subject.jwt")
+        self.assertEqual(result, "delegated-token")
 
 
 if __name__ == "__main__":

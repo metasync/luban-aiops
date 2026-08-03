@@ -176,7 +176,44 @@ For broker-mediated token delegation (SPEC-008), two optional secrets carry the 
 - `api-gateway-runtime-secrets` (optional, referenced by the `api-gateway` deployment), providing `GATEWAY_SERVICE_CLIENT_SECRET` — see `base/tool-gateway/runtime-secrets.example.env`
 - `identity-service-runtime-secrets` (optional, referenced by the `identity-service` deployment), additionally providing `IDENTITY_SERVICE_CLIENTS` (the service-client registry, format `client_id:secret:aud1|aud2`) — see `base/identity-broker/runtime-secrets.example.env`
 
-The gateway's `GATEWAY_SERVICE_CLIENT_SECRET` must match the secret registered for client `tool-gateway` in the broker's `IDENTITY_SERVICE_CLIENTS`. The credential confers no user authority; it only authorizes the token-exchange operation. Kubernetes workload-identity-bound short-lived tokens are the documented upgrade path (ADR-0004).
+The gateway's `GATEWAY_SERVICE_CLIENT_SECRET` must match the secret registered for client `tool-gateway` in the broker's `IDENTITY_SERVICE_CLIENTS`. The credential confers no user authority; it only authorizes the token-exchange operation. In this dev overlay the static secret remains the configured path; projected workload-identity tokens (SPEC-009) are the production upgrade — see below.
+
+## Tool Output Redaction (SPEC-009)
+
+Tool-output redaction is on by default in the gateway and needs no overlay change: every tool result passes through a single choke point that replaces credential-shaped spans (JWTs, `Bearer`/`Basic` values, PEM private keys, sensitive key-list fields) with `[REDACTED]` before the response and the audit log. When the redacted fraction of a result exceeds the threshold, the output is withheld with a `REDACTION_OVERFLOW` error (fail-closed).
+
+The only knob is a dev-debugging opt-out, added to the gateway fragment of `runtime-config.env` when needed:
+
+```env
+GATEWAY_REDACTION_ENABLED=false
+```
+
+Do not carry this into non-dev overlays; the redaction metrics (`gateway_tool_redacted_spans_total`) are the diagnostic surface instead.
+
+## Workload-Identity Service Tokens (SPEC-009)
+
+The exchange endpoint accepts Kubernetes projected service-account tokens as the service credential (`Authorization: Bearer`) instead of the static client secret. This dev overlay keeps the static secret as the fallback (dev clusters have no registered workload registry); a non-dev deployment wires the projected path with:
+
+- gateway: `GATEWAY_WORKLOAD_TOKEN_PATH=/var/run/secrets/tokens/identity-broker` plus a projected volume, e.g.
+
+  ```yaml
+  volumes:
+    - name: workload-token
+      projected:
+        sources:
+          - serviceAccountToken:
+              audience: identity-broker
+              expirationSeconds: 3600
+              path: identity-broker
+  volumeMounts:
+    - name: workload-token
+      mountPath: /var/run/secrets/tokens
+      readOnly: true
+  ```
+
+- broker: `IDENTITY_WORKLOAD_ISSUER_URL` (the cluster OIDC issuer), `IDENTITY_WORKLOAD_AUDIENCE` (default `identity-broker`), and `IDENTITY_WORKLOAD_CLIENTS` mapping the service-account subject to a registered client (`system:serviceaccount:<ns>:<sa>=<client_id>:<aud1>|<aud2>`)
+
+When `GATEWAY_WORKLOAD_TOKEN_PATH` is set but the token file is missing, the gateway falls back to the static secret and warns once per process. Unsetting the path is the rollback switch; the dev path (no workload issuer configured) is unchanged.
 
 ## Build Images
 
