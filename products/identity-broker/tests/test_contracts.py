@@ -36,7 +36,7 @@ def _settings(**overrides) -> IdentitySettings:
         "delegated_token_ttl_seconds": 300,
         "service_clients": (
             ServiceClient(
-                client_id="tool-gateway",
+                client_id="platform-gateway",
                 secret="gw-secret",
                 allowed_audiences=("tool-gateway",),
             ),
@@ -65,15 +65,15 @@ class IssuedTokenContractTests(unittest.TestCase):
         claims = pyjwt.decode(token, options={"verify_signature": False})
 
         jsonschema.validate(claims, _load_schema("identity-token.schema.json"))
-        # Portal tokens are audience-bound to the gateway and carry no actor.
-        self.assertEqual(claims["aud"], ["tool-gateway"])
+        # Portal tokens are audience-bound to the edge gateway and carry no actor.
+        self.assertEqual(claims["aud"], ["platform-gateway"])
         self.assertNotIn("act", claims)
 
     def test_delegated_token_conforms_to_schema(self) -> None:
         settings = _settings()
         delegated_token, _ = exchange_service.exchange_token(
             settings,
-            client_id="tool-gateway",
+            client_id="platform-gateway",
             client_secret="gw-secret",
             subject_token=issue_token(settings, _IDENTITY)[0],
             audience="tool-gateway",
@@ -84,7 +84,7 @@ class IssuedTokenContractTests(unittest.TestCase):
 
         jsonschema.validate(claims, _load_schema("identity-token.schema.json"))
         # Delegated tokens carry the actor claim and the requested audience.
-        self.assertEqual(claims["act"], {"sub": "tool-gateway"})
+        self.assertEqual(claims["act"], {"sub": "platform-gateway"})
         self.assertEqual(claims["aud"], ["tool-gateway"])
         self.assertEqual(claims["sub"], "user-1")
         self.assertEqual(claims["roles"], ["operator"])

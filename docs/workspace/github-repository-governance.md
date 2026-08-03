@@ -71,6 +71,7 @@ Area labels:
 - `area:policy-center`
 - `area:identity-broker`
 - `area:skills-hub`
+- `area:platform-gateway`
 - `area:tool-gateway`
 - `area:execution-runtime`
 - `area:shared-contracts`
@@ -119,6 +120,7 @@ For larger execution windows, add optional support milestones such as:
 - `operator-portal` owned by frontend or UX maintainers
 - `agent-platform` owned by runtime or orchestration maintainers
 - `policy-center` and `identity-broker` owned by security or control-plane maintainers
+- `platform-gateway` owned by platform security maintainers
 - `tool-gateway` owned by integrations maintainers
 - `execution-runtime` owned by automation maintainers
 - shared modules owned by core platform maintainers

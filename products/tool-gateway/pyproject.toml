@@ -1,5 +1,5 @@
 [project]
-name = "api-gateway"
+name = "tool-gateway"
 version = "0.1.0"
 description = "API gateway for Luban AIOps."
 requires-python = ">=3.11"
@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
-api-gateway = "api_gateway.main:run"
+tool-gateway = "tool_gateway.main:run"
 
 [dependency-groups]
 dev = [

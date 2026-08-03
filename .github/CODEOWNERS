@@ -7,6 +7,7 @@
 /products/agent-platform/ @metasync/agent-platform
 /products/policy-center/ @metasync/platform-security
 /products/identity-broker/ @metasync/platform-security
+/products/platform-gateway/ @metasync/platform-security
 /products/skills-hub/ @metasync/ops-enablement
 /products/tool-gateway/ @metasync/integrations
 /products/execution-runtime/ @metasync/automation

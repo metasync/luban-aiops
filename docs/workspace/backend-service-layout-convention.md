@@ -16,6 +16,7 @@ Use a consistent structure for backend services so that:
 
 This convention applies to backend products such as:
 
+- `platform-gateway`
 - `tool-gateway`
 - `identity-broker`
 - future service-oriented implementations of `policy-center`, `skills-hub`, and the HTTP edge of `execution-runtime`
@@ -150,6 +151,8 @@ Use these rules when deciding whether to create a new module:
 
 ## Current Reference Implementations
 
+- `products/platform-gateway`
+  - portal-facing edge service using the same layering as `tool-gateway` (SPEC-010)
 - `products/tool-gateway`
   - reference pattern for `FastAPI` service layering with route, core, and service modules
 - `products/identity-broker`

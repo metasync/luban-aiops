@@ -15,17 +15,17 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from prometheus_client import generate_latest
 
-from api_gateway.app import create_app
-from api_gateway.core.config import GatewaySettings, get_settings
-from api_gateway.services import token_verifier
-from api_gateway.services.policy_engine import reset_policy_state
-from api_gateway.tools.base import BaseTool, ToolDefinition, ToolResult, build_evidence
-from api_gateway.tools.redaction import (
+from tool_gateway.app import create_app
+from tool_gateway.core.config import GatewaySettings, get_settings
+from tool_gateway.services import token_verifier
+from tool_gateway.services.policy_engine import reset_policy_state
+from tool_gateway.tools.base import BaseTool, ToolDefinition, ToolResult, build_evidence
+from tool_gateway.tools.redaction import (
     REDACTION_MARKER,
     RedactionStats,
     redact_result,
 )
-from api_gateway.tools.registry import ToolRegistry
+from tool_gateway.tools.registry import ToolRegistry
 
 _KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
@@ -256,7 +256,7 @@ class RedactionRouteTests(unittest.TestCase):
     def test_audit_log_records_redacted_spans(self) -> None:
         client = self._client(GatewaySettings(require_auth=True))
         with _patch_jwks(), self.assertLogs(
-            "api_gateway.services.gateway_service", level="INFO"
+            "tool_gateway.services.gateway_service", level="INFO"
         ) as captured:
             self._invoke(client, "test.leaky")
         audit = [r for r in captured.records if "tool_invoked" in r.getMessage()]

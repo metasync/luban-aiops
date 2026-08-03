@@ -3,8 +3,8 @@
 import asyncio
 import unittest
 
-from api_gateway.tools.base import BaseTool, ToolDefinition, ToolResult, build_evidence
-from api_gateway.tools.registry import ToolRegistry
+from tool_gateway.tools.base import BaseTool, ToolDefinition, ToolResult, build_evidence
+from tool_gateway.tools.registry import ToolRegistry
 
 
 class _EchoTool(BaseTool):

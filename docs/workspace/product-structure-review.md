@@ -48,10 +48,11 @@ Recommendation:
 
 Current shape:
 
-- `src/api_gateway/app.py`
-- `src/api_gateway/api/routes/`
-- `src/api_gateway/core/`
-- `src/api_gateway/services/`
+- `src/tool_gateway/app.py`
+- `src/tool_gateway/api/routes/`
+- `src/tool_gateway/core/`
+- `src/tool_gateway/services/`
+- `src/tool_gateway/tools/`
 - `tests/`
 
 Assessment:
@@ -59,11 +60,31 @@ Assessment:
 - now follows a pragmatic `FastAPI` service layout
 - route modules are separated from config and backend orchestration
 - structurally cleaner than the earlier single-file `main.py` form
+- since SPEC-010 (ADR-0005) this product is the tool service only; the portal-facing edge moved to `platform-gateway`
 
 Recommendation:
 
 - use this package shape as the baseline for future `FastAPI`-oriented backend services
 - split `services/agent_backends.py` further only when native and transitional integration logic becomes materially larger
+
+### `products/platform-gateway`
+
+Current shape:
+
+- `src/platform_gateway/app.py`
+- `src/platform_gateway/api/routes/`
+- `src/platform_gateway/core/`
+- `src/platform_gateway/services/`
+- `tests/`
+
+Assessment:
+
+- extracted from the former combined `api_gateway` package by SPEC-010 (ADR-0005)
+- keeps the same `FastAPI` service layout for the portal-facing edge: token verification, action policy, chat/session proxying, and the delegation client
+
+Recommendation:
+
+- keep it aligned with the `tool-gateway` layout so the two gateway products stay structurally parallel
 
 ### `products/identity-broker`
 
@@ -151,7 +172,7 @@ Recommendation:
 
 - backend products are converging into two practical categories:
   - runtime-centric services with specialized internal modules, such as `agent-platform`
-  - request/response services with clear `FastAPI` layering, such as `tool-gateway` and `identity-broker`
+  - request/response services with clear `FastAPI` layering, such as `platform-gateway`, `tool-gateway`, and `identity-broker`
 - `agent-platform` is now cleaner because its transitional HTTP adapter follows the same layering discipline without flattening its native runtime concerns into a generic service layout
 - `operator-portal` should remain separate from backend layout conventions because its implementation style is inherently frontend-oriented
 - placeholder products should not be over-structured until they acquire real runtime behavior
@@ -164,6 +185,8 @@ Use these defaults going forward:
   - keep its current runtime-first structure with a layered transitional HTTP adapter
 - `tool-gateway`
   - treat as the reference pattern for `FastAPI` service organization
+- `platform-gateway`
+  - keep structurally parallel to `tool-gateway` (same layout, edge-scoped routes/services)
 - `identity-broker`
   - mirror the same pattern at smaller scale
 - future backend products

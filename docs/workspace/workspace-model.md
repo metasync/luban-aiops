@@ -67,6 +67,7 @@ luban-aiops/
     policy-center/
     identity-broker/
     skills-hub/
+    platform-gateway/
     tool-gateway/
     execution-runtime/
   shared/
@@ -152,6 +153,19 @@ Key concerns:
 - metadata normalization
 - indexing
 - retrieval enrichment for the agent platform
+
+### `platform-gateway`
+
+Primary responsibility:
+
+- portal-facing API edge (extracted from the combined gateway by SPEC-010, per ADR-0005)
+
+Key concerns:
+
+- portal token verification and session identity
+- action authorization for portal-facing routes
+- chat and session proxying to `agent-platform`
+- broker-mediated token delegation for downstream service calls
 
 ### `tool-gateway`
 
@@ -243,7 +257,7 @@ The platform should prefer:
 
 This workspace model supports the staged delivery plan already defined in the platform study:
 
-- early releases emphasize `operator-portal`, `agent-platform`, `identity-broker`, and `tool-gateway`
+- early releases emphasize `operator-portal`, `agent-platform`, `identity-broker`, `platform-gateway`, and `tool-gateway`
 - middle releases add `skills-hub` and deeper incident workflows
 - later releases bring in `policy-center` and `execution-runtime` for bounded actions
 

@@ -12,9 +12,9 @@
 SHELL := /bin/sh
 
 # Products with a Python (uv) test suite.
-PYTHON_PRODUCTS := agent-platform identity-broker tool-gateway
+PYTHON_PRODUCTS := agent-platform identity-broker platform-gateway tool-gateway
 # Products with a container image.
-IMAGE_PRODUCTS := agent-platform identity-broker tool-gateway operator-portal
+IMAGE_PRODUCTS := agent-platform identity-broker platform-gateway tool-gateway operator-portal
 
 # GitOps overlays rendered as part of verification.
 GITOPS_DIR := shared/platform-ops/gitops
@@ -77,7 +77,8 @@ build: ## Build all images (coordinated tag) and write .images.env for deploy
 	@for p in $(IMAGE_PRODUCTS); do $(MAKE) -C products/$$p build IMAGE_TAG=$(IMAGE_TAG) || exit 1; done
 	@echo "IMAGE_TAG=$(IMAGE_TAG)" > $(IMAGE_STATE)
 	@echo "AGENT_SERVICE_IMAGE=luban-aiops/agent-service:$(IMAGE_TAG)" >> $(IMAGE_STATE)
-	@echo "API_GATEWAY_IMAGE=luban-aiops/api-gateway:$(IMAGE_TAG)" >> $(IMAGE_STATE)
+	@echo "PLATFORM_GATEWAY_IMAGE=luban-aiops/platform-gateway:$(IMAGE_TAG)" >> $(IMAGE_STATE)
+	@echo "TOOL_GATEWAY_IMAGE=luban-aiops/tool-gateway:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "IDENTITY_SERVICE_IMAGE=luban-aiops/identity-service:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "WEB_UI_IMAGE=luban-aiops/web-ui:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "Built images with IMAGE_TAG=$(IMAGE_TAG); wrote $(IMAGE_STATE)"
@@ -87,7 +88,8 @@ build: ## Build all images (coordinated tag) and write .images.env for deploy
 		fi; \
 		kind load docker-image --name "$(KIND_CLUSTER_NAME)" \
 			"luban-aiops/web-ui:$(IMAGE_TAG)" \
-			"luban-aiops/api-gateway:$(IMAGE_TAG)" \
+			"luban-aiops/platform-gateway:$(IMAGE_TAG)" \
+			"luban-aiops/tool-gateway:$(IMAGE_TAG)" \
 			"luban-aiops/agent-service:$(IMAGE_TAG)" \
 			"luban-aiops/identity-service:$(IMAGE_TAG)"; \
 	fi

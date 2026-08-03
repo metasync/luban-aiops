@@ -46,7 +46,7 @@ Current implementation status:
 - keeps `main.py` as a thin runtime bootstrap entrypoint
 - centralizes `Keycloak` and `OIDC` login URL construction behind settings-aware service code
 - isolates group-to-role mapping and identity normalization from the HTTP route layer
-- issues RSA-signed platform JWTs (`POST /api/v1/auth/token`) with configurable TTL; tokens are audience-bound (`aud`, default `["tool-gateway"]`) to prevent cross-service replay (SPEC-008)
+- issues RSA-signed platform JWTs (`POST /api/v1/auth/token`) with configurable TTL; tokens are audience-bound (`aud`, default `["platform-gateway"]`) to prevent cross-service replay (SPEC-008; audience renamed with the SPEC-010 gateway split)
 - publishes the public key set at `GET /.well-known/jwks.json` (RFC 7517)
 - the OIDC callback (`/auth/callback`) returns a platform JWT as the primary `access_token`
 - supports token refresh (`POST /api/v1/auth/refresh`): exchanges a Keycloak refresh_token for a new platform JWT with updated identity claims
@@ -66,7 +66,7 @@ Current runtime environment knobs:
 - `IDENTITY_TOKEN_ISSUER`
   - `iss` claim written into issued tokens; defaults to `luban-identity-broker`
 - `IDENTITY_TOKEN_AUDIENCE`
-  - default `aud` written into issued tokens and the audience used to verify exchange subject tokens; defaults to `tool-gateway`
+  - default `aud` written into issued tokens and the audience used to verify exchange subject tokens; defaults to `platform-gateway` (the portal-facing edge; delegated tokens carry the requested audience, typically `tool-gateway`)
 - `IDENTITY_DELEGATED_TOKEN_TTL_SECONDS`
   - lifetime of delegated tokens minted by the exchange endpoint; defaults to `300` (kept shorter than the user token TTL)
 - `IDENTITY_SERVICE_CLIENTS`
@@ -76,7 +76,7 @@ Current runtime environment knobs:
 - `IDENTITY_WORKLOAD_AUDIENCE`
   - required `aud` claim on projected workload tokens; defaults to `identity-broker`
 - `IDENTITY_WORKLOAD_CLIENTS`
-  - workload-subject registry for the bearer path; format `subject=client_id:aud1|aud2`, comma-separated (e.g. `system:serviceaccount:prod-luban:api-gateway=tool-gateway:tool-gateway`); a validated subject inherits the mapped client's audience allow-list
+  - workload-subject registry for the bearer path; format `subject=client_id:aud1|aud2`, comma-separated (e.g. `system:serviceaccount:prod-luban:platform-gateway=platform-gateway:tool-gateway`); a validated subject inherits the mapped client's audience allow-list
 - `OTEL_ENABLED`
   - master switch for the OTLP push pipeline (traces + metrics); defaults to `false`; when disabled, the `/metrics` surface is unaffected
 - `OTEL_EXPORTER_OTLP_ENDPOINT`

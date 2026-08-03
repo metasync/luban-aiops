@@ -27,7 +27,7 @@ from identity_service.services.exchange_service import ExchangeError, exchange_t
 from identity_service.services.token_service import issue_token, reset_key_state
 
 _CLUSTER_ISSUER = "https://cluster.example/oidc"
-_SA_SUBJECT = "system:serviceaccount:prod-luban:api-gateway"
+_SA_SUBJECT = "system:serviceaccount:prod-luban:platform-gateway"
 _CLUSTER_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
 
@@ -36,11 +36,11 @@ def _settings(**overrides) -> IdentitySettings:
         "jwt_private_key_path": None,
         "jwt_token_ttl_seconds": 900,
         "jwt_issuer": "luban-identity-broker",
-        "jwt_audience": "tool-gateway",
+        "jwt_audience": "platform-gateway",
         "delegated_token_ttl_seconds": 300,
         "service_clients": (
             ServiceClient(
-                client_id="tool-gateway",
+                client_id="platform-gateway",
                 secret="gw-secret",
                 allowed_audiences=("tool-gateway",),
             ),
@@ -79,7 +79,7 @@ class ExchangeServiceTests(unittest.TestCase):
         subject = self._subject_token(settings)
 
         token, expires_in = exchange_token(
-            settings, "tool-gateway", "gw-secret", subject, "tool-gateway"
+            settings, "platform-gateway", "gw-secret", subject, "tool-gateway"
         )
 
         self.assertEqual(expires_in, 300)
@@ -88,7 +88,7 @@ class ExchangeServiceTests(unittest.TestCase):
         self.assertEqual(claims["username"], "alice")
         self.assertEqual(claims["roles"], ["operator"])
         self.assertEqual(claims["aud"], ["tool-gateway"])
-        self.assertEqual(claims["act"], {"sub": "tool-gateway"})
+        self.assertEqual(claims["act"], {"sub": "platform-gateway"})
         self.assertEqual(claims["iss"], "luban-identity-broker")
         self.assertEqual(claims["exp"] - claims["iat"], 300)
 
@@ -103,14 +103,14 @@ class ExchangeServiceTests(unittest.TestCase):
         settings = _settings()
         subject = self._subject_token(settings)
         with self.assertRaises(ExchangeError) as ctx:
-            exchange_token(settings, "tool-gateway", "wrong", subject, "tool-gateway")
+            exchange_token(settings, "platform-gateway", "wrong", subject, "tool-gateway")
         self.assertEqual(ctx.exception.status_code, 401)
 
     def test_invalid_subject_token_rejected(self) -> None:
         settings = _settings()
         with self.assertRaises(ExchangeError) as ctx:
             exchange_token(
-                settings, "tool-gateway", "gw-secret", "not.a.jwt", "tool-gateway"
+                settings, "platform-gateway", "gw-secret", "not.a.jwt", "tool-gateway"
             )
         self.assertEqual(ctx.exception.status_code, 401)
 
@@ -119,7 +119,7 @@ class ExchangeServiceTests(unittest.TestCase):
         subject = self._subject_token(settings)
         with self.assertRaises(ExchangeError) as ctx:
             exchange_token(
-                settings, "tool-gateway", "gw-secret", subject, "tool-gateway"
+                settings, "platform-gateway", "gw-secret", subject, "tool-gateway"
             )
         self.assertEqual(ctx.exception.status_code, 401)
 
@@ -128,7 +128,7 @@ class ExchangeServiceTests(unittest.TestCase):
         subject = self._subject_token(settings)
         with self.assertRaises(ExchangeError) as ctx:
             exchange_token(
-                settings, "tool-gateway", "gw-secret", subject, "agent-platform"
+                settings, "platform-gateway", "gw-secret", subject, "agent-platform"
             )
         self.assertEqual(ctx.exception.status_code, 400)
 
@@ -136,7 +136,7 @@ class ExchangeServiceTests(unittest.TestCase):
         settings = _settings()
         subject = self._subject_token(settings, roles=["read-only-observer"])
         token, _ = exchange_token(
-            settings, "tool-gateway", "gw-secret", subject, "tool-gateway"
+            settings, "platform-gateway", "gw-secret", subject, "tool-gateway"
         )
         claims = pyjwt.decode(token, options={"verify_signature": False})
         self.assertEqual(claims["roles"], ["read-only-observer"])
@@ -169,14 +169,14 @@ class ExchangeRouteTests(unittest.TestCase):
         response = self.client.post(
             "/api/v1/auth/exchange",
             json={"subject_token": self._subject_token(), "audience": "tool-gateway"},
-            headers={"Authorization": _basic("tool-gateway", "gw-secret")},
+            headers={"Authorization": _basic("platform-gateway", "gw-secret")},
         )
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["token_type"], "Bearer")
         self.assertEqual(body["expires_in"], 300)
         claims = pyjwt.decode(body["access_token"], options={"verify_signature": False})
-        self.assertEqual(claims["act"], {"sub": "tool-gateway"})
+        self.assertEqual(claims["act"], {"sub": "platform-gateway"})
         self.assertEqual(claims["aud"], ["tool-gateway"])
 
     def test_exchange_endpoint_missing_credential_returns_401(self) -> None:
@@ -190,7 +190,7 @@ class ExchangeRouteTests(unittest.TestCase):
         response = self.client.post(
             "/api/v1/auth/exchange",
             json={"subject_token": "not.a.jwt", "audience": "tool-gateway"},
-            headers={"Authorization": _basic("tool-gateway", "gw-secret")},
+            headers={"Authorization": _basic("platform-gateway", "gw-secret")},
         )
         self.assertEqual(response.status_code, 401)
 
@@ -198,7 +198,7 @@ class ExchangeRouteTests(unittest.TestCase):
         response = self.client.post(
             "/api/v1/auth/exchange",
             json={"subject_token": self._subject_token(), "audience": "agent-platform"},
-            headers={"Authorization": _basic("tool-gateway", "gw-secret")},
+            headers={"Authorization": _basic("platform-gateway", "gw-secret")},
         )
         self.assertEqual(response.status_code, 400)
 
@@ -207,11 +207,11 @@ def _workload_settings(**overrides) -> IdentitySettings:
     defaults = {
         "jwt_private_key_path": None,
         "jwt_issuer": "luban-identity-broker",
-        "jwt_audience": "tool-gateway",
+        "jwt_audience": "platform-gateway",
         "delegated_token_ttl_seconds": 300,
         "service_clients": (
             ServiceClient(
-                client_id="tool-gateway",
+                client_id="platform-gateway",
                 secret="gw-secret",
                 allowed_audiences=("tool-gateway",),
             ),
@@ -221,7 +221,7 @@ def _workload_settings(**overrides) -> IdentitySettings:
         "workload_clients": (
             WorkloadClient(
                 workload_subject=_SA_SUBJECT,
-                client_id="tool-gateway",
+                client_id="platform-gateway",
                 allowed_audiences=("tool-gateway",),
             ),
         ),
@@ -310,7 +310,7 @@ class WorkloadExchangeServiceTests(unittest.TestCase):
         self.assertEqual(claims["username"], "alice")
         self.assertEqual(claims["roles"], ["operator"])
         self.assertEqual(claims["aud"], ["tool-gateway"])
-        self.assertEqual(claims["act"], {"sub": "tool-gateway"})
+        self.assertEqual(claims["act"], {"sub": "platform-gateway"})
 
     def test_expired_workload_token_rejected(self) -> None:
         settings = _workload_settings()
@@ -425,7 +425,7 @@ class WorkloadExchangeRouteTests(unittest.TestCase):
         claims = pyjwt.decode(
             response.json()["access_token"], options={"verify_signature": False}
         )
-        self.assertEqual(claims["act"], {"sub": "tool-gateway"})
+        self.assertEqual(claims["act"], {"sub": "platform-gateway"})
 
     def test_exchange_endpoint_rejects_unregistered_bearer_token(self) -> None:
         with _patch_jwks_client():

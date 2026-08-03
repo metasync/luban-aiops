@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tool-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tool-gateway
+  template:
+    metadata:
+      labels:
+        app: tool-gateway
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8000"
+    spec:
+      serviceAccountName: tool-gateway
+      containers:
+        - name: tool-gateway
+          image: luban-aiops/tool-gateway:dev-local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: platform-runtime-config
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: platform-policy
+              mountPath: /etc/luban/policy
+              readOnly: true
+      volumes:
+        - name: platform-policy
+          configMap:
+            name: platform-policy

@@ -35,7 +35,7 @@
     "aud": {
       "type": "array",
       "items": {"type": "string"},
-      "description": "Intended audience(s). Portal tokens carry [\"tool-gateway\"]; delegated tokens carry the requested service audience. The gateway verifies this against GATEWAY_TOKEN_AUDIENCE and rejects tokens whose audience does not include it."
+      "description": "Intended audience(s). Portal tokens carry [\"platform-gateway\"]; delegated tokens carry the requested service audience (e.g. \"tool-gateway\"). Each verifying gateway checks this against its own configured audience (edge: PLATFORM_GATEWAY_TOKEN_AUDIENCE; tool: GATEWAY_TOKEN_AUDIENCE) and rejects tokens whose audience does not include it."
     },
     "act": {
       "type": "object",

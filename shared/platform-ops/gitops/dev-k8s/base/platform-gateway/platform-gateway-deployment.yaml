@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: platform-gateway
+  template:
+    metadata:
+      labels:
+        app: platform-gateway
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8000"
+    spec:
+      serviceAccountName: platform-gateway
+      containers:
+        - name: platform-gateway
+          image: luban-aiops/platform-gateway:dev-local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: platform-runtime-config
+            - secretRef:
+                name: platform-gateway-runtime-secrets
+                optional: true
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: platform-policy
+              mountPath: /etc/luban/policy
+              readOnly: true
+      volumes:
+        - name: platform-policy
+          configMap:
+            name: platform-policy

@@ -14,4 +14,4 @@ RUN uv sync --frozen --no-dev
 
 EXPOSE 8000
 
-CMD ["uv", "run", "api-gateway"]
+CMD ["uv", "run", "tool-gateway"]

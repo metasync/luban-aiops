@@ -3,7 +3,7 @@
 # Usage:  make -C products/tool-gateway <target>   (or cd here and run make)
 # Targets come from the shared fragments under ../../mk/. Run `make help`.
 
-IMAGE_NAME := api-gateway
+IMAGE_NAME := tool-gateway
 
 include ../../mk/image.mk
 include ../../mk/python.mk

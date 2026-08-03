@@ -59,7 +59,7 @@ class TokenIssuanceTests(unittest.TestCase):
         settings = _settings()
         token, _ = issue_token(settings, {"sub": "u", "username": "u"})
         claims = pyjwt.decode(token, options={"verify_signature": False})
-        self.assertEqual(claims["aud"], ["tool-gateway"])
+        self.assertEqual(claims["aud"], ["platform-gateway"])
 
     def test_issue_token_custom_audience_string(self) -> None:
         settings = _settings()

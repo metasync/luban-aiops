@@ -2,9 +2,10 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: chi
 - created: 2026-07-30
+- delivered: 2026-07-30
 - release slice: R2 start — structural prerequisite before any new edge
   feature (execution approvals, policy dimensions) lands
 - related ADRs: `docs/adr/0005-platform-gateway-extraction.md`
@@ -162,3 +163,7 @@ None — all resolved (see Changelog).
   broker client, so delegated tokens' `act.sub` becomes `platform-gateway`
   and the old `tool-gateway` client entry is removed. Approved by workspace
   maintainers; implementation may begin per `plan.md`
+- 2026-07-30: delivered — all R-1…R-5 requirements implemented; `make verify`
+  green (agent-platform 88, identity-broker 47, platform-gateway 74,
+  tool-gateway 83 tests; all four overlays render). Spec frozen per the
+  tier-2 lifecycle

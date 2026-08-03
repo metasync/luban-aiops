@@ -31,6 +31,8 @@ The workspace is organized as a modular platform made up of multiple product-ori
   - policy evaluation, approval orchestration, and authorization controls
 - `products/identity-broker`
   - `SSO`, identity federation, group normalization, and identity propagation
+- `products/platform-gateway`
+  - portal-facing API edge: token verification, action policy, chat/session proxying, and token delegation
 - `products/skills-hub`
   - Git-based Markdown skill ingestion, validation, indexing, and retrieval support
 - `products/tool-gateway`
@@ -76,7 +78,7 @@ The workspace is organized as a modular platform made up of multiple product-ori
 
 ## Current State
 
-Release 0 (platform foundation) and Release 1 (SPEC-001 through SPEC-009) are delivered: `agent-platform`, `identity-broker`, `tool-gateway`, and `operator-portal` are implemented, tested, and deployable to the `dev-k8s` overlay. Release 1 closes with the read-only tool execution framework (SPEC-007), broker-mediated service-to-service identity (SPEC-008, implementing ADR-0004), and pre-production hardening (SPEC-009: tool-output redaction and workload-identity service tokens) before the first non-dev deployment.
+Release 0 (platform foundation) and Release 1 (SPEC-001 through SPEC-009) are delivered: `agent-platform`, `identity-broker`, `platform-gateway`, `tool-gateway`, and `operator-portal` are implemented, tested, and deployable to the `dev-k8s` overlay. Release 1 closes with the read-only tool execution framework (SPEC-007), broker-mediated service-to-service identity (SPEC-008, implementing ADR-0004), and pre-production hardening (SPEC-009: tool-output redaction and workload-identity service tokens) before the first non-dev deployment. SPEC-010 (implementing ADR-0005) then split the former combined gateway into `platform-gateway` (portal-facing edge) and `tool-gateway` (tool and connector service).
 
 See [CHANGELOG.md](CHANGELOG.md) for delivered work and the [spec index](docs/specs/README.md) for the status of each spec.
 

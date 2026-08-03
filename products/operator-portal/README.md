@@ -37,7 +37,7 @@ Current implementation artifacts:
 
 Current browser baseline capabilities:
 
-- `OIDC` login start through `api-gateway`
+- `OIDC` login start through `platform-gateway`
 - authorization-code callback completion through `identity-broker`
 - authenticated portal logout entry point
 - silent background token refresh roughly 60 seconds before JWT expiry (via

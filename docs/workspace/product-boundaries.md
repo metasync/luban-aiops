@@ -35,7 +35,8 @@ Runbooks and Markdown skills should flow through a dedicated knowledge path inst
 | `policy-center` | authorization and approval control | policy evaluation, approval rules, control outcomes | UI rendering, identity federation, connector logic |
 | `identity-broker` | identity normalization | `SSO`, token normalization, role mapping, group mapping | policy decisions, portal UX, execution logic |
 | `skills-hub` | skill lifecycle and retrieval support | ingestion, validation, indexing, metadata, skill retrieval support | live tool execution, policy logic |
-| `tool-gateway` | connector standardization | tool contracts, system connectors, `MCP` integration, tool classification | approval logic, session orchestration, portal UX |
+| `platform-gateway` | portal-facing API edge | portal token verification, action policy for portal routes, chat/session proxying, token delegation | connector logic, tool execution, policy authority |
+| `tool-gateway` | connector standardization | tool contracts, system connectors, `MCP` integration, tool classification | approval logic, session orchestration, portal UX, portal-facing routes |
 | `execution-runtime` | bounded action execution | isolated workers, execution adapters, result reporting | approval authority, identity normalization, UX logic |
 
 ## Product Interfaces
@@ -109,6 +110,20 @@ Publishes:
 - retrieval responses
 - validation outcomes
 
+### `platform-gateway`
+
+Consumes:
+
+- portal bearer tokens and identity-broker verification material
+- agent-platform session and chat APIs
+- delegated-token exchange from `identity-broker`
+
+Publishes:
+
+- portal-facing `/api/v1` routes (auth, sessions, chat, runtime)
+- proxied streaming responses
+- delegated tokens to downstream services
+
 ### `tool-gateway`
 
 Consumes:
@@ -148,6 +163,8 @@ Publishes:
   - identity and platform access team
 - `skills-hub`
   - knowledge platform or operations enablement team
+- `platform-gateway`
+  - platform security or platform edge team
 - `tool-gateway`
   - integrations or platform connectors team
 - `execution-runtime`
@@ -215,6 +232,7 @@ Primary products:
 - `operator-portal`
 - `agent-platform`
 - `identity-broker`
+- `platform-gateway`
 - `tool-gateway`
 
 ### Middle Releases

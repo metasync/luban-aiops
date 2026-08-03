@@ -4,8 +4,8 @@ import asyncio
 import unittest
 from unittest.mock import MagicMock, patch
 
-from api_gateway.tools.k8s_connector import KubernetesConnector
-from api_gateway.tools.registry import ToolRegistry
+from tool_gateway.tools.k8s_connector import KubernetesConnector
+from tool_gateway.tools.registry import ToolRegistry
 
 
 def _run(coro):

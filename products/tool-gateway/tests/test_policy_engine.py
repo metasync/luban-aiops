@@ -7,9 +7,9 @@ from pathlib import Path
 import yaml
 from jsonschema import validate
 
-from api_gateway.core.config import GatewaySettings
-from api_gateway.services import policy_engine
-from api_gateway.services.policy_engine import (
+from tool_gateway.core.config import GatewaySettings
+from tool_gateway.services import policy_engine
+from tool_gateway.services.policy_engine import (
     PROTECTED_ACTIONS,
     PolicyDecision,
     PolicyLoadError,

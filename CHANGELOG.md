@@ -8,6 +8,41 @@ published product versions.
 
 ## Unreleased
 
+### Changed — SPEC-010: Platform Gateway Extraction (ADR-0005)
+
+- Split the former combined gateway into two products with the boundaries
+  ADR-0005 assigns: new `products/platform-gateway` owns the portal-facing
+  edge (token verification for portal sessions, action policy, chat/session
+  proxying, broker delegation client, `/api/v1` portal routes); the existing
+  product renames its package `api_gateway` → `tool_gateway` and keeps only
+  the tool/connector home (`ToolRegistry`, connectors, `tools:list` /
+  `tools:invoke`, redaction choke point, tool audit). HTTP contract shapes,
+  deny-by-default policy, and audit fields are unchanged.
+- env contract (Q-1): edge settings rename `GATEWAY_*` → `PLATFORM_GATEWAY_*`;
+  `GATEWAY_*` stays tool-scoped only (k8s, policy path, redaction, token
+  audience, auth knobs, host/port).
+- k8s (Q-2): `api-gateway` deployment/service/image rename to
+  `platform-gateway`; new `tool-gateway` deployment/service/SA/RBAC with
+  image `luban-aiops/tool-gateway`; policy ConfigMap `gateway-policy` →
+  `platform-policy` mounted on both services from one shared bundle;
+  `deploy-overlay.sh` and root `Makefile` updated (`.images.env` gains
+  `PLATFORM_GATEWAY_IMAGE` + `TOOL_GATEWAY_IMAGE`). Portal `nginx.conf`
+  proxies to `platform-gateway:8000`.
+- identity (Q-3/Q-4): portal platform JWTs change audience `tool-gateway` →
+  `platform-gateway` (broker `IDENTITY_TOKEN_AUDIENCE` default, overlay,
+  schema note, edge verifier); delegated tokens keep `aud = tool-gateway`.
+  The edge registers as a new `platform-gateway` broker client
+  (`act.sub = platform-gateway`); the old `tool-gateway` client entry is
+  removed.
+- guards: both gateways gain route-inventory tests pinning their surfaces
+  (edge: `/api/v1/*` portal routes only; tool: health/metrics +
+  `/api/v2/tools*` only). Metric names unchanged (`gateway_*` /
+  `delegation_*` remain the scrape contract).
+- docs: platform-gateway/tool-gateway READMEs, dev-k8s README (incl. the
+  one-time `kubectl delete deployment/api-gateway service/api-gateway`
+  cleanup), workspace model, product boundaries, layout convention, and
+  governance label scheme updated; spec status `delivered`.
+
 ### Added — SPEC-009: Pre-Production Hardening (Tool Output Redaction and Workload-Identity Service Tokens)
 
 - Closes the two deadline-bound Release 1 deferrals before the first non-dev

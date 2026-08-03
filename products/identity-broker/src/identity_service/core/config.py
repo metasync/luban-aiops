@@ -23,7 +23,7 @@ def _parse_service_clients(raw: str) -> tuple[ServiceClient, ...]:
 
     Format: comma-separated entries of ``client_id:secret:aud1|aud2``. The
     audience segment is optional (defaults to no allowed audiences). Example:
-    ``tool-gateway:s3cr3t:tool-gateway``.
+    ``platform-gateway:s3cr3t:tool-gateway``.
     """
     clients: list[ServiceClient] = []
     for entry in raw.split(","):
@@ -71,7 +71,7 @@ def _parse_workload_clients(raw: str) -> tuple[WorkloadClient, ...]:
     Format: comma-separated entries of ``subject=client_id:aud1|aud2``.
     ``subject`` may contain ``:`` (service-account subjects do), so the
     entry is split on ``=`` first. Example:
-    ``system:serviceaccount:dev-luban-aiops:api-gateway=tool-gateway:tool-gateway``.
+    ``system:serviceaccount:dev-luban-aiops:platform-gateway=platform-gateway:tool-gateway``.
     """
     clients: list[WorkloadClient] = []
     for entry in raw.split(","):
@@ -109,7 +109,7 @@ class IdentitySettings:
     jwt_private_key_path: str | None = None
     jwt_token_ttl_seconds: int = 900
     jwt_issuer: str = "luban-identity-broker"
-    jwt_audience: str = "tool-gateway"
+    jwt_audience: str = "platform-gateway"
     delegated_token_ttl_seconds: int = 300
     service_clients: tuple[ServiceClient, ...] = field(default_factory=tuple)
     workload_issuer_url: str = ""
@@ -140,7 +140,7 @@ class IdentitySettings:
                 os.getenv("IDENTITY_TOKEN_TTL_SECONDS", "900")
             ),
             jwt_issuer=os.getenv("IDENTITY_TOKEN_ISSUER", "luban-identity-broker"),
-            jwt_audience=os.getenv("IDENTITY_TOKEN_AUDIENCE", "tool-gateway"),
+            jwt_audience=os.getenv("IDENTITY_TOKEN_AUDIENCE", "platform-gateway"),
             delegated_token_ttl_seconds=int(
                 os.getenv("IDENTITY_DELEGATED_TOKEN_TTL_SECONDS", "300")
             ),

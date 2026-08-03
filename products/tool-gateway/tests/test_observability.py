@@ -9,10 +9,10 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from prometheus_client import REGISTRY
 
-from api_gateway.app import create_app
-from api_gateway.core.config import GatewaySettings, get_settings
-from api_gateway.core.request_context import resolve_request_id
-from api_gateway.services.policy_engine import reset_policy_state
+from tool_gateway.app import create_app
+from tool_gateway.core.config import GatewaySettings, get_settings
+from tool_gateway.core.request_context import resolve_request_id
+from tool_gateway.services.policy_engine import reset_policy_state
 
 
 def _sample(name: str, labels: dict[str, str]) -> float:
@@ -66,21 +66,17 @@ class DomainCounterTests(unittest.TestCase):
         client = _client(require_auth=False)
         allow_before = _sample(
             "gateway_policy_decisions_total",
-            {"action": "session:create", "decision": "allow"},
+            {"action": "tools:list", "decision": "allow"},
         )
         missing_before = _sample(
             "gateway_token_verification_total", {"result": "missing"}
         )
-        with patch(
-            "api_gateway.api.routes.sessions.create_session",
-        ) as create_session:
-            create_session.return_value = {"session_id": "s-1", "user_id": "dev"}
-            response = client.post("/api/v1/sessions", json={})
+        response = client.get("/api/v2/tools")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             _sample(
                 "gateway_policy_decisions_total",
-                {"action": "session:create", "decision": "allow"},
+                {"action": "tools:list", "decision": "allow"},
             ),
             allow_before + 1,
         )
@@ -94,10 +90,9 @@ class DomainCounterTests(unittest.TestCase):
         invalid_before = _sample(
             "gateway_token_verification_total", {"result": "invalid"}
         )
-        response = client.post(
-            "/api/v1/sessions",
+        response = client.get(
+            "/api/v2/tools",
             headers={"Authorization": "NotBearer xyz"},
-            json={},
         )
         self.assertEqual(response.status_code, 401)
         self.assertEqual(

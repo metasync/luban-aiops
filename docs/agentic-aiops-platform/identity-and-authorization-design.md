@@ -334,7 +334,8 @@ Workers should not accept arbitrary direct requests that bypass the control plan
 
 > Implementation status (Release 1): the platform-to-platform service identity
 > pattern below is implemented as broker-mediated token delegation (ADR-0004,
-> SPEC-008). The gateway exchanges the verified user token for a short-lived,
+> SPEC-008). The portal-facing edge (`platform-gateway` since the SPEC-010
+> split) exchanges the verified user token for a short-lived,
 > audience-bound delegated token (`sub` = user, `act` = calling service,
 > `aud` = target audience) that `agent-platform` relays as a bearer token;
 > identity-broker remains the sole signing authority, roles are never elevated,
