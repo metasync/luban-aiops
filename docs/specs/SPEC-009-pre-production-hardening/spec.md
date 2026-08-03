@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: chi
 - created: 2026-07-30
 - release slice: Release 1 closure gate — must be `delivered` before the first
@@ -138,18 +138,20 @@ Acceptance criteria:
 
 ## Open Questions
 
-- Q-1: which workload-identity mechanism targets the first non-dev cluster —
-  Kubernetes projected service-account token exchange (OIDC-federated at the
-  broker) versus SPIFFE SVIDs? Determines the broker validation dependency
-  and must be answered before `approved`.
-- Q-2: is the redaction overflow bound a hard error (`REDACTION_OVERFLOW`,
-  fail-closed) or a truncation-with-notice? Draft defaults to fail-closed;
-  confirm at approval.
-- Q-3: does the redaction pattern set need a `token`/`secret` key-value
-  matcher for arbitrary JSON keys, or is the bounded explicit key list
-  (password, secret, api_key, token) sufficient for Release 1?
+None — all resolved (see Changelog).
 
 ## Changelog
 
 - 2026-07-30: created as `draft`, closing SPEC-007 Q-3 and the SPEC-008 R-3
   workload-identity upgrade path before the first non-dev deployment
+- 2026-07-30: open questions resolved — Q-1: Kubernetes projected
+  service-account token exchange (OIDC-federated at the broker) chosen over
+  SPIFFE SVIDs: zero new infrastructure, reuses the broker's existing JWKS
+  validation, no new trust root; SPIFFE remains the documented future option
+  for multi-cluster federation or mTLS sender-constraining. Q-2: fail-closed
+  `REDACTION_OVERFLOW` at the 20% bound confirmed. Q-3: bounded explicit key
+  list (password, passwd, secret, api_key, apikey, token, access_key,
+  client_secret, private_key, authorization) layered on strict value
+  patterns; a generic key-substring matcher rejected as untestable and
+  over-redaction-prone. Approved by workspace maintainers; implementation may
+  begin per `plan.md`
