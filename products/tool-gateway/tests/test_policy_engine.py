@@ -233,10 +233,11 @@ class ContractAlignmentTests(unittest.TestCase):
         validate(instance=decision.to_dict(), schema=schema)
 
     def test_protected_actions_boundary(self) -> None:
-        # Exempt routes (health, runtime, auth, identity) carry no action; this
-        # set is the complete protected surface.
+        # Health and metrics routes carry no action and are exempt; portal-
+        # facing actions (chat, session:*) live in platform-gateway. This set
+        # is the complete protected surface of the tool service.
         self.assertEqual(
-            PROTECTED_ACTIONS, frozenset({"chat", "session:create", "session:read"})
+            PROTECTED_ACTIONS, frozenset({"tools:list", "tools:invoke"})
         )
 
 

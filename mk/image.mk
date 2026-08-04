@@ -1,19 +1,24 @@
 # Shared container-image targets.
 #
 # Included by each product Makefile (via `include ../../mk/image.mk`). The
-# including Makefile must set IMAGE_NAME (the short image name, e.g. api-gateway)
+# including Makefile must set IMAGE_NAME (the short image name, e.g. platform-gateway)
 # and may set IMAGE_CONTEXT (the docker build context, default: product dir).
 #
-# Override at invocation, e.g.:  make build IMAGE_TAG=v1 REGISTRY=ghcr.io/me
+# Overridable settings (IMAGE_PLATFORM, REGISTRY, ...) default in
+# mk/defaults.mk, included below; command-line overrides always win, e.g.:
+#   make build IMAGE_TAG=v1 REGISTRY=ghcr.io/me IMAGE_PLATFORM=linux/arm64
 # Command-line overrides propagate to these targets from the root Makefile too.
 #
 # Requires GNU make and docker.
 
 SHELL         := /bin/sh
 
-IMAGE_CONTEXT ?= .
-REGISTRY      ?=
-IMAGE_TAG     ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
+# Pull shared defaults relative to this fragment, so standalone product
+# builds resolve the same configuration as root-driven builds.
+include $(dir $(lastword $(MAKEFILE_LIST)))defaults.mk
+
+IMAGE_CONTEXT  ?= .
+IMAGE_TAG      ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
 ifeq ($(REGISTRY),)
 IMAGE_REF := luban-aiops/$(IMAGE_NAME):$(IMAGE_TAG)
@@ -28,7 +33,7 @@ help: ## Show available targets for this product
 		| awk 'BEGIN {FS = ":.*## "} {printf "  %-16s %s\n", $$1, $$2}'
 
 build: ## Build this product's container image (local tag; +registry tag if REGISTRY set)
-	docker build -t luban-aiops/$(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_CONTEXT)
+	docker build --platform $(IMAGE_PLATFORM) -t luban-aiops/$(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_CONTEXT)
 ifneq ($(REGISTRY),)
 	docker tag luban-aiops/$(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_REF)
 endif

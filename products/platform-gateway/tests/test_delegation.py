@@ -14,7 +14,7 @@ from platform_gateway.services import delegation_client as dc
 def _settings(**overrides) -> PlatformGatewaySettings:
     defaults = {
         "identity_service_url": "http://identity-service:8000",
-        "service_client_id": "tool-gateway",
+        "service_client_id": "platform-gateway",
         "service_client_secret": "gw-secret",
         "delegation_audience": "tool-gateway",
         "dev_user": "dev.operator",
@@ -151,7 +151,7 @@ class ExchangeRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(expires_in, 300)
         sent = FakeHttp.last  # type: ignore[attr-defined]
         self.assertTrue(sent["url"].endswith("/api/v1/auth/exchange"))
-        self.assertEqual(sent["auth"], ("tool-gateway", "gw-secret"))
+        self.assertEqual(sent["auth"], ("platform-gateway", "gw-secret"))
         self.assertEqual(
             sent["json"],
             {"subject_token": "subject.jwt", "audience": "tool-gateway"},
@@ -249,7 +249,7 @@ class WorkloadTokenTests(unittest.IsolatedAsyncioTestCase):
 
         sent = fake_http.last
         self.assertIsNone(sent["headers"])
-        self.assertEqual(sent["auth"], ("tool-gateway", "gw-secret"))
+        self.assertEqual(sent["auth"], ("platform-gateway", "gw-secret"))
         # The fallback warning is emitted exactly once per process.
         warnings = [r for r in captured.output if "falling back" in r]
         self.assertEqual(len(warnings), 1)

@@ -180,6 +180,6 @@ For Python backend products in this workspace:
 - keep a product-local `.python-version` when container builds use the product directory as the Docker build context
 - use `uv.lock` with `uv sync --frozen` in deterministic build paths
 
-The current backend container images still use the official `uv` Python base image for simplicity and compatibility. A future CI-aligned container strategy may install `uv` on top of an environment-specific base image and allow `uv` to resolve the interpreter from `.python-version`, as long as the resulting images remain reproducible and operationally supportable.
+All Python backend container images build `FROM luban-aiops/base-uv:al2023`, the shared base image in `shared/base-images/base-uv` (Amazon Linux 2023 minimal, pinned uv, no system Python — `uv` resolves the interpreter from `.python-version` during `uv sync`). Product Dockerfiles only copy sources, run `uv sync --frozen --no-dev`, and declare `EXPOSE`/`CMD`; the base image carries the env contract and the non-root `app` user (uid 1000). Built by `make base-images` (wired into `make build`).
 
 See `python-container-strategy.md` for the current recommendation, trade-offs, and migration criteria.

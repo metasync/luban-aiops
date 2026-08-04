@@ -16,7 +16,11 @@ from platform_gateway.core.metrics import (
 from platform_gateway.metadata import SERVICE_NAME, SERVICE_VERSION
 from platform_gateway.schemas.api import IdentityContext
 from platform_gateway.services import agent_client
-from platform_gateway.services.policy_engine import PolicyLoadError, evaluate
+from platform_gateway.services.policy_engine import (
+    PolicyLoadError,
+    evaluate,
+    load_bundle,
+)
 from platform_gateway.services.token_verifier import TokenVerificationError, verify_token
 
 LOGGER = logging.getLogger(__name__)
@@ -35,13 +39,16 @@ def live_status(settings: PlatformGatewaySettings) -> dict[str, str]:
 
 
 async def ready_status(settings: PlatformGatewaySettings) -> dict[str, object]:
+    """Readiness: the policy bundle must load and the agent service must respond."""
     try:
+        rules = load_bundle(settings)
         agent_health = await agent_client.health(settings)
         return {
             "status": "ok",
             "service": SERVICE_NAME,
             "version": SERVICE_VERSION,
             "agent_service": agent_health,
+            "policy_rules": len(rules),
         }
     except httpx.HTTPError as exc:
         return {

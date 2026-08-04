@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from platform_gateway.app import create_app
 from platform_gateway.core.config import PlatformGatewaySettings, get_settings
 from platform_gateway.schemas.api import IdentityContext
-from platform_gateway.services.policy_engine import reset_policy_state
+from platform_gateway.services.policy_engine import PolicyLoadError, reset_policy_state
 
 
 def _identity(role: str) -> IdentityContext:
@@ -143,6 +143,18 @@ class PolicyEnforcementRouteTests(unittest.TestCase):
 
         self.assertEqual(live.status_code, 200)
         self.assertEqual(ready.status_code, 200)
+
+    def test_readiness_degrades_when_policy_bundle_missing(self) -> None:
+        # Readiness must surface policy load failures, not report ok.
+        with patch(
+            "platform_gateway.services.gateway_service.load_bundle",
+            side_effect=PolicyLoadError("policy bundle not found at '/nope'"),
+        ):
+            ready = self.client.get("/health/ready")
+
+        body = ready.json()
+        self.assertEqual(body["status"], "degraded")
+        self.assertIn("policy bundle not found", body["policy_error"])
 
 
 if __name__ == "__main__":

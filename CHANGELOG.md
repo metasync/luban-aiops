@@ -8,6 +8,58 @@ published product versions.
 
 ## Unreleased
 
+### Changed — SPEC-010 code-review follow-ups
+
+- platform-gateway `/health/ready` now verifies the policy bundle loads
+  (reports a `policy_rules` count when ok; `status: degraded` with
+  `policy_error` on `PolicyLoadError` instead of silently reporting ok).
+- tool-gateway protected-action vocabulary corrected to the actual routes
+  (`tools:list` / `tools:invoke`); regression tests added for the readiness
+  degradation path.
+
+### Changed — Shared `base-uv` container base image and non-root enforcement
+
+- New shared Python base image `luban-aiops/base-uv:al2023`
+  (`shared/base-images/base-uv/Dockerfile`): Amazon Linux 2023 minimal with
+  a pinned uv (`UV_VERSION` ARG, default 0.12.1 — never `latest`), no system
+  Python (uv resolves the interpreter from each product's `.python-version`
+  during `uv sync`; `UV_PYTHON`/`PYTHON_VERSION` ARG default 3.12 is the
+  deterministic fallback), and a non-root `app` user (uid 1000). Built by
+  the new `make base-images` target, wired as a prerequisite of `make build`
+  (overridable: `make base-images BASE_UV_UV_VERSION=...`).
+- All four Python product Dockerfiles (`agent-platform`, `identity-broker`,
+  `platform-gateway`, `tool-gateway`) now build `FROM luban-aiops/base-uv:al2023`;
+  the env contract, `WORKDIR`, and `USER` move into the base, replacing the
+  divergent bookworm-slim and ad-hoc amazonlinux bootstrap.
+- operator-portal switches to `nginxinc/nginx-unprivileged:1.27-alpine` and
+  listens on 8080 (nginx.conf, deployment containerPort, web-ui Service
+  port/targetPort, dev-k8s README port-forward).
+- All five app deployments gain a non-root `securityContext`
+  (`runAsNonRoot`, `runAsUser` 1000 — 101 for web-ui,
+  `allowPrivilegeEscalation: false`, `seccompProfile: RuntimeDefault`).
+- Docs: `python-container-strategy.md` records the Option B migration as
+  executed; backend layout convention updated.
+
+### Changed — Explicit target platform for image builds
+
+- New `IMAGE_PLATFORM` build parameter (default `linux/amd64`, the deployment
+  target) in the root `Makefile` and `mk/image.mk`: applied to
+  `make base-images` and forwarded to every product build, so base and product
+  images always share one platform. Override per build, e.g.
+  `make build IMAGE_PLATFORM=linux/arm64` for native local/kind builds on
+  arm64 hosts.
+
+### Changed — Build configuration extracted to `mk/defaults.mk`
+
+- New `mk/defaults.mk` is the single source of truth for overridable build
+  settings (`IMAGE_PLATFORM`, `IMAGE_TAG_PREFIX`/`IMAGE_TAG_PROFILE`,
+  `REGISTRY`, `AUTO_LOAD_KIND`/`KIND_CLUSTER_NAME`, `BASE_UV_*`), included by
+  the root `Makefile` and by `mk/image.mk`, so root-driven and standalone
+  product builds resolve identical defaults. All values use `?=`, so
+  command-line overrides still win; `mk/` fragments keep processing logic
+  only. `IMAGE_TAG` and `IMAGE_CONTEXT` intentionally stay in `mk/image.mk`
+  (computed fallback / per-product hook).
+
 ### Changed — SPEC-010: Platform Gateway Extraction (ADR-0005)
 
 - Split the former combined gateway into two products with the boundaries

@@ -296,7 +296,7 @@ kubectl -n dev-luban-aiops logs deployment/redis
 To reach the portal in this development cluster through a single browser entrypoint:
 
 ```bash
-kubectl -n dev-luban-aiops port-forward service/web-ui 18080:80
+kubectl -n dev-luban-aiops port-forward service/web-ui 18080:8080
 ```
 
 Then open `http://localhost:18080`. The committed `OIDC` redirect URIs in this overlay assume that same local browser entrypoint, and `nginx` forwards `/api/` calls to `platform-gateway`.

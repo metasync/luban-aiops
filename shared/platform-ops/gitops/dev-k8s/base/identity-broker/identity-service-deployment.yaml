@@ -20,6 +20,12 @@ spec:
         - name: identity-service
           image: luban-aiops/identity-service:dev-local
           imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
           envFrom:
             - configMapRef:
                 name: platform-runtime-config

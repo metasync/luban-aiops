@@ -21,6 +21,12 @@ spec:
         - name: tool-gateway
           image: luban-aiops/tool-gateway:dev-local
           imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
           envFrom:
             - configMapRef:
                 name: platform-runtime-config

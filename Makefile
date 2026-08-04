@@ -26,11 +26,9 @@ OVERLAYS := dev-k8s \
 # Coordinated deploy build state (written by `make build`, read by `make deploy`).
 IMAGE_STATE := $(GITOPS_DIR)/dev-k8s/.images.env
 
-# Image build settings (override on the command line).
-IMAGE_TAG_PREFIX  ?= dev-k8s
-IMAGE_TAG_PROFILE ?=
-AUTO_LOAD_KIND    ?= false
-KIND_CLUSTER_NAME ?=
+# Overridable build settings (IMAGE_PLATFORM, BASE_UV_*, kind loading, ...).
+# Config lives in mk/defaults.mk; this Makefile holds processing logic.
+include mk/defaults.mk
 
 # Compute the coordinated image tag once (mirrors the former build-images.sh):
 # clean tree -> <prefix>[-<profile>]-<gitsha>; dirty -> ...-dirty-<timestamp>.
@@ -72,9 +70,16 @@ test: ## Run every product test suite
 lint: ## Lint every product Dockerfile (hadolint; docker-run fallback)
 	@for p in $(IMAGE_PRODUCTS); do $(MAKE) -C products/$$p lint || exit 1; done
 
+.PHONY: base-images
+base-images: ## Build shared base images (base-uv)
+	docker build --platform $(IMAGE_PLATFORM) \
+		--build-arg UV_VERSION=$(BASE_UV_UV_VERSION) \
+		--build-arg PYTHON_VERSION=$(BASE_UV_PYTHON_VERSION) \
+		-t $(BASE_UV_IMAGE):$(BASE_UV_TAG) shared/base-images/base-uv
+
 .PHONY: build
-build: ## Build all images (coordinated tag) and write .images.env for deploy
-	@for p in $(IMAGE_PRODUCTS); do $(MAKE) -C products/$$p build IMAGE_TAG=$(IMAGE_TAG) || exit 1; done
+build: base-images ## Build all images (coordinated tag) and write .images.env for deploy
+	@for p in $(IMAGE_PRODUCTS); do $(MAKE) -C products/$$p build IMAGE_TAG=$(IMAGE_TAG) IMAGE_PLATFORM=$(IMAGE_PLATFORM) || exit 1; done
 	@echo "IMAGE_TAG=$(IMAGE_TAG)" > $(IMAGE_STATE)
 	@echo "AGENT_SERVICE_IMAGE=luban-aiops/agent-service:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "PLATFORM_GATEWAY_IMAGE=luban-aiops/platform-gateway:$(IMAGE_TAG)" >> $(IMAGE_STATE)

@@ -16,5 +16,11 @@ spec:
         - name: web-ui
           image: luban-aiops/web-ui:dev-local
           imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
           ports:
-            - containerPort: 80
+            - containerPort: 8080

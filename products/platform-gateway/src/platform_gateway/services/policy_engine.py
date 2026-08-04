@@ -126,9 +126,12 @@ def _parse_rules(text: str, source: str) -> list[PolicyRule]:
 def load_bundle(settings: PlatformGatewaySettings) -> list[PolicyRule]:
     """Load and cache the policy bundle.
 
-    - GATEWAY_POLICY_PATH set + valid -> load it
+    - PLATFORM_GATEWAY_POLICY_PATH set + valid -> load it
     - path set + missing/invalid -> raise PolicyLoadError (no silent fallback)
     - path unset -> load the packaged default bundle
+
+    Note: tool-gateway uses GATEWAY_POLICY_PATH for its own bundle; the
+    PLATFORM_GATEWAY_* knobs apply to this edge service only.
     """
     global _bundle, _configured_path
 

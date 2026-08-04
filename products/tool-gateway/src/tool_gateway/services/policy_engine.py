@@ -22,15 +22,12 @@ LOGGER = logging.getLogger(__name__)
 
 DEFAULT_BUNDLE_RESOURCE = "policy-default.yaml"
 
-# Action vocabulary for the current gateway surface (R-3). Routes not listed
-# here (health, runtime metadata, auth, identity normalize) are platform
-# plumbing and are deliberately exempt from policy enforcement.
-ACTION_CHAT = "chat"
-ACTION_SESSION_CREATE = "session:create"
-ACTION_SESSION_READ = "session:read"
-PROTECTED_ACTIONS = frozenset(
-    {ACTION_CHAT, ACTION_SESSION_CREATE, ACTION_SESSION_READ}
-)
+# Action vocabulary for the tool API surface (SPEC-010). Health and metrics
+# routes are platform plumbing and are deliberately exempt from policy
+# enforcement; portal-facing actions (chat, session:*) live in platform-gateway.
+ACTION_TOOLS_LIST = "tools:list"
+ACTION_TOOLS_INVOKE = "tools:invoke"
+PROTECTED_ACTIONS = frozenset({ACTION_TOOLS_LIST, ACTION_TOOLS_INVOKE})
 
 # Module-level bundle singleton, keyed on the configured path.
 _bundle: list[PolicyRule] | None = None
