@@ -16,6 +16,9 @@ spec:
         prometheus.io/path: /metrics
         prometheus.io/port: "8000"
     spec:
+      # Service-link env vars collide with *_PORT/_HOST settings; service
+      # discovery uses DNS names instead.
+      enableServiceLinks: false
       serviceAccountName: platform-gateway
       containers:
         - name: platform-gateway

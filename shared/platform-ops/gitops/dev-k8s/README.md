@@ -108,6 +108,8 @@ The `web-ui` image serves the static portal through `nginx` and proxies `/api/` 
 
 The `redis` deployment uses `emptyDir` storage in this development baseline. That keeps setup simple for Kubernetes development testing, but it is not a durable production persistence model.
 
+All app deployments set `enableServiceLinks: false`. Kubernetes otherwise injects legacy service-link env vars (for example `AGENT_SERVICE_PORT=tcp://…`) that collide with the services' own `*_PORT` settings; service discovery in this platform uses DNS names exclusively.
+
 ## Runtime Secrets
 
 The `agent-service` deployment in this overlay supports an optional Kubernetes secret named `agent-platform-runtime-secrets`.

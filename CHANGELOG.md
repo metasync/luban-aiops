@@ -8,6 +8,20 @@ published product versions.
 
 ## Unreleased
 
+### Fixed — Deployment env collisions and portal stream rendering
+
+- All five dev-k8s app deployments set `enableServiceLinks: false`:
+  Kubernetes' legacy service-link env vars (e.g.
+  `AGENT_SERVICE_PORT=tcp://…`, injected for the same-named Service)
+  collided with the services' own port settings and crash-looped
+  `agent-service` on startup. Service discovery uses DNS names only.
+- operator-portal chat stream rendering fixed: the UI read `payload.event`
+  while the gateway/agent stream contract emits `payload.type`, so every
+  `message_delta` was dropped and the response area showed
+  "[stream completed with no visible text]". The portal now reads `type`
+  (with `event` as a legacy alias) and treats stream EOF as completion
+  when no `message_end` event arrives.
+
 ### Changed — SPEC-010 code-review follow-ups
 
 - platform-gateway `/health/ready` now verifies the policy bundle loads

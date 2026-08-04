@@ -16,6 +16,9 @@ spec:
         prometheus.io/path: /metrics
         prometheus.io/port: "8000"
     spec:
+      # Kubernetes injects legacy service-link env vars (e.g. AGENT_SERVICE_PORT=tcp://…)
+      # that collide with the service's own *_PORT settings; DNS names are used instead.
+      enableServiceLinks: false
       containers:
         - name: agent-service
           image: luban-aiops/agent-service:dev-local

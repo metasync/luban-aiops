@@ -12,6 +12,9 @@ spec:
       labels:
         app: web-ui
     spec:
+      # Service-link env vars can leak into the container environment; the
+      # portal only needs DNS-based upstream resolution.
+      enableServiceLinks: false
       containers:
         - name: web-ui
           image: luban-aiops/web-ui:dev-local

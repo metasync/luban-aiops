@@ -16,6 +16,9 @@ spec:
         prometheus.io/path: /metrics
         prometheus.io/port: "8000"
     spec:
+      # Service-link env vars (IDENTITY_SERVICE_PORT=tcp://…) collide with the
+      # broker's own port setting; service discovery uses DNS names instead.
+      enableServiceLinks: false
       containers:
         - name: identity-service
           image: luban-aiops/identity-service:dev-local

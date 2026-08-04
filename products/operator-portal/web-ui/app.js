@@ -174,14 +174,19 @@ function renderError(target, error) {
   target.textContent = error instanceof Error ? error.message : String(error);
 }
 
+// Stream events carry their kind in `type` per the gateway/agent contract
+// (message_start/message_delta/message_end/error); accept `event` as a
+// legacy alias.
+function streamEventType(payload) {
+  return String(payload.type || payload.event || "").toLowerCase();
+}
+
 function shouldAppendStreamDelta(payload) {
-  const event = String(payload.event || "").toLowerCase();
-  return Boolean(payload.delta) && ["message_delta", "text_block_start", "text_block_delta"].includes(event);
+  return Boolean(payload.delta) && ["message_delta", "text_block_start", "text_block_delta"].includes(streamEventType(payload));
 }
 
 function isStreamComplete(payload) {
-  const event = String(payload.event || "").toLowerCase();
-  return event === "message_end" || event === "reply_end";
+  return ["message_end", "reply_end"].includes(streamEventType(payload));
 }
 
 async function refreshAuthenticatedIdentity() {
@@ -404,6 +409,10 @@ async function streamPrompt() {
     }
     if (!streamCompleted && !responseOutput.textContent.trim()) {
       responseOutput.textContent = "[stream completed with no visible text]";
+    } else if (!streamCompleted) {
+      // The agent stream can end at EOF without a message_end event; treat
+      // stream close as completion so the UI state stays consistent.
+      responseOutput.textContent += "\n\n[stream complete]";
     }
   } catch (error) {
     throw error;
