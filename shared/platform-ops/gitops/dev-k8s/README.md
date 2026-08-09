@@ -252,6 +252,41 @@ If your development cluster does not automatically see Docker images from the ho
 make build AUTO_LOAD_KIND=true KIND_CLUSTER_NAME=<your-kind-cluster>
 ```
 
+## Token Delegation Secrets (SPEC-008)
+
+The agent needs a working **token delegation chain** to discover and invoke
+tools through tool-gateway. Without it, platform-gateway cannot exchange the
+user's portal JWT for a delegated token, and tool calls fail silently (the
+agent reports "access not granted" or "no tools available").
+
+`make deploy` provisions these secrets automatically via
+`sync-delegation-secrets.sh`. To skip (e.g. when secrets are injected by CI):
+
+```bash
+SKIP_DELEGATION_SECRETS=true make deploy
+```
+
+To provision manually or regenerate the shared secret:
+
+```bash
+shared/platform-ops/gitops/sync-delegation-secrets.sh
+```
+
+The script generates a random shared client secret (or uses
+`DELEGATION_CLIENT_SECRET` if exported), creates both K8s secrets, and
+restarts the affected deployments:
+
+- `platform-gateway-runtime-secrets` — `PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET`
+- `identity-service-runtime-secrets` — `IDENTITY_SERVICE_CLIENTS` (format: `platform-gateway:<secret>:tool-gateway`)
+
+Verify delegation is working:
+
+```bash
+kubectl -n dev-luban-aiops logs deployment/platform-gateway --tail=20 | grep delegation
+# Look for delegation_exchange_total{result=success} in metrics:
+kubectl -n dev-luban-aiops exec deployment/platform-gateway -- curl -s localhost:8000/metrics | grep delegation
+```
+
 ## Apply
 
 ```bash

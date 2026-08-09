@@ -60,6 +60,7 @@ Current implementation status:
 - routes chat and streaming calls through a provider-configurable AgentScope runtime adapter when credentials are configured
 - distinguishes between unconfigured runtime state and provider-call failures in runtime metadata
 - enables real runtime replies when `AGENTSCOPE_API_KEY` is supplied to the service environment
+- emits per-request tool trace events (`tool_call` and `tool_result`) into the SSE stream when `TOOL_GATEWAY_URL` is configured; traces are merged with text deltas so the operator portal can render an evidence panel (SPEC-011)
 
 Service layout:
 
@@ -154,6 +155,9 @@ Current runtime environment knobs:
 - `TOOL_GATEWAY_URL`
   - base URL of the tool-gateway for tool discovery and invocation (SPEC-007); when set, the AgentScope kernel registers gateway tools into the LLM Toolkit; when unset, the agent builds with an empty Toolkit
   - tool calls relay the gateway-forwarded delegated token (SPEC-008) as `Authorization: Bearer`; the token is bound per-user into the toolkit closures (no cross-user sharing) and identity is never carried in the request body; without a token, discovery degrades to an empty Toolkit and invocation returns a structured error
+  - when tools are active, each request creates a per-request trace queue; toolkit closures post `tool_call` and `tool_result` events that are drained into the SSE stream alongside text deltas (SPEC-011)
+- `AGENT_TOOL_DATA_SUMMARY_MAX_CHARS`
+  - maximum character length for `data_summary` fields in tool trace events; defaults to `2000`; payloads exceeding the limit are truncated with a structured marker; full payloads remain in audit logs only (SPEC-011)
 - `OTEL_ENABLED`
   - master switch for the OTLP push pipeline (traces + metrics); defaults to `false`; when disabled, the `/metrics` surface is unaffected
 - `OTEL_EXPORTER_OTLP_ENDPOINT`

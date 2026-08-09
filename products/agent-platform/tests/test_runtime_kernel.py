@@ -333,3 +333,69 @@ class TestPerTokenToolkitCache:
         assert toolkit is not None
         # Cached under the empty-key bucket.
         assert asyncio.run(kernel._ensure_toolkit(None)) is toolkit
+
+
+class TestRequestToolkitRegistration:
+    """Regression: per-request toolkits must actually register gateway tools.
+
+    AgentScope 2.x removed ``Toolkit.add``; a toolkit built without tools is
+    empty and the model can never invoke the gateway (root cause of the
+    hallucinated health report). These tests assert the schemas are really
+    present on the built toolkit.
+    """
+
+    DEFINITION = {
+        "name": "k8s.list_pods",
+        "description": "List pods in the cluster",
+        "risk_level": "read",
+        "parameters_schema": {
+            "type": "object",
+            "properties": {"namespace": {"type": "string"}},
+        },
+    }
+
+    def _kernel(self):
+        return AgentKernel(
+            settings=RuntimeSettings(
+                api_key="test-key",
+                tool_gateway_url="http://gw:8080",
+            )
+        )
+
+    def test_request_toolkit_registers_cached_definitions(self):
+        kernel = self._kernel()
+        kernel._tool_definitions["token-a"] = [self.DEFINITION]
+
+        toolkit = asyncio.run(
+            kernel._build_request_toolkit("token-a", asyncio.Queue())
+        )
+
+        schemas = asyncio.run(toolkit.get_tool_schemas())
+        names = {schema["function"]["name"] for schema in schemas}
+        assert names == {"k8s_list_pods"}
+
+    def test_request_toolkit_empty_when_no_definitions_cached(self):
+        kernel = self._kernel()
+
+        toolkit = asyncio.run(
+            kernel._build_request_toolkit("token-a", asyncio.Queue())
+        )
+
+        schemas = asyncio.run(toolkit.get_tool_schemas())
+        assert not any(
+            schema.get("type") == "function" for schema in schemas
+        )
+
+    def test_count_function_tools(self):
+        from agentscope.tool import Toolkit
+
+        from agent_service.tools.gateway_tools import build_gateway_toolkit
+
+        kernel = self._kernel()
+
+        assert asyncio.run(kernel._count_function_tools(Toolkit())) == 0
+
+        populated = build_gateway_toolkit(
+            [self.DEFINITION], "http://gw:8080", "token-a"
+        )
+        assert asyncio.run(kernel._count_function_tools(populated)) == 1

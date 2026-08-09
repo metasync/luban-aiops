@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 
 from identity_service.api.router import router
 from identity_service.core.metrics import setup_metrics
-from identity_service.core.observability import log_event
+from identity_service.core.observability import configure_logging, log_event
 from identity_service.core.telemetry import current_trace_id, setup_telemetry
 from identity_service.metadata import SERVICE_NAME, SERVICE_TITLE, SERVICE_VERSION
 
@@ -14,6 +14,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
+    configure_logging()
     app = FastAPI(title=SERVICE_TITLE, version=SERVICE_VERSION)
 
     @app.middleware("http")

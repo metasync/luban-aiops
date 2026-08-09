@@ -39,24 +39,28 @@ rules:
     decision:
       outcome: allow
 
+  # tools:invoke / tools:list are also granted to read-only-observer: the
+  # authorization matrix permits observers to perform tier-0 reads (read-status,
+  # read-logs, read-metrics) and every registered tool is currently read-only.
+  # Re-scope these rules before any mutating (tier 1+) tool is registered.
   - id: allow-operators-tools
     domain: action_authz
-    description: Operational and developer roles may invoke read-only tools.
+    description: Operational, developer, and observer roles may invoke read-only tools.
     priority: 100
     enabled: true
     match:
-      roles_any: ["platform-admin", "operator", "developer"]
+      roles_any: ["platform-admin", "operator", "developer", "read-only-observer"]
       actions_any: ["tools:invoke"]
     decision:
       outcome: allow
 
   - id: allow-operators-tools-list
     domain: action_authz
-    description: Operational and developer roles may list available tools.
+    description: Operational, developer, and observer roles may list available tools.
     priority: 100
     enabled: true
     match:
-      roles_any: ["platform-admin", "operator", "developer"]
+      roles_any: ["platform-admin", "operator", "developer", "read-only-observer"]
       actions_any: ["tools:list"]
     decision:
       outcome: allow

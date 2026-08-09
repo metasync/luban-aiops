@@ -7,7 +7,7 @@ They are validated against the JSON Schema files in shared/shared-contracts/sche
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -40,11 +40,31 @@ class AgentChatResponse(BaseModel):
 
 
 class AgentStreamEvent(BaseModel):
-    type: Literal["message_start", "message_delta", "message_end", "error"]
+    """SSE frame payload conforming to agent-stream-event.schema.json (v3).
+
+    v3 adds tool_call/tool_result frames for evidence panel rendering
+    (SPEC-011 R-1).
+    """
+
+    type: Literal[
+        "message_start",
+        "message_delta",
+        "message_end",
+        "error",
+        "tool_call",
+        "tool_result",
+    ]
     session_id: str
     request_id: str
     delta: str | None = None
     message: str | None = None
+    tool_name: str | None = None
+    call_id: str | None = None
+    parameters: dict[str, Any] | None = None
+    status: Literal["success", "error", "denied"] | None = None
+    evidence: dict[str, Any] | None = None
+    data_summary: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
 
 
 # --- Sessions ---

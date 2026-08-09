@@ -29,6 +29,13 @@ class GatewaySettings:
     k8s_namespace: str = ""
     redaction_enabled: bool = True
     redaction_overflow_fraction: float = 0.2
+    elastic_enabled: bool = False
+    elastic_url: str = ""
+    elastic_api_key: str = ""
+    elastic_username: str = ""
+    elastic_password: str = ""
+    elastic_verify_tls: bool = True
+    elastic_alerts_index: str = ".alerts-*"
 
     @classmethod
     def from_env(cls) -> "GatewaySettings":
@@ -61,6 +68,21 @@ class GatewaySettings:
             in {"1", "true", "yes", "on"},
             redaction_overflow_fraction=float(
                 os.getenv("GATEWAY_REDACTION_OVERFLOW_FRACTION", "0.2")
+            ),
+            elastic_enabled=os.getenv("GATEWAY_ELASTIC_ENABLED", "false")
+            .strip()
+            .lower()
+            in {"1", "true", "yes", "on"},
+            elastic_url=os.getenv("GATEWAY_ELASTIC_URL", ""),
+            elastic_api_key=os.getenv("GATEWAY_ELASTIC_API_KEY", ""),
+            elastic_username=os.getenv("GATEWAY_ELASTIC_USERNAME", ""),
+            elastic_password=os.getenv("GATEWAY_ELASTIC_PASSWORD", ""),
+            elastic_verify_tls=os.getenv("GATEWAY_ELASTIC_VERIFY_TLS", "true")
+            .strip()
+            .lower()
+            in {"1", "true", "yes", "on"},
+            elastic_alerts_index=os.getenv(
+                "GATEWAY_ELASTIC_ALERTS_INDEX", ".alerts-*"
             ),
         )
 

@@ -54,6 +54,10 @@ OTel push is controlled by standard-aligned environment variables:
 
 Fail-open guarantee: an unreachable or misconfigured collector must never break a request. OTel batch processors drop telemetry on export failure; service setup additionally guards initialization and logs rather than raising.
 
+## Structured Logging Levels
+
+All business and request events are emitted as single-line JSON via `log_event(...)` at **INFO** level. Because these records are the audit trail (http_request, tool_invoked, policy decisions), every service calls `configure_logging()` at app startup to raise the root logger from uvicorn's WARNING default to INFO. The level is overridable per-deployment via `LOG_LEVEL`; the default must stay INFO so audit records are never silently discarded.
+
 ## Request Correlation And Trace Bridging
 
 - `x-request-id` is the **log- and portal-facing** correlation key. It is generated if absent (preserving the existing portal contract) and forwarded on every outbound service-to-service call.

@@ -129,7 +129,9 @@ class ToolListEndpointTests(unittest.TestCase):
         self.assertEqual(set(tools), {"test.echo", "test.explode"})
         self.assertEqual(tools["test.echo"]["risk_level"], "read")
 
-    def test_list_tools_denied_for_observer(self) -> None:
+    def test_list_tools_allowed_for_observer(self) -> None:
+        # Authorization matrix: read-only-observer may perform tier-0 reads; all
+        # registered tools are read-only, so discovery is granted.
         with _patch_jwks():
             response = self.client.get(
                 "/api/v2/tools",
@@ -137,7 +139,9 @@ class ToolListEndpointTests(unittest.TestCase):
                     "Authorization": f"Bearer {_mint_delegated('read-only-observer')}"
                 },
             )
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
+        tools = {tool["name"]: tool for tool in response.json()}
+        self.assertEqual(set(tools), {"test.echo", "test.explode"})
 
     def test_list_tools_rejects_wrong_audience_before_policy(self) -> None:
         with _patch_jwks():
@@ -191,15 +195,17 @@ class ToolInvokeEndpointTests(unittest.TestCase):
         self.assertEqual(body["data"]["caller"], "operator.user")
         self.assertEqual(body["evidence"]["risk_level"], "read")
 
-    def test_invoke_denied_for_observer(self) -> None:
+    def test_invoke_allowed_for_observer(self) -> None:
+        # Authorization matrix: read-only-observer may perform tier-0 reads; all
+        # registered tools are read-only, so invocation is granted.
         with _patch_jwks():
             response = self._invoke(
                 _mint_delegated("read-only-observer"), "test.echo", {}, "req-2"
             )
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["status"], "denied")
-        self.assertEqual(body["error"]["code"], "POLICY_DENIED")
+        self.assertEqual(body["status"], "success")
+        self.assertEqual(body["data"]["caller"], "read-only-observer.user")
 
     def test_invoke_unknown_tool(self) -> None:
         with _patch_jwks():

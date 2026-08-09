@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import unittest
 from unittest.mock import patch
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 from prometheus_client import REGISTRY
 
 from agent_service.app import create_app
+from agent_service.core.observability import configure_logging
 from agent_service.services.session_service import create_session
 
 
@@ -51,6 +53,20 @@ class DomainCounterTests(unittest.TestCase):
         response = client.post("/api/v2/sessions", headers={"X-User-ID": "user-1"})
         self.assertEqual(response.status_code, 201)
         self.assertEqual(_sample("agent_sessions_created_total"), before + 1)
+
+
+class LoggingConfigTests(unittest.TestCase):
+    def test_defaults_to_info_so_audit_events_survive(self) -> None:
+        env = {k: v for k, v in os.environ.items() if k != "LOG_LEVEL"}
+        with patch.dict(os.environ, env, clear=True):
+            configure_logging()
+        self.assertEqual(logging.getLogger().level, logging.INFO)
+
+    def test_log_level_env_overrides(self) -> None:
+        with patch.dict(os.environ, {"LOG_LEVEL": "WARNING"}):
+            configure_logging()
+        self.assertEqual(logging.getLogger().level, logging.WARNING)
+        configure_logging()  # restore default for later tests
 
 
 if __name__ == "__main__":

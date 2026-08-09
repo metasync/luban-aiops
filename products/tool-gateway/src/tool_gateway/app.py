@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from tool_gateway.api.router import router
 from tool_gateway.core.config import get_settings
 from tool_gateway.core.metrics import setup_metrics
-from tool_gateway.core.observability import log_event
+from tool_gateway.core.observability import configure_logging, log_event
 from tool_gateway.core.request_context import resolve_request_id
 from tool_gateway.core.telemetry import setup_telemetry
 from tool_gateway.metadata import SERVICE_NAME, SERVICE_TITLE, SERVICE_VERSION
@@ -29,10 +29,25 @@ def _build_tool_registry() -> ToolRegistry:
         connector.register_tools(registry)
         LOGGER.info("kubernetes connector registered")
 
+    if settings.elastic_enabled:
+        from tool_gateway.tools.elastic_connector import ElasticConnector
+
+        connector = ElasticConnector(
+            url=settings.elastic_url,
+            api_key=settings.elastic_api_key,
+            username=settings.elastic_username,
+            password=settings.elastic_password,
+            verify_tls=settings.elastic_verify_tls,
+            alerts_index=settings.elastic_alerts_index,
+        )
+        connector.register_tools(registry)
+        LOGGER.info("elastic connector registered")
+
     return registry
 
 
 def create_app() -> FastAPI:
+    configure_logging()
     app = FastAPI(title=SERVICE_TITLE, version=SERVICE_VERSION)
     app.state.tool_registry = _build_tool_registry()
 

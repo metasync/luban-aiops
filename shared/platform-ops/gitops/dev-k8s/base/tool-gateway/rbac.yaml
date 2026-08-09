@@ -4,26 +4,62 @@ kind: ServiceAccount
 metadata:
   name: tool-gateway
 ---
+# Cluster-wide READ-ONLY access for the tool-gateway.
+#
+# Rationale: the AIOps agent must be able to health-check and inspect
+# workloads in ANY namespace (e.g. argocd, kube-system), not just the
+# platform namespace. Every registered tool is read-only by contract
+# (SPEC-007 risk_level=read) and invocations are additionally gated by
+# the deny-by-default policy engine, so granting get/list/watch across
+# the cluster is the intended blast radius. No mutating verbs are
+# granted anywhere.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
-  name: tool-gateway-readonly
+  name: luban-tool-gateway-readonly
 rules:
+  # Core workload and diagnostic resources.
   - apiGroups: [""]
-    resources: ["pods", "events"]
-    verbs: ["get", "list"]
-  - apiGroups: [""]
-    resources: ["pods/log"]
-    verbs: ["get"]
+    resources:
+      - pods
+      - pods/log
+      - events
+      - services
+      - endpoints
+      - namespaces
+      - nodes
+      - persistentvolumeclaims
+      - configmaps
+    verbs: ["get", "list", "watch"]
+  # Workload controllers.
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
+      - daemonsets
+    verbs: ["get", "list", "watch"]
+  # Batch workloads.
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  # Networking surfaces commonly needed for health checks.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
-  name: tool-gateway-readonly
+  name: luban-tool-gateway-readonly
 subjects:
   - kind: ServiceAccount
     name: tool-gateway
+    namespace: dev-luban-aiops
 roleRef:
-  kind: Role
-  name: tool-gateway-readonly
+  kind: ClusterRole
+  name: luban-tool-gateway-readonly
   apiGroup: rbac.authorization.k8s.io

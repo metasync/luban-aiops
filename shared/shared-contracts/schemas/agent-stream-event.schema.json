@@ -1,15 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/agent-stream-event.schema.json",
-  "title": "Agent Stream Event (v2)",
-  "description": "SSE frame payload for GET /api/v2/chat/stream. Simplified: 'type' replaces 'event'; no freeform 'payload' field.",
+  "title": "Agent Stream Event (v3)",
+  "description": "SSE frame payload for GET /api/v2/chat/stream. v3 adds tool_call and tool_result event types for evidence panel rendering (SPEC-011 R-1).",
   "type": "object",
   "additionalProperties": false,
   "required": ["type", "session_id", "request_id"],
   "properties": {
     "type": {
       "type": "string",
-      "enum": ["message_start", "message_delta", "message_end", "error"]
+      "enum": ["message_start", "message_delta", "message_end", "error", "tool_call", "tool_result"]
     },
     "session_id": {
       "type": "string"
@@ -24,6 +24,49 @@
     "message": {
       "type": "string",
       "description": "Terminal metadata. Present on message_end and error frames."
+    },
+    "tool_name": {
+      "type": "string",
+      "description": "Name of the invoked tool. Present on tool_call and tool_result frames."
+    },
+    "call_id": {
+      "type": "string",
+      "description": "Unique identifier correlating a tool_call with its tool_result within a request."
+    },
+    "parameters": {
+      "type": "object",
+      "description": "LLM-supplied tool parameters. Present on tool_call frames.",
+      "additionalProperties": true
+    },
+    "status": {
+      "type": "string",
+      "enum": ["success", "error", "denied"],
+      "description": "Tool execution outcome. Present on tool_result frames."
+    },
+    "evidence": {
+      "type": "object",
+      "description": "Execution provenance metadata. Present on tool_result frames.",
+      "properties": {
+        "executed_at": { "type": "string", "format": "date-time" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "risk_level": { "type": "string", "enum": ["read", "write", "admin"] },
+        "source_system": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "data_summary": {
+      "type": ["object", "null"],
+      "description": "Condensed tool result for UI rendering (bounded size). Present on tool_result frames.",
+      "additionalProperties": true
+    },
+    "error": {
+      "type": ["object", "null"],
+      "description": "Error details. Present on error and failed tool_result frames.",
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      },
+      "additionalProperties": false
     }
   }
 }

@@ -102,13 +102,31 @@ async def chat_stream(
     return StreamingResponse(_events(), media_type="text/event-stream")
 
 
+_STREAM_EVENT_TYPES = frozenset(
+    {
+        "message_start",
+        "message_delta",
+        "message_end",
+        "error",
+        "tool_call",
+        "tool_result",
+    }
+)
+
+_TOOL_RESULT_STATUSES = frozenset({"success", "error", "denied"})
+
+
 def _normalize_stream_event(
     raw: dict[str, object], session_id: str, request_id: str
 ) -> AgentStreamEvent:
-    """Translate a kernel stream chunk into a contract-conformant event."""
+    """Translate a kernel stream chunk into a contract-conformant event.
+
+    tool_call / tool_result frames carry the evidence-panel payload
+    (SPEC-011 R-1) and must pass through untouched; anything unrecognized
+    still degrades to message_delta for safety.
+    """
     event_type = str(raw.get("event", raw.get("type", "message_delta")))
-    # Map any unrecognized types to message_delta for safety.
-    if event_type not in ("message_start", "message_delta", "message_end", "error"):
+    if event_type not in _STREAM_EVENT_TYPES:
         event_type = "message_delta"
     return AgentStreamEvent(
         type=event_type,  # type: ignore[arg-type]
@@ -116,7 +134,29 @@ def _normalize_stream_event(
         request_id=request_id,
         delta=raw.get("delta") if isinstance(raw.get("delta"), str) else None,
         message=raw.get("message") if isinstance(raw.get("message"), str) else None,
+        tool_name=raw.get("tool_name") if isinstance(raw.get("tool_name"), str) else None,
+        call_id=raw.get("call_id") if isinstance(raw.get("call_id"), str) else None,
+        parameters=(
+            raw.get("parameters") if isinstance(raw.get("parameters"), dict) else None
+        ),
+        status=(
+            raw.get("status")  # type: ignore[arg-type]
+            if raw.get("status") in _TOOL_RESULT_STATUSES
+            else None
+        ),
+        evidence=raw.get("evidence") if isinstance(raw.get("evidence"), dict) else None,
+        data_summary=_coerce_data_summary(raw.get("data_summary")),
+        error=raw.get("error") if isinstance(raw.get("error"), dict) else None,
     )
+
+
+def _coerce_data_summary(value: object) -> dict[str, object] | None:
+    """The contract requires an object; wrap non-object summaries safely."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    return {"value": value}
 
 
 # --- Sessions ---

@@ -54,6 +54,7 @@ Current implementation status:
 - loads the policy bundle from `GATEWAY_POLICY_PATH`, falling back to a packaged default kept in sync with `shared/shared-contracts`
 - provides a tool execution framework (`src/tool_gateway/tools/`) with a `ToolRegistry`, `BaseTool` abstraction, and structured evidence envelope (SPEC-007)
 - ships a Kubernetes read-only connector (`k8s.list_pods`, `k8s.get_pod`, `k8s.get_events`, `k8s.get_pod_logs`) using `kubernetes-client/python`
+- ships an Elastic observability connector (`elastic.search_logs`, `elastic.get_service_health`, `elastic.get_active_alerts`) using the `elasticsearch` Python client; lazy-initialized, feature-gated by `GATEWAY_ELASTIC_ENABLED` (SPEC-011)
 - exposes `GET /api/v2/tools` (tool discovery, gated by `tools:list`) and `POST /api/v2/tools/invoke` (tool execution gated by `tools:invoke`); both derive identity solely from the verified token — any identity in a request body is never trusted
 - redacts credential-shaped spans (JWTs, `Bearer`/`Basic` values, PEM private keys, key-list fields such as `token`/`password`/`api_key`) from every tool result at the single invoke choke point before both the response and the audit log; when the redacted fraction exceeds `GATEWAY_REDACTION_OVERFLOW_FRACTION` the output is withheld with a `REDACTION_OVERFLOW` error (fail-closed, SPEC-009)
 
@@ -85,6 +86,18 @@ Current runtime environment knobs (tool-scoped; the portal-facing `PLATFORM_GATE
   - redacted-character fraction above which tool output is withheld with `REDACTION_OVERFLOW`; defaults to `0.2`
 - `GATEWAY_HOST`, `GATEWAY_PORT`
   - HTTP bind host/port; the port parser ignores Kubernetes service-link values like `tcp://IP:PORT`
+- `GATEWAY_ELASTIC_ENABLED`
+  - when `true`, registers the Elastic observability connector; defaults to `false`
+- `GATEWAY_ELASTIC_URL`
+  - Elastic cluster URL (e.g. `https://elasticsearch:9200`); required when `GATEWAY_ELASTIC_ENABLED=true`
+- `GATEWAY_ELASTIC_API_KEY`
+  - API key for Elastic authentication; preferred over basic auth when set
+- `GATEWAY_ELASTIC_USERNAME`, `GATEWAY_ELASTIC_PASSWORD`
+  - basic auth credentials for Elastic; used when `GATEWAY_ELASTIC_API_KEY` is not set
+- `GATEWAY_ELASTIC_VERIFY_TLS`
+  - when `true`, verifies TLS certificates on the Elastic connection; defaults to `true`
+- `GATEWAY_ELASTIC_ALERTS_INDEX`
+  - index pattern for active alerts queries; defaults to `alerts-*`
 - `OTEL_ENABLED`
   - master switch for the OTLP push pipeline (traces + metrics); defaults to `false`; when disabled, the `/metrics` surface is unaffected
 - `OTEL_EXPORTER_OTLP_ENDPOINT`

@@ -7,7 +7,11 @@ from agent_service.metadata import RUNTIME_APP_NAME
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are the runtime kernel for the Luban AIOps platform. "
-    "Answer clearly and concisely, and keep the response grounded in the current platform state."
+    "Answer clearly and concisely, and keep the response grounded in the current platform state. "
+    "Ground every factual claim in data actually returned by a tool call. "
+    "Never invent, estimate, or imply infrastructure data you did not retrieve: "
+    "if no tools are available, a tool call fails, or a call is denied, say so explicitly "
+    "and answer only with what you genuinely know. Do not emit tool-call markup as text."
 )
 
 RuntimeProvider = Literal["dashscope", "deepseek", "openai"]
@@ -103,6 +107,7 @@ class RuntimeSettings:
     organization: str | None = None
     provider_options: RuntimeProviderOptions | None = None
     tool_gateway_url: str | None = None
+    tool_data_summary_max_chars: int = 2000
 
     @staticmethod
     def default_provider_options(provider: RuntimeProvider) -> RuntimeProviderOptions:
@@ -212,6 +217,9 @@ class RuntimeSettings:
             organization=_optional_str("AGENTSCOPE_ORGANIZATION"),
             provider_options=cls._provider_options_from_env(provider),
             tool_gateway_url=_optional_str("TOOL_GATEWAY_URL"),
+            tool_data_summary_max_chars=int(
+                os.getenv("AGENT_TOOL_DATA_SUMMARY_MAX_CHARS", "2000")
+            ),
         )
 
     def is_configured(self) -> bool:

@@ -6,7 +6,10 @@ import unittest
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from agent_service.tools.gateway_tools import (
-    build_toolkit_functions,
+    _make_tool_fn,
+    build_function_tools,
+    build_gateway_toolkit,
+    build_toolkit,
     discover_tools,
     invoke_gateway_tool,
 )
@@ -124,29 +127,26 @@ class InvokeGatewayToolTests(unittest.TestCase):
         self.assertEqual(result["tool_name"], "k8s.list_pods")
 
 
-class BuildToolkitFunctionsTests(unittest.TestCase):
-    def test_builds_functions_for_each_tool(self) -> None:
-        functions = build_toolkit_functions("http://gw:8080", MOCK_TOOL_DEFINITIONS)
-        self.assertEqual(len(functions), 2)
-        self.assertEqual(functions[0][0], "k8s.list_pods")
-        self.assertEqual(functions[1][0], "k8s.get_pod")
+class MakeToolFnTests(unittest.TestCase):
+    """The closure factory: metadata and token binding (SPEC-008 R-5)."""
 
-    def test_function_names_are_sanitized(self) -> None:
-        functions = build_toolkit_functions("http://gw:8080", MOCK_TOOL_DEFINITIONS)
-        _, fn = functions[0]
+    def test_function_name_sanitized(self) -> None:
+        fn = _make_tool_fn(
+            "http://gw:8080", "k8s.list_pods", "List pods.", None, None, 2000
+        )
         self.assertEqual(fn.__name__, "k8s_list_pods")
 
     def test_function_docstring_set(self) -> None:
-        functions = build_toolkit_functions("http://gw:8080", MOCK_TOOL_DEFINITIONS)
-        _, fn = functions[0]
+        fn = _make_tool_fn(
+            "http://gw:8080", "k8s.list_pods",
+            "List pods in a namespace.", None, None, 2000,
+        )
         self.assertEqual(fn.__doc__, "List pods in a namespace.")
 
-    def test_function_binds_token_into_closure(self) -> None:
-        functions = build_toolkit_functions(
-            "http://gw:8080", MOCK_TOOL_DEFINITIONS, bearer_token="user-token"
+    def test_closure_binds_token_and_dotted_name(self) -> None:
+        fn = _make_tool_fn(
+            "http://gw:8080", "k8s.list_pods", "d", "user-token", None, 2000
         )
-        _, fn = functions[0]
-
         mock_result = {"status": "success", "data": {"pods": []}}
         with patch(
             "agent_service.tools.gateway_tools.invoke_gateway_tool",
@@ -157,11 +157,129 @@ class BuildToolkitFunctionsTests(unittest.TestCase):
 
         result = json.loads(result_str)
         self.assertEqual(result["status"], "success")
+        # The gateway receives the ORIGINAL dotted tool name; identity rides on
+        # the token only (never in the body).
         mock_invoke.assert_called_once_with(
             gateway_url="http://gw:8080",
             tool_name="k8s.list_pods",
             parameters={"namespace": "test"},
             bearer_token="user-token",
+        )
+
+
+class BuildFunctionToolsTests(unittest.TestCase):
+    def test_builds_function_tool_per_definition(self) -> None:
+        from agentscope.tool import FunctionTool
+
+        tools = build_function_tools("http://gw:8080", MOCK_TOOL_DEFINITIONS)
+        self.assertEqual(len(tools), 2)
+        self.assertTrue(all(isinstance(t, FunctionTool) for t in tools))
+
+    def test_tool_names_sanitized(self) -> None:
+        tools = build_function_tools("http://gw:8080", MOCK_TOOL_DEFINITIONS)
+        self.assertEqual(tools[0].name, "k8s_list_pods")
+        self.assertEqual(tools[1].name, "k8s_get_pod")
+
+    def test_input_schema_bound_from_definition(self) -> None:
+        tools = build_function_tools("http://gw:8080", MOCK_TOOL_DEFINITIONS)
+        # Normalized: AgentScope requires an object schema with a properties
+        # dict, so one is filled in when the gateway omits it.
+        self.assertEqual(
+            tools[1].input_schema,
+            {"type": "object", "required": ["name"], "properties": {}},
+        )
+
+    def test_schema_without_properties_normalized(self) -> None:
+        defs = [{
+            "name": "k8s.list_pods",
+            "description": "x",
+            "risk_level": "read",
+            "parameters_schema": {"type": "object"},
+        }]
+        tools = build_function_tools("http://gw:8080", defs)
+        self.assertEqual(
+            tools[0].input_schema, {"type": "object", "properties": {}}
+        )
+
+    def test_non_object_schema_replaced_with_default(self) -> None:
+        defs = [{
+            "name": "k8s.list_pods",
+            "description": "x",
+            "risk_level": "read",
+            "parameters_schema": {"type": "array"},
+        }]
+        tools = build_function_tools("http://gw:8080", defs)
+        self.assertEqual(
+            tools[0].input_schema, {"type": "object", "properties": {}}
+        )
+
+    def test_missing_schema_defaults_to_empty_object(self) -> None:
+        defs = [{"name": "k8s.noargs", "description": "x", "risk_level": "read"}]
+        tools = build_function_tools("http://gw:8080", defs)
+        self.assertEqual(
+            tools[0].input_schema, {"type": "object", "properties": {}}
+        )
+
+    def test_read_only_flag_from_risk_level(self) -> None:
+        tools = build_function_tools("http://gw:8080", MOCK_TOOL_DEFINITIONS)
+        self.assertTrue(tools[0].is_read_only)
+
+    def test_read_only_tools_auto_allowed_without_user_confirmation(self) -> None:
+        """Regression: AgentScope 2.x defaults custom tools to ASK, which
+        stalls a headless SSE stream at RequireUserConfirmEvent. Read-only
+        gateway tools must be pre-approved so invocations actually run."""
+        from agentscope.permission import PermissionBehavior
+
+        tools = build_function_tools("http://gw:8080", MOCK_TOOL_DEFINITIONS)
+        decision = _run(tools[0].check_permissions())
+        self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
+
+    def test_non_read_only_tools_still_require_confirmation(self) -> None:
+        from agentscope.permission import PermissionBehavior
+
+        defs = [{
+            "name": "k8s.restart_pod",
+            "description": "x",
+            "risk_level": "write",
+            "parameters_schema": {"type": "object"},
+        }]
+        tools = build_function_tools("http://gw:8080", defs)
+        self.assertFalse(tools[0].is_read_only)
+        decision = _run(tools[0].check_permissions())
+        self.assertEqual(decision.behavior, PermissionBehavior.ASK)
+
+
+class BuildToolkitRegressionTests(unittest.TestCase):
+    """Regression: tools must actually register into a real AgentScope Toolkit.
+
+    The prior implementation called ``Toolkit.add()``, which does not exist in
+    AgentScope 2.x, silently yielding an empty toolkit and fabricated answers.
+    """
+
+    def test_build_toolkit_registers_discovered_tools(self) -> None:
+        with patch(
+            "agent_service.tools.gateway_tools.discover_tools",
+            new_callable=AsyncMock,
+        ) as mock_discover:
+            mock_discover.return_value = MOCK_TOOL_DEFINITIONS
+            toolkit = _run(build_toolkit("http://gw:8080", bearer_token="tok"))
+
+        schemas = _run(toolkit.get_tool_schemas())
+        function_schemas = [s for s in schemas if s.get("type") == "function"]
+        names = {s["function"]["name"] for s in function_schemas}
+        self.assertEqual(names, {"k8s_list_pods", "k8s_get_pod"})
+        # Parameters survive end-to-end so the model can actually call them.
+        by_name = {s["function"]["name"]: s for s in function_schemas}
+        self.assertEqual(
+            by_name["k8s_get_pod"]["function"]["parameters"],
+            {"type": "object", "required": ["name"], "properties": {}},
+        )
+
+    def test_build_gateway_toolkit_empty_definitions(self) -> None:
+        toolkit = build_gateway_toolkit([], "http://gw:8080")
+        schemas = _run(toolkit.get_tool_schemas())
+        self.assertEqual(
+            [s for s in schemas if s.get("type") == "function"], []
         )
 
 

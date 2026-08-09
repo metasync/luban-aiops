@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import unittest
 from unittest.mock import patch
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 from prometheus_client import REGISTRY
 
 from platform_gateway.app import create_app
+from platform_gateway.core.observability import configure_logging
 from platform_gateway.core.config import PlatformGatewaySettings, get_settings
 from platform_gateway.core.request_context import resolve_request_id
 from platform_gateway.services.policy_engine import reset_policy_state
@@ -140,6 +142,20 @@ class OtelGatingTests(unittest.TestCase):
             client = _client()
             self.assertEqual(client.get("/health/live").status_code, 200)
             self.assertEqual(client.get("/metrics").status_code, 200)
+
+
+class LoggingConfigTests(unittest.TestCase):
+    def test_defaults_to_info_so_audit_events_survive(self) -> None:
+        env = {k: v for k, v in os.environ.items() if k != "LOG_LEVEL"}
+        with patch.dict(os.environ, env, clear=True):
+            configure_logging()
+        self.assertEqual(logging.getLogger().level, logging.INFO)
+
+    def test_log_level_env_overrides(self) -> None:
+        with patch.dict(os.environ, {"LOG_LEVEL": "WARNING"}):
+            configure_logging()
+        self.assertEqual(logging.getLogger().level, logging.WARNING)
+        configure_logging()  # restore default for later tests
 
 
 if __name__ == "__main__":

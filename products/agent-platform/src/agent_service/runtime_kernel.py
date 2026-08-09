@@ -17,6 +17,20 @@ TEXT_DELTA_EVENTS = {
     "thinking_block_delta",
 }
 
+# Deterministic guard injected into the turn when a tool gateway is configured
+# but no tool could be registered. A standing system prompt is only a
+# probabilistic hint; when the toolkit is empty the model has no real data to
+# ground in and tends to fabricate, so this explicit per-turn notice is added
+# by code exactly when the risk exists.
+NO_TOOLS_NOTICE = (
+    "[SYSTEM NOTICE] No operational tools are currently reachable. Tool "
+    "discovery returned no available tools, so you have NO live cluster, log, "
+    "or metric data. Do NOT report, estimate, or imply any infrastructure "
+    "status, health, counts, or metrics. Tell the user that operational "
+    "tooling is currently unavailable and that you cannot perform the "
+    "requested check right now."
+)
+
 
 def make_serializable(value: object) -> object:
     if value is None or isinstance(value, (str, int, float, bool)):
@@ -94,6 +108,10 @@ class AgentKernel:
         # another user's session. Keyed by token; the gateway reuses the same
         # delegated token for a user until near-expiry, so discovery is cached.
         self._toolkits: dict[str, object] = {}
+        # Per-token tool definition cache (SPEC-011 R-2): discovery results
+        # are cached per token; per-request toolkits are built from these
+        # definitions with a fresh trace queue.
+        self._tool_definitions: dict[str, list[dict]] = {}
         self._toolkit_lock = asyncio.Lock()
         self._agent_lock = asyncio.Lock()
 
@@ -162,6 +180,9 @@ class AgentKernel:
 
         Toolkits are cached per delegated token so the owning user's credential
         is bound into the closures and never shared across users.
+
+        Also caches tool definitions in ``_tool_definitions`` for per-request
+        toolkit rebuilding (SPEC-011 R-2).
         """
         cache_key = bearer_token or ""
         cached = self._toolkits.get(cache_key)
@@ -177,9 +198,18 @@ class AgentKernel:
                 return cached
 
             if self.settings.tool_gateway_url:
-                from agent_service.tools.gateway_tools import build_toolkit
+                from agent_service.tools.gateway_tools import (
+                    build_toolkit,
+                    discover_tools,
+                )
 
                 try:
+                    # Cache tool definitions separately for per-request rebuilds.
+                    definitions = await discover_tools(
+                        self.settings.tool_gateway_url, bearer_token
+                    )
+                    self._tool_definitions[cache_key] = definitions
+
                     toolkit = await build_toolkit(
                         self.settings.tool_gateway_url, bearer_token
                     )
@@ -191,6 +221,41 @@ class AgentKernel:
             toolkit = Toolkit()
             self._toolkits[cache_key] = toolkit
             return toolkit
+
+    async def _build_request_toolkit(
+        self,
+        bearer_token: str | None,
+        trace_queue: "asyncio.Queue",
+    ):
+        """Build a fresh Toolkit with closures bound to ``trace_queue``.
+
+        Uses cached tool definitions (from ``_ensure_toolkit``) to avoid
+        re-discovery. Returns an empty Toolkit when no definitions are cached
+        (SPEC-011 R-2).
+        """
+        cache_key = bearer_token or ""
+        definitions = self._tool_definitions.get(cache_key, [])
+        if not definitions:
+            from agentscope.tool import Toolkit
+            return Toolkit()
+
+        from agent_service.tools.gateway_tools import build_gateway_toolkit
+
+        return build_gateway_toolkit(
+            definitions,
+            self.settings.tool_gateway_url or "",
+            bearer_token,
+            trace_queue=trace_queue,
+            data_summary_max_chars=self.settings.tool_data_summary_max_chars,
+        )
+
+    async def _count_function_tools(self, toolkit) -> int:
+        """Count real (function) tools in a toolkit, excluding meta tools."""
+        try:
+            schemas = await toolkit.get_tool_schemas()
+        except Exception:
+            return 0
+        return sum(1 for schema in schemas if schema.get("type") == "function")
 
     async def _build_agent(self, bearer_token: str | None = None):
         from agentscope.agent import Agent
@@ -333,10 +398,53 @@ class AgentKernel:
             return
 
         try:
+            # Ensure the agent (with cached toolkit + definitions) exists.
             agent, user_msg_cls = await self.ensure_agent(session_id, bearer_token)
-            async for event in agent.reply_stream(user_msg_cls(name=user_name, content=message)):
+
+            # SPEC-011 R-2: create a per-request trace queue and rebuild the
+            # toolkit with closures bound to it. The agent retains conversation
+            # memory; only the toolkit functions are request-scoped.
+            trace_queue: asyncio.Queue = asyncio.Queue()
+            effective_message = message
+            if self.settings.tool_gateway_url:
+                request_toolkit = await self._build_request_toolkit(
+                    bearer_token, trace_queue,
+                )
+                agent.toolkit = request_toolkit
+
+                # Deterministic anti-hallucination guard: with a gateway
+                # configured but zero registered tools the model has no real
+                # data to ground in, so inject an explicit notice for this turn
+                # instead of relying on the standing system prompt.
+                if await self._count_function_tools(request_toolkit) == 0:
+                    LOGGER.warning(
+                        "tool gateway configured but no tools registered; "
+                        "injecting no-tools notice to prevent fabrication"
+                    )
+                    effective_message = f"{NO_TOOLS_NOTICE}\n\n{message}"
+
+            async for event in agent.reply_stream(
+                user_msg_cls(name=user_name, content=effective_message)
+            ):
                 self.clear_error()
+                # Drain any accumulated trace events before yielding text.
+                while not trace_queue.empty():
+                    trace = trace_queue.get_nowait()
+                    yield {
+                        **trace,
+                        "request_id": request_id,
+                        "session_id": session_id,
+                    }
                 yield self.normalize_event(event, request_id, session_id)
+
+            # Drain any remaining trace events after the stream completes.
+            while not trace_queue.empty():
+                trace = trace_queue.get_nowait()
+                yield {
+                    **trace,
+                    "request_id": request_id,
+                    "session_id": session_id,
+                }
         except Exception as exc:  # pragma: no cover - defensive fallback
             self.remember_error(exc)
             LOGGER.exception("AgentScope streaming failed; falling back to runtime error response: %s", exc)

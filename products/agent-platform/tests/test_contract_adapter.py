@@ -6,6 +6,7 @@ from pathlib import Path
 import jsonschema
 from fastapi.testclient import TestClient
 
+from agent_service.api.v2.routes import _normalize_stream_event
 from agent_service.app import create_app
 
 SCHEMAS_DIR = (
@@ -83,3 +84,76 @@ def test_chat_response_does_not_leak_framework_types() -> None:
     # No AgentScope internals
     assert "payload" not in payload
     assert "msg" not in payload
+
+
+# --- Stream event adapter (SPEC-011 R-1 evidence frames) ---
+
+
+def test_tool_call_frame_passes_through() -> None:
+    raw = {
+        "type": "tool_call",
+        "tool_name": "k8s.list_pods",
+        "call_id": "call-1",
+        "parameters": {"namespace": "argocd"},
+    }
+    event = _normalize_stream_event(raw, "ses-1", "req-1")
+    dumped = json.loads(event.model_dump_json(exclude_none=True))
+    assert dumped["type"] == "tool_call"
+    assert dumped["tool_name"] == "k8s.list_pods"
+    assert dumped["call_id"] == "call-1"
+    assert dumped["parameters"] == {"namespace": "argocd"}
+    jsonschema.validate(dumped, load_schema("agent-stream-event.schema.json"))
+
+
+def test_tool_result_frame_passes_through() -> None:
+    raw = {
+        "type": "tool_result",
+        "tool_name": "k8s.list_pods",
+        "call_id": "call-1",
+        "status": "success",
+        "evidence": {
+            "executed_at": "2026-08-05T10:00:00Z",
+            "duration_ms": 12,
+            "risk_level": "read",
+            "source_system": "kubernetes",
+        },
+        "data_summary": {"count": 3},
+    }
+    event = _normalize_stream_event(raw, "ses-1", "req-1")
+    dumped = json.loads(event.model_dump_json(exclude_none=True))
+    assert dumped["type"] == "tool_result"
+    assert dumped["status"] == "success"
+    assert dumped["evidence"]["risk_level"] == "read"
+    jsonschema.validate(dumped, load_schema("agent-stream-event.schema.json"))
+
+
+def test_denied_tool_result_keeps_denied_status() -> None:
+    raw = {
+        "type": "tool_result",
+        "tool_name": "k8s.list_pods",
+        "call_id": "call-2",
+        "status": "denied",
+        "error": {"code": "policy_denied", "message": "action not granted"},
+    }
+    event = _normalize_stream_event(raw, "ses-1", "req-1")
+    dumped = json.loads(event.model_dump_json(exclude_none=True))
+    assert dumped["status"] == "denied"
+    assert dumped["error"]["code"] == "policy_denied"
+    jsonschema.validate(dumped, load_schema("agent-stream-event.schema.json"))
+
+
+def test_non_object_data_summary_is_wrapped() -> None:
+    raw = {
+        "type": "tool_result",
+        "tool_name": "k8s.get_pod_logs",
+        "call_id": "call-3",
+        "status": "success",
+        "data_summary": ["line-a", "line-b"],
+    }
+    event = _normalize_stream_event(raw, "ses-1", "req-1")
+    assert event.data_summary == {"value": ["line-a", "line-b"]}
+
+
+def test_unknown_event_type_still_degrades_to_message_delta() -> None:
+    event = _normalize_stream_event({"type": "thinking_block"}, "ses-1", "req-1")
+    assert event.type == "message_delta"

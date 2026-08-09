@@ -46,6 +46,10 @@ Current browser baseline capabilities:
 - session creation, prompt send, and streamed response rendering through the
   proxied gateway path
 - request ID visibility for debug-oriented validation
+- evidence panel rendering tool trace events (`tool_call` and `tool_result`)
+  as cards with status badges, collapsible parameters and data summaries, and
+  evidence metadata — visible when the agent invokes tools, hidden otherwise
+  (SPEC-011)
 
 ## Expected Integration Points
 

@@ -8,6 +8,94 @@ published product versions.
 
 ## Unreleased
 
+### Fixed — Evidence panel frames, audit log visibility, cluster-wide read access
+
+- agent-platform: the stream event adapter (`AgentStreamEvent` /
+  `_normalize_stream_event`) now passes v3 `tool_call`/`tool_result` frames
+  through untouched. Previously the pre-v3 Pydantic model coerced every tool
+  frame to `message_delta` and stripped all evidence fields, so the portal
+  evidence panel never rendered despite kernel and portal support.
+- All four Python services: `configure_logging()` now raises the root logger
+  to INFO (overridable via `LOG_LEVEL`) at app startup. Uvicorn's WARNING
+  default silently discarded every `log_event` record — including the
+  `tool_invoked` audit trail and `http_request` middleware events.
+  Convention codified in `shared-contracts/observability-conventions.md`.
+- dev-k8s: tool-gateway RBAC upgraded from a namespaced Role to a
+  cluster-wide read-only ClusterRole (get/list/watch on core, apps, batch,
+  networking, and autoscaling resources) so the agent can health-check any
+  namespace (e.g. `argocd`). No mutating verbs are granted; tool surface and
+  deny-by-default policy remain the enforcement layers.
+
+### Added — SPEC-011: Observability Connector and Evidence Panels
+
+- Extended the agent stream event contract (`agent-stream-event.schema.json`,
+  v3) with `tool_call` and `tool_result` event types carrying tool name,
+  call ID, parameters, status, evidence metadata, and data summary.
+- agent-platform: toolkit closures now post `tool_call`/`tool_result` events
+  to a per-request `asyncio.Queue`; trace events are drained into the SSE
+  stream alongside text deltas. `data_summary` is truncated to
+  `AGENT_TOOL_DATA_SUMMARY_MAX_CHARS` (default 2000) with a structured
+  marker; full payloads stay in audit logs only.
+- tool-gateway: new Elastic observability connector
+  (`elastic.search_logs`, `elastic.get_service_health`,
+  `elastic.get_active_alerts`) following the Kubernetes connector pattern
+  (lazy init, executor-based sync, feature-gated by `GATEWAY_ELASTIC_ENABLED`).
+  Auth supports API key (preferred) and basic auth with TLS verification
+  toggle. Added `elasticsearch>=8.0,<9.0` dependency.
+- operator-portal: evidence panel renders tool call/result cards with status
+  badges, collapsible parameters and data summaries, and evidence metadata.
+  Panel appears on first `tool_call` event and clears on each new request.
+- dev-k8s overlay: `GATEWAY_ELASTIC_ENABLED=false` with commented Elastic env
+  var examples in tool-gateway `runtime-config.env`; gated off by default.
+
+### Fixed — Token delegation secrets auto-provisioning
+
+- New `sync-delegation-secrets.sh` script generates a shared client secret,
+  creates both `platform-gateway-runtime-secrets` and
+  `identity-service-runtime-secrets` K8s secrets, and restarts the affected
+  deployments. Previously these optional secrets were not provisioned by
+  `make deploy`, causing silent delegation failures — the agent ran without
+  tools ("access not granted").
+- `make deploy` now calls `sync-delegation-secrets.sh` automatically after
+  the overlay apply; set `SKIP_DELEGATION_SECRETS=true` when secrets are
+  injected externally (e.g. CI pipelines).
+- dev-k8s README: new "Token Delegation Secrets" section with usage,
+  verification commands, and skip switch.
+
+### Changed — Observer read-only tool access + anti-fabrication guardrail
+
+- Policy bundle now grants `read-only-observer` the `tools:list` and
+  `tools:invoke` actions, aligning the implementation with the authorization
+  matrix (observers may perform tier-0 reads, and every registered tool is
+  read-only). Previously observers were denied tool discovery (403), which
+  left the agent with an empty toolkit and caused it to emit fabricated
+  "health check" reports. All four byte-identical copies updated
+  (shared-contracts, tool-gateway, platform-gateway, dev-k8s overlay).
+- agent-platform system prompt hardened against fabrication: the agent must
+  ground every factual claim in real tool output and state explicitly when no
+  tools are available or a call fails, instead of inventing metrics/statuses.
+
+### Fixed — Agent toolkit registration (AgentScope 2.x) + deterministic no-tools guard
+
+- agent-platform: gateway tools are now built with the AgentScope 2.x API —
+  `FunctionTool` objects passed to `Toolkit(tools=[...])` instead of the
+  removed `Toolkit.add()`, which raised `AttributeError` per tool and left
+  every session with an empty toolkit (zero tool invocations, fabricated
+  health reports). The gateway's `parameters_schema` is bound explicitly
+  (closures expose only `**kwargs`) and normalized to the object-with-
+  properties shape AgentScope validates.
+- agent-platform: deterministic anti-hallucination guard — when a tool
+  gateway is configured but zero tools are registered for the turn, the
+  kernel injects an explicit "no operational tools" notice into that turn
+  instead of relying solely on the standing system prompt.
+- agent-platform: gateway tools now auto-approve read-only execution.
+  AgentScope 2.x defaults custom function tools to an interactive
+  user-confirmation prompt (`RequireUserConfirmEvent`), which a headless SSE
+  stream can never answer — the agent stalled and the portal showed "No
+  response received". `GatewayFunctionTool` returns ALLOW for read-only
+  tools (admission and policy are enforced by the tool-gateway), mirroring
+  AgentScope's MCP adapter; non-read-only tools still require confirmation.
+
 ### Fixed — Deployment env collisions and portal stream rendering
 
 - All five dev-k8s app deployments set `enableServiceLinks: false`:

@@ -50,6 +50,14 @@ class EvaluationSemanticsTests(unittest.TestCase):
             decision = evaluate(settings, ["read-only-observer"], action)
             self.assertEqual(decision.decision, "allow", action)
 
+    def test_observer_allowed_read_only_tools(self) -> None:
+        # Observers may discover and invoke read-only tools, matching the
+        # authorization matrix tier-0 read grant.
+        settings = _settings()
+        for action in ["tools:list", "tools:invoke"]:
+            decision = evaluate(settings, ["read-only-observer"], action)
+            self.assertEqual(decision.decision, "allow", action)
+
     def test_deny_by_default_for_unknown_action(self) -> None:
         settings = _settings()
         decision = evaluate(settings, ["operator"], "restart-service")

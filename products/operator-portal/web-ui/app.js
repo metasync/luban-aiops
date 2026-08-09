@@ -4,12 +4,86 @@ const promptInput = document.querySelector("#prompt-input");
 const sessionIdOutput = document.querySelector("#session-id");
 const requestIdOutput = document.querySelector("#request-id");
 const identityOutput = document.querySelector("#identity-output");
+const identityBadge = document.querySelector("#identity-badge");
 const responseOutput = document.querySelector("#response-output");
 const AUTH_SESSION_KEY = "luban.portal.authSession";
 const AUTH_REQUEST_KEY = "luban.portal.authRequest";
 let authCallbackNavigationPending = false;
 let refreshTimerId = null;
 const REFRESH_MARGIN_SECONDS = 60;
+
+// Evidence panel state (SPEC-011 R-4).
+const evidencePanel = document.querySelector("#evidence-panel");
+const evidenceCards = document.querySelector("#evidence-cards");
+const evidenceCardMap = new Map();
+
+// --- Markdown renderer ---
+function renderMarkdown(text) {
+  if (!text) return "";
+  let html = text;
+
+  // Escape HTML first
+  html = html.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  // Code blocks (``` ... ```)
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    return `<pre><code class="lang-${lang}">${code.trim()}</code></pre>`;
+  });
+
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+
+  // Headers
+  html = html.replace(/^######\s+(.+)$/gm, "<h6>$1</h6>");
+  html = html.replace(/^#####\s+(.+)$/gm, "<h5>$1</h5>");
+  html = html.replace(/^####\s+(.+)$/gm, "<h4>$1</h4>");
+  html = html.replace(/^###\s+(.+)$/gm, "<h3>$1</h3>");
+  html = html.replace(/^##\s+(.+)$/gm, "<h2>$1</h2>");
+  html = html.replace(/^#\s+(.+)$/gm, "<h1>$1</h1>");
+
+  // Horizontal rules
+  html = html.replace(/^---+$/gm, "<hr>");
+
+  // Bold and italic
+  html = html.replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>");
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  html = html.replace(/__(.+?)__/g, "<strong>$1</strong>");
+  html = html.replace(/_(.+?)_/g, "<em>$1</em>");
+
+  // Strikethrough
+  html = html.replace(/~~(.+?)~~/g, "<del>$1</del>");
+
+  // Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+  // Blockquotes
+  html = html.replace(/^&gt;\s+(.+)$/gm, "<blockquote>$1</blockquote>");
+
+  // Unordered lists
+  html = html.replace(/^[\*\-]\s+(.+)$/gm, "<li>$1</li>");
+  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, "<ul>$1</ul>");
+
+  // Ordered lists
+  html = html.replace(/^\d+\.\s+(.+)$/gm, "<li>$1</li>");
+
+  // Tables
+  html = html.replace(/^\|(.+)\|$/gm, (match, content) => {
+    const cells = content.split("|").map(c => c.trim());
+    if (cells.every(c => /^[-:]+$/.test(c))) return ""; // separator row
+    const tag = "td";
+    return "<tr>" + cells.map(c => `<${tag}>${c}</${tag}>`).join("") + "</tr>";
+  });
+  html = html.replace(/((?:<tr>.*<\/tr>\n?)+)/g, "<table>$1</table>");
+
+  // Paragraphs: wrap remaining lines that aren't already in block elements
+  html = html.replace(/^(?!<[hupoltbd]|<\/|<hr|<blockquote|<pre|<code)(.+)$/gm, "<p>$1</p>");
+
+  // Clean up empty paragraphs
+  html = html.replace(/<p>\s*<\/p>/g, "");
+
+  return html;
+}
 
 function defaultGateway() {
   if (window.location.protocol === "http:" || window.location.protocol === "https:") {
@@ -65,9 +139,15 @@ function syncResolvedUser() {
   if (authenticatedUser) {
     userInput.value = authenticatedUser;
     userInput.setAttribute("disabled", "disabled");
+    identityBadge.textContent = authenticatedUser;
+    document.querySelector("#login-button").hidden = true;
+    document.querySelector("#logout-button").hidden = false;
     return;
   }
   userInput.removeAttribute("disabled");
+  identityBadge.textContent = "Not signed in";
+  document.querySelector("#login-button").hidden = false;
+  document.querySelector("#logout-button").hidden = true;
 }
 
 function renderIdentity(payload) {
@@ -171,12 +251,15 @@ function clearAuthCallbackQuery() {
 }
 
 function renderError(target, error) {
-  target.textContent = error instanceof Error ? error.message : String(error);
+  const msg = error instanceof Error ? error.message : String(error);
+  const p = document.createElement("p");
+  p.style.color = "var(--error)";
+  p.textContent = msg;
+  target.innerHTML = "";
+  target.appendChild(p);
 }
 
-// Stream events carry their kind in `type` per the gateway/agent contract
-// (message_start/message_delta/message_end/error); accept `event` as a
-// legacy alias.
+// Stream events carry their kind in `type` per the gateway/agent contract.
 function streamEventType(payload) {
   return String(payload.type || payload.event || "").toLowerCase();
 }
@@ -282,7 +365,6 @@ async function completeLoginFromCallback() {
   clearPendingAuthRequest();
   clearAuthCallbackQuery();
   renderIdentity({ authenticated: true, identity: session.identity });
-  responseOutput.textContent = "Signed in.";
   return true;
 }
 
@@ -291,7 +373,7 @@ async function logout() {
   clearAuthSession();
   clearPendingAuthRequest();
   sessionIdOutput.textContent = "Not created";
-  responseOutput.textContent = "Signed out.";
+  syncResolvedUser();
 
   if (!session) {
     renderIdentity({ authenticated: false });
@@ -335,7 +417,6 @@ async function createSession() {
     body: JSON.stringify({ user_id: currentAuthenticatedUser() || userInput.value })
   });
   sessionIdOutput.textContent = payload.session_id;
-  responseOutput.textContent = JSON.stringify(payload, null, 2);
 }
 
 async function sendPrompt() {
@@ -348,16 +429,145 @@ async function sendPrompt() {
     })
   });
   sessionIdOutput.textContent = payload.session_id;
-  responseOutput.textContent = payload.response;
+  responseOutput.innerHTML = `<div class="md-content">${renderMarkdown(payload.response)}</div>`;
+}
+
+function clearEvidencePanel() {
+  evidenceCardMap.clear();
+  evidenceCards.innerHTML = "";
+  evidencePanel.hidden = true;
+}
+
+function renderToolCall(payload) {
+  evidencePanel.hidden = false;
+  const card = document.createElement("div");
+  card.className = "evidence-card";
+  card.dataset.callId = payload.call_id;
+  card.innerHTML = `
+    <div class="card-header">
+      <span class="tool-name">${escapeHtml(payload.tool_name)}</span>
+      <span class="status-badge pending">pending</span>
+      <span class="spinner"></span>
+    </div>
+    <details>
+      <summary>Parameters</summary>
+      <pre>${escapeHtml(JSON.stringify(payload.parameters || {}, null, 2))}</pre>
+    </details>
+  `;
+  evidenceCards.appendChild(card);
+  evidenceCardMap.set(payload.call_id, card);
+}
+
+function renderToolResult(payload) {
+  let card = evidenceCardMap.get(payload.call_id);
+  if (!card) {
+    evidencePanel.hidden = false;
+    card = document.createElement("div");
+    card.className = "evidence-card";
+    card.dataset.callId = payload.call_id;
+    evidenceCards.appendChild(card);
+    evidenceCardMap.set(payload.call_id, card);
+  }
+  const status = payload.status || "error";
+  const evidence = payload.evidence || {};
+  const spinner = card.querySelector(".spinner");
+  if (spinner) spinner.remove();
+  const badge = card.querySelector(".status-badge");
+  if (badge) {
+    badge.className = `status-badge ${status}`;
+    badge.textContent = status;
+  } else {
+    const header = card.querySelector(".card-header") || card;
+    const newBadge = document.createElement("span");
+    newBadge.className = `status-badge ${status}`;
+    newBadge.textContent = status;
+    header.prepend(newBadge);
+  }
+  if (!card.querySelector(".tool-name")) {
+    const header = card.querySelector(".card-header");
+    if (header) {
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "tool-name";
+      nameSpan.textContent = payload.tool_name || payload.call_id;
+      header.insertBefore(nameSpan, header.firstChild);
+    }
+  }
+  let metaDiv = card.querySelector(".evidence-meta");
+  if (!metaDiv) {
+    metaDiv = document.createElement("div");
+    metaDiv.className = "evidence-meta";
+    card.appendChild(metaDiv);
+  }
+  const metaParts = [];
+  if (evidence.source_system) metaParts.push(`<span>${escapeHtml(evidence.source_system)}</span>`);
+  if (evidence.duration_ms != null) metaParts.push(`<span>${evidence.duration_ms}ms</span>`);
+  if (evidence.risk_level) metaParts.push(`<span>risk: ${escapeHtml(evidence.risk_level)}</span>`);
+  if (evidence.executed_at) metaParts.push(`<span>${escapeHtml(evidence.executed_at)}</span>`);
+  metaDiv.innerHTML = metaParts.join("");
+  if (payload.error) {
+    const errorDiv = document.createElement("div");
+    errorDiv.className = "evidence-meta";
+    errorDiv.style.color = status === "denied" ? "var(--error)" : "var(--warning)";
+    errorDiv.textContent = `${payload.error.code}: ${payload.error.message}`;
+    card.appendChild(errorDiv);
+  }
+  if (payload.data_summary != null) {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "Data summary";
+    details.appendChild(summary);
+    const pre = document.createElement("pre");
+    pre.textContent = typeof payload.data_summary === "string"
+      ? payload.data_summary
+      : JSON.stringify(payload.data_summary, null, 2);
+    details.appendChild(pre);
+    card.appendChild(details);
+  }
+}
+
+function scrollToBottom() {
+  const chatMain = responseOutput.closest(".chat-main");
+  if (chatMain) {
+    chatMain.scrollTop = chatMain.scrollHeight;
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = String(str);
+  return div.innerHTML;
 }
 
 async function streamPrompt() {
   const requestId = buildRequestId();
   requestIdOutput.textContent = requestId;
-  responseOutput.textContent = "";
+  clearEvidencePanel();
 
+  // Remove placeholder on first message
+  const placeholder = responseOutput.querySelector(".chat-placeholder");
+  if (placeholder) placeholder.remove();
+
+  // Append user message to chat history
+  const userMsg = promptInput.value;
+  const userDiv = document.createElement("div");
+  userDiv.className = "chat-msg user-msg";
+  const userLabel = document.createElement("strong");
+  userLabel.textContent = "You: ";
+  const userText = document.createElement("span");
+  userText.textContent = userMsg;
+  userDiv.appendChild(userLabel);
+  userDiv.appendChild(userText);
+  responseOutput.appendChild(userDiv);
+
+  // Append agent response container
+  const agentDiv = document.createElement("div");
+  agentDiv.className = "chat-msg agent-msg md-content";
+  responseOutput.appendChild(agentDiv);
+
+  promptInput.value = "";
+  scrollToBottom();
   const params = new URLSearchParams({
-    message: promptInput.value,
+    message: userMsg,
     user_id: currentAuthenticatedUser() || userInput.value
   });
 
@@ -366,6 +576,8 @@ async function streamPrompt() {
   }
 
   let streamCompleted = false;
+  let accumulatedText = "";
+
   try {
     const response = await fetch(`${currentGateway()}/api/v1/chat/stream?${params.toString()}`, {
       headers: {
@@ -374,7 +586,10 @@ async function streamPrompt() {
       }
     });
     if (!response.ok || !response.body) {
-      throw new Error("Stream request failed.");
+      if (response.status === 401) {
+        throw new Error("Not authenticated. Please click Login in the top bar to sign in first.");
+      }
+      throw new Error(`Stream request failed (${response.status}).`);
     }
 
     const reader = response.body.getReader();
@@ -383,42 +598,48 @@ async function streamPrompt() {
 
     while (true) {
       const { value, done } = await reader.read();
-      if (done) {
-        break;
-      }
+      if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
       const events = buffer.split("\n\n");
       buffer = events.pop() || "";
 
       for (const event of events) {
-        if (!event.startsWith("data: ")) {
-          continue;
-        }
+        if (!event.startsWith("data: ")) continue;
         const payloadText = event.slice(6);
         const payload = JSON.parse(payloadText);
         sessionIdOutput.textContent = payload.session_id || sessionIdOutput.textContent;
+
+        const eventType = streamEventType(payload);
+        if (eventType === "tool_call") {
+          renderToolCall(payload);
+          continue;
+        }
+        if (eventType === "tool_result") {
+          renderToolResult(payload);
+          continue;
+        }
+
         if (shouldAppendStreamDelta(payload)) {
-          responseOutput.textContent += payload.delta;
+          accumulatedText += payload.delta;
+          agentDiv.innerHTML = renderMarkdown(accumulatedText);
+          scrollToBottom();
         }
         if (!streamCompleted && isStreamComplete(payload)) {
           streamCompleted = true;
-          responseOutput.textContent += "\n\n[stream complete]";
         }
       }
     }
-    if (!streamCompleted && !responseOutput.textContent.trim()) {
-      responseOutput.textContent = "[stream completed with no visible text]";
-    } else if (!streamCompleted) {
-      // The agent stream can end at EOF without a message_end event; treat
-      // stream close as completion so the UI state stays consistent.
-      responseOutput.textContent += "\n\n[stream complete]";
+
+    if (!accumulatedText.trim()) {
+      agentDiv.innerHTML = '<p style="color: var(--text-muted)"><em>No response received.</em></p>';
     }
   } catch (error) {
-    throw error;
+    agentDiv.innerHTML = `<p style="color: var(--error)">${escapeHtml(error.message)}</p>`;
   }
 }
 
+// --- Event listeners ---
 document.querySelector("#login-button").addEventListener("click", () => {
   startLogin().catch((error) => {
     renderError(identityOutput, error);
@@ -439,7 +660,7 @@ document.querySelector("#normalize-button").addEventListener("click", () => {
 
 document.querySelector("#session-button").addEventListener("click", () => {
   createSession().catch((error) => {
-    renderError(responseOutput, error);
+    renderError(identityOutput, error);
   });
 });
 
@@ -455,9 +676,19 @@ document.querySelector("#stream-button").addEventListener("click", () => {
   });
 });
 
+// Enter sends the prompt (Shift+Enter inserts a newline).
+promptInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    streamPrompt().catch((error) => {
+      renderError(responseOutput, error);
+    });
+  }
+});
+
 completeLoginFromCallback()
   .catch((error) => {
-    renderError(responseOutput, error);
+    renderError(identityOutput, error);
   })
   .finally(() => {
     if (authCallbackNavigationPending) {

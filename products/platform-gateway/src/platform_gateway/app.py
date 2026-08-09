@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 
 from platform_gateway.api.router import router
 from platform_gateway.core.metrics import setup_metrics
-from platform_gateway.core.observability import log_event
+from platform_gateway.core.observability import configure_logging, log_event
 from platform_gateway.core.request_context import resolve_request_id
 from platform_gateway.core.telemetry import setup_telemetry
 from platform_gateway.metadata import SERVICE_NAME, SERVICE_TITLE, SERVICE_VERSION
@@ -14,6 +14,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
+    configure_logging()
     app = FastAPI(title=SERVICE_TITLE, version=SERVICE_VERSION)
 
     @app.middleware("http")
