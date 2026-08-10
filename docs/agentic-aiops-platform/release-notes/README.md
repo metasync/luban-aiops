@@ -7,6 +7,11 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-10-r1-hardening-grounded-responses-and-evidence-ux.md`
+  - summarizes the Release 1 hardening wave: SPEC-011 completion (grounded
+    responses with v3 evidence frames), audit log visibility, cluster-wide
+    read-only access, permission allow-list and token-rotation fixes, and
+    the portal's inline per-turn evidence/audit UX
 - `2026-07-30-release-1-tool-execution-and-service-identity.md`
   - summarizes Release 1 (read-only operations copilot): the SPEC-007 tool
     execution framework and the SPEC-008 broker-mediated token delegation
