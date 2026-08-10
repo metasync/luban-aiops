@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from agent_service.runtime_kernel import AgentKernel
 from agent_service.runtime_settings import RuntimeSettings
@@ -281,12 +282,19 @@ class TestPerTokenToolkitCache:
         kernel = self._kernel()
         calls = []
 
-        async def fake_build_toolkit(gateway_url, bearer_token=None):
+        async def fake_discover(gateway_url, bearer_token=None):
             calls.append((gateway_url, bearer_token))
-            return object()
+            return [
+                {
+                    "name": "k8s.list_pods",
+                    "description": "x",
+                    "risk_level": "read",
+                    "parameters_schema": {"type": "object"},
+                }
+            ]
 
         monkeypatch.setattr(
-            "agent_service.tools.gateway_tools.build_toolkit", fake_build_toolkit
+            "agent_service.tools.gateway_tools.discover_tools", fake_discover
         )
 
         first = asyncio.run(kernel._ensure_toolkit("token-a"))
@@ -299,12 +307,19 @@ class TestPerTokenToolkitCache:
         kernel = self._kernel()
         seen_tokens = []
 
-        async def fake_build_toolkit(gateway_url, bearer_token=None):
+        async def fake_discover(gateway_url, bearer_token=None):
             seen_tokens.append(bearer_token)
-            return object()
+            return [
+                {
+                    "name": "k8s.list_pods",
+                    "description": "x",
+                    "risk_level": "read",
+                    "parameters_schema": {"type": "object"},
+                }
+            ]
 
         monkeypatch.setattr(
-            "agent_service.tools.gateway_tools.build_toolkit", fake_build_toolkit
+            "agent_service.tools.gateway_tools.discover_tools", fake_discover
         )
 
         toolkit_a = asyncio.run(kernel._ensure_toolkit("token-a"))
@@ -316,16 +331,13 @@ class TestPerTokenToolkitCache:
     def test_no_token_degrades_to_empty_toolkit_without_discovery(self, monkeypatch):
         kernel = self._kernel()
 
-        async def fake_build_toolkit(gateway_url, bearer_token=None):
-            # build_toolkit is still invoked, but with no token discovery
-            # short-circuits to an empty Toolkit inside gateway_tools.
+        async def fake_discover(gateway_url, bearer_token=None):
+            # Without a token discovery short-circuits to an empty list.
             assert bearer_token is None
-            from agentscope.tool import Toolkit
-
-            return Toolkit()
+            return []
 
         monkeypatch.setattr(
-            "agent_service.tools.gateway_tools.build_toolkit", fake_build_toolkit
+            "agent_service.tools.gateway_tools.discover_tools", fake_discover
         )
 
         toolkit = asyncio.run(kernel._ensure_toolkit(None))
@@ -377,14 +389,69 @@ class TestRequestToolkitRegistration:
     def test_request_toolkit_empty_when_no_definitions_cached(self):
         kernel = self._kernel()
 
-        toolkit = asyncio.run(
-            kernel._build_request_toolkit("token-a", asyncio.Queue())
-        )
+        with patch(
+            "agent_service.tools.gateway_tools.discover_tools",
+            new_callable=AsyncMock,
+        ) as mock_discover:
+            mock_discover.return_value = []
+            toolkit = asyncio.run(
+                kernel._build_request_toolkit("token-a", asyncio.Queue())
+            )
 
         schemas = asyncio.run(toolkit.get_tool_schemas())
         assert not any(
             schema.get("type") == "function" for schema in schemas
         )
+
+    def test_rotated_token_discovers_on_cache_miss(self):
+        """Regression: delegated tokens rotate mid-session (portal token
+        refresh) but the session-cached agent never re-runs discovery for the
+        new token. The per-request toolkit must discover on cache miss
+        instead of serving an empty toolkit (which injected the no-tools
+        notice for every subsequent turn until browser refresh)."""
+        kernel = self._kernel()
+        kernel._tool_definitions["token-old"] = [self.DEFINITION]
+
+        with patch(
+            "agent_service.tools.gateway_tools.discover_tools",
+            new_callable=AsyncMock,
+        ) as mock_discover:
+            mock_discover.return_value = [self.DEFINITION]
+            toolkit = asyncio.run(
+                kernel._build_request_toolkit("token-new", asyncio.Queue())
+            )
+
+        mock_discover.assert_awaited_once_with("http://gw:8080", "token-new")
+        schemas = asyncio.run(toolkit.get_tool_schemas())
+        names = {schema["function"]["name"] for schema in schemas}
+        assert names == {"k8s_list_pods"}
+        # The result is cached so later turns skip discovery.
+        assert kernel._tool_definitions["token-new"] == [self.DEFINITION]
+
+    def test_empty_discovery_result_is_not_cached(self):
+        """A failed/empty discovery must not poison the cache: the next turn
+        retries discovery instead of being stuck with no tools."""
+        kernel = self._kernel()
+
+        with patch(
+            "agent_service.tools.gateway_tools.discover_tools",
+            new_callable=AsyncMock,
+        ) as mock_discover:
+            mock_discover.return_value = []
+            asyncio.run(
+                kernel._build_request_toolkit("token-a", asyncio.Queue())
+            )
+            assert "token-a" not in kernel._tool_definitions
+
+            mock_discover.return_value = [self.DEFINITION]
+            toolkit = asyncio.run(
+                kernel._build_request_toolkit("token-a", asyncio.Queue())
+            )
+
+        assert mock_discover.await_count == 2
+        schemas = asyncio.run(toolkit.get_tool_schemas())
+        names = {schema["function"]["name"] for schema in schemas}
+        assert names == {"k8s_list_pods"}
 
     def test_count_function_tools(self):
         from agentscope.tool import Toolkit

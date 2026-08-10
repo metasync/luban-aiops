@@ -199,22 +199,26 @@ class AgentKernel:
 
             if self.settings.tool_gateway_url:
                 from agent_service.tools.gateway_tools import (
-                    build_toolkit,
+                    build_gateway_toolkit,
                     discover_tools,
                 )
 
                 try:
-                    # Cache tool definitions separately for per-request rebuilds.
+                    # Cache tool definitions separately for per-request
+                    # rebuilds; empty results are not cached so the next
+                    # caller retries discovery instead of being poisoned.
                     definitions = await discover_tools(
                         self.settings.tool_gateway_url, bearer_token
                     )
-                    self._tool_definitions[cache_key] = definitions
-
-                    toolkit = await build_toolkit(
-                        self.settings.tool_gateway_url, bearer_token
-                    )
-                    self._toolkits[cache_key] = toolkit
-                    return toolkit
+                    if definitions:
+                        self._tool_definitions[cache_key] = definitions
+                        toolkit = build_gateway_toolkit(
+                            definitions,
+                            self.settings.tool_gateway_url,
+                            bearer_token,
+                        )
+                        self._toolkits[cache_key] = toolkit
+                        return toolkit
                 except Exception as exc:
                     LOGGER.warning("failed to build gateway toolkit: %s", exc)
 
@@ -230,11 +234,22 @@ class AgentKernel:
         """Build a fresh Toolkit with closures bound to ``trace_queue``.
 
         Uses cached tool definitions (from ``_ensure_toolkit``) to avoid
-        re-discovery. Returns an empty Toolkit when no definitions are cached
-        (SPEC-011 R-2).
+        re-discovery. Delegated tokens rotate mid-session (portal token
+        refresh), and the session-cached agent short-circuits discovery for
+        the new token, so on a cache miss this method discovers with the
+        current token itself. Empty results are never cached: the next turn
+        retries instead of being stuck on a poisoned entry (SPEC-011 R-2).
         """
         cache_key = bearer_token or ""
         definitions = self._tool_definitions.get(cache_key, [])
+        if not definitions and self.settings.tool_gateway_url and bearer_token:
+            from agent_service.tools.gateway_tools import discover_tools
+
+            definitions = await discover_tools(
+                self.settings.tool_gateway_url, bearer_token
+            )
+            if definitions:
+                self._tool_definitions[cache_key] = definitions
         if not definitions:
             from agentscope.tool import Toolkit
             return Toolkit()

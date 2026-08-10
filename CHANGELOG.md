@@ -8,6 +8,18 @@ published product versions.
 
 ## Unreleased
 
+### Fixed — Rotated delegated tokens no longer strand sessions without tools
+
+- agent-platform: delegated tokens rotate mid-session (portal token refresh,
+  300s TTL), but tool discovery only ran at agent creation — keyed by
+  session — so a rotated token never got tool definitions and every
+  subsequent turn injected the no-tools notice until browser refresh.
+  `_build_request_toolkit` now discovers with the current token on cache
+  miss, and empty discovery results are never cached (both per-request and
+  `_ensure_toolkit` paths) so a transient failure can no longer poison the
+  cache. `_ensure_toolkit` additionally reuses the discovery result instead
+  of discovering twice.
+
 ### Fixed — Evidence panel frames, audit log visibility, cluster-wide read access
 
 - agent-platform: the stream event adapter (`AgentStreamEvent` /
