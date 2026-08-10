@@ -14,15 +14,16 @@ const REFRESH_MARGIN_SECONDS = 60;
 
 // Evidence drawer state (SPEC-011 R-4). Evidence is supportive detail: it
 // lives in a collapsed drawer so it never crowds the streamed response.
+// Each chat turn gets its own group so the evidence/audit trail stays
+// attached to the request that produced it instead of being overwritten.
 const evidenceDrawer = document.querySelector("#evidence-drawer");
 const evidenceSummary = document.querySelector("#evidence-summary");
 const evidenceCards = document.querySelector("#evidence-cards");
 const evidenceCardMap = new Map();
-const evidenceCounts = { calls: 0, pending: 0, success: 0, error: 0, denied: 0 };
-// Per-turn audit entries assembled from the stream (option-1 audit view:
-// self-service inspection of the caller's own turn; the authoritative
-// backend trail belongs to a future audit-access spec).
-let auditEntries = [];
+const MAX_EVIDENCE_TURNS = 20;
+let evidenceTurns = [];
+let currentTurn = null;
+let evidenceTurnCounter = 0;
 const chatMain = document.querySelector(".chat-main");
 
 // --- Markdown renderer ---
@@ -380,6 +381,7 @@ async function logout() {
   const session = loadAuthSession();
   clearAuthSession();
   clearPendingAuthRequest();
+  clearEvidencePanel();
   sessionIdOutput.textContent = "Not created";
   syncResolvedUser();
 
@@ -442,34 +444,82 @@ async function sendPrompt() {
 
 function clearEvidencePanel() {
   evidenceCardMap.clear();
+  evidenceTurns = [];
+  currentTurn = null;
   evidenceCards.innerHTML = "";
-  auditEntries = [];
-  evidenceCounts.calls = 0;
-  evidenceCounts.pending = 0;
-  evidenceCounts.success = 0;
-  evidenceCounts.error = 0;
-  evidenceCounts.denied = 0;
   evidenceDrawer.open = false;
   renderEvidenceSummary();
 }
 
+function formatCounts(counts) {
+  if (counts.calls === 0) return "no tool calls";
+  const parts = [`${counts.calls} call${counts.calls === 1 ? "" : "s"}`];
+  if (counts.pending > 0) parts.push(`${counts.pending} running`);
+  if (counts.success > 0) parts.push(`${counts.success} ok`);
+  if (counts.error > 0) parts.push(`${counts.error} failed`);
+  if (counts.denied > 0) parts.push(`${counts.denied} denied`);
+  return parts.join(" · ");
+}
+
 function renderEvidenceSummary() {
-  if (evidenceCounts.calls === 0) {
-    evidenceSummary.textContent = "no tool calls this turn";
+  if (evidenceTurns.length === 0) {
+    evidenceSummary.textContent = "no tool calls yet";
     return;
   }
-  const parts = [`${evidenceCounts.calls} call${evidenceCounts.calls === 1 ? "" : "s"}`];
-  if (evidenceCounts.pending > 0) parts.push(`${evidenceCounts.pending} running`);
-  if (evidenceCounts.success > 0) parts.push(`${evidenceCounts.success} ok`);
-  if (evidenceCounts.error > 0) parts.push(`${evidenceCounts.error} failed`);
-  if (evidenceCounts.denied > 0) parts.push(`${evidenceCounts.denied} denied`);
-  evidenceSummary.textContent = parts.join(" · ");
+  const totals = { calls: 0, pending: 0, success: 0, error: 0, denied: 0 };
+  for (const turn of evidenceTurns) {
+    for (const key of Object.keys(totals)) totals[key] += turn.counts[key];
+  }
+  evidenceSummary.textContent =
+    `${evidenceTurns.length} turn${evidenceTurns.length === 1 ? "" : "s"} · ${formatCounts(totals)}`;
+  for (const turn of evidenceTurns) {
+    turn.summaryLine.textContent = formatCounts(turn.counts);
+  }
+}
+
+// A turn group is created lazily on the first tool frame, so purely
+// conversational turns leave no empty entry behind. Older turns collapse;
+// the list is bounded so the DOM cannot grow without limit.
+function ensureCurrentTurn() {
+  if (currentTurn) return currentTurn;
+  evidenceTurnCounter += 1;
+  const group = document.createElement("details");
+  group.className = "evidence-turn";
+  group.open = true;
+  const summary = document.createElement("summary");
+  const title = document.createElement("span");
+  title.className = "evidence-turn-title";
+  const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  title.textContent = `Turn ${evidenceTurnCounter} · ${time}`;
+  const summaryLine = document.createElement("span");
+  summaryLine.className = "evidence-summary";
+  summary.append(title, summaryLine);
+  const body = document.createElement("div");
+  body.className = "evidence-turn-body";
+  group.append(summary, body);
+  for (const turn of evidenceTurns) {
+    turn.group.open = false;
+  }
+  evidenceCards.appendChild(group);
+  while (evidenceTurns.length >= MAX_EVIDENCE_TURNS) {
+    evidenceTurns.shift().group.remove();
+  }
+  currentTurn = {
+    group,
+    body,
+    summaryLine,
+    counts: { calls: 0, pending: 0, success: 0, error: 0, denied: 0 },
+    entries: []
+  };
+  evidenceTurns.push(currentTurn);
+  return currentTurn;
 }
 
 function renderToolCall(payload) {
-  evidenceCounts.calls += 1;
-  evidenceCounts.pending += 1;
-  auditEntries.push({
+  const turn = ensureCurrentTurn();
+  turn.counts.calls += 1;
+  turn.counts.pending += 1;
+  turn.entries.push({
     call_id: payload.call_id,
     tool: payload.tool_name || payload.call_id,
     status: "pending",
@@ -493,28 +543,29 @@ function renderToolCall(payload) {
       <pre>${escapeHtml(JSON.stringify(payload.parameters || {}, null, 2))}</pre>
     </details>
   `;
-  evidenceCards.appendChild(card);
+  turn.body.appendChild(card);
   evidenceCardMap.set(payload.call_id, card);
 }
 
 function renderToolResult(payload) {
+  const turn = ensureCurrentTurn();
   let card = evidenceCardMap.get(payload.call_id);
   if (!card) {
-    evidenceCounts.calls += 1;
+    turn.counts.calls += 1;
     card = document.createElement("div");
     card.className = "evidence-card";
     card.dataset.callId = payload.call_id;
-    evidenceCards.appendChild(card);
+    turn.body.appendChild(card);
     evidenceCardMap.set(payload.call_id, card);
-  } else if (evidenceCounts.pending > 0) {
-    evidenceCounts.pending -= 1;
+  } else if (turn.counts.pending > 0) {
+    turn.counts.pending -= 1;
   }
   const status = payload.status || "error";
-  if (Object.prototype.hasOwnProperty.call(evidenceCounts, status)) {
-    evidenceCounts[status] += 1;
+  if (Object.prototype.hasOwnProperty.call(turn.counts, status)) {
+    turn.counts[status] += 1;
   }
   const evidence = payload.evidence || {};
-  let entry = auditEntries.find((item) => item.call_id === payload.call_id);
+  let entry = turn.entries.find((item) => item.call_id === payload.call_id);
   if (!entry) {
     entry = {
       call_id: payload.call_id,
@@ -525,7 +576,7 @@ function renderToolResult(payload) {
       risk_level: null,
       source_system: null
     };
-    auditEntries.push(entry);
+    turn.entries.push(entry);
   }
   entry.tool = payload.tool_name || entry.tool;
   entry.status = status;
@@ -589,15 +640,17 @@ function renderToolResult(payload) {
   }
 }
 
-// Audit card (option 1): aggregates what the stream delivered for THIS turn
+// Audit card (option 1): aggregates what the stream delivered for ONE turn
 // only — self-service inspection of one's own session. It is a rendition of
-// streamed evidence, not the authoritative backend audit trail.
+// streamed evidence, not the authoritative backend audit trail. The card is
+// rendered inside its turn group so it stays attached to that request.
 function renderAuditCard(requestId) {
-  if (auditEntries.length === 0) return;
+  if (!currentTurn || currentTurn.entries.length === 0) return;
+  const turn = currentTurn;
   const card = document.createElement("details");
   card.className = "evidence-card audit-card";
   const summary = document.createElement("summary");
-  summary.textContent = `Audit trail · this turn (${auditEntries.length} call${auditEntries.length === 1 ? "" : "s"})`;
+  summary.textContent = `Audit trail · this turn (${turn.entries.length} call${turn.entries.length === 1 ? "" : "s"})`;
   card.appendChild(summary);
 
   const ids = document.createElement("div");
@@ -611,7 +664,7 @@ function renderAuditCard(requestId) {
   const headerCells = ["tool", "status", "executed at", "duration", "risk", "source"];
   table.innerHTML = `<thead><tr>${headerCells.map((cell) => `<th>${cell}</th>`).join("")}</tr></thead>`;
   const tbody = document.createElement("tbody");
-  for (const entry of auditEntries) {
+  for (const entry of turn.entries) {
     const row = document.createElement("tr");
     const cells = [
       entry.tool,
@@ -630,7 +683,7 @@ function renderAuditCard(requestId) {
   }
   table.appendChild(tbody);
   card.appendChild(table);
-  evidenceCards.prepend(card);
+  turn.body.prepend(card);
 }
 
 function isNearBottom(threshold = 80) {
@@ -657,7 +710,8 @@ function escapeHtml(str) {
 async function streamPrompt() {
   const requestId = buildRequestId();
   requestIdOutput.textContent = requestId;
-  clearEvidencePanel();
+  // Evidence is kept per turn: previous turns stay in the drawer and the
+  // new turn group is created lazily on the first tool frame.
 
   // Remove placeholder on first message
   const placeholder = responseOutput.querySelector(".chat-placeholder");

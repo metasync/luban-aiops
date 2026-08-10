@@ -8,6 +8,14 @@ published product versions.
 
 ## Unreleased
 
+### Changed — Evidence and audit cards are kept per turn
+
+- operator-portal: evidence and audit cards are no longer wiped when the
+  next question is sent. Each chat turn gets its own collapsible group in
+  the evidence drawer ("Turn N · HH:MM · counts"), created lazily on the
+  first tool frame and bounded to the last 20 turns; the drawer summary
+  shows session totals. Logout resets the drawer.
+
 ### Changed — Evidence moved to a collapsed drawer; audit card; sticky scroll
 
 - operator-portal: tool evidence no longer renders inline in the chat

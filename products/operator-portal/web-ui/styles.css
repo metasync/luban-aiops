@@ -366,6 +366,38 @@ body {
   background: var(--bg);
 }
 
+/* Per-turn group inside the evidence drawer: evidence and audit stay
+   attached to the request that produced them. */
+.evidence-turn {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.evidence-turn summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.evidence-turn summary:hover { color: var(--text); }
+
+.evidence-turn-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.evidence-turn-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
 .card-header {
   display: flex;
   align-items: center;
