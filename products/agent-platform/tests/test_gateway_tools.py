@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import unittest
 from unittest.mock import AsyncMock, patch, MagicMock
 
@@ -224,15 +225,48 @@ class BuildFunctionToolsTests(unittest.TestCase):
         tools = build_function_tools("http://gw:8080", MOCK_TOOL_DEFINITIONS)
         self.assertTrue(tools[0].is_read_only)
 
-    def test_read_only_tools_auto_allowed_without_user_confirmation(self) -> None:
+    def test_vetted_read_only_tools_auto_allowed_without_user_confirmation(self) -> None:
         """Regression: AgentScope 2.x defaults custom tools to ASK, which
         stalls a headless SSE stream at RequireUserConfirmEvent. Read-only
-        gateway tools must be pre-approved so invocations actually run."""
+        gateway tools on the vetted allow-list must be pre-approved so
+        invocations actually run."""
         from agentscope.permission import PermissionBehavior
 
         tools = build_function_tools("http://gw:8080", MOCK_TOOL_DEFINITIONS)
         decision = _run(tools[0].check_permissions())
         self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
+
+    def test_read_only_tool_outside_allow_list_still_requires_confirmation(self) -> None:
+        """Auto-approval is allow-listed, not blanket: a read-only tool that
+        is not vetted keeps the ASK default."""
+        from agentscope.permission import PermissionBehavior
+
+        defs = [{
+            "name": "k8s.list_secrets",
+            "description": "x",
+            "risk_level": "read",
+            "parameters_schema": {"type": "object"},
+        }]
+        tools = build_function_tools("http://gw:8080", defs)
+        self.assertTrue(tools[0].is_read_only)
+        decision = _run(tools[0].check_permissions())
+        self.assertEqual(decision.behavior, PermissionBehavior.ASK)
+
+    def test_auto_allow_list_env_override(self) -> None:
+        """AGENT_GATEWAY_TOOL_AUTO_ALLOW scopes auto-approval per deployment."""
+        from agentscope.permission import PermissionBehavior
+
+        with patch.dict(os.environ, {"AGENT_GATEWAY_TOOL_AUTO_ALLOW": "k8s.get_pod"}):
+            tools = build_function_tools("http://gw:8080", MOCK_TOOL_DEFINITIONS)
+        # k8s.list_pods is read-only but no longer on the allow-list.
+        self.assertEqual(
+            _run(tools[0].check_permissions()).behavior,
+            PermissionBehavior.ASK,
+        )
+        self.assertEqual(
+            _run(tools[1].check_permissions()).behavior,
+            PermissionBehavior.ALLOW,
+        )
 
     def test_non_read_only_tools_still_require_confirmation(self) -> None:
         from agentscope.permission import PermissionBehavior

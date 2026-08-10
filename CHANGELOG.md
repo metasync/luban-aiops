@@ -26,6 +26,16 @@ published product versions.
   namespace (e.g. `argocd`). No mutating verbs are granted; tool surface and
   deny-by-default policy remain the enforcement layers.
 
+### Changed — Permission auto-approval narrowed to an explicit allow-list
+
+- agent-platform: the `RequireUserConfirmEvent` bypass now applies only to
+  read-only tools on a vetted allow-list (`DEFAULT_AUTO_ALLOWED_TOOLS`,
+  overridable via `AGENT_GATEWAY_TOOL_AUTO_ALLOW`), instead of every
+  read-only tool. Anything outside the allow-list keeps the interactive ASK
+  default. Admission, policy enforcement, and per-invocation audit logging
+  by the tool-gateway are unchanged. (L3 security review remediation,
+  CWE-862.)
+
 ### Added — SPEC-011: Observability Connector and Evidence Panels
 
 - Extended the agent stream event contract (`agent-stream-event.schema.json`,

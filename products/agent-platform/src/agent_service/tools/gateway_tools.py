@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from typing import Any, TYPE_CHECKING
 
@@ -31,29 +32,63 @@ LOGGER = logging.getLogger(__name__)
 INVOKE_TIMEOUT_SECONDS = 30.0
 DISCOVER_TIMEOUT_SECONDS = 10.0
 
+# Vetted tool names that may bypass AgentScope's interactive ASK permission
+# gate. Only read-only tools on this explicit allow-list are auto-approved;
+# every other tool keeps the ASK default (effectively non-runnable in a
+# headless stream until interactively confirmed). Admission and policy are
+# still enforced by the tool-gateway on every invocation.
+DEFAULT_AUTO_ALLOWED_TOOLS = frozenset({
+    "k8s.list_pods",
+    "k8s.get_pod",
+    "k8s.get_events",
+    "k8s.get_pod_logs",
+})
+AUTO_ALLOW_ENV = "AGENT_GATEWAY_TOOL_AUTO_ALLOW"
 
-def _build_gateway_function_tool_class():
+
+def _load_auto_allowed_tools() -> frozenset[str]:
+    """Resolve the auto-approve allow-list (env override or vetted default).
+
+    ``AGENT_GATEWAY_TOOL_AUTO_ALLOW`` accepts a comma-separated list of
+    gateway tool names; an empty string auto-approves nothing. Entries are
+    normalized to the sanitized tool names used by AgentScope (dots become
+    underscores), matching ``FunctionTool.name``.
+    """
+    raw = os.environ.get(AUTO_ALLOW_ENV)
+    source = DEFAULT_AUTO_ALLOWED_TOOLS if raw is None else {
+        part.strip() for part in raw.split(",") if part.strip()
+    }
+    return frozenset(name.replace(".", "_") for name in source)
+
+
+def _build_gateway_function_tool_class(
+    auto_allowed: frozenset[str] | None = None,
+):
     """Return the FunctionTool subclass used for gateway tools.
 
     AgentScope 2.x pauses every custom function tool behind an interactive
     ``RequireUserConfirmEvent`` (default permission decision: ASK). A headless
     SSE stream can never answer that prompt, so the agent stalls and emits no
-    output at all. Gateway tools are pre-approved by design — they are
-    registered and policy-checked by the tool-gateway — so read-only tools
-    are allowed outright, mirroring AgentScope's own MCP adapter behaviour.
-    Non-read-only tools keep the ASK default.
+    output at all. Tools on the explicit allow-list (read-only AND vetted) are
+    pre-approved — the tool-gateway still enforces admission and policy on
+    every invocation and each call is audit-logged; anything outside the
+    allow-list keeps the ASK default rather than being blanket-approved.
     """
     from agentscope.permission import PermissionBehavior, PermissionDecision
     from agentscope.tool import FunctionTool
 
+    allow_list = (
+        auto_allowed if auto_allowed is not None else _load_auto_allowed_tools()
+    )
+
     class GatewayFunctionTool(FunctionTool):
         async def check_permissions(self, *_args, **_kwargs):
-            if self.is_read_only:
+            if self.is_read_only and self.name in allow_list:
                 return PermissionDecision(
                     behavior=PermissionBehavior.ALLOW,
                     message=(
-                        "Read-only gateway tool; admission and policy are "
-                        "enforced by the tool-gateway."
+                        "Vetted read-only gateway tool; admission and policy "
+                        "are enforced by the tool-gateway."
                     ),
                 )
             return await super().check_permissions(*_args, **_kwargs)
