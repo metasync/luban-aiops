@@ -8,6 +8,15 @@ published product versions.
 
 ## Unreleased
 
+### Changed — Evidence and audit groups follow their reply inline
+
+- operator-portal: replaced the bottom evidence drawer with per-turn
+  collapsible groups rendered inline directly after the agent reply they
+  ground. Each question's evidence cards and audit card follow that
+  answer; groups stay collapsed by default (the summary line shows the
+  counts) and are created lazily on the first tool frame, so purely
+  conversational turns leave no empty group.
+
 ### Changed — Evidence and audit cards are kept per turn
 
 - operator-portal: evidence and audit cards are no longer wiped when the

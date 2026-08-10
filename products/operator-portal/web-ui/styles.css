@@ -319,44 +319,13 @@ body {
 .md-content strong { color: var(--text); }
 .md-content em { color: var(--text-muted); }
 
-/* --- Evidence drawer ---
-   Tool evidence is supportive detail: collapsed by default so it never
-   crowds the streamed response; the summary line carries the trust signal. */
-.evidence-drawer {
-  flex-shrink: 0;
-  border-top: 1px solid var(--border);
-}
-
-.evidence-drawer summary {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 20px;
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  cursor: pointer;
-  user-select: none;
-}
-.evidence-drawer summary:hover { color: var(--text); }
-
-.evidence-drawer-title {
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-weight: 600;
-}
-
+/* --- Evidence & audit turn groups ---
+   Evidence and audit are supportive detail: each turn's group is rendered
+   inline directly after the agent reply it grounds and stays collapsed;
+   the summary line carries the trust signal without crowding the answer. */
 .evidence-summary {
   font-size: 0.75rem;
   color: var(--text-muted);
-}
-
-.evidence-cards {
-  padding: 4px 20px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 40vh;
-  overflow-y: auto;
 }
 
 .evidence-card {
@@ -366,12 +335,12 @@ body {
   background: var(--bg);
 }
 
-/* Per-turn group inside the evidence drawer: evidence and audit stay
-   attached to the request that produced them. */
+/* Per-turn group rendered inline after the agent reply it grounds. */
 .evidence-turn {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
+  margin-bottom: 16px;
 }
 
 .evidence-turn summary {

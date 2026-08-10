@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Luban AIOps Portal</title>
-    <link rel="stylesheet" href="./styles.css?v=20260810-per-turn-evidence" />
+    <link rel="stylesheet" href="./styles.css?v=20260810-inline-evidence" />
   </head>
   <body>
     <div class="chat-shell">
@@ -18,22 +18,13 @@
         </div>
       </header>
 
-      <!-- Main chat area -->
+      <!-- Main chat area. Evidence and audit groups are rendered inline,
+           directly after the agent reply they ground (SPEC-011 R-4). -->
       <main class="chat-main">
         <div id="response-output" class="chat-messages">
           <p class="chat-placeholder">Ask the agent about your infrastructure.</p>
         </div>
       </main>
-
-      <!-- Tool evidence drawer (SPEC-011 R-4): supportive detail, collapsed
-           by default so it never crowds the streamed response. -->
-      <details id="evidence-drawer" class="evidence-drawer">
-        <summary>
-          <span class="evidence-drawer-title">Tool Evidence</span>
-          <span id="evidence-summary" class="evidence-summary">no tool calls yet</span>
-        </summary>
-        <div id="evidence-cards" class="evidence-cards"></div>
-      </details>
 
       <!-- Prompt input (fixed bottom) -->
       <footer class="chat-input-bar">
@@ -72,6 +63,6 @@
       </details>
     </div>
 
-    <script src="./app.js?v=20260810-per-turn-evidence"></script>
+    <script src="./app.js?v=20260810-inline-evidence"></script>
   </body>
 </html>

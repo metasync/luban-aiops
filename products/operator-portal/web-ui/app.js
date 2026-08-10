@@ -12,18 +12,10 @@ let authCallbackNavigationPending = false;
 let refreshTimerId = null;
 const REFRESH_MARGIN_SECONDS = 60;
 
-// Evidence drawer state (SPEC-011 R-4). Evidence is supportive detail: it
-// lives in a collapsed drawer so it never crowds the streamed response.
-// Each chat turn gets its own group so the evidence/audit trail stays
-// attached to the request that produced it instead of being overwritten.
-const evidenceDrawer = document.querySelector("#evidence-drawer");
-const evidenceSummary = document.querySelector("#evidence-summary");
-const evidenceCards = document.querySelector("#evidence-cards");
-const evidenceCardMap = new Map();
-const MAX_EVIDENCE_TURNS = 20;
-let evidenceTurns = [];
+// Evidence state (SPEC-011 R-4). Evidence and audit are supportive detail:
+// each chat turn gets its own collapsed group rendered inline directly
+// after the agent reply it grounds, so provenance follows its answer.
 let currentTurn = null;
-let evidenceTurnCounter = 0;
 const chatMain = document.querySelector(".chat-main");
 
 // --- Markdown renderer ---
@@ -381,7 +373,6 @@ async function logout() {
   const session = loadAuthSession();
   clearAuthSession();
   clearPendingAuthRequest();
-  clearEvidencePanel();
   sessionIdOutput.textContent = "Not created";
   syncResolvedUser();
 
@@ -442,15 +433,6 @@ async function sendPrompt() {
   responseOutput.innerHTML = `<div class="md-content">${renderMarkdown(payload.response)}</div>`;
 }
 
-function clearEvidencePanel() {
-  evidenceCardMap.clear();
-  evidenceTurns = [];
-  currentTurn = null;
-  evidenceCards.innerHTML = "";
-  evidenceDrawer.open = false;
-  renderEvidenceSummary();
-}
-
 function formatCounts(counts) {
   if (counts.calls === 0) return "no tool calls";
   const parts = [`${counts.calls} call${counts.calls === 1 ? "" : "s"}`];
@@ -461,62 +443,35 @@ function formatCounts(counts) {
   return parts.join(" · ");
 }
 
-function renderEvidenceSummary() {
-  if (evidenceTurns.length === 0) {
-    evidenceSummary.textContent = "no tool calls yet";
-    return;
-  }
-  const totals = { calls: 0, pending: 0, success: 0, error: 0, denied: 0 };
-  for (const turn of evidenceTurns) {
-    for (const key of Object.keys(totals)) totals[key] += turn.counts[key];
-  }
-  evidenceSummary.textContent =
-    `${evidenceTurns.length} turn${evidenceTurns.length === 1 ? "" : "s"} · ${formatCounts(totals)}`;
-  for (const turn of evidenceTurns) {
-    turn.summaryLine.textContent = formatCounts(turn.counts);
-  }
-}
-
-// A turn group is created lazily on the first tool frame, so purely
-// conversational turns leave no empty entry behind. Older turns collapse;
-// the list is bounded so the DOM cannot grow without limit.
+// The turn group is created lazily on the first tool frame, so purely
+// conversational turns leave no empty group in the chat history. It is
+// inserted directly after the agent reply it grounds and stays collapsed:
+// the summary line carries the trust signal without crowding the answer.
 function ensureCurrentTurn() {
-  if (currentTurn) return currentTurn;
-  evidenceTurnCounter += 1;
+  if (!currentTurn || currentTurn.group) return currentTurn;
   const group = document.createElement("details");
   group.className = "evidence-turn";
-  group.open = true;
   const summary = document.createElement("summary");
   const title = document.createElement("span");
   title.className = "evidence-turn-title";
-  const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  title.textContent = `Turn ${evidenceTurnCounter} · ${time}`;
+  title.textContent = "Tool evidence";
   const summaryLine = document.createElement("span");
   summaryLine.className = "evidence-summary";
+  summaryLine.textContent = formatCounts(currentTurn.counts);
   summary.append(title, summaryLine);
   const body = document.createElement("div");
   body.className = "evidence-turn-body";
   group.append(summary, body);
-  for (const turn of evidenceTurns) {
-    turn.group.open = false;
-  }
-  evidenceCards.appendChild(group);
-  while (evidenceTurns.length >= MAX_EVIDENCE_TURNS) {
-    evidenceTurns.shift().group.remove();
-  }
-  currentTurn = {
-    group,
-    body,
-    summaryLine,
-    counts: { calls: 0, pending: 0, success: 0, error: 0, denied: 0 },
-    entries: []
-  };
-  evidenceTurns.push(currentTurn);
+  currentTurn.anchor.after(group);
+  currentTurn.group = group;
+  currentTurn.body = body;
+  currentTurn.summaryLine = summaryLine;
   return currentTurn;
 }
 
 function renderToolCall(payload) {
   const turn = ensureCurrentTurn();
+  if (!turn) return;
   turn.counts.calls += 1;
   turn.counts.pending += 1;
   turn.entries.push({
@@ -528,7 +483,7 @@ function renderToolCall(payload) {
     risk_level: null,
     source_system: null
   });
-  renderEvidenceSummary();
+  turn.summaryLine.textContent = formatCounts(turn.counts);
   const card = document.createElement("div");
   card.className = "evidence-card";
   card.dataset.callId = payload.call_id;
@@ -544,19 +499,20 @@ function renderToolCall(payload) {
     </details>
   `;
   turn.body.appendChild(card);
-  evidenceCardMap.set(payload.call_id, card);
+  turn.cardMap.set(payload.call_id, card);
 }
 
 function renderToolResult(payload) {
   const turn = ensureCurrentTurn();
-  let card = evidenceCardMap.get(payload.call_id);
+  if (!turn) return;
+  let card = turn.cardMap.get(payload.call_id);
   if (!card) {
     turn.counts.calls += 1;
     card = document.createElement("div");
     card.className = "evidence-card";
     card.dataset.callId = payload.call_id;
     turn.body.appendChild(card);
-    evidenceCardMap.set(payload.call_id, card);
+    turn.cardMap.set(payload.call_id, card);
   } else if (turn.counts.pending > 0) {
     turn.counts.pending -= 1;
   }
@@ -584,7 +540,7 @@ function renderToolResult(payload) {
   entry.duration_ms = evidence.duration_ms ?? null;
   entry.risk_level = evidence.risk_level || null;
   entry.source_system = evidence.source_system || null;
-  renderEvidenceSummary();
+  turn.summaryLine.textContent = formatCounts(turn.counts);
   const spinner = card.querySelector(".spinner");
   if (spinner) spinner.remove();
   const badge = card.querySelector(".status-badge");
@@ -643,9 +599,9 @@ function renderToolResult(payload) {
 // Audit card (option 1): aggregates what the stream delivered for ONE turn
 // only — self-service inspection of one's own session. It is a rendition of
 // streamed evidence, not the authoritative backend audit trail. The card is
-// rendered inside its turn group so it stays attached to that request.
+// rendered inside its turn group, inline after the reply it grounds.
 function renderAuditCard(requestId) {
-  if (!currentTurn || currentTurn.entries.length === 0) return;
+  if (!currentTurn || !currentTurn.group || currentTurn.entries.length === 0) return;
   const turn = currentTurn;
   const card = document.createElement("details");
   card.className = "evidence-card audit-card";
@@ -710,8 +666,6 @@ function escapeHtml(str) {
 async function streamPrompt() {
   const requestId = buildRequestId();
   requestIdOutput.textContent = requestId;
-  // Evidence is kept per turn: previous turns stay in the drawer and the
-  // new turn group is created lazily on the first tool frame.
 
   // Remove placeholder on first message
   const placeholder = responseOutput.querySelector(".chat-placeholder");
@@ -733,6 +687,18 @@ async function streamPrompt() {
   const agentDiv = document.createElement("div");
   agentDiv.className = "chat-msg agent-msg md-content";
   responseOutput.appendChild(agentDiv);
+
+  // Turn-scoped evidence/audit state: the group is created lazily on the
+  // first tool frame and inserted directly after this reply.
+  currentTurn = {
+    anchor: agentDiv,
+    group: null,
+    body: null,
+    summaryLine: null,
+    counts: { calls: 0, pending: 0, success: 0, error: 0, denied: 0 },
+    entries: [],
+    cardMap: new Map()
+  };
 
   promptInput.value = "";
   scrollToBottom(true);
@@ -805,9 +771,11 @@ async function streamPrompt() {
       agentDiv.innerHTML = '<p style="color: var(--text-muted)"><em>No response received.</em></p>';
     }
     renderAuditCard(requestId);
+    currentTurn = null;
   } catch (error) {
     agentDiv.innerHTML = `<p style="color: var(--error)">${escapeHtml(error.message)}</p>`;
     renderAuditCard(requestId);
+    currentTurn = null;
   }
 }
 
