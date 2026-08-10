@@ -12,10 +12,18 @@ let authCallbackNavigationPending = false;
 let refreshTimerId = null;
 const REFRESH_MARGIN_SECONDS = 60;
 
-// Evidence panel state (SPEC-011 R-4).
-const evidencePanel = document.querySelector("#evidence-panel");
+// Evidence drawer state (SPEC-011 R-4). Evidence is supportive detail: it
+// lives in a collapsed drawer so it never crowds the streamed response.
+const evidenceDrawer = document.querySelector("#evidence-drawer");
+const evidenceSummary = document.querySelector("#evidence-summary");
 const evidenceCards = document.querySelector("#evidence-cards");
 const evidenceCardMap = new Map();
+const evidenceCounts = { calls: 0, pending: 0, success: 0, error: 0, denied: 0 };
+// Per-turn audit entries assembled from the stream (option-1 audit view:
+// self-service inspection of the caller's own turn; the authoritative
+// backend trail belongs to a future audit-access spec).
+let auditEntries = [];
+const chatMain = document.querySelector(".chat-main");
 
 // --- Markdown renderer ---
 function renderMarkdown(text) {
@@ -435,11 +443,42 @@ async function sendPrompt() {
 function clearEvidencePanel() {
   evidenceCardMap.clear();
   evidenceCards.innerHTML = "";
-  evidencePanel.hidden = true;
+  auditEntries = [];
+  evidenceCounts.calls = 0;
+  evidenceCounts.pending = 0;
+  evidenceCounts.success = 0;
+  evidenceCounts.error = 0;
+  evidenceCounts.denied = 0;
+  evidenceDrawer.open = false;
+  renderEvidenceSummary();
+}
+
+function renderEvidenceSummary() {
+  if (evidenceCounts.calls === 0) {
+    evidenceSummary.textContent = "no tool calls this turn";
+    return;
+  }
+  const parts = [`${evidenceCounts.calls} call${evidenceCounts.calls === 1 ? "" : "s"}`];
+  if (evidenceCounts.pending > 0) parts.push(`${evidenceCounts.pending} running`);
+  if (evidenceCounts.success > 0) parts.push(`${evidenceCounts.success} ok`);
+  if (evidenceCounts.error > 0) parts.push(`${evidenceCounts.error} failed`);
+  if (evidenceCounts.denied > 0) parts.push(`${evidenceCounts.denied} denied`);
+  evidenceSummary.textContent = parts.join(" · ");
 }
 
 function renderToolCall(payload) {
-  evidencePanel.hidden = false;
+  evidenceCounts.calls += 1;
+  evidenceCounts.pending += 1;
+  auditEntries.push({
+    call_id: payload.call_id,
+    tool: payload.tool_name || payload.call_id,
+    status: "pending",
+    executed_at: null,
+    duration_ms: null,
+    risk_level: null,
+    source_system: null
+  });
+  renderEvidenceSummary();
   const card = document.createElement("div");
   card.className = "evidence-card";
   card.dataset.callId = payload.call_id;
@@ -461,15 +500,40 @@ function renderToolCall(payload) {
 function renderToolResult(payload) {
   let card = evidenceCardMap.get(payload.call_id);
   if (!card) {
-    evidencePanel.hidden = false;
+    evidenceCounts.calls += 1;
     card = document.createElement("div");
     card.className = "evidence-card";
     card.dataset.callId = payload.call_id;
     evidenceCards.appendChild(card);
     evidenceCardMap.set(payload.call_id, card);
+  } else if (evidenceCounts.pending > 0) {
+    evidenceCounts.pending -= 1;
   }
   const status = payload.status || "error";
+  if (Object.prototype.hasOwnProperty.call(evidenceCounts, status)) {
+    evidenceCounts[status] += 1;
+  }
   const evidence = payload.evidence || {};
+  let entry = auditEntries.find((item) => item.call_id === payload.call_id);
+  if (!entry) {
+    entry = {
+      call_id: payload.call_id,
+      tool: payload.tool_name || payload.call_id,
+      status,
+      executed_at: null,
+      duration_ms: null,
+      risk_level: null,
+      source_system: null
+    };
+    auditEntries.push(entry);
+  }
+  entry.tool = payload.tool_name || entry.tool;
+  entry.status = status;
+  entry.executed_at = evidence.executed_at || null;
+  entry.duration_ms = evidence.duration_ms ?? null;
+  entry.risk_level = evidence.risk_level || null;
+  entry.source_system = evidence.source_system || null;
+  renderEvidenceSummary();
   const spinner = card.querySelector(".spinner");
   if (spinner) spinner.remove();
   const badge = card.querySelector(".status-badge");
@@ -525,9 +589,61 @@ function renderToolResult(payload) {
   }
 }
 
-function scrollToBottom() {
-  const chatMain = responseOutput.closest(".chat-main");
-  if (chatMain) {
+// Audit card (option 1): aggregates what the stream delivered for THIS turn
+// only — self-service inspection of one's own session. It is a rendition of
+// streamed evidence, not the authoritative backend audit trail.
+function renderAuditCard(requestId) {
+  if (auditEntries.length === 0) return;
+  const card = document.createElement("details");
+  card.className = "evidence-card audit-card";
+  const summary = document.createElement("summary");
+  summary.textContent = `Audit trail · this turn (${auditEntries.length} call${auditEntries.length === 1 ? "" : "s"})`;
+  card.appendChild(summary);
+
+  const ids = document.createElement("div");
+  ids.className = "evidence-meta";
+  const sessionId = sessionIdOutput.textContent;
+  ids.innerHTML = `<span>request: ${escapeHtml(requestId)}</span>`
+    + (sessionId !== "Not created" ? `<span>session: ${escapeHtml(sessionId)}</span>` : "");
+  card.appendChild(ids);
+
+  const table = document.createElement("table");
+  const headerCells = ["tool", "status", "executed at", "duration", "risk", "source"];
+  table.innerHTML = `<thead><tr>${headerCells.map((cell) => `<th>${cell}</th>`).join("")}</tr></thead>`;
+  const tbody = document.createElement("tbody");
+  for (const entry of auditEntries) {
+    const row = document.createElement("tr");
+    const cells = [
+      entry.tool,
+      entry.status,
+      entry.executed_at || "—",
+      entry.duration_ms != null ? `${entry.duration_ms}ms` : "—",
+      entry.risk_level || "—",
+      entry.source_system || "—"
+    ];
+    for (const value of cells) {
+      const td = document.createElement("td");
+      td.textContent = value;
+      row.appendChild(td);
+    }
+    tbody.appendChild(row);
+  }
+  table.appendChild(tbody);
+  card.appendChild(table);
+  evidenceCards.prepend(card);
+}
+
+function isNearBottom(threshold = 80) {
+  if (!chatMain) return true;
+  return chatMain.scrollHeight - chatMain.scrollTop - chatMain.clientHeight < threshold;
+}
+
+// Sticky smart-scroll: only follow the stream when the reader is already at
+// (or near) the bottom. Growing evidence or late deltas must not yank the
+// viewport away from text the user is reading.
+function scrollToBottom(force = false) {
+  if (!chatMain) return;
+  if (force || isNearBottom()) {
     chatMain.scrollTop = chatMain.scrollHeight;
   }
 }
@@ -565,7 +681,7 @@ async function streamPrompt() {
   responseOutput.appendChild(agentDiv);
 
   promptInput.value = "";
-  scrollToBottom();
+  scrollToBottom(true);
   const params = new URLSearchParams({
     message: userMsg,
     user_id: currentAuthenticatedUser() || userInput.value
@@ -634,8 +750,10 @@ async function streamPrompt() {
     if (!accumulatedText.trim()) {
       agentDiv.innerHTML = '<p style="color: var(--text-muted)"><em>No response received.</em></p>';
     }
+    renderAuditCard(requestId);
   } catch (error) {
     agentDiv.innerHTML = `<p style="color: var(--error)">${escapeHtml(error.message)}</p>`;
+    renderAuditCard(requestId);
   }
 }
 

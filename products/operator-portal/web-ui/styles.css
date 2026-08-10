@@ -319,29 +319,50 @@ body {
 .md-content strong { color: var(--text); }
 .md-content em { color: var(--text-muted); }
 
-/* --- Evidence panel --- */
-.evidence-panel {
-  margin-top: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px;
-  background: var(--surface);
+/* --- Evidence drawer ---
+   Tool evidence is supportive detail: collapsed by default so it never
+   crowds the streamed response; the summary line carries the trust signal. */
+.evidence-drawer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
 }
 
-.evidence-header {
+.evidence-drawer summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
   font-size: 0.8rem;
-  font-weight: 600;
   color: var(--text-muted);
-  margin-bottom: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.evidence-drawer summary:hover { color: var(--text); }
+
+.evidence-drawer-title {
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.evidence-summary {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.evidence-cards {
+  padding: 4px 20px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 40vh;
+  overflow-y: auto;
 }
 
 .evidence-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 10px;
-  margin-bottom: 8px;
   background: var(--bg);
 }
 
@@ -401,4 +422,22 @@ body {
   overflow-x: auto;
   max-height: 200px;
   margin-top: 6px;
+}
+
+/* Audit card inside the evidence drawer. */
+.audit-card table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-top: 8px;
+  font-size: 0.75rem;
+}
+.audit-card th, .audit-card td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+}
+.audit-card th {
+  background: var(--surface);
+  color: var(--text-muted);
+  font-weight: 600;
 }

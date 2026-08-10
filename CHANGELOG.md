@@ -8,6 +8,21 @@ published product versions.
 
 ## Unreleased
 
+### Changed — Evidence moved to a collapsed drawer; audit card; sticky scroll
+
+- operator-portal: tool evidence no longer renders inline in the chat
+  column (it crowded out the streamed answer and fought the auto-scroll).
+  It now lives in a dedicated collapsed drawer above the input bar with a
+  live summary line ("N calls · X ok · Y denied"), matching the existing
+  Settings & Debug drawer idiom.
+- Added an "Audit trail · this turn" card assembled from streamed evidence
+  (tool, status, executed_at, duration, risk, source) plus request/session
+  IDs — self-service inspection of the caller's own turn. The authoritative
+  backend audit trail (cross-user, persistent) remains a future spec.
+- Sticky smart-scroll: the chat view only follows the stream while the
+  reader is near the bottom, so growing evidence no longer yanks the
+  viewport away from text being read.
+
 ### Fixed — Rotated delegated tokens no longer strand sessions without tools
 
 - agent-platform: delegated tokens rotate mid-session (portal token refresh,
