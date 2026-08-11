@@ -8,6 +8,31 @@ published product versions.
 
 ## Unreleased
 
+### Added — SPEC-012: Operator Guide and Deployment Documentation
+
+- New operator-facing documentation suite under `docs/guides/`:
+  - `getting-started.md` (R-1): prerequisites, build→deploy→verify walkthrough,
+    secrets provisioning, end-to-end verification checklist.
+  - `configuration-reference.md` (R-2): feature activation matrix, cross-service
+    dependency chains (token delegation, identity, tool relay), per-service
+    environment variable tables, secret contracts, runtime profiles, policy
+    management workflow.
+  - `troubleshooting.md` (R-3): symptom-based diagnostics for nine common
+    failure modes (access not granted, no tools, login fails, stream stalls,
+    policy denied, Elastic not configured, ErrImagePull, policy load failure,
+    token expiry).
+  - `tool-configuration.md` (R-4): tool inventory (K8s + Elastic), connector
+    activation checklists, RBAC configuration, redaction engine reference,
+    new-connector extension guide.
+  - `architecture-overview.md` (R-5): service topology, request flow, trust
+    chain, token delegation, workload identity, RBAC model, with Mermaid
+    diagrams.
+  - `README.md`: guide index and navigation.
+- Root Makefile: added `sync-policy` target (copy canonical `policy-default.yaml`
+  to all consumer locations) and `validate-policy` target (validate bundle
+  against `policy-rule.schema.json`); `validate-policy` wired into `make verify`.
+- New `shared/shared-contracts/scripts/validate_policy.py` validation script.
+
 ### Changed — Evidence and audit groups follow their reply inline
 
 - operator-portal: replaced the bottom evidence drawer with per-turn

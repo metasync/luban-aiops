@@ -1,0 +1,163 @@
+# Tool and Connector Guide
+
+An inventory of available tools and a per-connector activation checklist for operators
+configuring the platform's tool execution framework.
+
+## Tool Inventory
+
+All registered tools are **read-only** (risk level: `read`). The agent discovers available
+tools via the `tools:list` action and invokes them via `tools:invoke`. Both actions are
+governed by the policy bundle.
+
+### Kubernetes Connector Tools
+
+| Tool | Description | Parameters | Risk |
+|---|---|---|---|
+| `k8s.list_pods` | List pods in a namespace with optional label filtering | `namespace` (optional), `label_selector` (optional) | read |
+| `k8s.get_pod` | Get detailed status of a specific pod | `name` (required), `namespace` (optional) | read |
+| `k8s.get_events` | List Kubernetes events in a namespace | `namespace` (optional), `field_selector` (optional) | read |
+| `k8s.get_pod_logs` | Retrieve recent logs from a pod container | `name` (required), `namespace` (optional), `container` (optional), `tail_lines` (default 100, max 1000) | read |
+
+### Elastic Connector Tools
+
+| Tool | Description | Parameters | Risk |
+|---|---|---|---|
+| `elastic.search_logs` | Search logs using KQL or simple text | `query` (required), `index` (default `*`), `time_range_minutes` (default 15, max 1440), `max_results` (default 50, max 200) | read |
+| `elastic.get_service_health` | Get aggregated health metrics for a service | `service_name` (required), `time_range_minutes` (default 15, max 1440) | read |
+| `elastic.get_active_alerts` | List active alerts, optionally filtered by severity | `severity` (optional: `critical`, `warning`, `info`), `max_results` (default 50, max 200) | read |
+
+> **Important:** All registered tools are currently read-only. Before any mutating (write or
+> admin) tool is registered, the policy bundle must be updated to scope the
+> `read-only-observer` grants to read-only tools only.
+
+## Kubernetes Connector
+
+The Kubernetes connector provides read-only access to pod status, events, and logs using the
+official `kubernetes-client/python` library. It uses in-cluster config when running inside
+Kubernetes, falling back to kubeconfig for local development.
+
+### Activation Checklist
+
+- [ ] **`GATEWAY_K8S_ENABLED=true`** — set in `tool-gateway/runtime-config.env`
+- [ ] **`GATEWAY_K8S_NAMESPACE=<namespace>`** — default namespace for tool queries (e.g. `dev-luban-aiops`)
+- [ ] **Service account** — the tool-gateway pod runs with service account `tool-gateway`
+- [ ] **RBAC** — a Role and RoleBinding grant the service account read-only access to pods, pod logs, and events in the target namespace
+
+### RBAC Configuration
+
+The dev-k8s overlay includes the necessary RBAC resources. For a new namespace or cluster,
+create:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tool-gateway-readonly
+  namespace: <target-namespace>
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tool-gateway-readonly
+  namespace: <target-namespace>
+subjects:
+  - kind: ServiceAccount
+    name: tool-gateway
+    namespace: dev-luban-aiops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tool-gateway-readonly
+```
+
+### Verification
+
+```bash
+# Port-forward tool-gateway and check tool listing:
+kubectl -n dev-luban-aiops port-forward service/tool-gateway 18100:8000
+curl -s http://127.0.0.1:18100/api/v1/tools | jq '.[].name'
+# Should include: k8s.list_pods, k8s.get_pod, k8s.get_events, k8s.get_pod_logs
+```
+
+If the K8s client is not configured (no in-cluster config or kubeconfig available), all K8s tools
+return a structured `K8S_NOT_CONFIGURED` error.
+
+## Elastic Connector
+
+The Elastic connector provides read-only access to log search, service health metrics, and
+alert listing using the official `elasticsearch` Python client. It supports API-key
+authentication (preferred) or basic auth.
+
+### Activation Checklist
+
+- [ ] **`GATEWAY_ELASTIC_ENABLED=true`** — enable the connector
+- [ ] **`GATEWAY_ELASTIC_URL=<url>`** — Elasticsearch cluster URL (e.g. `https://elastic.example.com:9243`)
+- [ ] **Authentication** — provide one of:
+  - `GATEWAY_ELASTIC_API_KEY=<base64-api-key>` (API key auth, preferred), or
+  - `GATEWAY_ELASTIC_USERNAME=<user>` + `GATEWAY_ELASTIC_PASSWORD=<pass>` (basic auth)
+- [ ] **`GATEWAY_ELASTIC_VERIFY_TLS`** — set to `false` only for self-signed certs in dev (default `true`)
+- [ ] **`GATEWAY_ELASTIC_ALERTS_INDEX`** — alert index pattern (default `.alerts-*`)
+- [ ] **Network reachability** — the tool-gateway pod must be able to reach the Elastic cluster
+
+### Verification
+
+```bash
+# After enabling, check readiness:
+kubectl -n dev-luban-aiops exec deployment/tool-gateway -- curl -s localhost:8000/health/ready | jq
+# Should show status: ok and the expected number of tools including elastic.*
+
+# List tools to confirm elastic tools are registered:
+kubectl -n dev-luban-aiops port-forward service/tool-gateway 18100:8000
+curl -s http://127.0.0.1:18100/api/v1/tools | jq '.[].name'
+# Should include: elastic.search_logs, elastic.get_service_health, elastic.get_active_alerts
+```
+
+If the Elastic connector is enabled but the URL is unreachable, tools return an
+`ELASTIC_CONNECTION_ERROR`. If the connector is not enabled, tools return
+`ELASTIC_NOT_CONFIGURED`.
+
+## Output Redaction
+
+All tool results pass through a redaction engine before being returned to the agent and
+recorded in the audit log. The engine replaces credential-shaped content with `[REDACTED]`:
+
+| Pattern | What It Catches |
+|---|---|
+| JWT tokens | `eyJ...` base64-encoded tokens |
+| Bearer/Basic values | `Authorization: Bearer <token>`, `Basic <credentials>` |
+| PEM private keys | `-----BEGIN ... PRIVATE KEY-----` blocks |
+| AWS access keys | Strings starting with `AKIA` |
+| Sensitive field values | Case-insensitive key match for `password`, `secret`, `token`, `api_key`, and similar |
+
+**Fail-closed:** if the fraction of redacted content exceeds
+`GATEWAY_REDACTION_OVERFLOW_FRACTION` (default 20%), the entire tool output is withheld with
+a `REDACTION_OVERFLOW` error. This prevents accidental credential leakage when a tool result
+is predominantly secrets.
+
+**Dev opt-out:** for debugging, set `GATEWAY_REDACTION_ENABLED=false` in
+`tool-gateway/runtime-config.env`. Do not carry this into non-dev overlays.
+
+## Adding a New Connector
+
+New connectors follow the pattern established by the Kubernetes and Elastic connectors
+(SPEC-007 / SPEC-011):
+
+1. **Create a connector class** under `products/tool-gateway/src/tool_gateway/tools/` that
+   manages the external client lifecycle.
+2. **Define tool classes** extending `BaseTool` with a `ToolDefinition` (name, description,
+   risk level, category, parameters schema) and an `execute()` method returning `ToolResult`.
+3. **Register tools** with the `ToolRegistry` in the connector's `register_tools()` method.
+4. **Add configuration** variables to `GatewaySettings` in `core/config.py` with a
+   `GATEWAY_<CONNECTOR>_*` prefix.
+5. **Wire the connector** into the tool registry initialization in `app.py`, gated by a
+   `GATEWAY_<CONNECTOR>_ENABLED` boolean flag.
+6. **Update the policy bundle** if the new tools require different authorization (e.g. write
+   tools must not be granted to `read-only-observer`).
+7. **Update this document** with the new tools and their activation checklist.
+
+All tool results automatically pass through the redaction engine — no additional work is
+needed for credential protection.

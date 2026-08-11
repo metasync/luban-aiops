@@ -103,6 +103,24 @@ build: base-images ## Build all images (coordinated tag) and write .images.env f
 push: ## Push every product container image (set REGISTRY to re-tag)
 	@for p in $(IMAGE_PRODUCTS); do $(MAKE) -C products/$$p push || exit 1; done
 
+# --- Policy management ------------------------------------------------------
+
+POLICY_CANONICAL := shared/shared-contracts/policies/policy-default.yaml
+POLICY_TARGETS := \
+	products/tool-gateway/src/tool_gateway/policies/policy-default.yaml \
+	products/platform-gateway/src/platform_gateway/policies/policy-default.yaml \
+	shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml
+
+.PHONY: sync-policy
+sync-policy: ## Copy canonical policy bundle to all consumer locations
+	@for t in $(POLICY_TARGETS); do \
+		cp $(POLICY_CANONICAL) "$$t" && echo "synced $$t" || exit 1; \
+	done
+
+.PHONY: validate-policy
+validate-policy: ## Validate canonical policy bundle against JSON schema
+	@cd products/tool-gateway && uv run python ../../shared/shared-contracts/scripts/validate_policy.py
+
 # --- Cross-cutting ----------------------------------------------------------
 
 .PHONY: overlays
@@ -113,7 +131,7 @@ overlays: ## Render every GitOps overlay (kustomize build check)
 	done
 
 .PHONY: verify
-verify: test overlays ## Verification gate: product tests + overlay render checks
+verify: test overlays validate-policy ## Verification gate: product tests + overlay render + policy validation
 
 .PHONY: deploy
 deploy: ## Deploy the dev-k8s overlay to the current cluster (wraps deploy.sh)

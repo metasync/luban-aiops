@@ -125,4 +125,4 @@ Mechanical enforcement:
 | `SPEC-009` | Pre-production hardening — tool output redaction and workload-identity service tokens | `delivered` |
 | `SPEC-010` | Platform gateway extraction — splitting `tool-gateway` into `platform-gateway` and `tool-gateway` | `delivered` |
 | `SPEC-011` | Observability connector and evidence panels — Elastic connector, tool trace events, portal evidence panel | `delivered` |
-| `SPEC-012` | Operator guide and deployment documentation — getting started, configuration, troubleshooting, tools, architecture | `approved` |
+| `SPEC-012` | Operator guide and deployment documentation — getting started, configuration, troubleshooting, tools, architecture | `delivered` |

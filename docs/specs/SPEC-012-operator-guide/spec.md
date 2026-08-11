@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: workspace maintainers
 - created: 2026-08-05
 - release slice: `R1` (read-only operations copilot)

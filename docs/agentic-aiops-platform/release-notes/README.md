@@ -7,6 +7,11 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-11-r1-close-operator-guide.md`
+  - closes Release 1 with SPEC-012: operator guide suite (getting started,
+    configuration reference, troubleshooting, tool configuration, architecture
+    overview), policy management tooling (`sync-policy`, `validate-policy`),
+    and the completion of all 12 Release 1 specs
 - `2026-08-10-r1-hardening-grounded-responses-and-evidence-ux.md`
   - summarizes the Release 1 hardening wave: SPEC-011 completion (grounded
     responses with v3 evidence frames), audit log visibility, cluster-wide
