@@ -17,6 +17,7 @@ from identity_service.schemas.auth import (
     TokenRequest,
     TokenResponse,
 )
+from identity_service.services.audit_emitter import build_audit_event, emit_audit_event
 from identity_service.services.exchange_service import ExchangeError, exchange_token
 from identity_service.services.identity_service import (
     build_login_start,
@@ -126,6 +127,7 @@ def exchange_delegated_token(
     """
     workload_token = _parse_bearer_credential(authorization)
     client_id, client_secret = _parse_basic_credential(authorization)
+    caller = client_id if workload_token is None else "workload"
     try:
         token, expires_in = exchange_token(
             settings,
@@ -143,6 +145,20 @@ def exchange_delegated_token(
             audience=payload.audience,
             reason=exc.detail,
         )
+        emit_audit_event(
+            settings,
+            build_audit_event(
+                "token_exchange",
+                x_request_id,
+                "deny",
+                actor=caller,
+                details={
+                    "client_id": caller,
+                    "audience": payload.audience,
+                    "reason": exc.detail,
+                },
+            ),
+        )
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     log_event(
         LOGGER,
@@ -150,6 +166,19 @@ def exchange_delegated_token(
         request_id=x_request_id,
         client_id=client_id if workload_token is None else "workload",
         audience=payload.audience,
+    )
+    emit_audit_event(
+        settings,
+        build_audit_event(
+            "token_exchange",
+            x_request_id,
+            "success",
+            actor=caller,
+            details={
+                "client_id": caller,
+                "audience": payload.audience,
+            },
+        ),
     )
     return TokenExchangeResponse(access_token=token, expires_in=expires_in)
 

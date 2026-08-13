@@ -37,6 +37,15 @@ Current implementation artifacts:
 
 Current browser baseline capabilities:
 
+- two-column app shell: a left sidebar carries the logo and the function
+  list; the main column shows one function view at a time (Chat, Settings &
+  Debug, Audit trail) with state preserved across switches; narrow
+  screens collapse the sidebar into a hamburger-triggered off-canvas
+  drawer
+- sidebar footer: a user card (initials avatar, username, icon-only
+  Sign in / Sign out with tooltips; clicking the user opens a popup menu
+  showing granted roles and — later — other user-related info) and a
+  platform version card, kept separate from the function list
 - `OIDC` login start through `platform-gateway`
 - authorization-code callback completion through `identity-broker`
 - authenticated portal logout entry point
@@ -50,6 +59,11 @@ Current browser baseline capabilities:
   as cards with status badges, collapsible parameters and data summaries, and
   evidence metadata — visible when the agent invokes tools, hidden otherwise
   (SPEC-011)
+- read-only durable audit trail view: filter bar, newest-first table, cursor
+  pagination with a persistent "Load more" bar, and expandable event
+  envelopes; the navigation entry renders only for identities whose roles
+  hold `audit:read` (the gateway re-enforces the action server-side)
+  (SPEC-013)
 
 ## Expected Integration Points
 

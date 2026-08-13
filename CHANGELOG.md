@@ -8,6 +8,83 @@ published product versions.
 
 ## Unreleased
 
+### Added — SPEC-013: Durable Audit Trail
+
+- New `shared/shared-contracts/schemas/audit-event.schema.json` (R-1):
+  canonical audit-event envelope (`event_id`, `occurred_at`, `event_type`,
+  `service`, `request_id`, `subject`, `username`, optional `actor`
+  delegation chain, `roles`, optional `session_id`, `outcome`, typed
+  `details`); covers `tool_invoked`, `policy_decision`, `token_exchange`,
+  `session_created`, `chat_started`, `chat_completed`. Contract tests bind
+  emitter and audit-service Pydantic models to the schema.
+- Canonical policy bundle: new `audit:read` action granted to `auditor`
+  and `platform-admin` only (deny-by-default for all other roles);
+  synced to all consumer copies via `make sync-policy`.
+- New `products/audit-service` product (R-2): FastAPI service with
+  frozen-dataclass `AUDIT_*` settings, structured logging, `/health`,
+  `/metrics`, and an `AuditStore` protocol with two backends —
+  `InMemoryAuditStore` (dev/tests) and `PostgresAuditStore` (psycopg v3
+  async pool, keyset pagination), selected via `AUDIT_STORE_BACKEND`.
+- Authenticated non-blocking ingest (R-3): `POST /api/v1/audit/events`
+  accepts batches (capped by `AUDIT_MAX_BATCH`), rejects malformed events
+  with 400 + counter. Auth via static Basic client registry
+  (`AUDIT_INGEST_CLIENTS`) or projected workload tokens
+  (`AUDIT_WORKLOAD_*`), mirroring SPEC-008/009 credential vocabulary.
+- Fire-and-forget audit emitters (R-3) in tool-gateway, platform-gateway,
+  and identity-broker: 2s bounded timeout, failure counted in
+  `audit_emits_total`, never blocks or fails the originating request;
+  feature-gated by `GATEWAY_AUDIT_SERVICE_URL`,
+  `PLATFORM_GATEWAY_AUDIT_SERVICE_URL`, and `IDENTITY_AUDIT_SERVICE_URL`
+  (unset preserves log-only behavior exactly). Structured-log emission
+  retained alongside.
+- Permission-scoped query API (R-4): `GET /api/v1/audit/events` with
+  filters (`username`, `session_id`, `request_id`, `event_type`,
+  `service`, `since`/`until`), newest-first cursor pagination, verbatim
+  envelope round-trip. platform-gateway proxies the route under
+  `/api/v1/audit/*` with portal-token verification and
+  `enforce_policy("audit:read")` (structured 403 on deny).
+- Operator portal audit view (R-5): read-only audit trail function view
+  with filter bar, newest-first table, cursor pagination, and expandable
+  event envelopes; navigation entry rendered only for `auditor` /
+  `platform-admin` roles.
+- Operator portal shell: two-column layout replacing the stacked panels —
+  left sidebar carries the logo and the function list (Chat, Settings &
+  Debug, Audit trail); the main column shows one function at a time with
+  state preserved across switches. Narrow screens (≤800px) collapse the
+  sidebar into a hamburger-triggered off-canvas drawer (the topbar stays
+  above the open drawer so the hamburger always toggles).
+- Operator portal sidebar footer: a user card (initials avatar, username,
+  icon-only Sign in / Sign out with tooltips; clicking the user opens a
+  popup menu showing granted roles, extensible with future user-related
+  info) and a platform version card — separated from the function list.
+- Operator portal polish: sticky audit-table column headers inside the
+  scroll area, `:focus-visible` keyboard focus rings, and
+  `prefers-reduced-motion` guards on blinking/spinning animations.
+- Retention and bounded growth (R-6): `AUDIT_RETENTION_DAYS` (default 30)
+  window eviction + `AUDIT_MAX_EVENTS` hard cap, batched deletes,
+  eviction counted in metrics, never blocks ingest; window and store size
+  exposed in `/health` / `/metrics`.
+- dev-k8s overlay: PostgreSQL StatefulSet + PVC + Service, audit-service
+  deployment/service/runtime-config (`AUDIT_STORE_BACKEND=postgres`),
+  `sync-audit-secrets.sh` for shared ingest credentials (wired into
+  `make deploy` with skip switch), emitter `*_AUDIT_SERVICE_URL` env in
+  the three emitting services, policy ConfigMap updated.
+- Root Makefile: `audit-service` added to `PYTHON_PRODUCTS`,
+  `IMAGE_PRODUCTS`, `.images.env`, and the kind-load list.
+- Operator guides updated: audit-service in the architecture topology and
+  service inventory, `AUDIT_*` variables in the configuration reference,
+  audit-service activation checklist, and troubleshooting entries for
+  missing events, ingest 401, and query denial.
+
+### Fixed — SPEC-013: Durable Audit Trail
+
+- `PostgresAuditStore.add` now wraps `details` in `psycopg.types.json.Jsonb`
+  before insert; a raw dict is not adaptable for the `JSONB` column and
+  every ingest failed with `psycopg.ProgrammingError: cannot adapt type
+  'dict'`. Caught during the dev-k8s live test (unit tests exercised the
+  in-memory backend); regression test added against the fake psycopg
+  driver (audit-service tests 67 → 68).
+
 ### Added — SPEC-012: Operator Guide and Deployment Documentation
 
 - New operator-facing documentation suite under `docs/guides/`:

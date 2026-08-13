@@ -5,17 +5,19 @@ authorization model for operators who need to understand how the pieces connect.
 
 ## Service Topology
 
-The platform consists of six services deployed to a single Kubernetes namespace
+The platform consists of eight workloads deployed to a single Kubernetes namespace
 (`dev-luban-aiops` by default):
 
 | Service | Image | Role |
 |---|---|---|
 | **web-ui** | `luban-aiops/web-ui` | Static portal shell served by nginx; proxies `/api/` to platform-gateway |
-| **platform-gateway** | `luban-aiops/platform-gateway` | Portal-facing edge: JWT verification, action policy, chat/session proxying, token delegation |
+| **platform-gateway** | `luban-aiops/platform-gateway` | Portal-facing edge: JWT verification, action policy, chat/session proxying, token delegation, audit query proxy |
 | **agent-service** | `luban-aiops/agent-service` | AgentScope runtime kernel: LLM orchestration, session management, tool trace emission |
 | **tool-gateway** | `luban-aiops/tool-gateway` | Tool execution framework: connector dispatch, policy enforcement, output redaction |
 | **identity-service** | `luban-aiops/identity-service` | Enterprise identity: Keycloak OIDC login, JWT issuance, token exchange for delegation |
+| **audit-service** | `luban-aiops/audit-service` | Durable audit trail: authenticated ingest, retention-bounded store, query API (SPEC-013) |
 | **redis** | `redis:7.2-alpine` | In-cluster session store and AgentScope coordination (non-durable in dev) |
+| **postgres** | `postgres:16-alpine` | Durable audit store backend (PVC-backed, dev-only credentials) |
 
 All backend services are Python 3.12 FastAPI applications built on a shared
 `luban-aiops/base-uv` container image (Amazon Linux 2023, non-root uid 1000).
@@ -32,7 +34,9 @@ graph TB
         AS[agent-service<br/>:8000]
         TG[tool-gateway<br/>:8000]
         IB[identity-service<br/>:8000]
+        Audit[audit-service<br/>:8000]
         Redis[(Redis)]
+        PGDB[(PostgreSQL)]
     end
 
     subgraph External
@@ -41,7 +45,7 @@ graph TB
         Elastic[Elastic Cluster]
     end
 
-    User -->|http://localhost:18080| WebUI
+    User -->|https://aiops.luban.metasync.cc| WebUI
     WebUI -->|/api/*| PG
     PG -->|chat/session relay| AS
     PG -->|token exchange| IB
@@ -50,6 +54,11 @@ graph TB
     TG -->|read-only| Elastic
     IB -->|OIDC| Keycloak
     AS -->|sessions| Redis
+    TG -.->|audit events| Audit
+    PG -.->|audit events| Audit
+    IB -.->|audit events| Audit
+    PG -->|audit query proxy| Audit
+    Audit -->|store| PGDB
 ```
 
 ## Request Flow
@@ -62,7 +71,9 @@ Browser → web-ui → platform-gateway → agent-service → tool-gateway → c
 
 ### Step-by-Step
 
-1. **Browser** sends a chat request to `web-ui` (port-forwarded to `localhost:18080`).
+1. **Browser** sends a chat request to `web-ui` (via the Envoy Gateway hostnames
+   `aiops.luban.k8s.orb.local` / `aiops.luban.metasync.cc`, or port-forwarded to
+   `localhost:18080`).
 2. **web-ui** (nginx) serves static assets and proxies `/api/` to **platform-gateway**.
 3. **platform-gateway** verifies the portal JWT, evaluates action policy (`chat`), exchanges the
    user's token for a short-lived delegated token (audience = `tool-gateway`), and forwards the
@@ -164,6 +175,7 @@ Roles are mapped from OIDC groups by the identity-service:
 | `ops-operators` | `operator` | Day-to-day operations |
 | `ops-developers` | `developer` | Development and testing |
 | `ops-observers` | `read-only-observer` | Read-only query access |
+| `ops-auditors` | `auditor` | Audit trail review |
 | *(unmapped)* | `read-only-observer` | Default when no group matches |
 
 ### Protected Actions
@@ -175,6 +187,7 @@ The policy engine enforces deny-by-default authorization on named actions:
 | `chat` | platform-gateway | Send a chat prompt to the agent |
 | `session:create` | platform-gateway | Create a new conversation session |
 | `session:read` | platform-gateway | Read session history |
+| `audit:read` | platform-gateway | Query the durable audit trail |
 | `tools:list` | tool-gateway | Discover available tools |
 | `tools:invoke` | tool-gateway | Execute a tool |
 
@@ -183,7 +196,7 @@ business action).
 
 ### Default Policy Bundle
 
-The platform ships with four allow rules at priority 100. Everything else is denied:
+The platform ships with five allow rules at priority 100. Everything else is denied:
 
 | Rule | Roles | Actions |
 |---|---|---|
@@ -191,9 +204,14 @@ The platform ships with four allow rules at priority 100. Everything else is den
 | `allow-observer-read-and-chat` | read-only-observer | `chat`, `session:create`, `session:read` |
 | `allow-operators-tools` | admin, operator, developer, read-only-observer | `tools:invoke` |
 | `allow-operators-tools-list` | admin, operator, developer, read-only-observer | `tools:list` |
+| `allow-auditors-audit-read` | auditor, platform-admin | `audit:read` |
 
 > **Note:** The `read-only-observer` tool grants assume all registered tools are read-only
 > (tier-0 reads). Before any mutating tool is registered, these rules must be re-scoped.
+
+> **Note:** `audit:read` exposes cross-user activity and is therefore restricted to the
+> governance roles per the authorization matrix: `auditor` (from `ops-auditors`) and
+> `platform-admin` (from `ops-admins`).
 
 ### Policy Configuration
 

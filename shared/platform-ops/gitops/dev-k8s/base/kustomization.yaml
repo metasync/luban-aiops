@@ -11,6 +11,7 @@ configMapGenerator:
       - platform-gateway/runtime-config.env
       - tool-gateway/runtime-config.env
       - identity-broker/runtime-config.env
+      - audit-service/runtime-config.env
   - name: platform-policy
     files:
       - shared/policy.yaml
@@ -18,8 +19,11 @@ resources:
   - shared/namespace.yaml
   - infra/redis-deployment.yaml
   - infra/redis-service.yaml
+  - infra/postgres-statefulset.yaml
+  - infra/postgres-service.yaml
   - operator-portal/web-ui-deployment.yaml
   - operator-portal/web-ui-service.yaml
+  - operator-portal/web-ui-httproute.yaml
   - platform-gateway/rbac.yaml
   - platform-gateway/platform-gateway-deployment.yaml
   - platform-gateway/platform-gateway-service.yaml
@@ -30,3 +34,5 @@ resources:
   - agent-platform/agent-service-service.yaml
   - identity-broker/identity-service-deployment.yaml
   - identity-broker/identity-service-service.yaml
+  - audit-service/audit-service-deployment.yaml
+  - audit-service/audit-service-service.yaml

@@ -1,0 +1,1 @@
+`make verify` runs every product's test suite, renders all Kustomize overlays, and validates the canonical policy bundle; `make build` builds all product images with one coordinated tag and writes them to `shared/platform-ops/gitops/dev-k8s/.images.env`; `make deploy` applies the dev-k8s overlay via its `deploy.sh` script.

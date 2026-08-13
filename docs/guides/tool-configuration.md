@@ -141,6 +141,50 @@ is predominantly secrets.
 **Dev opt-out:** for debugging, set `GATEWAY_REDACTION_ENABLED=false` in
 `tool-gateway/runtime-config.env`. Do not carry this into non-dev overlays.
 
+## Audit Service Activation (SPEC-013)
+
+The durable audit trail is delivered by the standalone `audit-service` product, not a
+tool-gateway connector. Emitters (tool-gateway, platform-gateway, identity-service)
+forward audit events fire-and-forget; with no URL configured they keep today's log-only
+behavior.
+
+### Activation Checklist
+
+- [ ] **Store backend** — `AUDIT_STORE_BACKEND=postgres` with `AUDIT_DB_URL` pointing at a
+      reachable PostgreSQL (dev-k8s deploys the `postgres` StatefulSet and commits both)
+- [ ] **Ingest registry** — `AUDIT_INGEST_CLIENTS=client_id=secret,...` in
+      `audit-service-runtime-secrets` (one entry per emitter)
+- [ ] **Emitter URLs** — `GATEWAY_AUDIT_SERVICE_URL`, `PLATFORM_GATEWAY_AUDIT_SERVICE_URL`,
+      `IDENTITY_AUDIT_SERVICE_URL` (dev-k8s commits `http://audit-service:8000`)
+- [ ] **Emitter client ids** — `GATEWAY_AUDIT_CLIENT_ID`, `PLATFORM_GATEWAY_AUDIT_CLIENT_ID`,
+      `IDENTITY_AUDIT_CLIENT_ID` must match the registry entries
+- [ ] **Emitter secrets** — `*_AUDIT_CLIENT_SECRET` in each emitter's `*-runtime-secrets`
+      must match the secret registered for its client id
+- [ ] **Retention** — `AUDIT_RETENTION_DAYS` (default 30) and `AUDIT_MAX_EVENTS`
+      (default 100000) sized for the environment
+- [ ] **Query access** — the policy bundle grants `audit:read` to `auditor` and
+      `platform-admin` (rule `allow-auditors-audit-read`); the portal audit view is
+      client-gated to the same roles
+
+**Provisioning shortcut (dev-k8s):** `make deploy` runs `sync-audit-secrets.sh`, which
+generates one shared ingest secret and writes all four K8s secrets. Use
+`SKIP_AUDIT_SECRETS=true make deploy` when CI injects them.
+
+### Verification
+
+```bash
+# Store readiness and approximate size:
+kubectl -n dev-luban-aiops port-forward service/audit-service 18003:8000
+curl -s http://127.0.0.1:18003/health/ready | jq
+
+# Emitter delivery counters (result="ok" should dominate):
+kubectl -n dev-luban-aiops exec deployment/tool-gateway -- curl -s localhost:8000/metrics | grep audit_emits
+```
+
+If an emitter cannot reach the audit service, delivery degrades to log-only auditing and
+`audit_emits_total{result="error"}` counts the failures; the user-facing request is never
+blocked. See the [Troubleshooting Guide](troubleshooting.md) for audit-specific symptoms.
+
 ## Adding a New Connector
 
 New connectors follow the pattern established by the Kubernetes and Elastic connectors

@@ -9,7 +9,7 @@ Luban AIOps platform.
 |---|---|
 | [Getting Started](getting-started.md) | From cluster to working portal in 7 steps |
 | [Configuration Reference](configuration-reference.md) | Environment variables, secrets, and cross-service dependencies |
-| [Tool and Connector Guide](tool-configuration.md) | Tool inventory, K8s/Elastic activation checklists, adding new connectors |
+| [Tool and Connector Guide](tool-configuration.md) | Tool inventory, K8s/Elastic activation checklists, audit-service activation, adding new connectors |
 | [Architecture Overview](architecture-overview.md) | Service topology, request flow, trust chain, RBAC model |
 | [Troubleshooting](troubleshooting.md) | Symptom-based diagnostics for common deployment and runtime issues |
 
@@ -25,5 +25,5 @@ Luban AIOps platform.
 - [Delivery Roadmap](../agentic-aiops-platform/delivery-roadmap.md) — release sequence and themes
 - [Policy Specification](../agentic-aiops-platform/policy-specification.md) — full policy model
 - [Authorization Matrix](../agentic-aiops-platform/authorization-matrix.md) — role-to-action mapping
-- [Spec Index](../specs/README.md) — implementation specs (SPEC-001 through SPEC-012)
+- [Spec Index](../specs/README.md) — implementation specs (SPEC-001 through SPEC-013)
 - [Dev K8s Overlay](../../shared/platform-ops/gitops/dev-k8s/README.md) — deployer's reference

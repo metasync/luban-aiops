@@ -64,3 +64,16 @@ rules:
       actions_any: ["tools:list"]
     decision:
       outcome: allow
+
+  # audit:read exposes cross-user activity and is therefore restricted to the
+  # governance roles per the authorization matrix (auditor: "view audit trails").
+  - id: allow-auditors-audit-read
+    domain: action_authz
+    description: Auditors and platform admins may query the durable audit trail.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["auditor", "platform-admin"]
+      actions_any: ["audit:read"]
+    decision:
+      outcome: allow

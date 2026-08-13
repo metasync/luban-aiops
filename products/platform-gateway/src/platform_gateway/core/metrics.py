@@ -58,6 +58,12 @@ DELEGATION_CACHE = Counter(
     ["result"],
 )
 
+AUDIT_EMITS = Counter(
+    "audit_emits_total",
+    "Audit event emission attempts to the audit service (SPEC-013).",
+    ["result"],
+)
+
 
 def _handler_label(request: Request) -> str:
     # Templated route path (bounded cardinality), never the raw URL.
@@ -103,3 +109,8 @@ def record_delegation_exchange(result: str) -> None:
 
 def record_delegation_cache(result: str) -> None:
     DELEGATION_CACHE.labels(result=result).inc()
+
+
+def record_audit_emit(result: str) -> None:
+    """Record an audit emission outcome (``ok`` or ``error``)."""
+    AUDIT_EMITS.labels(result=result).inc()

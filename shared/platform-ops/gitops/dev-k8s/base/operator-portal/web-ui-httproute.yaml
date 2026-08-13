@@ -1,0 +1,26 @@
+# Operator portal ingress via the shared Envoy Gateway (namespace `gateway`).
+# The `luban-gateway` Gateway exposes wildcard HTTPS listeners for
+# *.luban.k8s.orb.local and *.luban.metasync.cc with allowedRoutes from all
+# namespaces, so this route only needs hostnames and the backend. The web-ui
+# nginx proxies /api/ to platform-gateway, so no other service needs a route.
+#
+# timeouts.request: 0s disables Envoy's default 15s route timeout: /api/v1/chat/
+# stream is an SSE endpoint whose responses routinely exceed 15s (agent runs +
+# LLM latency), and the default timeout resets the stream mid-flight.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web-ui
+spec:
+  parentRefs:
+    - name: luban-gateway
+      namespace: gateway
+  hostnames:
+    - aiops.luban.k8s.orb.local
+    - aiops.luban.metasync.cc
+  rules:
+    - timeouts:
+        request: 0s
+      backendRefs:
+        - name: web-ui
+          port: 8080

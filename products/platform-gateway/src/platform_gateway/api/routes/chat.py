@@ -7,6 +7,7 @@ from platform_gateway.core.config import PlatformGatewaySettings, get_settings
 from platform_gateway.core.observability import log_event
 from platform_gateway.core.request_context import resolve_request_id
 from platform_gateway.schemas.api import ChatRequest
+from platform_gateway.services.audit_emitter import build_audit_event, emit_audit_event
 from platform_gateway.services.delegation_client import obtain_delegated_token
 from platform_gateway.services.gateway_service import (
     chat,
@@ -63,6 +64,19 @@ async def chat_route(
         authenticated=identity.subject != "dev",  # type: ignore[union-attr]
         roles=identity.roles,  # type: ignore[union-attr]
     )
+    emit_audit_event(
+        settings,
+        build_audit_event(
+            "chat_completed",
+            request_id,
+            "success",
+            subject=identity.subject,  # type: ignore[union-attr]
+            username=user_id,
+            actor=identity.actor,  # type: ignore[union-attr]
+            roles=identity.roles,  # type: ignore[union-attr]
+            session_id=response.get("session_id"),
+        ),
+    )
     return response
 
 
@@ -91,6 +105,19 @@ async def chat_stream_route(
         user_id=user_id,
         authenticated=identity.subject != "dev",  # type: ignore[union-attr]
         roles=identity.roles,  # type: ignore[union-attr]
+    )
+    emit_audit_event(
+        settings,
+        build_audit_event(
+            "chat_started",
+            request_id,
+            "success",
+            subject=identity.subject,  # type: ignore[union-attr]
+            username=user_id,
+            actor=identity.actor,  # type: ignore[union-attr]
+            roles=identity.roles,  # type: ignore[union-attr]
+            session_id=session_id,
+        ),
     )
     return chat_stream(
         settings=settings,

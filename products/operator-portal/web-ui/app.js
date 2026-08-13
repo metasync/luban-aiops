@@ -1,4 +1,10 @@
 const gatewayInput = document.querySelector("#gateway-url");
+
+// Platform version shown in the sidebar footer; bump in step with the
+// CHANGELOG milestones. A gateway-served /api/v1/version endpoint is the
+// intended long-term source of truth.
+const PLATFORM_VERSION = "v0.1.0";
+document.querySelector("#version-output").textContent = PLATFORM_VERSION;
 const userInput = document.querySelector("#user-id");
 const promptInput = document.querySelector("#prompt-input");
 const sessionIdOutput = document.querySelector("#session-id");
@@ -17,6 +23,90 @@ const REFRESH_MARGIN_SECONDS = 60;
 // after the agent reply it grounds, so provenance follows its answer.
 let currentTurn = null;
 const chatMain = document.querySelector(".chat-main");
+
+// Durable audit trail view (SPEC-013 R-5): role-gated function view that
+// queries the gateway's audit proxy. Client-side gating is a convenience
+// only — the gateway re-enforces ``audit:read`` on every request.
+const auditOutput = document.querySelector("#audit-output");
+const auditMoreButton = document.querySelector("#audit-more-button");
+const auditStatus = document.querySelector("#audit-status");
+const AUDIT_ROLES = new Set(["auditor", "platform-admin"]);
+let auditCursor = null;
+let auditTableBody = null;
+let auditLoadedCount = 0;
+// Guards against double-clicked Refresh / Load more issuing the same cursor
+// twice and appending duplicate rows.
+let auditLoadInFlight = false;
+
+// --- View navigation (sidebar → main area) ---
+// Views are hidden, never destroyed, so chat history, session state, and
+// loaded audit rows survive navigation.
+const VIEWS = {
+  chat: { nav: document.querySelector("#nav-chat"), section: document.querySelector("#chat-view") },
+  settings: { nav: document.querySelector("#nav-settings"), section: document.querySelector("#settings-view") },
+  audit: { nav: document.querySelector("#nav-audit"), section: document.querySelector("#audit-view") }
+};
+let activeViewId = "chat";
+
+// Visible pulse on the Chat nav item while a stream is running, so switching
+// to another function never hides that the agent is still working.
+const chatStreamDot = document.querySelector("#chat-stream-dot");
+
+function showView(viewId) {
+  if (!VIEWS[viewId] || VIEWS[viewId].nav.hidden) return;
+  activeViewId = viewId;
+  for (const [id, view] of Object.entries(VIEWS)) {
+    const isActive = id === viewId;
+    view.section.hidden = !isActive;
+    view.nav.classList.toggle("active", isActive);
+    if (isActive) {
+      view.nav.setAttribute("aria-current", "page");
+    } else {
+      view.nav.removeAttribute("aria-current");
+    }
+  }
+  // Load the trail lazily on every activation of the audit view.
+  if (viewId === "audit") {
+    loadAuditEvents(false).catch((error) => {
+      renderError(auditOutput, error);
+    });
+  }
+}
+
+for (const [viewId, view] of Object.entries(VIEWS)) {
+  view.nav.addEventListener("click", () => {
+    showView(viewId);
+    closeSidebarDrawer();
+  });
+}
+
+// --- Mobile drawer (≤800px): the hamburger opens the sidebar as an
+// off-canvas drawer; backdrop tap, Escape, or picking a view closes it.
+// Above 800px the drawer classes/styles simply have no effect. ---
+const sidebar = document.querySelector("#sidebar");
+const menuButton = document.querySelector("#menu-button");
+const sidebarBackdrop = document.querySelector("#sidebar-backdrop");
+
+function setSidebarDrawerOpen(open) {
+  sidebar.classList.toggle("open", open);
+  sidebarBackdrop.hidden = !open;
+  menuButton.setAttribute("aria-expanded", String(open));
+}
+
+function closeSidebarDrawer() {
+  setSidebarDrawerOpen(false);
+}
+
+menuButton.addEventListener("click", () => {
+  setSidebarDrawerOpen(!sidebar.classList.contains("open"));
+});
+sidebarBackdrop.addEventListener("click", closeSidebarDrawer);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeSidebarDrawer();
+    setUserMenuOpen(false);
+  }
+});
 
 // --- Markdown renderer ---
 function renderMarkdown(text) {
@@ -135,18 +225,68 @@ function currentAuthenticatedUser() {
   return loadAuthSession()?.identity?.username || null;
 }
 
+function currentRoles() {
+  return loadAuthSession()?.identity?.roles || [];
+}
+
+function canViewAudit() {
+  return currentRoles().some((role) => AUDIT_ROLES.has(role));
+}
+
+// Initials for the user-card avatar: up to two letters from the username,
+// split on non-alphanumerics ("luban-admin" -> "LA").
+function userInitials(username) {
+  const parts = username.split(/[^a-zA-Z0-9]+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2);
+  return parts[0][0] + parts[1][0];
+}
+
+// --- User popup menu (sidebar footer) ---
+// Home for user-related info and actions: granted roles today; future
+// items (session expiry, token state, profile) belong here, not elsewhere.
+const userMenu = document.querySelector("#user-menu");
+const userMenuButton = document.querySelector("#user-menu-button");
+
+function setUserMenuOpen(open) {
+  userMenu.hidden = !open;
+  userMenuButton.setAttribute("aria-expanded", String(open));
+}
+
+userMenuButton.addEventListener("click", () => {
+  setUserMenuOpen(userMenu.hidden);
+});
+document.addEventListener("click", (event) => {
+  if (!userMenu.hidden && !event.target.closest(".user-card")) {
+    setUserMenuOpen(false);
+  }
+});
+
 function syncResolvedUser() {
   const authenticatedUser = currentAuthenticatedUser();
+  const roles = currentRoles();
+  const auditAllowed = canViewAudit();
+  VIEWS.audit.nav.hidden = !auditAllowed;
+  if (!auditAllowed && activeViewId === "audit") {
+    showView("chat");
+  }
+  const roleBadge = document.querySelector("#identity-role");
+  const avatar = document.querySelector("#user-avatar");
   if (authenticatedUser) {
     userInput.value = authenticatedUser;
     userInput.setAttribute("disabled", "disabled");
     identityBadge.textContent = authenticatedUser;
+    avatar.textContent = userInitials(authenticatedUser);
+    roleBadge.textContent = roles.join(", ") || "no role";
     document.querySelector("#login-button").hidden = true;
     document.querySelector("#logout-button").hidden = false;
     return;
   }
   userInput.removeAttribute("disabled");
   identityBadge.textContent = "Not signed in";
+  avatar.textContent = "?";
+  roleBadge.textContent = "no role";
+  setUserMenuOpen(false);
   document.querySelector("#login-button").hidden = false;
   document.querySelector("#logout-button").hidden = true;
 }
@@ -258,6 +398,111 @@ function renderError(target, error) {
   p.textContent = msg;
   target.innerHTML = "";
   target.appendChild(p);
+}
+
+// --- Durable audit trail view (SPEC-013 R-5) ---
+function buildAuditQueryParams(cursor) {
+  const params = new URLSearchParams({ limit: "50" });
+  const username = document.querySelector("#audit-filter-username").value.trim();
+  const eventType = document.querySelector("#audit-filter-type").value;
+  const service = document.querySelector("#audit-filter-service").value;
+  const since = document.querySelector("#audit-filter-since").value;
+  const until = document.querySelector("#audit-filter-until").value;
+  if (username) params.set("username", username);
+  if (eventType) params.set("event_type", eventType);
+  if (service) params.set("service", service);
+  if (since) params.set("since", new Date(since).toISOString());
+  if (until) params.set("until", new Date(until).toISOString());
+  if (cursor) params.set("cursor", cursor);
+  return params;
+}
+
+async function loadAuditEvents(append) {
+  if (!canViewAudit() || auditLoadInFlight) return;
+  auditLoadInFlight = true;
+  auditMoreButton.disabled = true;
+  try {
+    const cursor = append ? auditCursor : null;
+    const query = buildAuditQueryParams(cursor).toString();
+    const payload = await requestJson(`/api/v1/audit/events?${query}`, { method: "GET" });
+    auditCursor = payload.next_cursor || null;
+    if (!append) auditLoadedCount = 0;
+    renderAuditEvents(payload.events || [], append);
+    auditLoadedCount += (payload.events || []).length;
+    auditMoreButton.hidden = !auditCursor;
+    auditStatus.textContent = auditCursor
+      ? `${auditLoadedCount} events shown \u00b7 more available`
+      : `${auditLoadedCount} event${auditLoadedCount === 1 ? "" : "s"} shown \u00b7 end of trail`;
+  } finally {
+    auditLoadInFlight = false;
+    auditMoreButton.disabled = false;
+  }
+}
+
+function renderAuditEvents(events, append) {
+  if (!append) {
+    auditOutput.innerHTML = "";
+    auditTableBody = null;
+  }
+  if (!auditTableBody) {
+    if (events.length === 0) {
+      auditOutput.innerHTML = '<p class="chat-placeholder">No audit events match these filters.</p>';
+      return;
+    }
+    const table = document.createElement("table");
+    table.className = "audit-table";
+    const headers = ["occurred at", "type", "service", "outcome", "actor", "request"];
+    table.innerHTML = `<thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead>`;
+    auditTableBody = document.createElement("tbody");
+    table.appendChild(auditTableBody);
+    auditOutput.appendChild(table);
+  }
+  for (const event of events) {
+    auditTableBody.appendChild(auditEventRows(event));
+  }
+}
+
+// One event renders as a summary row plus a hidden detail row carrying the
+// verbatim event envelope; clicking the summary toggles the envelope.
+function auditEventRows(event) {
+  const fragment = document.createDocumentFragment();
+  const row = document.createElement("tr");
+  row.className = "audit-row";
+  const cells = [
+    formatAuditTimestamp(event.occurred_at),
+    event.event_type,
+    event.service,
+    event.outcome,
+    event.username || event.actor || event.subject || "\u2014",
+    event.request_id
+  ];
+  for (const [index, value] of cells.entries()) {
+    const td = document.createElement("td");
+    td.textContent = value;
+    if (index === 3 && (event.outcome === "deny" || event.outcome === "error")) {
+      td.className = "audit-outcome-negative";
+    }
+    row.appendChild(td);
+  }
+  const detailRow = document.createElement("tr");
+  detailRow.className = "audit-detail-row";
+  detailRow.hidden = true;
+  const detailCell = document.createElement("td");
+  detailCell.colSpan = 6;
+  const pre = document.createElement("pre");
+  pre.textContent = JSON.stringify(event, null, 2);
+  detailCell.appendChild(pre);
+  detailRow.appendChild(detailCell);
+  row.addEventListener("click", () => {
+    detailRow.hidden = !detailRow.hidden;
+  });
+  fragment.append(row, detailRow);
+  return fragment;
+}
+
+function formatAuditTimestamp(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 // Stream events carry their kind in `type` per the gateway/agent contract.
@@ -596,7 +841,7 @@ function renderToolResult(payload) {
   }
 }
 
-// Audit card (option 1): aggregates what the stream delivered for ONE turn
+// Tool execution card: aggregates what the stream delivered for ONE turn
 // only — self-service inspection of one's own session. It is a rendition of
 // streamed evidence, not the authoritative backend audit trail. The card is
 // rendered inside its turn group, inline after the reply it grounds.
@@ -604,9 +849,9 @@ function renderAuditCard(requestId) {
   if (!currentTurn || !currentTurn.group || currentTurn.entries.length === 0) return;
   const turn = currentTurn;
   const card = document.createElement("details");
-  card.className = "evidence-card audit-card";
+  card.className = "evidence-card tool-execution-card";
   const summary = document.createElement("summary");
-  summary.textContent = `Audit trail · this turn (${turn.entries.length} call${turn.entries.length === 1 ? "" : "s"})`;
+  summary.textContent = `Tool execution · this turn (${turn.entries.length} call${turn.entries.length === 1 ? "" : "s"})`;
   card.appendChild(summary);
 
   const ids = document.createElement("div");
@@ -663,6 +908,20 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// "Thinking…" placeholder shown while the agent is working before the first
+// content event arrives (first-token latency + tool runs can exceed 15s).
+function thinkingIndicator() {
+  const div = document.createElement("div");
+  div.className = "thinking";
+  div.innerHTML = '<span class="thinking-dots"><span></span><span></span><span></span></span>'
+    + '<span class="thinking-label">Thinking…</span>';
+  return div;
+}
+
+function removeThinking(thinking) {
+  if (thinking && thinking.parentNode) thinking.remove();
+}
+
 async function streamPrompt() {
   const requestId = buildRequestId();
   requestIdOutput.textContent = requestId;
@@ -687,6 +946,10 @@ async function streamPrompt() {
   const agentDiv = document.createElement("div");
   agentDiv.className = "chat-msg agent-msg md-content";
   responseOutput.appendChild(agentDiv);
+
+  // Animated placeholder until the first content event arrives.
+  const thinking = thinkingIndicator();
+  responseOutput.appendChild(thinking);
 
   // Turn-scoped evidence/audit state: the group is created lazily on the
   // first tool frame and inserted directly after this reply.
@@ -713,6 +976,8 @@ async function streamPrompt() {
 
   let streamCompleted = false;
   let accumulatedText = "";
+  // Sidebar pulse so other views stay aware the agent is still working.
+  chatStreamDot.hidden = false;
 
   try {
     const response = await fetch(`${currentGateway()}/api/v1/chat/stream?${params.toString()}`, {
@@ -723,7 +988,7 @@ async function streamPrompt() {
     });
     if (!response.ok || !response.body) {
       if (response.status === 401) {
-        throw new Error("Not authenticated. Please click Login in the top bar to sign in first.");
+        throw new Error("Not authenticated. Please click Login in the sidebar to sign in first.");
       }
       throw new Error(`Stream request failed (${response.status}).`);
     }
@@ -757,6 +1022,7 @@ async function streamPrompt() {
         }
 
         if (shouldAppendStreamDelta(payload)) {
+          removeThinking(thinking);
           accumulatedText += payload.delta;
           agentDiv.innerHTML = renderMarkdown(accumulatedText);
           scrollToBottom();
@@ -770,16 +1036,32 @@ async function streamPrompt() {
     if (!accumulatedText.trim()) {
       agentDiv.innerHTML = '<p style="color: var(--text-muted)"><em>No response received.</em></p>';
     }
+    removeThinking(thinking);
     renderAuditCard(requestId);
     currentTurn = null;
   } catch (error) {
+    removeThinking(thinking);
     agentDiv.innerHTML = `<p style="color: var(--error)">${escapeHtml(error.message)}</p>`;
     renderAuditCard(requestId);
     currentTurn = null;
+  } finally {
+    chatStreamDot.hidden = true;
   }
 }
 
 // --- Event listeners ---
+document.querySelector("#audit-refresh-button").addEventListener("click", () => {
+  loadAuditEvents(false).catch((error) => {
+    renderError(auditOutput, error);
+  });
+});
+
+auditMoreButton.addEventListener("click", () => {
+  loadAuditEvents(true).catch((error) => {
+    renderError(auditOutput, error);
+  });
+});
+
 document.querySelector("#login-button").addEventListener("click", () => {
   startLogin().catch((error) => {
     renderError(identityOutput, error);

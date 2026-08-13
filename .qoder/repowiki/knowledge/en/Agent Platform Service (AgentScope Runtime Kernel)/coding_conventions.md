@@ -1,0 +1,6 @@
+- HTTP routes accept identity via request headers (`X-User-ID`, `Authorization: Bearer`) and pass them opaquely to the kernel without inspecting or signing the delegated token.
+- Per-user credential isolation is enforced by caching AgentScope `Toolkit` instances keyed by the delegated bearer token so closures never share credentials across sessions.
+- Tool definitions are cached per token separately from the Toolkit itself, enabling per-request toolkit rebuilds that bind a fresh `asyncio.Queue` for evidence-panel tracing without re-discovering tools.
+- Gateway tool invocations wrap errors gracefully: missing tokens return a structured `{status: 'error', code: 'NO_CREDENTIAL'}` dict instead of raising, and discovery failures degrade to an empty toolkit.
+- Stream events emitted by the kernel are normalized through a central `_normalize_stream_event` helper that whitelists known event types and coerces fields to contract-safe shapes before SSE serialization.
+- Optional AgentScope imports are deferred inside functions (e.g., `from agentscope.tool import Toolkit`, `FunctionTool`) to keep the service runnable even when the provider runtime is not configured.

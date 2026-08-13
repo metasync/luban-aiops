@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  serviceName: postgres-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            # Dev-cluster-only credentials; the audit trail database is not
+            # exposed outside the namespace. Rotate via the manifest for
+            # anything beyond dev.
+            - name: POSTGRES_DB
+              value: audit
+            - name: POSTGRES_USER
+              value: audit
+            - name: POSTGRES_PASSWORD
+              value: audit-dev-local
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - audit
+                - -d
+                - audit
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+              subPath: pgdata
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

@@ -21,6 +21,7 @@ activate them. A feature is **active** when all required variables are set to no
 | **OpenTelemetry push** | `OTEL_ENABLED=true`, `OTEL_EXPORTER_OTLP_ENDPOINT` | all services | disabled |
 | **LLM runtime** | `AGENTSCOPE_PROVIDER`, `AGENTSCOPE_MODEL_NAME`, `AGENTSCOPE_API_KEY` | agent-service | via runtime profile |
 | **Workload identity** | `PLATFORM_GATEWAY_WORKLOAD_TOKEN_PATH`, `IDENTITY_WORKLOAD_ISSUER_URL`, `IDENTITY_WORKLOAD_CLIENTS` | platform-gateway, identity-service | disabled (dev) |
+| **Durable audit trail** | `*_AUDIT_SERVICE_URL`, `*_AUDIT_CLIENT_SECRET` ↔ `AUDIT_INGEST_CLIENTS` | audit-service, tool-gateway, platform-gateway, identity-service | **must be provisioned** (`sync-audit-secrets.sh`) |
 
 ## Cross-Service Dependency Chains
 
@@ -79,6 +80,31 @@ platform-gateway          agent-service               tool-gateway
 └──────────────┘          └──────────────┘            └──────────────┘
 ```
 
+### Audit Ingestion Chain
+
+Fire-and-forget audit delivery (SPEC-013). Unreachable audit-service degrades
+to log-only auditing; user-facing requests are never blocked.
+
+```
+tool-gateway / platform-gateway / identity-service          audit-service
+┌─────────────────────────────────────────┐                 ┌──────────────────────┐
+│ *_AUDIT_SERVICE_URL                     │── POST events ──►│ listens on :8000     │
+│ = http://audit-service:8000             │                 │ AUDIT_INGEST_CLIENTS │
+│ *_AUDIT_CLIENT_ID                       │── must match ──►│ entry:               │
+│ *_AUDIT_CLIENT_SECRET                   │── must match ──►│ <client_id>=<secret> │
+└─────────────────────────────────────────┘                 └──────────────────────┘
+```
+
+**Secret contract:**
+- Each emitter's `*_AUDIT_CLIENT_SECRET` (in its `*-runtime-secrets`)
+- Must match the secret registered for its client id in `AUDIT_INGEST_CLIENTS`
+  (in `audit-service-runtime-secrets`), format `client_id=client_secret,...`
+
+**Provisioning:** `make deploy` calls `sync-audit-secrets.sh` which generates
+one random shared secret (or uses `AUDIT_INGEST_SECRET` if exported) and writes
+all four K8s secrets. `SKIP_AUDIT_SECRETS=true` opts out; unsetting an
+emitter's `*_AUDIT_SERVICE_URL` falls back to log-only auditing.
+
 ## Per-Service Environment Variables
 
 ### agent-service
@@ -126,6 +152,9 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runti
 | `IDENTITY_TOKEN_ISSUER` | Expected JWT issuer | `http://identity-service:8000` | derived |
 | `IDENTITY_JWKS_CACHE_SECONDS` | JWKS key cache TTL | `300` | code default |
 | `CHAT_RESPONSE_TIMEOUT_SECONDS` | Upstream chat timeout | `30` | code default |
+| `PLATFORM_GATEWAY_AUDIT_SERVICE_URL` | Audit-service ingest URL (unset = log-only) | `http://audit-service:8000` | runtime-config |
+| `PLATFORM_GATEWAY_AUDIT_CLIENT_ID` | Audit ingest client id | `platform-gateway` | runtime-config |
+| `PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET` | Audit ingest credential | *(none)* | **runtime-secrets** |
 
 ### tool-gateway
 
@@ -150,6 +179,9 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-c
 | `GATEWAY_ELASTIC_VERIFY_TLS` | Verify Elastic TLS certificates | `true` | code default |
 | `GATEWAY_ELASTIC_ALERTS_INDEX` | Elastic alerts index pattern | `.alerts-*` | code default |
 | `GATEWAY_WORKLOAD_TOKEN_PATH` | Projected SA token file (prod) | *(none)* | runtime-secrets |
+| `GATEWAY_AUDIT_SERVICE_URL` | Audit-service ingest URL (unset = log-only) | `http://audit-service:8000` | runtime-config |
+| `GATEWAY_AUDIT_CLIENT_ID` | Audit ingest client id | `tool-gateway` | runtime-config |
+| `GATEWAY_AUDIT_CLIENT_SECRET` | Audit ingest credential | *(none)* | **runtime-secrets** |
 | `IDENTITY_SERVICE_URL` | Identity broker URL | `http://identity-service:8000` | shared/runtime.env |
 
 ### identity-service
@@ -160,12 +192,14 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtim
 | Variable | Purpose | Default | Source |
 |---|---|---|---|
 | `KEYCLOAK_BASE_URL` | Keycloak server URL | `https://idp.apps.metasync.cc` | runtime-config |
-| `KEYCLOAK_REALM` | Keycloak realm name | `snd` | runtime-config |
-| `OIDC_CLIENT_ID` | OIDC browser client ID | `snd-luban-aiops-portal` | runtime-config |
+| `KEYCLOAK_REALM` | Keycloak realm name | `luban-aiops` | runtime-config |
+| `OIDC_CLIENT_ID` | OIDC browser client ID | `luban-aiops-portal` | runtime-config |
 | `OIDC_CLIENT_SECRET` | OIDC client secret (confidential clients) | *(none)* | **runtime-secrets** |
 | `OIDC_SCOPES` | Requested OIDC scopes | `openid groups` | runtime-config |
-| `OIDC_REDIRECT_URI` | Browser callback URI | `http://localhost:18080/callback` | runtime-config |
-| `OIDC_POST_LOGOUT_REDIRECT_URI` | Post-logout redirect | `http://localhost:18080/` | runtime-config |
+| `OIDC_REDIRECT_URI` | Primary browser callback URI | `https://aiops.luban.metasync.cc/callback` | runtime-config |
+| `OIDC_POST_LOGOUT_REDIRECT_URI` | Primary post-logout redirect | `https://aiops.luban.metasync.cc/` | runtime-config |
+| `OIDC_EXTRA_REDIRECT_URIS` | Comma-separated extra callback URIs | gateway `.orb.local` + `localhost:18080` | runtime-config |
+| `OIDC_EXTRA_POST_LOGOUT_REDIRECT_URIS` | Comma-separated extra post-logout redirects | gateway `.orb.local` + `localhost:18080` | runtime-config |
 | `IDENTITY_TOKEN_AUDIENCE` | JWT audience for portal tokens | `platform-gateway` | runtime-config |
 | `IDENTITY_TOKEN_TTL_SECONDS` | Portal JWT TTL | `3600` | code default |
 | `IDENTITY_DELEGATED_TOKEN_TTL_SECONDS` | Delegated token TTL | `300` | runtime-config |
@@ -175,6 +209,28 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtim
 | `IDENTITY_WORKLOAD_ISSUER_URL` | Cluster OIDC issuer (prod) | *(none, disabled)* | runtime-secrets |
 | `IDENTITY_WORKLOAD_AUDIENCE` | Projected token audience | `identity-broker` | code default |
 | `IDENTITY_WORKLOAD_CLIENTS` | SA subject→client mapping | *(none)* | runtime-secrets |
+| `IDENTITY_AUDIT_SERVICE_URL` | Audit-service ingest URL (unset = log-only) | `http://audit-service:8000` | runtime-config |
+| `IDENTITY_AUDIT_CLIENT_ID` | Audit ingest client id | `identity-broker` | runtime-config |
+| `IDENTITY_AUDIT_CLIENT_SECRET` | Audit ingest credential | *(none)* | **runtime-secrets** |
+
+### audit-service
+
+Source: `products/audit-service/src/audit_service/core/config.py`
+Config fragment: `shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env`
+
+| Variable | Purpose | Default | Source |
+|---|---|---|---|
+| `AUDIT_STORE_BACKEND` | Store backend: `memory` or `postgres` | `postgres` (dev-k8s) | runtime-config |
+| `AUDIT_DB_URL` | PostgreSQL connection URL (postgres backend) | in-cluster `postgres` service | runtime-config |
+| `AUDIT_INGEST_CLIENTS` | Registered ingest callers (`client_id=secret,...`) | *(none)* | **runtime-secrets** |
+| `AUDIT_WORKLOAD_ISSUER_URL` | Cluster OIDC issuer for workload tokens (prod) | *(none, disabled)* | runtime-secrets |
+| `AUDIT_WORKLOAD_AUDIENCE` | Projected token audience | `audit-service` | code default |
+| `AUDIT_WORKLOAD_CLIENTS` | SA subject→client mapping | *(none)* | runtime-secrets |
+| `AUDIT_RETENTION_DAYS` | Retention window for eviction | `30` | runtime-config |
+| `AUDIT_MAX_EVENTS` | Hard store-size cap | `100000` | runtime-config |
+| `AUDIT_EVICTION_INTERVAL_SECONDS` | Eviction task period | `3600` | runtime-config |
+| `AUDIT_EVICTION_BATCH_SIZE` | Batched delete size (postgres) | `1000` | code default |
+| `AUDIT_MAX_BATCH` | Max events per ingest request | `50` | code default |
 
 ### Shared (all pods)
 
@@ -201,6 +257,7 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 | Key | Purpose | How to Provision |
 |---|---|---|
 | `PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET` | Token exchange credential | `sync-delegation-secrets.sh` |
+| `PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET` | Audit ingest credential | `sync-audit-secrets.sh` |
 
 ### `identity-service-runtime-secrets`
 
@@ -208,6 +265,19 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 |---|---|---|
 | `OIDC_CLIENT_SECRET` | Keycloak confidential client secret | Manual or CI |
 | `IDENTITY_SERVICE_CLIENTS` | Service client registry | `sync-delegation-secrets.sh` |
+| `IDENTITY_AUDIT_CLIENT_SECRET` | Audit ingest credential | `sync-audit-secrets.sh` |
+
+### `tool-gateway-runtime-secrets`
+
+| Key | Purpose | How to Provision |
+|---|---|---|
+| `GATEWAY_AUDIT_CLIENT_SECRET` | Audit ingest credential | `sync-audit-secrets.sh` |
+
+### `audit-service-runtime-secrets`
+
+| Key | Purpose | How to Provision |
+|---|---|---|
+| `AUDIT_INGEST_CLIENTS` | Ingest client registry (`client_id=secret,...`) | `sync-audit-secrets.sh` |
 
 ## Runtime Profiles
 

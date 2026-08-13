@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/audit-event.schema.json",
+  "title": "Audit Event (v1)",
+  "description": "Canonical audit-event envelope (SPEC-013 R-1). Emitters (tool-gateway, platform-gateway, identity-broker) mint event_id and occurred_at and forward post-redaction events to the audit-service; the audit service stores and returns envelopes verbatim. http_request middleware events are observability data and deliberately excluded from this contract.",
+  "type": "object",
+  "required": [
+    "event_id",
+    "occurred_at",
+    "event_type",
+    "service",
+    "request_id",
+    "outcome"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "description": "UUID minted by the emitter; correlates the stored record 1:1 with the emitter's structured log line."
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Emitter-side UTC timestamp (RFC 3339) of when the audited action happened."
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "tool_invoked",
+        "policy_decision",
+        "token_exchange",
+        "session_created",
+        "chat_started",
+        "chat_completed"
+      ],
+      "description": "Closed vocabulary of audited event types."
+    },
+    "service": {
+      "type": "string",
+      "description": "Emitting service name, e.g. tool-gateway, platform-gateway, identity-service."
+    },
+    "request_id": {
+      "type": "string",
+      "description": "Correlation identifier of the request that produced the event."
+    },
+    "subject": {
+      "type": "string",
+      "description": "Token subject (sub) of the user the event is attributed to, when applicable."
+    },
+    "username": {
+      "type": "string",
+      "description": "Human-readable username, when applicable."
+    },
+    "actor": {
+      "type": "string",
+      "description": "Delegation actor (act.sub) — the service that acted on the user's behalf, when applicable."
+    },
+    "roles": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Roles of the attributed identity at event time, when applicable."
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Agent session identifier, when the event belongs to a session."
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["allow", "deny", "success", "error"],
+      "description": "Result of the audited action."
+    },
+    "details": {
+      "type": "object",
+      "description": "Per-event-type payload. tool_invoked: tool_name, status, duration_ms, redacted_spans. policy_decision: action, decision, reason. token_exchange: audience, reason (rejections). session_created / chat_started / chat_completed: session-scoped metadata.",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

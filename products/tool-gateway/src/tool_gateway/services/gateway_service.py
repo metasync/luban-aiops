@@ -14,6 +14,7 @@ from tool_gateway.core.metrics import (
 from tool_gateway.core.observability import log_event
 from tool_gateway.metadata import SERVICE_NAME, SERVICE_VERSION
 from tool_gateway.schemas.api import IdentityContext
+from tool_gateway.services.audit_emitter import build_audit_event, emit_audit_event
 from tool_gateway.services.policy_engine import (
     PolicyLoadError,
     evaluate,
@@ -167,6 +168,19 @@ async def invoke_tool(
 
     # Policy enforcement.
     if identity is None:
+        emit_audit_event(
+            settings,
+            build_audit_event(
+                "policy_decision",
+                request_id,
+                "deny",
+                details={
+                    "action": "tools:invoke",
+                    "decision": "deny",
+                    "reason": "no identity context",
+                },
+            ),
+        )
         result = make_denied_result(tool_name, "no identity context")
         return JSONResponse(content=result.to_dict(), status_code=403)
 
@@ -183,6 +197,24 @@ async def invoke_tool(
                 "roles": identity.roles,
                 "reason": decision.reason,
             },
+        )
+        emit_audit_event(
+            settings,
+            build_audit_event(
+                "policy_decision",
+                request_id,
+                "deny",
+                subject=identity.subject,
+                username=identity.username,
+                actor=identity.actor,
+                roles=identity.roles,
+                details={
+                    "action": "tools:invoke",
+                    "decision": "deny",
+                    "reason": decision.reason,
+                    "matched_rule_ids": decision.matched_rule_ids,
+                },
+            ),
         )
         result = make_denied_result(tool_name, decision.reason)
         return JSONResponse(content=result.to_dict(), status_code=403)
@@ -236,6 +268,26 @@ async def invoke_tool(
         sub=identity.subject,
         act=identity.actor,
         redacted_spans=redacted_spans,
+    )
+
+    # Durable audit trail (SPEC-013 R-3): mirror the audit log, fire-and-forget.
+    emit_audit_event(
+        settings,
+        build_audit_event(
+            "tool_invoked",
+            request_id,
+            "success" if result.status == "success" else "error",
+            subject=identity.subject,
+            username=identity.username,
+            actor=identity.actor,
+            roles=identity.roles,
+            details={
+                "tool_name": tool_name,
+                "status": result.status,
+                "duration_ms": result.evidence.get("duration_ms", 0),
+                "redacted_spans": redacted_spans,
+            },
+        ),
     )
 
     status_code = 200 if result.status == "success" else 400

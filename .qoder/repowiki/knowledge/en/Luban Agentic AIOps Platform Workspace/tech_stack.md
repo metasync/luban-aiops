@@ -1,0 +1,1 @@
+Python services managed with `uv`; container images built on a shared `base-uv` image; Kubernetes deployment via Kustomize overlays; JSON Schema + YAML for cross-service API, event, and policy contracts.

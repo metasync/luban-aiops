@@ -1,0 +1,1 @@
+FastAPI-based agent service that wraps an AgentScope runtime kernel to stream chat responses and invoke platform tools via the tool-gateway, with per-session caching and per-request evidence-panel tracing.

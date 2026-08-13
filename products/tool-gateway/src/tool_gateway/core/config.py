@@ -36,6 +36,9 @@ class GatewaySettings:
     elastic_password: str = ""
     elastic_verify_tls: bool = True
     elastic_alerts_index: str = ".alerts-*"
+    audit_service_url: str = ""
+    audit_client_id: str = "tool-gateway"
+    audit_client_secret: str = ""
 
     @classmethod
     def from_env(cls) -> "GatewaySettings":
@@ -84,6 +87,9 @@ class GatewaySettings:
             elastic_alerts_index=os.getenv(
                 "GATEWAY_ELASTIC_ALERTS_INDEX", ".alerts-*"
             ),
+            audit_service_url=os.getenv("GATEWAY_AUDIT_SERVICE_URL", ""),
+            audit_client_id=os.getenv("GATEWAY_AUDIT_CLIENT_ID", "tool-gateway"),
+            audit_client_secret=os.getenv("GATEWAY_AUDIT_CLIENT_SECRET", ""),
         )
 
 

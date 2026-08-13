@@ -236,7 +236,8 @@ class ContractAlignmentTests(unittest.TestCase):
         # Exempt routes (health, runtime, auth, identity) carry no action; this
         # set is the complete protected surface.
         self.assertEqual(
-            PROTECTED_ACTIONS, frozenset({"chat", "session:create", "session:read"})
+            PROTECTED_ACTIONS,
+            frozenset({"chat", "session:create", "session:read", "audit:read"}),
         )
 
 

@@ -12,6 +12,12 @@ combined api-gateway by SPEC-010, per ADR-0005).
   token for a short-lived delegated token (`aud = tool-gateway`,
   `act.sub = platform-gateway`) via identity-broker before forwarding.
 - Relays auth/identity/runtime endpoints to identity-broker and agent-platform.
+- Proxies the durable audit trail query (`/api/v1/audit/*`) to `audit-service`,
+  gated by the `audit:read` policy action (granted to `auditor` and
+  `platform-admin` only, SPEC-013).
+- Forwards policy decision, session, and chat lifecycle audit events to
+  `audit-service` fire-and-forget when `PLATFORM_GATEWAY_AUDIT_SERVICE_URL`
+  is set (log-only otherwise; SPEC-013).
 - Exposes `/health/live`, `/health/ready`, and `/metrics`.
 
 Tool registry, connectors, `tools:list` / `tools:invoke`, and output redaction
@@ -43,3 +49,6 @@ Environment-driven; see `src/platform_gateway/core/config.py`.
 | `PLATFORM_GATEWAY_POLICY_PATH` | packaged default | action policy bundle path |
 | `PLATFORM_GATEWAY_REQUIRE_AUTH` | `true` | dev fallback issues a synthetic identity when off |
 | `PLATFORM_GATEWAY_DEV_USER` / `PLATFORM_GATEWAY_DEV_SIGNING_KEY_PATH` | see code | local-dev login shortcut |
+| `PLATFORM_GATEWAY_AUDIT_SERVICE_URL` | (empty) | audit-service ingest URL; empty keeps log-only auditing |
+| `PLATFORM_GATEWAY_AUDIT_CLIENT_ID` | `platform-gateway` | audit ingest client id |
+| `PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET` | (empty) | audit ingest credential (matches `AUDIT_INGEST_CLIENTS`) |

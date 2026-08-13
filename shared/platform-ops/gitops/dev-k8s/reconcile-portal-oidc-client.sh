@@ -83,6 +83,10 @@ KEYCLOAK_REALM=$(read_env_value KEYCLOAK_REALM "$RUNTIME_CONFIG_FILE")
 OIDC_CLIENT_ID=$(read_env_value OIDC_CLIENT_ID "$RUNTIME_CONFIG_FILE")
 OIDC_REDIRECT_URI=$(read_env_value OIDC_REDIRECT_URI "$RUNTIME_CONFIG_FILE")
 OIDC_POST_LOGOUT_REDIRECT_URI=$(read_env_value OIDC_POST_LOGOUT_REDIRECT_URI "$RUNTIME_CONFIG_FILE")
+# Optional comma-separated extras kept alongside the primary URIs (e.g. the
+# localhost port-forward callback for direct service debugging).
+OIDC_EXTRA_REDIRECT_URIS=$(read_env_value OIDC_EXTRA_REDIRECT_URIS "$RUNTIME_CONFIG_FILE")
+OIDC_EXTRA_POST_LOGOUT_REDIRECT_URIS=$(read_env_value OIDC_EXTRA_POST_LOGOUT_REDIRECT_URIS "$RUNTIME_CONFIG_FILE")
 
 [ -n "${KEYCLOAK_REALM:-}" ] || {
   echo "Error: KEYCLOAK_REALM is required in $RUNTIME_CONFIG_FILE" >&2
@@ -104,6 +108,18 @@ OIDC_POST_LOGOUT_REDIRECT_URI=$(read_env_value OIDC_POST_LOGOUT_REDIRECT_URI "$R
 WEB_ORIGIN=${OIDC_REDIRECT_URI%/*}
 CLIENT_NAME=${CLIENT_NAME:-"Luban AiOps Portal"}
 CLIENT_DESCRIPTION=${CLIENT_DESCRIPTION:-"Luban AiOps browser portal (OIDC Authorization Code + PKCE)"}
+
+origin_of() {
+  # https://host/path -> https://host
+  printf '%s' "$1" | awk -F/ '{print $1 "//" $3}'
+}
+
+EXTRA_WEB_ORIGINS=""
+if [ -n "$OIDC_EXTRA_REDIRECT_URIS" ]; then
+  EXTRA_WEB_ORIGINS=$(printf '%s' "$OIDC_EXTRA_REDIRECT_URIS" | tr ',' '\n' | while read -r uri; do
+    [ -n "$uri" ] && origin_of "$uri"
+  done | paste -sd, -)
+fi
 
 if ! "$KUBECTL_BIN" get namespace "$KEYCLOAK_NAMESPACE" >/dev/null 2>&1; then
   warn_or_fail "namespace '$KEYCLOAK_NAMESPACE' does not exist"
@@ -221,9 +237,13 @@ if [ -z "$CLIENT_INTERNAL_ID" ]; then
     --arg client_name "$CLIENT_NAME" \
     --arg client_description "$CLIENT_DESCRIPTION" \
     --arg redirect_uri "$OIDC_REDIRECT_URI" \
+    --arg extra_redirect_uris "$OIDC_EXTRA_REDIRECT_URIS" \
     --arg web_origin "$WEB_ORIGIN" \
+    --arg extra_web_origins "$EXTRA_WEB_ORIGINS" \
     --arg post_logout_redirect_uri "$OIDC_POST_LOGOUT_REDIRECT_URI" \
+    --arg extra_post_logout_redirect_uris "$OIDC_EXTRA_POST_LOGOUT_REDIRECT_URIS" \
     '
+      def split_csv($s): ($s | split(",") | map(select(length > 0)));
       {
         clientId: $client_id,
         name: $client_name,
@@ -234,16 +254,19 @@ if [ -z "$CLIENT_INTERNAL_ID" ]; then
         bearerOnly: false,
         standardFlowEnabled: true,
         implicitFlowEnabled: false,
-        directAccessGrantsEnabled: false,
+        directAccessGrantsEnabled: true,
         serviceAccountsEnabled: false,
         rootUrl: $web_origin,
         baseUrl: $web_origin,
-        redirectUris: [$redirect_uri],
-        webOrigins: [$web_origin],
+        redirectUris: ([$redirect_uri] + split_csv($extra_redirect_uris)),
+        webOrigins: ([$web_origin] + split_csv($extra_web_origins)),
         defaultClientScopes: ["groups"],
         attributes: {
           "pkce.code.challenge.method": "S256",
-          "post.logout.redirect.uris": $post_logout_redirect_uri
+          "post.logout.redirect.uris": (
+            [$post_logout_redirect_uri] + split_csv($extra_post_logout_redirect_uris)
+            | unique | join("##")
+          )
         }
       }
     ' >"$TMP_DIR/create-client.json"
@@ -263,9 +286,13 @@ jq \
   --arg client_name "$CLIENT_NAME" \
   --arg client_description "$CLIENT_DESCRIPTION" \
   --arg redirect_uri "$OIDC_REDIRECT_URI" \
+  --arg extra_redirect_uris "$OIDC_EXTRA_REDIRECT_URIS" \
   --arg web_origin "$WEB_ORIGIN" \
+  --arg extra_web_origins "$EXTRA_WEB_ORIGINS" \
   --arg post_logout_redirect_uri "$OIDC_POST_LOGOUT_REDIRECT_URI" \
+  --arg extra_post_logout_redirect_uris "$OIDC_EXTRA_POST_LOGOUT_REDIRECT_URIS" \
   '
+    def split_csv($s): ($s | split(",") | map(select(length > 0)));
     .name = $client_name
     | .description = $client_description
     | .enabled = true
@@ -274,12 +301,12 @@ jq \
     | .bearerOnly = false
     | .standardFlowEnabled = true
     | .implicitFlowEnabled = false
-    | .directAccessGrantsEnabled = false
+    | .directAccessGrantsEnabled = true
     | .serviceAccountsEnabled = false
     | .rootUrl = $web_origin
     | .baseUrl = $web_origin
-    | .redirectUris = (((.redirectUris // []) + [$redirect_uri]) | unique)
-    | .webOrigins = (((.webOrigins // []) + [$web_origin]) | unique)
+    | .redirectUris = (((.redirectUris // []) + [$redirect_uri] + split_csv($extra_redirect_uris)) | unique)
+    | .webOrigins = (((.webOrigins // []) + [$web_origin] + split_csv($extra_web_origins)) | unique)
     | .defaultClientScopes = (((.defaultClientScopes // []) + ["groups"]) | unique)
     | .attributes = (.attributes // {})
     | .attributes["pkce.code.challenge.method"] = "S256"
@@ -292,6 +319,7 @@ jq \
           end
         )
         + [$post_logout_redirect_uri]
+        + split_csv($extra_post_logout_redirect_uris)
         | map(select(length > 0))
         | unique
         | join("##")

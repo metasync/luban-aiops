@@ -25,6 +25,7 @@ EXPECTED_ROUTES = {
     ("GET", "/api/v1/sessions/{session_id}"),
     ("POST", "/api/v1/chat"),
     ("GET", "/api/v1/chat/stream"),
+    ("GET", "/api/v1/audit/events"),
 }
 
 

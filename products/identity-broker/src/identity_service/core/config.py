@@ -115,6 +115,9 @@ class IdentitySettings:
     workload_issuer_url: str = ""
     workload_audience: str = "identity-broker"
     workload_clients: tuple[WorkloadClient, ...] = field(default_factory=tuple)
+    audit_service_url: str = ""
+    audit_client_id: str = "identity-broker"
+    audit_client_secret: str = ""
 
     @classmethod
     def from_env(cls) -> "IdentitySettings":
@@ -154,6 +157,9 @@ class IdentitySettings:
             workload_clients=_parse_workload_clients(
                 os.getenv("IDENTITY_WORKLOAD_CLIENTS", "")
             ),
+            audit_service_url=os.getenv("IDENTITY_AUDIT_SERVICE_URL", ""),
+            audit_client_id=os.getenv("IDENTITY_AUDIT_CLIENT_ID", "identity-broker"),
+            audit_client_secret=os.getenv("IDENTITY_AUDIT_CLIENT_SECRET", ""),
         )
 
 

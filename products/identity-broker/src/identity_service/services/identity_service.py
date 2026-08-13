@@ -26,6 +26,8 @@ ROLE_MAPPINGS = {
     "ops-approvers": "approver",
     "ops-operators": "operator",
     "ops-observers": "read-only-observer",
+    "ops-auditors": "auditor",
+    "ops-developers": "developer",
 }
 
 

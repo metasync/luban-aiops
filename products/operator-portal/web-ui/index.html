@@ -4,65 +4,163 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Luban AIOps Portal</title>
-    <link rel="stylesheet" href="./styles.css?v=20260810-inline-evidence" />
+    <link rel="stylesheet" href="./styles.css?v=20260813-usercard3" />
   </head>
   <body>
-    <div class="chat-shell">
-      <!-- Top bar -->
-      <header class="top-bar">
-        <h1 class="top-bar-title">Luban AIOps</h1>
-        <div class="top-bar-status">
-          <span id="identity-badge" class="identity-badge">Not signed in</span>
-          <button id="login-button" type="button" class="btn-sm">Login</button>
-          <button id="logout-button" type="button" class="btn-sm" hidden>Logout</button>
-        </div>
+    <!-- Two-column app shell: a left sidebar carries branding, identity, and
+         the function list; the main column shows one function at a time.
+         Views are hidden, never destroyed, so chat history, session state,
+         and loaded audit rows survive navigation. -->
+    <div class="app-shell">
+      <!-- Narrow-screen top bar: hamburger opens the sidebar as an off-canvas
+           drawer so the main area keeps its full height. Hidden above 800px. -->
+      <header class="mobile-topbar">
+        <button id="menu-button" type="button" class="menu-button" aria-expanded="false" aria-controls="sidebar" aria-label="Toggle function menu">
+          <svg width="18" height="14" viewBox="0 0 18 14" aria-hidden="true"><path d="M0 1h18M0 7h18M0 13h18" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+        </button>
+        <span class="mobile-topbar-title">Luban AIOps</span>
       </header>
 
-      <!-- Main chat area. Evidence and audit groups are rendered inline,
-           directly after the agent reply they ground (SPEC-011 R-4). -->
-      <main class="chat-main">
-        <div id="response-output" class="chat-messages">
-          <p class="chat-placeholder">Ask the agent about your infrastructure.</p>
-        </div>
-      </main>
+      <aside id="sidebar" class="sidebar">
+        <h1 class="sidebar-logo">Luban AIOps</h1>
 
-      <!-- Prompt input (fixed bottom) -->
-      <footer class="chat-input-bar">
-        <textarea id="prompt-input" rows="2" placeholder="Ask about pods, services, logs, alerts..."></textarea>
-        <button id="stream-button" type="button" class="btn-send">Send</button>
-      </footer>
+        <!-- Function list. New functions are just another button + view.
+             The audit entry is hidden unless the resolved identity carries
+             an audit-allowed role (server re-enforces audit:read anyway). -->
+        <nav class="sidebar-nav" aria-label="Functions">
+          <button id="nav-chat" class="nav-item active" type="button" aria-current="page">
+            <span class="nav-label">Chat</span>
+            <span id="chat-stream-dot" class="nav-stream-dot" hidden></span>
+          </button>
+          <button id="nav-settings" class="nav-item" type="button">Settings &amp; Debug</button>
+          <button id="nav-audit" class="nav-item" type="button" hidden>Audit trail (durable)</button>
+        </nav>
 
-      <!-- Collapsible settings drawer -->
-      <details class="settings-drawer">
-        <summary>Settings &amp; Debug</summary>
-        <div class="settings-grid">
-          <div class="settings-section">
-            <h3>Gateway</h3>
-            <label for="gateway-url">Base URL</label>
-            <input id="gateway-url" placeholder="Defaults to current origin" />
-            <label for="user-id">User ID</label>
-            <input id="user-id" value="demo.operator" />
-            <div class="actions">
-              <button id="normalize-button" type="button">Normalize Identity</button>
-              <button id="session-button" type="button">Create Session</button>
-              <button id="send-button" type="button">Send (non-stream)</button>
+        <!-- Sidebar footer: identity and platform version are state, not
+             functions, so they sit pinned to the bottom (margin-top:auto),
+             separated from the function list above. -->
+        <div class="sidebar-footer">
+          <!-- User card: initials avatar + username (click opens the user
+               popup menu), plus an icon-only login/logout action with a
+               tooltip. -->
+          <div class="user-card">
+            <button id="user-menu-button" class="user-card-main" type="button" aria-expanded="false" aria-haspopup="menu" title="Account details">
+              <span id="user-avatar" class="user-avatar" aria-hidden="true">?</span>
+              <span id="identity-badge" class="identity-badge">Not signed in</span>
+            </button>
+            <button id="login-button" class="icon-button" type="button" title="Sign in" aria-label="Sign in">
+              <!-- Sign in: doorframe right, arrow entering the doorway. -->
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 2h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3M6.5 5 10 8l-3.5 3M10 8H2" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button id="logout-button" class="icon-button" type="button" title="Sign out" aria-label="Sign out" hidden>
+              <!-- Sign out: doorframe left, arrow leaving the doorway. -->
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M10.5 5 14 8l-3.5 3M14 8H6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+
+            <!-- User popup menu: user-related info hangs here. Today only
+                 the granted role(s); future items (session expiry, token
+                 state, profile) belong in this menu, not elsewhere. -->
+            <div id="user-menu" class="user-menu" role="menu" hidden>
+              <div class="user-menu-section">
+                <span class="user-menu-label">Granted roles</span>
+                <span id="identity-role" class="identity-role">no role</span>
+              </div>
             </div>
           </div>
-          <div class="settings-section">
-            <h3>Session</h3>
-            <dl class="metadata">
-              <div><dt>Session ID</dt><dd id="session-id">Not created</dd></div>
-              <div><dt>Request ID</dt><dd id="request-id">Pending</dd></div>
-            </dl>
-          </div>
-          <div class="settings-section">
-            <h3>Identity</h3>
-            <pre id="identity-output">No authenticated identity yet.</pre>
+
+          <!-- Platform version (kept in sync with CHANGELOG milestones). -->
+          <div class="version-card">
+            <span>Luban AIOps</span>
+            <span id="version-output"></span>
           </div>
         </div>
-      </details>
+      </aside>
+
+      <main class="main-area">
+        <!-- Chat workspace: streaming agent conversation with inline
+             per-turn tool evidence (SPEC-011 R-4). -->
+        <section id="chat-view" class="view chat-view">
+          <div class="chat-main">
+            <div id="response-output" class="chat-messages">
+              <p class="chat-placeholder">Ask the agent about your infrastructure.</p>
+            </div>
+          </div>
+          <footer class="chat-input-bar">
+            <textarea id="prompt-input" rows="2" placeholder="Ask about pods, services, logs, alerts..."></textarea>
+            <button id="stream-button" type="button" class="btn-send">Send</button>
+          </footer>
+        </section>
+
+        <!-- Settings & Debug: gateway target, session, and identity detail. -->
+        <section id="settings-view" class="view settings-view" hidden>
+          <h2 class="view-title">Settings &amp; Debug</h2>
+          <div class="settings-grid">
+            <div class="settings-section">
+              <h3>Gateway</h3>
+              <label for="gateway-url">Base URL</label>
+              <input id="gateway-url" placeholder="Defaults to current origin" />
+              <label for="user-id">User ID</label>
+              <input id="user-id" value="demo.operator" />
+              <div class="actions">
+                <button id="normalize-button" type="button">Normalize Identity</button>
+                <button id="session-button" type="button">Create Session</button>
+                <button id="send-button" type="button">Send (non-stream)</button>
+              </div>
+            </div>
+            <div class="settings-section">
+              <h3>Session</h3>
+              <dl class="metadata">
+                <div><dt>Session ID</dt><dd id="session-id">Not created</dd></div>
+                <div><dt>Request ID</dt><dd id="request-id">Pending</dd></div>
+              </dl>
+            </div>
+            <div class="settings-section">
+              <h3>Identity</h3>
+              <pre id="identity-output">No authenticated identity yet.</pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- Durable audit trail view (SPEC-013 R-5): role-gated; the gateway
+             re-enforces audit:read on every query regardless of this gating. -->
+        <section id="audit-view" class="view audit-view" hidden>
+          <h2 class="view-title">Audit trail (durable)</h2>
+          <div class="audit-toolbar">
+            <input id="audit-filter-username" placeholder="username" />
+            <select id="audit-filter-type">
+              <option value="">all event types</option>
+              <option value="tool_invoked">tool_invoked</option>
+              <option value="policy_decision">policy_decision</option>
+              <option value="token_exchange">token_exchange</option>
+              <option value="session_created">session_created</option>
+              <option value="chat_started">chat_started</option>
+              <option value="chat_completed">chat_completed</option>
+            </select>
+            <select id="audit-filter-service">
+              <option value="">all services</option>
+              <option value="tool-gateway">tool-gateway</option>
+              <option value="platform-gateway">platform-gateway</option>
+              <option value="identity-service">identity-service</option>
+            </select>
+            <input id="audit-filter-since" type="datetime-local" title="since" />
+            <input id="audit-filter-until" type="datetime-local" title="until" />
+            <button id="audit-refresh-button" type="button" class="btn-sm">Refresh</button>
+          </div>
+          <div id="audit-output" class="audit-results">
+            <p class="chat-placeholder">Load audit events to inspect the durable trail.</p>
+          </div>
+          <div class="audit-footer">
+            <span id="audit-status" class="audit-status"></span>
+            <button id="audit-more-button" type="button" class="btn-sm" hidden>Load more</button>
+          </div>
+        </section>
+      </main>
+
+      <!-- Tap target behind the open mobile drawer; closes it. Always hidden
+           on wide screens via CSS regardless of the hidden attribute. -->
+      <div id="sidebar-backdrop" class="sidebar-backdrop" hidden></div>
     </div>
 
-    <script src="./app.js?v=20260810-inline-evidence"></script>
+    <script src="./app.js?v=20260813-usercard3"></script>
   </body>
 </html>

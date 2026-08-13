@@ -61,6 +61,14 @@ class IdentityServiceTests(unittest.TestCase):
             ["approver", "platform-admin"],
         )
 
+    def test_resolve_roles_maps_audit_and_developer_groups(self) -> None:
+        self.assertEqual(resolve_roles(["ops-auditors"]), ["auditor"])
+        self.assertEqual(resolve_roles(["ops-developers"]), ["developer"])
+        self.assertEqual(
+            resolve_roles(["ops-auditors", "ops-admins"]),
+            ["auditor", "platform-admin"],
+        )
+
     def test_build_login_start_uses_settings(self) -> None:
         payload = build_login_start(
             IdentitySettings(

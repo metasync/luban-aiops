@@ -37,6 +37,9 @@ class PlatformGatewaySettings:
     policy_path: str = ""
     chat_response_timeout_seconds: float = 30.0
     require_auth: bool = True
+    audit_service_url: str = ""
+    audit_client_id: str = "platform-gateway"
+    audit_client_secret: str = ""
 
     @classmethod
     def from_env(cls) -> "PlatformGatewaySettings":
@@ -82,6 +85,13 @@ class PlatformGatewaySettings:
             .strip()
             .lower()
             in {"1", "true", "yes", "on"},
+            audit_service_url=os.getenv("PLATFORM_GATEWAY_AUDIT_SERVICE_URL", ""),
+            audit_client_id=os.getenv(
+                "PLATFORM_GATEWAY_AUDIT_CLIENT_ID", "platform-gateway"
+            ),
+            audit_client_secret=os.getenv(
+                "PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET", ""
+            ),
         )
 
 

@@ -9,7 +9,9 @@ This directory contains the development Kubernetes overlay for the platform base
 - `tool-gateway`
 - `agent-service`
 - `identity-service`
+- `audit-service`
 - `redis`
+- `postgres`
 
 ## Scope
 
@@ -19,6 +21,7 @@ These manifests are intended to:
 - define baseline environment variables
 - show the expected request path between services
 - provide an in-cluster `Redis` dependency for session storage and AgentScope coordination
+- provide an in-cluster `PostgreSQL` dependency for the durable audit trail (SPEC-013)
 
 The `dev-k8s` overlay is the single development deployment for the platform. It deploys the v2 agent-service contract surface consumed by `platform-gateway` (portal chat/session proxying) and the tool contract consumed by `agent-service` via `tool-gateway` (SPEC-010).
 
@@ -38,10 +41,11 @@ The base deployment manifest uses neutral placeholder image tags:
 - `luban-aiops/tool-gateway:dev-local`
 - `luban-aiops/agent-service:dev-local`
 - `luban-aiops/identity-service:dev-local`
+- `luban-aiops/audit-service:dev-local`
 
 `make build` and `make deploy` replace those placeholders with the generated `IMAGE_TAG` for each rollout.
 
-This development baseline also uses the upstream `redis:7.2-alpine` image for in-cluster runtime state and message coordination.
+This development baseline also uses the upstream `redis:7.2-alpine` image for in-cluster runtime state and message coordination, and `postgres:16-alpine` for the durable audit store.
 
 ## Runtime Wiring
 
@@ -52,16 +56,19 @@ The `platform-runtime-config` `ConfigMap` is assembled from product-scoped env f
 - `shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env`
 - `shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env`
 - `shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env`
+- `shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env`
 
 Because the fragments merge into one `ConfigMap`, each key may appear only once: `IDENTITY_SERVICE_URL` lives in the shared fragment and is consumed by both gateways.
 
-The identity-broker config fragment defines the browser callback and logout redirect defaults for the `OIDC` flow. The committed baseline matches the validated shared development IdP path in `dev-luban-aiops`:
+The identity-broker config fragment defines the browser callback and logout redirect defaults for the `OIDC` flow. The committed baseline targets a **self-contained** `luban-aiops` realm on the shared development Keycloak, so live testing no longer depends on users from other applications:
 
 - `KEYCLOAK_BASE_URL=https://idp.apps.metasync.cc`
-- `KEYCLOAK_REALM=snd`
-- `OIDC_CLIENT_ID=snd-luban-aiops-portal`
-- `OIDC_REDIRECT_URI=http://localhost:18080/callback`
-- `OIDC_POST_LOGOUT_REDIRECT_URI=http://localhost:18080/`
+- `KEYCLOAK_REALM=luban-aiops`
+- `OIDC_CLIENT_ID=luban-aiops-portal`
+- `OIDC_REDIRECT_URI=https://aiops.luban.metasync.cc/callback`
+- `OIDC_POST_LOGOUT_REDIRECT_URI=https://aiops.luban.metasync.cc/`
+- `OIDC_EXTRA_REDIRECT_URIS=https://aiops.luban.k8s.orb.local/callback,http://localhost:18080/callback`
+- `OIDC_EXTRA_POST_LOGOUT_REDIRECT_URIS=https://aiops.luban.k8s.orb.local/,http://localhost:18080/`
 - `OIDC_SCOPES=openid groups`
 
 The corresponding keys remain:
@@ -71,20 +78,57 @@ The corresponding keys remain:
 - `OIDC_CLIENT_ID`
 - `OIDC_REDIRECT_URI`
 - `OIDC_POST_LOGOUT_REDIRECT_URI`
+- `OIDC_EXTRA_REDIRECT_URIS`
+- `OIDC_EXTRA_POST_LOGOUT_REDIRECT_URIS`
 - `OIDC_SCOPES`
 
-The overlay also carries a Git-tracked reconciliation script for the shared
-Keycloak browser client:
+### Self-Contained Realm and Test Users
+
+The overlay carries a Git-tracked reconciliation script that provisions the whole
+identity surface on the shared Keycloak:
+
+- `shared/platform-ops/gitops/reconcile-luban-realm.sh`
+
+It is idempotent and ensures, in the `luban-aiops` realm:
+
+- the realm itself (registration/password-reset disabled)
+- a `groups` client scope mapping Keycloak group membership to the `groups` token claim
+- the six role groups expected by identity-broker `ROLE_MAPPINGS`: `ops-admins`,
+  `ops-approvers`, `ops-operators`, `ops-observers`, `ops-auditors`, `ops-developers`
+- one test user per group, each placed in exactly that group
+
+| Test User | Group | Platform Role |
+|---|---|---|
+| `luban-admin` | `ops-admins` | `platform-admin` |
+| `luban-approver` | `ops-approvers` | `approver` |
+| `luban-operator` | `ops-operators` | `operator` |
+| `luban-observer` | `ops-observers` | `read-only-observer` |
+| `luban-auditor` | `ops-auditors` | `auditor` |
+| `luban-developer` | `ops-developers` | `developer` |
+
+All six share a single **development-only** password, defaulting to `luban-dev-2026`
+and overridable via `LUBAN_TEST_USER_PASSWORD`. This is deliberately not a secret: the
+users exist only for live testing against the dev IdP. Never reuse this setup for real
+environments.
+
+The realm script runs before the browser-client reconcile during `make deploy`.
+
+### Browser Portal Client Reconciliation
+
+A second Git-tracked script reconciles the shared Keycloak browser client:
 
 - `shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh`
 
-That script treats the overlay `identity-broker/runtime-config.env` values as
-the desired browser client contract for `snd-luban-aiops-portal`. It reconciles:
+It treats the overlay `identity-broker/runtime-config.env` values as the desired
+browser client contract for `luban-aiops-portal`. It reconciles:
 
 - client existence and PKCE/public-client settings
-- `redirectUris`
-- `webOrigins`
-- `post.logout.redirect.uris`
+- direct-access grants (resource-owner password) enabled **for dev testing only**, so
+  the `luban-*` test users can obtain tokens via `curl` without driving the browser
+  flow; disable this for any real environment
+- `redirectUris` (primary + `OIDC_EXTRA_REDIRECT_URIS`)
+- `webOrigins` (derived from every callback origin)
+- `post.logout.redirect.uris` (primary + `OIDC_EXTRA_POST_LOGOUT_REDIRECT_URIS`)
 - client protocol mappers for `preferred_username` and `email`
 
 The `agent-service` deployment runs the v2 FastAPI adapter entrypoint (`uv run agent-service`). The `platform-gateway` connects to `http://agent-service:8000` and consumes the `/api/v2/` contract exclusively (see SPEC-002 and ADR-0003); `agent-service` in turn calls `tool-gateway` (`TOOL_GATEWAY_URL`) for tool execution.
@@ -105,6 +149,21 @@ Each profile contributes a committed non-secret `ConfigMap` named `agent-platfor
 That keeps provider switching Git-diffable and aligned with a future GitOps reconciliation flow.
 
 The `web-ui` image serves the static portal through `nginx` and proxies `/api/` requests to the in-cluster `platform-gateway` service. That keeps the browser entrypoint simple for development verification and avoids a separate CORS layer in this first slice.
+
+### Portal Ingress (HTTPRoute)
+
+The overlay ships a Gateway API `HTTPRoute` (`base/operator-portal/web-ui-httproute.yaml`)
+that exposes the portal through the shared Envoy Gateway (`luban-gateway` in namespace
+`gateway`), so live testing does not require a per-session `kubectl port-forward`:
+
+- `https://aiops.luban.k8s.orb.local`
+- `https://aiops.luban.metasync.cc`
+
+Both resolve to the same `web-ui:8080` backend; the gateway's wildcard HTTPS listeners
+accept routes from all namespaces, so the route only declares hostnames and the backend.
+Because `web-ui` proxies `/api/` to `platform-gateway`, no other service needs its own
+route. Port-forwarding `service/web-ui` remains a valid fallback when the wildcard DNS is
+not reachable.
 
 The `redis` deployment uses `emptyDir` storage in this development baseline. That keeps setup simple for Kubernetes development testing, but it is not a durable production persistence model.
 
@@ -285,6 +344,56 @@ Verify delegation is working:
 kubectl -n dev-luban-aiops logs deployment/platform-gateway --tail=20 | grep delegation
 # Look for delegation_exchange_total{result=success} in metrics:
 kubectl -n dev-luban-aiops exec deployment/platform-gateway -- curl -s localhost:8000/metrics | grep delegation
+```
+
+## Durable Audit Trail (SPEC-013)
+
+The overlay deploys `audit-service` backed by a `postgres` StatefulSet
+(`postgres:16-alpine`, 1Gi PVC, dev-only credentials committed in
+`base/infra/postgres-statefulset.yaml`). The audit-service fragment of
+`runtime-config.env` commits the non-secret halves:
+
+- `AUDIT_STORE_BACKEND=postgres`, `AUDIT_DB_URL` (points at the in-cluster
+  `postgres` service), `AUDIT_RETENTION_DAYS=30`, `AUDIT_MAX_EVENTS=100000`,
+  `AUDIT_EVICTION_INTERVAL_SECONDS=3600`
+
+The three emitters point at the service with matching client ids:
+
+- tool-gateway: `GATEWAY_AUDIT_SERVICE_URL=http://audit-service:8000`, `GATEWAY_AUDIT_CLIENT_ID=tool-gateway`
+- platform-gateway: `PLATFORM_GATEWAY_AUDIT_SERVICE_URL=http://audit-service:8000`, `PLATFORM_GATEWAY_AUDIT_CLIENT_ID=platform-gateway`
+- identity-service: `IDENTITY_AUDIT_SERVICE_URL=http://audit-service:8000`, `IDENTITY_AUDIT_CLIENT_ID=identity-broker`
+
+The shared ingest secret lives in four optional secrets and is provisioned
+by `sync-audit-secrets.sh` (one random secret shared across all parties):
+
+- `audit-service-runtime-secrets` — `AUDIT_INGEST_CLIENTS`
+  (format `client_id=secret,...`; see `base/audit-service/runtime-secrets.example.env`)
+- `tool-gateway-runtime-secrets` — `GATEWAY_AUDIT_CLIENT_SECRET`
+- `platform-gateway-runtime-secrets` — `PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET`
+- `identity-service-runtime-secrets` — `IDENTITY_AUDIT_CLIENT_SECRET`
+
+`make deploy` runs the script automatically; to skip (e.g. when secrets are
+injected by CI):
+
+```bash
+SKIP_AUDIT_SECRETS=true make deploy
+```
+
+To provision manually or regenerate the shared secret:
+
+```bash
+shared/platform-ops/gitops/sync-audit-secrets.sh
+```
+
+Unset the emitter's `*_AUDIT_SERVICE_URL` to fall back to log-only auditing.
+Verify ingest and query are working:
+
+```bash
+# ingest health: audit_emits_total{result="ok"} on each emitter
+kubectl -n dev-luban-aiops exec deployment/tool-gateway -- curl -s localhost:8000/metrics | grep audit_emits
+# store readiness and size
+kubectl -n dev-luban-aiops port-forward service/audit-service 18003:8000
+curl http://127.0.0.1:18003/health/ready
 ```
 
 ## Apply

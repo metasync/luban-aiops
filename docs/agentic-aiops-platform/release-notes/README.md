@@ -7,6 +7,14 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-12-durable-audit-trail.md`
+  - delivers SPEC-013: canonical audit-event contract, new `audit-service`
+    product (in-memory + PostgreSQL stores, retention), authenticated
+    fire-and-forget ingestion from three services, `audit:read`-gated query
+    API proxied via platform-gateway, and the operator portal audit view
+  - ships the operator portal shell redesign alongside: two-column
+    sidebar/drawer layout, sidebar-footer user and version cards, and
+    accessibility polish
 - `2026-08-11-r1-close-operator-guide.md`
   - closes Release 1 with SPEC-012: operator guide suite (getting started,
     configuration reference, troubleshooting, tool configuration, architecture

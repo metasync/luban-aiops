@@ -114,13 +114,24 @@ redis-...                         1/1     Running
 
 ## Step 7: Access the Portal
 
-Port-forward the web-ui service:
+The dev-k8s overlay ships an `HTTPRoute` exposing the portal through the shared Envoy
+Gateway. If your cluster's wildcard DNS is reachable, open either hostname directly:
+
+- `https://aiops.luban.k8s.orb.local`
+- `https://aiops.luban.metasync.cc`
+
+Otherwise port-forward the web-ui service:
 
 ```bash
 kubectl -n dev-luban-aiops port-forward service/web-ui 18080:8080
 ```
 
-Open `http://localhost:18080` in your browser.
+and open `http://localhost:18080` in your browser.
+
+> Login uses the self-contained `luban-aiops` Keycloak realm. `make deploy` reconciles the
+> realm, role groups, and one test user per role (`luban-admin`, `luban-approver`,
+> `luban-operator`, `luban-observer`, `luban-auditor`, `luban-developer`); see the dev-k8s
+> README for the shared dev password.
 
 ## End-to-End Verification Checklist
 

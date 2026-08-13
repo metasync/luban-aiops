@@ -28,8 +28,9 @@ DEFAULT_BUNDLE_RESOURCE = "policy-default.yaml"
 ACTION_CHAT = "chat"
 ACTION_SESSION_CREATE = "session:create"
 ACTION_SESSION_READ = "session:read"
+ACTION_AUDIT_READ = "audit:read"
 PROTECTED_ACTIONS = frozenset(
-    {ACTION_CHAT, ACTION_SESSION_CREATE, ACTION_SESSION_READ}
+    {ACTION_CHAT, ACTION_SESSION_CREATE, ACTION_SESSION_READ, ACTION_AUDIT_READ}
 )
 
 # Module-level bundle singleton, keyed on the configured path.

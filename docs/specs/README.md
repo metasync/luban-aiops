@@ -126,3 +126,4 @@ Mechanical enforcement:
 | `SPEC-010` | Platform gateway extraction — splitting `tool-gateway` into `platform-gateway` and `tool-gateway` | `delivered` |
 | `SPEC-011` | Observability connector and evidence panels — Elastic connector, tool trace events, portal evidence panel | `delivered` |
 | `SPEC-012` | Operator guide and deployment documentation — getting started, configuration, troubleshooting, tools, architecture | `delivered` |
+| `SPEC-013` | Durable audit trail — audit event contract, audit service store, permission-scoped query API | `delivered` |

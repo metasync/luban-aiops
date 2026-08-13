@@ -16,7 +16,9 @@ from platform_gateway.core.metrics import (
 from platform_gateway.metadata import SERVICE_NAME, SERVICE_VERSION
 from platform_gateway.schemas.api import IdentityContext
 from platform_gateway.services import agent_client
+from platform_gateway.services.audit_emitter import build_audit_event, emit_audit_event
 from platform_gateway.services.policy_engine import (
+    PolicyDecision,
     PolicyLoadError,
     evaluate,
     load_bundle,
@@ -242,6 +244,7 @@ def enforce_policy(
     }
     if decision.decision == "deny":
         LOGGER.warning("policy decision", extra=log_extra)
+        _emit_policy_decision(settings, identity, action, request_id, decision)
         raise HTTPException(
             status_code=403,
             detail={
@@ -251,6 +254,35 @@ def enforce_policy(
             },
         )
     LOGGER.info("policy decision", extra=log_extra)
+    _emit_policy_decision(settings, identity, action, request_id, decision)
+
+
+def _emit_policy_decision(
+    settings: PlatformGatewaySettings,
+    identity: IdentityContext,
+    action: str,
+    request_id: str,
+    decision: PolicyDecision,
+) -> None:
+    """Mirror every policy decision to the durable audit trail (SPEC-013 R-3)."""
+    emit_audit_event(
+        settings,
+        build_audit_event(
+            "policy_decision",
+            request_id,
+            decision.decision,
+            subject=identity.subject,
+            username=identity.username,
+            actor=identity.actor,
+            roles=identity.roles,
+            details={
+                "action": action,
+                "decision": decision.decision,
+                "reason": decision.reason,
+                "matched_rule_ids": decision.matched_rule_ids,
+            },
+        ),
+    )
 
 
 async def create_session(

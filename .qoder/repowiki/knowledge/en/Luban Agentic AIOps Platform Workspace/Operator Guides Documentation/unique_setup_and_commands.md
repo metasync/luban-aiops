@@ -1,0 +1,1 @@
+None — this is pure documentation with no build or runtime steps.

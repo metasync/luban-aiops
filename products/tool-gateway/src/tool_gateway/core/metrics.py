@@ -52,6 +52,12 @@ TOOL_REDACTED_SPANS = Counter(
     ["tool"],
 )
 
+AUDIT_EMITS = Counter(
+    "audit_emits_total",
+    "Audit event emission attempts to the audit service (SPEC-013).",
+    ["result"],
+)
+
 
 def _handler_label(request: Request) -> str:
     # Templated route path (bounded cardinality), never the raw URL.
@@ -94,3 +100,8 @@ def record_token_verification(result: str) -> None:
 def record_redacted_spans(tool: str, spans: int) -> None:
     if spans > 0:
         TOOL_REDACTED_SPANS.labels(tool=tool).inc(spans)
+
+
+def record_audit_emit(result: str) -> None:
+    """Record an audit emission outcome (``ok`` or ``error``)."""
+    AUDIT_EMITS.labels(result=result).inc()

@@ -52,6 +52,7 @@ Current implementation status:
 - supports token refresh (`POST /api/v1/auth/refresh`): exchanges a Keycloak refresh_token for a new platform JWT with updated identity claims
 - mints delegated tokens for service-to-service calls (`POST /api/v1/auth/exchange`, SPEC-008 / ADR-0004): authenticates a registered service credential (HTTP Basic) or a Kubernetes projected service-account token (`Authorization: Bearer`, validated against the cluster OIDC issuer JWKS, SPEC-009), verifies the subject token, and issues a short-lived token with `sub`/`username`/`roles` copied (never elevated), an RFC 8693 `act` actor claim, and the requested `aud`
 - adds focused tests for role normalization, login URL composition, token issuance, JWKS format, token refresh, and the exchange endpoint
+- forwards token-exchange audit events (granted and rejected) to `audit-service` via a fire-and-forget emitter when `IDENTITY_AUDIT_SERVICE_URL` is set; unreachability degrades to log-only auditing and never blocks the exchange path (SPEC-013)
 
 Current runtime environment knobs:
 
@@ -77,6 +78,12 @@ Current runtime environment knobs:
   - required `aud` claim on projected workload tokens; defaults to `identity-broker`
 - `IDENTITY_WORKLOAD_CLIENTS`
   - workload-subject registry for the bearer path; format `subject=client_id:aud1|aud2`, comma-separated (e.g. `system:serviceaccount:prod-luban:platform-gateway=platform-gateway:tool-gateway`); a validated subject inherits the mapped client's audience allow-list
+- `IDENTITY_AUDIT_SERVICE_URL`
+  - audit-service ingest URL; empty (default) keeps log-only auditing
+- `IDENTITY_AUDIT_CLIENT_ID`
+  - client id used to authenticate audit ingest; defaults to `identity-broker`
+- `IDENTITY_AUDIT_CLIENT_SECRET`
+  - audit ingest credential; must match the entry in the audit-service's `AUDIT_INGEST_CLIENTS` registry
 - `OTEL_ENABLED`
   - master switch for the OTLP push pipeline (traces + metrics); defaults to `false`; when disabled, the `/metrics` surface is unaffected
 - `OTEL_EXPORTER_OTLP_ENDPOINT`
@@ -86,7 +93,7 @@ Current runtime environment knobs:
 
 Observability surface (see `SPEC-005` and `shared/shared-contracts/observability-conventions.md`):
 
-- `GET /metrics` — always-on Prometheus exposition endpoint (auth-exempt), reporting standard HTTP RED metrics plus `identity_tokens_issued_total` (incremented on every platform JWT issued) and `token_exchange_total{result}` (delegated-token exchange attempts/outcomes, SPEC-008)
+- `GET /metrics` — always-on Prometheus exposition endpoint (auth-exempt), reporting standard HTTP RED metrics plus `identity_tokens_issued_total` (incremented on every platform JWT issued), `token_exchange_total{result}` (delegated-token exchange attempts/outcomes, SPEC-008), and `audit_emits_total{result}` (audit-event delivery attempts to audit-service, SPEC-013)
 - opt-in OTLP push via `opentelemetry-instrumentation-fastapi` + `opentelemetry-exporter-otlp` when `OTEL_ENABLED=true`; fail-open
 - `x-request-id` remains the log/portal correlation key; when OTel tracing is active it equals the W3C `trace_id`
 

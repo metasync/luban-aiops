@@ -6,6 +6,7 @@ from platform_gateway.core.config import PlatformGatewaySettings, get_settings
 from platform_gateway.core.observability import log_event
 from platform_gateway.core.request_context import resolve_request_id
 from platform_gateway.schemas.api import CreateSessionRequest
+from platform_gateway.services.audit_emitter import build_audit_event, emit_audit_event
 from platform_gateway.services.gateway_service import (
     create_session,
     enforce_policy,
@@ -41,6 +42,19 @@ async def create_session_route(
         user_id=user_id,
         authenticated=identity.subject != "dev",  # type: ignore[union-attr]
         roles=identity.roles,  # type: ignore[union-attr]
+    )
+    emit_audit_event(
+        settings,
+        build_audit_event(
+            "session_created",
+            request_id,
+            "success",
+            subject=identity.subject,  # type: ignore[union-attr]
+            username=user_id,
+            actor=identity.actor,  # type: ignore[union-attr]
+            roles=identity.roles,  # type: ignore[union-attr]
+            session_id=response.get("session_id"),
+        ),
     )
     return response
 
