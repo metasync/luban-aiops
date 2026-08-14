@@ -127,3 +127,4 @@ Mechanical enforcement:
 | `SPEC-011` | Observability connector and evidence panels — Elastic connector, tool trace events, portal evidence panel | `delivered` |
 | `SPEC-012` | Operator guide and deployment documentation — getting started, configuration, troubleshooting, tools, architecture | `delivered` |
 | `SPEC-013` | Durable audit trail — audit event contract, audit service store, permission-scoped query API | `delivered` |
+| `SPEC-014` | Skills and grounded guidance — skills-hub ingestion/retrieval, skills.search tool, cited answers | `approved` |

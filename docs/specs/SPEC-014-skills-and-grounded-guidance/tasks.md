@@ -1,0 +1,76 @@
+# SPEC-014 Tasks: Skills And Grounded Guidance (Release 2)
+
+Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement IDs.
+
+## R-1: Skill document contract
+
+- [ ] add `skill.schema.json` envelope incl. optional `source_url` attribution field (`shared/shared-contracts/schemas/`)
+- [ ] write `skill-format.md` frontmatter convention incl. size caps, slug rule, and a "where to find open-source skills" discovery appendix (`shared/shared-contracts/`)
+- [ ] implement Pydantic skill models (`products/skills-hub/src/skills_hub/schemas/skill.py`)
+- [ ] contract tests binding models to the schema (`products/skills-hub/tests/test_contracts.py`)
+
+## R-2: skills-hub product with federated multi-source ingestion
+
+- [ ] scaffold product: Dockerfile, Makefile (image+python fragments), pyproject + uv lock, metadata, README scaffold (`products/skills-hub/`)
+- [ ] port core chassis: config, metrics, observability, request_context, runtime, telemetry, health route (mirror audit-service)
+- [ ] `SKILLS_SOURCES` / `SKILLS_GIT_TOKENS` parsing with fail-fast startup errors (`services/source_config.py` + `tests/test_source_config.py`)
+- [ ] ingestion: directory walk, frontmatter parse, validation rules, slug derivation (`services/ingestion.py` + `tests/test_ingestion.py`)
+- [ ] local source sync (read → validate → atomic swap) (`services/sync.py` + tests)
+- [ ] git source sync via subprocess clone/fetch/reset in `asyncio.to_thread` (tests with a `file://` repo fixture)
+- [ ] `SkillStore` protocol + `InMemorySkillStore` with `replace_source` semantics (`services/skill_store.py` + `tests/test_skill_store.py`)
+- [ ] `PostgresSkillStore` (psycopg v3 pool, parameterized SQL, per-source replace) against a fake driver double
+- [ ] per-source sync loop tasks with jitter, `skills_syncs_total{source,result}` counter, failure keeps prior slice (`tests/test_sync.py`)
+- [ ] standalone validator CLI `python -m skills_hub.validate <dir>` reusing the service validation path (+ test against a fixture tree)
+
+## R-3: Search and retrieval API
+
+- [ ] deterministic scorer: title ×3 / tags ×2 / body ×1 saturating, `skill_id` tie-break (`services/scoring.py` + `tests/test_scoring.py`)
+- [ ] query auth: `SKILLS_QUERY_CLIENTS` Basic registry + workload tokens, 401 path (`services/query_auth.py` + `tests/test_query_auth.py`)
+- [ ] `GET /api/v1/skills` list with source/tag filters + capped offset pagination (`api/routes/skills.py` + tests)
+- [ ] `GET /api/v1/skills/{skill_id:path}` full record, structured 404 (tests)
+- [ ] `GET /api/v1/skills/search` ranked hits with excerpt ≤ 400 chars and provenance; 400 on malformed params (tests)
+- [ ] Postgres candidate selection (`to_tsvector`/`plainto_tsquery`) re-ranked by the shared scorer; byte-identical ordering parity test vs in-memory store
+
+## R-4: skills.search read-only tool in the tool execution framework
+
+- [ ] settings: `skills_service_url`, `skills_client_id`, `skills_client_secret` (`products/tool-gateway/.../core/config.py` + settings tests)
+- [ ] `SkillsConnector` with `skills.search` / `skills.get` definitions and parameter schemas (`tools/skills_connector.py`)
+- [ ] httpx transport with Basic auth, 10s timeout, error mapping (404 → `SKILL_NOT_FOUND`, unreachable → `TOOL_EXECUTION_ERROR`) (`tests/test_skills_connector.py`)
+- [ ] registration in `_build_tool_registry()` gated on `GATEWAY_SKILLS_SERVICE_URL` (tests incl. unset-URL byte-parity)
+- [ ] empty-match success result contract test against a fake skills-hub double
+- [ ] contract tests binding connector payloads to `skill.schema.json`
+
+## R-5: Runbook-aware answers with visible citations
+
+- [ ] extend `DEFAULT_SYSTEM_PROMPT` with the skills discipline (cite by title, guidance ≠ live data, report no-match honestly) (`products/agent-platform/.../runtime_settings.py` + tests)
+- [ ] add `skills.search`, `skills.get` to `DEFAULT_AUTO_ALLOWED_TOOLS` (sanitized-name test) (`tools/gateway_tools.py`)
+- [ ] verify portal evidence panel renders `skills.search` `data_summary` without changes (manual check during delivery; fix as portal bug if needed)
+
+## R-6: Deployment, configuration, and living-state docs
+
+- [ ] author sample source `sre-alerting`: adapt 5–6 prometheus-operator runbooks (Apache-2.0) with frontmatter, `source_url`, alert-name tags, NOTICE (`shared/platform-ops/skills/sre-alerting/`)
+- [ ] author sample source `platform-runbooks`: adapt 4–5 Kubernetes troubleshooting guides (CC-BY-4.0) with deliberate pod-troubleshooting overlap, NOTICE (`shared/platform-ops/skills/platform-runbooks/`)
+- [ ] write per-source READMEs as the team contribution template (format, tagging, validator pre-flight command)
+- [ ] validate both sample sources with the validator CLI; fix any rejections before wiring into the overlay
+- [ ] skills-hub overlay base: deployment (ConfigMap volume for `/skills`, data path), service, runtime-config.env, runtime-secrets.env + example (`dev-k8s/base/skills-hub/`)
+- [ ] postgres: initdb ConfigMap + mount creating `skills` database for fresh clusters (`dev-k8s/base/infra/`)
+- [ ] `sync-skills-secrets.sh`: idempotent `CREATE DATABASE skills` via kubectl exec + write `skills-hub-runtime-secrets` and gateway secret, `SKIP_SKILLS_SECRETS` opt-out (`shared/platform-ops/gitops/`)
+- [ ] wire deploy: `deploy.sh` calls the sync script, `deploy-overlay.sh` handles the skills-hub image, overlay kustomization includes the new base
+- [ ] tool-gateway runtime-config/secrets fragments: `GATEWAY_SKILLS_SERVICE_URL=http://skills-hub:8000`, client id + secret
+- [ ] e2e demo smoke script `shared/platform-ops/e2e/skills-demo.sh`: status assertions, alert-name search ranking check, scripted chat asserting the `skills.search` frame pair
+- [ ] write the Skills demo tour section in `getting-started.md` (alert→runbook loop, cross-source citation, no-match path) as UAT checklist + operator training
+- [ ] update living docs: root README, skills-hub README, tool-gateway README, dev-k8s README, configuration-reference, tool-configuration, architecture-overview
+
+## R-7: Tests and verification gate
+
+- [ ] all new suites green per product (`make test`)
+- [ ] `make verify` green: all product suites + all overlay renders
+
+## Delivery Gate
+
+- [ ] all acceptance criteria in `spec.md` verified
+- [ ] living state docs updated (see spec `Impact` section)
+- [ ] `CHANGELOG.md` entry added referencing the spec ID
+- [ ] release note written (`docs/agentic-aiops-platform/release-notes/`)
+- [ ] spec index in `docs/specs/README.md` updated
+- [ ] spec status set to `delivered`
