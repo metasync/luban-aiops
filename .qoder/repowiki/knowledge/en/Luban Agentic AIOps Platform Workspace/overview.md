@@ -1,1 +1,0 @@
-Multi-product workspace that wires agent-platform, identity-broker, platform-gateway, tool-gateway, and operator-portal behind shared JSON contracts, GitOps overlays, and a unified Makefile-driven build/test/deploy pipeline.

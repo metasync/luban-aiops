@@ -1,3 +1,0 @@
-- Each guide targets a single operator concern (onboarding, config, tools, architecture, troubleshooting) and is linked from the central README index table.
-- Cross-references use relative paths to sibling documentation directories (../agentic-aiops-platform, ../specs, ../../shared/platform-ops/gitops) instead of absolute URLs.
-- Architecture and flow descriptions are accompanied by Mermaid graph/sequence diagrams to visualize service topology and request chains.

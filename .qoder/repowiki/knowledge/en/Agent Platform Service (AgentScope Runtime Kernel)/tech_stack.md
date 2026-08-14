@@ -1,1 +1,0 @@
-Python FastAPI server over AgentScope 2.x runtime (uses `agentscope.tool.FunctionTool` and `Toolkit(tools=...)` constructor — the legacy `Toolkit.add()` API was removed); httpx async client for gateway calls; Redis-backed session store; SSE streaming for chat events; JSON Schema contracts in `shared/shared-contracts/schemas/`.

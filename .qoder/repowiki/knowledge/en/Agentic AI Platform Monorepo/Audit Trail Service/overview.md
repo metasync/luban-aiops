@@ -1,0 +1,1 @@
+FastAPI service that ingests, stores, and queries durable audit events with pluggable in-memory or PostgreSQL backends, JWT-based ingest/workload auth, and time/size-bounded retention.

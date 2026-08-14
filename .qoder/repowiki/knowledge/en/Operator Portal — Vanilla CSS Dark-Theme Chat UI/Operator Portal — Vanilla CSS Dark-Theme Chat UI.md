@@ -13,66 +13,53 @@ source_files:
 
 ## What system/approach is used
 
-The only frontend in this repository is the **Operator Portal** (`products/operator-portal/web-ui/`), a single-page chat/debug interface built with **vanilla HTML + CSS + JavaScript**. There is no framework (React, Vue, Svelte), no component library, no build toolchain, no CSS-in-JS, and no design-token system beyond plain CSS custom properties. The page is served directly by an Nginx container configured via `nginx.conf`.
+The only frontend in the repository lives under `products/operator-portal/web-ui/` and is a **vanilla HTML + CSS + JavaScript** single-page chat interface served by nginx. There is no build step, no component framework (React/Vue/etc.), no CSS-in-JS, no design-token library, and no responsive framework. Styling is a single flat stylesheet (`styles.css`) loaded directly from `index.html`, with all interactivity implemented in one script (`app.js`).
 
 ## Key files and packages
 
-- `products/operator-portal/web-ui/index.html` — static shell defining the chat layout: top bar, message area, evidence panel, prompt input, and a collapsible Settings & Debug drawer.
-- `products/operator-portal/web-ui/styles.css` — the entire stylesheet (~405 lines). Defines a dark theme via `:root` variables and all layout/style rules.
-- `products/operator-portal/web-ui/app.js` — client-side logic for OIDC login flow, session management, streaming chat via Server-Sent Events, markdown rendering, and evidence-panel updates.
-- `products/operator-portal/nginx.conf` — serves the three files above as a static site.
+- `products/operator-portal/web-ui/index.html` — minimal semantic shell: `<header class="top-bar">`, `<main class="chat-main">`, `<footer class="chat-input-bar">`, collapsible `<details class="settings-drawer">`.
+- `products/operator-portal/web-ui/styles.css` — the entire visual style surface (~445 lines).
+- `products/operator-portal/web-ui/app.js` — DOM manipulation, markdown renderer, OIDC login flow, SSE streaming of agent/tool events, and evidence/audit turn groups.
+- `products/operator-portal/nginx.conf` — serves these three static files; no asset pipeline.
 
-No other product in the repo contains frontend code; the remaining services are Python FastAPI backends.
+No external CSS frameworks or JS libraries are referenced; fonts are pulled via system font stacks.
 
 ## Architecture and conventions
 
-### Design tokens (CSS custom properties)
-All visual values are centralized in `:root` at the top of `styles.css`:
-- Palette: `--bg`, `--surface`, `--surface-alt`, `--border`, `--text`, `--text-muted`, `--accent`, `--accent-hover`, `--success`, `--error`, `--warning`, `--code-bg`.
+### Design tokens via CSS custom properties
+All colors, spacing, and radii are centralized in a `:root` block at the top of `styles.css`:
+- Color palette: `--bg`, `--surface`, `--surface-alt`, `--border`, `--text`, `--text-muted`, `--accent`, `--accent-hover`, `--success`, `--error`, `--warning`, `--code-bg`.
 - Spacing/radius: `--radius: 8px`.
-- Theme mode: `color-scheme: dark` forces browser-native dark inputs.
+- Global `color-scheme: dark` enforces a dark theme across native UI chrome.
 
-These variables are consumed everywhere else in the stylesheet, making it the single source of truth for colors and radii.
+This is the de facto design-token system for the portal.
 
 ### Layout model
-- A `.chat-shell` flex column fills `100vh`, max-width `900px`, centered.
-- Top bar (`.top-bar`) is fixed-height with title and identity badge.
-- Main chat area (`.chat-main`) is `flex: 1` with vertical overflow.
-- Input bar (`.chat-input-bar`) is pinned to the bottom with a border-top separator.
-- Settings drawer uses the native `<details>/<summary>` element styled as a collapsible section with a responsive grid (`grid-template-columns: repeat(auto-fit, minmax(250px, 1fr))`).
+A fixed-height flex column `.chat-shell` (max-width 900px, centered) contains three fixed regions: top bar, scrollable chat area, and bottom input bar. The settings panel is a native `<details>` drawer below the input. Evidence and audit cards are rendered inline after each agent reply as collapsed `<details class="evidence-turn">` blocks, per SPEC-011 R-4.
 
-### Typography
-- Font stack: `Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif`.
-- Code font stack: `"JetBrains Mono", "Fira Code", monospace`.
-- Headings inside rendered markdown (`.md-content h1..h6`) are colored `--accent` with decreasing sizes.
+### Markdown rendering
+`app.js` ships a small regex-based markdown-to-HTML converter (`renderMarkdown`) that handles headers, bold/italic/strikethrough, code fences, inline code, lists, tables, blockquotes, links, and paragraphs. Styled output is wrapped in a `.md-content` container whose typography rules live in `styles.css` (headings colored `--accent`, code blocks use `--code-bg` and monospace fonts `"JetBrains Mono", "Fira Code"`).
 
-### Message styling
-- User messages (`.chat-msg.user-msg`): dark surface background with a left accent border.
-- Agent messages (`.chat-msg.agent-msg`): transparent background with a left border line.
-- Markdown content is rendered into `.md-content` divs via a hand-rolled regex-based renderer in `app.js` that supports headers, lists, tables, blockquotes, code blocks, links, bold/italic/strikethrough, and paragraphs.
-
-### Evidence panel
-A dedicated `.evidence-panel` shows tool invocations as cards (`.evidence-card`) with:
-- Status badges (`.status-badge.pending|success|error|denied`) using semantic color classes.
-- Inline spinner animation (`@keyframes spin`).
-- Collapsible `<details>` sections for parameters and data summaries.
-- Metadata row (`.evidence-meta`) showing source system, duration, risk level, timestamp.
+### Component-style classes
+There are no reusable components; instead, BEM-like class names describe UI fragments:
+- Shell: `.chat-shell`, `.top-bar`, `.chat-main`, `.chat-input-bar`
+- Messages: `.chat-msg.user-msg`, `.chat-msg.agent-msg`
+- Controls: `.btn-sm`, `.btn-send`
+- Settings: `.settings-drawer`, `.settings-grid`, `.settings-section`
+- Evidence/audit: `.evidence-turn`, `.evidence-card`, `.status-badge.{pending|success|error|denied}`, `.audit-card`
 
 ### Responsive strategy
-- No media queries exist. Responsiveness comes from Flexbox/Grid auto-layout (`auto-fit`, `minmax`) and percentage/flex sizing.
-- The viewport is locked to `100vh` with `overflow: hidden` on body; scrolling occurs inside `.chat-main`.
+Responsiveness is minimal: `.chat-shell` uses `max-width: 900px` and `margin: 0 auto`; `.settings-grid` uses `grid-template-columns: repeat(auto-fit, minmax(250px, 1fr))`. No media queries exist — the layout relies on flexbox wrapping and CSS Grid auto-fitting rather than breakpoints.
 
-### State persistence
-- Auth sessions and pending OIDC requests are stored in `window.sessionStorage` under keys `luban.portal.authSession` and `luban.portal.authRequest`.
-- Token refresh is scheduled based on decoded JWT `exp` claims with a 60-second margin.
+### Theming constraints
+The stylesheet hard-codes a dark theme via `color-scheme: dark` and a fixed slate/blue palette. There is no light-mode variant, no theme switcher, and no mechanism to override tokens at runtime beyond editing `styles.css`.
 
 ## Conventions and constraints
 
-- **Single-file CSS**: All styles live in one flat stylesheet; there are no modules, preprocessors, or scoped styles.
-- **BEM-like class naming**: Classes use descriptive kebab-case names (`.chat-shell`, `.top-bar`, `.settings-drawer`, `.evidence-card`) rather than utility classes or a framework convention.
-- **Dark-only theme**: `color-scheme: dark` plus a fixed slate palette means light-mode support is not implemented.
-- **No external CSS dependencies**: The stylesheet is self-contained; no CDN fonts or icon libraries are referenced (system fonts are used).
-- **Markdown rendering is inline**: The JS `renderMarkdown()` function escapes HTML first, then applies regex transforms — no third-party markdown library is used.
-- **Evidence panel state is keyed by `call_id`**: A `Map` in `app.js` tracks evidence cards so `tool_call` and `tool_result` events can be correlated.
-- **Error display uses CSS variables**: Errors are injected as `<p style="color: var(--error)">` elements rather than through a dedicated error class.
-- **Static asset cache-busting**: Both `styles.css` and `app.js` are loaded with query-string version stamps (`?v=20260805-chat-layout`) in `index.html`.
+- **Single stylesheet**: All styling must go into `products/operator-portal/web-ui/styles.css`; there is no CSS module, SCSS, or split-file convention.
+- **CSS variables for all visuals**: Colors, borders, and radius should be expressed through the `--*` custom properties defined in `:root`, not hardcoded hex values scattered through selectors (the existing file follows this pattern consistently).
+- **Semantic HTML structure**: The page skeleton uses `<header>`, `<main>`, `<footer>`, and `<details>` for collapsible sections; new UI should follow the same pattern.
+- **Class naming**: Use descriptive kebab-case class names grouped by region (shell, messages, controls, settings, evidence); avoid generic utility classes.
+- **No external dependencies**: Do not import third-party CSS/JS libraries unless absolutely necessary; the portal is intentionally dependency-free and served statically by nginx.
+- **Evidence/audit rendering**: Per SPEC-011 R-4, tool evidence and audit trails are rendered as collapsed `.evidence-turn` groups inserted inline after the agent reply they ground, keeping provenance next to its answer without crowding the response.
+- **Markdown output**: Agent responses are rendered through the built-in `renderMarkdown` and styled via `.md-content`; do not inject raw HTML from untrusted sources without escaping.

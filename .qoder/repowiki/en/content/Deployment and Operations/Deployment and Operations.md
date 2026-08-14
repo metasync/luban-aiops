@@ -10,6 +10,8 @@
 - [products/identity-broker/Makefile](file://products/identity-broker/Makefile)
 - [products/tool-gateway/Dockerfile](file://products/tool-gateway/Dockerfile)
 - [products/tool-gateway/Makefile](file://products/tool-gateway/Makefile)
+- [products/audit-service/Dockerfile](file://products/audit-service/Dockerfile)
+- [products/audit-service/src/audit_service/core/config.py](file://products/audit-service/src/audit_service/core/config.py)
 - [mk/image.mk](file://mk/image.mk)
 - [mk/python.mk](file://mk/python.mk)
 - [shared/platform-ops/gitops/dev-k8s/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
@@ -19,19 +21,24 @@
 - [shared/platform-ops/gitops/select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
+- [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 - [shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/dashscope/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/configmap.yaml)
-- [shared/platform-ops/gitops/runtime-profiles/dashscope/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/configmap.yaml)
+- [shared/platform-ops/gitops/runtime-profiles/dashscope/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/kustomization.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/deepseek/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/configmap.yaml)
-- [shared/platform-ops/gitops/runtime-profiles/deepseek/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/configmap.yaml)
+- [shared/platform-ops/gitops/runtime-profiles/deepseek/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/kustomization.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/shared/observability.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/observability.env)
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env)
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml)
+- [shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml)
+- [shared/platform-ops/gitops/dev-k8s/base/infra/postgres-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/postgres-service.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-service.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
@@ -42,6 +49,8 @@
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/policy.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml)
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-service.yaml)
 - [shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 - [products/agent-platform/src/agent_service/core/metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [products/agent-platform/src/agent_service/core/observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
@@ -58,11 +67,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for delegation secret auto-provisioning via sync-delegation-secrets.sh script
-- Enhanced GitOps workflow documentation for cross-service authentication tokens
-- Updated secrets management section with new delegation secret provisioning process
-- Added detailed explanation of token delegation chain between platform-gateway and identity-broker
-- Updated operational procedures to include delegation secret synchronization steps
+- Added comprehensive documentation for the new audit-service component with PostgreSQL backend support
+- Enhanced Kubernetes infrastructure section with PostgreSQL StatefulSet requirements and headless service configuration
+- Updated secrets management section with audit secrets synchronization via sync-audit-secrets.sh script
+- Added detailed explanation of audit event ingestion workflow and client authentication mechanisms
+- Updated operational procedures to include audit service deployment, secret provisioning, and monitoring setup
+- Integrated OpenID Connect client reconciliation for portal authentication with Keycloak integration
 
 ## Table of Contents
 1. Introduction
@@ -77,11 +87,11 @@
 10. Appendices
 
 ## Introduction
-This document provides comprehensive deployment and operations guidance for the Luban AIOps Platform. It focuses on Kubernetes deployment using GitOps with Kustomize overlays, container build processes, image management, automation scripts, environment configuration, secrets management (including enhanced delegation secret auto-provisioning), scaling strategies, monitoring setup (Prometheus metrics, structured logging, health checks), operational procedures (updates, rollbacks, disaster recovery, capacity planning), performance tuning, resource optimization, and troubleshooting common issues.
+This document provides comprehensive deployment and operations guidance for the Luban AIOps Platform. It focuses on Kubernetes deployment using GitOps with Kustomize overlays, container build processes, image management, automation scripts, environment configuration, secrets management (including enhanced delegation secret auto-provisioning and audit secrets synchronization), scaling strategies, monitoring setup (Prometheus metrics, structured logging, health checks), operational procedures (updates, rollbacks, disaster recovery, capacity planning), performance tuning, resource optimization, and troubleshooting common issues.
 
 ## Project Structure
 The platform is organized into multiple products and shared operational assets:
-- Products: agent-platform, identity-broker, tool-gateway, operator-portal, platform-gateway
+- Products: agent-platform, identity-broker, tool-gateway, operator-portal, platform-gateway, audit-service
 - Shared ops: GitOps manifests under shared/platform-ops/gitops with base and runtime profiles
 - Build system: Makefiles per product and shared mk rules for images and Python packaging
 
@@ -93,12 +103,18 @@ IB["Identity Broker"]
 TG["Tool Gateway"]
 OP["Operator Portal"]
 PG["Platform Gateway"]
+AS["Audit Service"]
 end
 subgraph "Shared Ops"
 BASE["Kustomize Base"]
 OVL["Kustomize Overlays"]
 RP["Runtime Profiles"]
 DS["Delegation Secrets"]
+ASecrets["Audit Secrets"]
+end
+subgraph "Infrastructure"
+Redis["Redis"]
+Postgres["PostgreSQL"]
 end
 subgraph "Build System"
 MK["mk/image.mk<br/>mk/python.mk"]
@@ -109,15 +125,20 @@ IB --> BASE
 TG --> BASE
 OP --> BASE
 PG --> BASE
+AS --> BASE
 BASE --> OVL
 RP --> OVL
 DS --> OVL
+ASecrets --> OVL
+Redis --> AS
+Postgres --> AS
 PMK --> MK
 PMK --> AP
 PMK --> IB
 PMK --> TG
 PMK --> OP
 PMK --> PG
+PMK --> AS
 ```
 
 **Diagram sources**
@@ -129,6 +150,7 @@ PMK --> PG
 - [products/agent-platform/Makefile](file://products/agent-platform/Makefile)
 - [products/identity-broker/Makefile](file://products/identity-broker/Makefile)
 - [products/tool-gateway/Makefile](file://products/tool-gateway/Makefile)
+- [products/audit-service/Dockerfile](file://products/audit-service/Dockerfile)
 
 **Section sources**
 - [README.md](file://README.md)
@@ -141,20 +163,22 @@ PMK --> PG
 - Agent Platform: Provides agent runtime services, session management, and provider integrations. Exposes metrics and observability hooks.
 - Identity Broker: Handles authentication, token issuance, and identity context propagation. Supports token delegation and exchange operations.
 - Tool Gateway: API gateway enforcing policies, routing to agents/tools, and exposing metrics and observability hooks.
-- Operator Portal: Web UI for operators to manage platform resources and configurations.
+- Operator Portal: Web UI for operators to manage platform resources and configurations with OIDC authentication.
 - Platform Gateway: Central gateway that handles user authentication and delegates tokens to downstream services through the identity broker.
+- **Audit Service**: Durable audit trail service that ingests, stores, and queries audit events from all platform components with PostgreSQL persistence.
 
 Key operational artifacts:
 - Dockerfiles per product define container images.
 - Product Makefiles orchestrate builds and pushes.
 - mk/image.mk and mk/python.mk provide reusable build targets.
 - Kustomize base defines Kubernetes resources; overlays select runtime profiles and apply environment-specific patches.
-- Shell scripts automate deployment, secret synchronization, profile selection, verification, and delegation secret provisioning.
+- Shell scripts automate deployment, secret synchronization, profile selection, verification, delegation secret provisioning, and audit secret management.
 
 **Section sources**
 - [products/agent-platform/Dockerfile](file://products/agent-platform/Dockerfile)
 - [products/identity-broker/Dockerfile](file://products/identity-broker/Dockerfile)
 - [products/tool-gateway/Dockerfile](file://products/tool-gateway/Dockerfile)
+- [products/audit-service/Dockerfile](file://products/audit-service/Dockerfile)
 - [products/agent-platform/Makefile](file://products/agent-platform/Makefile)
 - [products/identity-broker/Makefile](file://products/identity-broker/Makefile)
 - [products/tool-gateway/Makefile](file://products/tool-gateway/Makefile)
@@ -162,23 +186,24 @@ Key operational artifacts:
 - [mk/python.mk](file://mk/python.mk)
 
 ## Architecture Overview
-The platform deploys as a set of Kubernetes workloads orchestrated via Kustomize. The GitOps workflow uses overlays to compose base manifests with environment-specific settings and runtime profiles. Enhanced with automated delegation secret provisioning for secure cross-service communication.
+The platform deploys as a set of Kubernetes workloads orchestrated via Kustomize. The GitOps workflow uses overlays to compose base manifests with environment-specific settings and runtime profiles. Enhanced with automated delegation secret provisioning for secure cross-service communication and durable audit trail storage.
 
 ```mermaid
 graph TB
 DevOps["Developer / CI"]
 Git["Git Repository"]
 Kustomize["Kustomize Overlay"]
-Secrets["Delegation Secrets"]
+Secrets["Delegation & Audit Secrets"]
 K8s["Kubernetes Cluster"]
 subgraph "Base Manifests"
 BaseNS["Namespace"]
-BaseInfra["Redis Deployment/Service"]
+BaseInfra["Redis & PostgreSQL StatefulSets"]
 BaseAP["Agent Service Deployment/Service"]
 BaseIB["Identity Service Deployment/Service"]
 BaseTG["API Gateway Deployment/Service"]
 BaseOP["Web UI Deployment/Service"]
 BasePG["Platform Gateway Deployment/Service"]
+BaseAS["Audit Service Deployment/Service"]
 end
 subgraph "Runtime Profiles"
 ProfileOpenAI["OpenAI ConfigMap"]
@@ -195,6 +220,7 @@ Kustomize --> BaseIB
 Kustomize --> BaseTG
 Kustomize --> BaseOP
 Kustomize --> BasePG
+Kustomize --> BaseAS
 Kustomize --> ProfileOpenAI
 Kustomize --> ProfileDashScope
 Kustomize --> ProfileDeepSeek
@@ -205,10 +231,12 @@ Kustomize --> K8s
 **Diagram sources**
 - [shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
+- [shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/dashscope/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/configmap.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/deepseek/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/configmap.yaml)
@@ -241,6 +269,7 @@ Commit --> End(["End"])
 - [products/agent-platform/Dockerfile](file://products/agent-platform/Dockerfile)
 - [products/identity-broker/Dockerfile](file://products/identity-broker/Dockerfile)
 - [products/tool-gateway/Dockerfile](file://products/tool-gateway/Dockerfile)
+- [products/audit-service/Dockerfile](file://products/audit-service/Dockerfile)
 - [products/agent-platform/Makefile](file://products/agent-platform/Makefile)
 - [products/identity-broker/Makefile](file://products/identity-broker/Makefile)
 - [products/tool-gateway/Makefile](file://products/tool-gateway/Makefile)
@@ -251,12 +280,13 @@ Commit --> End(["End"])
 - Base manifests define core resources (namespaces, services, deployments, RBAC, policies).
 - Runtime profiles inject model provider configurations via ConfigMaps.
 - Overlays select profiles and apply environment-specific patches.
-- Scripts automate deploy, profile selection, secret sync, verification, and delegation secret provisioning.
+- Scripts automate deploy, profile selection, secret sync, verification, delegation secret provisioning, and audit secret management.
 
 Operational steps:
 - Select runtime profile using the provided script.
 - Sync runtime secrets to the cluster.
 - Provision delegation secrets for cross-service authentication.
+- Provision audit secrets for audit event ingestion.
 - Deploy overlay to the target cluster.
 - Verify runtime profile and health endpoints.
 
@@ -265,11 +295,14 @@ sequenceDiagram
 participant Dev as "Developer"
 participant Script as "deploy-overlay.sh"
 participant Delegation as "sync-delegation-secrets.sh"
+participant Audit as "sync-audit-secrets.sh"
 participant Kustomize as "Kustomize"
 participant K8s as "Kubernetes"
 Dev->>Script : Run deploy-overlay.sh
 Script->>Delegation : Provision delegation secrets
 Delegation->>K8s : Create/update secrets
+Script->>Audit : Provision audit secrets
+Audit->>K8s : Create/update secrets
 Script->>Kustomize : kustomize build <overlay>
 Kustomize-->>Script : Rendered manifests
 Script->>K8s : kubectl apply -f <rendered>
@@ -279,6 +312,7 @@ K8s-->>Dev : Resources created/updated
 **Diagram sources**
 - [shared/platform-ops/gitops/deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
+- [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [shared/platform-ops/gitops/dev-k8s/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
 
@@ -289,6 +323,7 @@ K8s-->>Dev : Resources created/updated
 - [shared/platform-ops/gitops/select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
+- [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 
 ### Environment Configuration and Secrets Management
@@ -297,19 +332,23 @@ K8s-->>Dev : Resources created/updated
 - Runtime secrets are synchronized via dedicated scripts.
 - OIDC client reconciliation is supported by a helper script.
 - **Enhanced**: Delegation secrets are automatically provisioned for secure cross-service authentication.
+- **New**: Audit secrets are automatically provisioned for audit event ingestion across all platform components.
 
 Best practices:
 - Keep sensitive values out of version control; use secret sync scripts to populate secure stores.
 - Separate non-sensitive config from secrets.
 - Validate overlays before applying to prevent misconfiguration.
 - Use delegation secret provisioning to ensure consistent service-to-service authentication.
+- Use audit secret provisioning to ensure consistent audit event ingestion credentials.
 
 ```mermaid
 flowchart TD
 EnvFiles["Environment Files"] --> Overlay["Kustomize Overlay"]
 Secrets["Runtime Secrets"] --> SecretSync["sync-runtime-secret.sh"]
 DelegationSecrets["Delegation Secrets"] --> DelegationSync["sync-delegation-secrets.sh"]
+AuditSecrets["Audit Secrets"] --> AuditSync["sync-audit-secrets.sh"]
 DelegationSync --> K8sSecrets["Cluster Secrets"]
+AuditSync --> K8sSecrets
 SecretSync --> K8sSecrets
 Overlay --> K8sApply["kubectl apply"]
 K8sApply --> Pods["Pod Environments"]
@@ -321,8 +360,10 @@ K8sSecrets --> Pods
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
+- [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 
 **Section sources**
@@ -330,8 +371,10 @@ K8sSecrets --> Pods
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
+- [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 
 ### Token Delegation and Cross-Service Authentication
@@ -372,36 +415,83 @@ PG-->>User : Response
 - [shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env)
 
+### Audit Event Ingestion and Storage
+**New Section** The audit service provides durable audit trail storage with PostgreSQL backend and supports ingestion from all platform components.
+
+The audit service implements a comprehensive audit trail system:
+
+- **Event Ingestion**: All platform components emit audit events to the audit-service via authenticated HTTP endpoints
+- **Client Authentication**: Static client registry validates ingest requests using shared secrets
+- **PostgreSQL Persistence**: Durable storage with configurable retention policies and automatic eviction
+- **Query Interface**: REST API for querying audit events with filtering capabilities
+- **Health Monitoring**: Readiness and liveness probes for reliable operation
+
+```mermaid
+sequenceDiagram
+participant TG as "Tool Gateway"
+participant PG as "Platform Gateway"
+participant IB as "Identity Broker"
+participant AS as "Audit Service"
+participant DB as "PostgreSQL"
+Note over TG,DB : Audit Event Flow
+TG->>AS : POST /api/v1/audit/events (with auth)
+PG->>AS : POST /api/v1/audit/events (with auth)
+IB->>AS : POST /api/v1/audit/events (with auth)
+AS->>DB : Store audit event
+DB-->>AS : Confirmation
+AS-->>TG : 201 Created
+AS-->>PG : 201 Created
+AS-->>IB : 201 Created
+```
+
+**Diagram sources**
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml)
+- [shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml)
+- [products/audit-service/src/audit_service/core/config.py](file://products/audit-service/src/audit_service/core/config.py)
+
+**Section sources**
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml)
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env)
+- [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
+- [products/audit-service/src/audit_service/core/config.py](file://products/audit-service/src/audit_service/core/config.py)
+
 ### Scaling Strategies
 - Horizontal Pod Autoscaler (HPA): Configure based on CPU/memory utilization or custom metrics exposed by services.
 - Vertical Pod Autoscaler (VPA): Review recommended resource requests/limits periodically.
 - Replicas: Adjust deployment replicas per service workload characteristics.
 - Stateful components: Ensure Redis sizing and persistence align with expected load.
+- **Database Scaling**: Monitor PostgreSQL StatefulSet performance and consider read replicas for high-volume audit scenarios.
 
 Guidelines:
 - Set resource requests and limits conservatively; monitor actual usage.
-- Use separate HPA targets for stateless services (agent-platform, identity-broker, tool-gateway, platform-gateway).
+- Use separate HPA targets for stateless services (agent-platform, identity-broker, tool-gateway, platform-gateway, audit-service).
 - Monitor autoscaling events and adjust thresholds to avoid flapping.
+- Size PostgreSQL volumes appropriately for audit data retention requirements.
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
+- [shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml)
 
 ### Monitoring Setup: Prometheus Metrics, Structured Logging, Health Checks
 - Each service exposes metrics and observability hooks through dedicated modules.
 - Structured logging should be enabled via environment configuration.
 - Health check endpoints are defined for readiness/liveness probes.
+- **Audit Service Monitoring**: Prometheus scraping configured with specific metrics endpoint and port configuration.
 
 Implementation notes:
 - Integrate Prometheus scraping via ServiceMonitors or scrape configs targeting service ports.
 - Ensure metrics endpoints are reachable and not blocked by network policies.
 - Configure log levels and output formats consistently across services.
+- Monitor audit event ingestion rates and database performance metrics.
 
 ```mermaid
 graph TB
-Services["Agent Platform / Identity Broker / Tool Gateway / Platform Gateway"]
+Services["Agent Platform / Identity Broker / Tool Gateway / Platform Gateway / Audit Service"]
 Metrics["Metrics Endpoint"]
 Logs["Structured Logs"]
 Health["Health Endpoints"]
@@ -421,6 +511,7 @@ Grafana --> Prometheus
 - [products/identity-broker/src/identity_service/core/observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
 - [products/tool-gateway/src/api_gateway/core/metrics.py](file://products/tool-gateway/src/api_gateway/core/metrics.py)
 - [products/tool-gateway/src/api_gateway/core/observability.py](file://products/tool-gateway/src/api_gateway/core/observability.py)
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml)
 
 ### Operational Procedures: Updates, Rollbacks, Disaster Recovery, Capacity Planning
 - Updates:
@@ -428,28 +519,33 @@ Grafana --> Prometheus
   - Apply overlay changes; verify rollout status.
   - Validate health endpoints and metrics.
   - Re-provision delegation secrets if service credentials change.
+  - Re-provision audit secrets if audit ingestion credentials change.
 - Rollbacks:
   - Revert overlay commits to previous known-good tags.
   - Apply reverted overlay; confirm rollback success.
   - Restore delegation secrets if needed.
+  - Restore audit secrets if needed.
 - Disaster Recovery:
-  - Back up persistent data (e.g., Redis volumes).
+  - Back up persistent data (e.g., Redis volumes, PostgreSQL data).
   - Restore from backups and reapply overlays.
   - Re-provision delegation secrets and validate service connectivity.
+  - Re-provision audit secrets and validate audit ingestion.
   - Confirm data integrity and service functionality.
 - Capacity Planning:
   - Analyze metrics trends and resource utilization.
   - Scale horizontally or vertically based on observed demand.
   - Plan node pool sizing and cluster upgrades.
+  - Monitor PostgreSQL storage growth for audit data retention.
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
 - [shared/platform-ops/gitops/deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
+- [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 
 ## Dependency Analysis
-The platform's dependencies span build tools, container images, Kubernetes resources, runtime profiles, and delegation secret management.
+The platform's dependencies span build tools, container images, Kubernetes resources, runtime profiles, delegation secret management, and audit secret management.
 
 ```mermaid
 graph LR
@@ -459,15 +555,18 @@ APMake["products/agent-platform/Makefile"] --> APDocker["products/agent-platform
 IBMake["products/identity-broker/Makefile"] --> IBDocker["products/identity-broker/Dockerfile"]
 TGMake["products/tool-gateway/Makefile"] --> TGDocker["products/tool-gateway/Dockerfile"]
 PGMake["products/platform-gateway/Makefile"] --> PGDocker["products/platform-gateway/Dockerfile"]
+ASMake["products/audit-service/Makefile"] --> ASDocker["products/audit-service/Dockerfile"]
 BaseKust["base/kustomization.yaml"] --> Infra["infra/*"]
 BaseKust --> APRes["agent-platform/*"]
 BaseKust --> IBRes["identity-broker/*"]
 BaseKust --> TGRes["tool-gateway/*"]
 BaseKust --> OPRes["operator-portal/*"]
 BaseKust --> PGRes["platform-gateway/*"]
+BaseKust --> ASRes["audit-service/*"]
 OverlayKust["dev-k8s/kustomization.yaml"] --> BaseKust
 OverlayKust --> Profiles["runtime-profiles/*"]
 OverlayKust --> Delegation["sync-delegation-secrets.sh"]
+OverlayKust --> AuditSecrets["sync-audit-secrets.sh"]
 ```
 
 **Diagram sources**
@@ -477,6 +576,7 @@ OverlayKust --> Delegation["sync-delegation-secrets.sh"]
 - [products/agent-platform/Makefile](file://products/agent-platform/Makefile)
 - [products/identity-broker/Makefile](file://products/identity-broker/Makefile)
 - [products/tool-gateway/Makefile](file://products/tool-gateway/Makefile)
+- [products/audit-service/Dockerfile](file://products/audit-service/Dockerfile)
 - [shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
 - [shared/platform-ops/gitops/dev-k8s/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml)
@@ -506,6 +606,10 @@ OverlayKust --> Delegation["sync-delegation-secrets.sh"]
 - Token Delegation Performance:
   - Monitor delegation cache hit rates to optimize token refresh intervals.
   - Consider workload identity for reduced authentication overhead in production.
+- **Audit Service Performance**:
+  - Monitor PostgreSQL query performance and connection pooling.
+  - Tune audit event batch sizes and eviction intervals based on ingestion volume.
+  - Consider read replicas for high-volume audit query scenarios.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -515,6 +619,7 @@ Common issues and resolutions:
 - Secrets not applied:
   - Ensure secret sync script runs successfully and secrets exist in the target namespace.
   - Verify delegation secrets are properly provisioned for cross-service authentication.
+  - Verify audit secrets are properly provisioned for audit event ingestion.
 - Health checks failing:
   - Confirm health endpoints are reachable and returning expected responses.
 - Metrics not scraped:
@@ -525,21 +630,28 @@ Common issues and resolutions:
   - Check delegation secret consistency between platform-gateway and identity-broker.
   - Verify workload identity configuration if using projected tokens.
   - Monitor delegation exchange metrics for failure patterns.
+- **Audit ingestion failures**:
+  - Check audit secret consistency between emitters and audit-service.
+  - Verify PostgreSQL connectivity and database availability.
+  - Monitor audit event ingestion metrics and error rates.
+  - Check audit service health endpoints and database connection status.
 
 Operational commands:
 - Use deploy scripts to apply overlays and reconcile resources.
 - Use verification scripts to validate runtime profiles and health.
 - Use delegation secret provisioning script to ensure consistent service credentials.
+- Use audit secret provisioning script to ensure consistent audit ingestion credentials.
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
 - [shared/platform-ops/gitops/deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
+- [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 
 ## Conclusion
-This guide outlines the end-to-end deployment and operations for the Luban AIOps Platform using GitOps and Kustomize. By following the documented processes for building images, managing overlays, configuring environments, provisioning delegation secrets, and setting up monitoring, teams can reliably operate the platform at scale. The enhanced delegation secret auto-provisioning ensures secure cross-service authentication while maintaining operational simplicity. Continuous validation, robust secret management, proactive capacity planning, and careful monitoring of token delegation flows are essential for maintaining stability and performance.
+This guide outlines the end-to-end deployment and operations for the Luban AIOps Platform using GitOps and Kustomize. By following the documented processes for building images, managing overlays, configuring environments, provisioning delegation secrets, synchronizing audit secrets, and setting up monitoring, teams can reliably operate the platform at scale. The enhanced delegation secret auto-provisioning ensures secure cross-service authentication while maintaining operational simplicity. The new audit service provides durable audit trail storage with PostgreSQL persistence, enabling comprehensive compliance and security monitoring. Continuous validation, robust secret management, proactive capacity planning, and careful monitoring of token delegation flows and audit ingestion are essential for maintaining stability and performance.
 
 ## Appendices
 
@@ -547,15 +659,17 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - deploy-overlay.sh: Builds and applies Kustomize overlays to the cluster.
 - select-runtime-profile.sh: Chooses the appropriate runtime profile for model providers.
 - sync-runtime-secret.sh: Synchronizes runtime secrets into the cluster securely.
-- **sync-delegation-secrets.sh**: Automatically provisions delegation secrets for cross-service authentication between platform-gateway and identity-broker.
+- sync-delegation-secrets.sh: Automatically provisions delegation secrets for cross-service authentication between platform-gateway and identity-broker.
+- **sync-audit-secrets.sh**: Automatically provisions audit secrets for audit event ingestion across all platform components.
 - verify-runtime-profile.sh: Validates that the active runtime profile matches expectations.
-- reconcile-portal-oidc-client.sh: Ensures OIDC client configuration remains consistent.
+- reconcile-portal-oidc-client.sh: Ensures OIDC client configuration remains consistent with Keycloak.
 
 **Section sources**
 - [shared/platform-ops/gitops/deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
 - [shared/platform-ops/gitops/select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
+- [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 - [shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 
@@ -563,6 +677,7 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - Observability settings centralized in a shared env file.
 - Per-service runtime configs mounted via env files.
 - **Delegation configuration**: PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET and IDENTITY_SERVICE_CLIENTS must match for secure token delegation.
+- **Audit configuration**: AUDIT_STORE_BACKEND=postgres, AUDIT_DB_URL for PostgreSQL connection, AUDIT_RETENTION_DAYS for data retention policy.
 - **Workload identity**: PLATFORM_GATEWAY_WORKLOAD_TOKEN_PATH for production deployments preferring projected tokens over static secrets.
 - Ensure consistency across environments by pinning versions and tags.
 
@@ -571,6 +686,7 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env)
 
@@ -600,3 +716,58 @@ SKIP_DELEGATION_SECRETS=true make deploy
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env)
+
+### Appendix D: Audit Secret Management
+**New Section** Comprehensive audit secret management for secure audit event ingestion.
+
+The audit secret system ensures secure audit event ingestion from all platform components:
+
+- **Centralized Secret Generation**: The sync-audit-secrets.sh script generates a single shared secret for all audit emitters
+- **Multi-Component Integration**: Supports tool-gateway, platform-gateway, and identity-broker as audit event emitters
+- **Static Client Registry**: Audit-service maintains a registry of authorized clients with their corresponding secrets
+- **Automatic Workload Restart**: Script automatically restarts affected deployments after secret updates
+
+Usage:
+```bash
+# Generate and provision audit secrets
+./shared/platform-ops/gitops/sync-audit-secrets.sh dev-luban-aiops
+
+# Override with specific secret
+AUDIT_INGEST_SECRET=my-audit-secret ./shared/platform-ops/gitops/sync-audit-secrets.sh dev-luban-aiops
+
+# Skip in CI when secrets are injected externally
+SKIP_AUDIT_SECRETS=true make deploy
+```
+
+Configuration details:
+- **AUDIT_INGEST_CLIENTS**: Comma-separated list of client_id=secret pairs for authorized emitters
+- **Per-emitter secrets**: GATEWAY_AUDIT_CLIENT_SECRET, PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET, IDENTITY_AUDIT_CLIENT_SECRET
+- **PostgreSQL backend**: AUDIT_STORE_BACKEND=postgres with connection string in AUDIT_DB_URL
+- **Retention policy**: AUDIT_RETENTION_DAYS controls how long audit events are stored
+
+**Section sources**
+- [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env)
+- [products/audit-service/src/audit_service/core/config.py](file://products/audit-service/src/audit_service/core/config.py)
+
+### Appendix E: PostgreSQL Infrastructure
+**New Section** PostgreSQL StatefulSet configuration for audit service persistence.
+
+The audit service requires PostgreSQL for durable audit trail storage:
+
+- **StatefulSet Configuration**: Single replica with persistent volume claim for data durability
+- **Headless Service**: Enables stable DNS names for StatefulSet pod discovery
+- **Development Credentials**: Pre-configured with development database, user, and password
+- **Volume Management**: Persistent volume with 1Gi storage allocation for audit data
+
+Production considerations:
+- Replace development credentials with proper secrets management
+- Configure appropriate storage classes and backup strategies
+- Monitor database performance and scale storage as needed
+- Consider read replicas for high-volume audit query scenarios
+
+**Section sources**
+- [shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml)
+- [shared/platform-ops/gitops/dev-k8s/base/infra/postgres-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/postgres-service.yaml)
+- [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)

@@ -1,4 +1,0 @@
-- Each Python product exposes an `app.py` entrypoint, a `main.py` bootstrap, and a `metadata.py` module describing version/runtime info, mirroring the same structure across agent-platform, identity-broker, platform-gateway, and tool-gateway.
-- Cross-service requests and events are validated against JSON schemas stored in `shared/shared-contracts/schemas/` rather than hand-rolled validation logic.
-- Policy enforcement in gateway products loads the canonical `policy-default.yaml` from `shared/shared-contracts/policies/` and keeps local copies in sync via `make sync-policy`.
-- Per-product Dockerfiles inherit from the shared `base-uv` image and use `uv` for dependency installation, keeping runtime environments consistent across services.

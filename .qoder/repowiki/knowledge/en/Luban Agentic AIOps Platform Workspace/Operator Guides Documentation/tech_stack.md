@@ -1,1 +1,0 @@
-Markdown documentation authored for the project's static site / docs portal; includes Mermaid diagrams to illustrate service topology and request flows.

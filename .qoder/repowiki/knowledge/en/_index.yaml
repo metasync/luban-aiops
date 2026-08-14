@@ -3,22 +3,23 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-08-11T15:17:44Z"
+exported_at: "2026-08-13T17:19:30Z"
 modules:
     "":
-        dir_name: Luban Agentic AIOps Platform Workspace
-        title: Luban Agentic AIOps Platform Workspace
+        dir_name: Agentic AI Platform Monorepo
+        title: Agentic AI Platform Monorepo
         scope: []
         source_files: []
         children:
-            - guides
+            - audit_service
         depends_on: []
         related_to: []
-    guides:
-        dir_name: Operator Guides Documentation
-        title: Operator Guides Documentation
+    audit_service:
+        dir_name: Audit Trail Service
+        title: Audit Trail Service
         scope:
-            - docs/guides/
+            - products/audit-service/
+            - shared/platform-ops/gitops/dev-k8s/base/audit-service/
         source_files: []
         children: []
         depends_on: []

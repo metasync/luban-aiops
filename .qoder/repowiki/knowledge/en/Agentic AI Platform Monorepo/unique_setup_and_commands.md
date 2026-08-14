@@ -1,0 +1,1 @@
+Top-level `Makefile` and `mk/*.mk` provide common build targets for all products; deployment is performed through `shared/platform-ops/gitops/dev-k8s/deploy.sh` and the `sync-runtime-secret.sh` / `sync-audit-secrets.sh` / `sync-delegation-secrets.sh` helpers that populate per-product secrets before applying Kustomize overlays.

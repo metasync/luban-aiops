@@ -16,13 +16,12 @@
 
 ## Update Summary
 **Changes Made**
-- Replaced separate evidence drawer with inline per-turn evidence system
-- Implemented turn-scoped state management with currentTurn object and evidenceTurns array
-- Added collapsible turn groups rendered directly after agent responses
-- Enhanced live call statistics with real-time status tracking (pending, success, error, denied)
-- Improved streaming behavior with sticky smart-scroll functionality
-- Updated CSS styling for enhanced visual hierarchy and improved user experience
-- Refined JavaScript logic for evidence panel state management and per-turn audit cards
+- Complete UI redesign from single-column chat interface to professional two-column shell layout with persistent sidebar
+- Implementation of role-gated audit trail access with security context enforcement
+- Enhanced responsive design with mobile-first approach and off-canvas drawer navigation
+- Comprehensive accessibility improvements including WCAG 2.1 AA compliance
+- Integration of durable audit trail view with filtering and pagination capabilities
+- Enhanced user identity management with avatar system and role-based UI elements
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -30,24 +29,23 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Inline Per-Turn Evidence System](#inline-per-turn-evidence-system)
-7. [Authentication and Security](#authentication-and-security)
-8. [Markdown Rendering System](#markdown-rendering-system)
-9. [Real-time Streaming Interface](#real-time-streaming-interface)
-10. [Deployment Guide](#deployment-guide)
-11. [UI Customization](#ui-customization)
-12. [Accessibility Features](#accessibility-features)
-13. [Browser Compatibility](#browser-compatibility)
-14. [Troubleshooting Guide](#troubleshooting-guide)
-15. [Conclusion](#conclusion)
+6. [Two-Column Shell Layout](#two-column-shell-layout)
+7. [Role-Gated Audit Trail System](#role-gated-audit-trail-system)
+8. [Authentication and Security](#authentication-and-security)
+9. [Markdown Rendering System](#markdown-rendering-system)
+10. [Real-time Streaming Interface](#real-time-streaming-interface)
+11. [Deployment Guide](#deployment-guide)
+12. [UI Customization](#ui-customization)
+13. [Accessibility Features](#accessibility-features)
+14. [Browser Compatibility](#browser-compatibility)
+15. [Troubleshooting Guide](#troubleshooting-guide)
+16. [Conclusion](#conclusion)
 
 ## Introduction
 
-The Operator Portal is a modern web-based administrative interface designed for platform administration and monitoring within the Luban AIOPS ecosystem. Built with vanilla JavaScript and HTML/CSS, it provides operators with a sophisticated chat-based interface for interacting with AI agents, monitoring service health, tracking resource utilization, and managing operational controls across the platform's microservices architecture.
+The Operator Portal is a modern web-based administrative interface designed for platform administration and monitoring within the Luban AIOPS ecosystem. Built with vanilla JavaScript and HTML/CSS, it provides operators with a sophisticated two-column shell interface featuring a persistent sidebar for navigation and a main content area for interactive operations. The portal serves as a centralized control plane for platform administrators, offering real-time visibility into system status through an interactive chat interface, comprehensive evidence panels for tool execution tracking, configuration management capabilities, and administrative functions necessary for maintaining the AI-powered agent platform infrastructure.
 
-The portal serves as a centralized control plane for platform administrators, offering real-time visibility into system status through an interactive chat interface, comprehensive evidence panels for tool execution tracking, configuration management capabilities, and administrative functions necessary for maintaining the AI-powered agent platform infrastructure.
-
-**Updated** The portal now features a significantly enhanced inline per-turn evidence system that replaces the previous separate evidence drawer. The new implementation provides turn-scoped state management, collapsible turn groups rendered directly after agent responses, live call statistics with real-time status tracking, and improved streaming behavior with sticky smart-scroll functionality that respects user reading positions.
+**Updated** The portal has undergone a complete UI redesign transforming from a single-column chat interface to a professional two-column shell layout with a persistent sidebar containing branding, identity management, and function navigation. The new design includes role-gated audit trail access, enhanced responsive design with mobile-first approach, and comprehensive accessibility features meeting WCAG 2.1 AA standards.
 
 ## Project Structure
 
@@ -89,6 +87,7 @@ I --> K
 The Operator Portal consists of several key components that work together to provide a comprehensive administrative interface:
 
 ### Frontend Architecture
+- **Two-Column Shell Layout**: Professional interface with persistent sidebar and main content area
 - **Chat-Based Interface**: Modern single-page application with real-time streaming responses
 - **Inline Per-Turn Evidence System**: Sophisticated turn-scoped evidence grouping with collapsible groups rendered directly after agent responses
 - **Authentication System**: OIDC integration with automatic token refresh and session management
@@ -101,20 +100,19 @@ The Operator Portal consists of several key components that work together to pro
 - **Session Management**: Persistent session handling with automatic refresh mechanisms
 - **Error Handling**: Comprehensive error management with user-friendly feedback
 
-### Enhanced Inline Evidence System
-- **Per-turn Evidence Grouping**: Organized evidence by conversation turns with collapsible groups rendered inline
-- **Turn-based Organization**: Each conversation turn maintains its own evidence context and state using currentTurn object
-- **Live Status Metrics**: Real-time counters for pending, success, error, and denied states with formatCounts function
-- **Per-turn Audit Cards**: Comprehensive aggregation of tool executions per conversation turn with tabular display
-- **Sticky Smart-scroll**: Intelligent scrolling behavior that respects user reading position during streaming
-- **Metadata Display**: Source systems, duration, risk levels, and execution timestamps
+### Enhanced User Interface
+- **Persistent Sidebar**: Branding, identity management, and function navigation
+- **User Card System**: Avatar display with initials, username badge, and role information
+- **Role-Based Navigation**: Conditional visibility of audit trail based on user roles
+- **Mobile Drawer**: Off-canvas navigation for narrow screens with hamburger menu
+- **Settings & Debug Panel**: Configuration management and debugging tools
 
 ### Deployment Components
 - **Container Image**: Dockerized application using nginxinc/nginx-unprivileged:1.27-alpine for non-root execution
 - **Kubernetes Resources**: Deployment and service definitions with enhanced security context
 - **Configuration Management**: Environment-specific settings and secrets
 
-**Updated** The evidence panel system has been completely redesigned as an inline per-turn evidence system with turn-scoped state management, collapsible turn groups rendered directly after agent responses, live status metrics, per-turn audit cards, and intelligent streaming behavior with sticky smart-scroll functionality.
+**Updated** The interface has been completely redesigned with a professional two-column shell layout featuring a persistent sidebar for navigation and identity management, role-gated audit trail access, and comprehensive responsive design supporting both desktop and mobile experiences.
 
 **Section sources**
 - [app.js](file://products/operator-portal/web-ui/app.js)
@@ -163,16 +161,29 @@ The architecture emphasizes simplicity, performance, and maintainability while p
 
 ### HTML Structure and Layout
 
-The main HTML document defines the semantic structure of the operator portal, organizing content into logical sections for the chat-based interface:
+The main HTML document defines the semantic structure of the operator portal with a professional two-column shell layout:
 
-- **Top Bar**: Navigation, user authentication status, and global controls
-- **Chat Main Area**: Primary interaction space with message history and real-time streaming where evidence groups are rendered inline
-- **Input Bar**: Fixed bottom input area for prompts and commands
-- **Settings Drawer**: Collapsible configuration panel for debugging and setup
+- **App Shell**: Grid-based layout with fixed-width sidebar and flexible main content area
+- **Sidebar**: Persistent navigation panel with branding, user identity, and function list
+- **Main Area**: Content area displaying one function view at a time (chat, settings, audit)
+- **Mobile Top Bar**: Hamburger menu and title for narrow screen navigation
+- **View Sections**: Separate sections for chat workspace, settings/debug panel, and audit trail
 
 ### JavaScript Application Logic
 
 The JavaScript application implements core functionality including:
+
+#### Two-Column Shell Navigation
+- **View Management**: Show/hide different views while preserving state and history
+- **Sidebar Controls**: Mobile drawer toggle with backdrop and keyboard navigation
+- **Active State Management**: Visual indicators for current active view
+- **Role-Based Access Control**: Conditional visibility of audit trail based on user roles
+
+#### Enhanced User Identity System
+- **User Card Display**: Avatar with initials, username badge, and role information
+- **Popup Menu**: User-related actions and information in dropdown menu
+- **Login/Logout Actions**: Icon-only buttons with tooltip support
+- **Session Persistence**: Secure storage of authentication state in sessionStorage
 
 #### Chat Interface Management
 - **Real-time Streaming**: Server-Sent Events for live response updates
@@ -180,7 +191,7 @@ The JavaScript application implements core functionality including:
 - **Sticky Smart-scroll**: Intelligent scrolling that respects user reading position during streaming
 - **Input Handling**: Keyboard shortcuts and form validation
 
-#### Enhanced Inline Evidence System
+#### Inline Per-Turn Evidence System
 - **Per-turn Evidence Grouping**: Organizes evidence by conversation turns with collapsible groups rendered inline after agent responses
 - **Turn-based Organization**: Uses currentTurn object to track active conversation turn with anchor, group, body, summaryLine, counts, entries, and cardMap properties
 - **Evidence Turn Management**: Lazy creation of evidence groups on first tool frame with ensureCurrentTurn function
@@ -188,19 +199,13 @@ The JavaScript application implements core functionality including:
 - **Per-turn Audit Cards**: Comprehensive aggregation of tool executions with metadata display in tabular format
 - **Evidence Summary**: Dynamic summary line showing current turn statistics with collapsible details element
 
-#### Authentication State Management
-- **OIDC Integration**: Complete login flow with authorization code exchange
-- **Token Refresh**: Automatic background refresh 60 seconds before expiry
-- **Session Persistence**: Secure storage of authentication state in sessionStorage
-- **Identity Normalization**: Support for custom identity contexts and group membership
+#### Durable Audit Trail System
+- **Role-Gated Access**: Audit trail view hidden unless user has auditor or platform-admin roles
+- **Filtering Capabilities**: Username, event type, service, and date range filters
+- **Pagination Support**: Cursor-based pagination with load more functionality
+- **Event Detail View**: Expandable rows showing full event envelope JSON
 
-#### Markdown Rendering Engine
-- **Comprehensive Formatting**: Headers, lists, code blocks, tables, links, and blockquotes
-- **Syntax Highlighting**: Language-specific code block styling
-- **Security**: HTML escaping and safe content rendering
-- **Performance**: Efficient string processing and DOM manipulation
-
-**Updated** The evidence panel system has been completely redesigned as an inline per-turn evidence system with turn-scoped state management, collapsible turn groups rendered directly after agent responses, live status metrics, per-turn audit cards, and improved streaming behavior with sticky smart-scroll.
+**Updated** The interface now features a professional two-column shell layout with persistent sidebar navigation, role-gated audit trail access, enhanced user identity management with avatar system, and comprehensive responsive design supporting mobile devices with off-canvas drawer navigation.
 
 **Section sources**
 - [app.js](file://products/operator-portal/web-ui/app.js)
@@ -215,13 +220,20 @@ The styling system provides a comprehensive design foundation with:
 - **Spacing System**: Consistent margins and padding throughout
 - **Animation Effects**: Smooth transitions and loading indicators
 
+#### Two-Column Layout System
+- **Grid-Based Shell**: Fixed 230px sidebar with flexible main content area
+- **Responsive Breakpoints**: Mobile-first approach with off-canvas drawer below 800px
+- **Sidebar Styling**: Professional navigation with hover effects and active states
+- **Main Area**: Full-height content area with proper overflow handling
+
 #### Component Styles
+- **User Card**: Avatar display with initials, username badge, and role information
+- **Navigation Items**: Clean button styling with active state indicators
 - **Chat Messages**: Distinct styling for user and agent messages
 - **Inline Evidence Groups**: Professional collapsible interface with native browser details element behavior
-- **Per-turn Groups**: Enhanced styling for turn-based evidence organization with evidence-turn class
-- **Audit Cards**: Table-based layout for comprehensive tool execution tracking with audit-card class
+- **Audit Trail Table**: Responsive table with sticky headers and expandable detail rows
 - **Settings Panel**: Grid-based layout for configuration options
-- **Responsive Design**: Mobile-first approach with adaptive layouts
+- **Mobile Drawer**: Slide-in navigation with backdrop overlay
 
 #### Accessibility Features
 - **High Contrast**: WCAG 2.1 AA compliant color ratios
@@ -232,96 +244,103 @@ The styling system provides a comprehensive design foundation with:
 **Section sources**
 - [styles.css](file://products/operator-portal/web-ui/styles.css)
 
-## Inline Per-Turn Evidence System
+## Two-Column Shell Layout
 
-The Evidence Panel has been completely redesigned as an inline per-turn evidence grouping system with turn-based organization, providing superior accessibility and user experience for tool execution visualization.
+The Operator Portal features a professional two-column shell layout designed for optimal usability and information density.
 
-### Per-turn Evidence Grouping Architecture
+### Layout Architecture
 
-The evidence panel now uses a sophisticated per-turn grouping system that organizes evidence by conversation turns:
+The shell layout uses CSS Grid to create a fixed-width sidebar with a flexible main content area:
 
-- **Current Turn Management**: Uses `currentTurn` object to track the active conversation turn with properties including anchor, group, body, summaryLine, counts, entries, and cardMap
-- **Lazy Group Creation**: Evidence groups are created lazily on the first tool frame using ensureCurrentTurn function to avoid empty groups for purely conversational turns
-- **Collapsible Turn Groups**: Each turn is wrapped in a collapsible `<details>` element with evidence-turn class for better organization
-- **Automatic Turn Creation**: New turns are created at the start of each streamPrompt() call with fresh state
-- **Turn Lifecycle**: Turns are automatically cleaned up when stream completes or errors occur
+- **Sidebar Width**: Fixed 230px width providing consistent navigation space
+- **Main Area**: Flexible content area that adapts to available screen space
+- **Grid Template**: `grid-template-columns: 230px minmax(0, 1fr)` for responsive behavior
+- **Full Height**: Both columns span the full viewport height with proper overflow handling
 
-### Live Status Metrics
+### Sidebar Functionality
 
-The evidence system includes a dynamic summary line that provides real-time status information:
+The persistent sidebar contains three primary sections:
 
-- **Call Counters**: Total number of tool calls in the current turn tracked in currentTurn.counts.calls
-- **Status Breakdown**: Separate counts for pending, success, error, and denied states updated in real-time
-- **Real-time Updates**: Instant reflection of tool execution status changes through renderToolResult function
-- **Compact Display**: Condensed summary format using formatCounts function that fits in the evidence group summary
-- **Visual Indicators**: Color-coded status badges with pending (gray), success (green), error (red), and denied (red) states
+#### Branding and Identity
+- **Logo Display**: "Luban AIOps" branding with accent color styling
+- **User Card**: Interactive card showing user avatar, username, and role information
+- **Version Information**: Platform version display in footer section
 
-### Per-turn Audit Cards
+#### Navigation Menu
+- **Function List**: Chat, Settings & Debug, and Audit trail navigation items
+- **Active State**: Visual indicator showing current active view
+- **Stream Indicator**: Pulsing dot showing when chat streaming is active
+- **Role-Based Visibility**: Audit trail link hidden unless user has appropriate roles
 
-Each conversation turn generates a comprehensive audit card that aggregates all tool executions:
+#### Footer Section
+- **User Identity**: Persistent display of authenticated user with login/logout actions
+- **Platform Version**: Version information kept in sync with CHANGELOG milestones
+- **Auto-positioning**: Uses margin-top:auto to pin footer to bottom of sidebar
 
-- **Turn Aggregation**: Groups all tool calls from a single user prompt/response cycle in currentTurn.entries array
-- **Tabular Display**: Clean table format showing tool name, status, timing, and metadata with columns for tool, status, executed at, duration, risk, and source
-- **Request Context**: Includes session ID and request ID for traceability displayed in evidence-meta section
-- **Expandable Details**: Native collapsible behavior with details element for detailed inspection
-- **Metadata Display**: Source systems, duration, risk levels, and execution timestamps
+### Mobile Responsive Design
 
-### Sticky Smart-scroll Behavior
+For screens below 800px, the layout transforms to a mobile-first approach:
 
-The streaming interface now includes intelligent scrolling behavior:
-
-- **User Position Awareness**: Detects when users are near the bottom of the chat using isNearBottom function with threshold parameter
-- **Non-disruptive Scrolling**: Only auto-scrolls when users are actively reading using scrollToBottom function with force parameter
-- **Respectful Interaction**: Doesn't yank viewport away from content users are examining during streaming updates
-- **Smooth Experience**: Maintains natural reading flow during streaming updates with proper scroll positioning
-
-### Evidence Card Implementation
-
-```mermaid
-flowchart TD
-A[Tool Call Event] --> B{Create or Update Card}
-B --> |New| C[Create Evidence Card with details element]
-B --> |Existing| D[Update Existing Card]
-C --> E[Add Header with Tool Name]
-D --> F[Update Status Badge]
-E --> G[Add Parameters Section with details/summary]
-F --> H[Update Metadata]
-G --> I[Add Spinner if Pending]
-H --> J{Has Data Summary?}
-I --> K[Append to Turn Body]
-J --> |Yes| L[Add Collapsible Summary]
-J --> |No| M[Finalize Card]
-L --> M
-M --> N[Turn Group Visible]
-```
-
-**Diagram sources**
-- [app.js:472-597](file://products/operator-portal/web-ui/app.js#L472-L597)
-- [index.html:21-27](file://products/operator-portal/web-ui/index.html#L21-L27)
-
-### Status Management System
-
-The enhanced evidence panel tracks multiple execution states with visual indicators:
-
-- **Pending**: Initial state with spinner animation and gray badge, incremented in renderToolCall function
-- **Success**: Green badge indicating successful completion, decremented pending count in renderToolResult
-- **Error**: Red badge with error details and codes, displays error message in evidence-meta section
-- **Denied**: Security-related denials with policy enforcement context, styled with warning colors
-
-### Metadata and Context
-
-Each evidence card displays relevant execution metadata:
-
-- **Source Systems**: Originating service or component from evidence.source_system
-- **Duration Metrics**: Execution time in milliseconds from evidence.duration_ms
-- **Risk Levels**: Security classification of operations from evidence.risk_level
-- **Execution Timestamps**: When operations were performed from evidence.executed_at
-- **Audit Trail**: Comprehensive per-turn aggregation with renderAuditCard function
+- **Off-Canvas Drawer**: Sidebar slides in from left as overlay when hamburger menu is tapped
+- **Top Bar**: Compact header with hamburger button and title
+- **Backdrop Overlay**: Semi-transparent background when drawer is open
+- **Touch-Friendly**: Larger touch targets and swipe gestures support
 
 **Section sources**
-- [app.js:446-643](file://products/operator-portal/web-ui/app.js#L446-L643)
-- [index.html:21-27](file://products/operator-portal/web-ui/index.html#L21-L27)
-- [styles.css:322-445](file://products/operator-portal/web-ui/styles.css#L322-L445)
+- [index.html:14-77](file://products/operator-portal/web-ui/index.html#L14-L77)
+- [styles.css:41-77](file://products/operator-portal/web-ui/styles.css#L41-L77)
+- [styles.css:774-837](file://products/operator-portal/web-ui/styles.css#L774-L837)
+
+## Role-Gated Audit Trail System
+
+The Operator Portal implements a comprehensive audit trail system with role-based access control and advanced filtering capabilities.
+
+### Role-Based Access Control
+
+The audit trail view is protected by role-based access control:
+
+- **Required Roles**: Users must have either "auditor" or "platform-admin" roles to access audit trail
+- **Client-Side Gating**: Audit trail navigation item hidden unless user has required roles
+- **Server-Side Enforcement**: Gateway re-enforces audit:read permission on every request
+- **Automatic View Switching**: If user loses required roles, automatically switches back to chat view
+
+### Audit Trail Interface
+
+The audit trail provides comprehensive event inspection capabilities:
+
+#### Filter Toolbar
+- **Username Filter**: Search by specific username
+- **Event Type Filter**: Filter by event types (tool_invoked, policy_decision, token_exchange, etc.)
+- **Service Filter**: Filter by originating service (tool-gateway, platform-gateway, identity-service)
+- **Date Range Filters**: Since and until datetime-local inputs for temporal filtering
+- **Refresh Button**: Reload current filtered results
+
+#### Event Display
+- **Table Format**: Clean tabular display with columns for timestamp, type, service, outcome, actor, and request ID
+- **Expandable Details**: Click any row to reveal full event envelope JSON
+- **Status Indicators**: Color-coded outcomes with negative outcomes highlighted in red
+- **Pagination**: Cursor-based pagination with "Load more" button for large result sets
+
+#### Data Management
+- **Lazy Loading**: Events loaded only when audit view is activated
+- **State Preservation**: Filter selections and loaded data preserved during navigation
+- **Error Handling**: Graceful error display with user-friendly messages
+- **Loading States**: Visual feedback during data loading operations
+
+### Security Considerations
+
+The audit trail system implements multiple security layers:
+
+- **Role Verification**: Client-side role checking before rendering audit view
+- **Server-Side Validation**: Gateway enforces audit:read permission on all requests
+- **Request Context**: Includes x-request-id for traceability
+- **Authentication Required**: All audit requests require valid authentication tokens
+
+**Section sources**
+- [app.js:27-39](file://products/operator-portal/web-ui/app.js#L27-L39)
+- [app.js:232-234](file://products/operator-portal/web-ui/app.js#L232-L234)
+- [app.js:403-506](file://products/operator-portal/web-ui/app.js#L403-L506)
+- [index.html:124-156](file://products/operator-portal/web-ui/index.html#L124-L156)
 
 ## Authentication and Security
 
@@ -363,8 +382,18 @@ Flexible identity handling supports various scenarios:
 - **Group Membership**: Role-based access control integration
 - **Custom Claims**: Support for organization-specific identity attributes
 
+### User Interface Enhancements
+
+The authentication system integrates seamlessly with the new UI:
+
+- **User Card Display**: Avatar with initials, username badge, and role information
+- **Login/Logout Buttons**: Icon-only buttons with tooltip support
+- **Role-Based Navigation**: Conditional visibility of audit trail based on user roles
+- **Session Persistence**: Automatic session restoration on page reload
+
 **Section sources**
-- [app.js:107-413](file://products/operator-portal/web-ui/app.js#L107-L413)
+- [app.js:197-354](file://products/operator-portal/web-ui/app.js#L197-L354)
+- [app.js:555-642](file://products/operator-portal/web-ui/app.js#L555-L642)
 - [web-ui-deployment.yaml:22-27](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml#L22-L27)
 
 ## Markdown Rendering System
@@ -413,8 +442,8 @@ Consistent visual presentation across all rendered content:
 - **Accessibility**: Proper semantic markup for screen readers
 
 **Section sources**
-- [app.js:21-87](file://products/operator-portal/web-ui/app.js#L21-L87)
-- [styles.css:245-321](file://products/operator-portal/web-ui/styles.css#L245-L321)
+- [app.js:111-177](file://products/operator-portal/web-ui/app.js#L111-L177)
+- [styles.css:473-549](file://products/operator-portal/web-ui/styles.css#L473-L549)
 
 ## Real-time Streaming Interface
 
@@ -456,8 +485,18 @@ Optimized for high-frequency updates:
 - **Memory Management**: Proper cleanup of streaming resources
 - **Network Efficiency**: Connection reuse and request optimization
 
+### Enhanced Streaming Features
+
+The new interface includes additional streaming enhancements:
+
+- **Thinking Indicator**: Animated placeholder shown while agent processes requests
+- **Sidebar Pulse**: Visual indicator in sidebar showing active streaming state
+- **Turn Scoping**: Each conversation turn maintains its own evidence context
+- **Error Recovery**: Graceful handling of streaming errors with user feedback
+
 **Section sources**
-- [app.js:666-780](file://products/operator-portal/web-ui/app.js#L666-L780)
+- [app.js:925-1050](file://products/operator-portal/web-ui/app.js#L925-L1050)
+- [styles.css:330-359](file://products/operator-portal/web-ui/styles.css#L330-L359)
 
 ## Deployment Guide
 
@@ -517,7 +556,7 @@ Configure environment variables for the portal deployment:
 - **Logging Level**: Debug, info, warning, or error levels
 - **Feature Flags**: Enable/disable specific features
 
-**Updated** Port configuration remains at 8080 for non-root nginx execution with nginxinc/nginx-unprivileged:1.27-alpine base image. The enhanced inline per-turn evidence system with turn-scoped state management and collapsible turn groups is now fully integrated and accessible.
+**Updated** The deployment now supports the new two-column shell layout with role-gated audit trail access, enhanced responsive design, and improved accessibility features. The nginx configuration remains optimized for streaming support and non-root execution.
 
 **Section sources**
 - [nginx.conf](file://products/operator-portal/nginx.conf)
@@ -558,6 +597,15 @@ The Operator Portal supports extensive UI customization to match organizational 
 - **Keyboard Navigation**: Full keyboard operability
 - **Font Scaling**: Support for increased font sizes
 
+### New Customization Options
+
+The updated interface provides additional customization points:
+
+- **Sidebar Width**: Adjustable sidebar width for different screen densities
+- **User Card Layout**: Customizable user card appearance and positioning
+- **Navigation Item Styling**: Custom styling for navigation items and active states
+- **Mobile Drawer Behavior**: Configurable drawer animation and positioning
+
 **Section sources**
 - [styles.css](file://products/operator-portal/web-ui/styles.css)
 
@@ -593,6 +641,16 @@ The Operator Portal is designed with accessibility as a first-class concern, ens
 - **Error Prevention**: Helpful error messages and recovery options
 - **Progress Indicators**: Clear feedback for long-running operations
 
+### Enhanced Accessibility Features
+
+The new interface includes additional accessibility improvements:
+
+- **Two-Column Layout**: Proper semantic structure with nav and main landmarks
+- **Sidebar Navigation**: Accessible navigation with proper ARIA attributes
+- **User Card**: Accessible user identity display with proper labeling
+- **Mobile Drawer**: Accessible off-canvas navigation with proper focus management
+- **Audit Trail**: Accessible table with proper headers and expandable details
+
 **Section sources**
 - [styles.css](file://products/operator-portal/web-ui/styles.css)
 - [index.html](file://products/operator-portal/web-ui/index.html)
@@ -625,12 +683,14 @@ The Operator Portal supports modern web browsers with progressive enhancement fo
 - **Babel Transpilation**: ES6+ to ES5 transpilation when needed
 - **Graceful Degradation**: Essential functionality works across all supported browsers
 
-### Performance Considerations
+### New Feature Compatibility
 
-- **Lazy Loading**: Deferred loading of non-critical resources
-- **Code Splitting**: Modular JavaScript bundles for faster initial load
-- **Image Optimization**: Modern image formats with fallbacks
-- **Caching Strategy**: Efficient caching for optimal performance
+The updated interface maintains broad browser compatibility:
+
+- **CSS Grid**: Used for two-column layout with fallbacks for older browsers
+- **CSS Custom Properties**: Theme customization with fallback values
+- **Modern JavaScript**: ES6+ features with appropriate polyfills
+- **Responsive Design**: Mobile-first approach with progressive enhancement
 
 **Section sources**
 - [Dockerfile](file://products/operator-portal/Dockerfile)
@@ -696,36 +756,45 @@ Common issues and their solutions when working with the Operator Portal.
 - Review browser console for JavaScript errors in streaming logic
 - Confirm nginx proxy configuration allows streaming responses
 
-### Inline Evidence System Issues
+### Two-Column Layout Issues
 
-**Problem**: Evidence groups not appearing or showing incorrect data
+**Problem**: Sidebar not displaying correctly or main content overlapping
 **Solution**:
-- Verify tool_call and tool_result events are being sent
-- Check evidence group visibility and CSS styling for evidence-turn class
-- Review browser console for JavaScript errors in ensureCurrentTurn function
-- Ensure proper event type detection in streamEventType function
-- Verify evidence card creation and update logic in renderToolCall and renderToolResult functions
-- Check that HTML details elements are properly structured with evidence-turn-body class
-- Confirm per-turn evidence grouping is working correctly with currentTurn object
+- Verify CSS Grid template is properly defined with correct column widths
+- Check that app-shell class is applied to the root container
+- Ensure proper viewport meta tag is present for mobile responsiveness
+- Review CSS media queries for mobile breakpoint handling
+- Confirm sidebar has proper z-index and positioning styles
 
-### Per-turn Evidence Issues
+### Mobile Drawer Issues
 
-**Problem**: Evidence not grouped by turns or turn groups not collapsing
+**Problem**: Hamburger menu not working or drawer not appearing on mobile
 **Solution**:
-- Verify currentTurn object is properly maintained with all required properties
-- Check turn creation logic in streamPrompt function and ensureCurrentTurn function
-- Ensure collapsible turn groups are created with proper details elements and evidence-turn class
-- Review turn counter increment and turn limit enforcement in formatCounts function
-- Check evidence summary rendering for turn statistics with evidence-summary class
+- Verify mobile-topbar class is present and styled correctly
+- Check that menu-button has proper event listeners attached
+- Ensure sidebar-backdrop is positioned correctly with proper z-index
+- Review CSS media queries for mobile-specific styles
+- Confirm JavaScript drawer toggle functions are properly initialized
 
-### Authentication State Issues
+### Role-Based Access Issues
 
-**Problem**: Authentication state not persisting or refreshing incorrectly
+**Problem**: Audit trail not visible or access denied despite having correct roles
 **Solution**:
-- Check sessionStorage for proper token storage
-- Verify OIDC callback handling and state validation
-- Review automatic token refresh scheduling with scheduleTokenRefresh function
-- Ensure proper logout and session cleanup procedures
+- Verify user has auditor or platform-admin roles in identity system
+- Check client-side role detection in canViewAudit function
+- Ensure server-side audit:read permission is properly enforced
+- Review browser console for role detection errors
+- Confirm identity normalization is working correctly
+
+### User Card Issues
+
+**Problem**: User avatar not displaying or identity information incorrect
+**Solution**:
+- Check userInitials function for proper username parsing
+- Verify identity payload contains expected fields
+- Ensure user card popup menu is properly positioned
+- Review CSS for user-card and related styling classes
+- Check for JavaScript errors in user identity management
 
 ### Sticky Scroll Issues
 
@@ -736,7 +805,7 @@ Common issues and their solutions when working with the Operator Portal.
 - Ensure scrollToBottom function is called appropriately during streaming
 - Review CSS for any conflicting overflow or positioning styles
 
-**Updated** Added troubleshooting guidance for the enhanced inline per-turn evidence system, including turn-scoped state management, collapsible turn groups, live status metrics, sticky smart-scroll behavior, and per-turn audit card generation.
+**Updated** Added troubleshooting guidance for the new two-column shell layout, role-gated audit trail system, mobile drawer navigation, and enhanced user identity management features.
 
 **Section sources**
 - [app.js](file://products/operator-portal/web-ui/app.js)
@@ -745,14 +814,10 @@ Common issues and their solutions when working with the Operator Portal.
 
 The Operator Portal provides a comprehensive, accessible, and customizable web interface for platform administration and monitoring within the Luban AIOPS ecosystem. Built with vanilla JavaScript and modern web standards, it delivers enterprise-grade functionality while maintaining simplicity and performance.
 
-The recent enhancements introduce a significantly improved inline per-turn evidence system that replaces the previous separate evidence drawer. The new implementation provides turn-scoped state management with currentTurn object, collapsible turn groups rendered directly after agent responses, live status metrics with real-time tool execution tracking, per-turn audit cards for comprehensive execution history, and intelligent streaming behavior with sticky smart-scroll functionality that respects user reading positions.
+**Updated** The recent complete UI redesign transforms the portal from a simple single-column chat interface into a professional two-column shell layout with persistent sidebar navigation, role-gated audit trail access, enhanced responsive design, and comprehensive accessibility features. The new design provides superior usability for platform operators while maintaining backward compatibility with existing workflows.
 
-Key strengths of the portal include its modular architecture, extensive customization options, strong accessibility features, and seamless integration with backend services. The deployment process is streamlined through containerization and Kubernetes-native configurations, making it suitable for both development and production environments.
+Key strengths of the enhanced portal include its modular architecture, extensive customization options, strong accessibility features, and seamless integration with backend services. The deployment process remains streamlined through containerization and Kubernetes-native configurations, making it suitable for both development and production environments.
 
-**Updated** Recent enhancements include the complete redesign of the evidence panel system as an inline per-turn evidence system with turn-scoped state management, collapsible turn groups rendered directly after agent responses, live status metrics for real-time tool execution tracking, per-turn audit cards for comprehensive execution history, and improved streaming behavior with sticky smart-scroll functionality. These improvements significantly enhance the operator experience by providing intuitive interaction patterns, deep visibility into agent behavior, and reliable real-time communication with backend services.
-
-The enhanced inline per-turn evidence system provides unprecedented visibility into agent tool execution, enabling operators to understand and debug complex workflows in real-time. The turn-scoped state management with currentTurn object ensures excellent organization and accessibility. The per-turn audit cards offer comprehensive aggregation of tool executions with detailed metadata display in tabular format.
-
-For ongoing maintenance and enhancement, the codebase follows best practices for vanilla JavaScript development, ensuring long-term maintainability and ease of contribution. The comprehensive documentation and troubleshooting guides support effective operation and problem resolution.
+The new two-column shell layout offers significant improvements in information density and workflow efficiency, while the role-gated audit trail system provides comprehensive operational visibility with appropriate security controls. The responsive design ensures optimal user experience across desktop and mobile devices, and the enhanced accessibility features make the portal usable by operators with diverse needs.
 
 Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, and enhanced collaboration features to meet evolving operational requirements.
