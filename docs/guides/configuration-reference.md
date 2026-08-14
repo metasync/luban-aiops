@@ -105,6 +105,17 @@ one random shared secret (or uses `AUDIT_INGEST_SECRET` if exported) and writes
 all four K8s secrets. `SKIP_AUDIT_SECRETS=true` opts out; unsetting an
 emitter's `*_AUDIT_SERVICE_URL` falls back to log-only auditing.
 
+**Known limitation (shared query credential):** the audit-service query API
+(`GET /api/v1/audit/events`) authenticates against the same
+`AUDIT_INGEST_CLIENTS` registry as ingest, so any caller holding an ingest
+credential can also query the trail directly. End-user authorization is
+enforced upstream — platform-gateway gates the proxied route behind the
+deny-by-default `audit:read` policy (granted to `auditor` and
+`platform-admin` only) — so this is acceptable for the dev overlay. For the
+first non-dev deployment, split the registries: a separate query-credential
+registry (e.g. `AUDIT_QUERY_CLIENTS`) so ingest clients cannot read the
+trail, keeping ingest-only services from gaining query capability.
+
 ## Per-Service Environment Variables
 
 ### agent-service

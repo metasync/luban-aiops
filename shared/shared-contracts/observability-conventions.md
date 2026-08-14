@@ -10,7 +10,7 @@ These conventions back `SPEC-005` (observability baseline).
 
 Each service exposes two deliberately decoupled observability surfaces:
 
-1. **`/metrics` (pull, always on)** — a collector-independent Prometheus endpoint for debugging and health. Works with no external infrastructure. Implemented with `prometheus-fastapi-instrumentator`.
+1. **`/metrics` (pull, always on)** — a collector-independent Prometheus endpoint for debugging and health. Works with no external infrastructure. Implemented directly with `prometheus_client` (a minimal RED middleware plus the endpoint; `prometheus-fastapi-instrumentator` proved incompatible with the pinned starlette — see the SPEC-005 changelog).
 2. **OpenTelemetry push (opt-in)** — traces and metrics pushed via OTLP to the configured collector (the Elastic APM backend in this organization). Gated by `OTEL_ENABLED`; off by default; fails open.
 
 The two never depend on each other: disabling OTel push leaves `/metrics` fully functional.
@@ -30,7 +30,7 @@ Examples:
 
 ## Standard Labels
 
-- HTTP RED metrics (from the instrumentator): `method`, `handler` (the templated route, e.g. `/api/v1/sessions/{session_id}`), `status`
+- HTTP RED metrics (from the RED middleware): `method`, `handler` (the templated route, e.g. `/api/v1/sessions/{session_id}`), `status`
 - domain counters use **bounded enum labels only** (e.g. `decision` ∈ {allow, deny}; `result` ∈ {valid, invalid, expired, missing})
 
 ## Cardinality Rules
