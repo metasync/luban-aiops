@@ -10,6 +10,7 @@ This directory contains the development Kubernetes overlay for the platform base
 - `agent-service`
 - `identity-service`
 - `audit-service`
+- `skills-hub`
 - `redis`
 - `postgres`
 
@@ -21,7 +22,7 @@ These manifests are intended to:
 - define baseline environment variables
 - show the expected request path between services
 - provide an in-cluster `Redis` dependency for session storage and AgentScope coordination
-- provide an in-cluster `PostgreSQL` dependency for the durable audit trail (SPEC-013)
+- provide an in-cluster `PostgreSQL` dependency for the durable audit trail (SPEC-013) and the skills store (SPEC-014)
 
 The `dev-k8s` overlay is the single development deployment for the platform. It deploys the v2 agent-service contract surface consumed by `platform-gateway` (portal chat/session proxying) and the tool contract consumed by `agent-service` via `tool-gateway` (SPEC-010).
 
@@ -42,10 +43,11 @@ The base deployment manifest uses neutral placeholder image tags:
 - `luban-aiops/agent-service:dev-local`
 - `luban-aiops/identity-service:dev-local`
 - `luban-aiops/audit-service:dev-local`
+- `luban-aiops/skills-hub:dev-local`
 
 `make build` and `make deploy` replace those placeholders with the generated `IMAGE_TAG` for each rollout.
 
-This development baseline also uses the upstream `redis:7.2-alpine` image for in-cluster runtime state and message coordination, and `postgres:16-alpine` for the durable audit store.
+This development baseline also uses the upstream `redis:7.2-alpine` image for in-cluster runtime state and message coordination, and `postgres:16-alpine` for the durable audit store and the skills store.
 
 ## Runtime Wiring
 
@@ -57,6 +59,7 @@ The `platform-runtime-config` `ConfigMap` is assembled from product-scoped env f
 - `shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env`
 - `shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env`
 - `shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env`
+- `shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env`
 
 Because the fragments merge into one `ConfigMap`, each key may appear only once: `IDENTITY_SERVICE_URL` lives in the shared fragment and is consumed by both gateways.
 
@@ -394,6 +397,63 @@ kubectl -n dev-luban-aiops exec deployment/tool-gateway -- curl -s localhost:800
 # store readiness and size
 kubectl -n dev-luban-aiops port-forward service/audit-service 18003:8000
 curl http://127.0.0.1:18003/health/ready
+```
+
+## Skills and Grounded Guidance (SPEC-014)
+
+The overlay deploys `skills-hub`, which federates two sample skill sources
+(shipped as ConfigMap volumes under `/skills`) and serves them to the agent
+through the tool-gateway's read-only `skills.search` / `skills.get` /
+`skills.list` tools. Day-2 content operations (adding, revising, and removing
+skills and sources) are covered by the Skills and Guidance Guide
+(`docs/guides/skills-guide.md`).
+
+Sample sources (committed under `shared/platform-ops/skills/`):
+
+- `sre-alerting` — six adapted Prometheus Operator alert runbooks (Apache-2.0)
+- `platform-runbooks` — five adapted Kubernetes troubleshooting guides (CC-BY-4.0)
+
+The skills-hub fragment of `runtime-config.env` commits the non-secret halves:
+
+- `SKILLS_STORE_BACKEND=postgres`, `SKILLS_DB_URL` (points at the in-cluster
+  `postgres` service, database `skills`), `SKILLS_SYNC_INTERVAL_SECONDS=300`,
+  `SKILLS_DATA_PATH=/var/lib/skills-hub`, and the `SKILLS_SOURCES` federation
+  list (both sources as `local` mounts)
+
+The tool-gateway fragment commits the caller halves:
+
+- `GATEWAY_SKILLS_SERVICE_URL=http://skills-hub:8000`, `GATEWAY_SKILLS_CLIENT_ID=tool-gateway`
+
+The shared query secret lives in two optional secrets and is provisioned by
+`sync-skills-secrets.sh` (one random secret shared across both parties):
+
+- `skills-hub-runtime-secrets` — `SKILLS_QUERY_CLIENTS`
+  (format `client_id=secret,...`; see `base/skills-hub/runtime-secrets.example.env`)
+- `tool-gateway-runtime-secrets` — `GATEWAY_SKILLS_CLIENT_SECRET`
+
+`make deploy` runs the script automatically (after the audit secrets); to skip
+(e.g. when secrets are injected by CI):
+
+```bash
+SKIP_SKILLS_SECRETS=true make deploy
+```
+
+To provision manually or regenerate the shared secret:
+
+```bash
+shared/platform-ops/gitops/sync-skills-secrets.sh
+```
+
+The script also creates the `skills` database idempotently for existing
+clusters (fresh clusters get it via the `postgres-initdb` ConfigMap mounted at
+`/docker-entrypoint-initdb.d`). Verify sync and search are working:
+
+```bash
+# per-source sync status (last_error should be null for both sources)
+kubectl -n dev-luban-aiops exec deployment/skills-hub -- \
+  python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/api/v1/skills/status').read().decode())"
+# deterministic smoke test (status + search ranking + optional chat leg)
+shared/platform-ops/e2e/skills-demo.sh
 ```
 
 ## Apply

@@ -16,6 +16,10 @@ NAMESPACE=${NAMESPACE:-dev-luban-aiops}
 # Set SKIP_AUDIT_SECRETS=true when secrets are injected externally (e.g. CI).
 "$SCRIPT_DIR/../sync-audit-secrets.sh" "$NAMESPACE"
 
+# Provision skills query credentials (SPEC-014) unless skipped.
+# Set SKIP_SKILLS_SECRETS=true when secrets are injected externally (e.g. CI).
+"$SCRIPT_DIR/../sync-skills-secrets.sh" "$NAMESPACE"
+
 if [ "$RECONCILE_OIDC_PORTAL_CLIENT" = "true" ]; then
   # Self-contained realm (groups + test users) before the portal client, so
   # the client's `groups` scope resolves in the new realm.

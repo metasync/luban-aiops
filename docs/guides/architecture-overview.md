@@ -5,7 +5,7 @@ authorization model for operators who need to understand how the pieces connect.
 
 ## Service Topology
 
-The platform consists of eight workloads deployed to a single Kubernetes namespace
+The platform consists of nine workloads deployed to a single Kubernetes namespace
 (`dev-luban-aiops` by default):
 
 | Service | Image | Role |
@@ -16,8 +16,9 @@ The platform consists of eight workloads deployed to a single Kubernetes namespa
 | **tool-gateway** | `luban-aiops/tool-gateway` | Tool execution framework: connector dispatch, policy enforcement, output redaction |
 | **identity-service** | `luban-aiops/identity-service` | Enterprise identity: Keycloak OIDC login, JWT issuance, token exchange for delegation |
 | **audit-service** | `luban-aiops/audit-service` | Durable audit trail: authenticated ingest, retention-bounded store, query API (SPEC-013) |
+| **skills-hub** | `luban-aiops/skills-hub` | Federated skill ingestion and ranked retrieval for grounded guidance (SPEC-014) |
 | **redis** | `redis:7.2-alpine` | In-cluster session store and AgentScope coordination (non-durable in dev) |
-| **postgres** | `postgres:16-alpine` | Durable audit store backend (PVC-backed, dev-only credentials) |
+| **postgres** | `postgres:16-alpine` | Durable audit and skills store backend (PVC-backed, dev-only credentials) |
 
 All backend services are Python 3.12 FastAPI applications built on a shared
 `luban-aiops/base-uv` container image (Amazon Linux 2023, non-root uid 1000).
@@ -35,6 +36,7 @@ graph TB
         TG[tool-gateway<br/>:8000]
         IB[identity-service<br/>:8000]
         Audit[audit-service<br/>:8000]
+        Skills[skills-hub<br/>:8000]
         Redis[(Redis)]
         PGDB[(PostgreSQL)]
     end
@@ -43,6 +45,7 @@ graph TB
         Keycloak[Keycloak IdP]
         K8sAPI[Kubernetes API]
         Elastic[Elastic Cluster]
+        SkillRepos[Team Skill Sources]
     end
 
     User -->|https://aiops.luban.metasync.cc| WebUI
@@ -52,6 +55,9 @@ graph TB
     AS -->|tool discovery & invoke| TG
     TG -->|read-only| K8sAPI
     TG -->|read-only| Elastic
+    TG -->|skills.search / skills.get / skills.list| Skills
+    Skills -->|sync local + git| SkillRepos
+    Skills -->|store| PGDB
     IB -->|OIDC| Keycloak
     AS -->|sessions| Redis
     TG -.->|audit events| Audit
@@ -82,8 +88,12 @@ Browser → web-ui → platform-gateway → agent-service → tool-gateway → c
    directly or invoke tools. If tools are needed, it calls **tool-gateway** with the delegated
    token.
 5. **tool-gateway** verifies the delegated token, evaluates tool policy (`tools:list`,
-   `tools:invoke`), dispatches to the appropriate connector (Kubernetes or Elastic), redacts
-   credential-shaped output, and returns the result with evidence metadata.
+   `tools:invoke`), dispatches to the appropriate connector (Kubernetes, Elastic, or
+   skills-hub), redacts credential-shaped output, and returns the result with evidence
+   metadata. For procedure or remediation questions the agent consults the read-only
+   `skills.search` / `skills.get` / `skills.list` tools for team-owned guidance and
+   cites the skills it relies on (SPEC-014); skill guidance is kept separate from
+   live cluster evidence.
 6. **agent-service** merges tool results into the LLM response and streams text deltas plus
    tool-trace events back through the SSE channel.
 7. **platform-gateway** proxies the stream to the browser, where the portal renders the reply

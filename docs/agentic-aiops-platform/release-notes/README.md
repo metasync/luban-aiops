@@ -7,6 +7,13 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-15-skills-and-grounded-guidance.md`
+  - opens Release 2 with SPEC-014: canonical skill contract, new
+    `skills-hub` product (federated multi-source ingestion, deterministic
+    ranked retrieval, dedicated query-credential registry), read-only
+    `skills.search` / `skills.get` / `skills.list` tools in tool-gateway,
+    skills discipline in the agent prompt, two adapted open-source sample
+    sources, dev-k8s wiring, and a deterministic e2e demo smoke test
 - `2026-08-12-durable-audit-trail.md`
   - delivers SPEC-013: canonical audit-event contract, new `audit-service`
     product (in-memory + PostgreSQL stores, retention), authenticated

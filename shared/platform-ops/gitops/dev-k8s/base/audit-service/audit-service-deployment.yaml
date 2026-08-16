@@ -37,15 +37,21 @@ spec:
                 optional: true
           ports:
             - containerPort: 8000
+          # Probes need headroom beyond the 1s default: while the dev host is
+          # under load (e.g. after VM sleep/wake) healthy responses were taking
+          # 2-4s, which triggered needless liveness kills and crash loops.
           readinessProbe:
             httpGet:
               path: /health/ready
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /health/live
               port: 8000
             initialDelaySeconds: 10
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 4

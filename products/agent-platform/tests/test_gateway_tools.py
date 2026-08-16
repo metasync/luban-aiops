@@ -236,6 +236,43 @@ class BuildFunctionToolsTests(unittest.TestCase):
         decision = _run(tools[0].check_permissions())
         self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
 
+    def test_skills_tools_auto_allowed_with_sanitized_names(self) -> None:
+        """SPEC-014 R-5: skills.search/skills.get/skills.list are vetted
+        read-only and auto-approved; the allow-list matches sanitized
+        FunctionTool names."""
+        from agentscope.permission import PermissionBehavior
+
+        defs = [
+            {
+                "name": "skills.search",
+                "description": "Search skills.",
+                "risk_level": "read",
+                "category": "skills",
+                "parameters_schema": {"type": "object"},
+            },
+            {
+                "name": "skills.get",
+                "description": "Fetch one skill.",
+                "risk_level": "read",
+                "category": "skills",
+                "parameters_schema": {"type": "object"},
+            },
+            {
+                "name": "skills.list",
+                "description": "List registered skills.",
+                "risk_level": "read",
+                "category": "skills",
+                "parameters_schema": {"type": "object"},
+            },
+        ]
+        tools = build_function_tools("http://gw:8080", defs)
+        self.assertEqual(tools[0].name, "skills_search")
+        self.assertEqual(tools[1].name, "skills_get")
+        self.assertEqual(tools[2].name, "skills_list")
+        for tool in tools:
+            decision = _run(tool.check_permissions())
+            self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
+
     def test_read_only_tool_outside_allow_list_still_requires_confirmation(self) -> None:
         """Auto-approval is allow-listed, not blanket: a read-only tool that
         is not vetted keeps the ASK default."""

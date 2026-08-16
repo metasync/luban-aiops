@@ -32,6 +32,7 @@ AGENT_SERVICE_IMAGE="${AGENT_SERVICE_IMAGE:-}"
 AUDIT_SERVICE_IMAGE="${AUDIT_SERVICE_IMAGE:-}"
 IDENTITY_SERVICE_IMAGE="${IDENTITY_SERVICE_IMAGE:-}"
 PLATFORM_GATEWAY_IMAGE="${PLATFORM_GATEWAY_IMAGE:-}"
+SKILLS_HUB_IMAGE="${SKILLS_HUB_IMAGE:-}"
 TOOL_GATEWAY_IMAGE="${TOOL_GATEWAY_IMAGE:-}"
 WEB_UI_IMAGE="${WEB_UI_IMAGE:-}"
 
@@ -44,10 +45,15 @@ AGENT_SERVICE_IMAGE="${AGENT_SERVICE_IMAGE:-luban-aiops/agent-service:$IMAGE_TAG
 AUDIT_SERVICE_IMAGE="${AUDIT_SERVICE_IMAGE:-luban-aiops/audit-service:$IMAGE_TAG}"
 IDENTITY_SERVICE_IMAGE="${IDENTITY_SERVICE_IMAGE:-luban-aiops/identity-service:$IMAGE_TAG}"
 PLATFORM_GATEWAY_IMAGE="${PLATFORM_GATEWAY_IMAGE:-luban-aiops/platform-gateway:$IMAGE_TAG}"
+SKILLS_HUB_IMAGE="${SKILLS_HUB_IMAGE:-luban-aiops/skills-hub:$IMAGE_TAG}"
 TOOL_GATEWAY_IMAGE="${TOOL_GATEWAY_IMAGE:-luban-aiops/tool-gateway:$IMAGE_TAG}"
 WEB_UI_IMAGE="${WEB_UI_IMAGE:-luban-aiops/web-ui:$IMAGE_TAG}"
 
-kubectl apply -k "$OVERLAY_DIR"
+# LoadRestrictionsNone: the skills-hub base pulls sample skill content from
+# shared/platform-ops/skills/ (outside the overlay root) so team sample
+# sources stay single-sourced (SPEC-014 R-6).
+kubectl kustomize --load-restrictor LoadRestrictionsNone "$OVERLAY_DIR" \
+  | kubectl apply -f -
 
 kubectl -n "$NAMESPACE" set image deployment/web-ui \
   "web-ui=$WEB_UI_IMAGE"
@@ -61,6 +67,8 @@ kubectl -n "$NAMESPACE" set image deployment/identity-service \
   "identity-service=$IDENTITY_SERVICE_IMAGE"
 kubectl -n "$NAMESPACE" set image deployment/audit-service \
   "audit-service=$AUDIT_SERVICE_IMAGE"
+kubectl -n "$NAMESPACE" set image deployment/skills-hub \
+  "skills-hub=$SKILLS_HUB_IMAGE"
 
 kubectl -n "$NAMESPACE" rollout status deployment/web-ui --timeout=120s
 kubectl -n "$NAMESPACE" rollout status deployment/platform-gateway --timeout=120s
@@ -68,5 +76,6 @@ kubectl -n "$NAMESPACE" rollout status deployment/tool-gateway --timeout=120s
 kubectl -n "$NAMESPACE" rollout status deployment/agent-service --timeout=120s
 kubectl -n "$NAMESPACE" rollout status deployment/identity-service --timeout=120s
 kubectl -n "$NAMESPACE" rollout status deployment/audit-service --timeout=120s
+kubectl -n "$NAMESPACE" rollout status deployment/skills-hub --timeout=120s
 
 echo "Applied overlay $OVERLAY_DIR with IMAGE_TAG=$IMAGE_TAG in namespace $NAMESPACE"

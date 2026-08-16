@@ -43,6 +43,17 @@ def _build_tool_registry() -> ToolRegistry:
         connector.register_tools(registry)
         LOGGER.info("elastic connector registered")
 
+    if settings.skills_service_url:
+        from tool_gateway.tools.skills_connector import SkillsConnector
+
+        connector = SkillsConnector(
+            url=settings.skills_service_url,
+            client_id=settings.skills_client_id,
+            client_secret=settings.skills_client_secret,
+        )
+        connector.register_tools(registry)
+        LOGGER.info("skills connector registered")
+
     return registry
 
 

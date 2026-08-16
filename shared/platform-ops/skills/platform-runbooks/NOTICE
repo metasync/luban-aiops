@@ -1,0 +1,10 @@
+platform-runbooks sample skills for the luban-aiops skills-hub demo (SPEC-014).
+
+Content adapted from:
+  Kubernetes documentation — https://kubernetes.io/docs/tasks/debug/debug-application/
+  Source repository: kubernetes/website — https://github.com/kubernetes/website
+  License: CC-BY-4.0 — https://creativecommons.org/licenses/by/4.0/
+
+Changes from upstream: condensed into ordered diagnosis steps with the
+commands this cluster uses, merged into one guide per problem area, and
+given skills-hub frontmatter. Upstream documentation remains authoritative.

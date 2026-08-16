@@ -42,6 +42,9 @@ DEFAULT_AUTO_ALLOWED_TOOLS = frozenset({
     "k8s.get_pod",
     "k8s.get_events",
     "k8s.get_pod_logs",
+    "skills.search",
+    "skills.get",
+    "skills.list",
 })
 AUTO_ALLOW_ENV = "AGENT_GATEWAY_TOOL_AUTO_ALLOW"
 

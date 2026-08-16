@@ -1,0 +1,10 @@
+sre-alerting sample skills for the luban-aiops skills-hub demo (SPEC-014).
+
+Content adapted from:
+  prometheus-operator/runbooks — https://github.com/prometheus-operator/runbooks
+  License: Apache-2.0 — https://www.apache.org/licenses/LICENSE-2.0
+
+Changes from upstream: condensed to triage/remediation essentials,
+restructured into Meaning / Impact / Triage / Remediation sections, and
+given skills-hub frontmatter. Upstream content remains authoritative for
+the original alert definitions.

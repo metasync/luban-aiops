@@ -12,9 +12,31 @@ configMapGenerator:
       - tool-gateway/runtime-config.env
       - identity-broker/runtime-config.env
       - audit-service/runtime-config.env
+      - skills-hub/runtime-config.env
   - name: platform-policy
     files:
       - shared/policy.yaml
+  # Sample skill sources (SPEC-014 R-6): keys are flattened
+  # (<dir>-<file>) because ConfigMap keys cannot contain '/'; the
+  # skills-hub deployment maps each key back to its nested path.
+  - name: skills-sre-alerting
+    files:
+      - alerts-KubePodNotReady.md=../../../skills/sre-alerting/alerts/KubePodNotReady.md
+      - alerts-KubePodCrashLooping.md=../../../skills/sre-alerting/alerts/KubePodCrashLooping.md
+      - alerts-KubeContainerWaiting.md=../../../skills/sre-alerting/alerts/KubeContainerWaiting.md
+      - alerts-KubeDeploymentReplicasMismatch.md=../../../skills/sre-alerting/alerts/KubeDeploymentReplicasMismatch.md
+      - alerts-KubeNodeNotReady.md=../../../skills/sre-alerting/alerts/KubeNodeNotReady.md
+      - alerts-KubeMemoryPressure.md=../../../skills/sre-alerting/alerts/KubeMemoryPressure.md
+  - name: skills-platform-runbooks
+    files:
+      - guides-DebugPods.md=../../../skills/platform-runbooks/guides/DebugPods.md
+      - guides-ImagePullFailures.md=../../../skills/platform-runbooks/guides/ImagePullFailures.md
+      - guides-DebugServices.md=../../../skills/platform-runbooks/guides/DebugServices.md
+      - guides-CrashLoopsAndOOM.md=../../../skills/platform-runbooks/guides/CrashLoopsAndOOM.md
+      - guides-PodSchedulingFailures.md=../../../skills/platform-runbooks/guides/PodSchedulingFailures.md
+  - name: postgres-initdb
+    files:
+      - infra/create-skills-db.sql
 resources:
   - shared/namespace.yaml
   - infra/redis-deployment.yaml
@@ -36,3 +58,5 @@ resources:
   - identity-broker/identity-service-service.yaml
   - audit-service/audit-service-deployment.yaml
   - audit-service/audit-service-service.yaml
+  - skills-hub/skills-hub-deployment.yaml
+  - skills-hub/skills-hub-service.yaml

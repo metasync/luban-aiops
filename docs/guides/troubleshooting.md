@@ -395,3 +395,42 @@ kubectl -n dev-luban-aiops exec deployment/platform-gateway -- \
   for both (`luban-admin`, `luban-auditor`).
 - If the bundle is missing the rule, it drifted from the canonical source: run
   `make sync-policy` and redeploy.
+
+---
+
+## Symptom: Skills searches return nothing or the agent reports no guidance
+
+**Most likely cause:** One of — a skill source never synced (rejections or a sync
+error), the skills connector is not registered in tool-gateway, or the query
+secret halves do not match.
+
+**Diagnostic:**
+
+```bash
+# Per-source sync state (auth-exempt): check accepted counts, rejections, last_error
+kubectl -n dev-luban-aiops exec deployment/skills-hub -- \
+  curl -fsS http://localhost:8000/api/v1/skills/status
+
+# Catalog as the agent sees it (requires the query credential)
+QUERY_CLIENTS=$(kubectl -n dev-luban-aiops get secret skills-hub-runtime-secrets \
+  -o jsonpath='{.data.SKILLS_QUERY_CLIENTS}' | base64 -d)
+kubectl -n dev-luban-aiops exec deployment/skills-hub -- \
+  curl -fsS -u "tool-gateway:${QUERY_CLIENTS#tool-gateway=}" \
+  "http://localhost:8000/api/v1/skills?limit=100"
+
+# Connector registration is gated on this URL
+kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
+  sh -c 'echo "${GATEWAY_SKILLS_SERVICE_URL:-<unset>}"'
+```
+
+**Resolution:**
+
+- Source shows `rejections`: fix the reported documents
+  (`python -m skills_hub.validate <dir>`), then redeploy or restart skills-hub.
+- Source shows `last_error`: fix the git URL/credential or mount path; the
+  previous slice keeps serving until the next successful sync.
+- `GATEWAY_SKILLS_SERVICE_URL` unset or the secrets mismatched: re-run
+  `shared/platform-ops/gitops/sync-skills-secrets.sh` and
+  `kubectl rollout restart deployment/tool-gateway deployment/skills-hub`.
+- Content-level operations (add/revise/remove skills and sources) are covered
+  by the [Skills and Guidance Guide](skills-guide.md).

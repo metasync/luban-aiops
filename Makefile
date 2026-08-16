@@ -12,9 +12,9 @@
 SHELL := /bin/sh
 
 # Products with a Python (uv) test suite.
-PYTHON_PRODUCTS := agent-platform audit-service identity-broker platform-gateway tool-gateway
+PYTHON_PRODUCTS := agent-platform audit-service identity-broker platform-gateway skills-hub tool-gateway
 # Products with a container image.
-IMAGE_PRODUCTS := agent-platform audit-service identity-broker platform-gateway tool-gateway operator-portal
+IMAGE_PRODUCTS := agent-platform audit-service identity-broker platform-gateway skills-hub tool-gateway operator-portal
 
 # GitOps overlays rendered as part of verification.
 GITOPS_DIR := shared/platform-ops/gitops
@@ -86,6 +86,7 @@ build: base-images ## Build all images (coordinated tag) and write .images.env f
 	@echo "TOOL_GATEWAY_IMAGE=luban-aiops/tool-gateway:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "IDENTITY_SERVICE_IMAGE=luban-aiops/identity-service:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "AUDIT_SERVICE_IMAGE=luban-aiops/audit-service:$(IMAGE_TAG)" >> $(IMAGE_STATE)
+	@echo "SKILLS_HUB_IMAGE=luban-aiops/skills-hub:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "WEB_UI_IMAGE=luban-aiops/web-ui:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "Built images with IMAGE_TAG=$(IMAGE_TAG); wrote $(IMAGE_STATE)"
 	@if [ "$(AUTO_LOAD_KIND)" = "true" ]; then \
@@ -98,7 +99,8 @@ build: base-images ## Build all images (coordinated tag) and write .images.env f
 			"luban-aiops/tool-gateway:$(IMAGE_TAG)" \
 			"luban-aiops/agent-service:$(IMAGE_TAG)" \
 			"luban-aiops/identity-service:$(IMAGE_TAG)" \
-			"luban-aiops/audit-service:$(IMAGE_TAG)"; \
+			"luban-aiops/audit-service:$(IMAGE_TAG)" \
+			"luban-aiops/skills-hub:$(IMAGE_TAG)"; \
 	fi
 
 .PHONY: push
@@ -129,7 +131,7 @@ validate-policy: ## Validate canonical policy bundle against JSON schema
 overlays: ## Render every GitOps overlay (kustomize build check)
 	@for o in $(OVERLAYS); do \
 		echo "==> kustomize build $$o"; \
-		kustomize build $(GITOPS_DIR)/$$o >/dev/null || exit 1; \
+		kustomize build --load-restrictor LoadRestrictionsNone $(GITOPS_DIR)/$$o >/dev/null || exit 1; \
 	done
 
 .PHONY: verify

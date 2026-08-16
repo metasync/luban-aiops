@@ -1,10 +1,28 @@
 from agent_service.native_service import NativeServiceSettings
 from agent_service.runtime_settings import (
+    DEFAULT_SYSTEM_PROMPT,
     DashScopeOptions,
     DeepSeekOptions,
     OpenAIOptions,
     RuntimeSettings,
 )
+
+
+def test_default_system_prompt_carries_skills_discipline(monkeypatch):
+    """SPEC-014 R-5: the default prompt teaches the skills discipline."""
+    assert "skills.search" in DEFAULT_SYSTEM_PROMPT
+    assert "skills.get" in DEFAULT_SYSTEM_PROMPT
+    assert "skills.list" in DEFAULT_SYSTEM_PROMPT
+    # Cite used skills by title (skill_id acceptable too).
+    assert "cite" in DEFAULT_SYSTEM_PROMPT.lower()
+    # Guidance vs live-data separation.
+    assert "not live" in DEFAULT_SYSTEM_PROMPT
+    # Honest no-match reporting.
+    assert "no team guidance matched" in DEFAULT_SYSTEM_PROMPT
+
+    monkeypatch.delenv("AGENTSCOPE_SYSTEM_PROMPT", raising=False)
+    settings = RuntimeSettings.from_env()
+    assert settings.system_prompt == DEFAULT_SYSTEM_PROMPT
 
 
 def test_runtime_settings_defaults(monkeypatch):

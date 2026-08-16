@@ -109,6 +109,7 @@ platform-gateway-...              1/1     Running
 tool-gateway-...                  1/1     Running
 agent-service-...                 1/1     Running
 identity-service-...              1/1     Running
+skills-hub-...                    1/1     Running
 redis-...                         1/1     Running
 ```
 
@@ -162,6 +163,46 @@ The following secrets must be provisioned before the platform is fully operation
 | LLM API key | `agent-platform-runtime-secrets` | Agent LLM calls | `sync-runtime-secret.sh <profile>` |
 | Token delegation | `platform-gateway-runtime-secrets` + `identity-service-runtime-secrets` | Tool invocation auth | `sync-delegation-secrets.sh` (automatic with `make deploy`) |
 | OIDC client secret | `identity-service-runtime-secrets` | Confidential OIDC client | Manual (if required by your IdP) |
+| Skills query | `skills-hub-runtime-secrets` + `tool-gateway-runtime-secrets` | Grounded guidance retrieval | `sync-skills-secrets.sh` (automatic with `make deploy`) |
+
+## Skills Demo Tour (SPEC-014)
+
+This tour exercises the grounded-guidance slice end to end and doubles as the UAT
+checklist and operator training path. It assumes a deployed dev-k8s overlay with
+skills secrets provisioned (automatic via `make deploy`).
+
+To manage the skill content itself (add, revise, remove skills and sources), see
+the [Skills and Guidance Guide](skills-guide.md).
+
+Automated smoke test first (status, deterministic search ranking, and an optional
+scripted chat leg):
+
+```bash
+shared/platform-ops/e2e/skills-demo.sh
+# cluster-side assertions only (no port-forwards needed):
+SKIP_CHAT_LEG=true shared/platform-ops/e2e/skills-demo.sh
+```
+
+Then walk the three scenarios through the portal chat (log in as `luban-operator`):
+
+1. **Alert → runbook loop.** Ask: *"The KubePodNotReady alert is firing for our demo
+   workload. What does our guidance say to check?"* The agent should invoke
+   `skills.search`, cite the `sre-alerting` runbook by title, and keep its triage
+   steps clearly separated from any live cluster facts it pulls with `k8s.*` tools.
+2. **Cross-source citation.** Ask a pod-troubleshooting question that both sample
+   sources cover (e.g. *"How do I debug a pod stuck in CrashLoopBackOff?"*). Both
+   `sre-alerting` and `platform-runbooks` match; the agent may cite either or both,
+   and the evidence panel should show the `skills.search` frames with their excerpts.
+3. **Honest no-match.** Ask for guidance on a topic the sample sources do not cover
+   (e.g. *"What is our runbook for database failover?"*). The agent should report that
+   no team guidance matched instead of inventing steps.
+
+Verification points:
+
+- [ ] `skills.search` / `skills.get` appear in the evidence panel for scenario 1
+- [ ] the cited skill title (or `skill_id`) is visible in the reply
+- [ ] guidance and live cluster evidence are presented as distinct in the reply
+- [ ] scenario 3 produces an explicit no-match statement, not fabricated steps
 
 ## Next Steps
 

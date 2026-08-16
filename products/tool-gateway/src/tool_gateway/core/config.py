@@ -39,6 +39,9 @@ class GatewaySettings:
     audit_service_url: str = ""
     audit_client_id: str = "tool-gateway"
     audit_client_secret: str = ""
+    skills_service_url: str = ""
+    skills_client_id: str = "tool-gateway"
+    skills_client_secret: str = ""
 
     @classmethod
     def from_env(cls) -> "GatewaySettings":
@@ -90,6 +93,9 @@ class GatewaySettings:
             audit_service_url=os.getenv("GATEWAY_AUDIT_SERVICE_URL", ""),
             audit_client_id=os.getenv("GATEWAY_AUDIT_CLIENT_ID", "tool-gateway"),
             audit_client_secret=os.getenv("GATEWAY_AUDIT_CLIENT_SECRET", ""),
+            skills_service_url=os.getenv("GATEWAY_SKILLS_SERVICE_URL", ""),
+            skills_client_id=os.getenv("GATEWAY_SKILLS_CLIENT_ID", "tool-gateway"),
+            skills_client_secret=os.getenv("GATEWAY_SKILLS_CLIENT_SECRET", ""),
         )
 
 

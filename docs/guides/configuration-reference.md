@@ -22,6 +22,7 @@ activate them. A feature is **active** when all required variables are set to no
 | **LLM runtime** | `AGENTSCOPE_PROVIDER`, `AGENTSCOPE_MODEL_NAME`, `AGENTSCOPE_API_KEY` | agent-service | via runtime profile |
 | **Workload identity** | `PLATFORM_GATEWAY_WORKLOAD_TOKEN_PATH`, `IDENTITY_WORKLOAD_ISSUER_URL`, `IDENTITY_WORKLOAD_CLIENTS` | platform-gateway, identity-service | disabled (dev) |
 | **Durable audit trail** | `*_AUDIT_SERVICE_URL`, `*_AUDIT_CLIENT_SECRET` ↔ `AUDIT_INGEST_CLIENTS` | audit-service, tool-gateway, platform-gateway, identity-service | **must be provisioned** (`sync-audit-secrets.sh`) |
+| **Skills and grounded guidance** | `SKILLS_SOURCES`, `GATEWAY_SKILLS_SERVICE_URL`, `GATEWAY_SKILLS_CLIENT_SECRET` ↔ `SKILLS_QUERY_CLIENTS` | skills-hub, tool-gateway | **must be provisioned** (`sync-skills-secrets.sh`) |
 
 ## Cross-Service Dependency Chains
 
@@ -116,6 +117,38 @@ first non-dev deployment, split the registries: a separate query-credential
 registry (e.g. `AUDIT_QUERY_CLIENTS`) so ingest clients cannot read the
 trail, keeping ingest-only services from gaining query capability.
 
+### Skills Retrieval Chain
+
+Grounded guidance delivery (SPEC-014). The agent consults team-owned skills
+through the tool-gateway's read-only skills tools; with no
+`GATEWAY_SKILLS_SERVICE_URL` configured the connector stays unregistered and
+the agent answers without guidance.
+
+```
+agent-service          tool-gateway                          skills-hub
+┌──────────────┐       ┌──────────────────────┐              ┌──────────────────────┐
+│ skills.search│       │ GATEWAY_SKILLS_      │── GET search ─►│ listens on :8000     │
+│ skills.get   │invoke►│ SERVICE_URL          │   / get / list │ SKILLS_QUERY_CLIENTS │
+│ skills.list  │       │ = http://skills-hub: │              │ entry:               │
+│ (auto-allow) │       │   8000               │              │ <client_id>=<secret> │
+│              │       │ GATEWAY_SKILLS_      │── must match ─►│                      │
+│              │       │ CLIENT_ID / _SECRET  │              │                      │
+└──────────────┘       └──────────────────────┘              └──────────────────────┘
+```
+
+**Secret contract:**
+- `GATEWAY_SKILLS_CLIENT_SECRET` (in `tool-gateway-runtime-secrets`)
+- Must match the secret registered for client `tool-gateway` in
+  `SKILLS_QUERY_CLIENTS` (in `skills-hub-runtime-secrets`), format
+  `client_id=client_secret,...`
+
+**Provisioning:** `make deploy` calls `sync-skills-secrets.sh` which creates
+the `skills` database idempotently, generates one random shared secret, and
+writes both K8s secrets. `SKIP_SKILLS_SECRETS=true` opts out; unsetting
+`GATEWAY_SKILLS_SERVICE_URL` leaves the skills tools unregistered. Unlike the
+audit-service query path, skills-hub uses a dedicated query-credential
+registry from day one (no shared ingest/query credential).
+
 ## Per-Service Environment Variables
 
 ### agent-service
@@ -193,6 +226,9 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-c
 | `GATEWAY_AUDIT_SERVICE_URL` | Audit-service ingest URL (unset = log-only) | `http://audit-service:8000` | runtime-config |
 | `GATEWAY_AUDIT_CLIENT_ID` | Audit ingest client id | `tool-gateway` | runtime-config |
 | `GATEWAY_AUDIT_CLIENT_SECRET` | Audit ingest credential | *(none)* | **runtime-secrets** |
+| `GATEWAY_SKILLS_SERVICE_URL` | skills-hub base URL (unset = connector off) | `http://skills-hub:8000` | runtime-config |
+| `GATEWAY_SKILLS_CLIENT_ID` | Skills query client id | `tool-gateway` | runtime-config |
+| `GATEWAY_SKILLS_CLIENT_SECRET` | Skills query credential | *(none)* | **runtime-secrets** |
 | `IDENTITY_SERVICE_URL` | Identity broker URL | `http://identity-service:8000` | shared/runtime.env |
 
 ### identity-service
@@ -243,6 +279,24 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-
 | `AUDIT_EVICTION_BATCH_SIZE` | Batched delete size (postgres) | `1000` | code default |
 | `AUDIT_MAX_BATCH` | Max events per ingest request | `50` | code default |
 
+### skills-hub
+
+Source: `products/skills-hub/src/skills_hub/core/config.py`
+Config fragment: `shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env`
+
+| Variable | Purpose | Default | Source |
+|---|---|---|---|
+| `SKILLS_SOURCES` | Federated source list (JSON: `source_id`, `type` `local`/`git`, `path`/`url`/`ref`) | two local sample sources | runtime-config |
+| `SKILLS_GIT_TOKENS` | Per-source git tokens (JSON map) | *(none)* | runtime-secrets |
+| `SKILLS_SYNC_INTERVAL_SECONDS` | Per-source sync loop period | `300` | runtime-config |
+| `SKILLS_DATA_PATH` | Working dir for git checkouts | `/var/lib/skills-hub` | runtime-config |
+| `SKILLS_STORE_BACKEND` | Store backend: `memory` or `postgres` | `postgres` (dev-k8s) | runtime-config |
+| `SKILLS_DB_URL` | PostgreSQL connection URL (database `skills`) | in-cluster `postgres` service | runtime-config |
+| `SKILLS_QUERY_CLIENTS` | Registered query callers (`client_id=secret,...`) | *(none)* | **runtime-secrets** |
+| `SKILLS_WORKLOAD_ISSUER_URL` | Cluster OIDC issuer for workload tokens (prod) | *(none, disabled)* | runtime-secrets |
+| `SKILLS_WORKLOAD_AUDIENCE` | Projected token audience | `skills-hub` | code default |
+| `SKILLS_WORKLOAD_CLIENTS` | SA subject→client mapping | *(none)* | runtime-secrets |
+
 ### Shared (all pods)
 
 Source: `shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env`
@@ -283,12 +337,19 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 | Key | Purpose | How to Provision |
 |---|---|---|
 | `GATEWAY_AUDIT_CLIENT_SECRET` | Audit ingest credential | `sync-audit-secrets.sh` |
+| `GATEWAY_SKILLS_CLIENT_SECRET` | Skills query credential | `sync-skills-secrets.sh` |
 
 ### `audit-service-runtime-secrets`
 
 | Key | Purpose | How to Provision |
 |---|---|---|
 | `AUDIT_INGEST_CLIENTS` | Ingest client registry (`client_id=secret,...`) | `sync-audit-secrets.sh` |
+
+### `skills-hub-runtime-secrets`
+
+| Key | Purpose | How to Provision |
+|---|---|---|
+| `SKILLS_QUERY_CLIENTS` | Query client registry (`client_id=secret,...`) | `sync-skills-secrets.sh` |
 
 ## Runtime Profiles
 

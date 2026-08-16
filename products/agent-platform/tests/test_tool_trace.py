@@ -60,6 +60,18 @@ class DataSummaryTests(unittest.TestCase):
         result = _make_data_summary(data, max_chars=len(serialized))
         self.assertEqual(result, data)
 
+    def test_empty_match_skills_payload_passes_through(self) -> None:
+        """SPEC-014 R-5 empty-match contract: a skills.search success with
+        no hits keeps its exact shape through the evidence panel pipeline."""
+        data = {"matches": [], "total": 0}
+        self.assertEqual(_make_data_summary(data), data)
+
+    def test_empty_catalog_skills_payload_passes_through(self) -> None:
+        """Same contract for skills.list: an empty catalog keeps its exact
+        shape through the evidence panel pipeline."""
+        data = {"skills": [], "total": 0}
+        self.assertEqual(_make_data_summary(data), data)
+
 
 class TraceEmissionTests(unittest.TestCase):
     """Test tool_call / tool_result trace events from toolkit closures."""

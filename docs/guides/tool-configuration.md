@@ -26,6 +26,14 @@ governed by the policy bundle.
 | `elastic.get_service_health` | Get aggregated health metrics for a service | `service_name` (required), `time_range_minutes` (default 15, max 1440) | read |
 | `elastic.get_active_alerts` | List active alerts, optionally filtered by severity | `severity` (optional: `critical`, `warning`, `info`), `max_results` (default 50, max 200) | read |
 
+### Skills Connector Tools
+
+| Tool | Description | Parameters | Risk |
+|---|---|---|---|
+| `skills.search` | Search team-owned skills across all federated sources, ranked deterministically; query words match OR-wise, so partial matches still rank | `query` (required), `source` (optional), `tag` (optional), `limit` (default 5, max 20) | read |
+| `skills.get` | Fetch one full skill record by namespaced id | `skill_id` (required, `<source_id>/<slug>`) | read |
+| `skills.list` | List registered skills (summaries, no bodies) to discover what guidance exists | `source` (optional), `tag` (optional), `limit` (default/max 20), `offset` (default 0) | read |
+
 > **Important:** All registered tools are currently read-only. Before any mutating (write or
 > admin) tool is registered, the policy bundle must be updated to scope the
 > `read-only-observer` grants to read-only tools only.
@@ -119,6 +127,50 @@ curl -s http://127.0.0.1:18100/api/v1/tools | jq '.[].name'
 If the Elastic connector is enabled but the URL is unreachable, tools return an
 `ELASTIC_CONNECTION_ERROR`. If the connector is not enabled, tools return
 `ELASTIC_NOT_CONFIGURED`.
+
+## Skills Connector
+
+The skills connector provides read-only access to team-owned guidance through the
+standalone `skills-hub` service (SPEC-014). It searches across all federated skill
+sources, lists the registered catalog, and fetches full skill records. The connector
+registers only when `GATEWAY_SKILLS_SERVICE_URL` is set.
+
+Managing the skill content itself — adding, revising, and removing skills and
+sources — is covered in the [Skills and Guidance Guide](skills-guide.md).
+
+### Activation Checklist
+
+- [ ] **skills-hub deployed** — the `skills-hub` service is running with at least one
+      source configured (`SKILLS_SOURCES`) and synced (`/api/v1/skills/status`)
+- [ ] **`GATEWAY_SKILLS_SERVICE_URL=<url>`** — skills-hub base URL (dev-k8s commits
+      `http://skills-hub:8000`)
+- [ ] **`GATEWAY_SKILLS_CLIENT_ID`** — query client id (default `tool-gateway`)
+- [ ] **`GATEWAY_SKILLS_CLIENT_SECRET`** — must match the entry in the skills-hub's
+      `SKILLS_QUERY_CLIENTS` registry (`skills-hub-runtime-secrets`)
+- [ ] **Network reachability** — the tool-gateway pod must be able to reach skills-hub
+
+**Provisioning shortcut (dev-k8s):** `make deploy` runs `sync-skills-secrets.sh`,
+which creates the `skills` database, generates one shared query secret, and writes
+both K8s secrets. Use `SKIP_SKILLS_SECRETS=true make deploy` when CI injects them.
+
+### Verification
+
+```bash
+# Confirm the skills tools are registered:
+kubectl -n dev-luban-aiops port-forward service/tool-gateway 18100:8000
+curl -s http://127.0.0.1:18100/api/v1/tools | jq '.[].name'
+# Should include: skills.search, skills.get, skills.list
+
+# Confirm skills-hub synced its sources:
+kubectl -n dev-luban-aiops exec deployment/skills-hub -- \
+  curl -fsS http://localhost:8000/api/v1/skills/status
+```
+
+If a skill id does not exist, `skills.get` returns a structured `SKILL_NOT_FOUND`
+error. If skills-hub is unreachable, the skills tools return `TOOL_EXECUTION_ERROR`.
+An empty search or list result is a success (`{"matches": [], "total": 0}` /
+`{"skills": [], "total": 0}`), not an error — the agent reports that no team
+guidance matched.
 
 ## Output Redaction
 

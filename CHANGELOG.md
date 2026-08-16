@@ -8,6 +8,76 @@ published product versions.
 
 ## Unreleased
 
+### Refined — Skills and Grounded Guidance (post-delivery)
+
+- Search prefilter semantics now match the deterministic scorer: query words
+  are tokenized and OR-joined into `to_tsquery`, so multi-word queries keep
+  partial matches (`plainto_tsquery` previously AND-ed the words and silently
+  dropped them); a tokenless query short-circuits to an empty success without
+  a database round-trip.
+- New read-only `skills.list` tool in tool-gateway (catalog discovery:
+  summaries without bodies, source/tag filters, capped offset pagination),
+  mapped to the existing `GET /api/v1/skills` endpoint; auto-allowed for the
+  agent alongside `skills.search` / `skills.get`, and the system prompt now
+  teaches catalog discovery via `skills.list`.
+- skills-hub prunes store records whose source is no longer configured at
+  startup, so removing a `SKILLS_SOURCES` entry immediately retires its
+  skills from search, list, and get.
+- New [Skills and Guidance Operations Guide](docs/guides/skills-guide.md):
+  day-2 content operations for operators — adding, revising, and removing
+  skills and sources (local ConfigMap-backed and git), pre-flight
+  validation, verification, metrics, and troubleshooting.
+
+### Added — SPEC-014: Skills and Grounded Guidance
+
+- New `shared/shared-contracts/schemas/skill.schema.json` (R-1): canonical
+  skill envelope (`skill_id`, `title`, `description`, `tags`, `version`,
+  `source_id`, `source_path`, optional `source_ref` / `source_url`
+  attribution, `updated_at`, `body`) plus the `skill-format.md` frontmatter
+  convention (size caps, slug rule, and an open-source skill discovery
+  appendix). Contract tests bind skills-hub Pydantic models to the schema.
+- New `products/skills-hub` product (R-2): FastAPI service mirroring the
+  audit-service chassis — frozen-dataclass `SKILLS_*` settings, structured
+  logging, `/health`, `/metrics` (incl. `skills_syncs_total{source,result}`),
+  federated multi-source ingestion (`local` directories and `git`
+  repositories, namespaced `<source_id>/<slug>` ids), per-source atomic sync
+  with jitter (a failed sync keeps the prior slice), and a `SkillStore`
+  protocol with in-memory and PostgreSQL backends selected via
+  `SKILLS_STORE_BACKEND`. Includes a standalone validator CLI
+  (`python -m skills_hub.validate <dir>`) for team pre-flight checks.
+- Retrieval API (R-3): `GET /api/v1/skills` (source/tag filters, capped
+  offset pagination), `GET /api/v1/skills/{skill_id:path}` (full record,
+  structured 404), `GET /api/v1/skills/search` (deterministic ranking —
+  title ×3 / tags ×2 / body ×1 with `skill_id` tie-break, excerpt ≤ 400
+  chars, provenance), and an auth-exempt `/api/v1/skills/status`. Query auth
+  uses a dedicated Basic registry `SKILLS_QUERY_CLIENTS` plus projected
+  workload tokens — deliberately distinct from the SPEC-013 shared
+  ingest/query credential.
+- Skills connector in tool-gateway (R-4): read-only `skills.search` /
+  `skills.get` tools with Basic-auth httpx transport (10s timeout) and
+  structured error mapping (404 → `SKILL_NOT_FOUND`, unreachable →
+  `TOOL_EXECUTION_ERROR`); registered only when `GATEWAY_SKILLS_SERVICE_URL`
+  is set (unset preserves today's tool surface byte-for-byte). Settings:
+  `GATEWAY_SKILLS_SERVICE_URL`, `GATEWAY_SKILLS_CLIENT_ID`,
+  `GATEWAY_SKILLS_CLIENT_SECRET`.
+- Runbook-aware answers (R-5): `DEFAULT_SYSTEM_PROMPT` gains the skills
+  discipline (consult skills for procedure/remediation, cite by title, keep
+  guidance separate from live cluster evidence, report no-match honestly);
+  `skills.search` / `skills.get` join the default auto-allow list. Portal
+  evidence panels render skills frames without changes.
+- Deployment and sample content (R-6): dev-k8s deploys `skills-hub` with two
+  sample sources — `sre-alerting` (six adapted Prometheus Operator alert
+  runbooks, Apache-2.0) and `platform-runbooks` (five adapted Kubernetes
+  troubleshooting guides, CC-BY-4.0), each with NOTICE attribution and a
+  team contribution README. Postgres gains a `skills` database (initdb
+  ConfigMap for fresh clusters; `sync-skills-secrets.sh` idempotently creates
+  it and provisions the shared query secret on existing clusters,
+  `SKIP_SKILLS_SECRETS=true` opt-out). Deterministic e2e smoke test
+  `shared/platform-ops/e2e/skills-demo.sh` asserts source sync, alert-name
+  search ranking, and the `skills.search` tool_call/tool_result frame pair in
+  a scripted chat; getting-started gains a Skills demo tour (UAT checklist +
+  operator training).
+
 ### Added — SPEC-013: Durable Audit Trail
 
 - New `shared/shared-contracts/schemas/audit-event.schema.json` (R-1):

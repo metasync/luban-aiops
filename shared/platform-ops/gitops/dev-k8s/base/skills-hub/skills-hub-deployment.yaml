@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skills-hub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: skills-hub
+  template:
+    metadata:
+      labels:
+        app: skills-hub
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8000"
+    spec:
+      # Service-link env vars (SKILLS_HUB_PORT=tcp://…) collide with the
+      # service's own port setting; service discovery uses DNS names instead.
+      enableServiceLinks: false
+      containers:
+        - name: skills-hub
+          image: luban-aiops/skills-hub:dev-local
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+          envFrom:
+            - configMapRef:
+                name: platform-runtime-config
+            - secretRef:
+                name: skills-hub-runtime-secrets
+                optional: true
+          ports:
+            - containerPort: 8000
+          # Probes need headroom beyond the 1s default: while the dev host is
+          # under load (e.g. after VM sleep/wake) healthy responses were taking
+          # 2-4s, which triggered needless liveness kills and crash loops.
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 4
+          volumeMounts:
+            # Sample skill sources (read-only ConfigMap mounts). Local sources
+            # are ingested straight from these paths.
+            - name: skills-sre-alerting
+              mountPath: /skills/sre-alerting
+              readOnly: true
+            - name: skills-platform-runbooks
+              mountPath: /skills/platform-runbooks
+              readOnly: true
+            # Disposable cache for git-source checkouts (empty by default in
+            # dev; no persistence needed — sync re-materializes on startup).
+            - name: skills-data
+              mountPath: /var/lib/skills-hub
+      volumes:
+        - name: skills-sre-alerting
+          configMap:
+            name: skills-sre-alerting
+            items:
+              - key: alerts-KubePodNotReady.md
+                path: alerts/KubePodNotReady.md
+              - key: alerts-KubePodCrashLooping.md
+                path: alerts/KubePodCrashLooping.md
+              - key: alerts-KubeContainerWaiting.md
+                path: alerts/KubeContainerWaiting.md
+              - key: alerts-KubeDeploymentReplicasMismatch.md
+                path: alerts/KubeDeploymentReplicasMismatch.md
+              - key: alerts-KubeNodeNotReady.md
+                path: alerts/KubeNodeNotReady.md
+              - key: alerts-KubeMemoryPressure.md
+                path: alerts/KubeMemoryPressure.md
+        - name: skills-platform-runbooks
+          configMap:
+            name: skills-platform-runbooks
+            items:
+              - key: guides-DebugPods.md
+                path: guides/DebugPods.md
+              - key: guides-ImagePullFailures.md
+                path: guides/ImagePullFailures.md
+              - key: guides-DebugServices.md
+                path: guides/DebugServices.md
+              - key: guides-CrashLoopsAndOOM.md
+                path: guides/CrashLoopsAndOOM.md
+              - key: guides-PodSchedulingFailures.md
+                path: guides/PodSchedulingFailures.md
+        - name: skills-data
+          emptyDir: {}

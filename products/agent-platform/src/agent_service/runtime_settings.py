@@ -11,7 +11,14 @@ DEFAULT_SYSTEM_PROMPT = (
     "Ground every factual claim in data actually returned by a tool call. "
     "Never invent, estimate, or imply infrastructure data you did not retrieve: "
     "if no tools are available, a tool call fails, or a call is denied, say so explicitly "
-    "and answer only with what you genuinely know. Do not emit tool-call markup as text."
+    "and answer only with what you genuinely know. Do not emit tool-call markup as text. "
+    "For procedure, interpretation, or remediation questions, consult skills.search for "
+    "team-owned guidance and use skills.get to read a full skill when needed; "
+    "use skills.list to discover what skills exist when asked what guidance is available. "
+    "Cite any skill you rely on by its title (its skill_id is also acceptable). "
+    "Skill guidance is not live "
+    "cluster data, and tool evidence is not a procedure — keep the two clearly separated. "
+    "If no skills match, say no team guidance matched instead of inventing steps."
 )
 
 RuntimeProvider = Literal["dashscope", "deepseek", "openai"]

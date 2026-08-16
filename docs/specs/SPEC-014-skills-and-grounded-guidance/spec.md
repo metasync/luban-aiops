@@ -2,10 +2,11 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: workspace maintainers
 - created: 2026-08-14
 - approved: 2026-08-14
+- delivered: 2026-08-15
 - release slice: `R2` (Skills and Grounded Guidance)
 - related ADRs: none yet
 
