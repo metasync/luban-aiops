@@ -20,12 +20,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+from opentelemetry import trace
+
 from skills_hub.core import metrics
 from skills_hub.core.config import SkillsSettings, SourceSpec
 from skills_hub.services.ingestion import Rejection, ingest_directory
 from skills_hub.services.skill_store import SkillStore
 
 LOGGER = logging.getLogger(__name__)
+
+# No-op until a TracerProvider is installed (OTEL_ENABLED), so importing this
+# module never activates telemetry on its own.
+TRACER = trace.get_tracer("skills_hub.sync")
 
 MAX_REPORTED_REJECTIONS = 50
 GIT_TIMEOUT_SECONDS = 120
@@ -84,32 +90,53 @@ def _git(args: list[str]) -> None:
     )
 
 
-def _git_checkout(url: str, ref: str, dest: Path, token: str | None) -> str:
+def _git_checkout(
+    source_id: str, url: str, ref: str, dest: Path, token: str | None
+) -> str:
     """Clone or update a disposable checkout; return the resolved commit SHA.
 
     Any corruption is unrecoverable by design: the directory is a cache, so
     failures fall back to a fresh clone on the next cycle.
     """
-    auth_url = _with_token(url, token)
-    if (dest / ".git").is_dir():
-        _git(["-C", str(dest), "fetch", "--depth", "1", "origin", ref])
-        _git(["-C", str(dest), "reset", "--hard", "FETCH_HEAD"])
-    else:
-        if dest.exists():
-            shutil.rmtree(dest)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        clone_args = ["clone", "--depth", "1"]
-        if ref != "HEAD":
-            clone_args += ["--branch", ref]
-        _git([*clone_args, auth_url, str(dest)])
-    result = subprocess.run(
-        ["git", "-C", str(dest), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=GIT_TIMEOUT_SECONDS,
-    )
-    return result.stdout.strip()
+    with TRACER.start_as_current_span(
+        "skills.git.checkout",
+        record_exception=False,
+        set_status_on_exception=False,
+    ) as span:
+        span.set_attribute("source.id", source_id)
+        span.set_attribute("source.ref", ref)
+        try:
+            auth_url = _with_token(url, token)
+            if (dest / ".git").is_dir():
+                _git(["-C", str(dest), "fetch", "--depth", "1", "origin", ref])
+                _git(["-C", str(dest), "reset", "--hard", "FETCH_HEAD"])
+            else:
+                if dest.exists():
+                    shutil.rmtree(dest)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                clone_args = ["clone", "--depth", "1"]
+                if ref != "HEAD":
+                    clone_args += ["--branch", ref]
+                _git([*clone_args, auth_url, str(dest)])
+            result = subprocess.run(
+                ["git", "-C", str(dest), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=GIT_TIMEOUT_SECONDS,
+            )
+            return result.stdout.strip()
+        except Exception as exc:
+            # git quotes its argv (including the token-injected clone URL) in
+            # error text; scrub the credential before it lands in a span event.
+            message = str(exc)
+            if token:
+                message = message.replace(token, "***")
+            span.set_status(
+                trace.Status(trace.StatusCode.ERROR, "git checkout failed")
+            )
+            span.add_event("checkout.error", {"message": message})
+            raise
 
 
 # --- Sync manager --------------------------------------------------------------
@@ -153,52 +180,66 @@ class SyncManager:
     async def sync_once(self, spec: SourceSpec) -> SourceStatus:
         """Run one sync cycle for a source; never raises."""
         now = datetime.now(timezone.utc)
-        try:
-            root, ref = await self._materialize(spec)
-            result = await asyncio.to_thread(
-                ingest_directory, spec.source_id, root, ref, now
-            )
-            await self._store.replace_source(spec.source_id, result.records)
-            status = SourceStatus(
-                source_id=spec.source_id,
-                source_type=spec.type,
-                last_sync_at=now,
-                last_error=None,
-                ref=ref,
-                accepted=len(result.records),
-                rejections=tuple(result.rejections[:MAX_REPORTED_REJECTIONS]),
-            )
-            metrics.record_sync(spec.source_id, "ok")
-            metrics.set_source_size(spec.source_id, status.accepted)
-            for rejection in result.rejections:
-                metrics.record_rejected(_rejection_category(rejection.reason))
-            LOGGER.info(
-                "source synced",
-                extra={
-                    "source_id": spec.source_id,
-                    "ref": ref,
-                    "accepted": status.accepted,
-                    "rejected": len(result.rejections),
-                },
-            )
-        except Exception as exc:  # noqa: BLE001 - a cycle must never die
-            previous = self._statuses[spec.source_id]
-            # A failed `git clone` quotes its argv verbatim in the exception,
-            # which includes the token-injected URL; error messages reach the
-            # auth-exempt status endpoint and the logs, so the credential
-            # must never appear in them.
-            message = str(exc)
-            token = self._settings.git_tokens.get(spec.source_id)
-            if token:
-                message = message.replace(token, "***")
-            status = replace(previous, last_sync_at=now, last_error=message)
-            metrics.record_sync(spec.source_id, "error")
-            LOGGER.error(
-                "source sync failed; keeping previous snapshot",
-                extra={"source_id": spec.source_id, "error": message},
-            )
-        self._statuses[spec.source_id] = status
-        return status
+        with TRACER.start_as_current_span(
+            "skills.sync",
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
+            span.set_attribute("source.id", spec.source_id)
+            span.set_attribute("source.type", spec.type)
+            try:
+                root, ref = await self._materialize(spec)
+                result = await asyncio.to_thread(
+                    ingest_directory, spec.source_id, root, ref, now
+                )
+                await self._store.replace_source(spec.source_id, result.records)
+                status = SourceStatus(
+                    source_id=spec.source_id,
+                    source_type=spec.type,
+                    last_sync_at=now,
+                    last_error=None,
+                    ref=ref,
+                    accepted=len(result.records),
+                    rejections=tuple(result.rejections[:MAX_REPORTED_REJECTIONS]),
+                )
+                metrics.record_sync(spec.source_id, "ok")
+                metrics.set_source_size(spec.source_id, status.accepted)
+                for rejection in result.rejections:
+                    metrics.record_rejected(_rejection_category(rejection.reason))
+                span.set_attribute("result", "ok")
+                span.set_attribute("accepted", status.accepted)
+                span.set_status(trace.Status(trace.StatusCode.OK))
+                LOGGER.info(
+                    "source synced",
+                    extra={
+                        "source_id": spec.source_id,
+                        "ref": ref,
+                        "accepted": status.accepted,
+                        "rejected": len(result.rejections),
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001 - a cycle must never die
+                previous = self._statuses[spec.source_id]
+                # A failed `git clone` quotes its argv verbatim in the exception,
+                # which includes the token-injected URL; error messages reach the
+                # auth-exempt status endpoint and the logs, so the credential
+                # must never appear in them.
+                message = str(exc)
+                token = self._settings.git_tokens.get(spec.source_id)
+                if token:
+                    message = message.replace(token, "***")
+                status = replace(previous, last_sync_at=now, last_error=message)
+                metrics.record_sync(spec.source_id, "error")
+                span.set_attribute("result", "error")
+                span.set_status(
+                    trace.Status(trace.StatusCode.ERROR, "sync failed")
+                )
+                LOGGER.error(
+                    "source sync failed; keeping previous snapshot",
+                    extra={"source_id": spec.source_id, "error": message},
+                )
+            self._statuses[spec.source_id] = status
+            return status
 
     async def _materialize(self, spec: SourceSpec) -> tuple[Path, str]:
         """Return (readable root directory, ref marker) for one source."""
@@ -207,7 +248,7 @@ class SyncManager:
         dest = Path(self._settings.data_path) / "sources" / spec.source_id
         token = self._settings.git_tokens.get(spec.source_id)
         sha = await asyncio.to_thread(
-            _git_checkout, spec.url, spec.ref, dest, token
+            _git_checkout, spec.source_id, spec.url, spec.ref, dest, token
         )
         root = dest / spec.path if spec.path else dest
         if not root.is_dir():

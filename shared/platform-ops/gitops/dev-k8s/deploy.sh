@@ -20,6 +20,11 @@ NAMESPACE=${NAMESPACE:-dev-luban-aiops}
 # Set SKIP_SKILLS_SECRETS=true when secrets are injected externally (e.g. CI).
 "$SCRIPT_DIR/../sync-skills-secrets.sh" "$NAMESPACE"
 
+# Provision OTel ingest credentials for the OpenObserve backend (SPEC-005
+# completion) unless skipped. Requires OO_ROOT_USER_EMAIL/OO_ROOT_USER_PASSWORD
+# exported; otherwise it skips and push fails open. SKIP_OTEL_SECRETS=true for CI.
+"$SCRIPT_DIR/../sync-otel-secrets.sh" "$NAMESPACE"
+
 if [ "$RECONCILE_OIDC_PORTAL_CLIENT" = "true" ]; then
   # Self-contained realm (groups + test users) before the portal client, so
   # the client's `groups` scope resolves in the new realm.

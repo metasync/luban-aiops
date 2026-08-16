@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the metrics, tracing, and request-correlation conventions that all platform services follow, so that signal from `tool-gateway`, `identity-broker`, and `agent-platform` is consistent, joinable, and stable enough for a future shared SDK or backend migration.
+Define the metrics, tracing, logging, and request-correlation conventions that all platform services follow, so that signal from every service is consistent, joinable, and stable enough for a future shared SDK or backend migration.
 
 These conventions back `SPEC-005` (observability baseline).
 
@@ -11,7 +11,7 @@ These conventions back `SPEC-005` (observability baseline).
 Each service exposes two deliberately decoupled observability surfaces:
 
 1. **`/metrics` (pull, always on)** — a collector-independent Prometheus endpoint for debugging and health. Works with no external infrastructure. Implemented directly with `prometheus_client` (a minimal RED middleware plus the endpoint; `prometheus-fastapi-instrumentator` proved incompatible with the pinned starlette — see the SPEC-005 changelog).
-2. **OpenTelemetry push (opt-in)** — traces and metrics pushed via OTLP to the configured collector (the Elastic APM backend in this organization). Gated by `OTEL_ENABLED`; off by default; fails open.
+2. **OpenTelemetry push (opt-in)** — traces, metrics, and mirrored logs pushed via OTLP **HTTP/protobuf** to the configured backend (OpenObserve in this organization). Gated by `OTEL_ENABLED`; off by default; fails open.
 
 The two never depend on each other: disabling OTel push leaves `/metrics` fully functional.
 
@@ -48,15 +48,25 @@ High-cardinality labels explode storage and query cost and are rejected at revie
 
 OTel push is controlled by standard-aligned environment variables:
 
-- `OTEL_ENABLED` — master gate, default `false`. When false, no OTel providers or instrumentation are initialized (zero overhead) and `/metrics` is unaffected. One switch gates the full signal (traces + metrics); there are no per-signal toggles.
-- `OTEL_EXPORTER_OTLP_ENDPOINT` — the collector / APM OTLP endpoint URL.
+- `OTEL_ENABLED` — master gate, default `false`. When false, no OTel providers or instrumentation are initialized (zero overhead) and `/metrics` is unaffected. One switch gates the full signal (traces + metrics + log mirror); there are no per-signal toggles.
+- `OTEL_EXPORTER_OTLP_ENDPOINT` — the backend OTLP HTTP base URL. Exporters speak OTLP over HTTP/protobuf and append the per-signal path (`/v1/traces`, `/v1/metrics`, `/v1/logs`), so the value stops at the org prefix, e.g. `http://openobserve-router:5080/api/default` for the OpenObserve ingest contract `/api/{org}/v1/{signal}`.
+- `OTEL_EXPORTER_OTLP_HEADERS` — ingest authentication, `Authorization=Basic <base64(email:password)>` for OpenObserve. Secret material: provisioned into each service's runtime-secrets Secret by `sync-otel-secrets.sh`, never committed, never placed in the ConfigMap.
 - `OTEL_SERVICE_NAME` — the resource service name; defaults to the service's metadata name.
 
-Fail-open guarantee: an unreachable or misconfigured collector must never break a request. OTel batch processors drop telemetry on export failure; service setup additionally guards initialization and logs rather than raising.
+Fail-open guarantee: an unreachable or misconfigured backend must never break a request. Missing/invalid credentials produce 401s at export time; OTel batch processors drop telemetry on export failure and service setup additionally guards initialization and logs rather than raising.
 
 ## Structured Logging Levels
 
 All business and request events are emitted as single-line JSON via `log_event(...)` at **INFO** level. Because these records are the audit trail (http_request, tool_invoked, policy decisions), every service calls `configure_logging()` at app startup to raise the root logger from uvicorn's WARNING default to INFO. The level is overridable per-deployment via `LOG_LEVEL`; the default must stay INFO so audit records are never silently discarded.
+
+## OTLP Log Bridge
+
+When OTel push is enabled, each service attaches an OTel `LoggingHandler` to the root logger so every structured record is also exported as an OTLP log record. Semantics:
+
+- **JSON stdout stays the source of truth.** The OTLP mirror exists so the backend can correlate logs with traces; it never replaces container logs and audit tooling must keep reading stdout.
+- Trace/span association is automatic: records emitted inside an active span carry its `trace_id`/`span_id`, joining the log mirror to the trace view on the same W3C id that backs `x-request-id`.
+- Recursion guard: the `opentelemetry` loggers are detached from the root logger, so exporter failures cannot loop back through the bridge.
+- The bridge is gated by the same `OTEL_ENABLED` switch and fails open with the rest of the pipeline.
 
 ## Request Correlation And Trace Bridging
 
@@ -67,4 +77,4 @@ All business and request events are emitted as single-line JSON via `log_event(.
 
 ## Relationship To Backends
 
-Services only *expose* `/metrics` and *push* OTLP. Scraping infrastructure, metrics/traces storage, dashboards, and alerting (Prometheus server, Grafana, Elastic dashboards) are platform-ops concerns outside the service contract. The Elastic stack is the organization's observability platform; OTLP is its first-class ingestion path.
+Services only *expose* `/metrics` and *push* OTLP. Scraping infrastructure, metrics/traces/logs storage, dashboards, and alerting are platform-ops concerns outside the service contract. OpenObserve is the organization's observability backend; OTLP HTTP is its first-class ingestion path (org-scoped at `/api/{org}/v1/{signal}`, Basic-authenticated).

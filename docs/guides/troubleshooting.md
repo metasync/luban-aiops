@@ -434,3 +434,40 @@ kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
   `kubectl rollout restart deployment/tool-gateway deployment/skills-hub`.
 - Content-level operations (add/revise/remove skills and sources) are covered
   by the [Skills and Guidance Guide](skills-guide.md).
+
+## Symptom: No traces/metrics/logs appear in OpenObserve
+
+**Most likely cause:** One of — the OTLP ingest auth header is missing from a
+service's secret (OpenObserve answers 401 and the exporter drops batches),
+`OTEL_ENABLED` is false, or `OTEL_EXPORTER_OTLP_ENDPOINT` points at the wrong
+org/path. Telemetry always fails open, so services themselves look healthy.
+
+**Diagnostic:**
+
+```bash
+# Gate + endpoint come from the shared ConfigMap
+kubectl -n dev-luban-aiops get configmap platform-runtime-config \
+  -o jsonpath='{.data.OTEL_ENABLED}{"\n"}{.data.OTEL_EXPORTER_OTLP_ENDPOINT}{"\n"}'
+
+# The auth header must be present in each service's runtime-secrets Secret
+kubectl -n dev-luban-aiops get secret skills-hub-runtime-secrets \
+  -o jsonpath='{.data.OTEL_EXPORTER_OTLP_HEADERS}' | base64 -d | cut -c1-40
+
+# Exporter errors surface in pod logs ("otel telemetry setup failed",
+# "401" from the batch exporter)
+kubectl -n dev-luban-aiops logs deployment/skills-hub --tail=50 | grep -i otel
+```
+
+**Resolution:**
+
+- Header missing or 401s in the logs: export the OpenObserve root credentials
+  (luban-bootstrapper `openobserve/secrets/openobserve.env`) and re-run
+  `shared/platform-ops/gitops/sync-otel-secrets.sh` (or `make deploy` with the
+  variables exported); it upserts the header into all six secrets and restarts
+  the workloads.
+- `OTEL_ENABLED=false`: set it to `true` in
+  `dev-k8s/base/shared/runtime.env` and redeploy.
+- Endpoint wrong: it must stop at the org prefix
+  (`.../api/default`); the exporters append `/v1/{traces,metrics,logs}`.
+- Conventions and the log-bridge semantics:
+  `shared/shared-contracts/observability-conventions.md`.

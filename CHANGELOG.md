@@ -8,6 +8,34 @@ published product versions.
 
 ## Unreleased
 
+### Added — OpenObserve Telemetry Enablement (SPEC-005 completion)
+
+- The opt-in OTel push pipeline is now live for all six services against the
+  in-cluster OpenObserve backend: `OTEL_ENABLED=true` and the org-scoped OTLP
+  HTTP endpoint move into the shared ConfigMap, and the six `telemetry.py`
+  pipelines switch from OTLP gRPC to OTLP **HTTP/protobuf** (the protocol
+  OpenObserve ingests; dependency swapped to
+  `opentelemetry-exporter-otlp-proto-http`).
+- New **OTLP log bridge**: when enabled, each service attaches an OTel
+  `LoggingHandler` to the root logger, mirroring every structured JSON record
+  as an OTLP log with automatic trace/span association (via the non-deprecated
+  `opentelemetry-instrumentation-logging` handler). JSON stdout remains the
+  audit source of truth; OTel's own loggers are detached from the root to
+  prevent export-failure recursion. Gating and fail-open semantics unchanged.
+- skills-hub sync-loop depth: `skills.sync` spans (source id/type, result,
+  accepted count) and `skills.git.checkout` spans (source id, requested ref)
+  with checkout errors recorded **after** scrubbing the git token — the
+  token-injected clone URL never reaches span attributes or events.
+- New `sync-otel-secrets.sh` (wired into `make deploy`): computes the Basic
+  auth header from `OO_ROOT_USER_EMAIL`/`OO_ROOT_USER_PASSWORD` and upserts
+  `OTEL_EXPORTER_OTLP_HEADERS` into all six runtime-secrets Secrets, then
+  restarts the workloads. Unset credentials skip with a clear message — push
+  then 401s and fails open. `SKIP_OTEL_SECRETS=true` escape hatch for CI.
+- Docs: observability conventions now define the OpenObserve backend, OTLP
+  HTTP protocol, and log-bridge semantics; configuration reference documents
+  the three `OTEL_*` variables and the header contract per Secret;
+  troubleshooting gains a "no data in OpenObserve" section.
+
 ### Added — Git-Federated Skill Sources, End to End (R2 gap-closure)
 
 - The skills-hub image now ships `git`: the sync engine shells out to it for

@@ -18,7 +18,7 @@ activate them. A feature is **active** when all required variables are set to no
 | **Elastic observability** | `GATEWAY_ELASTIC_ENABLED=true`, `GATEWAY_ELASTIC_URL`, auth (`_API_KEY` or `_USERNAME`+`_PASSWORD`) | tool-gateway | disabled |
 | **Output redaction** | `GATEWAY_REDACTION_ENABLED` | tool-gateway | enabled (`true`) |
 | **Policy enforcement** | `GATEWAY_POLICY_PATH`, `PLATFORM_GATEWAY_POLICY_PATH` | tool-gateway, platform-gateway | `/etc/luban/policy/policy.yaml` |
-| **OpenTelemetry push** | `OTEL_ENABLED=true`, `OTEL_EXPORTER_OTLP_ENDPOINT` | all services | disabled |
+| **OpenTelemetry push** | `OTEL_ENABLED=true`, `OTEL_EXPORTER_OTLP_ENDPOINT`, auth `OTEL_EXPORTER_OTLP_HEADERS` | all services | enabled (OpenObserve; header via `sync-otel-secrets.sh`) |
 | **LLM runtime** | `AGENTSCOPE_PROVIDER`, `AGENTSCOPE_MODEL_NAME`, `AGENTSCOPE_API_KEY` | agent-service | via runtime profile |
 | **Workload identity** | `PLATFORM_GATEWAY_WORKLOAD_TOKEN_PATH`, `IDENTITY_WORKLOAD_ISSUER_URL`, `IDENTITY_WORKLOAD_CLIENTS` | platform-gateway, identity-service | disabled (dev) |
 | **Durable audit trail** | `*_AUDIT_SERVICE_URL`, `*_AUDIT_CLIENT_SECRET` ↔ `AUDIT_INGEST_CLIENTS` | audit-service, tool-gateway, platform-gateway, identity-service | **must be provisioned** (`sync-audit-secrets.sh`) |
@@ -305,9 +305,11 @@ Source: `shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env`
 
 | Variable | Purpose | Default | Source |
 |---|---|---|---|
-| `OTEL_ENABLED` | Enable OpenTelemetry push pipeline | `false` | shared/runtime.env |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector endpoint | *(commented out)* | shared/runtime.env |
+| `OTEL_ENABLED` | Enable OpenTelemetry push pipeline (traces + metrics + log mirror) | `true` | shared/runtime.env |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP HTTP base URL; exporters append `/v1/{traces,metrics,logs}` | `http://openobserve-router.openobserve.svc.cluster.local:5080/api/default` | shared/runtime.env |
 | `IDENTITY_SERVICE_URL` | Identity broker URL (shared) | `http://identity-service:8000` | shared/runtime.env |
+
+The OTLP ingest credential (`OTEL_EXPORTER_OTLP_HEADERS`) is secret material and lives in each service's runtime-secrets Secret, not in this ConfigMap. Provision it with `sync-otel-secrets.sh`, sourcing the OpenObserve root credentials from the luban-bootstrapper repo (`openobserve/secrets/openobserve.env`) at provision time only. Without the header the exporters push anonymously, OpenObserve answers 401, and the pipeline fails open.
 
 ## Secret Contracts
 
@@ -318,6 +320,7 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 | Key | Purpose | How to Provision |
 |---|---|---|
 | `AGENTSCOPE_API_KEY` | LLM provider API key | `sync-runtime-secret.sh <profile>` |
+| `OTEL_EXPORTER_OTLP_HEADERS` | OTLP ingest auth (Basic) for the OTel push pipeline | `sync-otel-secrets.sh` |
 
 ### `platform-gateway-runtime-secrets`
 
@@ -325,6 +328,7 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 |---|---|---|
 | `PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET` | Token exchange credential | `sync-delegation-secrets.sh` |
 | `PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET` | Audit ingest credential | `sync-audit-secrets.sh` |
+| `OTEL_EXPORTER_OTLP_HEADERS` | OTLP ingest auth (Basic) for the OTel push pipeline | `sync-otel-secrets.sh` |
 
 ### `identity-service-runtime-secrets`
 
@@ -333,6 +337,7 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 | `OIDC_CLIENT_SECRET` | Keycloak confidential client secret | Manual or CI |
 | `IDENTITY_SERVICE_CLIENTS` | Service client registry | `sync-delegation-secrets.sh` |
 | `IDENTITY_AUDIT_CLIENT_SECRET` | Audit ingest credential | `sync-audit-secrets.sh` |
+| `OTEL_EXPORTER_OTLP_HEADERS` | OTLP ingest auth (Basic) for the OTel push pipeline | `sync-otel-secrets.sh` |
 
 ### `tool-gateway-runtime-secrets`
 
@@ -340,12 +345,14 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 |---|---|---|
 | `GATEWAY_AUDIT_CLIENT_SECRET` | Audit ingest credential | `sync-audit-secrets.sh` |
 | `GATEWAY_SKILLS_CLIENT_SECRET` | Skills query credential | `sync-skills-secrets.sh` |
+| `OTEL_EXPORTER_OTLP_HEADERS` | OTLP ingest auth (Basic) for the OTel push pipeline | `sync-otel-secrets.sh` |
 
 ### `audit-service-runtime-secrets`
 
 | Key | Purpose | How to Provision |
 |---|---|---|
 | `AUDIT_INGEST_CLIENTS` | Ingest client registry (`client_id=secret,...`) | `sync-audit-secrets.sh` |
+| `OTEL_EXPORTER_OTLP_HEADERS` | OTLP ingest auth (Basic) for the OTel push pipeline | `sync-otel-secrets.sh` |
 
 ### `skills-hub-runtime-secrets`
 
@@ -353,6 +360,7 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 |---|---|---|
 | `SKILLS_QUERY_CLIENTS` | Query client registry (`client_id=secret,...`) | `sync-skills-secrets.sh` |
 | `SKILLS_GIT_TOKENS` | Git-source PATs (JSON map `source_id`→token); without it a git source fails auth while others keep serving | `SKILLS_GIT_TOKEN=<pat> sync-skills-secrets.sh` (never committed) |
+| `OTEL_EXPORTER_OTLP_HEADERS` | OTLP ingest auth (Basic) for the OTel push pipeline | `sync-otel-secrets.sh` |
 
 ## Runtime Profiles
 

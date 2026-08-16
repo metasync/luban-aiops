@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from skills_hub.core.config import SkillsSettings, SourceSpec
+from skills_hub.services import sync as sync_module
 from skills_hub.services.skill_store import InMemorySkillStore
 from skills_hub.services.sync import SyncManager, _with_token
 
@@ -131,7 +132,9 @@ class SyncOnceTests(unittest.TestCase):
             sources=(spec,), data_path=str(self.root / "data")
         )
 
-        def fake_checkout(url: str, ref: str, dest: Path, token: str | None):
+        def fake_checkout(
+            source_id: str, url: str, ref: str, dest: Path, token: str | None
+        ):
             sub = dest / "ops" / "skills"
             sub.mkdir(parents=True)
             (sub / "KubePodNotReady.md").write_text(VALID_DOC)
@@ -199,6 +202,94 @@ class GitUrlTests(unittest.TestCase):
             _with_token("git@github.com:team/repo.git", "tok"),
             "git@github.com:team/repo.git",
         )
+
+
+class SyncSpanTests(unittest.TestCase):
+    """The sync loop emits bounded spans (no-op unless a provider is set)."""
+
+    def setUp(self) -> None:
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        (self.root / "KubePodNotReady.md").write_text(VALID_DOC)
+        self.store = InMemorySkillStore()
+        self.exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(self.exporter))
+        self.tracer = provider.get_tracer("skills_hub.sync")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _by_name(self, name: str):
+        return [s for s in self.exporter.get_finished_spans() if s.name == name]
+
+    def test_successful_sync_emits_span_with_result_ok(self) -> None:
+        spec = SourceSpec(
+            source_id="sre-alerting", type="local", path=str(self.root)
+        )
+        manager = SyncManager(_settings(spec), self.store)
+        with patch.object(sync_module, "TRACER", self.tracer):
+            _run(manager.sync_once(spec))
+        spans = self._by_name("skills.sync")
+        self.assertEqual(len(spans), 1)
+        attrs = spans[0].attributes
+        self.assertEqual(attrs["source.id"], "sre-alerting")
+        self.assertEqual(attrs["source.type"], "local")
+        self.assertEqual(attrs["result"], "ok")
+        self.assertEqual(attrs["accepted"], 1)
+
+    def test_failed_sync_emits_span_with_result_error(self) -> None:
+        spec = SourceSpec(
+            source_id="team-git",
+            type="git",
+            url="https://example.com/team.git",
+            ref="main",
+        )
+        manager = SyncManager(_settings(spec), self.store)
+        with patch.object(sync_module, "TRACER", self.tracer), patch(
+            "skills_hub.services.sync._git_checkout",
+            side_effect=RuntimeError("clone failed"),
+        ):
+            _run(manager.sync_once(spec))
+        spans = self._by_name("skills.sync")
+        self.assertEqual(len(spans), 1)
+        self.assertEqual(spans[0].attributes["result"], "error")
+
+    def test_git_checkout_span_scrubs_token_from_error_event(self) -> None:
+        dest = self.root / "checkout"
+        with patch.object(sync_module, "TRACER", self.tracer), patch(
+            "skills_hub.services.sync._git",
+            side_effect=RuntimeError(
+                "clone failed: https://x-access-token:sekrit@example.com"
+            ),
+        ):
+            with self.assertRaises(RuntimeError):
+                sync_module._git_checkout(
+                    "team-git",
+                    "https://example.com/team.git",
+                    "main",
+                    dest,
+                    "sekrit",
+                )
+        spans = self._by_name("skills.git.checkout")
+        self.assertEqual(len(spans), 1)
+        span = spans[0]
+        self.assertEqual(span.attributes["source.id"], "team-git")
+        self.assertEqual(span.attributes["source.ref"], "main")
+        messages = [
+            ev.attributes.get("message", "")
+            for ev in span.events
+            if ev.name == "checkout.error"
+        ]
+        self.assertEqual(len(messages), 1)
+        self.assertNotIn("sekrit", messages[0])
+        self.assertIn("***", messages[0])
 
 
 if __name__ == "__main__":
