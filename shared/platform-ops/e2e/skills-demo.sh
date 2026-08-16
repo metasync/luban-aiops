@@ -71,8 +71,14 @@ if not matches:
     sys.exit(2)
 print(matches[0]['skill_id'])
 ") || fail "search for KubePodNotReady returned no matches"
-[ "$TOP_SKILL" = "sre-alerting/alerts/kubepodnotready" ] \
-  || fail "expected top match sre-alerting/alerts/kubepodnotready, got $TOP_SKILL"
+# The git-federated platform-skills source mirrors the sample content, so the
+# top match is the runbook from either source (identical deterministic score;
+# ordering between ties follows the sorted source list).
+case "$TOP_SKILL" in
+  "sre-alerting/alerts/kubepodnotready") ;;
+  "platform-skills/sre-alerting/alerts/kubepodnotready") ;;
+  *) fail "expected top match to be the KubePodNotReady runbook, got $TOP_SKILL" ;;
+esac
 echo "top match: $TOP_SKILL"
 
 if [ "${SKIP_CHAT_LEG:-}" = "true" ]; then
