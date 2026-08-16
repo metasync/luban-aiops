@@ -1,1 +1,0 @@
-The service is started by invoking `run()` from `main.py`, which reads host/port from `SkillsRunSettings.from_env()` and calls `uvicorn.run(app, ...)`. On startup the lifespan prunes skills whose sources have been removed from `SKILLS_SOURCES`, so an empty federation list clears the durable store.

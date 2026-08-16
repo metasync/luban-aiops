@@ -1,0 +1,1 @@
+Python services managed with `uv` (pinning `.python-version` per product); container images built from `shared/base-images/base-uv` (AL2023 + uv); Kubernetes deployment via Kustomize overlays under `shared/platform-ops/gitops`; policy validation against JSON schema via `shared/shared-contracts/scripts/validate_policy.py`; pre-commit/pre-push gate driven by GNU make targets.

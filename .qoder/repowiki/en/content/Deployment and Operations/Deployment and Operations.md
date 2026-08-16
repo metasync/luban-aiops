@@ -22,14 +22,15 @@
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
+- [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 - [shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/dashscope/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/configmap.yaml)
-- [shared/platform-ops/gitops/runtime-profiles/dashscope/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/kustomization.yaml)
+- [shared/platform-ops/gitops/runtime-profiles/dashscope/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/configmap.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/deepseek/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/configmap.yaml)
-- [shared/platform-ops/gitops/runtime-profiles/deepseek/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/kustomization.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/shared/observability.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/observability.env)
+- [shared/platform-ops/gitops/runtime-profiles/deepseek/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/configmap.yaml)
+- [shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
@@ -54,25 +55,27 @@
 - [shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 - [products/agent-platform/src/agent_service/core/metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [products/agent-platform/src/agent_service/core/observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
+- [products/agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
 - [products/identity-broker/src/identity_service/core/metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
 - [products/identity-broker/src/identity_service/core/observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
+- [products/identity-broker/src/identity_service/core/telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
 - [products/tool-gateway/src/api_gateway/core/metrics.py](file://products/tool-gateway/src/api_gateway/core/metrics.py)
 - [products/tool-gateway/src/api_gateway/core/observability.py](file://products/tool-gateway/src/api_gateway/core/observability.py)
+- [products/tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [products/platform-gateway/src/platform_gateway/services/delegation_client.py](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py)
 - [products/identity-broker/src/identity_service/services/exchange_service.py](file://products/identity-broker/src/identity_service/services/exchange_service.py)
 - [products/platform-gateway/src/platform_gateway/core/config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
 - [shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env)
+- [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new audit-service component with PostgreSQL backend support
-- Enhanced Kubernetes infrastructure section with PostgreSQL StatefulSet requirements and headless service configuration
-- Updated secrets management section with audit secrets synchronization via sync-audit-secrets.sh script
-- Added detailed explanation of audit event ingestion workflow and client authentication mechanisms
-- Updated operational procedures to include audit service deployment, secret provisioning, and monitoring setup
-- Integrated OpenID Connect client reconciliation for portal authentication with Keycloak integration
+- Enhanced OpenTelemetry secret synchronization with improved handling of externally provisioned runtime secrets in CI/CD environments
+- Updated sync-otel-secrets.sh script to intelligently handle cases where runtime-secrets.env files are not present locally by using kubectl patch to add OTEL_EXPORTER_OTLP_HEADERS while preserving existing Secret keys
+- Improved CI/CD integration with better skip mechanisms and graceful degradation
+- Enhanced documentation for OpenTelemetry credential management and troubleshooting
 
 ## Table of Contents
 1. Introduction
@@ -87,7 +90,7 @@
 10. Appendices
 
 ## Introduction
-This document provides comprehensive deployment and operations guidance for the Luban AIOps Platform. It focuses on Kubernetes deployment using GitOps with Kustomize overlays, container build processes, image management, automation scripts, environment configuration, secrets management (including enhanced delegation secret auto-provisioning and audit secrets synchronization), scaling strategies, monitoring setup (Prometheus metrics, structured logging, health checks), operational procedures (updates, rollbacks, disaster recovery, capacity planning), performance tuning, resource optimization, and troubleshooting common issues.
+This document provides comprehensive deployment and operations guidance for the Luban AIOps Platform. It focuses on Kubernetes deployment using GitOps with Kustomize overlays, container build processes, image management, automation scripts, environment configuration, secrets management (including enhanced delegation secret auto-provisioning, audit secrets synchronization, and OpenTelemetry credential provisioning), scaling strategies, monitoring setup (Prometheus metrics, structured logging, health checks, and OpenTelemetry push pipeline), operational procedures (updates, rollbacks, disaster recovery, capacity planning), performance tuning, resource optimization, and troubleshooting common issues.
 
 ## Project Structure
 The platform is organized into multiple products and shared operational assets:
@@ -104,6 +107,7 @@ TG["Tool Gateway"]
 OP["Operator Portal"]
 PG["Platform Gateway"]
 AS["Audit Service"]
+SH["Skills Hub"]
 end
 subgraph "Shared Ops"
 BASE["Kustomize Base"]
@@ -111,10 +115,12 @@ OVL["Kustomize Overlays"]
 RP["Runtime Profiles"]
 DS["Delegation Secrets"]
 ASecrets["Audit Secrets"]
+OTEL["OpenTelemetry Secrets"]
 end
 subgraph "Infrastructure"
 Redis["Redis"]
 Postgres["PostgreSQL"]
+OO["OpenObserve"]
 end
 subgraph "Build System"
 MK["mk/image.mk<br/>mk/python.mk"]
@@ -126,10 +132,12 @@ TG --> BASE
 OP --> BASE
 PG --> BASE
 AS --> BASE
+SH --> BASE
 BASE --> OVL
 RP --> OVL
 DS --> OVL
 ASecrets --> OVL
+OTEL --> OVL
 Redis --> AS
 Postgres --> AS
 PMK --> MK
@@ -139,6 +147,7 @@ PMK --> TG
 PMK --> OP
 PMK --> PG
 PMK --> AS
+PMK --> SH
 ```
 
 **Diagram sources**
@@ -166,13 +175,14 @@ PMK --> AS
 - Operator Portal: Web UI for operators to manage platform resources and configurations with OIDC authentication.
 - Platform Gateway: Central gateway that handles user authentication and delegates tokens to downstream services through the identity broker.
 - **Audit Service**: Durable audit trail service that ingests, stores, and queries audit events from all platform components with PostgreSQL persistence.
+- **Skills Hub**: Skills management service providing reusable capabilities across the platform.
 
 Key operational artifacts:
 - Dockerfiles per product define container images.
 - Product Makefiles orchestrate builds and pushes.
 - mk/image.mk and mk/python.mk provide reusable build targets.
 - Kustomize base defines Kubernetes resources; overlays select runtime profiles and apply environment-specific patches.
-- Shell scripts automate deployment, secret synchronization, profile selection, verification, delegation secret provisioning, and audit secret management.
+- Shell scripts automate deployment, secret synchronization, profile selection, verification, delegation secret provisioning, audit secret management, and OpenTelemetry credential provisioning.
 
 **Section sources**
 - [products/agent-platform/Dockerfile](file://products/agent-platform/Dockerfile)
@@ -186,14 +196,14 @@ Key operational artifacts:
 - [mk/python.mk](file://mk/python.mk)
 
 ## Architecture Overview
-The platform deploys as a set of Kubernetes workloads orchestrated via Kustomize. The GitOps workflow uses overlays to compose base manifests with environment-specific settings and runtime profiles. Enhanced with automated delegation secret provisioning for secure cross-service communication and durable audit trail storage.
+The platform deploys as a set of Kubernetes workloads orchestrated via Kustomize. The GitOps workflow uses overlays to compose base manifests with environment-specific settings and runtime profiles. Enhanced with automated delegation secret provisioning for secure cross-service communication, durable audit trail storage, and OpenTelemetry credential provisioning for centralized observability.
 
 ```mermaid
 graph TB
 DevOps["Developer / CI"]
 Git["Git Repository"]
 Kustomize["Kustomize Overlay"]
-Secrets["Delegation & Audit Secrets"]
+Secrets["Delegation & Audit & OTel Secrets"]
 K8s["Kubernetes Cluster"]
 subgraph "Base Manifests"
 BaseNS["Namespace"]
@@ -204,11 +214,16 @@ BaseTG["API Gateway Deployment/Service"]
 BaseOP["Web UI Deployment/Service"]
 BasePG["Platform Gateway Deployment/Service"]
 BaseAS["Audit Service Deployment/Service"]
+BaseSH["Skills Hub Deployment/Service"]
 end
 subgraph "Runtime Profiles"
 ProfileOpenAI["OpenAI ConfigMap"]
 ProfileDashScope["DashScope ConfigMap"]
 ProfileDeepSeek["DeepSeek ConfigMap"]
+end
+subgraph "Observability"
+OpenObserve["OpenObserve Backend"]
+OTLP["OTLP Exporters"]
 end
 DevOps --> Git
 Git --> Kustomize
@@ -221,11 +236,20 @@ Kustomize --> BaseTG
 Kustomize --> BaseOP
 Kustomize --> BasePG
 Kustomize --> BaseAS
+Kustomize --> BaseSH
 Kustomize --> ProfileOpenAI
 Kustomize --> ProfileDashScope
 Kustomize --> ProfileDeepSeek
 Secrets --> K8s
 Kustomize --> K8s
+BaseAP --> OTLP
+BaseIB --> OTLP
+BaseTG --> OTLP
+BaseOP --> OTLP
+BasePG --> OTLP
+BaseAS --> OTLP
+BaseSH --> OTLP
+OTLP --> OpenObserve
 ```
 
 **Diagram sources**
@@ -280,13 +304,14 @@ Commit --> End(["End"])
 - Base manifests define core resources (namespaces, services, deployments, RBAC, policies).
 - Runtime profiles inject model provider configurations via ConfigMaps.
 - Overlays select profiles and apply environment-specific patches.
-- Scripts automate deploy, profile selection, secret sync, verification, delegation secret provisioning, and audit secret management.
+- Scripts automate deploy, profile selection, secret sync, verification, delegation secret provisioning, audit secret management, and OpenTelemetry credential provisioning.
 
 Operational steps:
 - Select runtime profile using the provided script.
 - Sync runtime secrets to the cluster.
 - Provision delegation secrets for cross-service authentication.
 - Provision audit secrets for audit event ingestion.
+- Provision OpenTelemetry credentials for centralized observability.
 - Deploy overlay to the target cluster.
 - Verify runtime profile and health endpoints.
 
@@ -296,6 +321,7 @@ participant Dev as "Developer"
 participant Script as "deploy-overlay.sh"
 participant Delegation as "sync-delegation-secrets.sh"
 participant Audit as "sync-audit-secrets.sh"
+participant OTel as "sync-otel-secrets.sh"
 participant Kustomize as "Kustomize"
 participant K8s as "Kubernetes"
 Dev->>Script : Run deploy-overlay.sh
@@ -303,6 +329,8 @@ Script->>Delegation : Provision delegation secrets
 Delegation->>K8s : Create/update secrets
 Script->>Audit : Provision audit secrets
 Audit->>K8s : Create/update secrets
+Script->>OTel : Provision OpenTelemetry credentials
+OTel->>K8s : Create/update secrets
 Script->>Kustomize : kustomize build <overlay>
 Kustomize-->>Script : Rendered manifests
 Script->>K8s : kubectl apply -f <rendered>
@@ -313,6 +341,7 @@ K8s-->>Dev : Resources created/updated
 - [shared/platform-ops/gitops/deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
+- [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [shared/platform-ops/gitops/dev-k8s/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
 
@@ -324,6 +353,7 @@ K8s-->>Dev : Resources created/updated
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
+- [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 
 ### Environment Configuration and Secrets Management
@@ -333,6 +363,7 @@ K8s-->>Dev : Resources created/updated
 - OIDC client reconciliation is supported by a helper script.
 - **Enhanced**: Delegation secrets are automatically provisioned for secure cross-service authentication.
 - **New**: Audit secrets are automatically provisioned for audit event ingestion across all platform components.
+- **Updated**: OpenTelemetry credentials are automatically provisioned for centralized observability via OpenObserve with enhanced CI/CD support.
 
 Best practices:
 - Keep sensitive values out of version control; use secret sync scripts to populate secure stores.
@@ -340,6 +371,8 @@ Best practices:
 - Validate overlays before applying to prevent misconfiguration.
 - Use delegation secret provisioning to ensure consistent service-to-service authentication.
 - Use audit secret provisioning to ensure consistent audit event ingestion credentials.
+- Use OpenTelemetry secret provisioning to ensure consistent telemetry authentication headers.
+- **CI/CD Integration**: Set `SKIP_OTEL_SECRETS=true` in CI environments where secrets are injected externally.
 
 ```mermaid
 flowchart TD
@@ -347,8 +380,10 @@ EnvFiles["Environment Files"] --> Overlay["Kustomize Overlay"]
 Secrets["Runtime Secrets"] --> SecretSync["sync-runtime-secret.sh"]
 DelegationSecrets["Delegation Secrets"] --> DelegationSync["sync-delegation-secrets.sh"]
 AuditSecrets["Audit Secrets"] --> AuditSync["sync-audit-secrets.sh"]
+OTELSecrets["OpenTelemetry Credentials"] --> OTESync["sync-otel-secrets.sh"]
 DelegationSync --> K8sSecrets["Cluster Secrets"]
 AuditSync --> K8sSecrets
+OTESync --> K8sSecrets
 SecretSync --> K8sSecrets
 Overlay --> K8sApply["kubectl apply"]
 K8sApply --> Pods["Pod Environments"]
@@ -356,7 +391,7 @@ K8sSecrets --> Pods
 ```
 
 **Diagram sources**
-- [shared/platform-ops/gitops/dev-k8s/base/shared/observability.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/observability.env)
+- [shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
@@ -364,10 +399,11 @@ K8sSecrets --> Pods
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
+- [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 
 **Section sources**
-- [shared/platform-ops/gitops/dev-k8s/base/shared/observability.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/observability.env)
+- [shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
@@ -375,6 +411,7 @@ K8sSecrets --> Pods
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
+- [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 
 ### Token Delegation and Cross-Service Authentication
@@ -456,18 +493,60 @@ AS-->>IB : 201 Created
 - [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [products/audit-service/src/audit_service/core/config.py](file://products/audit-service/src/audit_service/core/config.py)
 
+### OpenTelemetry Push Pipeline and OpenObserve Integration
+**Updated Section** Comprehensive OpenTelemetry support with enhanced automated credential provisioning for centralized observability and improved CI/CD integration.
+
+The platform implements a unified observability pipeline using OpenTelemetry with OpenObserve as the backend:
+
+- **Opt-in Pipeline**: Controlled by `OTEL_ENABLED` environment variable (default false) with zero overhead when disabled
+- **Unified Signals**: Traces, metrics, and logs exported via OTLP HTTP/protobuf to OpenObserve
+- **Enhanced Authentication**: `sync-otel-secrets.sh` provisions Basic auth headers for OpenObserve ingestion with intelligent fallback handling
+- **Fail-open Design**: Telemetry failures don't impact application functionality
+- **Centralized Configuration**: Shared endpoint configuration via ConfigMap with per-service secret headers
+- **CI/CD Integration**: Skip mechanism (`SKIP_OTEL_SECRETS=true`) for environments where secrets are injected externally
+- **Intelligent Secret Handling**: Automatically detects when runtime-secrets.env files are missing and patches existing cluster secrets instead
+
+```mermaid
+sequenceDiagram
+participant App as "Application Services"
+participant OTel as "OTel Exporters"
+participant OO as "OpenObserve"
+Note over App,OO : OpenTelemetry Push Flow
+App->>OTel : Generate traces/metrics/logs
+OTel->>OTel : Apply Authorization header
+OTel->>OO : POST /api/default/v1/{signal}
+OO-->>OTel : 200 OK
+OTel-->>App : Continue processing
+Note over OTel : On failure : drop telemetry, continue app
+```
+
+**Diagram sources**
+- [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
+- [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
+
+**Section sources**
+- [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
+- [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
+- [products/agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
+- [products/identity-broker/src/identity_service/core/telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
+- [products/tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
+
 ### Scaling Strategies
 - Horizontal Pod Autoscaler (HPA): Configure based on CPU/memory utilization or custom metrics exposed by services.
 - Vertical Pod Autoscaler (VPA): Review recommended resource requests/limits periodically.
 - Replicas: Adjust deployment replicas per service workload characteristics.
 - Stateful components: Ensure Redis sizing and persistence align with expected load.
 - **Database Scaling**: Monitor PostgreSQL StatefulSet performance and consider read replicas for high-volume audit scenarios.
+- **Observability Scaling**: Scale OpenObserve instances based on telemetry volume and query patterns.
 
 Guidelines:
 - Set resource requests and limits conservatively; monitor actual usage.
-- Use separate HPA targets for stateless services (agent-platform, identity-broker, tool-gateway, platform-gateway, audit-service).
+- Use separate HPA targets for stateless services (agent-platform, identity-broker, tool-gateway, platform-gateway, audit-service, skills-hub).
 - Monitor autoscaling events and adjust thresholds to avoid flapping.
 - Size PostgreSQL volumes appropriately for audit data retention requirements.
+- Plan OpenObserve capacity based on telemetry ingestion rates and retention policies.
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
@@ -477,41 +556,52 @@ Guidelines:
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml)
 
-### Monitoring Setup: Prometheus Metrics, Structured Logging, Health Checks
+### Monitoring Setup: Prometheus Metrics, Structured Logging, Health Checks, OpenTelemetry
 - Each service exposes metrics and observability hooks through dedicated modules.
 - Structured logging should be enabled via environment configuration.
 - Health check endpoints are defined for readiness/liveness probes.
 - **Audit Service Monitoring**: Prometheus scraping configured with specific metrics endpoint and port configuration.
+- **OpenTelemetry Integration**: Unified telemetry pipeline with automated credential provisioning and centralized collection.
 
 Implementation notes:
 - Integrate Prometheus scraping via ServiceMonitors or scrape configs targeting service ports.
 - Ensure metrics endpoints are reachable and not blocked by network policies.
 - Configure log levels and output formats consistently across services.
 - Monitor audit event ingestion rates and database performance metrics.
+- Configure OpenTelemetry exporters with proper authentication and endpoint configuration.
+- Monitor telemetry export success rates and error patterns.
 
 ```mermaid
 graph TB
-Services["Agent Platform / Identity Broker / Tool Gateway / Platform Gateway / Audit Service"]
+Services["Agent Platform / Identity Broker / Tool Gateway / Platform Gateway / Audit Service / Skills Hub"]
 Metrics["Metrics Endpoint"]
 Logs["Structured Logs"]
 Health["Health Endpoints"]
+OTel["OpenTelemetry Exporters"]
 Prometheus["Prometheus"]
 Grafana["Grafana Dashboards"]
+OpenObserve["OpenObserve Backend"]
 Services --> Metrics
 Services --> Logs
 Services --> Health
+Services --> OTel
 Prometheus --> Metrics
 Grafana --> Prometheus
+OTel --> OpenObserve
 ```
 
 **Section sources**
 - [products/agent-platform/src/agent_service/core/metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [products/agent-platform/src/agent_service/core/observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
+- [products/agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
 - [products/identity-broker/src/identity_service/core/metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
 - [products/identity-broker/src/identity_service/core/observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
+- [products/identity-broker/src/identity_service/core/telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
 - [products/tool-gateway/src/api_gateway/core/metrics.py](file://products/tool-gateway/src/api_gateway/core/metrics.py)
 - [products/tool-gateway/src/api_gateway/core/observability.py](file://products/tool-gateway/src/api_gateway/core/observability.py)
+- [products/tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml)
+- [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 
 ### Operational Procedures: Updates, Rollbacks, Disaster Recovery, Capacity Planning
 - Updates:
@@ -520,32 +610,37 @@ Grafana --> Prometheus
   - Validate health endpoints and metrics.
   - Re-provision delegation secrets if service credentials change.
   - Re-provision audit secrets if audit ingestion credentials change.
+  - Re-provision OpenTelemetry credentials if OpenObserve authentication changes.
 - Rollbacks:
   - Revert overlay commits to previous known-good tags.
   - Apply reverted overlay; confirm rollback success.
   - Restore delegation secrets if needed.
   - Restore audit secrets if needed.
+  - Restore OpenTelemetry credentials if needed.
 - Disaster Recovery:
   - Back up persistent data (e.g., Redis volumes, PostgreSQL data).
   - Restore from backups and reapply overlays.
   - Re-provision delegation secrets and validate service connectivity.
   - Re-provision audit secrets and validate audit ingestion.
+  - Re-provision OpenTelemetry credentials and validate telemetry flow.
   - Confirm data integrity and service functionality.
 - Capacity Planning:
   - Analyze metrics trends and resource utilization.
   - Scale horizontally or vertically based on observed demand.
   - Plan node pool sizing and cluster upgrades.
   - Monitor PostgreSQL storage growth for audit data retention.
+  - Monitor OpenObserve storage and query performance for telemetry data.
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
 - [shared/platform-ops/gitops/deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
+- [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 
 ## Dependency Analysis
-The platform's dependencies span build tools, container images, Kubernetes resources, runtime profiles, delegation secret management, and audit secret management.
+The platform's dependencies span build tools, container images, Kubernetes resources, runtime profiles, delegation secret management, audit secret management, and OpenTelemetry credential provisioning.
 
 ```mermaid
 graph LR
@@ -567,6 +662,7 @@ OverlayKust["dev-k8s/kustomization.yaml"] --> BaseKust
 OverlayKust --> Profiles["runtime-profiles/*"]
 OverlayKust --> Delegation["sync-delegation-secrets.sh"]
 OverlayKust --> AuditSecrets["sync-audit-secrets.sh"]
+OverlayKust --> OTelSecrets["sync-otel-secrets.sh"]
 ```
 
 **Diagram sources**
@@ -580,7 +676,7 @@ OverlayKust --> AuditSecrets["sync-audit-secrets.sh"]
 - [shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
 - [shared/platform-ops/gitops/dev-k8s/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml)
-- [shared/platform-ops/gitops/runtime-profiles/dashscope/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/configmap.yaml)
+- [shared/platform-ops/gitops/runtime-profiles/dashscope/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/configmap.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/deepseek/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/configmap.yaml)
 
 **Section sources**
@@ -610,6 +706,11 @@ OverlayKust --> AuditSecrets["sync-audit-secrets.sh"]
   - Monitor PostgreSQL query performance and connection pooling.
   - Tune audit event batch sizes and eviction intervals based on ingestion volume.
   - Consider read replicas for high-volume audit query scenarios.
+- **OpenTelemetry Performance**:
+  - Monitor telemetry export success rates and latency.
+  - Configure appropriate batch sizes and timeout settings for OTel exporters.
+  - Monitor OpenObserve ingestion performance and storage utilization.
+  - Consider sampling strategies for high-volume telemetry data.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -620,6 +721,7 @@ Common issues and resolutions:
   - Ensure secret sync script runs successfully and secrets exist in the target namespace.
   - Verify delegation secrets are properly provisioned for cross-service authentication.
   - Verify audit secrets are properly provisioned for audit event ingestion.
+  - Verify OpenTelemetry credentials are properly provisioned for telemetry authentication.
 - Health checks failing:
   - Confirm health endpoints are reachable and returning expected responses.
 - Metrics not scraped:
@@ -635,23 +737,33 @@ Common issues and resolutions:
   - Verify PostgreSQL connectivity and database availability.
   - Monitor audit event ingestion metrics and error rates.
   - Check audit service health endpoints and database connection status.
+- **OpenTelemetry issues**:
+  - Verify `OTEL_ENABLED` is set correctly for each service.
+  - Check OpenObserve endpoint configuration and network connectivity.
+  - Verify Basic auth headers are properly provisioned via `sync-otel-secrets.sh`.
+  - Monitor telemetry export success rates and authentication errors.
+  - Check OpenObserve ingestion logs for 401 unauthorized responses.
+  - **CI/CD Issues**: If running in CI/CD, ensure `SKIP_OTEL_SECRETS=true` is set when secrets are injected externally.
+  - **Missing Local Files**: When runtime-secrets.env files are missing locally, the script will automatically patch existing cluster secrets instead of failing.
 
 Operational commands:
 - Use deploy scripts to apply overlays and reconcile resources.
 - Use verification scripts to validate runtime profiles and health.
 - Use delegation secret provisioning script to ensure consistent service credentials.
 - Use audit secret provisioning script to ensure consistent audit ingestion credentials.
+- Use OpenTelemetry secret provisioning script to ensure consistent telemetry authentication.
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
 - [shared/platform-ops/gitops/deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
+- [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 
 ## Conclusion
-This guide outlines the end-to-end deployment and operations for the Luban AIOps Platform using GitOps and Kustomize. By following the documented processes for building images, managing overlays, configuring environments, provisioning delegation secrets, synchronizing audit secrets, and setting up monitoring, teams can reliably operate the platform at scale. The enhanced delegation secret auto-provisioning ensures secure cross-service authentication while maintaining operational simplicity. The new audit service provides durable audit trail storage with PostgreSQL persistence, enabling comprehensive compliance and security monitoring. Continuous validation, robust secret management, proactive capacity planning, and careful monitoring of token delegation flows and audit ingestion are essential for maintaining stability and performance.
+This guide outlines the end-to-end deployment and operations for the Luban AIOps Platform using GitOps and Kustomize. By following the documented processes for building images, managing overlays, configuring environments, provisioning delegation secrets, synchronizing audit secrets, provisioning OpenTelemetry credentials, and setting up monitoring, teams can reliably operate the platform at scale. The enhanced delegation secret auto-provisioning ensures secure cross-service authentication while maintaining operational simplicity. The new audit service provides durable audit trail storage with PostgreSQL persistence, enabling comprehensive compliance and security monitoring. The integrated OpenTelemetry pipeline with automated credential provisioning delivers centralized observability with fail-safe design and enhanced CI/CD support. Continuous validation, robust secret management, proactive capacity planning, and careful monitoring of token delegation flows, audit ingestion, and telemetry export are essential for maintaining stability and performance.
 
 ## Appendices
 
@@ -660,7 +772,8 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - select-runtime-profile.sh: Chooses the appropriate runtime profile for model providers.
 - sync-runtime-secret.sh: Synchronizes runtime secrets into the cluster securely.
 - sync-delegation-secrets.sh: Automatically provisions delegation secrets for cross-service authentication between platform-gateway and identity-broker.
-- **sync-audit-secrets.sh**: Automatically provisions audit secrets for audit event ingestion across all platform components.
+- sync-audit-secrets.sh: Automatically provisions audit secrets for audit event ingestion across all platform components.
+- **sync-otel-secrets.sh**: Automatically provisions OpenTelemetry credentials for centralized observability via OpenObserve with enhanced CI/CD support.
 - verify-runtime-profile.sh: Validates that the active runtime profile matches expectations.
 - reconcile-portal-oidc-client.sh: Ensures OIDC client configuration remains consistent with Keycloak.
 
@@ -670,6 +783,7 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
+- [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 - [shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 
@@ -678,17 +792,20 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - Per-service runtime configs mounted via env files.
 - **Delegation configuration**: PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET and IDENTITY_SERVICE_CLIENTS must match for secure token delegation.
 - **Audit configuration**: AUDIT_STORE_BACKEND=postgres, AUDIT_DB_URL for PostgreSQL connection, AUDIT_RETENTION_DAYS for data retention policy.
+- **OpenTelemetry configuration**: OTEL_ENABLED for pipeline activation, OTEL_EXPORTER_OTLP_ENDPOINT for OpenObserve URL, OTEL_EXPORTER_OTLP_HEADERS for authentication (provisioned by sync-otel-secrets.sh).
 - **Workload identity**: PLATFORM_GATEWAY_WORKLOAD_TOKEN_PATH for production deployments preferring projected tokens over static secrets.
+- **CI/CD Integration**: SKIP_OTEL_SECRETS=true to skip OpenTelemetry secret provisioning in environments where secrets are injected externally.
 - Ensure consistency across environments by pinning versions and tags.
 
 **Section sources**
-- [shared/platform-ops/gitops/dev-k8s/base/shared/observability.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/observability.env)
+- [shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env)
+- [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 
 ### Appendix C: Delegation Secret Management
 **New Section** Enhanced delegation secret management for secure cross-service authentication.
@@ -751,7 +868,44 @@ Configuration details:
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env)
 - [products/audit-service/src/audit_service/core/config.py](file://products/audit-service/src/audit_service/core/config.py)
 
-### Appendix E: PostgreSQL Infrastructure
+### Appendix E: OpenTelemetry Secret Management
+**Updated Section** Comprehensive OpenTelemetry credential management for centralized observability with enhanced CI/CD support.
+
+The OpenTelemetry secret system ensures secure telemetry ingestion via OpenObserve:
+
+- **Centralized Credential Generation**: The sync-otel-secrets.sh script generates Basic auth headers from OpenObserve root credentials
+- **Multi-Service Integration**: Applies authentication headers to all platform services (agent-platform, identity-broker, tool-gateway, platform-gateway, audit-service, skills-hub)
+- **ConfigMap-Based Endpoint**: Shared OTLP endpoint configuration via ConfigMap with per-service secret headers
+- **Fail-Open Design**: Missing credentials result in anonymous push attempts that fail gracefully without impacting services
+- **Enhanced CI/CD Support**: Intelligent handling of externally provisioned secrets with skip mechanisms
+- **Robust Fallback**: Automatically patches existing cluster secrets when local runtime-secrets.env files are missing
+
+Usage:
+```bash
+# Generate and provision OpenTelemetry credentials
+export OO_ROOT_USER_EMAIL=admin@example.com
+export OO_ROOT_USER_PASSWORD=password
+./shared/platform-ops/gitops/sync-otel-secrets.sh dev-luban-aiops
+
+# Skip in CI when secrets are injected externally
+SKIP_OTEL_SECRETS=true make deploy
+```
+
+Configuration details:
+- **OTEL_ENABLED**: Master switch for telemetry pipeline (default false)
+- **OTEL_EXPORTER_OTLP_ENDPOINT**: OpenObserve OTLP HTTP endpoint (configured in shared runtime.env)
+- **OTEL_EXPORTER_OTLP_HEADERS**: Basic auth header for OpenObserve ingestion (provisioned by sync-otel-secrets.sh)
+- **Authentication**: Basic auth with base64-encoded email:password combination
+- **Backend**: OpenObserve with organization prefix (/api/default)
+- **CI/CD Integration**: Set `SKIP_OTEL_SECRETS=true` in CI environments where secrets are injected externally
+
+**Section sources**
+- [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
+- [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
+- [products/agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
+
+### Appendix F: PostgreSQL Infrastructure
 **New Section** PostgreSQL StatefulSet configuration for audit service persistence.
 
 The audit service requires PostgreSQL for durable audit trail storage:

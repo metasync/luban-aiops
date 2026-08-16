@@ -4,14 +4,15 @@
 **Referenced Files in This Document**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-- [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
-- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
-- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.example.env)
+- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
+- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
+- [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 - [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
-- [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 - [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
 - [Dockerfile](file://products/tool-gateway/Dockerfile)
 - [pyproject.toml](file://products/tool-gateway/pyproject.toml)
@@ -19,11 +20,11 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced SKILLS_SOURCES configuration documentation to include optional path field for git sources
-- Added comprehensive documentation for SKILLS_GIT_TOKENS environment variable for private repository authentication
-- Updated development environment examples to reflect new git source configuration patterns
-- Enhanced Skills Hub federation configuration with detailed guidance on subdirectory selection and token management
-- Updated troubleshooting section with new authentication and path validation issues
+- Added comprehensive OpenTelemetry configuration documentation including OTEL_ENABLED, OTEL_EXPORTER_OTLP_ENDPOINT, and authentication headers
+- Documented service-specific runtime secret configurations for OpenObserve integration
+- Updated observability conventions with opt-in OTel push pipeline details
+- Enhanced security guidance for OTLP authentication header management
+- Added troubleshooting section for OpenTelemetry setup and connectivity issues
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -40,72 +41,69 @@
 ## Introduction
 This document explains how the Tool Gateway Service manages configuration and environment setup across layers: environment variables, configuration files, and runtime overrides. It details available options, defaults, validation rules, and deployment-specific settings for development, staging, and production. It also provides examples for Docker and Kubernetes (ConfigMaps/Secrets), and outlines security best practices for secrets management and consistent configuration across environments.
 
-**Updated** Enhanced documentation reflects the architectural shift from Kubernetes service-link injection to DNS-based service discovery, providing clearer guidance on inter-service communication patterns and environment variable handling. Includes comprehensive Skills Hub integration configuration with enhanced git source support for subdirectory selection and improved private repository authentication through SKILLS_GIT_TOKENS.
+**Updated** Enhanced documentation now includes comprehensive OpenTelemetry configuration support with opt-in telemetry push pipeline, OpenObserve integration, and secure authentication header management through runtime secrets.
 
 ## Project Structure
-The Tool Gateway Service is implemented under products/tool-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/tool-gateway. The service image is built using a Dockerfile, and dependencies are declared in pyproject.toml. The Skills Hub service provides federated skill management with configurable storage backends, synchronization intervals, and enhanced git source support with optional subdirectory selection.
+The Tool Gateway Service is implemented under products/tool-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/tool-gateway. The service image is built using a Dockerfile, and dependencies are declared in pyproject.toml. The service includes integrated OpenTelemetry support for traces, metrics, and logs export to OpenObserve backend.
 
 ```mermaid
 graph TB
 subgraph "Tool Gateway Service"
 A["src/tool_gateway/core/config.py"]
 B["src/tool_gateway/core/runtime.py"]
-C["src/tool_gateway/policies/policy-default.yaml"]
-D["Dockerfile"]
-E["pyproject.toml"]
+C["src/tool_gateway/core/telemetry.py"]
+D["src/tool_gateway/policies/policy-default.yaml"]
+E["Dockerfile"]
+F["pyproject.toml"]
 end
-subgraph "Skills Hub Service"
-F["src/skills_hub/core/config.py"]
-G["src/skills_hub/services/sync.py"]
-H["skills-runtime-config.env"]
-I["runtime-secrets.example.env"]
-J["skills-hub-deployment.yaml"]
+subgraph "OpenTelemetry Infrastructure"
+G["OTEL_ENABLED"]
+H["OTEL_EXPORTER_OTLP_ENDPOINT"]
+I["OTEL_EXPORTER_OTLP_HEADERS"]
+J["OTEL_SERVICE_NAME"]
+K["OpenObserve Backend"]
 end
 subgraph "Kubernetes Base (dev)"
-K["base/tool-gateway/runtime-config.env"]
-L["base/tool-gateway/tool-gateway-deployment.yaml"]
-M["base/shared/runtime.env"]
+L["base/tool-gateway/runtime-config.env"]
+M["base/tool-gateway/tool-gateway-deployment.yaml"]
+N["base/shared/runtime.env"]
+O["base/tool-gateway/runtime-secrets.example.env"]
 end
-A --> K
-B --> L
-K --> L
-M --> L
-C --> A
+A --> L
+B --> M
+C --> G
+C --> H
+C --> I
+C --> J
+L --> M
+N --> M
+O --> M
 D --> A
-E --> D
-F --> H
-F --> I
-G --> J
-H --> J
-I --> J
+E --> A
+F --> E
+G --> K
+H --> K
+I --> K
+J --> K
 ```
 
 **Diagram sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-- [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
-- [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
-- [Dockerfile](file://products/tool-gateway/Dockerfile)
-- [pyproject.toml](file://products/tool-gateway/pyproject.toml)
-- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
-- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.example.env)
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
+- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
+- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
+- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-- [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
-- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
-- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.example.env)
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
+- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
+- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
+- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 - [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
 - [Dockerfile](file://products/tool-gateway/Dockerfile)
 - [pyproject.toml](file://products/tool-gateway/pyproject.toml)
@@ -113,9 +111,9 @@ I --> J
 ## Core Components
 - Configuration loader and model: centralizes environment variable parsing, file-based configuration, and runtime overrides; exposes validated configuration to the application.
 - Runtime settings: handles service binding configuration with robust port resolution that ignores Kubernetes service-link formats.
+- OpenTelemetry telemetry: opt-in push pipeline for traces, metrics, and logs export via OTLP HTTP/protobuf to configured backend.
 - Policy engine configuration: loads default policy definitions from YAML and supports environment-driven overrides.
 - Containerization and dependency management: Dockerfile defines runtime environment; pyproject.toml declares Python dependencies used by the gateway.
-- Skills Hub integration: federated skill source management with configurable storage backends, synchronization intervals, and enhanced git source support with optional subdirectory selection.
 
 Key responsibilities:
 - Provide a single source of truth for configuration via typed models.
@@ -123,28 +121,27 @@ Key responsibilities:
 - Support layered precedence: defaults < config files < environment variables < runtime overrides.
 - Handle DNS-based service discovery with proper fallback mechanisms.
 - Ignore Kubernetes service-link environment variables to prevent conflicts.
-- Manage Skills Hub federation with local and git-based skill sources, including optional subdirectory selection for monorepo scenarios.
-- Support private repository authentication through SKILLS_GIT_TOKENS environment variable.
+- Manage opt-in OpenTelemetry telemetry with fail-open behavior and secure authentication.
 
-**Updated** Enhanced core components to support DNS-based service discovery, improved environment variable handling, comprehensive Skills Hub integration with federated skill sources, and enhanced git source configuration with optional path fields and private repository authentication.
+**Updated** Enhanced core components to include comprehensive OpenTelemetry support with opt-in telemetry push pipeline, secure authentication header management, and integration with OpenObserve backend.
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-- [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
+- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
+- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
 - [Dockerfile](file://products/tool-gateway/Dockerfile)
 - [pyproject.toml](file://products/tool-gateway/pyproject.toml)
 
 ## Architecture Overview
-The configuration system follows a layered approach with enhanced service discovery:
+The configuration system follows a layered approach with enhanced observability capabilities:
 - Defaults: defined in code or default YAML policies.
 - Config files: loaded from container filesystem or mounted volumes.
 - Environment variables: injected at runtime via platform orchestration (e.g., Kubernetes).
 - Runtime overrides: applied programmatically during startup or request processing.
 - DNS-based service discovery: services communicate via Kubernetes DNS names instead of injected environment variables.
-- Skills Hub federation: federated skill sources with configurable storage backends, synchronization intervals, and enhanced git source support.
+- Opt-in OpenTelemetry telemetry: traces, metrics, and logs exported via OTLP HTTP/protobuf to configured backend.
 
 ```mermaid
 sequenceDiagram
@@ -154,8 +151,8 @@ participant Env as "Environment Variables"
 participant File as "Config Files"
 participant DNS as "Kubernetes DNS"
 participant Service as "Identity Service"
-participant SkillsHub as "Skills Hub"
-participant GitAuth as "Git Authentication"
+participant OTel as "OpenTelemetry Pipeline"
+participant Backend as "OpenObserve Backend"
 App->>Config : Initialize configuration
 Config->>Env : Read environment variables
 Config->>File : Load configuration files
@@ -165,20 +162,17 @@ App->>DNS : Resolve service name (identity-service)
 DNS-->>App : Service IP address
 App->>Service : Connect via DNS name
 Service-->>App : Service response
-App->>DNS : Resolve skills-hub service
-DNS-->>App : Skills Hub IP address
-App->>SkillsHub : Query skills via API
-SkillsHub->>GitAuth : Authenticate with SKILLS_GIT_TOKENS
-GitAuth-->>SkillsHub : Authenticated access
-SkillsHub->>SkillsHub : Process git sources with optional paths
-SkillsHub-->>App : Skill data with federation info
+App->>OTel : Check OTEL_ENABLED flag
+OTel->>Backend : Export traces/metrics/logs via OTLP
+Backend-->>OTel : Acknowledge receipt
+App->>App : Continue normal operation
 ```
 
 **Diagram sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-- [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
+- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
+- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 
 ## Detailed Component Analysis
@@ -190,7 +184,7 @@ SkillsHub-->>App : Skill data with federation info
 - Error handling: Aggregates validation errors and surfaces actionable messages.
 - Service discovery: Uses DNS-based resolution for inter-service communication.
 
-**Updated** Enhanced to support DNS-based service discovery, improved environment variable handling, Skills Hub federation configuration with strict validation rules, and enhanced git source validation with optional path fields.
+**Updated** Enhanced to support DNS-based service discovery, improved environment variable handling, and integration with OpenTelemetry configuration management.
 
 ```mermaid
 flowchart TD
@@ -239,6 +233,48 @@ ParseInt --> |Yes| Success
 **Section sources**
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
 
+### OpenTelemetry Telemetry Pipeline
+- Purpose: Opt-in telemetry push pipeline for traces, metrics, and logs export via OTLP HTTP/protobuf.
+- Gating: Controlled by `OTEL_ENABLED` environment variable (default false); when disabled, no overhead.
+- Authentication: Uses `OTEL_EXPORTER_OTLP_HEADERS` for Basic authentication to OpenObserve backend.
+- Fail-open: Setup errors are logged but never raised into request path; exporters drop telemetry on failure.
+- Log bridge: Mirrors structured logs to OTLP log pipeline while maintaining stdout as source of truth.
+- Service naming: Uses `OTEL_SERVICE_NAME` for resource identification, defaults to service metadata.
+
+**New Section** Comprehensive OpenTelemetry support with opt-in telemetry pipeline, secure authentication, and OpenObserve integration.
+
+```mermaid
+flowchart TD
+Enabled{"OTEL_ENABLED<br/>= true?"}
+Setup["Initialize Providers"]
+Traces["Tracer Provider"]
+Metrics["Meter Provider"]
+Logs["Logger Provider"]
+Exporters["OTLP Exporters"]
+Backend["OpenObserve Backend"]
+FailOpen["Fail Open on Error"]
+Enabled --> |No| Skip["Skip Initialization"]
+Enabled --> |Yes| Setup
+Setup --> Traces
+Setup --> Metrics
+Setup --> Logs
+Traces --> Exporters
+Metrics --> Exporters
+Logs --> Exporters
+Exporters --> Backend
+Backend --> |Error| FailOpen
+FailOpen --> Continue["Continue Service Operation"]
+Skip --> Continue
+```
+
+**Diagram sources**
+- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
+- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
+
+**Section sources**
+- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
+- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
+
 ### DNS-Based Service Discovery
 - Purpose: Enable reliable inter-service communication using Kubernetes DNS names.
 - Configuration: Service endpoints configured via environment variables pointing to DNS names.
@@ -251,9 +287,7 @@ ParseInt --> |Yes| Success
 graph LR
 Client["Tool Gateway Pod"] --> DNS["Kubernetes DNS Server"]
 DNS --> Identity["identity-service:8000"]
-DNS --> SkillsHub["skills-hub:8000"]
 Identity --> Resolver["DNS Resolution"]
-SkillsHub --> Resolver
 Resolver --> IP["Service IP Address"]
 IP --> Client
 ```
@@ -265,132 +299,6 @@ IP --> Client
 **Section sources**
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-
-### Enhanced Skills Hub Integration Configuration
-- Purpose: Configure federated skill sources with flexible storage backends, synchronization intervals, and enhanced git source support.
-- Sources configuration: JSON-formatted list defining local directories and git repositories with optional subdirectory selection.
-- Storage backends: Memory for development/testing, PostgreSQL for production persistence.
-- Synchronization: Configurable intervals for skill source updates and pruning.
-- Git source enhancement: Optional `path` field allows selecting specific subdirectories within git repositories for monorepo scenarios.
-- Private repository authentication: SKILLS_GIT_TOKENS environment variable provides secure authentication for private git repositories.
-- Validation: Strict schema validation for source configurations with fail-fast startup errors and path security validation.
-
-**Updated Section** Comprehensive Skills Hub integration with federated skill sources, configurable storage backends, synchronization management, enhanced git source support with optional path fields, and secure private repository authentication.
-
-```mermaid
-flowchart TD
-Sources["SKILLS_SOURCES<br/>(JSON)"] --> Parse["Parse & Validate"]
-Parse --> Local["Local Sources<br/>(path)"]
-Parse --> Git["Git Sources<br/>(url, ref, path*)"]
-Local --> Store["Skill Store"]
-Git --> TokenCheck{"Has Token?"}
-TokenCheck --> |Yes| Auth["Authenticate with<br/>SKILLS_GIT_TOKENS"]
-TokenCheck --> |No| Clone["Clone without auth"]
-Auth --> Clone
-Clone --> PathCheck{"Has path?"}
-PathCheck --> |Yes| Subdir["Select subdirectory"]
-PathCheck --> |No| Root["Use repo root"]
-Subdir --> Store
-Root --> Store
-Store --> Backend{"Backend Type"}
-Backend --> |memory| Memory["In-Memory Store"]
-Backend --> |postgres| Postgres["PostgreSQL Store"]
-Memory --> Sync["Sync Manager"]
-Postgres --> Sync
-Sync --> Interval["SKILLS_SYNC_INTERVAL_SECONDS"]
-Interval --> Prune["Prune Unconfigured Sources"]
-```
-
-**Diagram sources**
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-- [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
-- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.example.env)
-
-**Section sources**
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-- [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
-- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.example.env)
-
-### Git Source Path Validation and Security
-- Purpose: Ensure safe subdirectory selection within git repositories to prevent path traversal attacks.
-- Validation rules: Rejects absolute paths, parent directory references, and other potentially malicious path patterns.
-- Security: Validates that git source paths are relative subdirectories within the checkout directory.
-- Monorepo support: Enables selective ingestion of specific directories within large repositories.
-
-**New Section** Enhanced git source configuration with secure path validation for monorepo scenarios.
-
-```mermaid
-flowchart TD
-GitPath["Git Source Path"] --> CheckAbsolute{"Absolute Path?"}
-CheckAbsolute --> |Yes| Reject["Reject - Path Traversal Risk"]
-CheckAbsolute --> |No| CheckParent{"Contains '..'?"}
-CheckParent --> |Yes| Reject
-CheckParent --> |No| Validate["Validate Relative Path"]
-Validate --> Accept["Accept - Safe Subdirectory"]
-```
-
-**Diagram sources**
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-
-**Section sources**
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-
-### Private Repository Authentication with SKILLS_GIT_TOKENS
-- Purpose: Provide secure authentication for private git repositories through token injection.
-- Configuration: JSON map of source_id to authentication tokens.
-- Token injection: Automatically injects x-access-token into HTTPS clone URLs for authenticated access.
-- Security: Tokens are never logged or exposed in error messages; scrubbed automatically for security.
-- Fallback: Without tokens, git sources fail authentication while other sources continue serving.
-
-**New Section** Secure private repository authentication system with automatic token injection and credential protection.
-
-```mermaid
-flowchart TD
-Source["Git Source Request"] --> CheckToken{"Has Token?"}
-CheckToken --> |No| Public["Public Repository Access"]
-CheckToken --> |Yes| Inject["Inject Token into URL"]
-Inject --> Format["Format: https://x-access-token:token@host/repo.git"]
-Format --> Clone["Authenticated Clone"]
-Public --> Clone
-Clone --> Success["Repository Access Granted"]
-```
-
-**Diagram sources**
-- [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.example.env)
-
-**Section sources**
-- [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.example.env)
-
-### Service Links Disabling Strategy
-- Purpose: Prevent Kubernetes from automatically injecting service-link environment variables.
-- Configuration: `enableServiceLinks: false` in all deployment manifests.
-- Rationale: Avoids conflicts between manual configuration and automatic service-link injection.
-- Impact: Requires explicit configuration of service endpoints via environment variables.
-
-**New Section** Strategic disabling of Kubernetes service links to maintain configuration control.
-
-```mermaid
-flowchart TD
-Deployment["Kubernetes Deployment"] --> Check{"enableServiceLinks<br/>Setting"}
-Check --> |true| Inject["Auto-inject SERVICE_* env vars"]
-Check --> |false| Manual["Manual env var configuration"]
-Inject --> Conflict["Potential conflicts with<br/>manual configuration"]
-Manual --> Control["Full control over<br/>service endpoints"]
-Conflict --> Issue["Runtime configuration issues"]
-Control --> Success["Reliable service discovery"]
-```
-
-**Diagram sources**
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
-
-**Section sources**
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
 
 ### Policy Engine Configuration
 - Default policy: Loaded from a YAML file defining baseline rules and behaviors.
@@ -441,8 +349,9 @@ Entrypoint --> Run["Run service with env vars"]
 - ConfigMap: Holds non-sensitive configuration values including service endpoints.
 - Service discovery: Uses DNS names for inter-service communication.
 - Environment injection: Maps ConfigMap entries to environment variables consumed by the configuration loader.
+- Secrets management: Handles sensitive data like OpenTelemetry authentication headers separately from ConfigMaps.
 
-**Updated** Enhanced deployment configuration with DNS-based service discovery, disabled service links, comprehensive Skills Hub integration, and enhanced git source support with optional path fields and private repository authentication.
+**Updated** Enhanced deployment configuration with DNS-based service discovery, disabled service links, comprehensive OpenTelemetry integration, and secure authentication header management.
 
 ```mermaid
 graph TB
@@ -452,26 +361,22 @@ POD --> APP["Tool Gateway App"]
 APP --> CFG["Configuration Loader"]
 DNS["Kubernetes DNS"] --> SVC["Service Names"]
 SVC --> APP
-SkillsCM["Skills ConfigMap"] --> SkillsENV["Skills Environment Variables"]
-SkillsENV --> SkillsPod["Skills Hub Pod"]
-SkillsPod --> SkillsStore["Skills Store"]
-Secrets["Secrets"] --> GitTokens["SKILLS_GIT_TOKENS"]
-GitTokens --> SkillsPod
+Secrets["Secrets"] --> AuthHeaders["OTEL_EXPORTER_OTLP_HEADERS"]
+AuthHeaders --> APP
+OTelEnv["OTEL_* Variables"] --> APP
+APP --> OTel["OpenTelemetry Pipeline"]
+OTel --> Backend["OpenObserve Backend"]
 ```
 
 **Diagram sources**
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
-- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.example.env)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
 
 **Section sources**
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
-- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.example.env)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
 
 ### Dependency Management
 - Python dependencies: Declared in pyproject.toml for reproducible builds.
@@ -482,9 +387,9 @@ GitTokens --> SkillsPod
 - [pyproject.toml](file://products/tool-gateway/pyproject.toml)
 
 ## Dependency Analysis
-Configuration components depend on environment variables and files, while the runtime settings handle DNS-based service discovery. The Docker image encapsulates runtime dependencies, and Kubernetes manifests inject configuration at deployment time. Skills Hub integration adds federated skill source management with configurable storage backends and enhanced git source support.
+Configuration components depend on environment variables and files, while the runtime settings handle DNS-based service discovery. The Docker image encapsulates runtime dependencies, and Kubernetes manifests inject configuration at deployment time. OpenTelemetry integration adds opt-in telemetry capabilities with secure authentication and fail-open behavior.
 
-**Updated** Added dependencies for DNS-based service discovery, enhanced environment variable handling, comprehensive Skills Hub integration with federated skill sources, enhanced git source configuration with optional path fields, and private repository authentication through SKILLS_GIT_TOKENS.
+**Updated** Added dependencies for DNS-based service discovery, enhanced environment variable handling, comprehensive OpenTelemetry integration with opt-in telemetry pipeline, and secure authentication header management.
 
 ```mermaid
 graph TB
@@ -496,26 +401,24 @@ DOCKER["Dockerfile"] --> RUNTIME["Runtime Dependencies"]
 K8S["tool-gateway-deployment.yaml"] --> INJECT["Env Injection"]
 INJECT --> CFG
 SVC --> RT
-SkillsCFG["skills_config.py"] --> SkillsENV["Skills Environment Variables"]
-SkillsENV --> SkillsStore["Skills Store Backend"]
-SkillsStore --> DB["PostgreSQL Database"]
-SkillsSync["sync.py"] --> GitAuth["Git Authentication"]
-GitAuth --> Tokens["SKILLS_GIT_TOKENS"]
+OTel["telemetry.py"] --> OTEL_ENV["OTEL_* Variables"]
+OTEL_ENV --> Backend["OpenObserve Backend"]
+Secrets["runtime-secrets.env"] --> AuthHeaders["OTEL_EXPORTER_OTLP_HEADERS"]
+AuthHeaders --> OTel
 ```
 
 **Diagram sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-- [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
+- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [Dockerfile](file://products/tool-gateway/Dockerfile)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-- [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
+- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [Dockerfile](file://products/tool-gateway/Dockerfile)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 
@@ -526,12 +429,10 @@ GitAuth --> Tokens["SKILLS_GIT_TOKENS"]
 - Monitor configuration-related metrics and errors to detect misconfigurations early.
 - Leverage Kubernetes DNS caching for improved service discovery performance.
 - Optimize port resolution to avoid unnecessary string parsing operations.
-- Configure appropriate Skills Hub sync intervals based on skill source update frequency.
-- Use PostgreSQL backend for production Skills Hub deployments to ensure data persistence.
-- Monitor Skills Hub storage backend performance and database connection pools.
-- Optimize git source cloning with shallow clones (--depth 1) for faster synchronization.
-- Implement proper caching for git checkouts to reduce network overhead.
-- Monitor git authentication performance and token refresh cycles.
+- OpenTelemetry telemetry is opt-in and fails open to avoid performance impact when disabled.
+- Batch processors in OpenTelemetry reduce network overhead for telemetry export.
+- Configure appropriate OpenTelemetry exporter timeouts and batch sizes for optimal performance.
+- Monitor OpenTelemetry setup failures and exporter errors without affecting service operation.
 
 [No sources needed since this section provides general guidance]
 
@@ -545,38 +446,34 @@ Common issues and resolutions:
 - Service link conflicts: Ensure `enableServiceLinks: false` is set in all deployment manifests.
 - Port resolution issues: Check that port values are numeric and not in Kubernetes service-link format.
 - Inter-service communication failures: Verify DNS names are resolvable and services are running.
-- Skills Hub configuration errors: Validate SKILLS_SOURCES JSON format and required fields for each source type.
-- Skills Hub storage backend issues: Verify PostgreSQL connectivity and database permissions for production deployments.
-- Skills Hub sync failures: Check SKILLS_SYNC_INTERVAL_SECONDS settings and network connectivity to git sources.
-- Federated skill source problems: Validate local path mounts and git repository accessibility.
-- **New**: Git source path validation errors: Ensure git source paths are relative subdirectories without path traversal attempts.
-- **New**: Private repository authentication failures: Verify SKILLS_GIT_TOKENS configuration and token validity for private repositories.
-- **New**: Git source subdirectory not found: Check that specified subdirectories exist in cloned repositories.
-- **New**: Token injection issues: Verify HTTPS URLs and proper token formatting for private repository access.
+- **New**: OpenTelemetry setup failures: Check OTEL_ENABLED flag and verify endpoint connectivity; setup errors are logged but don't affect service operation.
+- **New**: OpenTelemetry authentication failures: Verify OTEL_EXPORTER_OTLP_HEADERS contains valid Basic auth credentials; 401 responses indicate authentication issues.
+- **New**: OpenTelemetry endpoint connectivity: Ensure OTEL_EXPORTER_OTLP_ENDPOINT points to reachable OpenObserve backend; unreachable endpoints cause exporter failures but don't break service.
+- **New**: OpenTelemetry service naming: Verify OTEL_SERVICE_NAME is set appropriately for trace correlation; defaults to service metadata if not specified.
+- **New**: Log bridge issues: When OpenTelemetry is enabled, structured logs are mirrored to OTLP; ensure log level is set to INFO for proper audit trail.
 
-**Updated** Added troubleshooting guidance for DNS-based service discovery, service link issues, comprehensive Skills Hub integration problems, enhanced git source configuration with path validation, and private repository authentication issues.
+**Updated** Added troubleshooting guidance for DNS-based service discovery, service link issues, comprehensive OpenTelemetry integration problems, authentication failures, and endpoint connectivity issues.
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-- [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
+- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
+- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
 
 ## Conclusion
-The Tool Gateway Service employs a robust, layered configuration system that integrates environment variables, configuration files, and runtime overrides with strict validation. By following the outlined best practices for Docker and Kubernetes deployments, teams can maintain secure, consistent configurations across environments while ensuring reliability and performance. The architectural shift to DNS-based service discovery eliminates service-link conflicts and provides more reliable inter-service communication patterns. The addition of Skills Hub integration enables federated skill source management with configurable storage backends and synchronization intervals, enhanced with optional git source path selection for monorepo scenarios and secure private repository authentication through SKILLS_GIT_TOKENS.
+The Tool Gateway Service employs a robust, layered configuration system that integrates environment variables, configuration files, and runtime overrides with strict validation. By following the outlined best practices for Docker and Kubernetes deployments, teams can maintain secure, consistent configurations across environments while ensuring reliability and performance. The architectural shift to DNS-based service discovery eliminates service-link conflicts and provides more reliable inter-service communication patterns. The addition of opt-in OpenTelemetry telemetry enables comprehensive observability with traces, metrics, and logs export to OpenObserve backend, featuring secure authentication header management and fail-open behavior that ensures service continuity even when telemetry infrastructure is unavailable.
 
-**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive Skills Hub integration with federated skill sources, enhanced git source configuration with optional path fields, and secure private repository authentication capabilities.
+**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive OpenTelemetry integration with opt-in telemetry pipeline, and secure authentication capabilities.
 
 ## Appendices
 
 ### Environment-Specific Settings
-- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based Skills Hub storage, local git sources without authentication.
-- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed Skills Hub storage, private repository access with test tokens.
-- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized Skills Hub sync intervals, secure private repository authentication with scoped tokens.
+- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable OpenTelemetry with local OpenObserve instance.
+- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure OpenTelemetry with staging backend.
+- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure OpenTelemetry with production backend and proper authentication.
 
-**Updated** Added guidance for DNS-based service discovery configuration, enhanced git source configuration with path selection, and private repository authentication across environments.
+**Updated** Added guidance for DNS-based service discovery configuration, OpenTelemetry telemetry setup across environments, and secure authentication header management.
 
 [No sources needed since this section provides general guidance]
 
@@ -591,17 +488,21 @@ The Tool Gateway Service employs a robust, layered configuration system that int
 - Disable service links to prevent accidental exposure of internal service information.
 - Secure Skills Hub PostgreSQL connections with proper authentication and network policies.
 - Validate Skills Hub source configurations to prevent injection attacks through malicious skill sources.
-- **New**: Protect SKILLS_GIT_TOKENS secrets with proper Kubernetes Secret management and rotation policies.
-- **New**: Implement token scoping for git repositories to limit access to minimum required permissions.
-- **New**: Monitor git authentication attempts and implement rate limiting for failed authentication attempts.
-- **New**: Validate git source paths to prevent path traversal attacks and ensure only safe subdirectories are selected.
+- Protect SKILLS_GIT_TOKENS secrets with proper Kubernetes Secret management and rotation policies.
+- Implement token scoping for git repositories to limit access to minimum required permissions.
+- Monitor git authentication attempts and implement rate limiting for failed authentication attempts.
+- Validate git source paths to prevent path traversal attacks and ensure only safe subdirectories are selected.
+- **New**: Secure OpenTelemetry authentication headers using Kubernetes Secrets; never commit OTEL_EXPORTER_OTLP_HEADERS to version control.
+- **New**: Rotate OpenTelemetry authentication credentials regularly and monitor for unauthorized access attempts.
+- **New**: Use separate OpenTelemetry endpoints and authentication for different environments to prevent cross-environment telemetry leakage.
+- **New**: Monitor OpenTelemetry exporter failures and authentication errors without exposing sensitive credential information in logs.
 
-**Updated** Enhanced security guidance with DNS-based service discovery best practices, Skills Hub security considerations, and comprehensive git source authentication security measures.
+**Updated** Enhanced security guidance with DNS-based service discovery best practices, comprehensive OpenTelemetry security considerations, and secure authentication header management practices.
 
 [No sources needed since this section provides general guidance]
 
 ### Complete Environment Variables Reference
-**Updated** Comprehensive reference including DNS-based service discovery variables, Skills Hub integration configuration, enhanced git source options, and private repository authentication.
+**Updated** Comprehensive reference including DNS-based service discovery variables, OpenTelemetry configuration, and authentication management.
 
 #### Core Configuration
 - `AGENT_SERVICE_URL`: Agent service endpoint URL (DNS-based)
@@ -626,77 +527,74 @@ The Tool Gateway Service employs a robust, layered configuration system that int
 #### Service Discovery Configuration
 - `IDENTITY_SERVICE_URL`: Identity service URL using DNS names (e.g., http://identity-service:8000)
 - `AGENT_SERVICE_URL`: Agent service URL using DNS names (e.g., http://agent-service:8000)
-- `GATEWAY_SKILLS_SERVICE_URL`: Skills Hub service URL using DNS names (e.g., http://skills-hub:8000)
 
-#### Skills Hub Configuration
-- `SKILLS_SOURCES`: Federated skill sources (JSON array with source_id, type, path/url/ref, and optional path for git sources)
-- `SKILLS_STORE_BACKEND`: Storage backend type (memory or postgres)
-- `SKILLS_DB_URL`: PostgreSQL connection URL for persistent storage
-- `SKILLS_SYNC_INTERVAL_SECONDS`: Skill source synchronization interval (default: 300)
-- `SKILLS_DATA_PATH`: Working directory for git checkouts (default: /var/lib/skills-hub)
-- `SKILLS_QUERY_CLIENTS`: Registered query clients (client_id=secret format)
-- `SKILLS_GIT_TOKENS`: Git authentication tokens for private repositories (JSON map of source_id -> token)
-- `SKILLS_WORKLOAD_ISSUER_URL`: OIDC issuer for workload identity (production)
-- `SKILLS_WORKLOAD_AUDIENCE`: Workload token audience (default: "skills-hub")
-- `SKILLS_WORKLOAD_CLIENTS`: Workload client mappings (subject=client_id format)
+#### OpenTelemetry Configuration
+- `OTEL_ENABLED`: Enable/disable OpenTelemetry push pipeline (default: false)
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: OTLP HTTP endpoint for OpenObserve (e.g., http://openobserve-router:5080/api/default)
+- `OTEL_EXPORTER_OTLP_HEADERS`: Authentication headers for OTLP export (Basic auth for OpenObserve)
+- `OTEL_SERVICE_NAME`: Service name for telemetry resource identification (defaults to service metadata)
 
-#### Enhanced Git Source Configuration Examples
-- Local source: `{"source_id": "local-skills", "type": "local", "path": "/skills/local"}`
-- Git source (full repo): `{"source_id": "team-repo", "type": "git", "url": "https://github.com/team/repo.git", "ref": "main"}`
-- Git source (subdirectory): `{"source_id": "monorepo-skills", "type": "git", "url": "https://github.com/team/monorepo.git", "ref": "main", "path": "skills/runbooks"}`
+#### OpenTelemetry Authentication
+- `OTEL_EXPORTER_OTLP_HEADERS`: Contains `Authorization=Basic <base64(email:password)>` for OpenObserve authentication
+- Provisioned via runtime-secrets Secret and managed by sync-otel-secrets.sh script
+- Never committed to version control; always stored in Kubernetes Secrets
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-- [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
-- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
-- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.example.env)
+- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
+- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
 
-### DNS-Based Service Discovery Setup Guide
-**New Section** Step-by-step guide for configuring DNS-based service discovery.
+### OpenTelemetry Setup Guide
+**New Section** Step-by-step guide for configuring OpenTelemetry telemetry pipeline with OpenObserve integration.
 
 #### Prerequisites
-- Kubernetes cluster with DNS service enabled (default in most distributions)
-- Service resources created for all dependent services
-- Network policies allowing inter-service communication
+- OpenObserve backend deployed and accessible
+- Basic authentication credentials for OpenObserve ingest endpoint
+- Kubernetes cluster with network access to OpenObserve service
+- Proper secrets management for authentication headers
 
 #### Configuration Steps
-1. Create Service resources for each dependent service
-2. Set service endpoint URLs using DNS names in environment variables
-3. Disable service links in deployment manifests (`enableServiceLinks: false`)
-4. Configure shared runtime configuration in ConfigMaps
-5. Verify DNS resolution works within the cluster
+1. Set `OTEL_ENABLED=true` in shared runtime configuration
+2. Configure `OTEL_EXPORTER_OTLP_ENDPOINT` to point to OpenObserve ingest endpoint
+3. Generate Basic auth credentials and set `OTEL_EXPORTER_OTLP_HEADERS` in runtime secrets
+4. Deploy with proper secret mounting for authentication headers
+5. Verify telemetry export by checking OpenObserve backend
 
 #### Example Configuration
 ```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: identity-service
-spec:
-  selector:
-    app: identity-service
-  ports:
-    - name: http
-      port: 8000
-      targetPort: 8000
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: platform-runtime-config
 data:
-  IDENTITY_SERVICE_URL: "http://identity-service:8000"
-  AGENT_SERVICE_URL: "http://agent-service:8000"
-  GATEWAY_SKILLS_SERVICE_URL: "http://skills-hub:8000"
+  OTEL_ENABLED: "true"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://openobserve-router.openobserve.svc.cluster.local:5080/api/default"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tool-gateway-runtime-secrets
+type: Opaque
+stringData:
+  OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Basic base64-encoded-email-colon-password"
+```
+
+#### Authentication Header Generation
+Generate Basic auth header using email:password combination:
+```bash
+echo -n "email@example.com:password" | base64
+# Output: base64-encoded-string
+# Then use: Authorization=Basic base64-encoded-string
 ```
 
 **Section sources**
+- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
+- [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 
 ### Service Links Migration Guide
 **New Section** Migration strategy from Kubernetes service-link injection to DNS-based discovery.
@@ -717,136 +615,24 @@ data:
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 
-### Enhanced Skills Hub Federation Setup Guide
-**Updated Section** Comprehensive guide for configuring Skills Hub with federated skill sources, enhanced git source support, and private repository authentication.
+### OpenTelemetry Troubleshooting Guide
+**New Section** Comprehensive troubleshooting guide for OpenTelemetry configuration and connectivity issues.
 
-#### Prerequisites
-- PostgreSQL database for production deployments
-- Git repositories containing skill sources (optional)
-- Local directories with skill files (optional)
-- Proper network policies for database and git access
-- GitHub Personal Access Tokens (PAT) for private repositories
+#### Common Issues and Solutions
+- **OTEL_ENABLED not taking effect**: Verify environment variable is properly set and service restarts after configuration changes
+- **Authentication failures (401)**: Check OTEL_EXPORTER_OTLP_HEADERS contains valid Basic auth credentials; verify OpenObserve user permissions
+- **Endpoint connectivity issues**: Ensure OTEL_EXPORTER_OTLP_ENDPOINT is reachable from pod network; check firewall rules and service availability
+- **High CPU usage**: Review OpenTelemetry batch processor settings; adjust batch sizes and export intervals for optimal performance
+- **Missing traces/metrics**: Verify service instrumentation is active; check that FastAPI and HTTPX instrumentors are properly initialized
+- **Log bridge not working**: Ensure log level is set to INFO; verify OTLP log exporter is properly configured
 
-#### Configuration Steps
-1. Define skill sources in SKILLS_SOURCES JSON format with optional path fields for git sources
-2. Choose appropriate storage backend (memory for dev, postgres for prod)
-3. Configure synchronization intervals based on update frequency
-4. Set up SKILLS_GIT_TOKENS for private repository authentication
-5. Validate configuration before deployment
-
-#### Enhanced SKILLS_SOURCES Configuration Examples
-```json
-[
-  {"source_id": "sre-alerting", "type": "local", "path": "/skills/sre-alerting"},
-  {"source_id": "platform-runbooks", "type": "local", "path": "/skills/platform-runbooks"},
-  {"source_id": "team-skills", "type": "git", "url": "https://github.com/team/skills.git", "ref": "main"},
-  {"source_id": "monorepo-runbooks", "type": "git", "url": "https://github.com/team/monorepo.git", "ref": "main", "path": "docs/runbooks"}
-]
-```
-
-#### Private Repository Authentication
-```json
-{
-  "team-skills": "ghp_your_personal_access_token",
-  "monorepo-runbooks": "ghp_another_token_for_monorepo"
-}
-```
-
-#### Production Deployment Considerations
-- Use PostgreSQL backend for data persistence
-- Configure appropriate sync intervals to balance freshness and performance
-- Set up proper database backups and monitoring
-- Implement network policies for database access
-- Monitor skill source health and synchronization status
-- Implement proper token rotation and secret management for private repositories
-- Use scoped tokens with minimum required permissions for git repositories
+#### Monitoring and Diagnostics
+- Check service logs for OpenTelemetry initialization messages
+- Monitor exporter error rates and authentication failures
+- Verify OpenObserve backend receives telemetry data
+- Use OpenObserve dashboards to validate trace correlation and metric collection
 
 **Section sources**
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-- [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
-- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.example.env)
-- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
-
-### Skills Hub Storage Backend Configuration
-**New Section** Detailed configuration for different storage backends.
-
-#### Memory Backend (Development)
-- Default backend for development and testing
-- No persistent storage - data lost on restart
-- Fastest performance for local development
-- No additional infrastructure requirements
-
-#### PostgreSQL Backend (Production)
-- Persistent storage for skill data
-- Requires PostgreSQL database setup
-- Supports concurrent access and scaling
-- Needs proper backup and maintenance procedures
-
-#### Database Connection Configuration
-- Use connection strings with proper authentication
-- Configure connection pooling for high availability
-- Monitor database performance and connection usage
-- Implement proper SSL/TLS encryption for production
-
-**Section sources**
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
-
-### Git Source Path Validation Rules
-**New Section** Detailed documentation for git source path validation and security rules.
-
-#### Allowed Path Patterns
-- Relative paths only (no absolute paths starting with `/`)
-- No parent directory references (`..`)
-- Must be within the git repository checkout directory
-- Trailing slashes are automatically removed
-
-#### Security Validation
-- Prevents path traversal attacks
-- Ensures subdirectories are properly scoped
-- Validates against common attack patterns
-- Provides clear error messages for invalid paths
-
-#### Examples
-- ✅ Valid: `"path": "skills/runbooks"`
-- ✅ Valid: `"path": "docs/guides"`
-- ❌ Invalid: `"path": "/etc/passwd"` (absolute path)
-- ❌ Invalid: `"path": "../../../etc"` (parent directory traversal)
-- ❌ Invalid: `"path": "a/../../b"` (path traversal attempt)
-
-**Section sources**
-- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
-
-### Private Repository Authentication Setup
-**New Section** Comprehensive guide for setting up private repository authentication with SKILLS_GIT_TOKENS.
-
-#### Prerequisites
-- GitHub Personal Access Token (PAT) with appropriate permissions
-- Kubernetes Secret management for token storage
-- Network access to private git repositories
-
-#### Configuration Steps
-1. Generate GitHub PAT with read-only repository access
-2. Create Kubernetes Secret with SKILLS_GIT_TOKENS configuration
-3. Map source_ids to corresponding tokens in JSON format
-4. Deploy with proper secret mounting
-5. Verify authentication works for private repositories
-
-#### Token Format and Security
-- JSON object mapping source_id to token
-- Tokens are automatically injected into HTTPS clone URLs
-- Credentials are never logged or exposed in error messages
-- Implement proper token rotation and access controls
-
-#### Example Configuration
-```json
-{
-  "private-repo-1": "ghp_abc123def456ghi789",
-  "private-repo-2": "ghp_xyz789abc123def456"
-}
-```
-
-**Section sources**
-- [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.example.env)
+- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
+- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)

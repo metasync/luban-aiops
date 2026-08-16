@@ -1,2 +1,0 @@
-- Skill documents are written as Markdown files validated against the shared `skill.schema.json`, ensuring producers and consumers share a single source of truth for the skill format.
-- Platform ops skill sources are organized by domain (e.g., Kubernetes troubleshooting, SRE alerting) under `shared/platform-ops/skills/` and consumed as raw inputs by the skills hub ingestion pipeline.

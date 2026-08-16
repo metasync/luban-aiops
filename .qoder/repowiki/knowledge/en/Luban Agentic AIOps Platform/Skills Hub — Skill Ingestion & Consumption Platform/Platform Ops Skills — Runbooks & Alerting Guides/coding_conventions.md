@@ -1,5 +1,0 @@
-- Each skill is a single Markdown file with YAML frontmatter containing at least `title` and `description`, plus optional `tags`, `version`, and `source_url` per `shared/shared-contracts/skill-format.md`.
-- Skills are organized one-per-file: one guide under `platform-runbooks/guides/` and one runbook under `sre-alerting/alerts/`, with filenames reflecting the problem or alert name.
-- Skills avoid secrets, hostnames, and customer data, and keep bodies under 64 KiB by splitting long guides into separate files.
-- Duplicate file slugs within a single source are rejected, forcing unique naming per skill.
-- Adapted upstream content includes a `source_url` frontmatter field and an attribution notice in the source's `NOTICE` file.

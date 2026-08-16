@@ -1,1 +1,0 @@
-Unittest-based integration and unit tests for the skills-hub FastAPI service, covering ingestion, scoring, storage backends, sync orchestration, HTTP routes, and contract alignment.

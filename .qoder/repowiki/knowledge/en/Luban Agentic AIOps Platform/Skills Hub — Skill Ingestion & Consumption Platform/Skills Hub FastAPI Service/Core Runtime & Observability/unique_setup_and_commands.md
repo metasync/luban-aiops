@@ -1,1 +1,0 @@
-Enable OTel push telemetry by setting `OTEL_ENABLED` to `1|true|yes|on` and configure `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_SERVICE_NAME`; otherwise the module stays fully disabled and does not import OTel libraries at all.

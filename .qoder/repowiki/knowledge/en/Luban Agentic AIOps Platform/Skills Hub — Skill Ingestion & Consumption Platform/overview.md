@@ -1,1 +1,0 @@
-FastAPI service that ingests Markdown-based skill documents (including platform ops runbooks), persists them, and exposes authenticated HTTP APIs for listing and retrieving skills.

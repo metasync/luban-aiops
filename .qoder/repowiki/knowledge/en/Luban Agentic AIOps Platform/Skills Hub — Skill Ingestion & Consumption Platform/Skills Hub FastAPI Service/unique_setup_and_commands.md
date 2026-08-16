@@ -1,1 +1,0 @@
-Managed via `uv` (pyproject.toml + uv.lock) with a Makefile target to run the service; Docker image built from the provided Dockerfile.

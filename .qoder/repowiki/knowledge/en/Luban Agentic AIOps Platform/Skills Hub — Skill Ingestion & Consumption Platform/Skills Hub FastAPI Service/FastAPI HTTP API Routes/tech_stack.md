@@ -1,1 +1,0 @@
-FastAPI `APIRouter` with async handlers; Pydantic model serialization via `model_dump(mode='json', exclude_none=True)`; metrics recorded through `skills_hub.core.metrics`.

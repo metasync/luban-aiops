@@ -1,1 +1,0 @@
-FastAPI service that ingests Markdown skill sources, persists them via pluggable stores, and exposes authenticated HTTP endpoints for listing and retrieving skills.

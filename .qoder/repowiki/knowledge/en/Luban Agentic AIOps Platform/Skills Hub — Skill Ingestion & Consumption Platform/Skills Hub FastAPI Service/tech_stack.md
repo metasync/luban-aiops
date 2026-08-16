@@ -1,1 +1,0 @@
-Python with FastAPI for HTTP, Pydantic for request/response schemas, SQLAlchemy-style memory/PostgreSQL skill store, Prometheus client for metrics, and optional OpenTelemetry for tracing.

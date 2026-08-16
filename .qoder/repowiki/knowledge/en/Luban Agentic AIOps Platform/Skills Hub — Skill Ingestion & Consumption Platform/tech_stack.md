@@ -1,1 +1,0 @@
-Python FastAPI service with Pydantic validation against a shared JSON Schema (`skill.schema.json`) that governs both skill document authoring and ingestion parsing.

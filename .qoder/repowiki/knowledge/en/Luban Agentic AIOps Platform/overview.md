@@ -1,1 +1,0 @@
-Multi-product platform that wires agent runtime, identity broker, policy enforcement, audit logging, skills catalog, and tool execution behind a single platform gateway with shared contracts and GitOps overlays.

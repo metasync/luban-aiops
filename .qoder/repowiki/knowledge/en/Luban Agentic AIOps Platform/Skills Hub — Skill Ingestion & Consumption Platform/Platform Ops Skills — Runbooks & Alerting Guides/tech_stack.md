@@ -1,1 +1,0 @@
-Markdown skills with YAML frontmatter consumed by the `skills_hub` Python validation tool; no runtime code.
