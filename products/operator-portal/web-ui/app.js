@@ -747,6 +747,57 @@ function renderToolCall(payload) {
   turn.cardMap.set(payload.call_id, card);
 }
 
+// Cited guidance: when a skills.* tool succeeds, the streamed data_summary
+// carries the matched skills; surface them as citation chips under the
+// evidence card. A truncated summary (_truncated marker) yields no chips
+// rather than partial ones.
+function citedSkills(payload) {
+  if (payload.status !== "success") return [];
+  const data = payload.data_summary;
+  if (!data || typeof data !== "object" || data._truncated) return [];
+  const entries =
+    payload.tool_name === "skills.search" ? data.matches
+    : payload.tool_name === "skills.list" ? data.skills
+    : payload.tool_name === "skills.get" ? [data]
+    : [];
+  return (Array.isArray(entries) ? entries : [])
+    .filter((item) => item && item.skill_id)
+    .map((item) => ({
+      skillId: String(item.skill_id),
+      title: String(item.title || item.skill_id)
+    }));
+}
+
+function renderCitedGuidance(card, payload) {
+  if (!String(payload.tool_name || "").startsWith("skills.")) return;
+  if (card.querySelector(".cited-guidance")) return;
+  const citations = citedSkills(payload);
+  if (citations.length === 0) return;
+  const section = document.createElement("div");
+  section.className = "cited-guidance";
+  const label = document.createElement("div");
+  label.className = "cited-guidance-label";
+  label.textContent = "Cited guidance";
+  section.appendChild(label);
+  const chips = document.createElement("div");
+  chips.className = "cited-chips";
+  for (const citation of citations) {
+    const chip = document.createElement("span");
+    chip.className = "cited-chip";
+    chip.title = citation.skillId;
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "cited-chip-title";
+    titleSpan.textContent = citation.title;
+    const idSpan = document.createElement("span");
+    idSpan.className = "cited-chip-id";
+    idSpan.textContent = citation.skillId;
+    chip.append(titleSpan, idSpan);
+    chips.appendChild(chip);
+  }
+  section.appendChild(chips);
+  card.appendChild(section);
+}
+
 function renderToolResult(payload) {
   const turn = ensureCurrentTurn();
   if (!turn) return;
@@ -839,6 +890,7 @@ function renderToolResult(payload) {
     details.appendChild(pre);
     card.appendChild(details);
   }
+  renderCitedGuidance(card, payload);
 }
 
 // Tool execution card: aggregates what the stream delivered for ONE turn

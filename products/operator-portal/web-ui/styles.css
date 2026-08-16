@@ -563,6 +563,46 @@ body {
   background: var(--bg);
 }
 
+/* Cited-guidance chips under skills.* evidence cards. */
+.cited-guidance {
+  margin-top: 8px;
+}
+.cited-guidance-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.cited-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cited-chip {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+  padding: 4px 8px;
+  max-width: 280px;
+}
+.cited-chip-title {
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cited-chip-id {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Per-turn group rendered inline after the agent reply it grounds. */
 .evidence-turn {
   border: 1px solid var(--border);

@@ -23,6 +23,14 @@
 # Override the generated secret:
 #   SKILLS_QUERY_SECRET=my-secret shared/platform-ops/gitops/sync-skills-secrets.sh
 #
+# Attach a git-source PAT (never echoed, never committed): when SKILLS_GIT_TOKEN
+# is exported, it is written into the skills-hub secret as
+# SKILLS_GIT_TOKENS={"platform-skills":"<token>"} so the platform-skills git
+# source can authenticate. Unset: the git source fails auth (scrubbed error on
+# the status endpoint) while the local sources keep serving.
+#
+#   SKILLS_GIT_TOKEN=github_pat_... shared/platform-ops/gitops/sync-skills-secrets.sh
+#
 # Skip in CI when secrets are injected externally:
 #   SKIP_SKILLS_SECRETS=true make deploy
 
@@ -87,6 +95,13 @@ SKILLS_SECRET_FILE="$BASE_DIR/skills-hub/runtime-secrets.env"
 cat > "$SKILLS_SECRET_FILE" <<EOF
 SKILLS_QUERY_CLIENTS=tool-gateway=${SKILLS_QUERY_SECRET}
 EOF
+# Git-source PAT: the secret file was just truncated, so a plain append is
+# idempotent. The token is never echoed to the terminal.
+if [ -n "${SKILLS_GIT_TOKEN:-}" ]; then
+  printf 'SKILLS_GIT_TOKENS={"platform-skills":"%s"}\n' "$SKILLS_GIT_TOKEN" \
+    >> "$SKILLS_SECRET_FILE"
+  echo "SKILLS_GIT_TOKENS provisioned for source 'platform-skills'."
+fi
 sync_secret skills-hub-runtime-secrets "$SKILLS_SECRET_FILE"
 
 # --- caller credential (in-place update, preserves existing secrets) ---------

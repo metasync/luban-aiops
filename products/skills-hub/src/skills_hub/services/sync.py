@@ -209,7 +209,13 @@ class SyncManager:
         sha = await asyncio.to_thread(
             _git_checkout, spec.url, spec.ref, dest, token
         )
-        return dest, sha
+        root = dest / spec.path if spec.path else dest
+        if not root.is_dir():
+            raise FileNotFoundError(
+                f"configured subpath {spec.path!r} not found in checkout "
+                f"of source {spec.source_id}"
+            )
+        return root, sha
 
     def status_report(self) -> list[dict]:
         """JSON-ready per-source report (bounded rejection lists)."""

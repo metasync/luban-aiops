@@ -11,6 +11,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path
 
 SOURCE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
@@ -25,7 +26,7 @@ class SourceSpec:
 
     source_id: str
     type: str  # "git" | "local"
-    path: str = ""  # local sources: directory path
+    path: str = ""  # local: directory path; git: optional subpath of checkout
     url: str = ""  # git sources: clone URL
     ref: str = "HEAD"  # git sources: branch/tag to track
 
@@ -91,8 +92,21 @@ def parse_sources(raw: str) -> tuple[SourceSpec, ...]:
                     f"source {source_id}: git sources require 'url'"
                 )
             ref = str(entry.get("ref", "HEAD")).strip() or "HEAD"
+            path = str(entry.get("path", "")).strip().rstrip("/")
+            if path:
+                if path.startswith("/") or ".." in Path(path).parts:
+                    raise SettingsError(
+                        f"source {source_id}: git 'path' must be a relative "
+                        "subdirectory within the checkout"
+                    )
             sources.append(
-                SourceSpec(source_id=source_id, type="git", url=url, ref=ref)
+                SourceSpec(
+                    source_id=source_id,
+                    type="git",
+                    url=url,
+                    ref=ref,
+                    path=path,
+                )
             )
         else:
             raise SettingsError(

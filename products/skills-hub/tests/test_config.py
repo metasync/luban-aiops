@@ -38,6 +38,24 @@ class ParseSourcesTests(unittest.TestCase):
         )
         self.assertEqual(source.type, "git")
         self.assertEqual(source.ref, "HEAD")
+        self.assertEqual(source.path, "")
+
+    def test_git_source_with_subpath(self) -> None:
+        (source,) = parse_sources(
+            '[{"source_id": "team-a", "type": "git", '
+            '"url": "https://example.com/team-a.git", '
+            '"path": "skills/runbooks/"}]'
+        )
+        self.assertEqual(source.path, "skills/runbooks")
+
+    def test_rejects_git_subpath_escaping_checkout(self) -> None:
+        for bad_path in ("/etc", "../outside", "a/../../b"):
+            with self.subTest(path=bad_path), self.assertRaises(SettingsError):
+                parse_sources(
+                    '[{"source_id": "a", "type": "git", '
+                    '"url": "https://example.com/a.git", '
+                    f'"path": "{bad_path}"}}]'
+                )
 
     def test_rejects_invalid_json(self) -> None:
         with self.assertRaises(SettingsError):

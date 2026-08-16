@@ -8,6 +8,25 @@ published product versions.
 
 ## Unreleased
 
+### Added — Git-Federated Skill Sources, End to End (R2 gap-closure)
+
+- The skills-hub image now ships `git`: the sync engine shells out to it for
+  `type=git` sources, but the base-uv-derived image lacked the binary, so git
+  federation could never have worked in-cluster. Git stays out of the shared
+  base image.
+- `SKILLS_SOURCES` git entries accept an optional `path` — the subdirectory
+  within the checkout to ingest (real team repos keep skills next to other
+  code). Path-escaping values are rejected at config parse; a missing subpath
+  fails the sync with a clear error while the previous snapshot keeps serving.
+- dev-k8s wires a production-parity git source (`platform-skills`, tracking
+  this repository's `shared/platform-ops/skills`): non-secret `url`/`ref`/
+  `path` in the ConfigMap, the PAT only in `skills-hub-runtime-secrets`.
+  `sync-skills-secrets.sh` provisions `SKILLS_GIT_TOKENS` when
+  `SKILLS_GIT_TOKEN` is exported (never echoed, never committed).
+- Operator portal: successful `skills.*` tool calls now render the matched
+  skills as **Cited guidance** chips (title + namespaced id) under the
+  tool-evidence card, making the guidance behind an answer glanceable.
+
 ### Refined — Skills and Grounded Guidance (post-delivery)
 
 - Search prefilter semantics now match the deterministic scorer: query words

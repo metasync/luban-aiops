@@ -144,7 +144,9 @@ agent-service          tool-gateway                          skills-hub
 
 **Provisioning:** `make deploy` calls `sync-skills-secrets.sh` which creates
 the `skills` database idempotently, generates one random shared secret, and
-writes both K8s secrets. `SKIP_SKILLS_SECRETS=true` opts out; unsetting
+writes both K8s secrets. Export `SKILLS_GIT_TOKEN=<pat>` before running it to
+also provision `SKILLS_GIT_TOKENS` for git-federated sources (the token is
+never echoed or committed). `SKIP_SKILLS_SECRETS=true` opts out; unsetting
 `GATEWAY_SKILLS_SERVICE_URL` leaves the skills tools unregistered. Unlike the
 audit-service query path, skills-hub uses a dedicated query-credential
 registry from day one (no shared ingest/query credential).
@@ -286,8 +288,8 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-con
 
 | Variable | Purpose | Default | Source |
 |---|---|---|---|
-| `SKILLS_SOURCES` | Federated source list (JSON: `source_id`, `type` `local`/`git`, `path`/`url`/`ref`) | two local sample sources | runtime-config |
-| `SKILLS_GIT_TOKENS` | Per-source git tokens (JSON map) | *(none)* | runtime-secrets |
+| `SKILLS_SOURCES` | Federated source list (JSON: `source_id`, `type` `local`/`git`; local requires `path`; git requires `url`, optional `ref` (default `HEAD`) and `path` — the subdirectory within the checkout to ingest) | two local sample sources + one git source | runtime-config |
+| `SKILLS_GIT_TOKENS` | Per-source git tokens (JSON map `source_id`→token, injected into https clone URLs as `x-access-token`) | *(none)* | **runtime-secrets** |
 | `SKILLS_SYNC_INTERVAL_SECONDS` | Per-source sync loop period | `300` | runtime-config |
 | `SKILLS_DATA_PATH` | Working dir for git checkouts | `/var/lib/skills-hub` | runtime-config |
 | `SKILLS_STORE_BACKEND` | Store backend: `memory` or `postgres` | `postgres` (dev-k8s) | runtime-config |
@@ -350,6 +352,7 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 | Key | Purpose | How to Provision |
 |---|---|---|
 | `SKILLS_QUERY_CLIENTS` | Query client registry (`client_id=secret,...`) | `sync-skills-secrets.sh` |
+| `SKILLS_GIT_TOKENS` | Git-source PATs (JSON map `source_id`→token); without it a git source fails auth while others keep serving | `SKILLS_GIT_TOKEN=<pat> sync-skills-secrets.sh` (never committed) |
 
 ## Runtime Profiles
 

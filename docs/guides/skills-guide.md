@@ -159,12 +159,36 @@ Choose the source type:
   to `SKILLS_SOURCES`:
 
   ```json
-  {"source_id":"payments","type":"git","url":"https://git.example/payments/skills.git","ref":"main"}
+  {"source_id":"payments","type":"git","url":"https://git.example/payments/skills.git","ref":"main","path":"runbooks"}
   ```
 
-  For private repositories, add `"payments": "<read-only-token>"` to
-  `SKILLS_GIT_TOKENS` (JSON map, via the skills-hub runtime secrets). The
-  service clones into `SKILLS_DATA_PATH` and re-syncs on the interval.
+  Fields: `url` (https clone URL), `ref` (branch/tag to track, default
+  `HEAD`), and optional `path` — the subdirectory within the checkout to
+  ingest. Real team repos keep skills next to other code, so `path` scopes
+  ingestion (a missing subpath fails the sync with a clear error instead of
+  ingesting the whole tree).
+
+  Production-parity secret split (the dev-k8s overlay follows it with the
+  `platform-skills` source pointed at this repository):
+
+  - **Non-secret** federation config (`url`/`ref`/`path`) lives in the
+    ConfigMap (`SKILLS_SOURCES` in `runtime-config.env`).
+  - **Secret** material lives only in the `skills-hub-runtime-secrets`
+    Secret: add `"payments": "<read-only-token>"` to `SKILLS_GIT_TOKENS`
+    (JSON map source_id → token, injected into the clone URL as
+    `x-access-token`). In dev-k8s, export the PAT and run the provisioning
+    script — the token is never echoed or committed:
+
+    ```sh
+    SKILLS_GIT_TOKEN=<pat> shared/platform-ops/gitops/sync-skills-secrets.sh
+    ```
+
+    In production the same Secret comes from your secret manager.
+
+  The service clones into `SKILLS_DATA_PATH` and re-syncs on the interval.
+  Resilience: a failing git source (unreachable URL, expired token, missing
+  subpath) keeps serving its previous snapshot, reports a scrubbed error on
+  the status endpoint, and never affects other sources.
 
 Rules for both: `source_id` must match `[a-z0-9][a-z0-9-]*` and be unique;
 unknown types or missing type-specific fields fail fast at startup. A failed
@@ -182,6 +206,9 @@ source sync never affects other sources.
 
 **Through the agent** (the intended path): the agent consults skills
 automatically for procedure/remediation questions and cites what it uses.
+When a `skills.*` tool succeeds, the portal's tool-evidence card shows the
+matched skills as **Cited guidance** chips (title + namespaced id), so the
+guidance behind an answer is visible without expanding the data summary.
 Operators can ask directly:
 
 - *"What guidance do we have for KubePodNotReady?"* → `skills.search`
@@ -247,6 +274,8 @@ Prometheus metrics on `/metrics`:
 | New/revised skill not visible | Sync not yet run, or ConfigMap wiring missed a file | Wait one interval or `kubectl rollout restart deployment/skills-hub`; check kustomization + deployment `items` |
 | Source reports rejections | Document violates the format contract | Read the `rejections` reasons in `/api/v1/skills/status`; fix and re-validate |
 | Source reports `last_error` | Unreachable git URL / bad token / unreadable path | Fix credentials or path; the previous slice keeps serving until then |
+| Git source errors mention auth, others healthy | `SKILLS_GIT_TOKENS` missing the source's token | Re-run `sync-skills-secrets.sh` with `SKILLS_GIT_TOKEN` exported (dev) or update the Secret (prod) |
+| Git source errors mention a subpath | Configured `path` absent from the repo checkout | Fix `path` in `SKILLS_SOURCES` or move the skills directory |
 | Search returns no matches | Query words co-occur nowhere, or source never synced | Try `skills.list` / the catalog endpoint to confirm the skill exists; check status |
 | `kustomize build` fails | ConfigMap entry points at a deleted/renamed file | Align `kustomization.yaml` keys with the files under `shared/platform-ops/skills/` |
 | Agent claims no skills exist | skills connector not registered | Check `GATEWAY_SKILLS_SERVICE_URL` and the query-secret match (see [Configuration Reference](configuration-reference.md)) |

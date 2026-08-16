@@ -117,6 +117,59 @@ class SyncOnceTests(unittest.TestCase):
         report = manager.status_report()
         self.assertNotIn("sekrit-token", report[0]["last_error"])
 
+    def test_git_source_ingests_from_configured_subpath(self) -> None:
+        """Monorepo sources ingest only the configured subdirectory of the
+        checkout, not the repo root."""
+        spec = SourceSpec(
+            source_id="team-git",
+            type="git",
+            url="https://example.com/team.git",
+            ref="main",
+            path="ops/skills",
+        )
+        settings = SkillsSettings(
+            sources=(spec,), data_path=str(self.root / "data")
+        )
+
+        def fake_checkout(url: str, ref: str, dest: Path, token: str | None):
+            sub = dest / "ops" / "skills"
+            sub.mkdir(parents=True)
+            (sub / "KubePodNotReady.md").write_text(VALID_DOC)
+            return "abc1234"
+
+        manager = SyncManager(settings, self.store)
+        with patch(
+            "skills_hub.services.sync._git_checkout",
+            side_effect=fake_checkout,
+        ):
+            status = _run(manager.sync_once(spec))
+        self.assertIsNone(status.last_error)
+        self.assertEqual(status.accepted, 1)
+        self.assertEqual(status.ref, "abc1234")
+        self.assertIsNotNone(
+            _run(self.store.get("team-git/kubepodnotready"))
+        )
+
+    def test_git_source_reports_missing_subpath_clearly(self) -> None:
+        spec = SourceSpec(
+            source_id="team-git",
+            type="git",
+            url="https://example.com/team.git",
+            ref="main",
+            path="does/not/exist",
+        )
+        settings = SkillsSettings(
+            sources=(spec,), data_path=str(self.root / "data")
+        )
+        manager = SyncManager(settings, self.store)
+        with patch(
+            "skills_hub.services.sync._git_checkout",
+            return_value="abc1234",
+        ):
+            status = _run(manager.sync_once(spec))
+        self.assertIn("does/not/exist", status.last_error)
+        self.assertEqual(_run(self.store.count()), 0)
+
     def test_status_report_orders_sources_and_bounds_fields(self) -> None:
         spec_a = SourceSpec(source_id="b-src", type="local", path=str(self.root))
         spec_b = SourceSpec(source_id="a-src", type="local", path=str(self.root))
