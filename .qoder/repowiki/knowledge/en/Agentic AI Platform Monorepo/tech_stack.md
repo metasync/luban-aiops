@@ -1,1 +1,0 @@
-Python FastAPI services built on uv, containerized via Dockerfiles using a shared base image, deployed with kubectl/kustomize overlays under `shared/platform-ops/gitops/dev-k8s/`; cross-service boundaries are validated against JSON Schema files in `shared/shared-contracts/schemas/`.

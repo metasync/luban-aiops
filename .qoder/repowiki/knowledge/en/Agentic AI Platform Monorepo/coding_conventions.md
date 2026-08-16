@@ -1,5 +1,0 @@
-- Every product follows the same src layout: `src/<service>/api/routes/`, `core/`, `schemas/`, `services/`, `policies/`, with `app.py` + `main.py` as entry points.
-- Cross-service payloads are modeled as Pydantic types derived from JSON Schema files under `shared/shared-contracts/schemas/` rather than hand-written type definitions.
-- Observability, metrics, telemetry, and request context are provided by a shared `core/observability.py` / `core/telemetry.py` / `core/request_context.py` pattern replicated in each service.
-- Policy enforcement is implemented per service via a local `services/policy_engine.py` that loads a YAML policy file from `policies/policy-default.yaml`.
-- Runtime configuration is split between env-driven config (`core/config.py`) and Kustomize ConfigMaps/Secrets mounted at deploy time.

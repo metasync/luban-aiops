@@ -1,1 +1,0 @@
-Python ≥3.11 with FastAPI + Uvicorn ASGI server; psycopg async driver for PostgreSQL (WAL-durable storage); PyJWT for token validation; OpenTelemetry SDK with OTLP exporter and FastAPI/HTTPX instrumentation; Prometheus metrics via prometheus-client; Pydantic v2 for request/response schemas; uv as build/packaging backend.

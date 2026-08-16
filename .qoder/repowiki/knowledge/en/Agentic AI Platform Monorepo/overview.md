@@ -1,1 +1,0 @@
-Monorepo that composes the agent-platform, platform-gateway, identity-broker, audit-service, and tool-gateway into a Kubernetes-deployed agentic AIops platform governed by shared JSON schemas and GitOps overlays.

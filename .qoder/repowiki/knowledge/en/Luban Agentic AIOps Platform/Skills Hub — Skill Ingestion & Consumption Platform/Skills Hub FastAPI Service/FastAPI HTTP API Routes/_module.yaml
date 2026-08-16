@@ -5,4 +5,7 @@ scope:
     - products/skills-hub/src/skills_hub/api/
 source_files: []
 depends_on: []
-related_to: []
+related_to:
+    - path: skills_hub/skills_hub_app/schemas_and_app
+    - path: skills_hub/skills_hub_app/services
+    - path: skills_hub/skills_hub_app/tests

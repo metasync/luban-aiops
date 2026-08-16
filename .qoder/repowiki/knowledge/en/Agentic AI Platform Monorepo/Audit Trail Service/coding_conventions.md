@@ -1,6 +1,0 @@
-- Configuration is modeled as frozen dataclasses loaded from environment variables via a classmethod (e.g. `AuditSettings.from_env`) and cached globally with `@lru_cache(maxsize=1)`.
-- Pluggable backends are expressed as a `Protocol` interface (`AuditStore`) with multiple concrete implementations selected by a factory function based on a settings flag.
-- Async resources (database connections, background tasks) are initialized and torn down inside a FastAPI `asynccontextmanager` lifespan to guarantee cleanup on shutdown.
-- Structured observability uses a shared `log_event` helper that attaches `service`, `request_id`, and domain-specific fields instead of ad-hoc log calls.
-- Paginated query results use a base64-encoded cursor encoding `(occurred_at|event_id)` passed between store implementations to support consistent pagination across in-memory and PostgreSQL backends.
-- Kubernetes manifests declare non-root security contexts (`runAsNonRoot`, `allowPrivilegeEscalation: false`, seccomp RuntimeDefault) and expose readiness/liveness HTTP probes on `/health/ready` and `/health/live`.
