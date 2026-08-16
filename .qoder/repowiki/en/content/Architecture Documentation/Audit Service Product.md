@@ -15,7 +15,15 @@
 - [audit.py](file://products/audit-service/src/audit_service/schemas/audit.py)
 - [config.py](file://products/audit-service/src/audit_service/core/config.py)
 - [metrics.py](file://products/audit-service/src/audit_service/core/metrics.py)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive security considerations section documenting the shared query credential limitation
+- Updated Authentication for Ingest and Query section with security implications
+- Enhanced Configuration and Runtime section with deployment-specific guidance
+- Added Known Limitations section explaining security considerations for non-development deployments
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -23,10 +31,12 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
+6. [Security Considerations](#security-considerations)
+7. [Known Limitations](#known-limitations)
+8. [Dependency Analysis](#dependency-analysis)
+9. [Performance Considerations](#performance-considerations)
+10. [Troubleshooting Guide](#troubleshooting-guide)
+11. [Conclusion](#conclusion)
 
 ## Introduction
 The Audit Service is the durable home for the platform audit trail. It ingests structured audit events from platform services, retains them within a retention-bounded store (in-memory for tests/dev and PostgreSQL for production), and exposes an authenticated query API that is proxied by the platform gateway under policy control. The service focuses exclusively on audit ingestion and querying; it does not authorize business actions or perform redaction.
@@ -302,6 +312,7 @@ Next --> Sleep
   - Static: HTTP Basic against a registry of client_id/secret pairs
   - Workload: Bearer token validated against cluster OIDC issuer JWKS, audience and subject mapping
 - Centralized caller resolution used by both routes
+- **Important**: Both ingest and query endpoints use the same `AUDIT_INGEST_CLIENTS` registry for authentication
 
 ```mermaid
 flowchart TD
@@ -317,12 +328,12 @@ Result -- No --> Err["Raise auth error -> 401"]
 
 **Diagram sources**
 - [ingest_auth.py:34-43](file://products/audit-service/src/audit_service/services/ingest_auth.py#L34-L43)
-- [ingest_auth.py:69-93](file://products/audit-service/src/audit_service/services/ingest_auth.py#L69-L93)
+- [ingest_auth.py:69-93](file://products/audit-service/src/audit_service/services/ingest_auth.py#L69-93)
 - [ingest_auth.py:105-117](file://products/audit-service/src/audit_service/services/ingest_auth.py#L105-L117)
 
 **Section sources**
 - [ingest_auth.py:34-43](file://products/audit-service/src/audit_service/services/ingest_auth.py#L34-L43)
-- [ingest_auth.py:69-93](file://products/audit-service/src/audit_service/services/ingest_auth.py#L69-L93)
+- [ingest_auth.py:69-93](file://products/audit-service/src/audit_service/services/ingest_auth.py#L69-93)
 - [ingest_auth.py:105-117](file://products/audit-service/src/audit_service/services/ingest_auth.py#L105-L117)
 
 ### Schemas and Data Model
@@ -358,6 +369,7 @@ jsonb details
 - Settings loaded from environment variables with defaults
 - Parsed registries for static clients and workload subject-to-client mappings
 - Runtime entrypoint binds host/port from settings
+- **Critical**: Both ingest and query operations share the `AUDIT_INGEST_CLIENTS` registry
 
 **Section sources**
 - [config.py:52-97](file://products/audit-service/src/audit_service/core/config.py#L52-L97)
@@ -369,6 +381,43 @@ jsonb details
 
 **Section sources**
 - [health.py:14-35](file://products/audit-service/src/audit_service/api/routes/health.py#L14-L35)
+
+## Security Considerations
+
+### Shared Credential Architecture
+The audit-service implements a unified authentication model where both ingest and query operations authenticate against the same `AUDIT_INGEST_CLIENTS` registry. This design choice has important security implications:
+
+- **Unified Access Control**: Any service or client configured with ingest credentials can both write to and read from the audit trail
+- **Development-Friendly**: Simplifies development and testing by reducing credential management complexity
+- **Production Risk**: Ingest-only services inadvertently gain query capability, potentially exposing sensitive audit data
+
+### Platform Gateway Protection
+End-user authorization for query operations is enforced upstream by the platform-gateway through the deny-by-default `audit:read` policy action. This policy is granted only to specific roles (`auditor` and `platform-admin`), providing an additional layer of access control beyond service authentication.
+
+### Workload Identity Support
+For production deployments, the service supports Kubernetes projected service-account tokens (workload identity) as an alternative to static credentials. This approach leverages cluster OIDC issuer JWKS validation with audience and subject mapping for enhanced security.
+
+**Section sources**
+- [ingest_auth.py:1-12](file://products/audit-service/src/audit_service/services/ingest_auth.py#L1-L12)
+- [query.py:1-7](file://products/audit-service/src/audit_service/api/routes/query.py#L1-L7)
+- [configuration-reference.md:108-117](file://docs/guides/configuration-reference.md#L108-L117)
+
+## Known Limitations
+
+### Shared Query Credential Limitation
+**Current State**: The audit-service query API (`GET /api/v1/audit/events`) authenticates against the same `AUDIT_INGEST_CLIENTS` registry as ingest operations. This means any caller holding an ingest credential can also query the audit trail directly.
+
+**Security Implications**: 
+- Ingest-only services inadvertently gain read access to audit data
+- Potential exposure of sensitive audit information to services that should only write
+- Reduced principle of least privilege enforcement
+
+**Mitigation Strategy**: For non-development deployments, split the registries by implementing a separate query-credential registry (e.g., `AUDIT_QUERY_CLIENTS`). This ensures ingest clients cannot read the trail, maintaining proper separation between write and read capabilities.
+
+**Acceptable for Development**: This limitation is acceptable for the dev overlay where end-user authorization is enforced upstream through platform-gateway's `audit:read` policy, which is granted only to `auditor` and `platform-admin` roles.
+
+**Section sources**
+- [configuration-reference.md:108-117](file://docs/guides/configuration-reference.md#L108-L117)
 
 ## Dependency Analysis
 - FastAPI application depends on routers, config, metrics, observability, store builder, and retention
@@ -424,6 +473,7 @@ Operational tips:
 - Use /health/live and /health/ready to validate service state and store readiness
 - Expose /metrics to track ingestion, rejections, queries, evictions, and store errors
 - Validate environment variables for store backend, DB URL, retention window, and client registries
+- Monitor for shared credential usage patterns that may indicate unintended query access
 
 **Section sources**
 - [ingest.py:33-82](file://products/audit-service/src/audit_service/api/routes/ingest.py#L33-L82)
@@ -434,5 +484,7 @@ Operational tips:
 
 ## Conclusion
 The Audit Service provides a robust, extensible foundation for durable audit trails across the platform. Its clear boundaries, authenticated APIs, pluggable storage backends, and bounded retention make it suitable for both development and production use. Integration points with the platform gateway and other services are minimal and well-defined, enabling reliable operation and straightforward troubleshooting.
+
+**Important Security Note**: While the shared credential limitation is acceptable for development environments due to upstream authorization controls, production deployments should implement separate credential registries for ingest and query operations to maintain proper separation of concerns and adhere to the principle of least privilege.
 
 [No sources needed since this section summarizes without analyzing specific files]

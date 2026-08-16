@@ -4,22 +4,18 @@
 **Referenced Files in This Document**
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
 - [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-- [agent-platform/src/agent_service/core/observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
 - [agent-platform/src/agent_service/core/metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
-- [agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
-- [agent-platform/src/agent_service/app.py](file://products/agent-platform/src/agent_service/app.py)
-- [identity-broker/src/identity_service/core/observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
 - [identity-broker/src/identity_service/core/metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
-- [identity-broker/src/identity_service/api/routes/health.py](file://products/identity-broker/src/identity_service/api/routes/health.py)
-- [identity-broker/src/identity_service/app.py](file://products/identity-broker/src/identity_service/app.py)
-- [tool-gateway/src/tool_gateway/core/observability.py](file://products/tool-gateway/src/tool_gateway/core/observability.py)
 - [tool-gateway/src/tool_gateway/core/metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
-- [tool-gateway/src/tool_gateway/api/routes/health.py](file://products/tool-gateway/src/tool_gateway/api/routes/health.py)
-- [tool-gateway/src/tool_gateway/services/gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
+- [platform-gateway/src/platform_gateway/core/metrics.py](file://products/platform-gateway/src/platform_gateway/core/metrics.py)
+- [agent-platform/src/agent_service/app.py](file://products/agent-platform/src/agent_service/app.py)
+- [identity-broker/src/identity_service/app.py](file://products/identity-broker/src/identity_service/app.py)
 - [tool-gateway/src/tool_gateway/app.py](file://products/tool-gateway/src/tool_gateway/app.py)
-- [platform-gateway/src/platform_gateway/core/observability.py](file://products/platform-gateway/src/platform_gateway/core/observability.py)
-- [platform-gateway/src/platform_gateway/core/telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [platform-gateway/src/platform_gateway/app.py](file://products/platform-gateway/src/platform_gateway/app.py)
+- [agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
+- [identity-broker/src/identity_service/core/telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
+- [tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
+- [platform-gateway/src/platform_gateway/core/telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [shared/shared-contracts/schemas/health-response.schema.json](file://shared/shared-contracts/schemas/health-response.schema.json)
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
@@ -28,12 +24,11 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced structured logging conventions section to reflect standardized `configure_logging()` implementation across all four services
-- Updated distributed tracing documentation with enhanced tool_invoked events from tool gateway
-- Added LOG_LEVEL environment variable support details for per-deployment log level configuration
-- Updated application startup sequence documentation to include logging configuration calls
-- Enhanced audit trail documentation with comprehensive tool invocation tracking
-- Updated troubleshooting guide to address missing audit trail events due to uvicorn's default WARNING log level
+- Updated metrics collection strategy section to reflect direct prometheus_client implementation instead of prometheus-fastapi-instrumentator
+- Enhanced architecture overview to show the new direct metrics implementation pattern
+- Updated dependency analysis to reflect prometheus-client as the core dependency
+- Added detailed explanation of the compatibility issues with prometheus-fastapi-instrumentator
+- Updated troubleshooting guide to include information about the metrics implementation change
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -48,27 +43,27 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides comprehensive guidance for monitoring and observability across the Luban AIOps Platform. It consolidates the platform's metrics collection strategy using Prometheus, structured logging conventions with standardized logging configuration, distributed tracing implementation with enhanced tool invocation tracking, health check endpoints, readiness/liveness probes configuration, alerting rules, dashboard templates, and incident response procedures. It also includes guidance on custom metric creation, log aggregation, trace correlation, performance monitoring, bottleneck identification, capacity planning, debugging techniques, and troubleshooting workflows using available observability tools.
+This document provides comprehensive guidance for monitoring and observability across the Luban AIOps Platform. It consolidates the platform's metrics collection strategy using Prometheus with direct prometheus_client implementation, structured logging conventions, distributed tracing implementation, health check endpoints, readiness/liveness probes configuration, alerting rules, dashboard templates, and incident response procedures. It also includes guidance on custom metric creation, log aggregation, trace correlation, performance monitoring, bottleneck identification, capacity planning, debugging techniques, and troubleshooting workflows using available observability tools.
 
 ## Project Structure
-Observability is implemented consistently across all four services with standardized logging configuration:
-- Agent Platform service exposes metrics, telemetry, and observability utilities with configure_logging() integration
-- Identity Broker service implements similar observability primitives and health routes with logging configuration
-- Tool Gateway service integrates observability into request handling and policy enforcement with tool_invoked event tracking
-- Platform Gateway service provides centralized routing with enhanced observability capabilities
+Observability is implemented consistently across all four services with standardized metrics collection using direct prometheus_client implementation:
+- Agent Platform service exposes metrics via custom RED middleware with prometheus_client
+- Identity Broker service implements similar metrics collection with domain-specific counters
+- Tool Gateway service integrates metrics into request handling with policy decision tracking
+- Platform Gateway service provides centralized routing metrics with delegation tracking
 - Shared contracts define observability conventions and schemas used by all services
 - Kubernetes manifests configure probes and environment variables for observability components
 
 ```mermaid
 graph TB
 subgraph "Services"
-AP["Agent Platform<br/>configure_logging(), metrics.py, telemetry.py"]
-IB["Identity Broker<br/>configure_logging(), metrics.py, health.py"]
-TG["Tool Gateway<br/>configure_logging(), tool_invoked events, metrics.py"]
-PG["Platform Gateway<br/>configure_logging(), telemetry.py"]
+AP["Agent Platform<br/>prometheus_client RED middleware"]
+IB["Identity Broker<br/>prometheus_client metrics + domain counters"]
+TG["Tool Gateway<br/>prometheus_client + policy metrics"]
+PG["Platform Gateway<br/>prometheus_client + delegation metrics"]
 end
 subgraph "Shared Contracts"
-OC["Observability Conventions<br/>LOG_LEVEL support, structured logging"]
+OC["Observability Conventions<br/>direct prometheus_client implementation"]
 HR["Health Response Schema<br/>health-response.schema.json"]
 end
 subgraph "Kubernetes"
@@ -95,10 +90,10 @@ PG_DEP --> OBS_ENV
 ```
 
 **Diagram sources**
-- [agent-platform/src/agent_service/core/observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
-- [identity-broker/src/identity_service/core/observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
-- [tool-gateway/src/tool_gateway/core/observability.py](file://products/tool-gateway/src/tool_gateway/core/observability.py)
-- [platform-gateway/src/platform_gateway/core/observability.py](file://products/platform-gateway/src/platform_gateway/core/observability.py)
+- [agent-platform/src/agent_service/core/metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
+- [identity-broker/src/identity_service/core/metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
+- [tool-gateway/src/tool_gateway/core/metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
+- [platform-gateway/src/platform_gateway/core/metrics.py](file://products/platform-gateway/src/platform_gateway/core/metrics.py)
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [shared/shared-contracts/schemas/health-response.schema.json](file://shared/shared-contracts/schemas/health-response.schema.json)
 
@@ -106,11 +101,13 @@ PG_DEP --> OBS_ENV
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 
 ## Core Components
-- Metrics Collection Strategy:
-  - Each service exposes a Prometheus-compatible endpoint via its metrics module.
-  - Standardized metric naming and labels are enforced through shared conventions.
-- **Updated** Structured Logging Conventions:
-  - All services now call `configure_logging()` at startup to raise root logger from WARNING to INFO level
+- **Updated** Metrics Collection Strategy:
+  - Each service exposes a Prometheus-compatible endpoint via direct prometheus_client implementation
+  - Custom RED middleware records HTTP requests and durations with bounded cardinality labels
+  - Standardized metric naming and labels enforced through shared conventions
+  - Direct implementation avoids compatibility issues with pinned starlette versions
+- Structured Logging Conventions:
+  - All services call `configure_logging()` at startup to raise root logger from WARNING to INFO level
   - LOG_LEVEL environment variable supports per-deployment log level overrides (default: INFO)
   - Logs include consistent fields such as service name, version, request ID, and correlation IDs
   - Audit trail events (http_request, tool_invoked, policy decisions) are captured at INFO level
@@ -130,8 +127,8 @@ PG_DEP --> OBS_ENV
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 
 ## Architecture Overview
-The observability architecture centers around standardized libraries and shared contracts with enhanced logging configuration:
-- Services implement metrics, telemetry, and observability helpers with unified logging setup
+The observability architecture centers around direct prometheus_client implementation with standardized libraries and shared contracts:
+- Services implement custom RED middleware using prometheus_client for metrics collection
 - Application startup sequences call configure_logging() before FastAPI initialization
 - Kubernetes configurations inject environment variables and define probes
 - Prometheus scrapes metrics; logs are aggregated centrally; traces are exported to a collector
@@ -146,16 +143,15 @@ participant Prometheus as "Prometheus"
 participant Logger as "Log Aggregator"
 participant Tracer as "Tracing Collector"
 Client->>Gateway : HTTP Request
-Gateway->>Gateway : configure_logging() + Create Span (trace_id)
+Gateway->>Gateway : configure_logging() + Record Metrics (prometheus_client)
 Gateway->>Identity : Auth Call (propagate trace_id)
 Identity-->>Gateway : Auth Result
 Gateway->>Agent : Agent Call (propagate trace_id)
 Agent-->>Gateway : Response
 Gateway->>Gateway : log_event("tool_invoked")
-Gateway-->>Client : Response
-Gateway->>Prometheus : Record metrics
-Agent->>Prometheus : Record metrics
-Identity->>Prometheus : Record metrics
+Gateway->>Prometheus : Export metrics (prometheus_client)
+Agent->>Prometheus : Export metrics (prometheus_client)
+Identity->>Prometheus : Export metrics (prometheus_client)
 Gateway->>Logger : Structured logs with trace_id
 Agent->>Logger : Structured logs with trace_id
 Identity->>Logger : Structured logs with trace_id
@@ -165,71 +161,73 @@ Identity->>Tracer : Export spans
 ```
 
 **Diagram sources**
-- [tool-gateway/src/tool_gateway/services/gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
-- [tool-gateway/src/tool_gateway/app.py](file://products/tool-gateway/src/tool_gateway/app.py)
-- [agent-platform/src/agent_service/app.py](file://products/agent-platform/src/agent_service/app.py)
-- [identity-broker/src/identity_service/app.py](file://products/identity-broker/src/identity_service/app.py)
-- [platform-gateway/src/platform_gateway/app.py](file://products/platform-gateway/src/platform_gateway/app.py)
+- [tool-gateway/src/tool_gateway/core/metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
+- [agent-platform/src/agent_service/core/metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
+- [identity-broker/src/identity_service/core/metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
+- [platform-gateway/src/platform_gateway/core/metrics.py](file://products/platform-gateway/src/platform_gateway/core/metrics.py)
 
 ## Detailed Component Analysis
 
-### Metrics Collection Strategy
-- Each service defines metrics in a dedicated module:
-  - Agent Platform metrics module registers counters, histograms, and gauges.
-  - Identity Broker metrics module tracks authentication flows and token operations.
-  - Tool Gateway metrics module records API latency, throughput, and policy decisions.
-  - Platform Gateway metrics module handles routing and policy enforcement metrics.
-- Metric naming follows shared conventions to ensure consistency across services.
-- Labels include service, route, method, status code, and operation where applicable.
+### **Updated** Metrics Collection Strategy
+- Each service defines metrics using direct prometheus_client implementation:
+  - Custom RED middleware records HTTP requests with method, handler, and status labels
+  - Histogram metrics track request duration with method and handler labels
+  - Domain-specific counters for business logic (sessions, tokens, policy decisions)
+  - Module-level metric objects prevent double-registration during testing
+- Metric naming follows shared conventions to ensure consistency across services
+- Labels include service, route, method, status code, and operation where applicable
+- Direct implementation avoids compatibility issues with pinned starlette versions
 
 ```mermaid
 classDiagram
-class MetricsModule {
-+register_counter(name, help, labels)
-+register_histogram(name, help, labels)
-+register_gauge(name, help, labels)
-+increment_counter(name, labels, value)
-+observe_histogram(name, labels, value)
-+set_gauge(name, labels, value)
+class PrometheusMetrics {
++Counter http_requests_total
++Histogram http_request_duration_seconds
++setup_metrics(app)
++record_custom_metric(name, value)
 }
 class AgentMetrics {
-+request_count
-+latency_histogram
-+error_rate
++agent_sessions_created_total
++agent_chat_requests_total
++session_store_backend gauge
++session_store_errors counter
 }
 class IdentityMetrics {
-+auth_success_count
-+auth_failure_count
-+token_duration_histogram
++identity_tokens_issued_total
++token_exchange_total
++audit_emits_total
 }
 class GatewayMetrics {
-+route_latency_histogram
-+policy_decision_count
-+tool_invocation_count
++gateway_policy_decisions_total
++gateway_token_verification_total
++audit_emits_total
++tool_redacted_spans_total
 }
 class PlatformGatewayMetrics {
-+routing_latency
-+policy_checks_total
-+delegation_requests
++delegation_exchange_total
++delegation_cache_total
++audit_emits_total
 }
-MetricsModule <|-- AgentMetrics
-MetricsModule <|-- IdentityMetrics
-MetricsModule <|-- GatewayMetrics
-MetricsModule <|-- PlatformGatewayMetrics
+PrometheusMetrics <|-- AgentMetrics
+PrometheusMetrics <|-- IdentityMetrics
+PrometheusMetrics <|-- GatewayMetrics
+PrometheusMetrics <|-- PlatformGatewayMetrics
 ```
 
 **Diagram sources**
 - [agent-platform/src/agent_service/core/metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [identity-broker/src/identity_service/core/metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
 - [tool-gateway/src/tool_gateway/core/metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
+- [platform-gateway/src/platform_gateway/core/metrics.py](file://products/platform-gateway/src/platform_gateway/core/metrics.py)
 
 **Section sources**
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [agent-platform/src/agent_service/core/metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [identity-broker/src/identity_service/core/metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
 - [tool-gateway/src/tool_gateway/core/metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
+- [platform-gateway/src/platform_gateway/core/metrics.py](file://products/platform-gateway/src/platform_gateway/core/metrics.py)
 
-### **Updated** Structured Logging Conventions
+### Structured Logging Conventions
 - All services now implement standardized logging configuration:
   - `configure_logging()` raises root logger from WARNING to INFO level at startup
   - LOG_LEVEL environment variable supports per-deployment overrides (default: INFO)
@@ -255,7 +253,7 @@ Analyze --> End(["Insights & Alerts"])
 - [tool-gateway/src/tool_gateway/core/observability.py](file://products/tool-gateway/src/tool_gateway/core/observability.py)
 - [platform-gateway/src/platform_gateway/core/observability.py](file://products/platform-gateway/src/platform_gateway/core/observability.py)
 
-### **Enhanced** Distributed Tracing Implementation
+### Enhanced Distributed Tracing Implementation
 - Telemetry modules create spans for critical operations:
   - HTTP request lifecycle, policy evaluation, tool invocation, agent execution
   - Enhanced tool invocation tracking with tool_invoked events
@@ -285,15 +283,15 @@ Agent->>Tracer : ExportSpans()
 ```
 
 **Diagram sources**
-- [tool-gateway/src/tool_gateway/services/gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
 - [identity-broker/src/identity_service/core/telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
+- [tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [platform-gateway/src/platform_gateway/core/telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 
 **Section sources**
 - [agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
 - [identity-broker/src/identity_service/core/telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
-- [tool-gateway/src/tool_gateway/services/gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
+- [tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [platform-gateway/src/platform_gateway/core/telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 
 ### Health Check Endpoints, Readiness Probes, and Liveness Probes
@@ -318,8 +316,6 @@ ReturnFail --> End(["Unhealthy"])
 ```
 
 **Diagram sources**
-- [identity-broker/src/identity_service/api/routes/health.py](file://products/identity-broker/src/identity_service/api/routes/health.py)
-- [tool-gateway/src/tool_gateway/api/routes/health.py](file://products/tool-gateway/src/tool_gateway/api/routes/health.py)
 - [shared/shared-contracts/schemas/health-response.schema.json](file://shared/shared-contracts/schemas/health-response.schema.json)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
@@ -327,8 +323,6 @@ ReturnFail --> End(["Unhealthy"])
 
 **Section sources**
 - [shared/shared-contracts/schemas/health-response.schema.json](file://shared/shared-contracts/schemas/health-response.schema.json)
-- [identity-broker/src/identity_service/api/routes/health.py](file://products/identity-broker/src/identity_service/api/routes/health.py)
-- [tool-gateway/src/tool_gateway/api/routes/health.py](file://products/tool-gateway/src/tool_gateway/api/routes/health.py)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
@@ -362,7 +356,7 @@ Dashboards --> Ops["Operations Team"]
 
 ```mermaid
 flowchart TD
-DefineMetric["Define Custom Metric<br/>name, help, labels"] --> Register["Register with Metrics Module"]
+DefineMetric["Define Custom Metric<br/>name, help, labels"] --> Register["Register with prometheus_client"]
 Register --> Emit["Emit Metric Values"]
 Emit --> Scrape["Prometheus Scrapes"]
 Scrape --> Query["Query & Visualize"]
@@ -377,14 +371,15 @@ TracingBackend --> Correlate["Correlate Across Services"]
 
 ## Dependency Analysis
 Observability components depend on shared contracts and Kubernetes configurations:
-- Services rely on shared observability conventions for consistency.
-- Deployments configure probes and environment variables for observability.
-- Prometheus scrapes metrics from each service's endpoint.
-- All services call configure_logging() during startup for consistent log levels.
+- Services rely on shared observability conventions for consistency
+- Deployments configure probes and environment variables for observability
+- Prometheus scrapes metrics from each service's /metrics endpoint
+- All services call configure_logging() during startup for consistent log levels
+- Direct prometheus_client implementation replaces prometheus-fastapi-instrumentator
 
 ```mermaid
 graph TB
-OC["Observability Conventions"] --> AP_METRICS["Agent Platform Metrics"]
+OC["Observability Conventions<br/>direct prometheus_client"] --> AP_METRICS["Agent Platform Metrics"]
 OC --> IB_METRICS["Identity Broker Metrics"]
 OC --> TG_METRICS["Tool Gateway Metrics"]
 OC --> PG_METRICS["Platform Gateway Metrics"]
@@ -410,29 +405,32 @@ PG_METRICS --> PROM
 - Correlate traces with metrics to pinpoint slow or failing operations.
 - Capacity planning should be informed by trends in throughput, latency, and error rates.
 - Tool invocation patterns can reveal performance issues in external integrations.
+- Direct prometheus_client implementation provides better performance than external instrumentation libraries.
 
 ## Troubleshooting Guide
 - Use structured logs with correlation IDs to trace requests across services.
 - Inspect Prometheus metrics for anomalies in latency, errors, and resource usage.
 - Review traces to understand call chains and identify failures.
 - Validate health endpoints and probe configurations when services are unhealthy.
-- **Updated** Check LOG_LEVEL environment variable if audit trail events are missing - uvicorn defaults to WARNING level which discards INFO-level structured events like http_request and tool_invoked.
-- **Updated** Investigate tool_invoked events for tool-specific issues and redaction problems.
-- **Updated** Verify that configure_logging() is called during service startup to ensure proper log level configuration.
+- Check LOG_LEVEL environment variable if audit trail events are missing - uvicorn defaults to WARNING level which discards INFO-level structured events like http_request and tool_invoked.
+- Investigate tool_invoked events for tool-specific issues and redaction problems.
+- Verify that configure_logging() is called during service startup to ensure proper log level configuration.
+- **Updated** If metrics are not appearing in Prometheus, verify that the /metrics endpoint is accessible and returning prometheus_client format data.
+- **Updated** The direct prometheus_client implementation avoids compatibility issues with pinned starlette versions that affected prometheus-fastapi-instrumentator.
 
 **Section sources**
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-- [identity-broker/src/identity_service/api/routes/health.py](file://products/identity-broker/src/identity_service/api/routes/health.py)
-- [tool-gateway/src/tool_gateway/api/routes/health.py](file://products/tool-gateway/src/tool_gateway/api/routes/health.py)
+- [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
 
 ## Conclusion
-The Luban AIOps Platform implements a robust observability framework centered on standardized metrics, enhanced structured logging with configurable log levels, and distributed tracing with tool invocation tracking. By adhering to shared conventions, calling configure_logging() at startup, and configuring Kubernetes probes appropriately, operators can effectively monitor, diagnose, and respond to incidents while planning for future capacity needs. The enhanced audit trail with tool_invoked events provides comprehensive visibility into tool execution patterns and potential security concerns.
+The Luban AIOps Platform implements a robust observability framework centered on direct prometheus_client implementation for metrics collection, enhanced structured logging with configurable log levels, and distributed tracing with tool invocation tracking. By using direct prometheus_client instead of prometheus-fastapi-instrumentator, the platform avoids compatibility issues with pinned starlette versions while maintaining equivalent functionality. The framework adheres to shared conventions, calls configure_logging() at startup, and configures Kubernetes probes appropriately, enabling operators to effectively monitor, diagnose, and respond to incidents while planning for future capacity needs. The enhanced audit trail with tool_invoked events provides comprehensive visibility into tool execution patterns and potential security concerns.
 
 ## Appendices
 - Reference specifications for observability baseline and conventions.
 - Kubernetes deployment examples for probes and environment variables.
 - Health response schema for consistent health checks.
 - LOG_LEVEL environment variable configuration for different environments.
+- **Updated** Migration notes from prometheus-fastapi-instrumentator to direct prometheus_client implementation.
 
 **Section sources**
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
