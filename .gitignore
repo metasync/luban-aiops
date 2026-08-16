@@ -22,6 +22,9 @@ __pycache__/
 
 *.log
 
+# Local verification screenshots captured by browser-based checks.
+*.png
+
 # Local runtime profile secrets and local image-tag state.
 shared/platform-ops/gitops/**/runtime-secrets.env
 shared/platform-ops/gitops/**/.images.env
