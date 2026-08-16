@@ -16,6 +16,9 @@
 - [identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
 - [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
 - [redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
+- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
+- [skills-hub-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-service.yaml)
+- [skills-hub-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
 - [dev-k8s-readme.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 </cite>
@@ -29,6 +32,7 @@
 - Enhanced deployment automation scripts to handle the new service structure
 - **Enhanced Security Contexts**: All service deployments now include comprehensive security contexts with runAsNonRoot: true, runAsUser: 1000, allowPrivilegeEscalation: false, and seccompProfile: RuntimeDefault for improved container security
 - **Service Link Configuration**: Added `enableServiceLinks: false` across all dev-k8s deployments to prevent Kubernetes legacy service-link environment variable injection conflicts, ensuring DNS-based service discovery is used exclusively
+- **Added Skills Hub Service**: Complete Kubernetes deployment manifests for Skills Hub service including deployment configurations, security contexts, health probes, and Prometheus scraping annotations
 
 ## Table of Contents
 1. Overview
@@ -37,13 +41,14 @@
 4. Tool Gateway Service
 5. Identity Broker Service
 6. Agent Platform Service
-7. Operator Portal Service
-8. Infrastructure Services
-9. Service Discovery and Networking
-10. Persistent Storage Configuration
-11. Deployment Automation
-12. Rollback Procedures
-13. Troubleshooting
+7. Skills Hub Service
+8. Operator Portal Service
+9. Infrastructure Services
+10. Service Discovery and Networking
+11. Persistent Storage Configuration
+12. Deployment Automation
+13. Rollback Procedures
+14. Troubleshooting
 
 ## Overview
 
@@ -51,6 +56,7 @@ The Luban AIOps Platform uses a Kustomize-based deployment structure that suppor
 
 - **Platform Gateway**: Handles user-facing API requests, authentication, authorization, and agent service orchestration
 - **Tool Gateway**: Manages tool execution, Kubernetes resource access, and policy enforcement for tool operations
+- **Skills Hub**: Provides skill management, ingestion, and query capabilities for AI-powered guidance and runbooks
 
 The deployment is organized using Kustomize overlays with a base configuration that includes all core services and their dependencies. All services are deployed with enhanced security contexts to ensure containers run as non-root users with minimal privileges. Additionally, all deployments now use `enableServiceLinks: false` to prevent Kubernetes legacy service-link environment variable injection conflicts, ensuring reliable DNS-based service discovery.
 
@@ -64,20 +70,23 @@ A[Kustomization] --> B[ConfigMap Generator]
 A --> C[Resources]
 B --> D[Shared Runtime Config]
 B --> E[Policy Config]
-C --> F[Platform Gateway]
-C --> G[Tool Gateway]
-C --> H[Identity Broker]
-C --> I[Agent Platform]
-C --> J[Operator Portal]
-C --> K[Infrastructure]
-F --> L[Service Account]
-G --> M[Service Account + RBAC]
-H --> N[Service Account]
-I --> O[Service Account]
+B --> F[Skills ConfigMaps]
+C --> G[Platform Gateway]
+C --> H[Tool Gateway]
+C --> I[Identity Broker]
+C --> J[Agent Platform]
+C --> K[Skills Hub]
+C --> L[Operator Portal]
+C --> M[Infrastructure]
+G --> N[Service Account]
+H --> O[Service Account + RBAC]
+I --> P[Service Account]
+J --> Q[Service Account]
+K --> R[Service Account]
 ```
 
 **Diagram sources**
-- [kustomization.yaml:1-33](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml#L1-L33)
+- [kustomization.yaml:1-63](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml#L1-L63)
 
 The base configuration creates a unified `platform-runtime-config` ConfigMap from multiple environment fragments:
 - Shared runtime settings (`shared/runtime.env`)
@@ -85,9 +94,13 @@ The base configuration creates a unified `platform-runtime-config` ConfigMap fro
 - Tool gateway specific settings (`tool-gateway/runtime-config.env`)
 - Identity broker settings (`identity-broker/runtime-config.env`)
 - Agent platform settings (`agent-platform/runtime-config.env`)
+- Skills hub settings (`skills-hub/runtime-config.env`)
+
+Additionally, the configuration generates sample skill source ConfigMaps for SRE alerting and platform runbooks.
 
 **Section sources**
 - [kustomization.yaml:6-16](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml#L6-L16)
+- [kustomization.yaml:19-36](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml#L19-L36)
 - [shared-runtime.env:1-8](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env#L1-L8)
 
 ## Platform Gateway Service
@@ -251,6 +264,97 @@ The agent-platform exposes HTTP service for API endpoints consumed by platform-g
 **Section sources**
 - [agent-service-service.yaml:1-12](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-service.yaml#L1-L12)
 
+## Skills Hub Service
+
+The skills-hub service provides skill management, ingestion, and query capabilities for AI-powered guidance and runbooks. It serves as the central repository for platform knowledge and operational procedures.
+
+### Deployment Configuration
+
+The skills-hub deployment includes comprehensive health monitoring, security contexts, and Prometheus scraping annotations for observability. The deployment features robust health probes with appropriate timing configurations to handle development environment load variations.
+
+**Key Features:**
+- Prometheus monitoring with scrape annotations for metrics collection
+- Comprehensive health probes with tuned timing parameters
+- PostgreSQL backend for skill storage and querying
+- Federated skill sources from local ConfigMap volumes
+- Security context with non-root execution and privilege restrictions
+- Volume mounts for skill sources and temporary cache storage
+- **Security Context**: Non-root execution with UID 1000, privilege escalation disabled, and seccomp profile enabled
+- **Service Link Configuration**: `enableServiceLinks: false` prevents legacy service-link environment variable injection conflicts
+
+**Updated** Enhanced security context ensures the skills-hub container runs with minimal privileges, protecting skill data and processing operations. The service link configuration ensures reliable DNS-based service discovery without conflicting environment variables. Health probes are configured with generous timing to prevent unnecessary restarts during development environment load spikes.
+
+**Section sources**
+- [skills-hub-deployment.yaml:1-104](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml#L1-L104)
+
+### Service Configuration
+
+The skills-hub exposes HTTP service on port 8000 for skill queries and management operations.
+
+**Section sources**
+- [skills-hub-service.yaml:1-11](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-service.yaml#L1-L11)
+
+### Health Monitoring and Probes
+
+The skills-hub service implements comprehensive health monitoring with separate readiness and liveness probes:
+
+**Readiness Probe:**
+- Endpoint: `/health/ready`
+- Initial delay: 5 seconds
+- Period: 10 seconds
+- Timeout: 5 seconds
+
+**Liveness Probe:**
+- Endpoint: `/health/live`
+- Initial delay: 10 seconds
+- Period: 20 seconds
+- Timeout: 5 seconds
+- Failure threshold: 4
+
+These configurations provide adequate headroom for development environments where healthy responses may take 2-4 seconds due to system load or VM sleep/wake cycles.
+
+### Prometheus Monitoring
+
+The skills-hub service includes Prometheus scraping annotations for metrics collection:
+
+```yaml
+annotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/path: /metrics
+  prometheus.io/port: "8000"
+```
+
+This enables automatic metrics discovery and collection by Prometheus instances in the cluster.
+
+### Skill Sources and Storage
+
+The skills-hub service supports federated skill sources through ConfigMap volume mounts:
+
+**Local Skill Sources:**
+- SRE Alerting guides mounted at `/skills/sre-alerting`
+- Platform Runbooks mounted at `/skills/platform-runbooks`
+
+**Storage Configuration:**
+- PostgreSQL database for persistent skill storage
+- EmptyDir volume for temporary git-source checkouts at `/var/lib/skills-hub`
+- Read-only ConfigMap mounts for skill source files
+
+### Environment Variables
+
+The skills-hub service requires configuration for database connectivity, skill sources, and query authentication:
+
+| Variable | Description | Example Value |
+|----------|-------------|---------------|
+| SKILLS_STORE_BACKEND | Storage backend type | postgres |
+| SKILLS_DB_URL | PostgreSQL connection string | postgresql://audit:audit-dev-local@postgres:5432/skills |
+| SKILLS_SYNC_INTERVAL_SECONDS | Sync interval in seconds | 300 |
+| SKILLS_DATA_PATH | Data directory path | /var/lib/skills-hub |
+| SKILLS_SOURCES | JSON array of skill sources | [{"source_id":"sre-alerting","type":"local","path":"/skills/sre-alerting"}] |
+| SKILLS_QUERY_CLIENTS | Query client credentials | tool-gateway=secret-value |
+
+**Section sources**
+- [skills-hub-runtime-config.env:1-11](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env#L1-L11)
+
 ## Operator Portal Service
 
 The operator-portal service provides a web-based interface for platform administration and monitoring.
@@ -310,6 +414,8 @@ C --> E[Tool Gateway Service]
 D --> E
 C --> F[Identity Broker Service]
 E --> G[Kubernetes API Server]
+C --> H[Skills Hub Service]
+D --> H
 style A fill:#e1f5fe
 style B fill:#f3e5f5
 style C fill:#fff3e0
@@ -317,6 +423,7 @@ style D fill:#e8f5e8
 style E fill:#fff8e1
 style F fill:#fce4ec
 style G fill:#f1f8e9
+style H fill:#e0f2f1
 ```
 
 **Diagram sources**
@@ -324,6 +431,7 @@ style G fill:#f1f8e9
 - [tool-gateway-service.yaml:1-12](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-service.yaml#L1-L12)
 - [agent-service-service.yaml:1-12](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-service.yaml#L1-L12)
 - [identity-service-service.yaml:1-12](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml#L1-L12)
+- [skills-hub-service.yaml:1-11](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-service.yaml#L1-L11)
 
 ### Network Flow
 
@@ -332,7 +440,8 @@ style G fill:#f1f8e9
 3. **Authentication**: Platform-gateway communicates with identity-broker for authentication
 4. **Agent Operations**: Platform-gateway calls agent-platform service for agent operations
 5. **Tool Execution**: Agent-platform calls tool-gateway for tool execution
-6. **Kubernetes Access**: Tool-gateway accesses Kubernetes API server with RBAC permissions
+6. **Skill Queries**: Agent-platform and tool-gateway call skills-hub for skill information
+7. **Kubernetes Access**: Tool-gateway accesses Kubernetes API server with RBAC permissions
 
 ### Service Link Configuration Impact
 
@@ -349,6 +458,7 @@ All services now use `enableServiceLinks: false` to prevent Kubernetes from inje
 - [web-ui-deployment.yaml:15-17](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml#L15-L17)
 - [platform-gateway-deployment.yaml:19-21](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml#L19-L21)
 - [tool-gateway-deployment.yaml:19-21](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml#L19-L21)
+- [skills-hub-deployment.yaml:19-21](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml#L19-L21)
 
 ## Persistent Storage Configuration
 
@@ -360,6 +470,7 @@ The current development deployment uses ephemeral storage for simplicity. Produc
 - **Session State**: Stored in memory, not persisted across pod restarts
 - **Configuration**: Stored in ConfigMaps and Secrets
 - **Agent Workspaces**: Uses emptyDir for temporary workspace storage
+- **Skills Hub Data**: Uses emptyDir for temporary git-source checkouts; PostgreSQL for persistent skill storage
 
 ### Production Recommendations
 
@@ -369,6 +480,7 @@ For production deployments, consider:
 - External configuration management
 - Backup and disaster recovery procedures
 - **Security Considerations**: Ensure persistent volumes are properly secured with appropriate access controls
+- **Skills Hub**: Configure PostgreSQL with persistent volumes and backup strategies
 
 ## Deployment Automation
 
@@ -390,7 +502,7 @@ The deployment process applies the complete platform stack:
 make deploy
 ```
 
-This performs one-time cleanup of legacy api-gateway objects and deploys the new dual-gateway architecture.
+This performs one-time cleanup of legacy api-gateway objects and deploys the new dual-gateway architecture along with the Skills Hub service.
 
 ### Manual Deployment
 
@@ -413,6 +525,7 @@ To rollback to a previous image version:
 ```bash
 kubectl rollout undo deployment/platform-gateway
 kubectl rollout undo deployment/tool-gateway
+kubectl rollout undo deployment/skills-hub
 ```
 
 ### Configuration Rollback
@@ -430,6 +543,7 @@ In case of critical issues, scale down affected services:
 ```bash
 kubectl scale deployment/platform-gateway --replicas=0
 kubectl scale deployment/tool-gateway --replicas=0
+kubectl scale deployment/skills-hub --replicas=0
 ```
 
 ## Troubleshooting
@@ -457,6 +571,12 @@ kubectl scale deployment/tool-gateway --replicas=0
 - Check that file permissions in mounted volumes are compatible with the specified user IDs
 - Ensure that any custom scripts or entrypoints don't require root privileges
 
+**Skills Hub Specific Issues:**
+- Verify PostgreSQL connectivity and database schema initialization
+- Check skill source ConfigMap mounts and file permissions
+- Validate Prometheus scraping configuration for metrics collection
+- Monitor health probe endpoints for service readiness
+
 ### Debugging Commands
 
 **Check Pod Status:**
@@ -468,6 +588,7 @@ kubectl get pods -n dev-luban-aiops
 ```bash
 kubectl logs deployment/platform-gateway -n dev-luban-aiops
 kubectl logs deployment/tool-gateway -n dev-luban-aiops
+kubectl logs deployment/skills-hub -n dev-luban-aiops
 ```
 
 **Verify Service Endpoints:**
@@ -478,12 +599,14 @@ kubectl get endpoints -n dev-luban-aiops
 **Test Service Connectivity:**
 ```bash
 kubectl run test-pod --image=busybox -n dev-luban-aiops --command -- wget -qO- http://platform-gateway:8000/health
+kubectl run test-pod --image=busybox -n dev-luban-aiops --command -- wget -qO- http://skills-hub:8000/health/ready
 ```
 
 **Check Security Contexts:**
 ```bash
 kubectl describe pod -l app=platform-gateway -n dev-luban-aiops
 kubectl describe pod -l app=tool-gateway -n dev-luban-aiops
+kubectl describe pod -l app=skills-hub -n dev-luban-aiops
 ```
 
 **Verify Service Link Configuration:**
@@ -493,6 +616,13 @@ kubectl describe pod -l app=identity-service -n dev-luban-aiops | grep enableSer
 kubectl describe pod -l app=web-ui -n dev-luban-aiops | grep enableServiceLinks
 kubectl describe pod -l app=platform-gateway -n dev-luban-aiops | grep enableServiceLinks
 kubectl describe pod -l app=tool-gateway -n dev-luban-aiops | grep enableServiceLinks
+kubectl describe pod -l app=skills-hub -n dev-luban-aiops | grep enableServiceLinks
+```
+
+**Check Skills Hub Health:**
+```bash
+kubectl exec -it deployment/skills-hub -n dev-luban-aiops -- curl -s http://localhost:8000/health/ready
+kubectl exec -it deployment/skills-hub -n dev-luban-aiops -- curl -s http://localhost:8000/health/live
 ```
 
 **Section sources**

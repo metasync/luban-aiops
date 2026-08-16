@@ -1,0 +1,1 @@
+Validate a skill source locally with `python -m skills_hub.validate shared/platform-ops/skills/<source>` (exit code 0 means safe to publish); each source has its own README documenting this step.

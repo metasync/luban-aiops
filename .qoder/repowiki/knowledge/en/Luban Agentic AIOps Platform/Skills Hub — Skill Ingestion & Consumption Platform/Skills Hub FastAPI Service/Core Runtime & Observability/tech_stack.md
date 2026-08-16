@@ -1,0 +1,1 @@
+Prometheus client library for in-process metrics; optional OpenTelemetry SDK with gRPC OTLP exporters for traces and metrics, instrumenting FastAPI and HTTPX when `OTEL_ENABLED` is set.

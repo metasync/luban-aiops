@@ -1,0 +1,1 @@
+Python asyncio-based services using `psycopg` async driver for PostgreSQL, `PyJWT` with JWKS-backed RS256 verification for workload identity, `httpx` for OIDC discovery, and `yaml.safe_load` for frontmatter parsing.

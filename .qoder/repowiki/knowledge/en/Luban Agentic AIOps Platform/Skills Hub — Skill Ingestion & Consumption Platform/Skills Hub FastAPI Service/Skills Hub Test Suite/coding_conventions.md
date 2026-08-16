@@ -1,0 +1,6 @@
+- Each test module defines a top-level `unittest.TestCase` class with `setUp`/`tearDown` managing temporary directories and environment patches, and ends with an `if __name__ == "__main__": unittest.main()` block for standalone execution.
+- Shared fixture data (Markdown skill documents, timestamps, helper constructors like `_skill(...)`) is defined as module-level constants or functions so individual tests compose minimal inputs.
+- HTTP route tests drive the live FastAPI app via `TestClient`, set authentication headers using a helper that base64-encodes `client_id:secret` into a Basic token, and assert status codes plus JSON shape rather than mocking endpoints.
+- Async store operations are invoked synchronously through a local `_run(coro)` helper that calls `asyncio.run`, keeping test methods synchronous while exercising async backends.
+- Tests assert behavior by inspecting returned objects and error payloads (e.g., `rejections[0].reason`, `status.last_error`) rather than relying on side effects, and use `unittest.mock.patch` to isolate network/git I/O.
+- Contract and scoring tests pin a fixed `datetime(2026, 8, 15, 12, 0, 0, tzinfo=timezone.utc)` constant (`NOW`) to make deterministic assertions about timestamps and ordering.

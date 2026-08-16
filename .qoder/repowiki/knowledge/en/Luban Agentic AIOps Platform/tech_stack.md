@@ -1,0 +1,1 @@
+Python FastAPI services managed with uv; Docker images built from per-product Dockerfiles using a shared `base-uv` image; Kubernetes deployment via Kustomize overlays under `shared/platform-ops/gitops`; JSON Schema + YAML policy bundles in `shared/shared-contracts` define cross-service contracts; GNU Make aggregates per-product targets.

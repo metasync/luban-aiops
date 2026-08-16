@@ -1,0 +1,1 @@
+Sample skill sources providing Kubernetes troubleshooting runbooks and Prometheus alert-based runbooks consumed by the skills hub agent for platform and SRE operations.

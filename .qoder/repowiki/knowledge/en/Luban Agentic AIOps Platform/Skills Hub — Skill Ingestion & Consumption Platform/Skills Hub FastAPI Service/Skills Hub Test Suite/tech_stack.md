@@ -1,0 +1,1 @@
+Python `unittest` framework with `fastapi.testclient.TestClient` for full-stack route tests; `jsonschema` used to validate the Pydantic `Skill` model against the shared `skill.schema.json` contract; async helpers run coroutines via `asyncio.run` inside synchronous test methods.

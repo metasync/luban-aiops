@@ -1,0 +1,1 @@
+Core services that ingest Markdown skill sources, persist them in memory or PostgreSQL, run per-source sync loops, and authenticate query callers.

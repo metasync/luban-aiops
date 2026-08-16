@@ -1,0 +1,6 @@
+- Route modules define a module-level `APIRouter()` instance and expose it for mounting rather than registering endpoints directly on the app.
+- Shared services are resolved from `request.app.state` via small private helpers (`_store`, `_sync_manager`) instead of passing them as parameters.
+- Configuration is injected through `Depends(get_settings)` so settings are type-checked and lazily loaded per request.
+- Authenticated endpoints wrap `authenticate_caller(settings, request)` in try/except and convert `QueryAuthError` into a uniform `{error: {code, message}}` JSON response.
+- Parameter validation returns early with a 400 `INVALID_PARAMETERS` error using the shared `_error` helper before touching the store.
+- Route ordering is documented in comments to explain why specific paths (e.g., `/skills/search`) must be declared before the `{skill_id:path}` catch-all.

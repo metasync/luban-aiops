@@ -1,0 +1,5 @@
+- Configuration values are exposed as frozen dataclasses with a `from_env()` classmethod that reads `SKILLS_*` environment variables and delegates complex parsing to dedicated `parse_*` functions that raise `SettingsError` on malformed input.
+- Global metric objects are declared at module level so repeated app creation (e.g. in tests) never re-registers them against the default Prometheus registry.
+- Optional heavy dependencies (OpenTelemetry SDK) are imported lazily inside functions guarded by an `is_enabled()` flag so the service starts cleanly without OTel installed.
+- Request-scoped identity is resolved through a priority chain (inbound header → active OTel trace id → generated UUID) rather than relying on a single source.
+- Structured events are emitted via `log_event` which serializes payloads to JSON with sorted keys, ensuring uniform machine-readable logs across the application.

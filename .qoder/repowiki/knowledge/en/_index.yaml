@@ -3,7 +3,7 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-08-14T17:15:22Z"
+exported_at: "2026-08-16T01:57:09Z"
 modules:
     "":
         dir_name: Agentic AI Platform Monorepo
@@ -20,6 +20,90 @@ modules:
         scope:
             - products/audit-service/
             - shared/platform-ops/gitops/dev-k8s/base/audit-service/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    skills_hub:
+        dir_name: Skills Hub — Skill Ingestion & Consumption Platform
+        title: Skills Hub — Skill Ingestion & Consumption Platform
+        scope:
+            - products/skills-hub/
+            - shared/platform-ops/skills/
+            - shared/shared-contracts/schemas/skill.schema.json
+            - shared/shared-contracts/skill-format.md
+        source_files: []
+        children:
+            - skills_hub/platform_ops_skills
+            - skills_hub/skills_hub_app
+        depends_on: []
+        related_to: []
+    skills_hub/platform_ops_skills:
+        dir_name: Platform Ops Skills — Runbooks & Alerting Guides
+        title: Platform Ops Skills — Runbooks & Alerting Guides
+        scope:
+            - shared/platform-ops/skills/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    skills_hub/skills_hub_app:
+        dir_name: Skills Hub FastAPI Service
+        title: Skills Hub FastAPI Service
+        scope:
+            - products/skills-hub/
+        source_files: []
+        children:
+            - skills_hub/skills_hub_app/api_routes
+            - skills_hub/skills_hub_app/core_runtime
+            - skills_hub/skills_hub_app/schemas_and_app
+            - skills_hub/skills_hub_app/services
+            - skills_hub/skills_hub_app/tests
+        depends_on: []
+        related_to: []
+    skills_hub/skills_hub_app/api_routes:
+        dir_name: FastAPI HTTP API Routes
+        title: FastAPI HTTP API Routes
+        scope:
+            - products/skills-hub/src/skills_hub/api/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    skills_hub/skills_hub_app/core_runtime:
+        dir_name: Core Runtime & Observability
+        title: Core Runtime & Observability
+        scope:
+            - products/skills-hub/src/skills_hub/core/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    skills_hub/skills_hub_app/schemas_and_app:
+        dir_name: FastAPI Application Bootstrap & Skill Schema
+        title: FastAPI Application Bootstrap & Skill Schema
+        scope:
+            - products/skills-hub/src/skills_hub/schemas/
+            - products/skills-hub/src/skills_hub/app.py
+            - products/skills-hub/src/skills_hub/main.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    skills_hub/skills_hub_app/services:
+        dir_name: Skills Ingestion, Storage & Query Services
+        title: Skills Ingestion, Storage & Query Services
+        scope:
+            - products/skills-hub/src/skills_hub/services/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    skills_hub/skills_hub_app/tests:
+        dir_name: Skills Hub Test Suite
+        title: Skills Hub Test Suite
+        scope:
+            - products/skills-hub/tests/
         source_files: []
         children: []
         depends_on: []

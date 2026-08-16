@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: skills_hub/skills_hub_app/services
+title: Skills Ingestion, Storage & Query Services
+scope:
+    - products/skills-hub/src/skills_hub/services/
+source_files: []
+depends_on: []
+related_to: []

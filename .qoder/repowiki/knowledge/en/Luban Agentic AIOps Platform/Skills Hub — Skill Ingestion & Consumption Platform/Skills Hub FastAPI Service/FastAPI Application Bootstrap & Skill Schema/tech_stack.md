@@ -1,0 +1,1 @@
+FastAPI with async lifespan, Uvicorn server, Pydantic v2 models (`ConfigDict(extra='forbid')`), and custom core modules for metrics, telemetry, and request-context logging.

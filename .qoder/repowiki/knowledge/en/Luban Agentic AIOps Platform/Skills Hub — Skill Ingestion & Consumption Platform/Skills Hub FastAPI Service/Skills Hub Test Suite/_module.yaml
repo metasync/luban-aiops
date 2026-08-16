@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: skills_hub/skills_hub_app/tests
+title: Skills Hub Test Suite
+scope:
+    - products/skills-hub/tests/
+source_files: []
+depends_on: []
+related_to: []

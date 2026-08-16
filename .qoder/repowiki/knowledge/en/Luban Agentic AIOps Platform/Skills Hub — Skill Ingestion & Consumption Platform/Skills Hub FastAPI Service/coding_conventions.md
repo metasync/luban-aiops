@@ -1,0 +1,3 @@
+- Cross-cutting concerns (config, logging, metrics, telemetry, request context) are accessed through the `core` package rather than imported directly by routes or services.
+- All external data contracts are expressed as Pydantic models in `schemas/skill.py` and reused by both API routes and tests.
+- Service state (skill store, sync manager) is created once at application lifespan start and injected into routes via dependency injection.

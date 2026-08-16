@@ -1,0 +1,5 @@
+- Each product exposes a FastAPI app via `src/<pkg>/app.py` with a parallel `api/`, `core/`, `schemas/`, `services/`, and optional `policies/` layout mirrored across all services.
+- Cross-service wire formats are defined once as JSON schemas under `shared/shared-contracts/schemas` and consumed by multiple products rather than redefined locally.
+- Policy enforcement uses a default YAML bundle copied from `shared/shared-contracts/policies/policy-default.yaml` into each gateway's `policies/` directory, evaluated deny-by-default with explicit allow/deny outcomes.
+- Observability is uniform: every service exposes Prometheus metrics on `/metrics`, gates OTLP tracing behind `OTEL_ENABLED`, and bridges correlation IDs via the `x-request-id` header.
+- Identity travels exclusively in HTTP headers (`X-User-ID`, JWT token) and is never embedded in request/response bodies between services.

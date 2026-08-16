@@ -1,0 +1,6 @@
+- Each service module defines its own module-level `LOGGER = logging.getLogger(__name__)` and documents spec requirements (e.g. SPEC-014 R-*) in the module docstring.
+- Validation failures are modeled as frozen dataclasses (`Rejection`, `SearchHit`) carrying source context rather than raising exceptions, enabling non-fatal per-document error collection.
+- Backend selection is performed by a factory function (`build_skill_store`) reading settings instead of global configuration, keeping implementations interchangeable behind a `Protocol` interface.
+- Both storage backends delegate ranking to the shared pure `scoring.rank` function so in-memory and Postgres search produce identical result ordering.
+- Async database operations use an injectable `ConnectFactory` callable so production code uses `psycopg.AsyncConnection.connect` while tests can substitute a fake driver.
+- Per-source sync loops catch all exceptions, never crash, keep the previous snapshot on failure, and record metrics and bounded rejection lists for observability.

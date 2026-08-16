@@ -1,0 +1,1 @@
+FastAPI route definitions exposing health, readiness, per-source sync status, and authenticated skill listing/search/retrieval endpoints under /api/v1.

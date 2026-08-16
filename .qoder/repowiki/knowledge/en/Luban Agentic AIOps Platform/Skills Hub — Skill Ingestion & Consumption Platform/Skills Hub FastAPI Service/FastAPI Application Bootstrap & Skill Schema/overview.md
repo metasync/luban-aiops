@@ -1,0 +1,1 @@
+Defines the Pydantic skill envelope and bootstraps the FastAPI application with lifespan-managed skill store, sync manager, logging, metrics, and telemetry.

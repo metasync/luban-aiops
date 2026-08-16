@@ -4,8 +4,11 @@
 **Referenced Files in This Document**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
+- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
+- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
+- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 - [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
 - [Dockerfile](file://products/tool-gateway/Dockerfile)
@@ -14,11 +17,11 @@
 
 ## Update Summary
 **Changes Made**
+- Added comprehensive documentation for Skills Hub integration configuration including SKILLS_SOURCES, SKILLS_STORE_BACKEND, SKILLS_DB_URL, and SKILLS_SYNC_INTERVAL_SECONDS environment variables
 - Updated environment variable handling documentation to explain the shift from Kubernetes service-link injection to DNS-based service discovery
-- Added comprehensive documentation for service links disabling and its implications
-- Enhanced development setup documentation to clarify inter-service communication patterns
-- Updated deployment configuration examples to reflect the new service discovery approach
-- Added troubleshooting guidance for DNS-based service resolution issues
+- Added detailed Skills Hub configuration reference with validation rules and deployment examples
+- Enhanced deployment configuration examples to reflect the new Skills Hub service integration
+- Added troubleshooting guidance for Skills Hub connectivity and configuration issues
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -35,10 +38,10 @@
 ## Introduction
 This document explains how the Tool Gateway Service manages configuration and environment setup across layers: environment variables, configuration files, and runtime overrides. It details available options, defaults, validation rules, and deployment-specific settings for development, staging, and production. It also provides examples for Docker and Kubernetes (ConfigMaps/Secrets), and outlines security best practices for secrets management and consistent configuration across environments.
 
-**Updated** Enhanced documentation reflects the architectural shift from Kubernetes service-link injection to DNS-based service discovery, providing clearer guidance on inter-service communication patterns and environment variable handling.
+**Updated** Enhanced documentation reflects the architectural shift from Kubernetes service-link injection to DNS-based service discovery, providing clearer guidance on inter-service communication patterns and environment variable handling. Includes comprehensive Skills Hub integration configuration for federated skill sources and persistent storage backends.
 
 ## Project Structure
-The Tool Gateway Service is implemented under products/tool-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/tool-gateway. The service image is built using a Dockerfile, and dependencies are declared in pyproject.toml.
+The Tool Gateway Service is implemented under products/tool-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/tool-gateway. The service image is built using a Dockerfile, and dependencies are declared in pyproject.toml. The Skills Hub service provides federated skill management with configurable storage backends and sync intervals.
 
 ```mermaid
 graph TB
@@ -49,35 +52,48 @@ C["src/tool_gateway/policies/policy-default.yaml"]
 D["Dockerfile"]
 E["pyproject.toml"]
 end
-subgraph "Kubernetes Base (dev)"
-F["base/tool-gateway/runtime-config.env"]
-G["base/tool-gateway/tool-gateway-deployment.yaml"]
-H["base/shared/runtime.env"]
+subgraph "Skills Hub Service"
+F["src/skills_hub/core/config.py"]
+G["skills-runtime-config.env"]
+H["skills-hub-deployment.yaml"]
 end
-A --> F
-B --> G
-F --> G
-H --> G
+subgraph "Kubernetes Base (dev)"
+I["base/tool-gateway/runtime-config.env"]
+J["base/tool-gateway/tool-gateway-deployment.yaml"]
+K["base/shared/runtime.env"]
+end
+A --> I
+B --> J
+I --> J
+K --> J
 C --> A
 D --> A
 E --> D
+F --> G
+G --> H
 ```
 
 **Diagram sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
+- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
 - [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
 - [Dockerfile](file://products/tool-gateway/Dockerfile)
 - [pyproject.toml](file://products/tool-gateway/pyproject.toml)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
+- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
+- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
+- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
+- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
+- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 - [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
 - [Dockerfile](file://products/tool-gateway/Dockerfile)
@@ -88,6 +104,7 @@ E --> D
 - Runtime settings: handles service binding configuration with robust port resolution that ignores Kubernetes service-link formats.
 - Policy engine configuration: loads default policy definitions from YAML and supports environment-driven overrides.
 - Containerization and dependency management: Dockerfile defines runtime environment; pyproject.toml declares Python dependencies used by the gateway.
+- Skills Hub integration: federated skill source management with configurable storage backends and synchronization intervals.
 
 Key responsibilities:
 - Provide a single source of truth for configuration via typed models.
@@ -95,12 +112,14 @@ Key responsibilities:
 - Support layered precedence: defaults < config files < environment variables < runtime overrides.
 - Handle DNS-based service discovery with proper fallback mechanisms.
 - Ignore Kubernetes service-link environment variables to prevent conflicts.
+- Manage Skills Hub federation with local and git-based skill sources.
 
-**Updated** Enhanced core components to support DNS-based service discovery and improved environment variable handling.
+**Updated** Enhanced core components to support DNS-based service discovery, improved environment variable handling, and comprehensive Skills Hub integration with federated skill sources.
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
+- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
 - [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
 - [Dockerfile](file://products/tool-gateway/Dockerfile)
 - [pyproject.toml](file://products/tool-gateway/pyproject.toml)
@@ -112,6 +131,7 @@ The configuration system follows a layered approach with enhanced service discov
 - Environment variables: injected at runtime via platform orchestration (e.g., Kubernetes).
 - Runtime overrides: applied programmatically during startup or request processing.
 - DNS-based service discovery: services communicate via Kubernetes DNS names instead of injected environment variables.
+- Skills Hub federation: federated skill sources with configurable storage backends and sync intervals.
 
 ```mermaid
 sequenceDiagram
@@ -121,6 +141,7 @@ participant Env as "Environment Variables"
 participant File as "Config Files"
 participant DNS as "Kubernetes DNS"
 participant Service as "Identity Service"
+participant SkillsHub as "Skills Hub"
 App->>Config : Initialize configuration
 Config->>Env : Read environment variables
 Config->>File : Load configuration files
@@ -130,11 +151,16 @@ App->>DNS : Resolve service name (identity-service)
 DNS-->>App : Service IP address
 App->>Service : Connect via DNS name
 Service-->>App : Service response
+App->>DNS : Resolve skills-hub service
+DNS-->>App : Skills Hub IP address
+App->>SkillsHub : Query skills via API
+SkillsHub-->>App : Skill data with federation info
 ```
 
 **Diagram sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
+- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 
 ## Detailed Component Analysis
@@ -146,7 +172,7 @@ Service-->>App : Service response
 - Error handling: Aggregates validation errors and surfaces actionable messages.
 - Service discovery: Uses DNS-based resolution for inter-service communication.
 
-**Updated** Enhanced to support DNS-based service discovery and improved environment variable handling.
+**Updated** Enhanced to support DNS-based service discovery, improved environment variable handling, and Skills Hub federation configuration with strict validation rules.
 
 ```mermaid
 flowchart TD
@@ -187,7 +213,6 @@ PortValue --> |No| UseDefault
 PortValue --> |Yes| ParseInt
 ParseInt --> |No| ExtractPort
 ParseInt --> |Yes| Success
-ExtractPort --> Success
 ```
 
 **Diagram sources**
@@ -208,7 +233,9 @@ ExtractPort --> Success
 graph LR
 Client["Tool Gateway Pod"] --> DNS["Kubernetes DNS Server"]
 DNS --> Identity["identity-service:8000"]
+DNS --> SkillsHub["skills-hub:8000"]
 Identity --> Resolver["DNS Resolution"]
+SkillsHub --> Resolver
 Resolver --> IP["Service IP Address"]
 IP --> Client
 ```
@@ -220,6 +247,39 @@ IP --> Client
 **Section sources**
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
+
+### Skills Hub Integration Configuration
+- Purpose: Configure federated skill sources with flexible storage backends and synchronization intervals.
+- Sources configuration: JSON-formatted list defining local directories and git repositories.
+- Storage backends: Memory for development/testing, PostgreSQL for production persistence.
+- Synchronization: Configurable intervals for skill source updates and pruning.
+- Validation: Strict schema validation for source configurations with fail-fast startup errors.
+
+**New Section** Comprehensive Skills Hub integration with federated skill sources, configurable storage backends, and synchronization management.
+
+```mermaid
+flowchart TD
+Sources["SKILLS_SOURCES<br/>(JSON)"] --> Parse["Parse & Validate"]
+Parse --> Local["Local Sources<br/>(path)"]
+Parse --> Git["Git Sources<br/>(url, ref)"]
+Local --> Store["Skill Store"]
+Git --> Store
+Store --> Backend{"Backend Type"}
+Backend --> |memory| Memory["In-Memory Store"]
+Backend --> |postgres| Postgres["PostgreSQL Store"]
+Memory --> Sync["Sync Manager"]
+Postgres --> Sync
+Sync --> Interval["SKILLS_SYNC_INTERVAL_SECONDS"]
+Interval --> Prune["Prune Unconfigured Sources"]
+```
+
+**Diagram sources**
+- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
+- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
+
+**Section sources**
+- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
+- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 
 ### Service Links Disabling Strategy
 - Purpose: Prevent Kubernetes from automatically injecting service-link environment variables.
@@ -242,9 +302,11 @@ Control --> Success["Reliable service discovery"]
 
 **Diagram sources**
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
+- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
 
 **Section sources**
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
+- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
 
 ### Policy Engine Configuration
 - Default policy: Loaded from a YAML file defining baseline rules and behaviors.
@@ -296,7 +358,7 @@ Entrypoint --> Run["Run service with env vars"]
 - Service discovery: Uses DNS names for inter-service communication.
 - Environment injection: Maps ConfigMap entries to environment variables consumed by the configuration loader.
 
-**Updated** Enhanced deployment configuration with DNS-based service discovery and disabled service links.
+**Updated** Enhanced deployment configuration with DNS-based service discovery, disabled service links, and comprehensive Skills Hub integration.
 
 ```mermaid
 graph TB
@@ -306,17 +368,22 @@ POD --> APP["Tool Gateway App"]
 APP --> CFG["Configuration Loader"]
 DNS["Kubernetes DNS"] --> SVC["Service Names"]
 SVC --> APP
+SkillsCM["Skills ConfigMap"] --> SkillsENV["Skills Environment Variables"]
+SkillsENV --> SkillsPod["Skills Hub Pod"]
+SkillsPod --> SkillsStore["Skills Store"]
 ```
 
 **Diagram sources**
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
+- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
+- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
 
 **Section sources**
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
+- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
+- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
 
 ### Dependency Management
 - Python dependencies: Declared in pyproject.toml for reproducible builds.
@@ -327,9 +394,9 @@ SVC --> APP
 - [pyproject.toml](file://products/tool-gateway/pyproject.toml)
 
 ## Dependency Analysis
-Configuration components depend on environment variables and files, while the runtime settings handle DNS-based service discovery. The Docker image encapsulates runtime dependencies, and Kubernetes manifests inject configuration at deployment time.
+Configuration components depend on environment variables and files, while the runtime settings handle DNS-based service discovery. The Docker image encapsulates runtime dependencies, and Kubernetes manifests inject configuration at deployment time. Skills Hub integration adds federated skill source management with configurable storage backends.
 
-**Updated** Added dependencies for DNS-based service discovery and enhanced environment variable handling.
+**Updated** Added dependencies for DNS-based service discovery, enhanced environment variable handling, and comprehensive Skills Hub integration with federated skill sources.
 
 ```mermaid
 graph TB
@@ -341,17 +408,22 @@ DOCKER["Dockerfile"] --> RUNTIME["Runtime Dependencies"]
 K8S["tool-gateway-deployment.yaml"] --> INJECT["Env Injection"]
 INJECT --> CFG
 SVC --> RT
+SkillsCFG["skills_config.py"] --> SkillsENV["Skills Environment Variables"]
+SkillsENV --> SkillsStore["Skills Store Backend"]
+SkillsStore --> DB["PostgreSQL Database"]
 ```
 
 **Diagram sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
+- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
 - [Dockerfile](file://products/tool-gateway/Dockerfile)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
+- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
 - [Dockerfile](file://products/tool-gateway/Dockerfile)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 
@@ -362,6 +434,9 @@ SVC --> RT
 - Monitor configuration-related metrics and errors to detect misconfigurations early.
 - Leverage Kubernetes DNS caching for improved service discovery performance.
 - Optimize port resolution to avoid unnecessary string parsing operations.
+- Configure appropriate Skills Hub sync intervals based on skill source update frequency.
+- Use PostgreSQL backend for production Skills Hub deployments to ensure data persistence.
+- Monitor Skills Hub storage backend performance and database connection pools.
 
 [No sources needed since this section provides general guidance]
 
@@ -371,31 +446,37 @@ Common issues and resolutions:
 - Invalid configuration values: Check types, ranges, and cross-field constraints; review validation error messages.
 - Policy loading failures: Verify YAML syntax and structure; ensure paths are correct and accessible.
 - Secrets not mounted: Confirm Secret objects exist and are referenced correctly in the deployment.
-- **New**: DNS resolution failures: Verify service names match Kubernetes Service resources and check network policies.
-- **New**: Service link conflicts: Ensure `enableServiceLinks: false` is set in all deployment manifests.
-- **New**: Port resolution issues: Check that port values are numeric and not in Kubernetes service-link format.
-- **New**: Inter-service communication failures: Verify DNS names are resolvable and services are running.
+- DNS resolution failures: Verify service names match Kubernetes Service resources and check network policies.
+- Service link conflicts: Ensure `enableServiceLinks: false` is set in all deployment manifests.
+- Port resolution issues: Check that port values are numeric and not in Kubernetes service-link format.
+- Inter-service communication failures: Verify DNS names are resolvable and services are running.
+- **New**: Skills Hub configuration errors: Validate SKILLS_SOURCES JSON format and required fields for each source type.
+- **New**: Skills Hub storage backend issues: Verify PostgreSQL connectivity and database permissions for production deployments.
+- **New**: Skills Hub sync failures: Check SKILLS_SYNC_INTERVAL_SECONDS settings and network connectivity to git sources.
+- **New**: Federated skill source problems: Validate local path mounts and git repository accessibility.
 
-**Updated** Added troubleshooting guidance for DNS-based service discovery and service link issues.
+**Updated** Added troubleshooting guidance for DNS-based service discovery, service link issues, and comprehensive Skills Hub integration problems.
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
+- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
+- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
 
 ## Conclusion
-The Tool Gateway Service employs a robust, layered configuration system that integrates environment variables, configuration files, and runtime overrides with strict validation. By following the outlined best practices for Docker and Kubernetes deployments, teams can maintain secure, consistent configurations across environments while ensuring reliability and performance. The architectural shift to DNS-based service discovery eliminates service-link conflicts and provides more reliable inter-service communication patterns.
+The Tool Gateway Service employs a robust, layered configuration system that integrates environment variables, configuration files, and runtime overrides with strict validation. By following the outlined best practices for Docker and Kubernetes deployments, teams can maintain secure, consistent configurations across environments while ensuring reliability and performance. The architectural shift to DNS-based service discovery eliminates service-link conflicts and provides more reliable inter-service communication patterns. The addition of Skills Hub integration enables federated skill source management with configurable storage backends and synchronization intervals, enhancing the platform's operational capabilities.
 
-**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery and environment variable handling.
+**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, and comprehensive Skills Hub integration with federated skill sources.
 
 ## Appendices
 
 ### Environment-Specific Settings
-- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement.
-- Staging: Mirror production settings with test data and limited scope, enable full redaction.
-- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity.
+- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based Skills Hub storage.
+- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed Skills Hub storage.
+- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized Skills Hub sync intervals.
 
-**Updated** Added guidance for DNS-based service discovery configuration across environments.
+**Updated** Added guidance for DNS-based service discovery configuration and Skills Hub integration across environments.
 
 [No sources needed since this section provides general guidance]
 
@@ -406,21 +487,23 @@ The Tool Gateway Service employs a robust, layered configuration system that int
 - Prefer workload identity over static credentials in production environments.
 - Configure appropriate redaction sensitivity levels based on data classification.
 - Monitor redaction metrics and workload identity authentication attempts.
-- **New**: Use DNS-based service discovery to avoid exposing service endpoints in environment variables.
-- **New**: Disable service links to prevent accidental exposure of internal service information.
+- Use DNS-based service discovery to avoid exposing service endpoints in environment variables.
+- Disable service links to prevent accidental exposure of internal service information.
+- Secure Skills Hub PostgreSQL connections with proper authentication and network policies.
+- Validate Skills Hub source configurations to prevent injection attacks through malicious skill sources.
 
-**Updated** Enhanced security guidance with DNS-based service discovery best practices.
+**Updated** Enhanced security guidance with DNS-based service discovery best practices and Skills Hub security considerations.
 
 [No sources needed since this section provides general guidance]
 
 ### Complete Environment Variables Reference
-**Updated** Comprehensive reference including DNS-based service discovery variables.
+**Updated** Comprehensive reference including DNS-based service discovery variables and Skills Hub integration configuration.
 
 #### Core Configuration
 - `AGENT_SERVICE_URL`: Agent service endpoint URL (DNS-based)
 - `IDENTITY_SERVICE_URL`: Identity broker service endpoint URL (DNS-based)
 - `IDENTITY_JWKS_URL`: Identity service JWKS endpoint
-- `IDENTITY_JWKS_CACHE_SECONDS`: JWKS cache duration (default: 300)
+- `IDENTITY_JWKS_CACHE_SECONDS`: JWCS cache duration (default: 300)
 - `IDENTITY_TOKEN_ISSUER`: JWT issuer claim (default: "luban-identity-broker")
 - `GATEWAY_TOKEN_AUDIENCE`: Token audience (default: "tool-gateway")
 - `GATEWAY_DELEGATION_AUDIENCE`: Delegation audience (default: "tool-gateway")
@@ -439,11 +522,26 @@ The Tool Gateway Service employs a robust, layered configuration system that int
 #### Service Discovery Configuration
 - `IDENTITY_SERVICE_URL`: Identity service URL using DNS names (e.g., http://identity-service:8000)
 - `AGENT_SERVICE_URL`: Agent service URL using DNS names (e.g., http://agent-service:8000)
+- `GATEWAY_SKILLS_SERVICE_URL`: Skills Hub service URL using DNS names (e.g., http://skills-hub:8000)
+
+#### Skills Hub Configuration
+- `SKILLS_SOURCES`: Federated skill sources (JSON array with source_id, type, path/url/ref)
+- `SKILLS_STORE_BACKEND`: Storage backend type (memory or postgres)
+- `SKILLS_DB_URL`: PostgreSQL connection URL for persistent storage
+- `SKILLS_SYNC_INTERVAL_SECONDS`: Skill source synchronization interval (default: 300)
+- `SKILLS_DATA_PATH`: Working directory for git checkouts (default: /var/lib/skills-hub)
+- `SKILLS_QUERY_CLIENTS`: Registered query clients (client_id=secret format)
+- `SKILLS_GIT_TOKENS`: Git authentication tokens for private repositories
+- `SKILLS_WORKLOAD_ISSUER_URL`: OIDC issuer for workload identity (production)
+- `SKILLS_WORKLOAD_AUDIENCE`: Workload token audience (default: "skills-hub")
+- `SKILLS_WORKLOAD_CLIENTS`: Workload client mappings (subject=client_id format)
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
+- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
+- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 
 ### DNS-Based Service Discovery Setup Guide
@@ -482,6 +580,7 @@ metadata:
 data:
   IDENTITY_SERVICE_URL: "http://identity-service:8000"
   AGENT_SERVICE_URL: "http://agent-service:8000"
+  GATEWAY_SKILLS_SERVICE_URL: "http://skills-hub:8000"
 ```
 
 **Section sources**
@@ -506,3 +605,65 @@ data:
 **Section sources**
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
+
+### Skills Hub Federation Setup Guide
+**New Section** Comprehensive guide for configuring Skills Hub with federated skill sources.
+
+#### Prerequisites
+- PostgreSQL database for production deployments
+- Git repositories containing skill sources (optional)
+- Local directories with skill files (optional)
+- Proper network policies for database and git access
+
+#### Configuration Steps
+1. Define skill sources in SKILLS_SOURCES JSON format
+2. Choose appropriate storage backend (memory for dev, postgres for prod)
+3. Configure synchronization intervals based on update frequency
+4. Set up authentication for private git repositories
+5. Validate configuration before deployment
+
+#### Example SKILLS_SOURCES Configuration
+```json
+[
+  {"source_id": "sre-alerting", "type": "local", "path": "/skills/sre-alerting"},
+  {"source_id": "platform-runbooks", "type": "local", "path": "/skills/platform-runbooks"},
+  {"source_id": "team-skills", "type": "git", "url": "https://github.com/team/skills.git", "ref": "main"}
+]
+```
+
+#### Production Deployment Considerations
+- Use PostgreSQL backend for data persistence
+- Configure appropriate sync intervals to balance freshness and performance
+- Set up proper database backups and monitoring
+- Implement network policies for database access
+- Monitor skill source health and synchronization status
+
+**Section sources**
+- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
+- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
+- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
+
+### Skills Hub Storage Backend Configuration
+**New Section** Detailed configuration for different storage backends.
+
+#### Memory Backend (Development)
+- Default backend for development and testing
+- No persistent storage - data lost on restart
+- Fastest performance for local development
+- No additional infrastructure requirements
+
+#### PostgreSQL Backend (Production)
+- Persistent storage for skill data
+- Requires PostgreSQL database setup
+- Supports concurrent access and scaling
+- Needs proper backup and maintenance procedures
+
+#### Database Connection Configuration
+- Use connection strings with proper authentication
+- Configure connection pooling for high availability
+- Monitor database performance and connection usage
+- Implement proper SSL/TLS encryption for production
+
+**Section sources**
+- [skills_config.py](file://products/skills-hub/src/skills_hub/core/config.py)
+- [skills-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)

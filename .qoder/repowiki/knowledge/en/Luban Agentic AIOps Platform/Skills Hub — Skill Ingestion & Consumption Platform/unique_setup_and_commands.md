@@ -1,0 +1,1 @@
+Skill documents under `shared/platform-ops/skills/` are authored in Markdown following the shared schema and are picked up by the skills hub agent during ingestion; changes to `skill.schema.json` require coordinated updates to both the schema and any consuming parsers.

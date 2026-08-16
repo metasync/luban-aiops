@@ -1,0 +1,4 @@
+- Application lifecycle is managed through a FastAPI `@asynccontextmanager` lifespan that initializes dependencies into `app.state` and tears them down in reverse order.
+- Shared data contracts are expressed as Pydantic `BaseModel`s with `ConfigDict(extra='forbid')` and explicit `Field` constraints for length bounds.
+- Cross-cutting concerns (logging, metrics, telemetry) are configured once during `create_app()` rather than per-request or per-route.
+- Request tracing uses a middleware that resolves an `x-request-id` and emits a structured event via `log_event` with method, path, status_code, and duration_ms.

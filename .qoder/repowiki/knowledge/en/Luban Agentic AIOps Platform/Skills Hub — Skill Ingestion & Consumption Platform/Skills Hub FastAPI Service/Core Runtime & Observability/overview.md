@@ -1,0 +1,1 @@
+Provides skills-hub's runtime configuration, request-scoped identity, structured logging, Prometheus metrics, and optional OpenTelemetry telemetry for the FastAPI application.
