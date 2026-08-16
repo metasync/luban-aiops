@@ -18,6 +18,14 @@
 - [skills-guide.md](file://docs/guides/skills-guide.md)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Enhanced git-federated source support with subpath specification for monorepo scenarios
+- Added comprehensive security validation including path traversal protection and token injection
+- Improved sync engine with better error handling and credential scrubbing
+- Updated configuration parsing to support git source subpaths with security constraints
+- Enhanced testing coverage for git source functionality and security features
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
@@ -34,7 +42,8 @@
 The Skills Hub Service ingests team-owned Markdown skills from federated sources (local directories and Git repositories), validates and normalizes them, stores them in a durable or in-memory store, and serves deterministic ranked search and full-record retrieval APIs. It is the authoritative source of grounded guidance for agents via the tool-gateway.
 
 Key responsibilities:
-- Federated ingestion with per-source atomic sync
+- Federated ingestion with per-source atomic sync supporting both local directories and Git repositories
+- Subpath specification for Git sources enabling monorepo support with security validation
 - Frontmatter validation and metadata normalization against a shared schema
 - Deterministic ranking and provenance-aware search results
 - Query authentication via static Basic credentials or projected workload tokens
@@ -89,8 +98,10 @@ J --> K["shared/shared-contracts/schemas/skill.schema.json"]
 - Ingestion: walks local directories, parses YAML frontmatter, enforces size/format limits, derives slugs, rejects duplicates within a source.
 - Storage: strategy pattern with InMemory and Postgres backends; Postgres uses GIN full-text index and re-ranks via shared scorer.
 - Scoring: deterministic keyword scoring with title/tag/body weights and capped body occurrences; stable tie-breaking by skill_id.
-- Sync: per-source async loop materializing git or local sources, ingesting, atomically replacing store slices, tracking status and metrics.
+- Sync: per-source async loop materializing git or local sources with subpath support, ingesting, atomically replacing store slices, tracking status and metrics.
 - Query auth: supports HTTP Basic against a static registry and projected workload tokens validated against cluster OIDC issuer JWKS.
+
+**Updated** Enhanced sync engine now supports Git repository subpath specification for monorepo scenarios with comprehensive security validation.
 
 **Section sources**
 - [runtime.py:19-30](file://products/skills-hub/src/skills_hub/core/runtime.py#L19-L30)
@@ -113,9 +124,9 @@ participant Hub as "Skills Hub"
 participant Store as "SkillStore"
 participant GW as "Tool Gateway"
 participant Agent as "Agent"
-Note over Team,Hub : Periodic sync
-Team->>Hub : Local dir / Git repo
-Hub->>Hub : Materialize source
+Note over Team,Hub : Periodic sync with subpath support
+Team->>Hub : Local dir / Git repo (with optional subpath)
+Hub->>Hub : Materialize source (git checkout + subpath validation)
 Hub->>Hub : Ingest & validate docs
 Hub->>Store : Atomic replace_source(source_id, records)
 Note over Agent,GW : Query path
@@ -262,9 +273,12 @@ Cap --> Out(["Hits"])
 ### Synchronization Engine
 - Per-source async tasks run independent loops with jittered intervals.
 - Materialization: local directories or Git clone/fetch/reset with optional token injection into HTTPS URLs.
+- **Enhanced**: Git sources now support subpath specification for monorepo scenarios with security validation.
 - Ingest runs synchronously in a thread to avoid blocking the event loop.
 - On success, atomically replaces the source slice in the store; on failure, retains previous snapshot and records error/metrics.
 - Status report exposes last_sync_at, ref, accepted counts, and bounded rejections.
+
+**Updated** The sync engine now includes comprehensive Git repository support with subpath specification, security validation, and improved error handling with credential scrubbing.
 
 ```mermaid
 sequenceDiagram
@@ -273,7 +287,7 @@ participant FS as "Filesystem/Git"
 participant IG as "Ingestion"
 participant ST as "SkillStore"
 loop every interval
-SM->>FS : Materialize source (local or git checkout)
+SM->>FS : Materialize source (local or git checkout with subpath)
 SM->>IG : ingest_directory(source_id, root, ref, now)
 IG-->>SM : IngestResult(records, rejections)
 SM->>ST : replace_source(source_id, records)
@@ -316,11 +330,15 @@ Static -- Invalid --> Deny
 ### Configuration and Runtime
 - Settings parsed from environment variables with fail-fast validation for malformed inputs.
 - SourceSpec supports local and git types with required fields enforced.
+- **Enhanced**: Git sources now support optional `path` field for subdirectory specification within monorepos.
+- Security validation prevents path traversal attacks and ensures relative paths only.
 - Query clients and workload clients parsed from comma-separated mappings.
 - Run settings resolve host/port with safe defaults.
 
+**Updated** Configuration now supports Git source subpath specification with comprehensive security validation to prevent path traversal attacks.
+
 **Section sources**
-- [config.py:1-189](file://products/skills-hub/src/skills_hub/core/config.py#L1-L189)
+- [config.py:1-203](file://products/skills-hub/src/skills_hub/core/config.py#L1-L203)
 - [runtime.py:1-30](file://products/skills-hub/src/skills_hub/core/runtime.py#L1-L30)
 
 ## Dependency Analysis
@@ -350,11 +368,11 @@ CFG --> SYNC
 - [sync.py:1-238](file://products/skills-hub/src/skills_hub/services/sync.py#L1-L238)
 - [ingestion.py:1-229](file://products/skills-hub/src/skills_hub/services/ingestion.py#L1-L229)
 - [app.py:20-86](file://products/skills-hub/src/skills_hub/app.py#L20-L86)
-- [config.py:1-189](file://products/skills-hub/src/skills_hub/core/config.py#L1-L189)
+- [config.py:1-203](file://products/skills-hub/src/skills_hub/core/config.py#L1-L203)
 
 **Section sources**
 - [app.py:20-86](file://products/skills-hub/src/skills_hub/app.py#L20-L86)
-- [config.py:1-189](file://products/skills-hub/src/skills_hub/core/config.py#L1-L189)
+- [config.py:1-203](file://products/skills-hub/src/skills_hub/core/config.py#L1-L203)
 
 ## Performance Considerations
 - Search performance:
@@ -368,8 +386,7 @@ CFG --> SYNC
   - Git operations run in threads to avoid blocking the event loop.
 - Storage:
   - In-memory store offers fast reads/writes for dev/test; Postgres provides durability and scalable indexing.
-
-[No sources needed since this section provides general guidance]
+- **Enhanced**: Git operations now include timeout protection and efficient shallow cloning for better performance.
 
 ## Troubleshooting Guide
 Common operational issues and resolutions:
@@ -379,6 +396,8 @@ Common operational issues and resolutions:
   - Inspect /api/v1/skills/status for rejection reasons; fix frontmatter or size violations; use the pre-flight validator CLI.
 - Source reports last_error:
   - Check unreachable Git URL, invalid token, or unreadable path; previous snapshot remains served until recovery.
+- **New**: Git subpath errors:
+  - Verify configured subpath exists in the Git repository; check for path traversal attempts being rejected.
 - Search returns no matches:
   - Confirm skill exists via catalog endpoint; check status and ensure source synced successfully.
 - kustomize build fails:
@@ -397,7 +416,7 @@ Operational endpoints and metrics:
 ## Conclusion
 The Skills Hub Service provides a robust, deterministic, and secure foundation for serving grounded guidance to agents. Its design emphasizes fail-fast configuration, resilient per-source sync, deterministic ranking, and clear operational surfaces. Integration through the tool-gateway ensures consistent policy enforcement, auditability, and evidence presentation.
 
-[No sources needed since this section summarizes without analyzing specific files]
+**Updated** The recent enhancements add comprehensive Git repository support with subpath specification for monorepo scenarios, robust security validation, and improved error handling with credential scrubbing, making it suitable for enterprise-scale federated skill management.
 
 ## Appendices
 
@@ -429,3 +448,48 @@ string body
 **Section sources**
 - [skill.schema.json:1-76](file://shared/shared-contracts/schemas/skill.schema.json#L1-L76)
 - [skill.py:1-33](file://products/skills-hub/src/skills_hub/schemas/skill.py#L1-L33)
+
+### Git Source Configuration Examples
+
+#### Basic Git Source
+```json
+{
+  "source_id": "team-skills",
+  "type": "git",
+  "url": "https://github.com/team/skills-repo.git",
+  "ref": "main"
+}
+```
+
+#### Git Source with Subpath (Monorepo Support)
+```json
+{
+  "source_id": "platform-runbooks",
+  "type": "git", 
+  "url": "https://github.com/company/monorepo.git",
+  "ref": "main",
+  "path": "platform/runbooks"
+}
+```
+
+#### Git Source with Authentication
+```json
+{
+  "source_id": "private-skills",
+  "type": "git",
+  "url": "https://github.com/company/private-skills.git", 
+  "ref": "v1.0"
+}
+```
+
+With corresponding token configuration:
+```json
+{
+  "private-skills": "your-access-token-here"
+}
+```
+
+**Section sources**
+- [config.py:50-116](file://products/skills-hub/src/skills_hub/core/config.py#L50-L116)
+- [sync.py:87-112](file://products/skills-hub/src/skills_hub/services/sync.py#L87-L112)
+- [test_sync.py:120-151](file://products/skills-hub/tests/test_sync.py#L120-L151)

@@ -16,12 +16,10 @@
 
 ## Update Summary
 **Changes Made**
-- Complete UI redesign from single-column chat interface to professional two-column shell layout with persistent sidebar
-- Implementation of role-gated audit trail access with security context enforcement
-- Enhanced responsive design with mobile-first approach and off-canvas drawer navigation
-- Comprehensive accessibility improvements including WCAG 2.1 AA compliance
-- Integration of durable audit trail view with filtering and pagination capabilities
-- Enhanced user identity management with avatar system and role-based UI elements
+- Added comprehensive "Cited guidance" chips display system for skills.* tools success responses
+- Enhanced evidence card rendering with clickable skill citation elements showing title and namespaced ID
+- Integrated cited guidance feature into the existing tool evidence system with proper styling and user interaction
+- Updated documentation to reflect new skills integration capabilities and enhanced operational visibility
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -34,18 +32,19 @@
 8. [Authentication and Security](#authentication-and-security)
 9. [Markdown Rendering System](#markdown-rendering-system)
 10. [Real-time Streaming Interface](#real-time-streaming-interface)
-11. [Deployment Guide](#deployment-guide)
-12. [UI Customization](#ui-customization)
-13. [Accessibility Features](#accessibility-features)
-14. [Browser Compatibility](#browser-compatibility)
-15. [Troubleshooting Guide](#troubleshooting-guide)
-16. [Conclusion](#conclusion)
+11. [Skills Integration and Cited Guidance](#skills-integration-and-cited-guidance)
+12. [Deployment Guide](#deployment-guide)
+13. [UI Customization](#ui-customization)
+14. [Accessibility Features](#accessibility-features)
+15. [Browser Compatibility](#browser-compatibility)
+16. [Troubleshooting Guide](#troubleshooting-guide)
+17. [Conclusion](#conclusion)
 
 ## Introduction
 
 The Operator Portal is a modern web-based administrative interface designed for platform administration and monitoring within the Luban AIOPS ecosystem. Built with vanilla JavaScript and HTML/CSS, it provides operators with a sophisticated two-column shell interface featuring a persistent sidebar for navigation and a main content area for interactive operations. The portal serves as a centralized control plane for platform administrators, offering real-time visibility into system status through an interactive chat interface, comprehensive evidence panels for tool execution tracking, configuration management capabilities, and administrative functions necessary for maintaining the AI-powered agent platform infrastructure.
 
-**Updated** The portal has undergone a complete UI redesign transforming from a single-column chat interface to a professional two-column shell layout with a persistent sidebar containing branding, identity management, and function navigation. The new design includes role-gated audit trail access, enhanced responsive design with mobile-first approach, and comprehensive accessibility features meeting WCAG 2.1 AA standards.
+**Updated** The portal has undergone significant enhancements including the addition of "Cited guidance" chips display system that shows matched skills as clickable elements with title and namespaced ID when skills.* tools succeed, providing enhanced operational visibility and traceability for team-owned guidance references.
 
 ## Project Structure
 
@@ -90,6 +89,7 @@ The Operator Portal consists of several key components that work together to pro
 - **Two-Column Shell Layout**: Professional interface with persistent sidebar and main content area
 - **Chat-Based Interface**: Modern single-page application with real-time streaming responses
 - **Inline Per-Turn Evidence System**: Sophisticated turn-scoped evidence grouping with collapsible groups rendered directly after agent responses
+- **Skills Integration**: Enhanced evidence cards with "Cited guidance" chips displaying matched skills when skills.* tools succeed
 - **Authentication System**: OIDC integration with automatic token refresh and session management
 - **Markdown Renderer**: Comprehensive text formatting with syntax highlighting support
 - **Responsive Design**: Dark theme with mobile-first approach and accessibility features
@@ -107,12 +107,18 @@ The Operator Portal consists of several key components that work together to pro
 - **Mobile Drawer**: Off-canvas navigation for narrow screens with hamburger menu
 - **Settings & Debug Panel**: Configuration management and debugging tools
 
+### Skills Evidence Enhancement
+- **Cited Guidance Chips**: Visual indicators showing matched skills from successful skills.* tool executions
+- **Skill Citation Display**: Clickable elements displaying skill titles and namespaced IDs
+- **Evidence Integration**: Seamless integration with existing evidence card system
+- **Truncation Handling**: Smart handling of truncated data summaries to avoid partial citations
+
 ### Deployment Components
 - **Container Image**: Dockerized application using nginxinc/nginx-unprivileged:1.27-alpine for non-root execution
 - **Kubernetes Resources**: Deployment and service definitions with enhanced security context
 - **Configuration Management**: Environment-specific settings and secrets
 
-**Updated** The interface has been completely redesigned with a professional two-column shell layout featuring a persistent sidebar for navigation and identity management, role-gated audit trail access, and comprehensive responsive design supporting both desktop and mobile experiences.
+**Updated** The interface now includes enhanced skills integration with "Cited guidance" chips that provide visual feedback when skills.* tools successfully execute, showing matched skills as clickable elements with title and namespaced ID for improved operational traceability.
 
 **Section sources**
 - [app.js](file://products/operator-portal/web-ui/app.js)
@@ -148,6 +154,7 @@ Gateway-->>Portal : SSE stream
 Portal->>User : Render markdown response
 Portal->>User : Create inline evidence group
 Portal->>User : Update per-turn audit card
+Portal->>User : Display cited guidance chips for skills.* tools
 ```
 
 **Diagram sources**
@@ -199,13 +206,20 @@ The JavaScript application implements core functionality including:
 - **Per-turn Audit Cards**: Comprehensive aggregation of tool executions with metadata display in tabular format
 - **Evidence Summary**: Dynamic summary line showing current turn statistics with collapsible details element
 
+#### Skills Integration and Cited Guidance
+- **Cited Skills Detection**: Automatic detection of skills.* tool success responses with matched skills data
+- **Chip Generation**: Creation of clickable chip elements displaying skill titles and namespaced IDs
+- **Evidence Integration**: Seamless integration with existing evidence card system
+- **Truncation Handling**: Smart filtering to avoid displaying partial or truncated skill citations
+- **Visual Styling**: Professional chip design with proper spacing, borders, and typography
+
 #### Durable Audit Trail System
 - **Role-Gated Access**: Audit trail view hidden unless user has auditor or platform-admin roles
 - **Filtering Capabilities**: Username, event type, service, and date range filters
 - **Pagination Support**: Cursor-based pagination with load more functionality
 - **Event Detail View**: Expandable rows showing full event envelope JSON
 
-**Updated** The interface now features a professional two-column shell layout with persistent sidebar navigation, role-gated audit trail access, enhanced user identity management with avatar system, and comprehensive responsive design supporting mobile devices with off-canvas drawer navigation.
+**Updated** The interface now includes comprehensive skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions, providing enhanced operational visibility and traceability for team-owned guidance references.
 
 **Section sources**
 - [app.js](file://products/operator-portal/web-ui/app.js)
@@ -231,6 +245,7 @@ The styling system provides a comprehensive design foundation with:
 - **Navigation Items**: Clean button styling with active state indicators
 - **Chat Messages**: Distinct styling for user and agent messages
 - **Inline Evidence Groups**: Professional collapsible interface with native browser details element behavior
+- **Cited Guidance Chips**: Specialized styling for skill citation chips with proper typography and spacing
 - **Audit Trail Table**: Responsive table with sticky headers and expandable detail rows
 - **Settings Panel**: Grid-based layout for configuration options
 - **Mobile Drawer**: Slide-in navigation with backdrop overlay
@@ -498,6 +513,87 @@ The new interface includes additional streaming enhancements:
 - [app.js:925-1050](file://products/operator-portal/web-ui/app.js#L925-L1050)
 - [styles.css:330-359](file://products/operator-portal/web-ui/styles.css#L330-L359)
 
+## Skills Integration and Cited Guidance
+
+The Operator Portal now includes comprehensive skills integration with "Cited guidance" chips that provide enhanced operational visibility when skills.* tools successfully execute.
+
+### Cited Guidance System Architecture
+
+The cited guidance system automatically detects and displays matched skills from successful skills.* tool executions:
+
+#### Skill Detection Logic
+- **Success Status Check**: Only processes tool results with "success" status
+- **Data Summary Validation**: Ensures data_summary exists and is not truncated
+- **Tool Type Recognition**: Handles different skills.* tool types (search, list, get)
+- **Entry Extraction**: Extracts skill entries based on tool type (matches, skills, or single data)
+
+#### Chip Generation Process
+- **Validation Filtering**: Filters out invalid entries without skill_id
+- **Title Generation**: Creates user-friendly titles from skill data or falls back to skill_id
+- **Element Creation**: Generates clickable chip elements with proper styling
+- **Integration**: Seamlessly integrates with existing evidence card system
+
+#### Visual Presentation
+- **Chip Design**: Professional chip styling with borders, background, and proper spacing
+- **Typography**: Clear title display with monospace font for skill IDs
+- **Layout**: Flexbox-based layout with proper wrapping and gaps
+- **Responsiveness**: Adapts to different screen sizes and content lengths
+
+### Implementation Details
+
+The cited guidance system is implemented through two key functions:
+
+#### citedSkills Function
+- **Input Processing**: Validates payload status and data structure
+- **Tool Type Handling**: Processes different skills.* tool types appropriately
+- **Data Extraction**: Extracts skill information from various data structures
+- **Output Generation**: Returns array of skill objects with id and title
+
+#### renderCitedGuidance Function
+- **Conditional Rendering**: Only renders for skills.* tools with valid citations
+- **Duplicate Prevention**: Prevents multiple rendering of same evidence card
+- **Element Construction**: Builds DOM structure for cited guidance section
+- **Styling Application**: Applies proper CSS classes for visual presentation
+
+### User Experience Benefits
+
+The cited guidance system provides several operational benefits:
+
+#### Enhanced Traceability
+- **Skill Reference**: Clear indication of which team-owned guidance was used
+- **Namespaced IDs**: Precise identification of specific skill versions
+- **Visual Feedback**: Immediate recognition of skills usage in tool execution
+
+#### Improved Operational Visibility
+- **Quick Reference**: At-a-glance understanding of guidance sources
+- **Click-to-Copy**: Easy copying of skill IDs for further investigation
+- **Contextual Information**: Title and ID displayed together for clarity
+
+#### Integration with Existing Features
+- **Evidence Cards**: Seamless integration with existing evidence system
+- **Turn Scoping**: Proper association with conversation turns
+- **Status Tracking**: Works alongside existing success/error/denied status indicators
+
+### Styling and Design
+
+The cited guidance chips follow the established design system:
+
+#### Visual Design
+- **Color Scheme**: Uses existing design tokens for consistency
+- **Typography**: Mix of regular and monospace fonts for readability
+- **Spacing**: Proper margins and padding for visual hierarchy
+- **Borders**: Subtle borders to distinguish chips from other content
+
+#### Responsive Behavior
+- **Flexbox Layout**: Automatic wrapping for multiple chips
+- **Text Overflow**: Ellipsis handling for long skill titles
+- **Touch Friendly**: Adequate sizing for mobile interaction
+- **Screen Reader Support**: Proper ARIA attributes and semantic markup
+
+**Section sources**
+- [app.js:750-799](file://products/operator-portal/web-ui/app.js#L750-L799)
+- [styles.css:566-604](file://products/operator-portal/web-ui/styles.css#L566-L604)
+
 ## Deployment Guide
 
 ### Prerequisites
@@ -556,7 +652,7 @@ Configure environment variables for the portal deployment:
 - **Logging Level**: Debug, info, warning, or error levels
 - **Feature Flags**: Enable/disable specific features
 
-**Updated** The deployment now supports the new two-column shell layout with role-gated audit trail access, enhanced responsive design, and improved accessibility features. The nginx configuration remains optimized for streaming support and non-root execution.
+**Updated** The deployment now supports the enhanced skills integration with "Cited guidance" chips, providing improved operational visibility for team-owned guidance references. The nginx configuration remains optimized for streaming support and non-root execution.
 
 **Section sources**
 - [nginx.conf](file://products/operator-portal/nginx.conf)
@@ -605,6 +701,7 @@ The updated interface provides additional customization points:
 - **User Card Layout**: Customizable user card appearance and positioning
 - **Navigation Item Styling**: Custom styling for navigation items and active states
 - **Mobile Drawer Behavior**: Configurable drawer animation and positioning
+- **Cited Guidance Styling**: Customizable chip appearance and behavior for skills integration
 
 **Section sources**
 - [styles.css](file://products/operator-portal/web-ui/styles.css)
@@ -650,6 +747,7 @@ The new interface includes additional accessibility improvements:
 - **User Card**: Accessible user identity display with proper labeling
 - **Mobile Drawer**: Accessible off-canvas navigation with proper focus management
 - **Audit Trail**: Accessible table with proper headers and expandable details
+- **Cited Guidance Chips**: Accessible chip elements with proper labeling and keyboard navigation
 
 **Section sources**
 - [styles.css](file://products/operator-portal/web-ui/styles.css)
@@ -691,6 +789,7 @@ The updated interface maintains broad browser compatibility:
 - **CSS Custom Properties**: Theme customization with fallback values
 - **Modern JavaScript**: ES6+ features with appropriate polyfills
 - **Responsive Design**: Mobile-first approach with progressive enhancement
+- **Skills Integration**: Cited guidance chips work across all supported browsers
 
 **Section sources**
 - [Dockerfile](file://products/operator-portal/Dockerfile)
@@ -805,7 +904,29 @@ Common issues and their solutions when working with the Operator Portal.
 - Ensure scrollToBottom function is called appropriately during streaming
 - Review CSS for any conflicting overflow or positioning styles
 
-**Updated** Added troubleshooting guidance for the new two-column shell layout, role-gated audit trail system, mobile drawer navigation, and enhanced user identity management features.
+### Skills Integration Issues
+
+**Problem**: Cited guidance chips not appearing for skills.* tools
+**Solution**:
+- Verify skills.* tools return success status with proper data_summary structure
+- Check that data_summary contains skill_id and title fields
+- Ensure tool_name starts with "skills." prefix
+- Review browser console for JavaScript errors in citedSkills function
+- Verify CSS classes are properly applied for chip styling
+- Check that _truncated flag is not set in data_summary
+
+### Cited Guidance Display Issues
+
+**Problem**: Cited guidance chips displaying incorrectly or not at all
+**Solution**:
+- Verify renderCitedGuidance function is being called with proper payload
+- Check that evidence card exists and has proper structure
+- Ensure CSS classes for cited-guidance, cited-chips, and cited-chip are applied
+- Review CSS for proper styling of chip elements
+- Check for JavaScript errors in chip generation logic
+- Verify skill data contains required fields (skill_id, title)
+
+**Updated** Added troubleshooting guidance for the new skills integration and cited guidance chips feature, including common issues with chip display, skill data validation, and styling problems.
 
 **Section sources**
 - [app.js](file://products/operator-portal/web-ui/app.js)
@@ -814,10 +935,10 @@ Common issues and their solutions when working with the Operator Portal.
 
 The Operator Portal provides a comprehensive, accessible, and customizable web interface for platform administration and monitoring within the Luban AIOPS ecosystem. Built with vanilla JavaScript and modern web standards, it delivers enterprise-grade functionality while maintaining simplicity and performance.
 
-**Updated** The recent complete UI redesign transforms the portal from a simple single-column chat interface into a professional two-column shell layout with persistent sidebar navigation, role-gated audit trail access, enhanced responsive design, and comprehensive accessibility features. The new design provides superior usability for platform operators while maintaining backward compatibility with existing workflows.
+**Updated** The recent enhancements include the addition of comprehensive skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions, providing enhanced operational visibility and traceability for team-owned guidance references. This feature significantly improves the portal's ability to show operators exactly which team-owned guidance was referenced during tool execution.
 
-Key strengths of the enhanced portal include its modular architecture, extensive customization options, strong accessibility features, and seamless integration with backend services. The deployment process remains streamlined through containerization and Kubernetes-native configurations, making it suitable for both development and production environments.
+Key strengths of the enhanced portal include its modular architecture, extensive customization options, strong accessibility features, seamless integration with backend services, and now comprehensive skills integration capabilities. The deployment process remains streamlined through containerization and Kubernetes-native configurations, making it suitable for both development and production environments.
 
-The new two-column shell layout offers significant improvements in information density and workflow efficiency, while the role-gated audit trail system provides comprehensive operational visibility with appropriate security controls. The responsive design ensures optimal user experience across desktop and mobile devices, and the enhanced accessibility features make the portal usable by operators with diverse needs.
+The enhanced skills integration provides significant improvements in operational traceability, allowing operators to quickly identify which team-owned guidance was used during automated processes. The cited guidance chips offer immediate visual feedback about skill usage while maintaining the existing evidence card system's integrity and performance characteristics.
 
-Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, and enhanced collaboration features to meet evolving operational requirements.
+Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, and further improvements to the skills integration system to meet evolving operational requirements.
