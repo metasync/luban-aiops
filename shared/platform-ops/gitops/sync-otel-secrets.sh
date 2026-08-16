@@ -81,9 +81,20 @@ PROFILE_FILE="$SCRIPT_DIR/runtime-profiles/$PROFILE_DIR/runtime-secrets.env"
 if [ -n "$PROFILE_DIR" ] && [ -f "$PROFILE_FILE" ]; then
   upsert_env_line "$PROFILE_FILE" OTEL_EXPORTER_OTLP_HEADERS "$OTEL_HEADER_LINE"
   sync_secret agent-platform-runtime-secrets "$PROFILE_FILE"
+elif kubectl -n "$NAMESPACE" get secret agent-platform-runtime-secrets \
+    >/dev/null 2>&1; then
+  # No local profile secret file, but the cluster Secret exists (provisioned
+  # by Luban CI or an earlier run): merge the header in cluster-side,
+  # preserving all existing keys.
+  VALUE_B64=$(printf '%s' "${OTEL_HEADER_LINE#OTEL_EXPORTER_OTLP_HEADERS=}" \
+    | base64 | tr -d '\n')
+  kubectl -n "$NAMESPACE" patch secret agent-platform-runtime-secrets \
+    --type merge \
+    -p "{\"data\":{\"OTEL_EXPORTER_OTLP_HEADERS\":\"${VALUE_B64}\"}}"
+  echo "Patched existing secret 'agent-platform-runtime-secrets' in namespace '$NAMESPACE'."
 else
-  echo "No local runtime-profile secret file (profile: ${PROFILE_DIR:-none});"
-  echo "skipping agent-platform-runtime-secrets (inject the header externally if needed)."
+  echo "No local runtime-profile secret file (profile: ${PROFILE_DIR:-none})"
+  echo "and no cluster secret; agent-service pushes anonymously (401s fail open)."
 fi
 
 for entry in \
