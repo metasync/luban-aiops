@@ -20,6 +20,14 @@ NAMESPACE=${NAMESPACE:-dev-luban-aiops}
 # Set SKIP_SKILLS_SECRETS=true when secrets are injected externally (e.g. CI).
 "$SCRIPT_DIR/../sync-skills-secrets.sh" "$NAMESPACE"
 
+# Provision incident intake/query credentials (SPEC-015) unless skipped.
+# Set SKIP_INCIDENT_SECRETS=true when secrets are injected externally (e.g. CI).
+"$SCRIPT_DIR/../sync-incident-secrets.sh" "$NAMESPACE"
+
+# Provision the sessions database for the agent-platform session store
+# (SPEC-016). Idempotent; no secrets involved.
+"$SCRIPT_DIR/../sync-sessions-db.sh" "$NAMESPACE"
+
 # Provision OTel ingest credentials for the OpenObserve backend (SPEC-005
 # completion) unless skipped. Requires OO_ROOT_USER_EMAIL/OO_ROOT_USER_PASSWORD
 # exported; otherwise it skips and push fails open. SKIP_OTEL_SECRETS=true for CI.

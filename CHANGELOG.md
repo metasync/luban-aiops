@@ -2,11 +2,142 @@
 
 All notable changes to this repository are documented in this file.
 
-The format is intentionally lightweight during the current pre-release phase.
-Entries are grouped by workspace-level implementation milestones rather than
-published product versions.
+Platform releases follow semantic versioning (MAJOR.MINOR.PATCH): the root
+`VERSION` file is the single source of truth, release trains map to MINOR
+bumps, and entries accumulate under `Unreleased` until a release closes
+them into a versioned section. Version lockstep across products and the
+portal is enforced by `make validate-version`.
+
+Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
+Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
+
+### Added — Platform versioning discipline
+
+- New root `VERSION` file (semver, currently `0.3.0`) as the single source
+  of truth for the platform version; all products and the portal track it in
+  lockstep (`pyproject.toml`, `metadata.py` `SERVICE_VERSION`, portal
+  `PLATFORM_VERSION` — all bumped from the stale `0.1.0`).
+- New `make validate-version` gate (wired into `make verify`) fails on any
+  drift between `VERSION` and the product/portal constants.
+- Coordinated image tags now carry the semver prefix
+  (`<semver>-<prefix>-<gitsha>`), and this changelog closes entries into
+  versioned sections (`0.3.0`, `0.2.0`, `0.1.0`). Versioning policy is
+  documented in `CONTRIBUTING.md`.
+
+### Added — SPEC-016: Postgres session store backend
+
+- agent-platform gains a third session store backend:
+  `SESSION_STORE_BACKEND=memory|redis|postgres` (unknown values now fail
+  startup instead of silently defaulting). The Postgres backend persists
+  sessions in a dedicated `sessions` database with idle-TTL semantics
+  matching the Redis store (refresh folded into reads, bounded
+  opportunistic sweep) and applies its DDL idempotently on startup.
+- `SESSION_DB_URL` supplies the DSN (required for `postgres`); unreachable
+  databases fail open to the in-memory backend and increment
+  `session_store_fallbacks_total`. `session_store_backend` gauge and
+  `agent-health.schema.json` learn the `postgres` value.
+- dev-k8s switches the deployed overlay from Redis-backed sessions to
+  Postgres (`SESSION_REDIS_*` removed; Redis remains for kernel
+  coordination only): new `infra/create-sessions-db.sql` initdb entry and
+  `sync-sessions-db.sh` for existing clusters, wired into `make deploy`.
+
+### Added — SPEC-017: kernel utilization and conversation durability
+
+- agent-platform now drives the AgentScope kernel's own tuning surfaces
+  (R-1): `AGENTSCOPE_MAX_ITERS` (ReAct loop cap),
+  `AGENTSCOPE_CONTEXT_TRIGGER_RATIO` (long-term memory trigger),
+  `AGENTSCOPE_TOOL_RESULT_LIMIT` (tool result truncation),
+  `AGENTSCOPE_TIMEZONE` (runtime-state injection), and
+  `AGENTSCOPE_MODEL_MAX_RETRIES` (model retries). Defaults mirror
+  agentscope's own, every value is validated at startup, and each
+  constructed agent logs its effective configuration once.
+- `/api/v2/chat` accepts an optional `response_schema` and returns a
+  kernel-validated `structured_output` (R-2): incident-service triage
+  turns send the triage-report JSON schema and prefer the structured
+  output, with the fenced-block parser retained as fallback; server-minted
+  attribution forcing is unchanged. The default system prompt is now
+  format-neutral about report delivery.
+- Conversation durability (R-3): the kernel-serializable agent state is
+  snapshotted after every completed turn and restored on agent
+  construction via a new `AgentStateStore`
+  (`AGENT_STATE_STORE_BACKEND=memory|postgres`, `AGENT_STATE_DB_URL`,
+  `AGENT_STATE_TTL_SECONDS`), sharing the SPEC-016 `sessions` database.
+  Snapshot/restore never fails a turn; corrupt rows are discarded with a
+  counter. Session deletion also removes persisted state, and `/health`
+  surfaces the `agent_state` backend.
+
+### Changed
+
+- agent-platform upgrades the AgentScope kernel from `2.0.4.post1` to
+  `2.0.6`: O(n) stream accumulation and reused OpenAI clients on the
+  streaming path, the OTel cross-task detach fix, preserved error state in
+  tool responses, and the 2.0.5 agent-loop/permission fixes. The kernel now
+  also ships a SQLAlchemy storage backend upstream (`AsyncSQLAlchemyStorage`).
+
+## 0.3.0 — 2026-08-17
+
+### Added — SPEC-015: Incident Triage and Collaboration (Release 3)
+
+- New `shared/shared-contracts/schemas/incident.schema.json` and
+  `triage-report.schema.json` (R-1): the canonical incident envelope and the
+  structured triage output contract; incident-service models bind to both
+  via contract tests.
+- New `products/incident-service` product (R-2): FastAPI on the shared
+  `base-uv` image mirroring the audit-service chassis. Alertmanager v4
+  webhook intake (`INCIDENT_WEBHOOK_TOKEN` bearer, fail-closed 503 when
+  unconfigured, `groupKey` fingerprint dedupe, resolution handling), manual
+  intake for the portal report form, and an `IncidentStore` protocol with
+  in-memory and Postgres backends (`incidents` database). Query auth uses
+  the dedicated `INCIDENT_QUERY_CLIENTS` Basic registry plus projected
+  workload tokens.
+- Operator-initiated triage (R-3): `POST /api/v1/incidents/{id}/triage` runs
+  one agent turn in the dedicated `incident-<id>` session, relaying the
+  operator's delegated bearer, and captures the outcome as a validated
+  fenced `triage-report` JSON block — `triaged` with report and connector
+  dispatch, or `triage_failed` with the raw agent text preserved. The agent
+  system prompt gains the triage-report output discipline. agent-platform
+  gains named-session support (`POST /api/v2/sessions` accepts an optional
+  caller-supplied `session_id`, idempotent for the owner); because sessions
+  are single-owner, re-triage by a second operator falls back to
+  `incident-<id>--<operator>`, and report attribution
+  (`session_id`/`generated_at`/`generated_by`) is server-minted, never
+  taken from agent output.
+- Read-only incident tools (R-4): tool-gateway's `IncidentsConnector`
+  registers `incidents.list` / `incidents.get` (Basic-auth httpx transport,
+  structured error mapping), gated on `GATEWAY_INCIDENTS_SERVICE_URL`; both
+  join `DEFAULT_AUTO_ALLOWED_TOOLS`. No mutating incident tool exists —
+  the SPEC-007 read-only invariant holds.
+- Connector framework (R-5): config-driven `Connector` registry
+  (`INCIDENT_CONNECTORS`, unknown names fail startup) with the built-in
+  `audit` sink emitting `incident_triaged` events to audit-service; dispatch
+  outcomes persist per incident and never fail the triage path. Slack/Jira
+  adapters are documented contract-only.
+- Portal and gateway surfaces (R-6/R-7): platform-gateway proxies the
+  incident list/get/report/create/triage routes under three new policy
+  actions (`incident:read` / `incident:create` / `incident:triage`, bundle
+  now eight rules) and relays identity; the operator portal gains the
+  Incidents panel (filterable list with auto-refresh, report detail, Run
+  triage, Report incident form, Continue in chat, connector dispatch
+  outcomes) and the audit view gains the `incident_triaged` type.
+- Deployment and demo: dev-k8s overlay for incident-service (deployment,
+  service, postgres `incidents` database via initdb ConfigMap),
+  `sync-incident-secrets.sh` wired into `make deploy`
+  (`SKIP_INCIDENT_SECRETS` opt-out), `sync-audit-secrets.sh` registers
+  incident-service as a fourth audit emitter, and
+  `shared/platform-ops/e2e/incident-demo.sh` asserts intake auth, dedupe,
+  resolution, query visibility, gateway triage, and the audit dispatch.
+- Docs: release note
+  `docs/agentic-aiops-platform/release-notes/2026-08-17-r3-incident-triage-and-collaboration.md`,
+  new [Incident Triage and Collaboration Guide](docs/guides/incident-guide.md)
+  (Alertmanager wiring, lifecycle and dedupe semantics, portal workflow,
+  triage interpretation, re-triage collaboration), incident symptoms in
+  troubleshooting, updated guides (getting-started Incident Triage tour,
+  configuration reference, tool configuration, architecture overview),
+  product and dev-k8s READMEs.
+
+## 0.2.0 — 2026-08-15
 
 ### Added — OpenObserve Telemetry Enablement (SPEC-005 completion)
 
@@ -201,6 +332,8 @@ published product versions.
   'dict'`. Caught during the dev-k8s live test (unit tests exercised the
   in-memory backend); regression test added against the fake psycopg
   driver (audit-service tests 67 → 68).
+
+## 0.1.0 — 2026-08-11
 
 ### Added — SPEC-012: Operator Guide and Deployment Documentation
 

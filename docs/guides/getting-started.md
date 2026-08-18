@@ -60,7 +60,7 @@ shared/platform-ops/gitops/sync-runtime-secret.sh deepseek
 make build
 ```
 
-This builds all product images with a coordinated image tag (e.g. `dev-k8s-<gitsha>`) and
+This builds all product images with a coordinated image tag (e.g. `0.3.0-dev-k8s-<gitsha>`) and
 writes the tag to `shared/platform-ops/gitops/dev-k8s/.images.env`.
 
 For kind clusters, auto-load images:
@@ -83,6 +83,11 @@ This single command:
 4. Provisions token delegation secrets (shared credential between platform-gateway and
    identity-service)
 5. Reconciles the portal's Keycloak OIDC client
+6. Provisions audit, skills, incident, and OTel push secrets (`sync-audit-secrets.sh`,
+   `sync-skills-secrets.sh`, `sync-incident-secrets.sh`, `sync-otel-secrets.sh`), creating
+   the `skills` and `incidents` Postgres databases idempotently, and ensures the
+   `sessions` database for the agent-platform session store exists
+   (`sync-sessions-db.sh`, no secrets involved)
 
 > **Important:** Never deploy with raw `kubectl apply -k` — it resets image tags to the
 > `dev-local` placeholder, causing `ErrImagePull`. Always use `make deploy` or run the
@@ -110,6 +115,7 @@ tool-gateway-...                  1/1     Running
 agent-service-...                 1/1     Running
 identity-service-...              1/1     Running
 skills-hub-...                    1/1     Running
+incident-service-...              1/1     Running
 redis-...                         1/1     Running
 ```
 
@@ -164,6 +170,7 @@ The following secrets must be provisioned before the platform is fully operation
 | Token delegation | `platform-gateway-runtime-secrets` + `identity-service-runtime-secrets` | Tool invocation auth | `sync-delegation-secrets.sh` (automatic with `make deploy`) |
 | OIDC client secret | `identity-service-runtime-secrets` | Confidential OIDC client | Manual (if required by your IdP) |
 | Skills query | `skills-hub-runtime-secrets` + `tool-gateway-runtime-secrets` | Grounded guidance retrieval | `sync-skills-secrets.sh` (automatic with `make deploy`) |
+| Incident intake and query | `incident-service-runtime-secrets` + `platform-gateway-runtime-secrets` + `tool-gateway-runtime-secrets` | Alertmanager webhook token, incident query credentials, audit ingest credential | `sync-incident-secrets.sh` (automatic with `make deploy`) |
 
 ## Skills Demo Tour (SPEC-014)
 
@@ -203,6 +210,62 @@ Verification points:
 - [ ] the cited skill title (or `skill_id`) is visible in the reply
 - [ ] guidance and live cluster evidence are presented as distinct in the reply
 - [ ] scenario 3 produces an explicit no-match statement, not fabricated steps
+
+## Incident Triage Tour (SPEC-015)
+
+This tour exercises the Release 3 incident slice end to end and doubles as the
+UAT checklist and operator training path. It assumes a deployed dev-k8s overlay
+with incident secrets provisioned (automatic via `make deploy`). For alert
+source integration and triage interpretation beyond this tour, see the
+[Incident Triage and Collaboration Guide](incident-guide.md).
+
+Automated smoke test first (webhook auth control checks, intake → dedupe →
+resolve, query visibility, operator triage through the gateway, and the audit
+dispatch):
+
+```bash
+shared/platform-ops/e2e/incident-demo.sh
+# cluster-side assertions only (no port-forwards needed):
+SKIP_TRIAGE_LEG=true shared/platform-ops/e2e/incident-demo.sh
+```
+
+The triage leg needs two port-forwards (platform-gateway and identity-service);
+the script header documents them.
+
+Then walk the workflow through the portal (log in as `luban-operator`):
+
+1. **Report an incident.** Open the Incidents panel, expand the Report
+   incident form, and submit a manual incident (title, summary, severity,
+   optional `key=value` labels). The panel opens the new incident's detail
+   view with status `new`.
+2. **Run triage.** Click Run triage. The button shows `Triaging…` while the
+   agent runs one turn in the incident's dedicated session; on success the
+   detail view renders the triage report: severity assessment, summary,
+   evidence gathered from the read-only tools, hypotheses, and ranked
+   advisory next steps with priorities.
+3. **Continue in chat.** Click Continue in chat — the chat view opens on the
+   incident's session (`incident-<id>`) so follow-up questions carry the
+   triage context. Ask what else is open and confirm the agent can use
+   `incidents.list` / `incidents.get`.
+4. **Check the durable trail.** Open the Audit view and filter by event type
+   `incident_triaged`: the triage outcome for your incident is on the trail,
+   dispatched by the built-in `audit` connector.
+5. **Alert intake (optional).** Point a real or scripted Alertmanager at
+   `POST /api/v1/webhooks/alertmanager` with the `INCIDENT_WEBHOOK_TOKEN`
+   bearer (see `incident-demo.sh` for the payload shape); confirm the alert
+   group appears in the Incidents list, dedupes on re-fire, and resolves on
+   the `resolved` payload.
+
+Verification points:
+
+- [ ] a manual incident reaches `triaged` with a rendered report and ranked
+      next steps
+- [ ] Run triage is unavailable to read-only observers (policy
+      `incident:triage`), while the list stays visible (`incident:read`)
+- [ ] `incidents.list` / `incidents.get` appear in the evidence panel when
+      the chat references live incidents
+- [ ] the `incident_triaged` event is visible in the Audit view
+- [ ] an unauthenticated webhook post is rejected with `401`
 
 ## Next Steps
 

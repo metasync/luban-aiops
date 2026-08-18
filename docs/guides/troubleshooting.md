@@ -435,6 +435,107 @@ kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
 - Content-level operations (add/revise/remove skills and sources) are covered
   by the [Skills and Guidance Guide](skills-guide.md).
 
+## Symptom: Alertmanager alerts never create incidents (401/503 from webhook)
+
+**Most likely cause:** One of — the bearer token Alertmanager sends does not
+match `INCIDENT_WEBHOOK_TOKEN` (401 `UNAUTHORIZED`), or the token was never
+provisioned and the webhook fails closed (503 `WEBHOOK_NOT_CONFIGURED`).
+
+**Diagnostic:**
+
+```bash
+# Is the token configured at all?
+kubectl -n dev-luban-aiops get secret incident-service-runtime-secrets \
+  -o jsonpath='{.data.INCIDENT_WEBHOOK_TOKEN}' | base64 -d | wc -c
+
+# Probe the webhook from inside the cluster with the configured token
+TOKEN=$(kubectl -n dev-luban-aiops get secret incident-service-runtime-secrets \
+  -o jsonpath='{.data.INCIDENT_WEBHOOK_TOKEN}' | base64 -d)
+kubectl -n dev-luban-aiops exec deployment/incident-service -- \
+  curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"resolved","groupKey":"probe://diag","commonLabels":{}}' \
+  http://localhost:8000/api/v1/webhooks/alertmanager
+# expected: 200 (idempotent "ignored" resolution for an unknown fingerprint)
+```
+
+**Resolution:**
+
+- 503: run `shared/platform-ops/gitops/sync-incident-secrets.sh` and roll
+  `deployment/incident-service` so the new secret is mounted.
+- 401 with a configured token: rotate both halves together — re-run the sync
+  script with an exported `INCIDENT_WEBHOOK_TOKEN` and update the
+  Alertmanager receiver's `bearer_token`. Alertmanager retries on 401, so no
+  alerts are lost once the token matches.
+- Full intake semantics (dedupe, resolve) are covered by the
+  [Incident Triage and Collaboration Guide](incident-guide.md).
+
+## Symptom: Run triage fails or an incident is stuck in "triaging"/"triage_failed"
+
+**Most likely cause:** One of — the incident-service → platform-gateway relay
+or the token-delegation chain is down (surfaced as a triage error banner),
+agent-platform rejected both candidate triage sessions, or the agent turn
+timed out. A stuck `triaging` status means the triage turn never completed.
+
+**Diagnostic:**
+
+```bash
+# Triage runs are logged structured with the incident id and session used
+kubectl -n dev-luban-aiops logs deployment/incident-service --tail=100 \
+  | grep -E 'triage|incident-'
+
+# The relay target and credential must be configured on platform-gateway
+kubectl -n dev-luban-aiops exec deployment/platform-gateway -- \
+  sh -c 'echo "${PLATFORM_GATEWAY_INCIDENT_SERVICE_URL:-<unset>}"'
+
+# Delegation chain health (platform-gateway exchanges the operator token at
+# identity-service and relays it to incident-service as X-Delegated-Token)
+kubectl -n dev-luban-aiops logs deployment/platform-gateway --tail=100 \
+  | grep -iE 'delegat|exchange'
+```
+
+**Resolution:**
+
+- Relay 401s: re-run `shared/platform-ops/gitops/sync-incident-secrets.sh`
+  (it keeps `INCIDENT_QUERY_CLIENTS` and the gateway client secret in sync)
+  and roll incident-service and platform-gateway.
+- Session 404 errors in the logs: triage tries `incident-<id>` then
+  `incident-<id>--<operator>`; both failing means agent-platform is
+  unreachable or its session store is degraded — check agent-platform logs.
+- `triage_failed` is terminal-by-design: fix the underlying cause and click
+  **Re-run triage**; the latest successful outcome replaces the failure.
+
+## Symptom: Agent cannot see incidents ("incidents.list" tool missing)
+
+**Most likely cause:** The incidents connector is not registered in
+tool-gateway — `GATEWAY_INCIDENTS_SERVICE_URL` is unset, or the query secret
+halves do not match between tool-gateway and incident-service.
+
+**Diagnostic:**
+
+```bash
+# Connector registration is gated on this URL
+kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
+  sh -c 'echo "${GATEWAY_INCIDENTS_SERVICE_URL:-<unset>}"'
+
+# Query visibility as the agent sees it (HTTP Basic service credential)
+QUERY_CLIENTS=$(kubectl -n dev-luban-aiops get secret incident-service-runtime-secrets \
+  -o jsonpath='{.data.INCIDENT_QUERY_CLIENTS}' | base64 -d)
+kubectl -n dev-luban-aiops exec deployment/incident-service -- \
+  curl -fsS -u "tool-gateway:${QUERY_CLIENTS##*tool-gateway=}" \
+  "http://localhost:8000/api/v1/incidents?limit=5"
+```
+
+**Resolution:**
+
+- URL unset or secrets mismatched: re-run
+  `shared/platform-ops/gitops/sync-incident-secrets.sh` and
+  `kubectl rollout restart deployment/tool-gateway deployment/incident-service`.
+- The connector is read-only by design; mutating flows (report, triage) go
+  through the portal and platform-gateway — see the
+  [Incident Triage and Collaboration Guide](incident-guide.md).
+
 ## Symptom: No traces/metrics/logs appear in OpenObserve
 
 **Most likely cause:** One of — the OTLP ingest auth header is missing from a

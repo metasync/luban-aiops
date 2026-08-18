@@ -64,6 +64,13 @@ Current browser baseline capabilities:
   envelopes; the navigation entry renders only for identities whose roles
   hold `audit:read` (the gateway re-enforces the action server-side)
   (SPEC-013)
+- Incidents panel: filterable incident list with auto-refresh, incident
+  detail with the full triage report (severity assessment, evidence,
+  hypotheses, ranked advisory next steps, cited skills), connector dispatch
+  outcomes, Run triage with live triaging/failed states (failed runs expose
+  the raw agent text), a Report incident form, and Continue in chat on the
+  incident's dedicated session; viewing is gated by `incident:read`, acting
+  by `incident:create` / `incident:triage` (SPEC-015)
 
 ## Expected Integration Points
 

@@ -42,9 +42,9 @@ spec:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
               subPath: pgdata
-            # Fresh clusters gain the skills database automatically
-            # (SPEC-014 R-6); existing clusters are covered by
-            # sync-skills-secrets.sh.
+            # Fresh clusters gain the skills and incidents databases
+            # automatically (SPEC-014 R-6, SPEC-015); existing clusters are
+            # covered by sync-skills-secrets.sh / sync-incident-secrets.sh.
             - name: postgres-initdb
               mountPath: /docker-entrypoint-initdb.d
               readOnly: true

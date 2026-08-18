@@ -13,6 +13,10 @@ def test_v2_contract_surface_smoke() -> None:
     health = client.get("/api/v2/health")
     assert health.status_code == 200
     assert health.json()["status"] == "not_ready"
+    # SPEC-016/017: store backends are surfaced on the readiness contract.
+    assert health.json()["session_store"] in ("memory", "redis", "postgres")
+    assert health.json()["agent_state"] in ("memory", "postgres")
+    assert isinstance(health.json()["agent_state_ready"], bool)
 
     session = client.post(
         "/api/v2/sessions",
@@ -36,6 +40,8 @@ def test_v2_contract_surface_smoke() -> None:
     assert chat_payload["request_id"] == "req-test"
     assert chat_payload["session_id"] == session_payload["session_id"]
     assert "placeholder response" in chat_payload["content"]
+    # SPEC-017 R-2: structured output is null without a response_schema.
+    assert chat_payload["structured_output"] is None
 
 
 def test_v2_chat_requires_user_id_header() -> None:

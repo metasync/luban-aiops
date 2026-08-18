@@ -30,6 +30,32 @@ This workspace follows the spec-driven workflow defined in `docs/specs/README.md
 - implementation pull requests link the spec ID they serve
 - delivered specs are frozen; follow-up changes get a new spec
 
+## Versioning
+
+The platform follows semantic versioning (MAJOR.MINOR.PATCH). The root
+`VERSION` file is the single source of truth:
+
+- MAJOR — breaking cross-service contract or API changes
+- MINOR — release trains (each delivered release slice bumps the minor)
+- PATCH — fixes between releases
+
+Products version in **lockstep** with the platform: every
+`products/*/pyproject.toml`, every `metadata.py` `SERVICE_VERSION`, and the
+portal's `PLATFORM_VERSION` must equal `VERSION`. Product versions express
+"which platform release this build belongs to", not independent change
+histories — products ship together under one coordinated image tag and share
+one changelog. A product may opt out of lockstep only when it becomes
+independently consumable.
+
+`make validate-version` (part of `make verify`) enforces the lockstep, and
+the coordinated image tag is prefixed with the semver
+(`<semver>-<prefix>-<gitsha>[-dirty-<timestamp>]`).
+
+Release workflow: entries accumulate under `Unreleased` in `CHANGELOG.md`;
+closing a release bumps `VERSION` everywhere (run `make validate-version`
+to catch misses), moves the entries into a versioned section, and tags the
+release.
+
 ## Change Principles
 
 - keep identity, policy, orchestration, and execution concerns separated

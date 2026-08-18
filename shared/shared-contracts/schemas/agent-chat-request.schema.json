@@ -15,6 +15,10 @@
     "session_id": {
       "type": "string",
       "description": "Optional session identifier to continue an existing conversation. Omit to start a new session."
+    },
+    "response_schema": {
+      "type": "object",
+      "description": "Optional JSON-schema dict for kernel-validated structured output (SPEC-017 R-2); passed through unchanged to the agent kernel."
     }
   }
 }

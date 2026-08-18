@@ -15,6 +15,12 @@ combined api-gateway by SPEC-010, per ADR-0005).
 - Proxies the durable audit trail query (`/api/v1/audit/*`) to `audit-service`,
   gated by the `audit:read` policy action (granted to `auditor` and
   `platform-admin` only, SPEC-013).
+- Proxies the incidents surface (`/api/v1/incidents/*`: list, get, report,
+  create, triage) to `incident-service`, gated by the `incident:read` /
+  `incident:create` / `incident:triage` policy actions (SPEC-015). Queries
+  use the gateway's incident-service credential; triage additionally relays
+  `X-User-ID` and the operator's delegated bearer. Unset upstream fails
+  closed (503).
 - Forwards policy decision, session, and chat lifecycle audit events to
   `audit-service` fire-and-forget when `PLATFORM_GATEWAY_AUDIT_SERVICE_URL`
   is set (log-only otherwise; SPEC-013).
@@ -52,3 +58,7 @@ Environment-driven; see `src/platform_gateway/core/config.py`.
 | `PLATFORM_GATEWAY_AUDIT_SERVICE_URL` | (empty) | audit-service ingest URL; empty keeps log-only auditing |
 | `PLATFORM_GATEWAY_AUDIT_CLIENT_ID` | `platform-gateway` | audit ingest client id |
 | `PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET` | (empty) | audit ingest credential (matches `AUDIT_INGEST_CLIENTS`) |
+| `PLATFORM_GATEWAY_INCIDENT_SERVICE_URL` | (empty) | incident-service upstream; empty keeps the incidents routes fail-closed (503) |
+| `PLATFORM_GATEWAY_INCIDENT_CLIENT_ID` | `platform-gateway` | incident query client id |
+| `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET` | (empty) | incident query credential (matches `INCIDENT_QUERY_CLIENTS`) |
+| `PLATFORM_GATEWAY_INCIDENT_TRIAGE_TIMEOUT_SECONDS` | `120` | triage proxy timeout |

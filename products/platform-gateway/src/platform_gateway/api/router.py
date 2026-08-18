@@ -6,6 +6,7 @@ from platform_gateway.api.routes import (
     chat,
     health,
     identity,
+    incidents,
     runtime,
     sessions,
 )
@@ -18,3 +19,4 @@ router.include_router(identity.router)
 router.include_router(sessions.router)
 router.include_router(chat.router)
 router.include_router(audit.router)
+router.include_router(incidents.router)

@@ -97,13 +97,13 @@ SESSION_STORE_ERRORS = Counter(
 
 SESSION_STORE_FALLBACKS = Counter(
     "session_store_fallbacks_total",
-    "Times the session store fell back to in-memory due to Redis failure.",
+    "Times the session store fell back to in-memory due to backend failure.",
 )
 
 
 def record_session_store_backend(backend: str) -> None:
     """Set the active backend gauge (1 for active, 0 for others)."""
-    for label in ("redis", "memory"):
+    for label in ("redis", "memory", "postgres"):
         SESSION_STORE_BACKEND_GAUGE.labels(backend=label).set(
             1 if label == backend else 0
         )
@@ -115,3 +115,39 @@ def record_session_store_error(operation: str) -> None:
 
 def record_session_store_fallback() -> None:
     SESSION_STORE_FALLBACKS.inc()
+
+
+# --- Agent state store observability (SPEC-017 R-5) ---
+
+AGENT_STATE_BACKEND_GAUGE = Gauge(
+    "agent_state_backend",
+    "Active agent state store backend (1 = active).",
+    ["backend"],
+)
+
+AGENT_STATE_ERRORS = Counter(
+    "agent_state_errors_total",
+    "Agent state store operation failures.",
+    ["operation"],
+)
+
+AGENT_STATE_FALLBACKS = Counter(
+    "agent_state_fallbacks_total",
+    "Times the agent state store fell back to in-memory due to backend failure.",
+)
+
+
+def record_agent_state_backend(backend: str) -> None:
+    """Set the active backend gauge (1 for active, 0 for others)."""
+    for label in ("memory", "postgres"):
+        AGENT_STATE_BACKEND_GAUGE.labels(backend=label).set(
+            1 if label == backend else 0
+        )
+
+
+def record_agent_state_error(operation: str) -> None:
+    AGENT_STATE_ERRORS.labels(operation=operation).inc()
+
+
+def record_agent_state_fallback() -> None:
+    AGENT_STATE_FALLBACKS.inc()

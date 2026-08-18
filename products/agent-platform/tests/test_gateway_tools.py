@@ -273,6 +273,35 @@ class BuildFunctionToolsTests(unittest.TestCase):
             decision = _run(tool.check_permissions())
             self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
 
+    def test_incidents_tools_auto_allowed_with_sanitized_names(self) -> None:
+        """SPEC-015 R-4: incidents.list/incidents.get are vetted read-only
+        and auto-approved; the allow-list matches sanitized FunctionTool
+        names."""
+        from agentscope.permission import PermissionBehavior
+
+        defs = [
+            {
+                "name": "incidents.list",
+                "description": "List tracked incidents.",
+                "risk_level": "read",
+                "category": "incidents",
+                "parameters_schema": {"type": "object"},
+            },
+            {
+                "name": "incidents.get",
+                "description": "Fetch one incident with its triage report.",
+                "risk_level": "read",
+                "category": "incidents",
+                "parameters_schema": {"type": "object"},
+            },
+        ]
+        tools = build_function_tools("http://gw:8080", defs)
+        self.assertEqual(tools[0].name, "incidents_list")
+        self.assertEqual(tools[1].name, "incidents_get")
+        for tool in tools:
+            decision = _run(tool.check_permissions())
+            self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
+
     def test_read_only_tool_outside_allow_list_still_requires_confirmation(self) -> None:
         """Auto-approval is allow-listed, not blanket: a read-only tool that
         is not vetted keeps the ASK default."""

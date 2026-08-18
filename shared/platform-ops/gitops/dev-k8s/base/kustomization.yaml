@@ -13,6 +13,7 @@ configMapGenerator:
       - identity-broker/runtime-config.env
       - audit-service/runtime-config.env
       - skills-hub/runtime-config.env
+      - incident-service/runtime-config.env
   - name: platform-policy
     files:
       - shared/policy.yaml
@@ -37,6 +38,8 @@ configMapGenerator:
   - name: postgres-initdb
     files:
       - infra/create-skills-db.sql
+      - infra/create-incidents-db.sql
+      - infra/create-sessions-db.sql
 resources:
   - shared/namespace.yaml
   - infra/redis-deployment.yaml
@@ -60,3 +63,5 @@ resources:
   - audit-service/audit-service-service.yaml
   - skills-hub/skills-hub-deployment.yaml
   - skills-hub/skills-hub-service.yaml
+  - incident-service/incident-service-deployment.yaml
+  - incident-service/incident-service-service.yaml

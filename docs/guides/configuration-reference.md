@@ -11,7 +11,7 @@ activate them. A feature is **active** when all required variables are set to no
 
 | Capability | Required Variables | Service(s) | Default (dev-k8s) |
 |---|---|---|---|
-| **Chat and sessions** | `AGENT_SERVICE_URL`, `SESSION_STORE_BACKEND`, `SESSION_REDIS_HOST` | platform-gateway, agent-service | enabled |
+| **Chat and sessions** | `AGENT_SERVICE_URL`, `SESSION_STORE_BACKEND`, `SESSION_DB_URL`, `AGENT_STATE_STORE_BACKEND`, `AGENT_STATE_DB_URL` | platform-gateway, agent-service | enabled |
 | **Portal authentication** | `PLATFORM_GATEWAY_REQUIRE_AUTH=true`, `IDENTITY_TOKEN_AUDIENCE` | platform-gateway, identity-service | enabled |
 | **Token delegation** | `PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET` ↔ `IDENTITY_SERVICE_CLIENTS` | platform-gateway ↔ identity-service | **must be provisioned** |
 | **Kubernetes tools** | `GATEWAY_K8S_ENABLED=true`, `GATEWAY_K8S_NAMESPACE` | tool-gateway | enabled (`dev-luban-aiops`) |
@@ -21,8 +21,9 @@ activate them. A feature is **active** when all required variables are set to no
 | **OpenTelemetry push** | `OTEL_ENABLED=true`, `OTEL_EXPORTER_OTLP_ENDPOINT`, auth `OTEL_EXPORTER_OTLP_HEADERS` | all services | enabled (OpenObserve; header via `sync-otel-secrets.sh`) |
 | **LLM runtime** | `AGENTSCOPE_PROVIDER`, `AGENTSCOPE_MODEL_NAME`, `AGENTSCOPE_API_KEY` | agent-service | via runtime profile |
 | **Workload identity** | `PLATFORM_GATEWAY_WORKLOAD_TOKEN_PATH`, `IDENTITY_WORKLOAD_ISSUER_URL`, `IDENTITY_WORKLOAD_CLIENTS` | platform-gateway, identity-service | disabled (dev) |
-| **Durable audit trail** | `*_AUDIT_SERVICE_URL`, `*_AUDIT_CLIENT_SECRET` ↔ `AUDIT_INGEST_CLIENTS` | audit-service, tool-gateway, platform-gateway, identity-service | **must be provisioned** (`sync-audit-secrets.sh`) |
+| **Durable audit trail** | `*_AUDIT_SERVICE_URL`, `*_AUDIT_CLIENT_SECRET` ↔ `AUDIT_INGEST_CLIENTS` | audit-service, tool-gateway, platform-gateway, identity-service, incident-service | **must be provisioned** (`sync-audit-secrets.sh`) |
 | **Skills and grounded guidance** | `SKILLS_SOURCES`, `GATEWAY_SKILLS_SERVICE_URL`, `GATEWAY_SKILLS_CLIENT_SECRET` ↔ `SKILLS_QUERY_CLIENTS` | skills-hub, tool-gateway | **must be provisioned** (`sync-skills-secrets.sh`) |
+| **Incident intake and triage** | `INCIDENT_WEBHOOK_TOKEN`, `PLATFORM_GATEWAY_INCIDENT_SERVICE_URL`, `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET` ↔ `INCIDENT_QUERY_CLIENTS` | incident-service, platform-gateway, tool-gateway | **must be provisioned** (`sync-incident-secrets.sh`) |
 
 ## Cross-Service Dependency Chains
 
@@ -151,6 +152,63 @@ never echoed or committed). `SKIP_SKILLS_SECRETS=true` opts out; unsetting
 audit-service query path, skills-hub uses a dedicated query-credential
 registry from day one (no shared ingest/query credential).
 
+### Incident Intake and Triage Chain
+
+Incident triage delivery (SPEC-015). Alertmanager posts to the webhook with
+the shared bearer token; operators drive queries, manual reports, and triage
+through platform-gateway, which enforces the `incident:*` policy actions and
+relays identity. Triage reuses the chat delegation chain (SPEC-008): the
+operator's delegated bearer is forwarded to incident-service, which uses it
+for the single agent-platform turn in session `incident-<id>`. Agent
+sessions are single-owner, so re-triage by a second operator falls back to
+`incident-<id>--<operator>`; the incident record tracks the session
+actually used, and the portal's Continue in chat follows it. Operator-facing
+workflow detail lives in the
+[Incident Triage and Collaboration Guide](incident-guide.md).
+
+```
+Alertmanager                    incident-service
+┌──────────────────────┐        ┌──────────────────────────┐
+│ POST /api/v1/webhooks│──token─►│ INCIDENT_WEBHOOK_TOKEN   │
+│ /alertmanager        │        │ (fail-closed when unset) │
+└──────────────────────┘        └──────────────────────────┘
+
+platform-gateway / tool-gateway            incident-service
+┌──────────────────────────────┐           ┌──────────────────────────┐
+│ PLATFORM_GATEWAY_INCIDENT_   │── GET /   │ listens on :8000         │
+│ SERVICE_URL                  │   POST ──►│ INCIDENT_QUERY_CLIENTS   │
+│ GATEWAY_INCIDENTS_SERVICE_URL│           │ entry:                   │
+│ = http://incident-service:   │           │ <client_id>=<secret>     │
+│   8000                       │           │                          │
+│ PLATFORM_GATEWAY_INCIDENT_   │── must    │                          │
+│ CLIENT_SECRET /              │   match ─►│                          │
+│ GATEWAY_INCIDENTS_CLIENT_    │           │                          │
+│ SECRET                       │           │                          │
+└──────────────────────────────┘           └──────────────────────────┘
+```
+
+**Secret contract:**
+- `INCIDENT_WEBHOOK_TOKEN` (in `incident-service-runtime-secrets`) — shared
+  bearer for the Alertmanager webhook; empty disables intake with a 503
+- `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET` /
+  `GATEWAY_INCIDENTS_CLIENT_SECRET` (in each gateway's runtime-secrets) —
+  must match the secrets registered for clients `platform-gateway` and
+  `tool-gateway` in `INCIDENT_QUERY_CLIENTS` (in
+  `incident-service-runtime-secrets`), format `client_id=client_secret,...`
+- `INCIDENT_AUDIT_CLIENT_SECRET` (in `incident-service-runtime-secrets`) —
+  the built-in audit connector's ingest credential; must match the
+  `incident-service` entry in `AUDIT_INGEST_CLIENTS`
+
+**Provisioning:** `make deploy` calls `sync-incident-secrets.sh` which
+creates the `incidents` database idempotently, generates the webhook token
+and one shared query secret (or uses exported `INCIDENT_WEBHOOK_TOKEN` /
+`INCIDENT_QUERY_SECRET`), and writes the three K8s secrets.
+`SKIP_INCIDENT_SECRETS=true` opts out; unsetting
+`PLATFORM_GATEWAY_INCIDENT_SERVICE_URL` leaves the portal incidents routes
+fail-closed (503), and unsetting `GATEWAY_INCIDENTS_SERVICE_URL` leaves the
+incident tools unregistered. Like skills-hub, incident-service uses a
+dedicated query-credential registry from day one.
+
 ## Per-Service Environment Variables
 
 ### agent-service
@@ -171,10 +229,16 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime
 | `AGENTSCOPE_REDIS_DB` | Redis database number | `0` | runtime-config |
 | `AGENTSCOPE_WORKSPACE_DIR` | Working directory for session files | `/var/lib/luban-aiops/workspaces/agent-platform` | runtime-config |
 | `AGENTSCOPE_WORKSPACE_TTL_SECONDS` | Workspace cleanup TTL | `3600` | runtime-config |
-| `SESSION_STORE_BACKEND` | Session persistence backend | `redis` | runtime-config |
-| `SESSION_REDIS_HOST` | Redis host for sessions | `redis` | runtime-config |
-| `SESSION_REDIS_PORT` | Redis port for sessions | `6379` | runtime-config |
-| `SESSION_REDIS_DB` | Redis database for sessions | `1` | runtime-config |
+| `SESSION_STORE_BACKEND` | Session persistence backend (`memory` \| `redis` \| `postgres`; unknown values fail startup) | `postgres` | runtime-config |
+| `SESSION_DB_URL` | Postgres DSN for sessions (required for `postgres`) | `postgresql://audit:audit-dev-local@postgres:5432/sessions` | runtime-config |
+| `AGENT_STATE_STORE_BACKEND` | Agent state persistence backend (`memory` \| `postgres`; unknown values fail startup, unreachable Postgres fails open to memory) | `postgres` | runtime-config |
+| `AGENT_STATE_DB_URL` | Postgres DSN for agent state (required for `postgres`; shares the `sessions` database) | `postgresql://audit:audit-dev-local@postgres:5432/sessions` | runtime-config |
+| `AGENT_STATE_TTL_SECONDS` | Sweep TTL for stale agent state rows | `3600` | code default |
+| `AGENTSCOPE_MAX_ITERS` | ReAct loop iteration cap (`ReActConfig.max_iters`; must be >= 1) | `20` | code default |
+| `AGENTSCOPE_CONTEXT_TRIGGER_RATIO` | Long-term memory trigger ratio (`ContextConfig.trigger_ratio`; must be in open interval (0, 0.9)) | `0.8` | code default |
+| `AGENTSCOPE_TOOL_RESULT_LIMIT` | Tool result character limit (`ContextConfig.tool_result_limit`; must be >= 1) | `50000` | code default |
+| `AGENTSCOPE_TIMEZONE` | Runtime-state injection timezone (`InjectionConfig.timezone`; IANA name, validated at startup) | `UTC` | code default |
+| `AGENTSCOPE_MODEL_MAX_RETRIES` | Model call retry count (`ModelConfig.max_retries`; must be >= 0) | `0` | code default |
 | `TOOL_GATEWAY_URL` | Upstream tool-gateway URL | `http://tool-gateway:8000` | runtime-config |
 
 ### platform-gateway
@@ -201,6 +265,10 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runti
 | `PLATFORM_GATEWAY_AUDIT_SERVICE_URL` | Audit-service ingest URL (unset = log-only) | `http://audit-service:8000` | runtime-config |
 | `PLATFORM_GATEWAY_AUDIT_CLIENT_ID` | Audit ingest client id | `platform-gateway` | runtime-config |
 | `PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET` | Audit ingest credential | *(none)* | **runtime-secrets** |
+| `PLATFORM_GATEWAY_INCIDENT_SERVICE_URL` | incident-service base URL (unset = incidents routes fail closed 503) | *(none)* | runtime-config |
+| `PLATFORM_GATEWAY_INCIDENT_CLIENT_ID` | Incident query client id | `platform-gateway` | code default |
+| `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET` | Incident query credential | *(none)* | **runtime-secrets** |
+| `PLATFORM_GATEWAY_INCIDENT_TRIAGE_TIMEOUT_SECONDS` | Triage proxy timeout | `120` | code default |
 
 ### tool-gateway
 
@@ -231,6 +299,9 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-c
 | `GATEWAY_SKILLS_SERVICE_URL` | skills-hub base URL (unset = connector off) | `http://skills-hub:8000` | runtime-config |
 | `GATEWAY_SKILLS_CLIENT_ID` | Skills query client id | `tool-gateway` | runtime-config |
 | `GATEWAY_SKILLS_CLIENT_SECRET` | Skills query credential | *(none)* | **runtime-secrets** |
+| `GATEWAY_INCIDENTS_SERVICE_URL` | incident-service base URL (unset = connector off) | *(none)* | runtime-config |
+| `GATEWAY_INCIDENTS_CLIENT_ID` | Incidents query client id | `tool-gateway` | code default |
+| `GATEWAY_INCIDENTS_CLIENT_SECRET` | Incidents query credential | *(none)* | **runtime-secrets** |
 | `IDENTITY_SERVICE_URL` | Identity broker URL | `http://identity-service:8000` | shared/runtime.env |
 
 ### identity-service
@@ -299,6 +370,27 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-con
 | `SKILLS_WORKLOAD_AUDIENCE` | Projected token audience | `skills-hub` | code default |
 | `SKILLS_WORKLOAD_CLIENTS` | SA subject→client mapping | *(none)* | runtime-secrets |
 
+### incident-service
+
+Source: `products/incident-service/src/incident_service/core/config.py`
+Config fragment: `shared/platform-ops/gitops/dev-k8s/base/incident-service/runtime-config.env`
+
+| Variable | Purpose | Default | Source |
+|---|---|---|---|
+| `INCIDENT_STORE_BACKEND` | Store backend: `memory` or `postgres` | `postgres` (dev-k8s) | runtime-config |
+| `INCIDENT_DB_URL` | PostgreSQL connection URL (database `incidents`) | in-cluster `postgres` service | runtime-config |
+| `INCIDENT_WEBHOOK_TOKEN` | Shared bearer for the Alertmanager webhook (empty = intake disabled, 503) | *(none)* | **runtime-secrets** |
+| `INCIDENT_QUERY_CLIENTS` | Registered query callers (`client_id=secret,...`) | *(none)* | **runtime-secrets** |
+| `INCIDENT_WORKLOAD_ISSUER_URL` | Cluster OIDC issuer for workload tokens (prod) | *(none, disabled)* | runtime-secrets |
+| `INCIDENT_WORKLOAD_AUDIENCE` | Projected token audience | `incident-service` | code default |
+| `INCIDENT_WORKLOAD_CLIENTS` | SA subject→client mapping | *(none)* | runtime-secrets |
+| `INCIDENT_AGENT_SERVICE_URL` | agent-platform chat endpoint for triage turns | `http://agent-service:8000` | runtime-config |
+| `INCIDENT_TRIAGE_TIMEOUT_SECONDS` | Triage turn timeout | `120` | code default |
+| `INCIDENT_CONNECTORS` | Active connector names (registered: `audit`) | `audit` | runtime-config |
+| `INCIDENT_AUDIT_SERVICE_URL` | audit-service ingest URL for the `audit` connector (unset = dispatch skipped) | `http://audit-service:8000` | runtime-config |
+| `INCIDENT_AUDIT_CLIENT_ID` | Audit ingest client id | `incident-service` | runtime-config |
+| `INCIDENT_AUDIT_CLIENT_SECRET` | Audit ingest credential | *(none)* | **runtime-secrets** |
+
 ### Shared (all pods)
 
 Source: `shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env`
@@ -328,6 +420,7 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 |---|---|---|
 | `PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET` | Token exchange credential | `sync-delegation-secrets.sh` |
 | `PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET` | Audit ingest credential | `sync-audit-secrets.sh` |
+| `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET` | Incident query credential | `sync-incident-secrets.sh` |
 | `OTEL_EXPORTER_OTLP_HEADERS` | OTLP ingest auth (Basic) for the OTel push pipeline | `sync-otel-secrets.sh` |
 
 ### `identity-service-runtime-secrets`
@@ -345,6 +438,7 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 |---|---|---|
 | `GATEWAY_AUDIT_CLIENT_SECRET` | Audit ingest credential | `sync-audit-secrets.sh` |
 | `GATEWAY_SKILLS_CLIENT_SECRET` | Skills query credential | `sync-skills-secrets.sh` |
+| `GATEWAY_INCIDENTS_CLIENT_SECRET` | Incidents query credential | `sync-incident-secrets.sh` |
 | `OTEL_EXPORTER_OTLP_HEADERS` | OTLP ingest auth (Basic) for the OTel push pipeline | `sync-otel-secrets.sh` |
 
 ### `audit-service-runtime-secrets`
@@ -360,6 +454,15 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 |---|---|---|
 | `SKILLS_QUERY_CLIENTS` | Query client registry (`client_id=secret,...`) | `sync-skills-secrets.sh` |
 | `SKILLS_GIT_TOKENS` | Git-source PATs (JSON map `source_id`→token); without it a git source fails auth while others keep serving | `SKILLS_GIT_TOKEN=<pat> sync-skills-secrets.sh` (never committed) |
+| `OTEL_EXPORTER_OTLP_HEADERS` | OTLP ingest auth (Basic) for the OTel push pipeline | `sync-otel-secrets.sh` |
+
+### `incident-service-runtime-secrets`
+
+| Key | Purpose | How to Provision |
+|---|---|---|
+| `INCIDENT_WEBHOOK_TOKEN` | Alertmanager webhook bearer token | `sync-incident-secrets.sh` |
+| `INCIDENT_QUERY_CLIENTS` | Query client registry (`client_id=secret,...`) | `sync-incident-secrets.sh` |
+| `INCIDENT_AUDIT_CLIENT_SECRET` | Audit ingest credential for the built-in `audit` connector | `sync-audit-secrets.sh` |
 | `OTEL_EXPORTER_OTLP_HEADERS` | OTLP ingest auth (Basic) for the OTel push pipeline | `sync-otel-secrets.sh` |
 
 ## Runtime Profiles

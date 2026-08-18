@@ -21,6 +21,10 @@
       "type": "string",
       "enum": ["ok", "partial", "error"],
       "default": "ok"
+    },
+    "structured_output": {
+      "type": ["object", "null"],
+      "description": "Validated structured output when the request carried a response_schema (SPEC-017 R-2); null when the turn produced none."
     }
   }
 }

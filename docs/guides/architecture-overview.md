@@ -5,7 +5,7 @@ authorization model for operators who need to understand how the pieces connect.
 
 ## Service Topology
 
-The platform consists of nine workloads deployed to a single Kubernetes namespace
+The platform consists of ten workloads deployed to a single Kubernetes namespace
 (`dev-luban-aiops` by default):
 
 | Service | Image | Role |
@@ -17,8 +17,9 @@ The platform consists of nine workloads deployed to a single Kubernetes namespac
 | **identity-service** | `luban-aiops/identity-service` | Enterprise identity: Keycloak OIDC login, JWT issuance, token exchange for delegation |
 | **audit-service** | `luban-aiops/audit-service` | Durable audit trail: authenticated ingest, retention-bounded store, query API (SPEC-013) |
 | **skills-hub** | `luban-aiops/skills-hub` | Federated skill ingestion and ranked retrieval for grounded guidance (SPEC-014) |
-| **redis** | `redis:7.2-alpine` | In-cluster session store and AgentScope coordination (non-durable in dev) |
-| **postgres** | `postgres:16-alpine` | Durable audit and skills store backend (PVC-backed, dev-only credentials) |
+| **incident-service** | `luban-aiops/incident-service` | Alert/manual incident intake, fingerprint dedupe, agent triage orchestration, connector dispatch (SPEC-015) |
+| **redis** | `redis:7.2-alpine` | AgentScope kernel coordination (non-durable in dev) |
+| **postgres** | `postgres:16-alpine` | Durable audit, skills, incidents, session store, and agent state backend (PVC-backed, dev-only credentials) |
 
 All backend services are Python 3.12 FastAPI applications built on a shared
 `luban-aiops/base-uv` container image (Amazon Linux 2023, non-root uid 1000).
@@ -37,7 +38,7 @@ graph TB
         IB[identity-service<br/>:8000]
         Audit[audit-service<br/>:8000]
         Skills[skills-hub<br/>:8000]
-        Redis[(Redis)]
+        Incident[incident-service<br/>:8000]
         PGDB[(PostgreSQL)]
     end
 
@@ -46,6 +47,7 @@ graph TB
         K8sAPI[Kubernetes API]
         Elastic[Elastic Cluster]
         SkillRepos[Team Skill Sources]
+        Alertmanager[Alertmanager]
     end
 
     User -->|https://aiops.luban.metasync.cc| WebUI
@@ -56,13 +58,19 @@ graph TB
     TG -->|read-only| K8sAPI
     TG -->|read-only| Elastic
     TG -->|skills.search / skills.get / skills.list| Skills
+    TG -->|incidents.list / incidents.get| Incident
     Skills -->|sync local + git| SkillRepos
     Skills -->|store| PGDB
+    Alertmanager -->|webhook, bearer token| Incident
+    PG -->|incidents proxy| Incident
+    Incident -->|triage turn, delegated bearer| AS
+    Incident -->|store| PGDB
     IB -->|OIDC| Keycloak
-    AS -->|sessions| Redis
+    AS -->|sessions + agent state| PGDB
     TG -.->|audit events| Audit
     PG -.->|audit events| Audit
     IB -.->|audit events| Audit
+    Incident -.->|incident_triaged| Audit
     PG -->|audit query proxy| Audit
     Audit -->|store| PGDB
 ```
@@ -124,6 +132,33 @@ sequenceDiagram
     AS-->>PG: SSE stream (text + tool traces)
     PG-->>B: proxied SSE stream
 ```
+
+### Incident Triage Flow (SPEC-015)
+
+Incidents follow a separate, operator-driven loop:
+
+```
+Alertmanager → webhook ─┐
+                        ├─► incident-service (normalize, dedupe, store)
+portal Report form → PG ─┘
+operator Run triage → PG → incident-service → agent-service (session incident-<id>)
+                          ← validated triage report
+incident-service → connectors → audit-service (incident_triaged on the durable trail)
+```
+
+1. Alertmanager posts alert groups to `POST /api/v1/webhooks/alertmanager`
+   (shared bearer token; fail-closed when unconfigured); operators can also
+   report incidents through the portal. Both paths normalize into one
+   canonical incident model with fingerprint-based dedupe and resolution.
+2. Triage is operator-initiated: platform-gateway checks the
+   `incident:triage` action and relays the operator's delegated bearer to
+   incident-service, which runs one agent turn in the `incident-<id>`
+   session. The agent gathers evidence with the read-only tools
+   (`k8s.*`, `elastic.*`, `skills.*`, `incidents.*`) and ends with a fenced
+   `triage-report` JSON block that is schema-validated before storage.
+3. Validated reports dispatch through the connector framework; the built-in
+   `audit` connector puts an `incident_triaged` event on the durable trail.
+   Ranked next steps are advisory — there is no execution surface in R3.
 
 ## Trust Chain
 
@@ -198,6 +233,9 @@ The policy engine enforces deny-by-default authorization on named actions:
 | `session:create` | platform-gateway | Create a new conversation session |
 | `session:read` | platform-gateway | Read session history |
 | `audit:read` | platform-gateway | Query the durable audit trail |
+| `incident:read` | platform-gateway | View incidents and triage reports |
+| `incident:create` | platform-gateway | Report a manual incident |
+| `incident:triage` | platform-gateway | Initiate agent triage of an incident |
 | `tools:list` | tool-gateway | Discover available tools |
 | `tools:invoke` | tool-gateway | Execute a tool |
 
@@ -206,7 +244,7 @@ business action).
 
 ### Default Policy Bundle
 
-The platform ships with five allow rules at priority 100. Everything else is denied:
+The platform ships with eight allow rules at priority 100. Everything else is denied:
 
 | Rule | Roles | Actions |
 |---|---|---|
@@ -215,6 +253,9 @@ The platform ships with five allow rules at priority 100. Everything else is den
 | `allow-operators-tools` | admin, operator, developer, read-only-observer | `tools:invoke` |
 | `allow-operators-tools-list` | admin, operator, developer, read-only-observer | `tools:list` |
 | `allow-auditors-audit-read` | auditor, platform-admin | `audit:read` |
+| `allow-operators-incident-read` | admin, approver, operator, developer, read-only-observer | `incident:read` |
+| `allow-operators-incident-create` | admin, approver, operator, developer | `incident:create` |
+| `allow-operators-incident-triage` | admin, approver, operator, developer | `incident:triage` |
 
 > **Note:** The `read-only-observer` tool grants assume all registered tools are read-only
 > (tier-0 reads). Before any mutating tool is registered, these rules must be re-scoped.

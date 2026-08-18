@@ -34,6 +34,13 @@ governed by the policy bundle.
 | `skills.get` | Fetch one full skill record by namespaced id | `skill_id` (required, `<source_id>/<slug>`) | read |
 | `skills.list` | List registered skills (summaries, no bodies) to discover what guidance exists | `source` (optional), `tag` (optional), `limit` (default/max 20), `offset` (default 0) | read |
 
+### Incidents Connector Tools
+
+| Tool | Description | Parameters | Risk |
+|---|---|---|---|
+| `incidents.list` | List tracked incidents (summary fields, newest first) with optional status/severity/source filters | `status` (optional: `new`, `triaging`, `triaged`, `triage_failed`, `resolved`), `severity` (optional: `critical`, `warning`, `info`), `source` (optional: `alertmanager`, `manual`), `limit` (default 20), `offset` (default 0) | read |
+| `incidents.get` | Fetch one full incident record including the latest triage report and connector dispatch outcomes | `incident_id` (required, `inc-...`) | read |
+
 > **Important:** All registered tools are currently read-only. Before any mutating (write or
 > admin) tool is registered, the policy bundle must be updated to scope the
 > `read-only-observer` grants to read-only tools only.
@@ -172,6 +179,49 @@ An empty search or list result is a success (`{"matches": [], "total": 0}` /
 `{"skills": [], "total": 0}`), not an error — the agent reports that no team
 guidance matched.
 
+## Incidents Connector
+
+The incidents connector provides read-only access to tracked incidents and
+their triage reports through the standalone `incident-service` product
+(SPEC-015). It lets the agent ground answers in the live incident record
+("what else is open?", "what did triage conclude for this incident?"). The
+connector registers only when `GATEWAY_INCIDENTS_SERVICE_URL` is set. There
+is deliberately no mutating incident tool — reporting and triage flow
+through platform-gateway under the `incident:create` / `incident:triage`
+policy actions instead.
+
+### Activation Checklist
+
+- [ ] **incident-service deployed** — the `incident-service` workload is
+      running and ready (`/health/ready`)
+- [ ] **`GATEWAY_INCIDENTS_SERVICE_URL=<url>`** — incident-service base URL
+      (dev-k8s commits `http://incident-service:8000`)
+- [ ] **`GATEWAY_INCIDENTS_CLIENT_ID`** — query client id (default `tool-gateway`)
+- [ ] **`GATEWAY_INCIDENTS_CLIENT_SECRET`** — must match the entry in the
+      incident-service's `INCIDENT_QUERY_CLIENTS` registry
+      (`incident-service-runtime-secrets`)
+- [ ] **Network reachability** — the tool-gateway pod must be able to reach
+      incident-service
+
+**Provisioning shortcut (dev-k8s):** `make deploy` runs
+`sync-incident-secrets.sh`, which creates the `incidents` database, generates
+the webhook token and one shared query secret, and writes the K8s secrets.
+Use `SKIP_INCIDENT_SECRETS=true make deploy` when CI injects them.
+
+### Verification
+
+```bash
+# Confirm the incidents tools are registered:
+kubectl -n dev-luban-aiops port-forward service/tool-gateway 18100:8000
+curl -s http://127.0.0.1:18100/api/v1/tools | jq '.[].name'
+# Should include: incidents.list, incidents.get
+```
+
+If an incident id does not exist, `incidents.get` returns a structured
+`INCIDENT_NOT_FOUND` error. If incident-service is unreachable, the incidents
+tools return `TOOL_EXECUTION_ERROR`. An empty list result is a success
+(`{"incidents": [], "total": 0}`), not an error.
+
 ## Output Redaction
 
 All tool results pass through a redaction engine before being returned to the agent and
@@ -196,9 +246,9 @@ is predominantly secrets.
 ## Audit Service Activation (SPEC-013)
 
 The durable audit trail is delivered by the standalone `audit-service` product, not a
-tool-gateway connector. Emitters (tool-gateway, platform-gateway, identity-service)
-forward audit events fire-and-forget; with no URL configured they keep today's log-only
-behavior.
+tool-gateway connector. Emitters (tool-gateway, platform-gateway, identity-service,
+incident-service) forward audit events fire-and-forget; with no URL configured they keep
+today's log-only behavior.
 
 ### Activation Checklist
 
@@ -207,9 +257,10 @@ behavior.
 - [ ] **Ingest registry** — `AUDIT_INGEST_CLIENTS=client_id=secret,...` in
       `audit-service-runtime-secrets` (one entry per emitter)
 - [ ] **Emitter URLs** — `GATEWAY_AUDIT_SERVICE_URL`, `PLATFORM_GATEWAY_AUDIT_SERVICE_URL`,
-      `IDENTITY_AUDIT_SERVICE_URL` (dev-k8s commits `http://audit-service:8000`)
+      `IDENTITY_AUDIT_SERVICE_URL`, `INCIDENT_AUDIT_SERVICE_URL` (dev-k8s commits
+      `http://audit-service:8000`)
 - [ ] **Emitter client ids** — `GATEWAY_AUDIT_CLIENT_ID`, `PLATFORM_GATEWAY_AUDIT_CLIENT_ID`,
-      `IDENTITY_AUDIT_CLIENT_ID` must match the registry entries
+      `IDENTITY_AUDIT_CLIENT_ID`, `INCIDENT_AUDIT_CLIENT_ID` must match the registry entries
 - [ ] **Emitter secrets** — `*_AUDIT_CLIENT_SECRET` in each emitter's `*-runtime-secrets`
       must match the secret registered for its client id
 - [ ] **Retention** — `AUDIT_RETENTION_DAYS` (default 30) and `AUDIT_MAX_EVENTS`
@@ -219,7 +270,7 @@ behavior.
       client-gated to the same roles
 
 **Provisioning shortcut (dev-k8s):** `make deploy` runs `sync-audit-secrets.sh`, which
-generates one shared ingest secret and writes all four K8s secrets. Use
+generates one shared ingest secret and writes all five K8s secrets. Use
 `SKIP_AUDIT_SECRETS=true make deploy` when CI injects them.
 
 ### Verification

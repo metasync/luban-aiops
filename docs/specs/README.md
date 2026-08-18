@@ -128,3 +128,7 @@ Mechanical enforcement:
 | `SPEC-012` | Operator guide and deployment documentation — getting started, configuration, troubleshooting, tools, architecture | `delivered` |
 | `SPEC-013` | Durable audit trail — audit event contract, audit service store, permission-scoped query API | `delivered` |
 | `SPEC-014` | Skills and grounded guidance — skills-hub ingestion/retrieval, skills.search tool, cited answers | `delivered` |
+| `SPEC-015` | Incident triage and collaboration — incident-service intake/triage, connector framework, portal Incidents experience | `delivered` |
+| `SPEC-016` | Session store separation — Postgres session backend for agent-platform, kernel Redis untouched | `delivered` |
+| `SPEC-017` | Agent kernel utilization and conversation durability — kernel configs, structured triage output, AgentState persistence to Postgres | `delivered` |
+| `SPEC-018` | Kernel middleware alignment — middleware-based tracing/permission hooks, built-in task tools (sequenced after SPEC-017) | `planned` |

@@ -18,6 +18,7 @@ EventType = Literal[
     "session_created",
     "chat_started",
     "chat_completed",
+    "incident_triaged",
 ]
 
 Outcome = Literal["allow", "deny", "success", "error"]

@@ -11,6 +11,7 @@ Luban AIOps platform.
 | [Configuration Reference](configuration-reference.md) | Environment variables, secrets, and cross-service dependencies |
 | [Tool and Connector Guide](tool-configuration.md) | Tool inventory, K8s/Elastic/skills activation checklists, audit-service activation, adding new connectors |
 | [Skills and Guidance Guide](skills-guide.md) | Managing skill content: add, revise, remove skills and sources; verification and troubleshooting |
+| [Incident Triage and Collaboration Guide](incident-guide.md) | Alertmanager wiring, incident lifecycle, running and interpreting triage, collaboration semantics |
 | [Architecture Overview](architecture-overview.md) | Service topology, request flow, trust chain, RBAC model |
 | [Troubleshooting](troubleshooting.md) | Symptom-based diagnostics for common deployment and runtime issues |
 
@@ -26,5 +27,5 @@ Luban AIOps platform.
 - [Delivery Roadmap](../agentic-aiops-platform/delivery-roadmap.md) — release sequence and themes
 - [Policy Specification](../agentic-aiops-platform/policy-specification.md) — full policy model
 - [Authorization Matrix](../agentic-aiops-platform/authorization-matrix.md) — role-to-action mapping
-- [Spec Index](../specs/README.md) — implementation specs (SPEC-001 through SPEC-014)
+- [Spec Index](../specs/README.md) — implementation specs (SPEC-001 through SPEC-015)
 - [Dev K8s Overlay](../../shared/platform-ops/gitops/dev-k8s/README.md) — deployer's reference

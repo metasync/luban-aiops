@@ -800,6 +800,159 @@ body {
   color: var(--text-muted);
 }
 
+/* --- Incident triage view (SPEC-015 R-6) ---
+   Reuses the audit toolbar/results/footer vocabulary: filters on top, a
+   self-scrolling results area, and a status line below. The manual report
+   form folds in under the toolbar when an acting role toggles it open. */
+.incidents-report-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.incidents-report-form label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.incidents-report-form input,
+.incidents-report-form textarea,
+.incidents-report-form select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+
+.incidents-report-form textarea { resize: vertical; }
+
+.incidents-report-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.incident-row { cursor: pointer; }
+.incident-row:hover { background: var(--surface); }
+
+.incident-detail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.incident-detail-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.incident-detail-header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.incident-badges {
+  display: flex;
+  gap: 6px;
+}
+
+.incident-meta { flex-wrap: wrap; }
+
+.incident-summary {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.incident-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.incident-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.incident-section h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--accent);
+}
+
+.incident-section h4 {
+  margin: 6px 0 4px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.incident-section ul,
+.incident-section ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.incident-section li { margin: 4px 0; }
+
+/* Step rationale stays secondary under the bold step title. */
+.incident-section li p {
+  margin: 2px 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.incident-report-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.incident-raw summary {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.incident-raw pre {
+  font-size: 0.75rem;
+  background: var(--code-bg);
+  padding: 8px;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  max-height: 240px;
+}
+
+/* Severity/status/source/dispatch/priority badges layered on .status-badge,
+   mirroring its existing success/error coloring conventions. */
+.status-badge.sev-critical { background: #7f1d1d; color: var(--error); }
+.status-badge.sev-warning { background: #78350f; color: var(--warning); }
+.status-badge.sev-info { background: var(--surface-alt); color: var(--text-muted); }
+.status-badge.st-new { background: #0c4a6e; color: var(--accent); }
+.status-badge.st-triaging { background: #1e3a8a; color: #93c5fd; }
+.status-badge.st-triaged { background: #166534; color: var(--success); }
+.status-badge.st-triage_failed { background: #7f1d1d; color: var(--error); }
+.status-badge.st-resolved { background: var(--surface-alt); color: var(--text-muted); }
+.status-badge.src-alertmanager,
+.status-badge.src-manual { background: var(--surface-alt); color: var(--text-muted); }
+.status-badge.dsp-delivered { background: #166534; color: var(--success); }
+.status-badge.dsp-failed { background: #7f1d1d; color: var(--error); }
+.status-badge.prio-high { background: #7f1d1d; color: var(--error); }
+.status-badge.prio-medium { background: #78350f; color: var(--warning); }
+.status-badge.prio-low { background: var(--surface-alt); color: var(--text-muted); }
+
 /* --- Narrow screens: hamburger + off-canvas drawer ---
    Below 800px the sidebar slides in from the left over a backdrop instead
    of stacking into a top band, so the active view keeps its full height. */

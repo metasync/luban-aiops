@@ -43,7 +43,7 @@ async def chat(
     request_id: str,
 ) -> ChatResponse:
     session = ensure_session(session_id, user_id)
-    response = await get_runtime_kernel().reply_text(
+    response, _structured = await get_runtime_kernel().reply_text(
         message=message,
         session_id=session.session_id,
         user_name=user_id or "user",

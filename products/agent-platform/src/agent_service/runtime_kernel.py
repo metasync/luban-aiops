@@ -4,8 +4,10 @@ import logging
 from collections import OrderedDict
 from collections.abc import AsyncIterator
 
+from agent_service.core.metrics import record_agent_state_error
 from agent_service.providers import get_provider
 from agent_service.runtime_settings import RuntimeSettings
+from agent_service.services.agent_state_store import AGENT_STATE_STORE
 
 LOGGER = logging.getLogger(__name__)
 MAX_CACHED_AGENTS = 1000
@@ -272,16 +274,103 @@ class AgentKernel:
             return 0
         return sum(1 for schema in schemas if schema.get("type") == "function")
 
-    async def _build_agent(self, bearer_token: str | None = None):
+    def _build_kernel_configs(self):
+        """Settings-driven kernel configs (SPEC-017 R-1).
+
+        Defaults mirror agentscope's own defaults, so unset deployments
+        behave exactly as before the settings existed.
+        """
+        from agentscope.agent import (
+            ContextConfig,
+            InjectionConfig,
+            ModelConfig,
+            ReActConfig,
+        )
+
+        settings = self.settings
+        return {
+            "model_config": ModelConfig(max_retries=settings.model_max_retries),
+            "context_config": ContextConfig(
+                trigger_ratio=settings.context_trigger_ratio,
+                tool_result_limit=settings.tool_result_limit,
+            ),
+            "react_config": ReActConfig(max_iters=settings.max_iters),
+            "injection_config": InjectionConfig(
+                inject_runtime_state=True,
+                timezone=settings.timezone,
+            ),
+        }
+
+    def _restore_state(self, session_id: str):
+        """Load a persisted AgentState for the session, if any (SPEC-017 R-3).
+
+        A missing row returns None (fresh agent); a corrupt row is discarded
+        with a WARNING and a counter so a poisoned snapshot can never wedge
+        a session.
+        """
+        try:
+            raw = AGENT_STATE_STORE.load_state(session_id)
+        except Exception as exc:
+            record_agent_state_error("restore")
+            LOGGER.warning(
+                "agent state restore failed for session %s: %s", session_id, exc
+            )
+            return None
+        if raw is None:
+            return None
+        try:
+            from agentscope.state import AgentState
+
+            return AgentState.model_validate_json(raw)
+        except Exception as exc:
+            record_agent_state_error("restore")
+            LOGGER.warning(
+                "discarding corrupt persisted agent state for session %s: %s",
+                session_id,
+                exc,
+            )
+            return None
+
+    def _snapshot_state(self, session_id: str, agent) -> None:
+        """Persist the agent state after a completed turn (SPEC-017 R-3).
+
+        Never raises: a failed snapshot degrades durability, not the turn.
+        """
+        try:
+            state_json = agent.state.model_dump_json()
+            AGENT_STATE_STORE.save_state(session_id, state_json)
+        except Exception as exc:
+            record_agent_state_error("snapshot")
+            LOGGER.warning(
+                "agent state snapshot failed for session %s: %s", session_id, exc
+            )
+
+    async def _build_agent(self, session_id: str, bearer_token: str | None = None):
         from agentscope.agent import Agent
         from agentscope.message import UserMsg
 
         toolkit = await self._ensure_toolkit(bearer_token)
+        configs = self._build_kernel_configs()
+        state = self._restore_state(session_id)
         agent = Agent(
             name=self.settings.agent_name,
             system_prompt=self.settings.system_prompt,
             model=self._build_model(),
             toolkit=toolkit,
+            state=state,
+            **configs,
+        )
+        LOGGER.info(
+            "kernel agent constructed",
+            extra={
+                "session_id": session_id,
+                "max_iters": self.settings.max_iters,
+                "context_trigger_ratio": self.settings.context_trigger_ratio,
+                "tool_result_limit": self.settings.tool_result_limit,
+                "timezone": self.settings.timezone,
+                "model_max_retries": self.settings.model_max_retries,
+                "state_restored": state is not None,
+            },
         )
         return agent, UserMsg
 
@@ -303,7 +392,7 @@ class AgentKernel:
             if cached is not None:
                 self._agents.move_to_end(session_id)
                 return cached
-            agent, user_msg_cls = await self._build_agent(bearer_token)
+            agent, user_msg_cls = await self._build_agent(session_id, bearer_token)
             self._agents[session_id] = (agent, user_msg_cls)
             while len(self._agents) > self._max_cached_agents:
                 self._agents.popitem(last=False)
@@ -354,19 +443,36 @@ class AgentKernel:
         session_id: str,
         user_name: str,
         bearer_token: str | None = None,
-    ) -> str:
+        response_schema: dict | None = None,
+    ) -> tuple[str, dict | None]:
+        """Run one blocking turn.
+
+        Returns the reply text and, when ``response_schema`` was supplied,
+        the kernel-validated structured output carried on the final message
+        (SPEC-017 R-2) — ``None`` when the turn ended without producing one.
+        """
         if not self.is_configured():
-            return self.build_unconfigured_message(message, session_id)
+            return self.build_unconfigured_message(message, session_id), None
 
         try:
             agent, user_msg_cls = await self.ensure_agent(session_id, bearer_token)
-            reply_msg = await agent.reply(user_msg_cls(name=user_name, content=message))
+            reply_msg = await agent.reply(
+                user_msg_cls(name=user_name, content=message),
+                structured_schema=response_schema,
+            )
             self.clear_error()
-            return extract_text(getattr(reply_msg, "content", reply_msg))
+            structured = getattr(reply_msg, "structured_output", None)
+            if not isinstance(structured, dict):
+                structured = None
+            self._snapshot_state(session_id, agent)
+            return (
+                extract_text(getattr(reply_msg, "content", reply_msg)),
+                structured,
+            )
         except Exception as exc:  # pragma: no cover - defensive fallback
             self.remember_error(exc)
             LOGGER.exception("AgentScope reply failed; falling back to runtime error response: %s", exc)
-            return self.build_provider_error_message(message, session_id)
+            return self.build_provider_error_message(message, session_id), None
 
     def normalize_event(
         self,
@@ -460,6 +566,10 @@ class AgentKernel:
                     "request_id": request_id,
                     "session_id": session_id,
                 }
+
+            # Persist conversation state after the completed turn so it
+            # survives restarts (SPEC-017 R-3). Fail-open by design.
+            self._snapshot_state(session_id, agent)
         except Exception as exc:  # pragma: no cover - defensive fallback
             self.remember_error(exc)
             LOGGER.exception("AgentScope streaming failed; falling back to runtime error response: %s", exc)

@@ -7,6 +7,13 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-17-r3-incident-triage-and-collaboration.md`
+  - delivers Release 3 with SPEC-015: new `incident-service` product
+    (Alertmanager webhook + manual intake, fingerprint dedupe, dual-backend
+    store), operator-initiated agent triage with validated triage reports,
+    pluggable connector framework with the built-in audit sink, read-only
+    `incidents.list` / `incidents.get` tools, the portal Incidents panel,
+    dev-k8s wiring, and a deterministic e2e demo smoke test
 - `2026-08-15-skills-and-grounded-guidance.md`
   - opens Release 2 with SPEC-014: canonical skill contract, new
     `skills-hub` product (federated multi-source ingestion, deterministic

@@ -25,7 +25,8 @@ LUBAN_DEFAULTS_INCLUDED := 1
 IMAGE_PLATFORM ?= linux/amd64
 
 # Coordinated image tag prefix/profile used by the root `make build`
-# (final tag: <prefix>[-<profile>]-<gitsha>[-dirty-<timestamp>]).
+# (final tag: <semver>-<prefix>[-<profile>]-<gitsha>[-dirty-<timestamp>];
+# the semver comes from the root VERSION file).
 IMAGE_TAG_PREFIX  ?= dev-k8s
 IMAGE_TAG_PROFILE ?=
 

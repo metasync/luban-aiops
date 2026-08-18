@@ -1,3 +1,5 @@
+import pytest
+
 from agent_service.native_service import NativeServiceSettings
 from agent_service.runtime_settings import (
     DEFAULT_SYSTEM_PROMPT,
@@ -19,6 +21,30 @@ def test_default_system_prompt_carries_skills_discipline(monkeypatch):
     assert "not live" in DEFAULT_SYSTEM_PROMPT
     # Honest no-match reporting.
     assert "no team guidance matched" in DEFAULT_SYSTEM_PROMPT
+
+    monkeypatch.delenv("AGENTSCOPE_SYSTEM_PROMPT", raising=False)
+    settings = RuntimeSettings.from_env()
+    assert settings.system_prompt == DEFAULT_SYSTEM_PROMPT
+
+
+def test_default_system_prompt_carries_triage_discipline(monkeypatch):
+    """SPEC-015 R-3 (updated by SPEC-017 R-2): the default prompt teaches the
+    triage discipline; delivery is format-neutral — the structured-output
+    tool carries the report when active, and the incident-service turn
+    prompt supplies any fallback format."""
+    # Read-only evidence gathering.
+    assert "read-only" in DEFAULT_SYSTEM_PROMPT
+    # The report fields the capture pipeline validates.
+    for field in (
+        "incident_id", "summary", "severity_assessment", "evidence",
+        "hypotheses", "next_steps", "skills_cited", "session_id",
+        "generated_at", "generated_by",
+    ):
+        assert field in DEFAULT_SYSTEM_PROMPT
+    # Next steps are advisory only — R3 executes nothing.
+    assert "advisory" in DEFAULT_SYSTEM_PROMPT
+    # Structured output is delivered through the kernel tool, not prose.
+    assert "structured-output" in DEFAULT_SYSTEM_PROMPT
 
     monkeypatch.delenv("AGENTSCOPE_SYSTEM_PROMPT", raising=False)
     settings = RuntimeSettings.from_env()
@@ -191,3 +217,98 @@ def test_runtime_settings_reject_mismatched_provider_options():
         assert "provider_options type does not match" in str(exc)
     else:  # pragma: no cover - defensive assertion
         raise AssertionError("Mismatched provider options should be rejected")
+
+
+# ---------------------------------------------------------------------------
+# SPEC-017 R-1: kernel utilization settings
+# ---------------------------------------------------------------------------
+
+
+def test_kernel_settings_defaults_match_agentscope(monkeypatch):
+    """Unset deployments behave exactly as before the settings existed."""
+    for name in (
+        "AGENTSCOPE_MAX_ITERS",
+        "AGENTSCOPE_CONTEXT_TRIGGER_RATIO",
+        "AGENTSCOPE_TOOL_RESULT_LIMIT",
+        "AGENTSCOPE_TIMEZONE",
+        "AGENTSCOPE_MODEL_MAX_RETRIES",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.max_iters == 20
+    assert settings.context_trigger_ratio == 0.8
+    assert settings.tool_result_limit == 50000
+    assert settings.timezone == "UTC"
+    assert settings.model_max_retries == 0
+
+
+def test_kernel_settings_read_env(monkeypatch):
+    monkeypatch.setenv("AGENTSCOPE_MAX_ITERS", "30")
+    monkeypatch.setenv("AGENTSCOPE_CONTEXT_TRIGGER_RATIO", "0.6")
+    monkeypatch.setenv("AGENTSCOPE_TOOL_RESULT_LIMIT", "20000")
+    monkeypatch.setenv("AGENTSCOPE_TIMEZONE", "Asia/Shanghai")
+    monkeypatch.setenv("AGENTSCOPE_MODEL_MAX_RETRIES", "2")
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.max_iters == 30
+    assert settings.context_trigger_ratio == 0.6
+    assert settings.tool_result_limit == 20000
+    assert settings.timezone == "Asia/Shanghai"
+    assert settings.model_max_retries == 2
+
+
+def test_kernel_settings_reject_zero_max_iters():
+    try:
+        RuntimeSettings(max_iters=0)
+    except ValueError as exc:
+        assert "AGENTSCOPE_MAX_ITERS" in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("max_iters < 1 should be rejected")
+
+
+@pytest.mark.parametrize("ratio", [0.0, -0.1, 0.9, 1.2])
+def test_kernel_settings_reject_out_of_range_trigger_ratio(ratio):
+    # agentscope ContextConfig requires 0 < trigger_ratio < 0.9.
+    try:
+        RuntimeSettings(context_trigger_ratio=ratio)
+    except ValueError as exc:
+        assert "AGENTSCOPE_CONTEXT_TRIGGER_RATIO" in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError(f"trigger_ratio={ratio} should be rejected")
+
+
+def test_kernel_settings_reject_zero_tool_result_limit():
+    try:
+        RuntimeSettings(tool_result_limit=0)
+    except ValueError as exc:
+        assert "AGENTSCOPE_TOOL_RESULT_LIMIT" in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("tool_result_limit < 1 should be rejected")
+
+
+def test_kernel_settings_reject_negative_model_max_retries():
+    try:
+        RuntimeSettings(model_max_retries=-1)
+    except ValueError as exc:
+        assert "AGENTSCOPE_MODEL_MAX_RETRIES" in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("model_max_retries < 0 should be rejected")
+
+
+def test_kernel_settings_reject_unknown_timezone():
+    try:
+        RuntimeSettings(timezone="Mars/Olympus_Mons")
+    except ValueError as exc:
+        assert "AGENTSCOPE_TIMEZONE" in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("Unknown timezone should be rejected")
+
+
+def test_default_system_prompt_is_format_neutral_for_triage():
+    """SPEC-017 R-2: structured output is delivered through the kernel's
+    structured-output tool when active; the prompt must not hard-wire the
+    fenced-block format as the only channel."""
+    assert "structured-output" in DEFAULT_SYSTEM_PROMPT

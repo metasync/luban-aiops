@@ -36,6 +36,43 @@ class GatewayRunSettingsTests(unittest.TestCase):
                 settings = PlatformGatewaySettings.from_env()
             self.assertEqual(settings.require_auth, expected, raw_value)
 
+    def test_gateway_settings_incident_proxy_defaults(self) -> None:
+        """SPEC-015 R-7: incident proxy settings default off."""
+        import os
+        from unittest.mock import patch
+
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("PLATFORM_GATEWAY_INCIDENT_")
+        }
+        with patch.dict(os.environ, env, clear=True):
+            settings = PlatformGatewaySettings.from_env()
+
+        self.assertEqual(settings.incident_service_url, "")
+        self.assertEqual(settings.incident_client_id, "platform-gateway")
+        self.assertEqual(settings.incident_client_secret, "")
+        self.assertEqual(settings.incident_triage_timeout_seconds, 120.0)
+
+    def test_gateway_settings_incident_proxy_reads_env(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {
+            "PLATFORM_GATEWAY_INCIDENT_SERVICE_URL": "http://incident-service:8000",
+            "PLATFORM_GATEWAY_INCIDENT_CLIENT_ID": "gateway",
+            "PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET": "secret",
+            "PLATFORM_GATEWAY_INCIDENT_TRIAGE_TIMEOUT_SECONDS": "90",
+        }):
+            settings = PlatformGatewaySettings.from_env()
+
+        self.assertEqual(
+            settings.incident_service_url, "http://incident-service:8000"
+        )
+        self.assertEqual(settings.incident_client_id, "gateway")
+        self.assertEqual(settings.incident_client_secret, "secret")
+        self.assertEqual(settings.incident_triage_timeout_seconds, 90.0)
+
     def test_gateway_run_settings_read_env(self) -> None:
         import os
 

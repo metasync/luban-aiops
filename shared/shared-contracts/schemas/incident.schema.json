@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/incident.schema.json",
+  "title": "Incident (v1)",
+  "description": "Canonical incident envelope (SPEC-015 R-1). incident-service builds one envelope per normalized alert group (Alertmanager webhook) or manual operator report and stores/serves it verbatim. fingerprint is the dedupe key: the Alertmanager groupKey (or a stable hash of the label set) for alertmanager incidents, a 'manual:' marker for manual reports. status advances new -> triaging -> triaged | triage_failed; resolved is terminal for the intake lifecycle. triage_raw preserves the raw agent reply only when triage fails validation, so operators can inspect what went wrong. session_id names the dedicated agent session carrying the triage conversation (incident-<incident_id>, or incident-<incident_id>--<operator> when a second operator re-triages).",
+  "type": "object",
+  "required": [
+    "incident_id",
+    "fingerprint",
+    "source",
+    "severity",
+    "status",
+    "title",
+    "summary",
+    "labels",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "incident_id": {
+      "type": "string",
+      "pattern": "^inc-[a-z0-9-]+$",
+      "description": "Globally unique incident id assigned by incident-service."
+    },
+    "fingerprint": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Dedupe key: Alertmanager groupKey (or hash of the label set) for webhook incidents; 'manual:' marker for manual reports."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["alertmanager", "manual"],
+      "description": "Intake channel that created the incident."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "warning", "info"],
+      "description": "Normalized severity; webhook intake maps the Alertmanager severity label, defaulting to warning."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["new", "triaging", "triaged", "triage_failed", "resolved"],
+      "description": "Incident lifecycle status."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Short human-readable title (alert summary annotation or operator-provided)."
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 2000,
+      "description": "Incident description (alert description annotation or operator-provided)."
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {"type": "string"},
+      "description": "Normalized label map (Alertmanager commonLabels or operator-provided)."
+    },
+    "reported_by": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "Operator name for manual incidents; absent for webhook intake."
+    },
+    "session_id": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "Dedicated agent session (incident-<incident_id>) once triage has run; absent before first triage."
+    },
+    "triage_raw": {
+      "type": "string",
+      "maxLength": 65536,
+      "description": "Raw agent reply preserved when triage failed validation; absent otherwise."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Intake-side UTC timestamp (RFC 3339)."
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp (RFC 3339) of the last status or report change."
+    },
+    "resolved_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp (RFC 3339) when the incident was resolved; absent otherwise."
+    }
+  },
+  "additionalProperties": false
+}

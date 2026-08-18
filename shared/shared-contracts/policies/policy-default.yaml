@@ -77,3 +77,40 @@ rules:
       actions_any: ["audit:read"]
     decision:
       outcome: allow
+
+  # Incident vocabulary (SPEC-015): incident:read is a viewing surface, so
+  # read-only-observer joins the operational roles; incident:create and
+  # incident:triage stay with the operational/developer roles. Triage next
+  # steps are advisory only — no execution action exists in R3.
+  - id: allow-operators-incident-read
+    domain: action_authz
+    description: Operational, developer, and observer roles may view incidents and triage reports.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator", "developer", "read-only-observer"]
+      actions_any: ["incident:read"]
+    decision:
+      outcome: allow
+
+  - id: allow-operators-incident-create
+    domain: action_authz
+    description: Operational and developer roles may report manual incidents.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator", "developer"]
+      actions_any: ["incident:create"]
+    decision:
+      outcome: allow
+
+  - id: allow-operators-incident-triage
+    domain: action_authz
+    description: Operational and developer roles may initiate agent triage of an incident.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator", "developer"]
+      actions_any: ["incident:triage"]
+    decision:
+      outcome: allow

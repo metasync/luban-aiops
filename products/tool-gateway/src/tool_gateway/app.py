@@ -54,6 +54,17 @@ def _build_tool_registry() -> ToolRegistry:
         connector.register_tools(registry)
         LOGGER.info("skills connector registered")
 
+    if settings.incidents_service_url:
+        from tool_gateway.tools.incidents_connector import IncidentsConnector
+
+        connector = IncidentsConnector(
+            url=settings.incidents_service_url,
+            client_id=settings.incidents_client_id,
+            client_secret=settings.incidents_client_secret,
+        )
+        connector.register_tools(registry)
+        LOGGER.info("incidents connector registered")
+
     return registry
 
 

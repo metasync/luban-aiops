@@ -8,7 +8,7 @@
 # Basic auth on ingest, delivered via OTEL_EXPORTER_OTLP_HEADERS. This script
 # computes the header from the OpenObserve root credentials and upserts it
 # into every service's runtime-secrets.env (in place, preserving all other
-# secrets), syncs the six Kubernetes Secrets, and restarts the workloads.
+# secrets), syncs the seven Kubernetes Secrets, and restarts the workloads.
 #
 # Usage:
 #   OO_ROOT_USER_EMAIL=... OO_ROOT_USER_PASSWORD=... \
@@ -100,6 +100,7 @@ fi
 for entry in \
   "audit-service-runtime-secrets|$BASE_DIR/audit-service/runtime-secrets.env" \
   "identity-service-runtime-secrets|$BASE_DIR/identity-broker/runtime-secrets.env" \
+  "incident-service-runtime-secrets|$BASE_DIR/incident-service/runtime-secrets.env" \
   "platform-gateway-runtime-secrets|$BASE_DIR/platform-gateway/runtime-secrets.env" \
   "skills-hub-runtime-secrets|$BASE_DIR/skills-hub/runtime-secrets.env" \
   "tool-gateway-runtime-secrets|$BASE_DIR/tool-gateway/runtime-secrets.env"
@@ -110,10 +111,10 @@ do
   sync_secret "$secret_name" "$env_file"
 done
 
-# --- restart all six workloads ------------------------------------------------
+# --- restart all seven workloads ----------------------------------------------
 
 for deployment in agent-service audit-service identity-service \
-  platform-gateway skills-hub tool-gateway
+  incident-service platform-gateway skills-hub tool-gateway
 do
   kubectl -n "$NAMESPACE" rollout restart "deployment/$deployment"
 done
@@ -121,7 +122,7 @@ done
 echo ""
 echo "OTel ingest credentials provisioned. Waiting for rollout..."
 for deployment in agent-service audit-service identity-service \
-  platform-gateway skills-hub tool-gateway
+  incident-service platform-gateway skills-hub tool-gateway
 do
   kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout=120s
 done

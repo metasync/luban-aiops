@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: incident-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: incident-service
+  template:
+    metadata:
+      labels:
+        app: incident-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8000"
+    spec:
+      # Service-link env vars (INCIDENT_SERVICE_PORT=tcp://…) collide with the
+      # service's own port setting; service discovery uses DNS names instead.
+      enableServiceLinks: false
+      containers:
+        - name: incident-service
+          image: luban-aiops/incident-service:dev-local
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+          envFrom:
+            - configMapRef:
+                name: platform-runtime-config
+            - secretRef:
+                name: incident-service-runtime-secrets
+                optional: true
+          ports:
+            - containerPort: 8000
+          # Probes need headroom beyond the 1s default: while the dev host is
+          # under load (e.g. after VM sleep/wake) healthy responses were taking
+          # 2-4s, which triggered needless liveness kills and crash loops.
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 4

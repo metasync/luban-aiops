@@ -40,6 +40,10 @@ class PlatformGatewaySettings:
     audit_service_url: str = ""
     audit_client_id: str = "platform-gateway"
     audit_client_secret: str = ""
+    incident_service_url: str = ""
+    incident_client_id: str = "platform-gateway"
+    incident_client_secret: str = ""
+    incident_triage_timeout_seconds: float = 120.0
 
     @classmethod
     def from_env(cls) -> "PlatformGatewaySettings":
@@ -91,6 +95,18 @@ class PlatformGatewaySettings:
             ),
             audit_client_secret=os.getenv(
                 "PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET", ""
+            ),
+            incident_service_url=os.getenv(
+                "PLATFORM_GATEWAY_INCIDENT_SERVICE_URL", ""
+            ),
+            incident_client_id=os.getenv(
+                "PLATFORM_GATEWAY_INCIDENT_CLIENT_ID", "platform-gateway"
+            ),
+            incident_client_secret=os.getenv(
+                "PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET", ""
+            ),
+            incident_triage_timeout_seconds=float(
+                os.getenv("PLATFORM_GATEWAY_INCIDENT_TRIAGE_TIMEOUT_SECONDS", "120")
             ),
         )
 

@@ -61,6 +61,7 @@ Current implementation status:
 - distinguishes between unconfigured runtime state and provider-call failures in runtime metadata
 - enables real runtime replies when `AGENTSCOPE_API_KEY` is supplied to the service environment
 - emits per-request tool trace events (`tool_call` and `tool_result`) into the SSE stream when `TOOL_GATEWAY_URL` is configured; traces are merged with text deltas so the operator portal can render an evidence panel (SPEC-011)
+- carries the triage-report output discipline in the default system prompt so incident triage turns end with a schema-conformant fenced `triage-report` JSON block; `incidents.list` / `incidents.get` join the default auto-allowed tool set alongside the `skills.*` tools, so the agent can ground answers in live incidents without configuration changes (SPEC-015)
 
 Service layout:
 
@@ -95,7 +96,7 @@ Configuration and singleton access:
 - `src/agent_service/services/runtime_dependencies.py`
   - exposes the cached `AgentKernel` singleton through `get_runtime_kernel()`
 - `src/agent_service/services/session_store.py`
-  - isolates the in-memory session persistence detail from higher-level session and chat orchestration
+  - isolates session persistence (memory / Redis / Postgres backends, SPEC-016) from higher-level session and chat orchestration
 
 Local run options:
 
@@ -134,6 +135,16 @@ Current runtime environment knobs:
   - defaults to `LubanOpsRuntime`
 - `AGENTSCOPE_SYSTEM_PROMPT`
   - defaults to the current runtime grounding prompt
+- `AGENTSCOPE_MAX_ITERS`
+  - ReAct loop iteration cap passed to the kernel's `ReActConfig`; defaults to `20`; must be >= 1 (SPEC-017)
+- `AGENTSCOPE_CONTEXT_TRIGGER_RATIO`
+  - long-term memory trigger ratio passed to the kernel's `ContextConfig`; defaults to `0.8`; must be in the open interval (0, 0.9) (SPEC-017)
+- `AGENTSCOPE_TOOL_RESULT_LIMIT`
+  - tool result character limit passed to the kernel's `ContextConfig`; defaults to `50000`; must be >= 1 (SPEC-017)
+- `AGENTSCOPE_TIMEZONE`
+  - IANA timezone for runtime-state injection (`InjectionConfig`); defaults to `UTC`; validated at startup (SPEC-017)
+- `AGENTSCOPE_MODEL_MAX_RETRIES`
+  - model call retry count passed to the kernel's `ModelConfig`; defaults to `0`; must be >= 0 (SPEC-017)
 - `DASHSCOPE_THINKING_ENABLE`, `DASHSCOPE_THINKING_BUDGET`, `DASHSCOPE_TOP_K`, `DASHSCOPE_PARALLEL_TOOL_CALLS`
   - DashScope-specific runtime options
 - `DEEPSEEK_THINKING_ENABLE`, `DEEPSEEK_REASONING_EFFORT`
@@ -141,17 +152,25 @@ Current runtime environment knobs:
 - `OPENAI_THINKING_ENABLE`, `OPENAI_REASONING_EFFORT`, `OPENAI_PARALLEL_TOOL_CALLS`
   - OpenAI-compatible runtime options
 - `SESSION_TTL_SECONDS`
-  - idle lifetime for sessions; defaults to `3600`; used by both backends
+  - idle lifetime for sessions; defaults to `3600`; used by all backends
 - `SESSION_MAX_ENTRIES`
   - maximum concurrent in-memory sessions before oldest-first eviction; defaults to `1000`; only applies to the `memory` backend
 - `SESSION_STORE_BACKEND`
-  - selects the session store backend: `redis` or `memory`; defaults to `memory` (deployed overlays set `redis`)
+  - selects the session store backend: `memory`, `redis`, or `postgres`; defaults to `memory`; unknown values fail startup (deployed overlays set `postgres`, SPEC-016)
+- `SESSION_DB_URL`
+  - Postgres DSN for the session store; required when the backend is `postgres`; the table DDL is applied idempotently on startup; unreachable databases fail open to the in-memory backend (`session_store_fallbacks_total`)
 - `SESSION_REDIS_HOST`
-  - Redis host for the session store; defaults to `127.0.0.1`
+  - Redis host for the session store; defaults to `127.0.0.1`; only applies to the `redis` backend
 - `SESSION_REDIS_PORT`
-  - Redis port for the session store; defaults to `6379`
+  - Redis port for the session store; defaults to `6379`; only applies to the `redis` backend
 - `SESSION_REDIS_DB`
-  - Redis DB number for session keys; defaults to `1` (separate from AgentScope's DB `0`)
+  - Redis DB number for session keys; defaults to `1` (separate from AgentScope's DB `0`); only applies to the `redis` backend
+- `AGENT_STATE_STORE_BACKEND`
+  - selects the agent state store backend: `memory` or `postgres`; defaults to `memory`; unknown values fail startup (deployed overlays set `postgres`, SPEC-017)
+- `AGENT_STATE_DB_URL`
+  - Postgres DSN for agent state; required when the backend is `postgres` (shares the `sessions` database); the table DDL is applied idempotently on startup; unreachable databases fail open to the in-memory backend (`agent_state_fallbacks_total`)
+- `AGENT_STATE_TTL_SECONDS`
+  - sweep TTL for stale agent state rows; defaults to `3600`
 - `TOOL_GATEWAY_URL`
   - base URL of the tool-gateway for tool discovery and invocation (SPEC-007); when set, the AgentScope kernel registers gateway tools into the LLM Toolkit; when unset, the agent builds with an empty Toolkit
   - tool calls relay the gateway-forwarded delegated token (SPEC-008) as `Authorization: Bearer`; the token is bound per-user into the toolkit closures (no cross-user sharing) and identity is never carried in the request body; without a token, discovery degrades to an empty Toolkit and invocation returns a structured error
@@ -171,14 +190,24 @@ Session store (SPEC-006):
 - when Redis is unreachable at startup, the store falls back to in-memory with a warning and a Prometheus counter (`session_store_fallbacks_total`)
 - the in-memory backend (`SESSION_STORE_BACKEND=memory`) keeps sessions in process memory only, with TTL and max-entry eviction
 - sessions are scoped to the creating user (via `X-User-ID` header); unknown or foreign `session_id` values return `404`
+- `POST /api/v2/sessions` accepts an optional body `{"session_id": ...}` to create a caller-named dedicated session (SPEC-015 triage sessions); it is get-or-create and idempotent for the owning user, and a foreign owner still answers `404`
 - the native runtime path delegates session state to the AgentScope runtime services instead
+
+Agent state durability (SPEC-017):
+
+- the kernel-serializable agent state (conversation context, summaries, reply context) is snapshotted after every completed turn and restored when an agent is constructed for a session, so conversations survive agent-platform restarts
+- `AGENT_STATE_STORE_BACKEND=postgres` persists snapshots as JSONB in the SPEC-016 `sessions` database; `memory` keeps them in process memory (dev/CI default)
+- snapshot and restore never fail a turn: store errors log, increment `agent_state_errors_total`, and degrade gracefully; unreachable Postgres at startup fails open to memory (`agent_state_fallbacks_total`)
+- a corrupt persisted snapshot is discarded (fresh agent) instead of wedging the session
+- session deletion also removes the session's persisted state (best-effort)
+- `POST /api/v2/chat` accepts an optional `response_schema` (JSON-schema dict) and returns the kernel-validated `structured_output` alongside the text reply (null when no schema was requested or the turn produced none)
 
 Current runtime status surface:
 
 - `/api/v2/runtime`
   - returns provider, resolved model, runtime state, and the last provider error if one exists
 - `/api/v2/health`
-  - returns runtime mode, runtime state, provider, configured status, session store backend, and session store readiness
+  - returns runtime mode, runtime state, provider, configured status, session store backend and readiness, and agent state store backend and readiness
 - `/metrics`
   - always-on Prometheus exposition endpoint (auth-exempt), reporting standard HTTP RED metrics plus `agent_sessions_created_total` and `agent_chat_requests_total`; opt-in OTLP push via `opentelemetry-instrumentation-fastapi` + `opentelemetry-exporter-otlp` when `OTEL_ENABLED=true` (fail-open); see `SPEC-005` and `shared/shared-contracts/observability-conventions.md`
 - `x-request-id` remains the log/portal correlation key; when OTel tracing is active it equals the W3C `trace_id`

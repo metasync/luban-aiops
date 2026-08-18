@@ -16,6 +16,7 @@ __all__ = [
     "AgentChatResponse",
     "AgentStreamEvent",
     "AgentSession",
+    "AgentSessionCreateRequest",
     "AgentRuntimeMetadata",
     "AgentHealth",
 ]
@@ -27,6 +28,13 @@ __all__ = [
 class AgentChatRequest(BaseModel):
     message: str = Field(min_length=1)
     session_id: str | None = None
+    response_schema: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Optional JSON-schema dict for kernel-validated structured "
+            "output (SPEC-017 R-2); passed through unchanged."
+        ),
+    )
 
 
 class AgentChatResponse(BaseModel):
@@ -34,6 +42,13 @@ class AgentChatResponse(BaseModel):
     request_id: str
     content: str
     status: Literal["ok", "partial", "error"] = "ok"
+    structured_output: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Validated structured output when response_schema was supplied "
+            "(SPEC-017 R-2); null when the turn produced none."
+        ),
+    )
 
 
 # --- Streaming ---
@@ -77,6 +92,17 @@ class AgentSession(BaseModel):
     status: Literal["active", "expired"] = "active"
 
 
+class AgentSessionCreateRequest(BaseModel):
+    """Optional body for ``POST /api/v2/sessions``.
+
+    Omitting ``session_id`` keeps the historical server-generated id;
+    supplying one creates a named dedicated session (SPEC-015 R-3 triage
+    sessions). Identity stays in headers, never in bodies.
+    """
+
+    session_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
 # --- Runtime metadata ---
 
 
@@ -100,3 +126,5 @@ class AgentHealth(BaseModel):
     configured: bool
     session_store: str | None = None
     session_store_ready: bool | None = None
+    agent_state: str | None = None
+    agent_state_ready: bool | None = None

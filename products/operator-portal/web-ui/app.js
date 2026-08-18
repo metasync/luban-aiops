@@ -1,9 +1,9 @@
 const gatewayInput = document.querySelector("#gateway-url");
 
-// Platform version shown in the sidebar footer; bump in step with the
-// CHANGELOG milestones. A gateway-served /api/v1/version endpoint is the
-// intended long-term source of truth.
-const PLATFORM_VERSION = "v0.1.0";
+// Platform version shown in the sidebar footer; must match the root
+// VERSION file (enforced by make validate-version). A gateway-served
+// /api/v1/version endpoint is the intended long-term source of truth.
+const PLATFORM_VERSION = "v0.3.0";
 document.querySelector("#version-output").textContent = PLATFORM_VERSION;
 const userInput = document.querySelector("#user-id");
 const promptInput = document.querySelector("#prompt-input");
@@ -38,12 +38,34 @@ let auditLoadedCount = 0;
 // twice and appending duplicate rows.
 let auditLoadInFlight = false;
 
+// Incident triage view (SPEC-015 R-6): list/detail surfaces over the
+// gateway's incident proxy plus the manual intake form. Client-side gating
+// is a convenience only — the gateway re-enforces incident:* policy on
+// every request.
+const incidentsOutput = document.querySelector("#incidents-output");
+const incidentsStatus = document.querySelector("#incidents-status");
+const incidentsReportToggle = document.querySelector("#incidents-report-toggle");
+const incidentsReportForm = document.querySelector("#incidents-report-form");
+const INCIDENT_VIEW_ROLES = new Set([
+  "platform-admin", "approver", "operator", "developer", "read-only-observer"
+]);
+const INCIDENT_ACT_ROLES = new Set([
+  "platform-admin", "approver", "operator", "developer"
+]);
+const INCIDENTS_AUTO_REFRESH_SECONDS = 15;
+let incidentsMode = "list"; // "list" | "detail"
+let incidentsDetailId = null;
+let incidentsAutoRefreshId = null;
+// Guards Refresh racing the auto-refresh tick into duplicate renders.
+let incidentsLoadInFlight = false;
+
 // --- View navigation (sidebar → main area) ---
 // Views are hidden, never destroyed, so chat history, session state, and
 // loaded audit rows survive navigation.
 const VIEWS = {
   chat: { nav: document.querySelector("#nav-chat"), section: document.querySelector("#chat-view") },
   settings: { nav: document.querySelector("#nav-settings"), section: document.querySelector("#settings-view") },
+  incidents: { nav: document.querySelector("#nav-incidents"), section: document.querySelector("#incidents-view") },
   audit: { nav: document.querySelector("#nav-audit"), section: document.querySelector("#audit-view") }
 };
 let activeViewId = "chat";
@@ -70,6 +92,19 @@ function showView(viewId) {
     loadAuditEvents(false).catch((error) => {
       renderError(auditOutput, error);
     });
+  }
+  // Incidents: every activation returns to the list and lazy-loads it; the
+  // auto-refresh keeps statuses fresh while the view stays open (triage
+  // flips them asynchronously) and stops as soon as another view opens.
+  if (viewId === "incidents") {
+    incidentsMode = "list";
+    incidentsDetailId = null;
+    loadIncidentsList().catch((error) => {
+      renderError(incidentsOutput, error);
+    });
+    startIncidentsAutoRefresh();
+  } else {
+    stopIncidentsAutoRefresh();
   }
 }
 
@@ -233,6 +268,16 @@ function canViewAudit() {
   return currentRoles().some((role) => AUDIT_ROLES.has(role));
 }
 
+function canViewIncidents() {
+  return currentRoles().some((role) => INCIDENT_VIEW_ROLES.has(role));
+}
+
+// Reporting and triage need the write vocabulary (incident:create /
+// incident:triage); read-only-observer can look but not act.
+function canActOnIncidents() {
+  return currentRoles().some((role) => INCIDENT_ACT_ROLES.has(role));
+}
+
 // Initials for the user-card avatar: up to two letters from the username,
 // split on non-alphanumerics ("luban-admin" -> "LA").
 function userInitials(username) {
@@ -268,6 +313,12 @@ function syncResolvedUser() {
   const auditAllowed = canViewAudit();
   VIEWS.audit.nav.hidden = !auditAllowed;
   if (!auditAllowed && activeViewId === "audit") {
+    showView("chat");
+  }
+  const incidentsAllowed = canViewIncidents();
+  VIEWS.incidents.nav.hidden = !incidentsAllowed;
+  incidentsReportToggle.hidden = !canActOnIncidents();
+  if (!incidentsAllowed && activeViewId === "incidents") {
     showView("chat");
   }
   const roleBadge = document.querySelector("#identity-role");
@@ -503,6 +554,400 @@ function auditEventRows(event) {
 function formatAuditTimestamp(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+// --- Incident triage view (SPEC-015 R-6) ---
+function setIncidentsStatus(text, isError = false) {
+  incidentsStatus.textContent = text;
+  incidentsStatus.style.color = isError ? "var(--error)" : "";
+}
+
+function startIncidentsAutoRefresh() {
+  stopIncidentsAutoRefresh();
+  incidentsAutoRefreshId = setInterval(() => {
+    if (activeViewId !== "incidents" || incidentsMode !== "list") return;
+    loadIncidentsList().catch((error) => setIncidentsStatus(error.message, true));
+  }, INCIDENTS_AUTO_REFRESH_SECONDS * 1000);
+}
+
+function stopIncidentsAutoRefresh() {
+  if (incidentsAutoRefreshId !== null) {
+    clearInterval(incidentsAutoRefreshId);
+    incidentsAutoRefreshId = null;
+  }
+}
+
+function buildIncidentsQuery() {
+  const params = new URLSearchParams({ limit: "50" });
+  const status = document.querySelector("#incidents-filter-status").value;
+  const severity = document.querySelector("#incidents-filter-severity").value;
+  const source = document.querySelector("#incidents-filter-source").value;
+  if (status) params.set("status", status);
+  if (severity) params.set("severity", severity);
+  if (source) params.set("source", source);
+  return params.toString();
+}
+
+async function loadIncidentsList() {
+  if (!canViewIncidents() || incidentsLoadInFlight) return;
+  incidentsLoadInFlight = true;
+  try {
+    const payload = await requestJson(`/api/v1/incidents?${buildIncidentsQuery()}`, { method: "GET" });
+    incidentsMode = "list";
+    incidentsDetailId = null;
+    renderIncidentsList(payload.incidents || []);
+    const shown = (payload.incidents || []).length;
+    setIncidentsStatus(`${shown} incident${shown === 1 ? "" : "s"} shown \u00b7 ${payload.total} total`);
+  } finally {
+    incidentsLoadInFlight = false;
+  }
+}
+
+// Shared badge builder: .status-badge carries the shape, the kind prefix
+// (sev/st/src/dsp/prio) picks the semantic color in styles.css.
+function incidentBadge(value, kind) {
+  const span = document.createElement("span");
+  span.className = `status-badge ${kind}-${value}`;
+  span.textContent = value;
+  return span;
+}
+
+function renderIncidentsList(incidents) {
+  incidentsOutput.innerHTML = "";
+  if (incidents.length === 0) {
+    incidentsOutput.innerHTML = '<p class="chat-placeholder">No incidents match these filters.</p>';
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "audit-table";
+  const headers = ["opened", "title", "severity", "status", "source", "id"];
+  table.innerHTML = `<thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead>`;
+  const tbody = document.createElement("tbody");
+  for (const incident of incidents) {
+    const row = document.createElement("tr");
+    row.className = "incident-row";
+    const cells = [
+      formatAuditTimestamp(incident.created_at),
+      incident.title,
+      incidentBadge(incident.severity, "sev"),
+      incidentBadge(incident.status, "st"),
+      incident.source,
+      incident.incident_id
+    ];
+    for (const value of cells) {
+      const td = document.createElement("td");
+      if (typeof value === "string") td.textContent = value;
+      else td.appendChild(value);
+      row.appendChild(td);
+    }
+    row.addEventListener("click", () => {
+      openIncidentDetail(incident.incident_id).catch((error) => {
+        setIncidentsStatus(error.message, true);
+      });
+    });
+    tbody.appendChild(row);
+  }
+  table.appendChild(tbody);
+  incidentsOutput.appendChild(table);
+}
+
+async function openIncidentDetail(incidentId) {
+  const payload = await requestJson(`/api/v1/incidents/${incidentId}`, { method: "GET" });
+  incidentsMode = "detail";
+  incidentsDetailId = incidentId;
+  renderIncidentDetail(payload);
+  setIncidentsStatus(`incident ${incidentId}`);
+}
+
+function renderIncidentDetail(payload) {
+  const { incident, report, dispatches } = payload;
+  incidentsOutput.innerHTML = "";
+  const detail = document.createElement("div");
+  detail.className = "incident-detail";
+
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "btn-sm";
+  back.textContent = "\u2190 All incidents";
+  back.addEventListener("click", () => {
+    loadIncidentsList().catch((error) => renderError(incidentsOutput, error));
+    startIncidentsAutoRefresh();
+  });
+  detail.appendChild(back);
+
+  const header = document.createElement("div");
+  header.className = "incident-detail-header";
+  const title = document.createElement("h3");
+  title.textContent = incident.title;
+  const badges = document.createElement("div");
+  badges.className = "incident-badges";
+  badges.append(
+    incidentBadge(incident.severity, "sev"),
+    incidentBadge(incident.status, "st"),
+    incidentBadge(incident.source, "src")
+  );
+  header.append(title, badges);
+  detail.appendChild(header);
+
+  const meta = document.createElement("div");
+  meta.className = "evidence-meta incident-meta";
+  const metaParts = [
+    `id: ${incident.incident_id}`,
+    `fingerprint: ${incident.fingerprint}`,
+    `opened: ${formatAuditTimestamp(incident.created_at)}`,
+    `updated: ${formatAuditTimestamp(incident.updated_at)}`
+  ];
+  if (incident.reported_by) metaParts.push(`reported by: ${incident.reported_by}`);
+  if (incident.resolved_at) metaParts.push(`resolved: ${formatAuditTimestamp(incident.resolved_at)}`);
+  meta.innerHTML = metaParts.map((part) => `<span>${escapeHtml(part)}</span>`).join("");
+  detail.appendChild(meta);
+
+  if (incident.labels && Object.keys(incident.labels).length > 0) {
+    const chips = document.createElement("div");
+    chips.className = "cited-chips incident-labels";
+    for (const [key, value] of Object.entries(incident.labels)) {
+      const chip = document.createElement("span");
+      chip.className = "cited-chip";
+      chip.textContent = `${key}=${value}`;
+      chips.appendChild(chip);
+    }
+    detail.appendChild(chips);
+  }
+
+  if (incident.summary) {
+    const summary = document.createElement("p");
+    summary.className = "incident-summary";
+    summary.textContent = incident.summary;
+    detail.appendChild(summary);
+  }
+
+  // Actions: triage is operator-initiated and gated to write roles; the
+  // chat deep-link opens the chat view on the incident's triage session.
+  const actions = document.createElement("div");
+  actions.className = "incident-actions";
+  if (canActOnIncidents()) {
+    const triageButton = document.createElement("button");
+    triageButton.type = "button";
+    triageButton.className = "btn-sm";
+    triageButton.textContent = report ? "Re-run triage" : "Run triage";
+    triageButton.disabled = incident.status === "triaging";
+    triageButton.addEventListener("click", () => {
+      runIncidentTriage(incident.incident_id, triageButton);
+    });
+    actions.appendChild(triageButton);
+  }
+  const chatButton = document.createElement("button");
+  chatButton.type = "button";
+  chatButton.className = "btn-sm";
+  chatButton.textContent = "Continue in chat";
+  chatButton.addEventListener("click", () => {
+    sessionIdOutput.textContent = incident.session_id || `incident-${incident.incident_id}`;
+    showView("chat");
+  });
+  actions.appendChild(chatButton);
+  detail.appendChild(actions);
+
+  if (report) {
+    detail.appendChild(renderTriageReport(report));
+  } else if (incident.status === "triage_failed" && incident.triage_raw) {
+    // Failed triage keeps the raw agent output for inspection.
+    const raw = document.createElement("details");
+    raw.className = "incident-raw";
+    const rawSummary = document.createElement("summary");
+    rawSummary.textContent = "Raw triage output (validation failed)";
+    const pre = document.createElement("pre");
+    pre.textContent = incident.triage_raw;
+    raw.append(rawSummary, pre);
+    detail.appendChild(raw);
+  } else if (incident.status === "new") {
+    const hint = document.createElement("p");
+    hint.className = "chat-placeholder";
+    hint.textContent = "No triage report yet \u2014 run triage to let the agent gather evidence.";
+    detail.appendChild(hint);
+  }
+
+  detail.appendChild(renderDispatches(dispatches || []));
+  incidentsOutput.appendChild(detail);
+}
+
+function incidentListSection(headingText, items) {
+  const block = document.createElement("div");
+  const heading = document.createElement("h4");
+  heading.textContent = headingText;
+  block.appendChild(heading);
+  const list = document.createElement("ul");
+  for (const item of items) {
+    const li = document.createElement("li");
+    li.textContent = item;
+    list.appendChild(li);
+  }
+  block.appendChild(list);
+  return block;
+}
+
+function renderTriageReport(report) {
+  const section = document.createElement("div");
+  section.className = "incident-section";
+  const heading = document.createElement("h3");
+  heading.textContent = "Triage report";
+  section.appendChild(heading);
+
+  const reportHead = document.createElement("div");
+  reportHead.className = "incident-report-head";
+  reportHead.appendChild(incidentBadge(report.severity_assessment, "sev"));
+  const byLine = document.createElement("span");
+  byLine.className = "audit-status";
+  byLine.textContent = `${report.generated_by} \u00b7 ${formatAuditTimestamp(report.generated_at)} \u00b7 session ${report.session_id}`;
+  reportHead.appendChild(byLine);
+  section.appendChild(reportHead);
+
+  const summary = document.createElement("div");
+  summary.className = "md-content";
+  summary.innerHTML = renderMarkdown(report.summary);
+  section.appendChild(summary);
+
+  if ((report.evidence || []).length > 0) {
+    section.appendChild(incidentListSection(
+      "Evidence",
+      report.evidence.map((ref) => `${ref.source}: ${ref.description}`)
+    ));
+  }
+  if ((report.hypotheses || []).length > 0) {
+    section.appendChild(incidentListSection("Hypotheses", report.hypotheses));
+  }
+  if ((report.next_steps || []).length > 0) {
+    const steps = document.createElement("div");
+    const label = document.createElement("h4");
+    label.textContent = "Next steps (advisory)";
+    steps.appendChild(label);
+    const list = document.createElement("ol");
+    for (const step of report.next_steps) {
+      const item = document.createElement("li");
+      const titleSpan = document.createElement("strong");
+      titleSpan.textContent = step.title;
+      item.append(titleSpan, " ", incidentBadge(step.priority, "prio"));
+      const rationale = document.createElement("p");
+      rationale.textContent = step.rationale;
+      item.appendChild(rationale);
+      list.appendChild(item);
+    }
+    steps.appendChild(list);
+    section.appendChild(steps);
+  }
+  if ((report.skills_cited || []).length > 0) {
+    const cited = document.createElement("div");
+    const label = document.createElement("h4");
+    label.textContent = "Cited guidance";
+    cited.appendChild(label);
+    const chips = document.createElement("div");
+    chips.className = "cited-chips";
+    for (const skillId of report.skills_cited) {
+      const chip = document.createElement("span");
+      chip.className = "cited-chip";
+      chip.textContent = skillId;
+      chips.appendChild(chip);
+    }
+    cited.appendChild(chips);
+    section.appendChild(cited);
+  }
+  return section;
+}
+
+function renderDispatches(dispatches) {
+  const section = document.createElement("div");
+  section.className = "incident-section";
+  const heading = document.createElement("h3");
+  heading.textContent = "Connector dispatch";
+  section.appendChild(heading);
+  if (dispatches.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "audit-status";
+    empty.textContent = "No connector dispatches yet.";
+    section.appendChild(empty);
+    return section;
+  }
+  const table = document.createElement("table");
+  table.className = "audit-table";
+  table.innerHTML = "<thead><tr><th>connector</th><th>status</th><th>reference</th><th>dispatched</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  for (const dispatch of dispatches) {
+    const row = document.createElement("tr");
+    const connector = document.createElement("td");
+    connector.textContent = dispatch.connector;
+    const status = document.createElement("td");
+    status.appendChild(incidentBadge(dispatch.status, "dsp"));
+    if (dispatch.status === "failed" && dispatch.error) status.title = dispatch.error;
+    const reference = document.createElement("td");
+    reference.textContent = dispatch.reference || "\u2014";
+    const at = document.createElement("td");
+    at.textContent = formatAuditTimestamp(dispatch.created_at);
+    row.append(connector, status, reference, at);
+    tbody.appendChild(row);
+  }
+  table.appendChild(tbody);
+  section.appendChild(table);
+  return section;
+}
+
+// Triage runs the full delegated chain through the gateway (operator
+// identity + delegated bearer); the call blocks until the agent turn and
+// connector dispatches complete, so the button stays disabled in flight.
+async function runIncidentTriage(incidentId, button) {
+  button.disabled = true;
+  const originalLabel = button.textContent;
+  button.textContent = "Triaging\u2026";
+  setIncidentsStatus(`running triage for ${incidentId}\u2026`);
+  try {
+    const payload = await requestJson(`/api/v1/incidents/${incidentId}/triage`, { method: "POST" });
+    renderIncidentDetail(payload);
+    setIncidentsStatus(`incident ${incidentId} \u00b7 triage ${payload.incident.status}`);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = originalLabel;
+    setIncidentsStatus(error.message, true);
+  }
+}
+
+// Labels input is "key=value, key2=value2"; empty entries are skipped and
+// anything without a non-empty key is a client-side rejection.
+function parseLabelsInput(raw) {
+  const labels = {};
+  for (const part of raw.split(",")) {
+    const entry = part.trim();
+    if (!entry) continue;
+    const separator = entry.indexOf("=");
+    if (separator <= 0) throw new Error("Labels must be key=value pairs.");
+    labels[entry.slice(0, separator).trim()] = entry.slice(separator + 1).trim();
+  }
+  return labels;
+}
+
+async function submitIncidentReport(event) {
+  event.preventDefault();
+  const statusLine = document.querySelector("#incidents-report-status");
+  const submitButton = document.querySelector("#incidents-report-submit");
+  try {
+    const labels = parseLabelsInput(document.querySelector("#incidents-report-labels").value);
+    submitButton.disabled = true;
+    statusLine.textContent = "Reporting\u2026";
+    const created = await requestJson("/api/v1/incidents", {
+      method: "POST",
+      body: JSON.stringify({
+        title: document.querySelector("#incidents-report-title").value.trim(),
+        summary: document.querySelector("#incidents-report-summary").value.trim(),
+        severity: document.querySelector("#incidents-report-severity").value,
+        labels
+      })
+    });
+    incidentsReportForm.hidden = true;
+    incidentsReportForm.reset();
+    statusLine.textContent = "";
+    await openIncidentDetail(created.incident_id);
+  } catch (error) {
+    statusLine.textContent = error.message;
+  } finally {
+    submitButton.disabled = false;
+  }
 }
 
 // Stream events carry their kind in `type` per the gateway/agent contract.
@@ -1112,6 +1557,39 @@ auditMoreButton.addEventListener("click", () => {
   loadAuditEvents(true).catch((error) => {
     renderError(auditOutput, error);
   });
+});
+
+document.querySelector("#incidents-refresh-button").addEventListener("click", () => {
+  if (incidentsMode === "detail" && incidentsDetailId) {
+    openIncidentDetail(incidentsDetailId).catch((error) => {
+      setIncidentsStatus(error.message, true);
+    });
+    return;
+  }
+  loadIncidentsList().catch((error) => {
+    renderError(incidentsOutput, error);
+  });
+});
+
+// Filter changes always re-query the list, whatever the current mode.
+for (const filterId of ["#incidents-filter-status", "#incidents-filter-severity", "#incidents-filter-source"]) {
+  document.querySelector(filterId).addEventListener("change", () => {
+    loadIncidentsList().catch((error) => {
+      renderError(incidentsOutput, error);
+    });
+  });
+}
+
+incidentsReportToggle.addEventListener("click", () => {
+  incidentsReportForm.hidden = !incidentsReportForm.hidden;
+});
+
+document.querySelector("#incidents-report-cancel").addEventListener("click", () => {
+  incidentsReportForm.hidden = true;
+});
+
+incidentsReportForm.addEventListener("submit", (event) => {
+  submitIncidentReport(event);
 });
 
 document.querySelector("#login-button").addEventListener("click", () => {

@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/triage-report.schema.json",
+  "title": "Triage Report (v1)",
+  "description": "Canonical triage report (SPEC-015 R-1). The agent emits the report as a fenced triage-report JSON block during an operator-initiated triage run; incident-service validates it against this schema before storing. Every hypothesis and next step must be grounded in tool evidence or cited skills; next steps are advisory only (R3 does not execute anything).",
+  "type": "object",
+  "required": [
+    "incident_id",
+    "summary",
+    "severity_assessment",
+    "evidence",
+    "hypotheses",
+    "next_steps",
+    "skills_cited",
+    "session_id",
+    "generated_at",
+    "generated_by"
+  ],
+  "properties": {
+    "incident_id": {
+      "type": "string",
+      "pattern": "^inc-[a-z0-9-]+$",
+      "description": "The incident this report belongs to."
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "One-paragraph triage summary: what is happening, how severe, and why."
+    },
+    "severity_assessment": {
+      "type": "string",
+      "enum": ["critical", "warning", "info"],
+      "description": "Agent assessment of the incident severity based on gathered evidence."
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["source", "description"],
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Tool name or 'skills' — where the evidence came from."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400,
+            "description": "What the evidence shows."
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Provenance references for the evidence gathered during triage."
+    },
+    "hypotheses": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {"type": "string", "minLength": 1, "maxLength": 400},
+      "description": "Ranked likely causes, most likely first."
+    },
+    "next_steps": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "required": ["title", "rationale", "priority"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The recommended step."
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400,
+            "description": "Why this step is recommended, grounded in evidence or cited guidance."
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "Recommended ordering urgency."
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Ranked advisory next steps; the platform does not execute them in R3."
+    },
+    "skills_cited": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {"type": "string", "minLength": 1, "maxLength": 256},
+      "description": "skill_ids of team guidance consulted during triage."
+    },
+    "session_id": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "The dedicated agent session the triage ran in (incident-<incident_id>)."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp (RFC 3339) when the report was captured."
+    },
+    "generated_by": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "The operator who initiated the triage run."
+    }
+  },
+  "additionalProperties": false
+}

@@ -38,6 +38,40 @@ class GatewayRunSettingsTests(unittest.TestCase):
                 settings = GatewaySettings.from_env()
             self.assertEqual(settings.require_auth, expected, raw_value)
 
+    def test_gateway_settings_incidents_connector_defaults(self) -> None:
+        """SPEC-015 R-4: incidents connector settings default off."""
+        import os
+        from unittest.mock import patch
+
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("GATEWAY_INCIDENTS_")
+        }
+        with patch.dict(os.environ, env, clear=True):
+            settings = GatewaySettings.from_env()
+
+        self.assertEqual(settings.incidents_service_url, "")
+        self.assertEqual(settings.incidents_client_id, "tool-gateway")
+        self.assertEqual(settings.incidents_client_secret, "")
+
+    def test_gateway_settings_incidents_connector_reads_env(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {
+            "GATEWAY_INCIDENTS_SERVICE_URL": "http://incident-service:8000",
+            "GATEWAY_INCIDENTS_CLIENT_ID": "gateway",
+            "GATEWAY_INCIDENTS_CLIENT_SECRET": "secret",
+        }):
+            settings = GatewaySettings.from_env()
+
+        self.assertEqual(
+            settings.incidents_service_url, "http://incident-service:8000"
+        )
+        self.assertEqual(settings.incidents_client_id, "gateway")
+        self.assertEqual(settings.incidents_client_secret, "secret")
+
     def test_gateway_run_settings_read_env(self) -> None:
         import os
 

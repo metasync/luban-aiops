@@ -18,7 +18,15 @@ DEFAULT_SYSTEM_PROMPT = (
     "Cite any skill you rely on by its title (its skill_id is also acceptable). "
     "Skill guidance is not live "
     "cluster data, and tool evidence is not a procedure — keep the two clearly separated. "
-    "If no skills match, say no team guidance matched instead of inventing steps."
+    "If no skills match, say no team guidance matched instead of inventing steps. "
+    "When asked to triage an incident, work strictly read-only: gather live evidence with the "
+    "available tools, consult matching runbooks via skills.search, and produce a triage report "
+    "covering the fields incident_id, summary, severity_assessment, evidence, hypotheses, "
+    "next_steps, skills_cited, session_id, generated_at, and generated_by. Ground every "
+    "hypothesis and next step in evidence you actually gathered or a cited skill, and keep next "
+    "steps advisory only (the platform executes nothing). When a structured output requirement "
+    "is active for the turn, deliver the report by calling the provided structured-output tool "
+    "rather than formatting it in prose."
 )
 
 RuntimeProvider = Literal["dashscope", "deepseek", "openai"]
@@ -115,6 +123,13 @@ class RuntimeSettings:
     provider_options: RuntimeProviderOptions | None = None
     tool_gateway_url: str | None = None
     tool_data_summary_max_chars: int = 2000
+    # Kernel tuning surfaces (SPEC-017 R-1). Defaults mirror the agentscope
+    # defaults so unset deployments behave exactly as before.
+    max_iters: int = 20
+    context_trigger_ratio: float = 0.8
+    tool_result_limit: int = 50000
+    timezone: str = "UTC"
+    model_max_retries: int = 0
 
     @staticmethod
     def default_provider_options(provider: RuntimeProvider) -> RuntimeProviderOptions:
@@ -140,6 +155,32 @@ class RuntimeSettings:
                 "AGENTSCOPE_PROFILE must match AGENTSCOPE_PROVIDER when both are set. "
                 f"Got profile={self.profile!r} and provider={self.provider!r}."
             )
+
+        # Kernel tuning validation (SPEC-017 R-1): out-of-range values fail
+        # startup with a clear error. Bounds mirror the agentscope config
+        # constraints so an invalid setting cannot reach the kernel.
+        if self.max_iters < 1:
+            raise ValueError("AGENTSCOPE_MAX_ITERS must be >= 1.")
+        if not 0.0 < self.context_trigger_ratio < 0.9:
+            raise ValueError(
+                "AGENTSCOPE_CONTEXT_TRIGGER_RATIO must be in the open "
+                "interval (0, 0.9)."
+            )
+        if self.tool_result_limit < 1:
+            raise ValueError("AGENTSCOPE_TOOL_RESULT_LIMIT must be >= 1.")
+        if self.model_max_retries < 0:
+            raise ValueError("AGENTSCOPE_MODEL_MAX_RETRIES must be >= 0.")
+        if not self.timezone:
+            raise ValueError("AGENTSCOPE_TIMEZONE must not be empty.")
+        try:
+            from zoneinfo import ZoneInfo
+
+            ZoneInfo(self.timezone)
+        except Exception as exc:  # noqa: BLE001 - zoneinfo raises several types
+            raise ValueError(
+                f"AGENTSCOPE_TIMEZONE is not a valid IANA timezone: "
+                f"{self.timezone!r}."
+            ) from exc
 
         if self.provider_options is None:
             object.__setattr__(
@@ -227,6 +268,13 @@ class RuntimeSettings:
             tool_data_summary_max_chars=int(
                 os.getenv("AGENT_TOOL_DATA_SUMMARY_MAX_CHARS", "2000")
             ),
+            max_iters=int(os.getenv("AGENTSCOPE_MAX_ITERS", "20")),
+            context_trigger_ratio=float(
+                os.getenv("AGENTSCOPE_CONTEXT_TRIGGER_RATIO", "0.8")
+            ),
+            tool_result_limit=int(os.getenv("AGENTSCOPE_TOOL_RESULT_LIMIT", "50000")),
+            timezone=os.getenv("AGENTSCOPE_TIMEZONE", "UTC").strip() or "UTC",
+            model_max_retries=int(os.getenv("AGENTSCOPE_MODEL_MAX_RETRIES", "0")),
         )
 
     def is_configured(self) -> bool:

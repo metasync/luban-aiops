@@ -282,6 +282,24 @@ The platform is ready for wider enterprise adoption beyond the initial user grou
 
 This avoids introducing powerful execution features before the platform has earned user trust.
 
+## Exploration Backlog
+
+Candidates identified during the AgentScope utilization audit (post-R3) that
+are not yet decision-complete enough for a spec. Each needs a spike before
+promotion; until then they stay here.
+
+| Candidate | Question to answer in a spike | Likely home |
+|---|---|---|
+| MCP exposure of tool-gateway connectors | Can connectors be served as MCP endpoints without bypassing policy enforcement and audit? | own spec after R4 policy surfaces settle |
+| Semantic (vector) skill retrieval | Does an Elasticsearch vector store measurably beat skills-hub's scoring search on our corpus? We already run Elastic (SPEC-011). | skills-hub enhancement spec |
+| Long-term operator memory | Do agentscope long-term-memory middlewares (mem0/reme) add real triage continuity across sessions, and where would that state live? | follow-up to SPEC-017 durability |
+| Kernel-side SQL storage | When would adopting `AsyncSQLAlchemyStorage` for the kernel app beat platform-owned state snapshots (SPEC-017 R-3)? | revisit if the native entrypoint is ever deployed |
+
+Promotion rule: a spike lands its findings as a short memo (workspace docs);
+only then does the item get a SPEC number. SPEC-018 (kernel middleware
+alignment) already covers the tier-2 follow-ups and is sequenced after
+SPEC-017.
+
 ## Validation Model Per Release
 
 Every release should have four validation layers:

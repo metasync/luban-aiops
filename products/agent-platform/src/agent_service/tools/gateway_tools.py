@@ -45,6 +45,8 @@ DEFAULT_AUTO_ALLOWED_TOOLS = frozenset({
     "skills.search",
     "skills.get",
     "skills.list",
+    "incidents.list",
+    "incidents.get",
 })
 AUTO_ALLOW_ENV = "AGENT_GATEWAY_TOOL_AUTO_ALLOW"
 

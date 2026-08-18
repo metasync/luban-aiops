@@ -42,6 +42,9 @@ class GatewaySettings:
     skills_service_url: str = ""
     skills_client_id: str = "tool-gateway"
     skills_client_secret: str = ""
+    incidents_service_url: str = ""
+    incidents_client_id: str = "tool-gateway"
+    incidents_client_secret: str = ""
 
     @classmethod
     def from_env(cls) -> "GatewaySettings":
@@ -96,6 +99,13 @@ class GatewaySettings:
             skills_service_url=os.getenv("GATEWAY_SKILLS_SERVICE_URL", ""),
             skills_client_id=os.getenv("GATEWAY_SKILLS_CLIENT_ID", "tool-gateway"),
             skills_client_secret=os.getenv("GATEWAY_SKILLS_CLIENT_SECRET", ""),
+            incidents_service_url=os.getenv("GATEWAY_INCIDENTS_SERVICE_URL", ""),
+            incidents_client_id=os.getenv(
+                "GATEWAY_INCIDENTS_CLIENT_ID", "tool-gateway"
+            ),
+            incidents_client_secret=os.getenv(
+                "GATEWAY_INCIDENTS_CLIENT_SECRET", ""
+            ),
         )
 
 

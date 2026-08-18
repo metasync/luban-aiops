@@ -11,6 +11,7 @@ This directory contains the development Kubernetes overlay for the platform base
 - `identity-service`
 - `audit-service`
 - `skills-hub`
+- `incident-service`
 - `redis`
 - `postgres`
 
@@ -21,8 +22,8 @@ These manifests are intended to:
 - establish service names and ports
 - define baseline environment variables
 - show the expected request path between services
-- provide an in-cluster `Redis` dependency for session storage and AgentScope coordination
-- provide an in-cluster `PostgreSQL` dependency for the durable audit trail (SPEC-013) and the skills store (SPEC-014)
+- provide an in-cluster `Redis` dependency for AgentScope coordination
+- provide an in-cluster `PostgreSQL` dependency for the durable audit trail (SPEC-013), the skills store (SPEC-014), the incidents store (SPEC-015), the agent session store (SPEC-016), and agent state persistence (SPEC-017)
 
 The `dev-k8s` overlay is the single development deployment for the platform. It deploys the v2 agent-service contract surface consumed by `platform-gateway` (portal chat/session proxying) and the tool contract consumed by `agent-service` via `tool-gateway` (SPEC-010).
 
@@ -44,10 +45,11 @@ The base deployment manifest uses neutral placeholder image tags:
 - `luban-aiops/identity-service:dev-local`
 - `luban-aiops/audit-service:dev-local`
 - `luban-aiops/skills-hub:dev-local`
+- `luban-aiops/incident-service:dev-local`
 
 `make build` and `make deploy` replace those placeholders with the generated `IMAGE_TAG` for each rollout.
 
-This development baseline also uses the upstream `redis:7.2-alpine` image for in-cluster runtime state and message coordination, and `postgres:16-alpine` for the durable audit store and the skills store.
+This development baseline also uses the upstream `redis:7.2-alpine` image for in-cluster kernel coordination, and `postgres:16-alpine` for the durable audit store, the skills store, the incidents store, and the session store.
 
 ## Runtime Wiring
 
@@ -60,6 +62,7 @@ The `platform-runtime-config` `ConfigMap` is assembled from product-scoped env f
 - `shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env`
 - `shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env`
 - `shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env`
+- `shared/platform-ops/gitops/dev-k8s/base/incident-service/runtime-config.env`
 
 Because the fragments merge into one `ConfigMap`, each key may appear only once: `IDENTITY_SERVICE_URL` lives in the shared fragment and is consumed by both gateways.
 
@@ -295,10 +298,10 @@ This builds all product images with a coordinated `IMAGE_TAG` (delegating to eac
 
 - `shared/platform-ops/gitops/dev-k8s/.images.env`
 
-By default the generated tag uses the overlay name for clarity:
+By default the generated tag carries the platform semver (root `VERSION` file) plus the overlay name for clarity:
 
-- clean build: `dev-k8s-<gitsha>`
-- dirty local build: `dev-k8s-<gitsha>-dirty-<timestamp>`
+- clean build: `<semver>-dev-k8s-<gitsha>` (e.g. `0.3.0-dev-k8s-d2596c2`)
+- dirty local build: `<semver>-dev-k8s-<gitsha>-dirty-<timestamp>`
 
 If you want extra traceability in local experiments, you can optionally add a profile suffix:
 
@@ -455,6 +458,116 @@ kubectl -n dev-luban-aiops exec deployment/skills-hub -- \
 # deterministic smoke test (status + search ranking + optional chat leg)
 shared/platform-ops/e2e/skills-demo.sh
 ```
+
+## Incident Triage (SPEC-015)
+
+The overlay deploys `incident-service`, which ingests Alertmanager webhooks
+and manual operator reports, runs operator-initiated agent triage, and
+dispatches validated triage reports through its connector framework (the
+built-in `audit` sink emits `incident_triaged` events to audit-service).
+
+The incident-service fragment of `runtime-config.env` commits the non-secret
+halves:
+
+- `INCIDENT_STORE_BACKEND=postgres`, `INCIDENT_DB_URL` (points at the
+  in-cluster `postgres` service, database `incidents`),
+  `INCIDENT_AGENT_SERVICE_URL=http://agent-service:8000`,
+  `INCIDENT_CONNECTORS=audit`, and the `INCIDENT_AUDIT_*` emitter halves
+
+The gateway fragments commit the caller halves:
+
+- platform-gateway: `PLATFORM_GATEWAY_INCIDENT_SERVICE_URL=http://incident-service:8000`,
+  `PLATFORM_GATEWAY_INCIDENT_CLIENT_ID=platform-gateway`
+- tool-gateway: `GATEWAY_INCIDENTS_SERVICE_URL=http://incident-service:8000`,
+  `GATEWAY_INCIDENTS_CLIENT_ID=tool-gateway`
+
+The webhook token and shared query secret live in three optional secrets and
+are provisioned by `sync-incident-secrets.sh`:
+
+- `incident-service-runtime-secrets` — `INCIDENT_WEBHOOK_TOKEN` and
+  `INCIDENT_QUERY_CLIENTS` (format `client_id=secret,...`; see
+  `base/incident-service/runtime-secrets.example.env`)
+- `platform-gateway-runtime-secrets` — `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET`
+- `tool-gateway-runtime-secrets` — `GATEWAY_INCIDENTS_CLIENT_SECRET`
+
+`make deploy` runs the script automatically (after the skills secrets); to
+skip (e.g. when secrets are injected by CI):
+
+```bash
+SKIP_INCIDENT_SECRETS=true make deploy
+```
+
+To provision manually or regenerate the secrets:
+
+```bash
+shared/platform-ops/gitops/sync-incident-secrets.sh
+```
+
+The script also creates the `incidents` database idempotently for existing
+clusters (fresh clusters get it via the `postgres-initdb` ConfigMap mounted
+at `/docker-entrypoint-initdb.d`). `sync-audit-secrets.sh` registers
+incident-service as an audit emitter (`INCIDENT_AUDIT_CLIENT_SECRET` plus the
+`AUDIT_INGEST_CLIENTS` entry). Point Alertmanager at the webhook with the
+provisioned bearer token:
+
+```
+POST http://incident-service:8000/api/v1/webhooks/alertmanager
+Authorization: Bearer <INCIDENT_WEBHOOK_TOKEN>
+```
+
+Verify intake, dedupe, triage, and the audit dispatch with the deterministic
+smoke test:
+
+```bash
+shared/platform-ops/e2e/incident-demo.sh
+# cluster-side assertions only (no port-forwards needed):
+SKIP_TRIAGE_LEG=true shared/platform-ops/e2e/incident-demo.sh
+```
+
+First deploy to an existing cluster: `make deploy` applies the overlay and
+waits for every rollout before the sync scripts run, so incident-service can
+CrashLoopBackOff (the `incidents` database does not exist yet) and the deploy
+can exit with `exceeded its progress deadline`. That is harmless — run the
+sync scripts above once (they create the database, sync the secrets, and
+restart the affected deployments) and the rollout completes.
+
+## Session Store on Postgres (SPEC-016)
+
+The agent-platform session store persists chat sessions in the shared
+`postgres` instance (database `sessions`) instead of Redis. The
+agent-platform fragment of `runtime-config.env` commits:
+
+- `SESSION_STORE_BACKEND=postgres`
+- `SESSION_DB_URL=postgresql://audit:audit-dev-local@postgres:5432/sessions`
+
+Redis stays deployed for AgentScope kernel coordination only
+(`AGENTSCOPE_REDIS_*`). No secrets are involved: the DSN uses the committed
+dev credentials, like the audit/skills/incidents stores.
+
+Fresh clusters get the `sessions` database via the `postgres-initdb`
+ConfigMap; existing clusters get it from `sync-sessions-db.sh` (idempotent
+`CREATE DATABASE` plus an agent-service restart), which `make deploy` runs
+automatically after the incident secrets step. If Postgres is unreachable at
+startup, the store fails open on its in-memory fallback
+(`session_store_fallbacks_total` counts this).
+
+## Agent State on Postgres (SPEC-017)
+
+The agent-platform agent state store persists kernel-serializable
+conversation state (so conversations survive restarts) in the same
+`sessions` database. The agent-platform fragment of `runtime-config.env`
+commits:
+
+- `AGENT_STATE_STORE_BACKEND=postgres`
+- `AGENT_STATE_DB_URL=postgresql://audit:audit-dev-local@postgres:5432/sessions`
+
+The `agent_states` table DDL is applied idempotently by agent-service at
+startup (no initdb change needed), and an unreachable database fails open
+to the in-memory backend (`agent_state_fallbacks_total`). The kernel
+tuning knobs (`AGENTSCOPE_MAX_ITERS`, `AGENTSCOPE_CONTEXT_TRIGGER_RATIO`,
+`AGENTSCOPE_TOOL_RESULT_LIMIT`, `AGENTSCOPE_TIMEZONE`,
+`AGENTSCOPE_MODEL_MAX_RETRIES`) are intentionally unset in dev so the
+agentscope defaults apply.
 
 ## Apply
 

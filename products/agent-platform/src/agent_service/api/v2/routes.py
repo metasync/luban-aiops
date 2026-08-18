@@ -22,10 +22,16 @@ from agent_service.schemas.v2 import (
     AgentHealth,
     AgentRuntimeMetadata,
     AgentSession,
+    AgentSessionCreateRequest,
     AgentStreamEvent,
 )
+from agent_service.services.agent_state_store import AGENT_STATE_STORE
 from agent_service.services.runtime_dependencies import get_runtime_kernel
-from agent_service.services.session_service import ensure_session, get_session
+from agent_service.services.session_service import (
+    create_named_session,
+    ensure_session,
+    get_session,
+)
 from agent_service.services.session_store import SESSION_STORE
 
 router = APIRouter(prefix="/api/v2")
@@ -61,16 +67,18 @@ async def chat(
     request_id = x_request_id or "untracked"
     record_chat_request()
     session = ensure_session(body.session_id, user_id)
-    content = await get_runtime_kernel().reply_text(
+    content, structured_output = await get_runtime_kernel().reply_text(
         message=body.message,
         session_id=session.session_id,
         user_name=user_id,
         bearer_token=_bearer_token(authorization),
+        response_schema=body.response_schema,
     )
     return AgentChatResponse(
         session_id=session.session_id,
         request_id=request_id,
         content=content,
+        structured_output=structured_output,
     )
 
 
@@ -164,10 +172,16 @@ def _coerce_data_summary(value: object) -> dict[str, object] | None:
 
 @router.post("/sessions", response_model=AgentSession, status_code=201)
 async def create_session(
+    body: AgentSessionCreateRequest | None = None,
     x_user_id: str | None = Header(None),
 ) -> AgentSession:
     user_id = _user_id(x_user_id)
-    session = ensure_session(None, user_id)
+    requested_id = body.session_id.strip() if body and body.session_id else ""
+    if requested_id:
+        # Dedicated named session (SPEC-015 R-3): idempotent for the owner.
+        session = create_named_session(requested_id, user_id)
+    else:
+        session = ensure_session(None, user_id)
     return AgentSession(
         session_id=session.session_id,
         user_id=session.user_id or user_id,
@@ -223,4 +237,6 @@ async def health() -> AgentHealth:
         configured=configured,
         session_store=SESSION_STORE.backend_name,
         session_store_ready=SESSION_STORE.is_ready(),
+        agent_state=AGENT_STATE_STORE.backend_name,
+        agent_state_ready=AGENT_STATE_STORE.is_ready(),
     )

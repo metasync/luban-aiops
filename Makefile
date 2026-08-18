@@ -12,9 +12,9 @@
 SHELL := /bin/sh
 
 # Products with a Python (uv) test suite.
-PYTHON_PRODUCTS := agent-platform audit-service identity-broker platform-gateway skills-hub tool-gateway
+PYTHON_PRODUCTS := agent-platform audit-service identity-broker incident-service platform-gateway skills-hub tool-gateway
 # Products with a container image.
-IMAGE_PRODUCTS := agent-platform audit-service identity-broker platform-gateway skills-hub tool-gateway operator-portal
+IMAGE_PRODUCTS := agent-platform audit-service identity-broker incident-service platform-gateway skills-hub tool-gateway operator-portal
 
 # GitOps overlays rendered as part of verification.
 GITOPS_DIR := shared/platform-ops/gitops
@@ -26,15 +26,21 @@ OVERLAYS := dev-k8s \
 # Coordinated deploy build state (written by `make build`, read by `make deploy`).
 IMAGE_STATE := $(GITOPS_DIR)/dev-k8s/.images.env
 
+# Platform release version (semver; single source of truth is the root
+# VERSION file). Prefixes the coordinated image tag and is kept in lockstep
+# with every product version — enforced by `make validate-version`.
+PLATFORM_VERSION := $(shell cat VERSION 2>/dev/null)
+
 # Overridable build settings (IMAGE_PLATFORM, BASE_UV_*, kind loading, ...).
 # Config lives in mk/defaults.mk; this Makefile holds processing logic.
 include mk/defaults.mk
 
 # Compute the coordinated image tag once (mirrors the former build-images.sh):
-# clean tree -> <prefix>[-<profile>]-<gitsha>; dirty -> ...-dirty-<timestamp>.
+# clean tree -> <semver>-<prefix>[-<profile>]-<gitsha>;
+# dirty -> ...-dirty-<timestamp>.
 ifeq ($(origin IMAGE_TAG),undefined)
 IMAGE_TAG := $(shell \
-	base="$(IMAGE_TAG_PREFIX)$(if $(IMAGE_TAG_PROFILE),-$(IMAGE_TAG_PROFILE),)"; \
+	base="$(if $(PLATFORM_VERSION),$(PLATFORM_VERSION)-)$(IMAGE_TAG_PREFIX)$(if $(IMAGE_TAG_PROFILE),-$(IMAGE_TAG_PROFILE),)"; \
 	if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
 		sha=`git rev-parse --short HEAD 2>/dev/null || echo manual`; \
 		if [ -n "`git status --porcelain 2>/dev/null`" ]; then \
@@ -87,6 +93,7 @@ build: base-images ## Build all images (coordinated tag) and write .images.env f
 	@echo "IDENTITY_SERVICE_IMAGE=luban-aiops/identity-service:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "AUDIT_SERVICE_IMAGE=luban-aiops/audit-service:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "SKILLS_HUB_IMAGE=luban-aiops/skills-hub:$(IMAGE_TAG)" >> $(IMAGE_STATE)
+	@echo "INCIDENT_SERVICE_IMAGE=luban-aiops/incident-service:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "WEB_UI_IMAGE=luban-aiops/web-ui:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "Built images with IMAGE_TAG=$(IMAGE_TAG); wrote $(IMAGE_STATE)"
 	@if [ "$(AUTO_LOAD_KIND)" = "true" ]; then \
@@ -100,7 +107,8 @@ build: base-images ## Build all images (coordinated tag) and write .images.env f
 			"luban-aiops/agent-service:$(IMAGE_TAG)" \
 			"luban-aiops/identity-service:$(IMAGE_TAG)" \
 			"luban-aiops/audit-service:$(IMAGE_TAG)" \
-			"luban-aiops/skills-hub:$(IMAGE_TAG)"; \
+			"luban-aiops/skills-hub:$(IMAGE_TAG)" \
+			"luban-aiops/incident-service:$(IMAGE_TAG)"; \
 	fi
 
 .PHONY: push
@@ -125,6 +133,10 @@ sync-policy: ## Copy canonical policy bundle to all consumer locations
 validate-policy: ## Validate canonical policy bundle against JSON schema
 	@cd products/tool-gateway && uv run python ../../shared/shared-contracts/scripts/validate_policy.py
 
+.PHONY: validate-version
+validate-version: ## Validate version lockstep between VERSION, products, and portal
+	@cd products/tool-gateway && uv run python ../../shared/shared-contracts/scripts/validate_version.py ../..
+
 # --- Cross-cutting ----------------------------------------------------------
 
 .PHONY: overlays
@@ -135,7 +147,7 @@ overlays: ## Render every GitOps overlay (kustomize build check)
 	done
 
 .PHONY: verify
-verify: test overlays validate-policy ## Verification gate: product tests + overlay render + policy validation
+verify: test overlays validate-policy validate-version ## Verification gate: tests + overlays + policy + version lockstep
 
 .PHONY: deploy
 deploy: ## Deploy the dev-k8s overlay to the current cluster (wraps deploy.sh)

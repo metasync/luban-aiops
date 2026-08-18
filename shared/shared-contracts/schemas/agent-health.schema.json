@@ -28,12 +28,21 @@
     },
     "session_store": {
       "type": "string",
-      "enum": ["redis", "memory"],
-      "description": "Active session store backend (SPEC-006)."
+      "enum": ["redis", "memory", "postgres"],
+      "description": "Active session store backend (SPEC-006, SPEC-016)."
     },
     "session_store_ready": {
       "type": "boolean",
       "description": "Whether the session store backend is reachable."
+    },
+    "agent_state": {
+      "type": "string",
+      "enum": ["memory", "postgres"],
+      "description": "Active agent state store backend (SPEC-017)."
+    },
+    "agent_state_ready": {
+      "type": "boolean",
+      "description": "Whether the agent state store backend is reachable."
     }
   }
 }

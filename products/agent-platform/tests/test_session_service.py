@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from agent_service.app import create_app
 from agent_service.services import session_service
+from agent_service.services.agent_state_store import InMemoryAgentStateStore
 from agent_service.services.session_store import InMemorySessionStore
 
 
@@ -135,3 +136,141 @@ def test_session_routes_enforce_integrity():
     )
     assert owner.status_code == 200
     assert owner.json()["user_id"] == "alice"
+
+
+def test_create_named_session_is_idempotent_for_owner(monkeypatch):
+    monkeypatch.setattr(session_service, "SESSION_STORE", InMemorySessionStore())
+
+    created = session_service.create_named_session("incident-inc-aaa111", "alice")
+    assert created.session_id == "incident-inc-aaa111"
+    assert created.user_id == "alice"
+
+    again = session_service.create_named_session("incident-inc-aaa111", "alice")
+    assert again.session_id == "incident-inc-aaa111"
+
+
+def test_create_named_session_hides_foreign_owner(monkeypatch):
+    monkeypatch.setattr(session_service, "SESSION_STORE", InMemorySessionStore())
+
+    session_service.create_named_session("incident-inc-aaa111", "alice")
+
+    try:
+        session_service.create_named_session("incident-inc-aaa111", "bob")
+    except HTTPException as exc:
+        assert exc.status_code == 404
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("Foreign named sessions must not be adoptable")
+
+
+def test_create_named_session_lost_race_surfaces_as_404(monkeypatch):
+    # Simulates two operators creating the same named session concurrently
+    # on a last-writer-wins backend: the loser must get 404 instead of
+    # chatting under a session now owned by someone else.
+    store = InMemorySessionStore()
+    real_create = store.create_session
+
+    def racing_create(user_id, session_id=None):
+        record = real_create(user_id, session_id=session_id)
+        if session_id == "incident-inc-race01":
+            real_create("other-user", session_id=session_id)
+        return record
+
+    monkeypatch.setattr(store, "create_session", racing_create)
+    monkeypatch.setattr(session_service, "SESSION_STORE", store)
+
+    try:
+        session_service.create_named_session("incident-inc-race01", "alice")
+    except HTTPException as exc:
+        assert exc.status_code == 404
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("A lost create race must not return a session")
+
+
+def test_named_session_route_accepts_caller_supplied_id():
+    client = TestClient(create_app())
+
+    created = client.post(
+        "/api/v2/sessions",
+        json={"session_id": "incident-inc-route01"},
+        headers={"X-User-ID": "alice"},
+    )
+    assert created.status_code == 201
+    assert created.json()["session_id"] == "incident-inc-route01"
+
+    # Idempotent for the owning user (re-triage reuses the session).
+    again = client.post(
+        "/api/v2/sessions",
+        json={"session_id": "incident-inc-route01"},
+        headers={"X-User-ID": "alice"},
+    )
+    assert again.status_code == 201
+    assert again.json()["session_id"] == "incident-inc-route01"
+
+    # Foreign owner is indistinguishable from an unknown id.
+    foreign = client.post(
+        "/api/v2/sessions",
+        json={"session_id": "incident-inc-route01"},
+        headers={"X-User-ID": "bob"},
+    )
+    assert foreign.status_code == 404
+
+    # The named session is usable where an unknown id would 404.
+    readable = client.get(
+        "/api/v2/sessions/incident-inc-route01",
+        headers={"X-User-ID": "alice"},
+    )
+    assert readable.status_code == 200
+
+
+def test_delete_session_removes_session_and_agent_state(monkeypatch):
+    monkeypatch.setattr(session_service, "SESSION_STORE", InMemorySessionStore())
+    state_store = InMemoryAgentStateStore()
+    monkeypatch.setattr(session_service, "AGENT_STATE_STORE", state_store)
+
+    created = session_service.create_session("alice")
+    state_store.save_state(created.session_id, '{"turn": 1}')
+
+    assert session_service.delete_session(created.session_id, "alice") is True
+    assert state_store.load_state(created.session_id) is None
+
+    # Session is gone: repeat delete reports absence.
+    assert session_service.delete_session(created.session_id, "alice") is False
+
+
+def test_delete_session_missing_returns_false(monkeypatch):
+    monkeypatch.setattr(session_service, "SESSION_STORE", InMemorySessionStore())
+    assert session_service.delete_session("ses-nope", "alice") is False
+
+
+def test_delete_session_hides_foreign_owner(monkeypatch):
+    monkeypatch.setattr(session_service, "SESSION_STORE", InMemorySessionStore())
+    state_store = InMemoryAgentStateStore()
+    monkeypatch.setattr(session_service, "AGENT_STATE_STORE", state_store)
+
+    created = session_service.create_session("alice")
+    state_store.save_state(created.session_id, '{"turn": 1}')
+
+    try:
+        session_service.delete_session(created.session_id, "bob")
+    except HTTPException as exc:
+        assert exc.status_code == 404
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("Foreign sessions must not be deletable")
+
+    # The owner's session and its state survive the foreign attempt.
+    assert session_service.get_session(created.session_id, "alice") is not None
+    assert state_store.load_state(created.session_id) is not None
+
+
+def test_delete_session_survives_state_store_failure(monkeypatch):
+    monkeypatch.setattr(session_service, "SESSION_STORE", InMemorySessionStore())
+
+    class BrokenStateStore:
+        def delete_state(self, session_id):
+            raise RuntimeError("state store down")
+
+    monkeypatch.setattr(session_service, "AGENT_STATE_STORE", BrokenStateStore())
+
+    created = session_service.create_session("alice")
+    # Fail-open: the session delete succeeds even if state cleanup fails.
+    assert session_service.delete_session(created.session_id, "alice") is True

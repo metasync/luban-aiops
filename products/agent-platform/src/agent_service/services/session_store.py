@@ -1,8 +1,9 @@
-"""Session store with pluggable backends (SPEC-006).
+"""Session store with pluggable backends (SPEC-006, SPEC-016).
 
-Provides a Protocol-based interface so the service layer can work with
-either an in-memory store (dev/CI) or a Redis-backed store (deployed).
-Backend selection is driven by the ``SESSION_STORE_BACKEND`` env var.
+Provides a Protocol-based interface so the service layer can work with an
+in-memory store (dev/CI), a Redis-backed store (legacy deployments), or a
+Postgres-backed store (deployed, SPEC-016). Backend selection is driven by
+the ``SESSION_STORE_BACKEND`` env var.
 """
 
 from __future__ import annotations
@@ -11,8 +12,10 @@ import json
 import logging
 import os
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 from uuid import uuid4
 
 from agent_service.core.metrics import (
@@ -47,7 +50,9 @@ class SessionStore(Protocol):
     @property
     def backend_name(self) -> str: ...
 
-    def create_session(self, user_id: str | None) -> SessionRecord: ...
+    def create_session(
+        self, user_id: str | None, session_id: str | None = None
+    ) -> SessionRecord: ...
 
     def get_session(self, session_id: str) -> SessionRecord | None: ...
 
@@ -100,11 +105,13 @@ class InMemorySessionStore:
             self._sessions.pop(oldest_id, None)
             self._last_accessed.pop(oldest_id, None)
 
-    def create_session(self, user_id: str | None) -> SessionRecord:
+    def create_session(
+        self, user_id: str | None, session_id: str | None = None
+    ) -> SessionRecord:
         now = time.monotonic()
         self._purge_expired(now)
         record = SessionRecord(
-            session_id=f"ses-{uuid4()}",
+            session_id=session_id or f"ses-{uuid4()}",
             user_id=user_id,
             created_at=datetime.now(timezone.utc),
         )
@@ -180,9 +187,11 @@ class RedisSessionStore:
         except Exception:
             return None
 
-    def create_session(self, user_id: str | None) -> SessionRecord:
+    def create_session(
+        self, user_id: str | None, session_id: str | None = None
+    ) -> SessionRecord:
         record = SessionRecord(
-            session_id=f"ses-{uuid4()}",
+            session_id=session_id or f"ses-{uuid4()}",
             user_id=user_id,
             created_at=datetime.now(timezone.utc),
         )
@@ -261,6 +270,231 @@ class RedisSessionStore:
 
 
 # ---------------------------------------------------------------------------
+# Postgres backend (SPEC-016)
+# ---------------------------------------------------------------------------
+
+
+_SESSIONS_DDL = """
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id       TEXT PRIMARY KEY,
+    user_id          TEXT,
+    created_at       TIMESTAMPTZ NOT NULL,
+    last_accessed_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user
+    ON sessions (user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_accessed
+    ON sessions (last_accessed_at);
+"""
+
+_NOT_EXPIRED = (
+    "last_accessed_at > now() - make_interval(secs => %(ttl_seconds)s)"
+)
+
+# Conflict-safe insert: reclaim a row whose idle TTL has lapsed but has not
+# been swept yet, and no-op against a live conflicting row. The no-op case
+# keeps create_named_session's post-create re-read authoritative (foreign
+# owner surfaces as 404 instead of a UniqueViolation 500).
+_INSERT_SESSION = """
+INSERT INTO sessions (session_id, user_id, created_at, last_accessed_at)
+VALUES (%(session_id)s, %(user_id)s, %(created_at)s, %(created_at)s)
+ON CONFLICT (session_id) DO UPDATE
+   SET user_id = EXCLUDED.user_id,
+       created_at = EXCLUDED.created_at,
+       last_accessed_at = EXCLUDED.last_accessed_at
+ WHERE sessions.last_accessed_at <= now() - make_interval(secs => %(ttl_seconds)s)
+"""
+
+# Idle-TTL refresh folded into the read (one statement, one round trip).
+_GET_SESSION = f"""
+UPDATE sessions
+   SET last_accessed_at = now()
+ WHERE session_id = %(session_id)s AND {_NOT_EXPIRED}
+RETURNING session_id, user_id, created_at
+"""
+
+_LIST_USER_SESSIONS = f"""
+SELECT session_id, user_id, created_at
+  FROM sessions
+ WHERE user_id = %(user_id)s AND {_NOT_EXPIRED}
+ ORDER BY created_at
+"""
+
+_DELETE_SESSION = """
+DELETE FROM sessions
+ WHERE session_id = %(session_id)s
+RETURNING session_id
+"""
+
+_COUNT_SESSIONS = f"""
+SELECT COUNT(*) FROM sessions WHERE {_NOT_EXPIRED}
+"""
+
+# Bounded opportunistic sweep (SPEC-016 R-1): reclaim expired rows without a
+# long-running sweeper; runs piggyback on writes.
+_SWEEP_EXPIRED = """
+DELETE FROM sessions
+ WHERE ctid IN (
+     SELECT ctid FROM sessions
+      WHERE last_accessed_at <= now() - make_interval(secs => %(ttl_seconds)s)
+      LIMIT %(sweep_limit)s
+ )
+"""
+
+_SWEEP_LIMIT = 100
+
+SyncConnectFactory = Callable[[], Iterator[Any]]
+
+
+class PostgresSessionStore:
+    """Postgres-backed session store (SPEC-016 R-1).
+
+    Semantics mirror the Redis backend: idle TTL refreshed on read, expired
+    rows invisible to every query. Connections are opened per operation
+    (session traffic is low-volume); the ``connect`` factory is injectable
+    so tests can substitute a fake driver.
+    """
+
+    backend_name = "postgres"
+
+    def __init__(
+        self,
+        db_url: str,
+        ttl_seconds: float = DEFAULT_SESSION_TTL_SECONDS,
+        connect: SyncConnectFactory | None = None,
+    ) -> None:
+        self._db_url = db_url
+        self.ttl_seconds = ttl_seconds
+        self._connect = connect or self._default_connect
+
+    @contextmanager
+    def _default_connect(self) -> Iterator[Any]:
+        import psycopg
+
+        conn = psycopg.connect(self._db_url, autocommit=False)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    def _ttl_params(self) -> dict[str, Any]:
+        return {"ttl_seconds": self.ttl_seconds}
+
+    def initialize(self) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(_SESSIONS_DDL)
+            conn.commit()
+
+    def create_session(
+        self, user_id: str | None, session_id: str | None = None
+    ) -> SessionRecord:
+        record = SessionRecord(
+            session_id=session_id or f"ses-{uuid4()}",
+            user_id=user_id,
+            created_at=datetime.now(timezone.utc),
+        )
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        _INSERT_SESSION,
+                        {
+                            "session_id": record.session_id,
+                            "user_id": record.user_id,
+                            "created_at": record.created_at,
+                            **self._ttl_params(),
+                        },
+                    )
+                    cur.execute(
+                        _SWEEP_EXPIRED,
+                        {
+                            **self._ttl_params(),
+                            "sweep_limit": _SWEEP_LIMIT,
+                        },
+                    )
+                conn.commit()
+        except Exception:
+            record_session_store_error("create")
+            raise
+        return record
+
+    def get_session(self, session_id: str) -> SessionRecord | None:
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        _GET_SESSION,
+                        {
+                            "session_id": session_id,
+                            **self._ttl_params(),
+                        },
+                    )
+                    row = cur.fetchone()
+                conn.commit()
+        except Exception:
+            record_session_store_error("get")
+            raise
+        if row is None:
+            return None
+        return SessionRecord(
+            session_id=row[0], user_id=row[1], created_at=row[2]
+        )
+
+    def list_sessions_by_user(self, user_id: str) -> list[SessionRecord]:
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        _LIST_USER_SESSIONS,
+                        {"user_id": user_id, **self._ttl_params()},
+                    )
+                    rows = cur.fetchall()
+                conn.commit()
+        except Exception:
+            record_session_store_error("list")
+            raise
+        return [
+            SessionRecord(session_id=row[0], user_id=row[1], created_at=row[2])
+            for row in rows
+        ]
+
+    def delete_session(self, session_id: str) -> bool:
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        _DELETE_SESSION, {"session_id": session_id}
+                    )
+                    row = cur.fetchone()
+                conn.commit()
+        except Exception:
+            record_session_store_error("delete")
+            raise
+        return row is not None
+
+    def is_ready(self) -> bool:
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    return cur.fetchone() is not None
+        except Exception:
+            return False
+
+    def __len__(self) -> int:
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(_COUNT_SESSIONS, self._ttl_params())
+                    row = cur.fetchone()
+                conn.commit()
+        except Exception:
+            return 0
+        return int(row[0]) if row else 0
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
@@ -277,27 +511,71 @@ def _env_str(name: str, default: str) -> str:
     return os.getenv(name, default)
 
 
+def _build_memory_store(ttl: float) -> InMemorySessionStore:
+    store = InMemorySessionStore(
+        ttl_seconds=ttl,
+        max_entries=_env_int("SESSION_MAX_ENTRIES", DEFAULT_SESSION_MAX_ENTRIES),
+    )
+    record_session_store_backend("memory")
+    return store
+
+
+def _build_postgres_store(db_url: str, ttl: float) -> PostgresSessionStore:
+    """Construct and initialize the Postgres backend (SPEC-016 R-2).
+
+    Raises on an unreachable database so the factory can apply the
+    fail-open in-memory fallback.
+    """
+    store = PostgresSessionStore(db_url=db_url, ttl_seconds=ttl)
+    store.initialize()
+    record_session_store_backend("postgres")
+    LOGGER.info("session store: Postgres backend initialized")
+    return store
+
+
 def build_session_store() -> SessionStore:
     """Create the session store based on environment configuration.
 
     Reads:
-        SESSION_STORE_BACKEND: ``memory`` | ``redis`` (default ``memory``)
-        SESSION_TTL_SECONDS: TTL for both backends (default 3600)
+        SESSION_STORE_BACKEND: ``memory`` | ``redis`` | ``postgres``
+            (default ``memory``; unknown values fail startup, SPEC-016 R-2)
+        SESSION_TTL_SECONDS: TTL for all backends (default 3600)
         SESSION_MAX_ENTRIES: max entries for in-memory backend (default 1000)
         SESSION_REDIS_HOST: Redis host (default ``127.0.0.1``)
         SESSION_REDIS_PORT: Redis port (default ``6379``)
         SESSION_REDIS_DB: Redis DB number (default ``1``)
+        SESSION_DB_URL: Postgres DSN (required for ``postgres``)
+
+    Backend failures fail open: the service stays usable on an in-memory
+    fallback and records ``session_store_fallbacks_total``.
     """
     backend = _env_str("SESSION_STORE_BACKEND", "memory")
     ttl = _env_float("SESSION_TTL_SECONDS", DEFAULT_SESSION_TTL_SECONDS)
 
     if backend == "memory":
-        store = InMemorySessionStore(
-            ttl_seconds=ttl,
-            max_entries=_env_int("SESSION_MAX_ENTRIES", DEFAULT_SESSION_MAX_ENTRIES),
+        return _build_memory_store(ttl)
+
+    if backend == "postgres":
+        db_url = os.getenv("SESSION_DB_URL", "").strip()
+        if not db_url:
+            raise ValueError(
+                "SESSION_STORE_BACKEND=postgres requires SESSION_DB_URL to be set"
+            )
+        try:
+            return _build_postgres_store(db_url, ttl)
+        except Exception as exc:
+            LOGGER.warning(
+                "session store: Postgres unavailable (%s), falling back to in-memory",
+                exc,
+            )
+            record_session_store_fallback()
+            return _build_memory_store(ttl)
+
+    if backend != "redis":
+        raise ValueError(
+            f"Unknown SESSION_STORE_BACKEND: {backend!r} "
+            "(expected 'memory', 'redis', or 'postgres')"
         )
-        record_session_store_backend("memory")
-        return store
 
     # Redis backend — attempt connection with timeout.
     try:
@@ -329,12 +607,7 @@ def build_session_store() -> SessionStore:
             exc,
         )
         record_session_store_fallback()
-        fallback = InMemorySessionStore(
-            ttl_seconds=ttl,
-            max_entries=_env_int("SESSION_MAX_ENTRIES", DEFAULT_SESSION_MAX_ENTRIES),
-        )
-        record_session_store_backend("memory")
-        return fallback
+        return _build_memory_store(ttl)
 
 
 # Module-level singleton — imported by session_service.py.

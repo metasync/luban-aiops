@@ -29,8 +29,19 @@ ACTION_CHAT = "chat"
 ACTION_SESSION_CREATE = "session:create"
 ACTION_SESSION_READ = "session:read"
 ACTION_AUDIT_READ = "audit:read"
+ACTION_INCIDENT_READ = "incident:read"
+ACTION_INCIDENT_CREATE = "incident:create"
+ACTION_INCIDENT_TRIAGE = "incident:triage"
 PROTECTED_ACTIONS = frozenset(
-    {ACTION_CHAT, ACTION_SESSION_CREATE, ACTION_SESSION_READ, ACTION_AUDIT_READ}
+    {
+        ACTION_CHAT,
+        ACTION_SESSION_CREATE,
+        ACTION_SESSION_READ,
+        ACTION_AUDIT_READ,
+        ACTION_INCIDENT_READ,
+        ACTION_INCIDENT_CREATE,
+        ACTION_INCIDENT_TRIAGE,
+    }
 )
 
 # Module-level bundle singleton, keyed on the configured path.

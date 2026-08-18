@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -26,6 +26,9 @@ class ChatResponse(BaseModel):
     request_id: str
     content: str
     status: Literal["ok", "partial", "error"] = "ok"
+    # Kernel-validated structured output (SPEC-017 R-2); null when the turn
+    # requested no response schema. Relayed verbatim from agent-service.
+    structured_output: dict[str, Any] | None = None
 
 
 class CreateSessionRequest(BaseModel):
@@ -34,6 +37,17 @@ class CreateSessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     user_id: str | None = None
+
+
+class ReportIncidentRequest(BaseModel):
+    """Manual incident report (SPEC-015); mirrored to incident-service."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(default="", max_length=2000)
+    severity: Literal["critical", "warning", "info"] = "warning"
+    labels: dict[str, str] = Field(default_factory=dict)
 
 
 class SessionRecord(BaseModel):

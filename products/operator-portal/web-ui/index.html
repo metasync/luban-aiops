@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Luban AIOps Portal</title>
-    <link rel="stylesheet" href="./styles.css?v=20260816-cited-guidance" />
+    <link rel="stylesheet" href="./styles.css?v=20260817-incident-triage" />
   </head>
   <body>
     <!-- Two-column app shell: a left sidebar carries branding, identity, and
@@ -25,14 +25,16 @@
         <h1 class="sidebar-logo">Luban AIOps</h1>
 
         <!-- Function list. New functions are just another button + view.
-             The audit entry is hidden unless the resolved identity carries
-             an audit-allowed role (server re-enforces audit:read anyway). -->
+             Role-gated entries (Incidents, Audit) stay hidden until the
+             resolved identity carries an allowed role; the server
+             re-enforces incident:*/audit:read on every request anyway. -->
         <nav class="sidebar-nav" aria-label="Functions">
           <button id="nav-chat" class="nav-item active" type="button" aria-current="page">
             <span class="nav-label">Chat</span>
             <span id="chat-stream-dot" class="nav-stream-dot" hidden></span>
           </button>
           <button id="nav-settings" class="nav-item" type="button">Settings &amp; Debug</button>
+          <button id="nav-incidents" class="nav-item" type="button" hidden>Incidents</button>
           <button id="nav-audit" class="nav-item" type="button" hidden>Audit trail (durable)</button>
         </nav>
 
@@ -121,6 +123,64 @@
           </div>
         </section>
 
+        <!-- Incident triage view (SPEC-015 R-6): role-gated list of
+             normalized incidents with detail/triage/report surfaces. The
+             gateway re-enforces incident:* policy on every request
+             regardless of this client-side gating. -->
+        <section id="incidents-view" class="view incidents-view" hidden>
+          <h2 class="view-title">Incidents</h2>
+          <div class="audit-toolbar incidents-toolbar">
+            <select id="incidents-filter-status" title="status">
+              <option value="">all statuses</option>
+              <option value="new">new</option>
+              <option value="triaging">triaging</option>
+              <option value="triaged">triaged</option>
+              <option value="triage_failed">triage_failed</option>
+              <option value="resolved">resolved</option>
+            </select>
+            <select id="incidents-filter-severity" title="severity">
+              <option value="">all severities</option>
+              <option value="critical">critical</option>
+              <option value="warning">warning</option>
+              <option value="info">info</option>
+            </select>
+            <select id="incidents-filter-source" title="source">
+              <option value="">all sources</option>
+              <option value="alertmanager">alertmanager</option>
+              <option value="manual">manual</option>
+            </select>
+            <button id="incidents-refresh-button" type="button" class="btn-sm">Refresh</button>
+            <button id="incidents-report-toggle" type="button" class="btn-sm" hidden>Report incident</button>
+          </div>
+          <!-- Manual intake form (SPEC-015 R-2): collapsed by default; the
+               submission goes through the gateway's incident:create proxy. -->
+          <form id="incidents-report-form" class="incidents-report-form" hidden>
+            <label for="incidents-report-title">Title</label>
+            <input id="incidents-report-title" maxlength="200" placeholder="Short incident title" required />
+            <label for="incidents-report-summary">Summary</label>
+            <textarea id="incidents-report-summary" rows="3" maxlength="2000" placeholder="What is happening, where, since when?"></textarea>
+            <label for="incidents-report-severity">Severity</label>
+            <select id="incidents-report-severity">
+              <option value="warning">warning</option>
+              <option value="critical">critical</option>
+              <option value="info">info</option>
+            </select>
+            <label for="incidents-report-labels">Labels (key=value, comma separated)</label>
+            <input id="incidents-report-labels" placeholder="team=payments, cluster=dev-k8s" />
+            <div class="incidents-report-actions">
+              <button id="incidents-report-submit" type="submit" class="btn-sm">Submit report</button>
+              <button id="incidents-report-cancel" type="button" class="btn-sm">Cancel</button>
+              <span id="incidents-report-status" class="audit-status"></span>
+            </div>
+          </form>
+          <div id="incidents-output" class="audit-results">
+            <p class="chat-placeholder">Load incidents to inspect intake and triage state.</p>
+          </div>
+          <div class="audit-footer">
+            <span id="incidents-status" class="audit-status"></span>
+          </div>
+        </section>
+
         <!-- Durable audit trail view (SPEC-013 R-5): role-gated; the gateway
              re-enforces audit:read on every query regardless of this gating. -->
         <section id="audit-view" class="view audit-view" hidden>
@@ -135,12 +195,14 @@
               <option value="session_created">session_created</option>
               <option value="chat_started">chat_started</option>
               <option value="chat_completed">chat_completed</option>
+              <option value="incident_triaged">incident_triaged</option>
             </select>
             <select id="audit-filter-service">
               <option value="">all services</option>
               <option value="tool-gateway">tool-gateway</option>
               <option value="platform-gateway">platform-gateway</option>
               <option value="identity-service">identity-service</option>
+              <option value="incident-service">incident-service</option>
             </select>
             <input id="audit-filter-since" type="datetime-local" title="since" />
             <input id="audit-filter-until" type="datetime-local" title="until" />
@@ -161,6 +223,6 @@
       <div id="sidebar-backdrop" class="sidebar-backdrop" hidden></div>
     </div>
 
-    <script src="./app.js?v=20260816-cited-guidance"></script>
+    <script src="./app.js?v=20260817-incident-triage"></script>
   </body>
 </html>

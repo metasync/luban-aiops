@@ -56,6 +56,7 @@ Current implementation status:
 - ships a Kubernetes read-only connector (`k8s.list_pods`, `k8s.get_pod`, `k8s.get_events`, `k8s.get_pod_logs`) using `kubernetes-client/python`
 - ships an Elastic observability connector (`elastic.search_logs`, `elastic.get_service_health`, `elastic.get_active_alerts`) using the `elasticsearch` Python client; lazy-initialized, feature-gated by `GATEWAY_ELASTIC_ENABLED` (SPEC-011)
 - ships a skills connector (`skills.search`, `skills.get`, `skills.list`) against the `skills-hub` service with Basic-auth httpx transport, 10s timeout, and structured error mapping (404 → `SKILL_NOT_FOUND`, unreachable → `TOOL_EXECUTION_ERROR`); registered only when `GATEWAY_SKILLS_SERVICE_URL` is set (SPEC-014)
+- ships an incidents connector (`incidents.list`, `incidents.get`) against the `incident-service` service with the same Basic-auth httpx transport and error-mapping pattern (404 → `INCIDENT_NOT_FOUND`, unreachable → `TOOL_EXECUTION_ERROR`); registered only when `GATEWAY_INCIDENTS_SERVICE_URL` is set; read-only by design — no mutating incident tool exists (SPEC-015)
 - exposes `GET /api/v2/tools` (tool discovery, gated by `tools:list`) and `POST /api/v2/tools/invoke` (tool execution gated by `tools:invoke`); both derive identity solely from the verified token — any identity in a request body is never trusted
 - redacts credential-shaped spans (JWTs, `Bearer`/`Basic` values, PEM private keys, key-list fields such as `token`/`password`/`api_key`) from every tool result at the single invoke choke point before both the response and the audit log; when the redacted fraction exceeds `GATEWAY_REDACTION_OVERFLOW_FRACTION` the output is withheld with a `REDACTION_OVERFLOW` error (fail-closed, SPEC-009)
 - forwards `tool_invoked` audit events (including policy-denied invocations, post-redaction) to `audit-service` via a fire-and-forget emitter when `GATEWAY_AUDIT_SERVICE_URL` is set; unreachability degrades to log-only auditing and never blocks the invoke path (SPEC-013)
@@ -112,6 +113,12 @@ Current runtime environment knobs (tool-scoped; the portal-facing `PLATFORM_GATE
   - client id used to authenticate skills queries; defaults to `tool-gateway`
 - `GATEWAY_SKILLS_CLIENT_SECRET`
   - skills query credential; must match the entry in the skills-hub's `SKILLS_QUERY_CLIENTS` registry
+- `GATEWAY_INCIDENTS_SERVICE_URL`
+  - incident-service base URL (e.g. `http://incident-service:8000`); empty (default) leaves the incidents connector unregistered
+- `GATEWAY_INCIDENTS_CLIENT_ID`
+  - client id used to authenticate incidents queries; defaults to `tool-gateway`
+- `GATEWAY_INCIDENTS_CLIENT_SECRET`
+  - incidents query credential; must match the entry in the incident-service's `INCIDENT_QUERY_CLIENTS` registry
 - `OTEL_ENABLED`
   - master switch for the OTLP push pipeline (traces + metrics); defaults to `false`; when disabled, the `/metrics` surface is unaffected
 - `OTEL_EXPORTER_OTLP_ENDPOINT`
