@@ -14,6 +14,7 @@
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
@@ -27,6 +28,7 @@
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 - [tool-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-service.yaml)
 - [test_elastic_connector.py](file://products/tool-gateway/tests/test_elastic_connector.py)
+- [test_incidents_connector.py](file://products/tool-gateway/tests/test_incidents_connector.py)
 - [0005-platform-gateway-extraction.md](file://docs/adr/0005-platform-gateway-extraction.md)
 - [SPEC-010 spec.md](file://docs/specs/SPEC-010-platform-gateway-extraction/spec.md)
 - [2026-08-10-r1-hardening-grounded-responses-and-evidence-ux.md](file://docs/agentic-aiops-platform/release-notes/2026-08-10-r1-hardening-grounded-responses-and-evidence-ux.md)
@@ -34,11 +36,12 @@
 
 ## Update Summary
 **Changes Made**
-- Updated RBAC permissions section to reflect the expansion from namespaced Role to cluster-wide read-only ClusterRole (luban-tool-gateway-readonly)
-- Enhanced Kubernetes integration documentation to detail cross-namespace diagnostic capabilities
-- Updated security considerations to emphasize the strict read-only access controls while enabling cluster-wide operations
-- Added release notes reference documenting the RBAC permission changes
-- Updated troubleshooting guidance for cluster-wide access scenarios
+- Added comprehensive documentation for the new Incidents Connector tool enabling agents to query incidents through the tool gateway
+- Updated architecture diagrams to include the incidents connector alongside existing Kubernetes and Elastic connectors
+- Enhanced configuration section with incidents service integration settings
+- Added incidents connector implementation details, API endpoints, and security considerations
+- Updated troubleshooting guide with incidents-specific issues and resolution steps
+- Expanded policy engine documentation to include incidents tool permissions
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -61,10 +64,11 @@ Key responsibilities (current):
 - Internal HTTP API surface for tool discovery and invocation (`/api/v2/tools`)
 - Policy evaluation for tool-specific actions using YAML-based definitions with enhanced `tools:list` and `tools:invoke` permissions
 - Secure token verification with audience validation for `tool-gateway` audience
-- Multi-source tool registry supporting Kubernetes and Elastic connectors with safe discovery and invocation
+- Multi-source tool registry supporting Kubernetes, Elastic, and **Incidents connectors** with safe discovery and invocation
 - Comprehensive output redaction system preventing credential leakage
 - **Enhanced Kubernetes integration via cluster-wide read-only ClusterRole enabling cross-namespace diagnostic capabilities**
 - Elastic connector integration for observability data access including log search, service health metrics, and alert management
+- **Incidents connector integration for querying incident data through the new incident service**
 - Observability, metrics, and telemetry for monitoring and debugging
 
 **Important Note**: The platform-gateway extraction is complete. Portal-facing responsibilities including chat/session proxying, authentication flows, and delegation client functionality have moved to the new `platform-gateway` service, leaving tool-gateway focused exclusively on tool execution and connector management.
@@ -73,7 +77,7 @@ Key responsibilities (current):
 The Tool Gateway is implemented as a Python service under products/tool-gateway. Core modules include:
 - API layer: FastAPI routers and route handlers for tools and health endpoints
 - Services: Gateway orchestration, policy engine, and token verifier
-- Tools: Base tool abstraction, registry, Kubernetes connector, Elastic connector, and output redaction system
+- Tools: Base tool abstraction, registry, Kubernetes connector, Elastic connector, **Incidents connector**, and output redaction system
 - Core: Configuration, runtime, observability, metrics, telemetry, request context, dependencies
 - Schemas: Shared contract schemas for tool invocations and results
 - Policies: Default YAML policy definitions with enhanced tool permissions
@@ -91,12 +95,13 @@ G["Tool Registry<br/>tools/registry.py"]
 H["Base Tool<br/>tools/base.py"]
 I["K8s Connector<br/>tools/k8s_connector.py"]
 J["Elastic Connector<br/>tools/elastic_connector.py"]
-K["Output Redaction<br/>tools/redaction.py"]
-L["Policies YAML<br/>policies/policy-default.yaml"]
-M["Schemas<br/>schemas/api.py + shared contracts"]
-N["Core Config/Runtime<br/>core/config.py, core/runtime.py"]
-O["Observability/Metrics/Telemetry<br/>core/*"]
-P["Dependencies<br/>core/dependencies.py"]
+K["Incidents Connector<br/>tools/incidents_connector.py"]
+L["Output Redaction<br/>tools/redaction.py"]
+M["Policies YAML<br/>policies/policy-default.yaml"]
+N["Schemas<br/>schemas/api.py + shared contracts"]
+O["Core Config/Runtime<br/>core/config.py, core/runtime.py"]
+P["Observability/Metrics/Telemetry<br/>core/*"]
+Q["Dependencies<br/>core/dependencies.py"]
 end
 A --> B
 A --> C
@@ -105,19 +110,20 @@ C --> D
 D --> E
 D --> F
 D --> G
-F --> K
+F --> L
 G --> H
 G --> I
 G --> J
 G --> K
-E --> L
-D --> M
+G --> L
+E --> M
 D --> N
 D --> O
 D --> P
+D --> Q
 ```
 
-**Updated** Architecture diagram reflects the current structure with Elastic connector integration alongside Kubernetes connector
+**Updated** Architecture diagram reflects the current structure with all three connectors: Kubernetes, Elastic, and Incidents
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -130,6 +136,7 @@ D --> P
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
@@ -149,14 +156,15 @@ D --> P
 - Gateway Service: Orchestrates request lifecycle, applies policy checks, invokes tools, and returns responses with automatic redaction.
 - Policy Engine: Loads YAML policies, evaluates rules against request context, and makes allow/deny decisions for tool actions with enhanced `tools:list` and `tools:invoke` permissions.
 - Token Verifier: Validates authentication tokens with audience verification for `tool-gateway` audience and enriches request context with identity information.
-- Tool Registry: Discovers available tools from multiple connectors (Kubernetes, Elastic), manages their metadata, and executes them safely with input validation and output redaction.
+- Tool Registry: Discovers available tools from multiple connectors (Kubernetes, Elastic, **Incidents**), manages their metadata, and executes them safely with input validation and output redaction.
 - Output Redaction System: Automatically detects and redacts sensitive information from tool outputs using pattern matching and key-list filtering.
 - **Enhanced Kubernetes Connector**: Provides safe abstractions for interacting with Kubernetes clusters across all namespaces using cluster-wide read-only ClusterRole permissions, enabling comprehensive diagnostic capabilities while maintaining strict read-only access controls.
 - Elastic Connector: Provides read-only access to Elasticsearch for observability data including log search, service health metrics, and active alerts.
+- **Incidents Connector**: Provides read-only access to the incident-service query API for listing and retrieving incident data with proper authentication and parameter validation.
 - Schemas and Contracts: Enforce consistent request/response shapes for tool invocations and results.
 - Core Utilities: Configuration, runtime settings, observability, metrics, telemetry, request context propagation, and dependency injection.
 
-**Updated** Component descriptions reflect the current implementation with Elastic connector integration and enhanced cluster-wide Kubernetes permissions
+**Updated** Component descriptions reflect the current implementation with all three connectors integrated
 
 **Section sources**
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
@@ -166,6 +174,7 @@ D --> P
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
@@ -180,7 +189,7 @@ The Tool Gateway follows a streamlined architecture focused on multi-source tool
 **Current Architecture:**
 - API Layer: FastAPI routers expose endpoints for tool discovery and invocation only.
 - Service Layer: Gateway orchestrates tool invocation flows; policy engine enforces rules for tool actions with enhanced permissions; token verifier authenticates with audience validation for `tool-gateway`.
-- Tool Layer: Registry discovers and executes tools from multiple connectors; **enhanced Kubernetes connector provides cluster-wide read-only access**; Elastic connector provides observability data access; output redaction ensures sensitive data never leaves the service.
+- Tool Layer: Registry discovers and executes tools from multiple connectors; **enhanced Kubernetes connector provides cluster-wide read-only access**; Elastic connector provides observability data access; **incidents connector provides incident data access**; output redaction ensures sensitive data never leaves the service.
 - Core Layer: Configuration, runtime, observability, metrics, telemetry, and request context support cross-cutting concerns.
 
 ```mermaid
@@ -194,6 +203,7 @@ participant Token as "Token Verifier"
 participant Registry as "Tool Registry"
 participant K8s as "K8s Connector"
 participant Elastic as "Elastic Connector"
+participant Incidents as "Incidents Connector"
 participant Redaction as "Output Redaction"
 Client->>Router : "POST /api/v2/tools/invoke"
 Router->>ToolsRoute : "Handle tool invocation"
@@ -213,6 +223,10 @@ else "Elastic Tool"
 Gateway->>Registry : "Execute elastic tool with validated inputs"
 Registry->>Elastic : "Query logs/health/alerts"
 Elastic-->>Registry : "Observability data"
+else "Incidents Tool"
+Gateway->>Registry : "Execute incidents tool with validated inputs"
+Registry->>Incidents : "List/get incidents via HTTP"
+Incidents-->>Registry : "Incident data"
 end
 Registry-->>Gateway : "Tool result"
 Gateway->>Redaction : "Apply redaction patterns"
@@ -225,7 +239,7 @@ ToolsRoute-->>Client : "403 Forbidden"
 end
 ```
 
-**Updated** Sequence diagram reflects the current architecture with both Kubernetes and Elastic connectors, highlighting cluster-wide read-only access
+**Updated** Sequence diagram reflects the current architecture with all three connectors, highlighting cluster-wide read-only access and incidents integration
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -236,6 +250,7 @@ end
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 
 ## Detailed Component Analysis
@@ -322,6 +337,10 @@ class ElasticConnector {
 +get_service_health(service_name, time_range) dict
 +get_active_alerts(severity, max_results) dict
 }
+class IncidentsConnector {
++list_incidents(status, severity, source, limit, offset) dict
++get_incident(incident_id) dict
+}
 GatewayService --> PolicyEngine : "uses"
 GatewayService --> TokenVerifier : "uses"
 GatewayService --> ToolRegistry : "uses"
@@ -330,9 +349,10 @@ ToolRegistry --> BaseTool : "manages"
 ToolRegistry --> OutputRedaction : "uses"
 BaseTool --> K8sConnector : "may use"
 BaseTool --> ElasticConnector : "may use"
+BaseTool --> IncidentsConnector : "may use"
 ```
 
-**Updated** Streamlined architecture with both Kubernetes and Elastic connectors integrated
+**Updated** Streamlined architecture with all three connectors integrated
 
 **Diagram sources**
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
@@ -342,6 +362,7 @@ BaseTool --> ElasticConnector : "may use"
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 
 **Section sources**
@@ -465,6 +486,9 @@ class K8sTool {
 class ElasticTool {
 +execute(params, identity) Result
 }
+class IncidentsTool {
++execute(params, identity) Result
+}
 class OutputRedaction {
 +redact_result(result) Result
 +stats RedactionStats
@@ -473,15 +497,17 @@ ToolRegistry --> BaseTool : "manages"
 ToolRegistry --> OutputRedaction : "uses"
 K8sTool --|> BaseTool : "extends"
 ElasticTool --|> BaseTool : "extends"
+IncidentsTool --|> BaseTool : "extends"
 ```
 
-**Updated** Integrated with output redaction system and supports multiple tool providers
+**Updated** Integrated with output redaction system and supports all three tool providers
 
 **Diagram sources**
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 
 **Section sources**
@@ -556,6 +582,40 @@ BuildEvidence --> ReturnResult["Return Tool Result"]
 **Section sources**
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 
+### Incidents Connector for Incident Data Access
+Provides read-only access to the incident-service query API with two main tools:
+- **List Incidents**: Query tracked incidents with optional status, severity, and source filters, supporting pagination
+- **Get Incident**: Fetch a specific incident by ID, including its latest triage report and connector dispatch outcomes
+
+Features include:
+- **Authentication**: Uses gateway-held Basic credentials (never user's token) for secure service-to-service communication
+- **Parameter Validation**: Strict validation of incident IDs using regex pattern matching to prevent path injection attacks
+- **Pagination Support**: Configurable limit (default 20, max 50) and offset parameters for efficient data retrieval
+- **Filtering Options**: Optional status, severity, and source filters for targeted incident queries
+- **Structured Error Handling**: Maps upstream errors to structured tool errors with appropriate codes
+- **Evidence Building**: Automatic evidence generation for audit trails with source system identification
+- **Contract Compliance**: Ensures incident data conforms to shared schema contracts
+
+```mermaid
+flowchart TD
+ToolRequest["Tool Request"] --> ValidateParams["Validate Parameters"]
+ValidateParams --> CheckConfig{"Incidents Configured?"}
+CheckConfig --> |No| ReturnError["Return NOT_CONFIGURED"]
+CheckConfig --> |Yes| Authenticate["Authenticate with Basic Credentials"]
+Authenticate --> ExecuteQuery["Execute HTTP Request"]
+ExecuteQuery --> ProcessResults["Process Results"]
+ProcessResults --> BuildEvidence["Build Audit Evidence"]
+BuildEvidence --> ReturnResult["Return Tool Result"]
+```
+
+**New** Incidents connector provides secure incident data access through the incident service
+
+**Diagram sources**
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+
+**Section sources**
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+
 ### Schemas and Contracts
 - Tool invocation schema defines required fields for tool calls
 - Tool result schema standardizes responses across tools
@@ -566,13 +626,13 @@ BuildEvidence --> ReturnResult["Return Tool Result"]
 - [tool-result.schema.json](file://shared/shared-contracts/schemas/tool-result.schema.json)
 
 ### Core Configuration and Runtime
-- Configuration loads environment variables including audience validation settings and Elastic connector configuration
+- Configuration loads environment variables including audience validation settings and **incidents service configuration**
 - Runtime settings manage service lifecycle and dependencies
 - Observability, metrics, and telemetry provide monitoring and tracing
 - Redaction configuration with enable/disable switches and overflow thresholds
 - Dependency injection framework for service components
 
-**Updated** Added Elastic connector configuration options and enhanced dependency injection
+**Updated** Added incidents service configuration options and enhanced dependency injection
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
@@ -590,6 +650,7 @@ The Tool Gateway has clear dependency boundaries with focused security component
 - Tool registry depends on base tool implementations, connectors, and redaction system
 - **Enhanced Kubernetes connector depends on cluster-wide RBAC permissions and policy enforcement**
 - Elastic connector depends on Elasticsearch client and configuration
+- **Incidents connector depends on incident-service HTTP API and Basic authentication**
 - Output redaction depends on tool result structures and metrics tracking
 
 ```mermaid
@@ -603,11 +664,12 @@ Registry --> Tools["Base Tool Implementations"]
 Registry --> Redaction
 Tools --> K8s["Kubernetes Connector (Cluster-Wide)"]
 Tools --> Elastic["Elastic Connector"]
+Tools --> Incidents["Incidents Connector"]
 Services --> Schemas["Schemas & Contracts"]
 Services --> Core["Core Config/Runtime/Observability"]
 ```
 
-**Updated** Simplified dependency graph reflecting multi-connector architecture with enhanced Kubernetes permissions
+**Updated** Simplified dependency graph reflecting all three connectors with enhanced Kubernetes permissions
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -618,6 +680,7 @@ Services --> Core["Core Config/Runtime/Observability"]
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 
@@ -630,6 +693,7 @@ Services --> Core["Core Config/Runtime/Observability"]
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 
@@ -646,6 +710,9 @@ Services --> Core["Core Config/Runtime/Observability"]
 - Parameter clamping to prevent resource exhaustion in Elastic queries
 - Time range limitations for log searches to prevent long-running queries
 - **Optimized cluster-wide resource access patterns to minimize API call overhead**
+- **Connection timeout configuration for incidents service calls (10 seconds)**
+- **Result limit enforcement for incidents queries (max 50 entries)**
+- **Efficient incident data projection to exclude unnecessary fields in list operations**
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -658,12 +725,15 @@ Common issues and resolutions:
 - **Diagnostic scope limitations**: Ensure proper ClusterRoleBinding for the tool-gateway ServiceAccount
 - Elastic connectivity: Check Elastic URL, authentication credentials, and network connectivity
 - Elastic configuration: Verify `GATEWAY_ELASTIC_ENABLED` and related environment variables
+- **Incidents connectivity**: Check incidents service URL, Basic authentication credentials, and network connectivity
+- **Incidents configuration**: Verify `GATEWAY_INCIDENTS_SERVICE_URL`, `GATEWAY_INCIDENTS_CLIENT_ID`, and `GATEWAY_INCIDENTS_CLIENT_SECRET`
+- **Incidents parameter validation**: Ensure incident IDs match the expected pattern (inc-<lowercase alphanumeric>)
 - Performance degradation: Monitor metrics and adjust rate limits
 - Output redaction issues: Check redaction configuration and overflow thresholds
 - Dependency injection problems: Verify service initialization and configuration
 - Parameter validation errors: Review tool parameter schemas and constraints
 
-**Updated** Added troubleshooting guidance for cluster-wide Kubernetes access and enhanced RBAC permissions
+**Updated** Added troubleshooting guidance for incidents connector integration and common issues
 
 **Section sources**
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
@@ -671,6 +741,7 @@ Common issues and resolutions:
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
 - [observability.py](file://products/tool-gateway/src/tool_gateway/core/observability.py)
@@ -679,7 +750,7 @@ Common issues and resolutions:
 ## Conclusion
 The Tool Gateway Service provides a focused, secure, and extensible platform for internal tool execution with policy enforcement, secure tool invocation, and comprehensive output redaction. Its streamlined architecture enables easy extension with new tools while maintaining strong security and observability standards. The service now operates exclusively as an internal component, receiving requests from other platform services through well-defined APIs with delegated token authentication.
 
-The platform-gateway extraction has successfully separated portal-facing responsibilities into the new `platform-gateway` service, allowing tool-gateway to focus solely on its core mandate of connector standardization and tool execution. Recent enhancements include the addition of Elastic connector for observability data access, **enhanced RBAC permissions with cluster-wide read-only access enabling comprehensive diagnostic capabilities across all namespaces**, and improved policy engine with `tools:list` and `tools:invoke` permissions for observer roles.
+The platform-gateway extraction has successfully separated portal-facing responsibilities into the new `platform-gateway` service, allowing tool-gateway to focus solely on its core mandate of connector standardization and tool execution. Recent enhancements include the addition of Elastic connector for observability data access, **incidents connector for querying incident data through the new incident service**, **enhanced RBAC permissions with cluster-wide read-only access enabling comprehensive diagnostic capabilities across all namespaces**, and improved policy engine with `tools:list` and `tools:invoke` permissions for observer roles.
 
 This architectural change improves ownership alignment, security boundaries, and maintainability while preserving all external contracts and functionality. The transition from namespaced Role to cluster-wide ClusterRole significantly enhances operational capabilities while maintaining strict read-only access controls.
 
@@ -694,7 +765,7 @@ The platform-gateway extraction (ADR-0005, SPEC-010) has been completed successf
 
 **Component Separation:**
 - **Moved to platform-gateway**: Token verification, policy engine, chat routes, session routes, auth routes, identity routes, runtime routes, delegation client, agent client
-- **Remaining in tool-gateway**: Tool registry, base tool framework, k8s connector, elastic connector, output redaction, tools routes, health endpoints
+- **Remaining in tool-gateway**: Tool registry, base tool framework, k8s connector, elastic connector, **incidents connector**, output redaction, tools routes, health endpoints
 
 **Impact Assessment:**
 - External HTTP contracts remain unchanged for portal callers
@@ -737,12 +808,14 @@ Tools are registered dynamically with metadata and schemas from multiple connect
 - Execution functions with error handling
 - Integration with Kubernetes connector for cluster-wide operations
 - Integration with Elastic connector for observability data access
+- **Integration with Incidents connector for incident data access**
 
 **Section sources**
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 
 ### Custom Tool Development Guidelines
 When developing custom tools:
@@ -751,16 +824,18 @@ When developing custom tools:
 - Implement error handling and logging
 - Integrate with Kubernetes connector for cluster-wide operations
 - Integrate with Elastic connector for observability data access
+- **Integrate with Incidents connector for incident data access**
 - Register tools with the registry for discovery
 - Be aware that all tool outputs will be automatically redacted for security
 
-**Updated** Added guidance for Elastic connector integration and automatic output redaction
+**Updated** Added guidance for Incidents connector integration and automatic output redaction
 
 **Section sources**
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 
 ### Security Considerations
@@ -772,10 +847,12 @@ When developing custom tools:
 - Automatic output redaction preventing credential leakage
 - Fail-closed overflow protection for excessive redaction scenarios
 - Elastic connector authentication with API key or basic auth
+- **Incidents connector authentication with Basic credentials (service-to-service only)**
 - Parameter validation and clamping to prevent resource exhaustion
+- **Strict incident ID validation to prevent path injection attacks**
 - **Strict read-only access controls ensuring no mutating operations are permitted**
 
-**Updated** Enhanced security model with Elastic connector considerations and improved cluster-wide RBAC permissions
+**Updated** Enhanced security model with Elastic and Incidents connector considerations and improved cluster-wide RBAC permissions
 
 **Section sources**
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
@@ -784,6 +861,7 @@ When developing custom tools:
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 
 ### Rate Limiting and Monitoring Strategies
 - Configure rate limits at the API gateway level
@@ -793,10 +871,11 @@ When developing custom tools:
 - Monitor Kubernetes API call rates and quotas across all namespaces
 - Track redaction statistics and overflow events
 - Monitor Elastic connector performance and query efficiency
+- **Monitor incidents connector performance and upstream service availability**
 - Track tool execution times and success rates
 - **Monitor cluster-wide resource access patterns and API call volumes**
 
-**Updated** Enhanced monitoring strategies with Elastic connector metrics and cluster-wide access monitoring
+**Updated** Enhanced monitoring strategies with Elastic and Incidents connector metrics and cluster-wide access monitoring
 
 **Section sources**
 - [metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
@@ -833,6 +912,23 @@ The Elastic connector provides observability data access with flexible configura
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [test_elastic_connector.py](file://products/tool-gateway/tests/test_elastic_connector.py)
+
+### Incidents Connector Configuration
+The Incidents connector provides incident data access with secure service-to-service authentication:
+- **Enable/Disable**: `GATEWAY_INCIDENTS_SERVICE_URL` environment variable (required for activation)
+- **Service URL**: `GATEWAY_INCIDENTS_SERVICE_URL` for incident-service endpoint
+- **Authentication**: `GATEWAY_INCIDENTS_CLIENT_ID` and `GATEWAY_INCIDENTS_CLIENT_SECRET` for Basic authentication
+- **Default Client ID**: `tool-gateway` (must be registered in incident-service query clients)
+- **Timeout**: 10 seconds for HTTP requests to incident-service
+- **Result Limits**: Maximum 50 entries per list operation
+- **Authentication Flow**: Uses gateway-held credentials, never exposes user tokens to incident-service
+
+**New** Incidents connector configuration options for secure incident data access
+
+**Section sources**
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [test_incidents_connector.py](file://products/tool-gateway/tests/test_incidents_connector.py)
 
 ### RBAC Permission Changes - Release Notes Reference
 The RBAC permissions have been significantly enhanced in Release 1:
