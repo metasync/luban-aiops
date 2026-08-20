@@ -34,6 +34,8 @@ upstream 4xx pass through verbatim.
 137 tests including the new policy-matrix and workspace-proxy suites), all
 four Kustomize overlays render cleanly, `validate-policy` confirms the
 ten-rule deny-by-default bundle, and `validate-version` confirms lockstep.
+This slice closes release **0.5.0** (MINOR bump per the release-train
+convention).
 
 ## Change Set 1: Sectioned navigation and version consolidation (R-1)
 
