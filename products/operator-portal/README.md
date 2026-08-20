@@ -42,10 +42,15 @@ Current browser baseline capabilities:
   Debug, Audit trail) with state preserved across switches; narrow
   screens collapse the sidebar into a hamburger-triggered off-canvas
   drawer
+- sectioned sidebar navigation: Chat stands alone; Control gathers
+  Incidents, Audit trail, and Permissions; Workspace gathers Tools, Skills,
+  and Settings & Debug; section headers hide automatically when every entry
+  in the section is hidden (SPEC-019)
 - sidebar footer: a user card (initials avatar, username, icon-only
   Sign in / Sign out with tooltips; clicking the user opens a popup menu
-  showing granted roles and — later — other user-related info) and a
-  platform version card, kept separate from the function list
+  showing granted roles and — later — other user-related info), kept
+  separate from the function list; the platform version renders as a muted
+  chip in the logo row
 - `OIDC` login start through `platform-gateway`
 - authorization-code callback completion through `identity-broker`
 - authenticated portal logout entry point
@@ -71,6 +76,15 @@ Current browser baseline capabilities:
   the raw agent text), a Report incident form, and Continue in chat on the
   incident's dedicated session; viewing is gated by `incident:read`, acting
   by `incident:create` / `incident:triage` (SPEC-015)
+- Permissions view: the live role × action matrix evaluated from the policy
+  bundle platform-gateway actually enforces (`GET /api/v1/policy/matrix`),
+  with bundle version/source provenance and server-side row scoping
+  (platform-admin sees all roles, everyone else their own rows); visible to
+  every signed-in user under `policy:read` (SPEC-019)
+- Workspace resource views: read-only Tools catalog
+  (`GET /api/v1/tools`, delegated-bearer proxy to tool-gateway under
+  `tools:list`) and Skills inventory (`GET /api/v1/skills`, gateway-held
+  query credential under `skills:read`) with source/tag filters (SPEC-019)
 
 ## Expected Integration Points
 

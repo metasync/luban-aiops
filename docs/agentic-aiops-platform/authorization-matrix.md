@@ -326,6 +326,18 @@ Store the matrix in a versioned policy configuration so it can be:
 - changed through controlled pull requests
 - tested before rollout
 
+### Live Matrix Transparency
+
+The enforced implementation of this matrix lives in the policy bundle
+(`shared/shared-contracts/policies/policy-default.yaml`) and is exposed live
+by platform-gateway at `GET /api/v1/policy/matrix` (SPEC-019), evaluated from
+the loaded bundle rather than hand-maintained. The operator portal's
+Permissions view renders it, so the granted role × action surface is
+self-service and always reflects what the gateway actually enforces.
+Transparency actions `policy:read` and `skills:read` (read-only workspace
+inventory) are granted to all operational roles; deny-by-default semantics
+are unchanged.
+
 ## Final Recommendation
 
 Use this matrix as the default enterprise baseline for the platform:

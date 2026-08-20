@@ -72,3 +72,16 @@ class IdentityContext(BaseModel):
     groups: list[str] = Field(default_factory=list)
     roles: list[str]
     actor: str | None = None
+
+
+class PolicyMatrixResponse(BaseModel):
+    """Mirror of `shared-contracts/schemas/policy-matrix.schema.json` (SPEC-019 R-2)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: int
+    source: Literal["configured", "packaged-default"]
+    scope: Literal["full", "own"]
+    roles: list[str]
+    actions: list[str]
+    matrix: dict[str, dict[str, bool]]

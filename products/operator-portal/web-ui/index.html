@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Luban AIOps Portal</title>
-    <link rel="stylesheet" href="./styles.css?v=20260817-incident-triage" />
+    <link rel="stylesheet" href="./styles.css?v=20260820-tools-columns" />
   </head>
   <body>
     <!-- Two-column app shell: a left sidebar carries branding, identity, and
@@ -22,25 +22,43 @@
       </header>
 
       <aside id="sidebar" class="sidebar">
-        <h1 class="sidebar-logo">Luban AIOps</h1>
+        <h1 class="sidebar-logo">
+          Luban AIOps
+          <!-- Platform version consolidated into the logo row (SPEC-019 R-1);
+               kept in sync with CHANGELOG milestones via make validate-version. -->
+          <span id="version-output" class="version-chip"></span>
+        </h1>
 
-        <!-- Function list. New functions are just another button + view.
-             Role-gated entries (Incidents, Audit) stay hidden until the
-             resolved identity carries an allowed role; the server
-             re-enforces incident:*/audit:read on every request anyway. -->
+        <!-- Function list, grouped by intent (SPEC-019 R-1): Chat stands
+             alone; Control gathers governance surfaces; Workspace gathers
+             resource inventories and diagnostics. Section headers hide
+             automatically when every entry in the section is hidden.
+             Role-gated entries (Incidents, Audit) and sign-in-gated entries
+             (Permissions, Tools, Skills) stay hidden until the resolved
+             identity qualifies; the server re-enforces the matching policy
+             action on every request anyway. -->
         <nav class="sidebar-nav" aria-label="Functions">
           <button id="nav-chat" class="nav-item active" type="button" aria-current="page">
             <span class="nav-label">Chat</span>
             <span id="chat-stream-dot" class="nav-stream-dot" hidden></span>
           </button>
-          <button id="nav-settings" class="nav-item" type="button">Settings &amp; Debug</button>
-          <button id="nav-incidents" class="nav-item" type="button" hidden>Incidents</button>
-          <button id="nav-audit" class="nav-item" type="button" hidden>Audit trail (durable)</button>
+          <div id="nav-section-control" class="nav-section" hidden>
+            <span class="nav-section-label">Control</span>
+            <button id="nav-incidents" class="nav-item" type="button" hidden>Incidents</button>
+            <button id="nav-audit" class="nav-item" type="button" hidden>Audit trail (durable)</button>
+            <button id="nav-permissions" class="nav-item" type="button" hidden>Permissions</button>
+          </div>
+          <div id="nav-section-workspace" class="nav-section">
+            <span class="nav-section-label">Workspace</span>
+            <button id="nav-tools" class="nav-item" type="button" hidden>Tools</button>
+            <button id="nav-skills" class="nav-item" type="button" hidden>Skills</button>
+            <button id="nav-settings" class="nav-item" type="button">Settings &amp; Debug</button>
+          </div>
         </nav>
 
-        <!-- Sidebar footer: identity and platform version are state, not
-             functions, so they sit pinned to the bottom (margin-top:auto),
-             separated from the function list above. -->
+        <!-- Sidebar footer: identity is state, not a function, so the user
+             card sits pinned to the bottom (margin-top:auto), separated
+             from the function list above. -->
         <div class="sidebar-footer">
           <!-- User card: initials avatar + username (click opens the user
                popup menu), plus an icon-only login/logout action with a
@@ -68,12 +86,6 @@
                 <span id="identity-role" class="identity-role">no role</span>
               </div>
             </div>
-          </div>
-
-          <!-- Platform version (kept in sync with CHANGELOG milestones). -->
-          <div class="version-card">
-            <span>Luban AIOps</span>
-            <span id="version-output"></span>
           </div>
         </div>
       </aside>
@@ -216,6 +228,56 @@
             <button id="audit-more-button" type="button" class="btn-sm" hidden>Load more</button>
           </div>
         </section>
+
+        <!-- Permissions view (SPEC-019 R-3): the live role x action matrix
+             evaluated from the enforced policy bundle. Rows are scoped
+             server-side by the gateway; this view never filters them. -->
+        <section id="permissions-view" class="view permissions-view" hidden>
+          <h2 class="view-title">Permissions</h2>
+          <div class="audit-toolbar">
+            <button id="permissions-refresh-button" type="button" class="btn-sm">Refresh</button>
+          </div>
+          <div id="permissions-output" class="audit-results">
+            <p class="chat-placeholder">Load the permission matrix to see what each role may do.</p>
+          </div>
+          <div class="audit-footer">
+            <span id="permissions-status" class="audit-status"></span>
+          </div>
+        </section>
+
+        <!-- Tools catalog view (SPEC-019 R-4): read-only inventory proxied
+             from tool-gateway under a delegated operator token. The gateway
+             re-enforces tools:list on every request regardless of gating. -->
+        <section id="tools-view" class="view tools-view" hidden>
+          <h2 class="view-title">Tools</h2>
+          <div class="audit-toolbar">
+            <button id="tools-refresh-button" type="button" class="btn-sm">Refresh</button>
+          </div>
+          <div id="tools-output" class="audit-results">
+            <p class="chat-placeholder">Load the tool catalog to inspect what the agent can call.</p>
+          </div>
+          <div class="audit-footer">
+            <span id="tools-status" class="audit-status"></span>
+          </div>
+        </section>
+
+        <!-- Skills inventory view (SPEC-019 R-4): read-only listing proxied
+             from skills-hub with the gateway-held query credential. The
+             gateway re-enforces skills:read on every request. -->
+        <section id="skills-view" class="view skills-view" hidden>
+          <h2 class="view-title">Skills</h2>
+          <div class="audit-toolbar">
+            <input id="skills-filter-source" placeholder="source" />
+            <input id="skills-filter-tag" placeholder="tag" />
+            <button id="skills-refresh-button" type="button" class="btn-sm">Refresh</button>
+          </div>
+          <div id="skills-output" class="audit-results">
+            <p class="chat-placeholder">Load the skills inventory to inspect grounded guidance.</p>
+          </div>
+          <div class="audit-footer">
+            <span id="skills-status" class="audit-status"></span>
+          </div>
+        </section>
       </main>
 
       <!-- Tap target behind the open mobile drawer; closes it. Always hidden
@@ -223,6 +285,6 @@
       <div id="sidebar-backdrop" class="sidebar-backdrop" hidden></div>
     </div>
 
-    <script src="./app.js?v=20260817-incident-triage"></script>
+    <script src="./app.js?v=20260820-tools-columns"></script>
   </body>
 </html>

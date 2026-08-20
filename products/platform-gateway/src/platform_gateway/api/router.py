@@ -7,8 +7,11 @@ from platform_gateway.api.routes import (
     health,
     identity,
     incidents,
+    policy,
     runtime,
     sessions,
+    skills,
+    tools,
 )
 
 router = APIRouter()
@@ -20,3 +23,6 @@ router.include_router(sessions.router)
 router.include_router(chat.router)
 router.include_router(audit.router)
 router.include_router(incidents.router)
+router.include_router(policy.router)
+router.include_router(tools.router)
+router.include_router(skills.router)

@@ -427,12 +427,21 @@ The tool-gateway fragment commits the caller halves:
 
 - `GATEWAY_SKILLS_SERVICE_URL=http://skills-hub:8000`, `GATEWAY_SKILLS_CLIENT_ID=tool-gateway`
 
-The shared query secret lives in two optional secrets and is provisioned by
-`sync-skills-secrets.sh` (one random secret shared across both parties):
+The platform-gateway fragment commits its portal inventory proxy halves
+(SPEC-019):
+
+- `PLATFORM_GATEWAY_SKILLS_HUB_URL=http://skills-hub:8000`,
+  `PLATFORM_GATEWAY_SKILLS_CLIENT_ID=platform-gateway`, and
+  `PLATFORM_GATEWAY_TOOL_GATEWAY_URL=http://tool-gateway:8000` (the Tools
+  proxy rides the delegation chain, so it needs no extra secret)
+
+The shared query secret lives in three optional secrets and is provisioned by
+`sync-skills-secrets.sh` (one random secret shared across all callers):
 
 - `skills-hub-runtime-secrets` — `SKILLS_QUERY_CLIENTS`
   (format `client_id=secret,...`; see `base/skills-hub/runtime-secrets.example.env`)
 - `tool-gateway-runtime-secrets` — `GATEWAY_SKILLS_CLIENT_SECRET`
+- `platform-gateway-runtime-secrets` — `PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET`
 
 `make deploy` runs the script automatically (after the audit secrets); to skip
 (e.g. when secrets are injected by CI):

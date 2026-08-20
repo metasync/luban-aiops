@@ -257,7 +257,9 @@ The policy engine enforces deny-by-default authorization on named actions:
 | `incident:read` | platform-gateway | View incidents and triage reports |
 | `incident:create` | platform-gateway | Report a manual incident |
 | `incident:triage` | platform-gateway | Initiate agent triage of an incident |
-| `tools:list` | tool-gateway | Discover available tools |
+| `policy:read` | platform-gateway | View the live role × action permission matrix |
+| `tools:list` | tool-gateway, platform-gateway | Discover available tools (platform-gateway gates the portal catalog proxy) |
+| `skills:read` | platform-gateway | View the federated skills inventory |
 | `tools:invoke` | tool-gateway | Execute a tool |
 
 Health, metrics, auth, and identity routes are explicitly exempt (platform plumbing, no
@@ -265,7 +267,7 @@ business action).
 
 ### Default Policy Bundle
 
-The platform ships with eight allow rules at priority 100. Everything else is denied:
+The platform ships with ten allow rules at priority 100. Everything else is denied:
 
 | Rule | Roles | Actions |
 |---|---|---|
@@ -277,6 +279,14 @@ The platform ships with eight allow rules at priority 100. Everything else is de
 | `allow-operators-incident-read` | admin, approver, operator, developer, read-only-observer | `incident:read` |
 | `allow-operators-incident-create` | admin, approver, operator, developer | `incident:create` |
 | `allow-operators-incident-triage` | admin, approver, operator, developer | `incident:triage` |
+| `allow-all-policy-read` | admin, approver, operator, developer, read-only-observer | `policy:read` |
+| `allow-all-skills-read` | admin, approver, operator, developer, read-only-observer | `skills:read` |
+
+> **Note:** The live matrix these rules produce is served by platform-gateway at
+> `GET /api/v1/policy/matrix` (SPEC-019) and rendered in the portal's Permissions view.
+> Rows are scoped server-side: `platform-admin` sees every role, every other identity
+> only its own granted rows. "Why was I denied?" is therefore self-service — the view
+> always reflects the bundle the gateway actually enforces.
 
 > **Note:** The `read-only-observer` tool grants assume all registered tools are read-only
 > (tier-0 reads). Before any mutating tool is registered, these rules must be re-scoped.

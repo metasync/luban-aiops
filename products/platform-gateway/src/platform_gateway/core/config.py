@@ -44,6 +44,12 @@ class PlatformGatewaySettings:
     incident_client_id: str = "platform-gateway"
     incident_client_secret: str = ""
     incident_triage_timeout_seconds: float = 120.0
+    # Workspace transparency proxies (SPEC-019 R-4): read-only inventory
+    # surfaces for the portal. Empty URL = proxy disabled (503).
+    tool_gateway_url: str = ""
+    skills_hub_url: str = ""
+    skills_client_id: str = "platform-gateway"
+    skills_client_secret: str = ""
 
     @classmethod
     def from_env(cls) -> "PlatformGatewaySettings":
@@ -107,6 +113,14 @@ class PlatformGatewaySettings:
             ),
             incident_triage_timeout_seconds=float(
                 os.getenv("PLATFORM_GATEWAY_INCIDENT_TRIAGE_TIMEOUT_SECONDS", "120")
+            ),
+            tool_gateway_url=os.getenv("PLATFORM_GATEWAY_TOOL_GATEWAY_URL", ""),
+            skills_hub_url=os.getenv("PLATFORM_GATEWAY_SKILLS_HUB_URL", ""),
+            skills_client_id=os.getenv(
+                "PLATFORM_GATEWAY_SKILLS_CLIENT_ID", "platform-gateway"
+            ),
+            skills_client_secret=os.getenv(
+                "PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET", ""
             ),
         )
 

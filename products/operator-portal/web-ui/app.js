@@ -1,8 +1,9 @@
 const gatewayInput = document.querySelector("#gateway-url");
 
-// Platform version shown in the sidebar footer; must match the root
-// VERSION file (enforced by make validate-version). A gateway-served
-// /api/v1/version endpoint is the intended long-term source of truth.
+// Platform version shown as a chip in the sidebar logo row (SPEC-019 R-1);
+// must match the root VERSION file (enforced by make validate-version). A
+// gateway-served /api/v1/version endpoint is the intended long-term source
+// of truth.
 const PLATFORM_VERSION = "v0.4.0";
 document.querySelector("#version-output").textContent = PLATFORM_VERSION;
 const userInput = document.querySelector("#user-id");
@@ -59,6 +60,22 @@ let incidentsAutoRefreshId = null;
 // Guards Refresh racing the auto-refresh tick into duplicate renders.
 let incidentsLoadInFlight = false;
 
+// Permissions view (SPEC-019 R-3): renders the live role x action matrix
+// from the gateway's /api/v1/policy/matrix endpoint. Rows arrive scoped
+// server-side; the view displays them verbatim. Sign-in-gated: every signed
+// role holds policy:read, so the entry hides only when signed out. The
+// gateway re-enforces policy:read on every request regardless.
+const permissionsOutput = document.querySelector("#permissions-output");
+const permissionsStatus = document.querySelector("#permissions-status");
+
+// Workspace resource views (SPEC-019 R-4): read-only Tools and Skills
+// inventories over gateway proxies. Same gating posture as Permissions:
+// sign-in-gated entries, server re-enforcement on tools:list / skills:read.
+const toolsOutput = document.querySelector("#tools-output");
+const toolsStatus = document.querySelector("#tools-status");
+const skillsOutput = document.querySelector("#skills-output");
+const skillsStatus = document.querySelector("#skills-status");
+
 // --- View navigation (sidebar → main area) ---
 // Views are hidden, never destroyed, so chat history, session state, and
 // loaded audit rows survive navigation.
@@ -66,9 +83,31 @@ const VIEWS = {
   chat: { nav: document.querySelector("#nav-chat"), section: document.querySelector("#chat-view") },
   settings: { nav: document.querySelector("#nav-settings"), section: document.querySelector("#settings-view") },
   incidents: { nav: document.querySelector("#nav-incidents"), section: document.querySelector("#incidents-view") },
-  audit: { nav: document.querySelector("#nav-audit"), section: document.querySelector("#audit-view") }
+  audit: { nav: document.querySelector("#nav-audit"), section: document.querySelector("#audit-view") },
+  permissions: { nav: document.querySelector("#nav-permissions"), section: document.querySelector("#permissions-view") },
+  tools: { nav: document.querySelector("#nav-tools"), section: document.querySelector("#tools-view") },
+  skills: { nav: document.querySelector("#nav-skills"), section: document.querySelector("#skills-view") }
 };
 let activeViewId = "chat";
+
+// Section wrappers (SPEC-019 R-1): a header hides automatically when every
+// entry in its section is hidden.
+const NAV_SECTIONS = {
+  control: {
+    container: document.querySelector("#nav-section-control"),
+    entries: ["incidents", "audit", "permissions"]
+  },
+  workspace: {
+    container: document.querySelector("#nav-section-workspace"),
+    entries: ["tools", "skills", "settings"]
+  }
+};
+
+function syncNavSectionVisibility() {
+  for (const section of Object.values(NAV_SECTIONS)) {
+    section.container.hidden = section.entries.every((id) => VIEWS[id].nav.hidden);
+  }
+}
 
 // Visible pulse on the Chat nav item while a stream is running, so switching
 // to another function never hides that the agent is still working.
@@ -105,6 +144,23 @@ function showView(viewId) {
     startIncidentsAutoRefresh();
   } else {
     stopIncidentsAutoRefresh();
+  }
+  // Transparency and inventory views lazy-load on every activation so the
+  // rendered state tracks the live policy bundle and workspace resources.
+  if (viewId === "permissions") {
+    loadPolicyMatrix().catch((error) => {
+      renderError(permissionsOutput, error);
+    });
+  }
+  if (viewId === "tools") {
+    loadToolsCatalog().catch((error) => {
+      renderError(toolsOutput, error);
+    });
+  }
+  if (viewId === "skills") {
+    loadSkillsInventory().catch((error) => {
+      renderError(skillsOutput, error);
+    });
   }
 }
 
@@ -321,6 +377,17 @@ function syncResolvedUser() {
   if (!incidentsAllowed && activeViewId === "incidents") {
     showView("chat");
   }
+  // Permissions/Tools/Skills are granted to all five roles, so the signed-in
+  // session itself is the gate (SPEC-019 R-1); the server re-enforces
+  // policy:read / tools:list / skills:read on every request regardless.
+  const signedIn = Boolean(authenticatedUser);
+  for (const viewId of ["permissions", "tools", "skills"]) {
+    VIEWS[viewId].nav.hidden = !signedIn;
+    if (!signedIn && activeViewId === viewId) {
+      showView("chat");
+    }
+  }
+  syncNavSectionVisibility();
   const roleBadge = document.querySelector("#identity-role");
   const avatar = document.querySelector("#user-avatar");
   if (authenticatedUser) {
@@ -554,6 +621,145 @@ function auditEventRows(event) {
 function formatAuditTimestamp(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+// --- Permissions view (SPEC-019 R-3) ---
+async function loadPolicyMatrix() {
+  if (!currentAuthenticatedUser()) return;
+  const payload = await requestJson("/api/v1/policy/matrix", { method: "GET" });
+  renderPolicyMatrix(payload);
+}
+
+function renderPolicyMatrix(payload) {
+  permissionsOutput.innerHTML = "";
+  const meta = document.createElement("p");
+  meta.className = "permissions-meta";
+  meta.textContent =
+    `Policy bundle v${payload.version} \u00b7 ${payload.source} \u00b7 scope: ${payload.scope}`;
+  permissionsOutput.appendChild(meta);
+
+  const actions = payload.actions || [];
+  const table = document.createElement("table");
+  table.className = "audit-table policy-matrix-table";
+  const headRow = document.createElement("tr");
+  const roleHeader = document.createElement("th");
+  roleHeader.textContent = "role";
+  headRow.appendChild(roleHeader);
+  for (const action of actions) {
+    const th = document.createElement("th");
+    th.textContent = action;
+    headRow.appendChild(th);
+  }
+  const thead = document.createElement("thead");
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  for (const role of payload.roles || []) {
+    const row = document.createElement("tr");
+    const roleCell = document.createElement("td");
+    roleCell.textContent = role;
+    row.appendChild(roleCell);
+    for (const action of actions) {
+      const cell = document.createElement("td");
+      const allowed = Boolean(payload.matrix?.[role]?.[action]);
+      const badge = document.createElement("span");
+      badge.className = `status-badge ${allowed ? "success" : "denied"}`;
+      badge.textContent = allowed ? "allow" : "deny";
+      cell.appendChild(badge);
+      row.appendChild(cell);
+    }
+    tbody.appendChild(row);
+  }
+  table.appendChild(tbody);
+  permissionsOutput.appendChild(table);
+  const rows = (payload.roles || []).length;
+  permissionsStatus.textContent =
+    `${rows} role${rows === 1 ? "" : "s"} \u00d7 ${actions.length} actions \u00b7 evaluated from the enforced bundle`;
+}
+
+// --- Tools catalog view (SPEC-019 R-4) ---
+async function loadToolsCatalog() {
+  if (!currentAuthenticatedUser()) return;
+  const payload = await requestJson("/api/v1/tools", { method: "GET" });
+  renderToolsCatalog(Array.isArray(payload) ? payload : []);
+}
+
+function renderToolsCatalog(tools) {
+  toolsOutput.innerHTML = "";
+  if (tools.length === 0) {
+    toolsOutput.innerHTML = '<p class="chat-placeholder">No tools are registered in this workspace.</p>';
+    toolsStatus.textContent = "";
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "audit-table tools-table";
+  const headers = ["name", "description", "category", "risk"];
+  table.innerHTML = `<thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead>`;
+  const tbody = document.createElement("tbody");
+  for (const tool of tools) {
+    const row = document.createElement("tr");
+    for (const value of [tool.name, tool.description, tool.category, tool.risk_level]) {
+      const td = document.createElement("td");
+      td.textContent = value ?? "\u2014";
+      row.appendChild(td);
+    }
+    tbody.appendChild(row);
+  }
+  table.appendChild(tbody);
+  toolsOutput.appendChild(table);
+  toolsStatus.textContent =
+    `${tools.length} tool${tools.length === 1 ? "" : "s"} registered \u00b7 read-only catalog`;
+}
+
+// --- Skills inventory view (SPEC-019 R-4) ---
+function buildSkillsQuery() {
+  const params = new URLSearchParams({ limit: "100" });
+  const source = document.querySelector("#skills-filter-source").value.trim();
+  const tag = document.querySelector("#skills-filter-tag").value.trim();
+  if (source) params.set("source", source);
+  if (tag) params.set("tag", tag);
+  return params.toString();
+}
+
+async function loadSkillsInventory() {
+  if (!currentAuthenticatedUser()) return;
+  const payload = await requestJson(`/api/v1/skills?${buildSkillsQuery()}`, { method: "GET" });
+  renderSkillsInventory(payload.skills || [], payload.total || 0);
+}
+
+function renderSkillsInventory(skills, total) {
+  skillsOutput.innerHTML = "";
+  if (skills.length === 0) {
+    skillsOutput.innerHTML = '<p class="chat-placeholder">No skills match these filters.</p>';
+    skillsStatus.textContent = "";
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "audit-table";
+  const headers = ["title", "source", "tags", "version", "updated"];
+  table.innerHTML = `<thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead>`;
+  const tbody = document.createElement("tbody");
+  for (const skill of skills) {
+    const row = document.createElement("tr");
+    const cells = [
+      skill.title || skill.skill_id,
+      skill.source_id || "\u2014",
+      (skill.tags || []).join(", ") || "\u2014",
+      skill.version || "\u2014",
+      formatAuditTimestamp(skill.updated_at)
+    ];
+    for (const value of cells) {
+      const td = document.createElement("td");
+      td.textContent = value;
+      row.appendChild(td);
+    }
+    tbody.appendChild(row);
+  }
+  table.appendChild(tbody);
+  skillsOutput.appendChild(table);
+  skillsStatus.textContent =
+    `${skills.length} skill${skills.length === 1 ? "" : "s"} shown \u00b7 ${total} total`;
 }
 
 // --- Incident triage view (SPEC-015 R-6) ---
@@ -1576,6 +1782,33 @@ for (const filterId of ["#incidents-filter-status", "#incidents-filter-severity"
   document.querySelector(filterId).addEventListener("change", () => {
     loadIncidentsList().catch((error) => {
       renderError(incidentsOutput, error);
+    });
+  });
+}
+
+// Transparency and workspace inventory surfaces (SPEC-019 R-3/R-4).
+document.querySelector("#permissions-refresh-button").addEventListener("click", () => {
+  loadPolicyMatrix().catch((error) => {
+    renderError(permissionsOutput, error);
+  });
+});
+
+document.querySelector("#tools-refresh-button").addEventListener("click", () => {
+  loadToolsCatalog().catch((error) => {
+    renderError(toolsOutput, error);
+  });
+});
+
+document.querySelector("#skills-refresh-button").addEventListener("click", () => {
+  loadSkillsInventory().catch((error) => {
+    renderError(skillsOutput, error);
+  });
+});
+
+for (const filterId of ["#skills-filter-source", "#skills-filter-tag"]) {
+  document.querySelector(filterId).addEventListener("change", () => {
+    loadSkillsInventory().catch((error) => {
+      renderError(skillsOutput, error);
     });
   });
 }

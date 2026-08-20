@@ -132,3 +132,4 @@ Mechanical enforcement:
 | `SPEC-016` | Session store separation — Postgres session backend for agent-platform, kernel Redis untouched | `delivered` |
 | `SPEC-017` | Agent kernel utilization and conversation durability — kernel configs, structured triage output, AgentState persistence to Postgres | `delivered` |
 | `SPEC-018` | Kernel middleware alignment — middleware-based tracing/permission hooks, built-in task tools (sequenced after SPEC-017) | `delivered` |
+| `SPEC-019` | Portal transparency — permission matrix, workspace resource views, sectioned navigation | `delivered` |

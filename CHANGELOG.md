@@ -13,6 +13,8 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+- **Portal transparency and navigation** (SPEC-019): sectioned sidebar (Chat / Control / Workspace) with auto-hiding sections, live permission matrix endpoint (`GET /api/v1/policy/matrix`) rendered from the enforced policy bundle with server-side role scoping, Permissions view, and read-only Tools and Skills inventory views behind new platform-gateway proxies (new `policy:read` / `skills:read` actions granted to all operational roles); version chip consolidated into the logo row. The Tools catalog table uses fixed column geometry so the short category/risk columns are not starved by the free-form description column.
+
 ## 0.4.0 — 2026-08-20
 
 ### Added — Platform versioning discipline

@@ -32,6 +32,10 @@ ACTION_AUDIT_READ = "audit:read"
 ACTION_INCIDENT_READ = "incident:read"
 ACTION_INCIDENT_CREATE = "incident:create"
 ACTION_INCIDENT_TRIAGE = "incident:triage"
+# Transparency and workspace inventory actions (SPEC-019).
+ACTION_POLICY_READ = "policy:read"
+ACTION_TOOLS_LIST = "tools:list"
+ACTION_SKILLS_READ = "skills:read"
 PROTECTED_ACTIONS = frozenset(
     {
         ACTION_CHAT,
@@ -41,11 +45,15 @@ PROTECTED_ACTIONS = frozenset(
         ACTION_INCIDENT_READ,
         ACTION_INCIDENT_CREATE,
         ACTION_INCIDENT_TRIAGE,
+        ACTION_POLICY_READ,
+        ACTION_TOOLS_LIST,
+        ACTION_SKILLS_READ,
     }
 )
 
 # Module-level bundle singleton, keyed on the configured path.
 _bundle: list[PolicyRule] | None = None
+_bundle_version: int = 0
 _configured_path: str | None = None
 
 
@@ -87,8 +95,9 @@ class PolicyDecision:
 
 def reset_policy_state() -> None:
     """Reset module state (for tests)."""
-    global _bundle, _configured_path
+    global _bundle, _bundle_version, _configured_path
     _bundle = None
+    _bundle_version = 0
     _configured_path = None
 
 
@@ -100,7 +109,7 @@ def _packaged_bundle_text() -> str:
     )
 
 
-def _parse_rules(text: str, source: str) -> list[PolicyRule]:
+def _parse_rules(text: str, source: str) -> tuple[int, list[PolicyRule]]:
     try:
         data = yaml.safe_load(text)
     except yaml.YAMLError as exc:
@@ -110,6 +119,13 @@ def _parse_rules(text: str, source: str) -> list[PolicyRule]:
         raise PolicyLoadError(
             f"policy bundle '{source}' must be a mapping with a 'rules' list"
         )
+
+    try:
+        version = int(data.get("version", 0))
+    except (TypeError, ValueError) as exc:
+        raise PolicyLoadError(
+            f"policy bundle '{source}' version must be an integer"
+        ) from exc
 
     rules: list[PolicyRule] = []
     for index, raw in enumerate(data["rules"]):
@@ -132,7 +148,7 @@ def _parse_rules(text: str, source: str) -> list[PolicyRule]:
             raise PolicyLoadError(
                 f"rule #{index} in '{source}' is malformed: {exc}"
             ) from exc
-    return rules
+    return version, rules
 
 
 def load_bundle(settings: PlatformGatewaySettings) -> list[PolicyRule]:
@@ -145,7 +161,7 @@ def load_bundle(settings: PlatformGatewaySettings) -> list[PolicyRule]:
     Note: tool-gateway uses GATEWAY_POLICY_PATH for its own bundle; the
     PLATFORM_GATEWAY_* knobs apply to this edge service only.
     """
-    global _bundle, _configured_path
+    global _bundle, _bundle_version, _configured_path
 
     path = settings.policy_path
     if _bundle is not None and _configured_path == path:
@@ -155,17 +171,31 @@ def load_bundle(settings: PlatformGatewaySettings) -> list[PolicyRule]:
         bundle_path = Path(path)
         if not bundle_path.is_file():
             raise PolicyLoadError(f"policy bundle not found at '{path}'")
-        rules = _parse_rules(bundle_path.read_text(encoding="utf-8"), path)
+        version, rules = _parse_rules(bundle_path.read_text(encoding="utf-8"), path)
     else:
-        rules = _parse_rules(_packaged_bundle_text(), "<packaged default>")
+        version, rules = _parse_rules(_packaged_bundle_text(), "<packaged default>")
 
     _bundle = rules
+    _bundle_version = version
     _configured_path = path
     LOGGER.info(
         "policy bundle loaded",
         extra={"policy_path": path or "<packaged default>", "rule_count": len(rules)},
     )
     return rules
+
+
+def bundle_metadata(settings: PlatformGatewaySettings) -> dict[str, object]:
+    """Version and provenance of the loaded bundle (SPEC-019 R-2).
+
+    Lets transparency surfaces tell a configured bundle from the packaged
+    default, so policy drift and degraded loads are visible instead of silent.
+    """
+    load_bundle(settings)
+    return {
+        "version": _bundle_version,
+        "source": "configured" if settings.policy_path else "packaged-default",
+    }
 
 
 def evaluate(settings: PlatformGatewaySettings, roles: list[str], action: str) -> PolicyDecision:

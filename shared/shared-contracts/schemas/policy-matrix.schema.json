@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/policy-matrix.schema.json",
+  "title": "Policy Matrix",
+  "description": "Effective role x action authorization matrix derived from the policy bundle currently loaded by the gateway (SPEC-019 R-2). Read-only transparency surface; never a source of authority — enforcement stays with the policy engine.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "source", "scope", "roles", "actions", "matrix"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "description": "The version field of the loaded policy bundle."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["configured", "packaged-default"],
+      "description": "Where the loaded bundle came from: the configured policy path or the packaged default."
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["full", "own"],
+      "description": "platform-admin receives every role row (full); every other identity receives only its granted roles (own)."
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The roles with rows in this response, sorted."
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The action catalog (bundle actions union protected route actions), sorted."
+    },
+    "matrix": {
+      "type": "object",
+      "description": "role -> action -> allow (true) or deny (false), evaluated with full policy semantics.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

@@ -12,6 +12,7 @@ from platform_gateway.schemas.api import (
     ChatRequest,
     ChatResponse,
     IdentityContext,
+    PolicyMatrixResponse,
     SessionRecord,
 )
 
@@ -32,6 +33,7 @@ class ContractAlignmentTests(unittest.TestCase):
         (ChatResponse, "agent-chat-response.schema.json"),
         (SessionRecord, "agent-session.schema.json"),
         (IdentityContext, "identity-context.schema.json"),
+        (PolicyMatrixResponse, "policy-matrix.schema.json"),
     ]
 
     def test_model_properties_match_contract_properties(self) -> None:
@@ -87,6 +89,17 @@ class ContractAlignmentTests(unittest.TestCase):
                     groups=["ops-operators"],
                 ),
                 "identity-context.schema.json",
+            ),
+            (
+                PolicyMatrixResponse(
+                    version=1,
+                    source="packaged-default",
+                    scope="own",
+                    roles=["operator"],
+                    actions=["chat", "policy:read"],
+                    matrix={"operator": {"chat": True, "policy:read": True}},
+                ),
+                "policy-matrix.schema.json",
             ),
         ]
         for instance, schema_name in samples:

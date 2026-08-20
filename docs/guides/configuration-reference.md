@@ -22,7 +22,7 @@ activate them. A feature is **active** when all required variables are set to no
 | **LLM runtime** | `AGENTSCOPE_PROVIDER`, `AGENTSCOPE_MODEL_NAME`, `AGENTSCOPE_API_KEY` | agent-service | via runtime profile |
 | **Workload identity** | `PLATFORM_GATEWAY_WORKLOAD_TOKEN_PATH`, `IDENTITY_WORKLOAD_ISSUER_URL`, `IDENTITY_WORKLOAD_CLIENTS` | platform-gateway, identity-service | disabled (dev) |
 | **Durable audit trail** | `*_AUDIT_SERVICE_URL`, `*_AUDIT_CLIENT_SECRET` ↔ `AUDIT_INGEST_CLIENTS` | audit-service, tool-gateway, platform-gateway, identity-service, incident-service | **must be provisioned** (`sync-audit-secrets.sh`) |
-| **Skills and grounded guidance** | `SKILLS_SOURCES`, `GATEWAY_SKILLS_SERVICE_URL`, `GATEWAY_SKILLS_CLIENT_SECRET` ↔ `SKILLS_QUERY_CLIENTS` | skills-hub, tool-gateway | **must be provisioned** (`sync-skills-secrets.sh`) |
+| **Skills and grounded guidance** | `SKILLS_SOURCES`, `GATEWAY_SKILLS_SERVICE_URL`, `GATEWAY_SKILLS_CLIENT_SECRET`, `PLATFORM_GATEWAY_SKILLS_HUB_URL`, `PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET` ↔ `SKILLS_QUERY_CLIENTS` | skills-hub, tool-gateway, platform-gateway | **must be provisioned** (`sync-skills-secrets.sh`) |
 | **Incident intake and triage** | `INCIDENT_WEBHOOK_TOKEN`, `PLATFORM_GATEWAY_INCIDENT_SERVICE_URL`, `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET` ↔ `INCIDENT_QUERY_CLIENTS` | incident-service, platform-gateway, tool-gateway | **must be provisioned** (`sync-incident-secrets.sh`) |
 
 ## Cross-Service Dependency Chains
@@ -143,9 +143,19 @@ agent-service          tool-gateway                          skills-hub
   `SKILLS_QUERY_CLIENTS` (in `skills-hub-runtime-secrets`), format
   `client_id=client_secret,...`
 
+**Portal inventory proxy (SPEC-019):** platform-gateway speaks to the same
+skills-hub registry under its own client id for the portal's Skills view:
+`PLATFORM_GATEWAY_SKILLS_HUB_URL` + `PLATFORM_GATEWAY_SKILLS_CLIENT_ID` /
+`PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET` (in
+`platform-gateway-runtime-secrets`) must match the `platform-gateway` entry
+in `SKILLS_QUERY_CLIENTS`. The portal's Tools view takes a separate path:
+`PLATFORM_GATEWAY_TOOL_GATEWAY_URL` proxies tool-gateway `GET /api/v2/tools`
+under a delegated operator token, so no extra secret is needed. Unset URLs
+leave the respective portal routes fail-closed (503).
+
 **Provisioning:** `make deploy` calls `sync-skills-secrets.sh` which creates
 the `skills` database idempotently, generates one random shared secret, and
-writes both K8s secrets. Export `SKILLS_GIT_TOKEN=<pat>` before running it to
+writes the skills-hub, tool-gateway, and platform-gateway K8s secrets. Export `SKILLS_GIT_TOKEN=<pat>` before running it to
 also provision `SKILLS_GIT_TOKENS` for git-federated sources (the token is
 never echoed or committed). `SKIP_SKILLS_SECRETS=true` opts out; unsetting
 `GATEWAY_SKILLS_SERVICE_URL` leaves the skills tools unregistered. Unlike the
@@ -275,6 +285,10 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runti
 | `PLATFORM_GATEWAY_INCIDENT_CLIENT_ID` | Incident query client id | `platform-gateway` | code default |
 | `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET` | Incident query credential | *(none)* | **runtime-secrets** |
 | `PLATFORM_GATEWAY_INCIDENT_TRIAGE_TIMEOUT_SECONDS` | Triage proxy timeout | `120` | code default |
+| `PLATFORM_GATEWAY_TOOL_GATEWAY_URL` | tool-gateway base URL for the portal Tools proxy (unset = route fails closed 503) | *(none)* | runtime-config |
+| `PLATFORM_GATEWAY_SKILLS_HUB_URL` | skills-hub base URL for the portal Skills proxy (unset = route fails closed 503) | *(none)* | runtime-config |
+| `PLATFORM_GATEWAY_SKILLS_CLIENT_ID` | Skills query client id | `platform-gateway` | runtime-config |
+| `PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET` | Skills query credential | *(none)* | **runtime-secrets** |
 
 ### tool-gateway
 
@@ -427,6 +441,7 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 | `PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET` | Token exchange credential | `sync-delegation-secrets.sh` |
 | `PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET` | Audit ingest credential | `sync-audit-secrets.sh` |
 | `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET` | Incident query credential | `sync-incident-secrets.sh` |
+| `PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET` | Skills query credential (portal Skills proxy) | `sync-skills-secrets.sh` |
 | `OTEL_EXPORTER_OTLP_HEADERS` | OTLP ingest auth (Basic) for the OTel push pipeline | `sync-otel-secrets.sh` |
 
 ### `identity-service-runtime-secrets`

@@ -7,6 +7,15 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-20-portal-transparency-and-navigation.md`
+  - delivers SPEC-019: sectioned portal navigation (Chat / Control /
+    Workspace) with auto-hiding sections and a logo-row version chip,
+    live permission matrix endpoint (`GET /api/v1/policy/matrix`)
+    evaluated from the enforced bundle with server-side role scoping and
+    a Permissions view, read-only Tools and Skills inventory views behind
+    new platform-gateway proxies, new `policy:read` / `skills:read`
+    policy actions for all operational roles, and dev-k8s skills-query
+    wiring for the platform-gateway client
 - `2026-08-17-r3-incident-triage-and-collaboration.md`
   - delivers Release 3 with SPEC-015: new `incident-service` product
     (Alertmanager webhook + manual intake, fingerprint dedupe, dual-backend

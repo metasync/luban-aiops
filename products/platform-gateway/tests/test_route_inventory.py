@@ -31,6 +31,12 @@ EXPECTED_ROUTES = {
     ("GET", "/api/v1/incidents/{incident_id}"),
     ("GET", "/api/v1/incidents/{incident_id}/report"),
     ("POST", "/api/v1/incidents/{incident_id}/triage"),
+    # Portal transparency surfaces (SPEC-019): the live policy matrix and
+    # read-only workspace inventories. The tool *API* still lives on
+    # tool-gateway; these are v1 portal-facing proxies.
+    ("GET", "/api/v1/policy/matrix"),
+    ("GET", "/api/v1/tools"),
+    ("GET", "/api/v1/skills"),
 }
 
 

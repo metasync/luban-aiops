@@ -114,3 +114,32 @@ rules:
       actions_any: ["incident:triage"]
     decision:
       outcome: allow
+
+  # Transparency vocabulary (SPEC-019): policy:read serves the live
+  # permission-matrix view. The gateway scopes rows server-side (full matrix
+  # for platform-admin, own roles otherwise), so granting the action to every
+  # role exposes no cross-role data.
+  - id: allow-all-policy-read
+    domain: action_authz
+    description: Every platform role may view its effective policy permissions.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator", "developer", "read-only-observer"]
+      actions_any: ["policy:read"]
+    decision:
+      outcome: allow
+
+  # skills:read serves the workspace skills inventory through the
+  # platform-gateway proxy; skills are shared guidance resources, so every
+  # role may list them (same posture as tools:list for the read-only toolset).
+  - id: allow-all-skills-read
+    domain: action_authz
+    description: Every platform role may list the federated skills inventory.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator", "developer", "read-only-observer"]
+      actions_any: ["skills:read"]
+    decision:
+      outcome: allow

@@ -1,13 +1,15 @@
 #!/bin/sh
 
 # Provision the skills query credentials for the dev-k8s overlay
-# (SPEC-014 R-3/R-6).
+# (SPEC-014 R-3/R-6, SPEC-019 R-4).
 #
-# The tool-gateway queries skills-hub, which authenticates query callers
-# against a static registry (SKILLS_QUERY_CLIENTS):
+# The tool-gateway and the platform-gateway query skills-hub, which
+# authenticates query callers against a static registry
+# (SKILLS_QUERY_CLIENTS):
 #
-#   skills-hub    →  SKILLS_QUERY_CLIENTS (client registry)
-#   tool-gateway  →  GATEWAY_SKILLS_CLIENT_SECRET
+#   skills-hub       →  SKILLS_QUERY_CLIENTS (client registry)
+#   tool-gateway     →  GATEWAY_SKILLS_CLIENT_SECRET
+#   platform-gateway →  PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET
 #
 # This script also ensures the 'skills' database exists (fresh clusters get
 # it via the postgres initdb script; existing clusters get it here through
@@ -93,7 +95,7 @@ BASE_DIR="$SCRIPT_DIR/dev-k8s/base"
 
 SKILLS_SECRET_FILE="$BASE_DIR/skills-hub/runtime-secrets.env"
 cat > "$SKILLS_SECRET_FILE" <<EOF
-SKILLS_QUERY_CLIENTS=tool-gateway=${SKILLS_QUERY_SECRET}
+SKILLS_QUERY_CLIENTS=tool-gateway=${SKILLS_QUERY_SECRET},platform-gateway=${SKILLS_QUERY_SECRET}
 EOF
 # Git-source PAT: the secret file was just truncated, so a plain append is
 # idempotent. The token is never echoed to the terminal.
@@ -111,15 +113,24 @@ upsert_env_line "$TG_SECRET_FILE" GATEWAY_SKILLS_CLIENT_SECRET \
   "GATEWAY_SKILLS_CLIENT_SECRET=${SKILLS_QUERY_SECRET}"
 sync_secret tool-gateway-runtime-secrets "$TG_SECRET_FILE"
 
+# platform-gateway uses the same shared secret for its skills inventory
+# proxy (SPEC-019 R-4).
+PG_SECRET_FILE="$BASE_DIR/platform-gateway/runtime-secrets.env"
+upsert_env_line "$PG_SECRET_FILE" PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET \
+  "PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET=${SKILLS_QUERY_SECRET}"
+sync_secret platform-gateway-runtime-secrets "$PG_SECRET_FILE"
+
 # --- restart affected workloads ----------------------------------------------
 
 kubectl -n "$NAMESPACE" rollout restart deployment/skills-hub
 kubectl -n "$NAMESPACE" rollout restart deployment/tool-gateway
+kubectl -n "$NAMESPACE" rollout restart deployment/platform-gateway
 
 echo ""
 echo "Skills query secrets provisioned. Waiting for rollout..."
 kubectl -n "$NAMESPACE" rollout status deployment/skills-hub --timeout=120s
 kubectl -n "$NAMESPACE" rollout status deployment/tool-gateway --timeout=120s
+kubectl -n "$NAMESPACE" rollout status deployment/platform-gateway --timeout=120s
 
 echo ""
 echo "Skills retrieval is now configured."

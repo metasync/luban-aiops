@@ -58,6 +58,9 @@ body {
 }
 
 .sidebar-logo {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   margin: 0;
   padding: 0 8px;
   font-size: 1.05rem;
@@ -66,9 +69,20 @@ body {
   letter-spacing: 0.01em;
 }
 
-/* --- Sidebar footer: user card + version card ---
-   Identity and platform version are state, not functions: pinned to the
-   bottom via margin-top:auto so the function list above stays clean. */
+/* Platform version consolidated into the logo row (SPEC-019 R-1). */
+.version-chip {
+  font-size: 0.62rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--surface-alt);
+  border-radius: 10px;
+  padding: 2px 8px;
+  letter-spacing: 0;
+}
+
+/* --- Sidebar footer: user card ---
+   Identity is state, not a function: pinned to the bottom via
+   margin-top:auto so the function list above stays clean. */
 .sidebar-footer {
   margin-top: auto;
   display: flex;
@@ -187,21 +201,30 @@ body {
   word-break: break-all;
 }
 
-.version-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
-  font-size: 0.65rem;
-  color: var(--text-muted);
-}
-
 /* --- Function navigation --- */
 .sidebar-nav {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* Sectioned navigation (SPEC-019 R-1): grouped entries under a muted
+   label; the whole section hides when every entry inside it is hidden. */
+.nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.nav-section-label {
+  padding: 0 12px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  opacity: 0.75;
 }
 
 .nav-item {
@@ -657,6 +680,25 @@ body {
 .status-badge.error { background: #7f1d1d; color: var(--error); }
 .status-badge.denied { background: #7f1d1d; color: var(--error); }
 
+/* Permissions matrix (SPEC-019 R-3): provenance line above the table and a
+   compact role x action grid (centers badge cells, keeps names readable). */
+.permissions-meta {
+  margin: 0 0 10px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.policy-matrix-table th,
+.policy-matrix-table td {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.policy-matrix-table th:first-child,
+.policy-matrix-table td:first-child {
+  text-align: left;
+}
+
 .spinner {
   width: 14px;
   height: 14px;
@@ -766,6 +808,25 @@ body {
   position: sticky;
   top: 0;
   z-index: 1;
+}
+
+/* Tools catalog (SPEC-019): auto table layout lets the free-form description
+   column starve the short category/risk columns down to border width, so pin
+   explicit column geometry instead. */
+.tools-table {
+  table-layout: fixed;
+}
+
+.tools-table th:nth-child(1),
+.tools-table td:nth-child(1) { width: 22%; }
+.tools-table th:nth-child(3),
+.tools-table td:nth-child(3) { width: 13%; }
+.tools-table th:nth-child(4),
+.tools-table td:nth-child(4) { width: 11%; }
+
+.tools-table td {
+  word-break: normal;
+  overflow-wrap: anywhere;
 }
 
 .audit-row { cursor: pointer; }

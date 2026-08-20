@@ -240,6 +240,7 @@ class ContractAlignmentTests(unittest.TestCase):
             frozenset({
                 "chat", "session:create", "session:read", "audit:read",
                 "incident:read", "incident:create", "incident:triage",
+                "policy:read", "tools:list", "skills:read",
             }),
         )
 
