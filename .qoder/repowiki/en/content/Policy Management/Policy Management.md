@@ -8,10 +8,14 @@
 - [Makefile](file://Makefile)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
+- [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
+- [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
@@ -23,12 +27,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new `audit:read` policy action
-- Updated policy enforcement flow to include audit trail access control
-- Enhanced role-based authorization examples with audit-specific scenarios
-- Updated troubleshooting guide with audit access denial scenarios
-- Added detailed coverage of deny-by-default authorization model for audit trails
-- Expanded policy rule examples to include audit trail access patterns
+- Added comprehensive documentation for the new policy matrix functionality that evaluates currently enforced policy bundle to generate role × action permission table
+- Documented server-side row scoping for different user contexts (full matrix for platform-admin, own rows for other roles)
+- Updated policy actions vocabulary to include new `tools:list` and `skills:read` actions
+- Enhanced policy evaluation flow with transparency endpoint for live permission visibility
+- Added detailed coverage of policy matrix schema validation and response structure
+- Updated troubleshooting guide with policy matrix access scenarios
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -37,26 +41,27 @@
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Enhanced Policy Tooling](#enhanced-policy-tooling)
-7. [Dependency Analysis](#dependency-analysis)
-8. [Performance Considerations](#performance-considerations)
-9. [Troubleshooting Guide](#troubleshooting-guide)
-10. [Conclusion](#conclusion)
-11. [Appendices](#appendices)
+7. [Policy Matrix Functionality](#policy-matrix-functionality)
+8. [Dependency Analysis](#dependency-analysis)
+9. [Performance Considerations](#performance-considerations)
+10. [Troubleshooting Guide](#troubleshooting-guide)
+11. [Conclusion](#conclusion)
+12. [Appendices](#appendices)
 
 ## Introduction
 This document describes the policy management system that enables declarative policy definitions and runtime enforcement across the platform. It covers the policy language syntax, built-in rule types, custom policy development, evaluation flow, decision logic, audit trail generation, testing, validation, deployment, versioning, conflict resolution, performance optimization, and integration with identity contexts and authorization decisions across services.
 
-The system is designed to be declarative, auditable, and extensible, allowing operators to define policies centrally and enforce them consistently at the API gateway boundary and within tool execution paths. **Updated** with enhanced tooling for policy bundle validation and synchronization across multiple service locations, including comprehensive audit trail access controls with deny-by-default authorization.
+The system is designed to be declarative, auditable, and extensible, allowing operators to define policies centrally and enforce them consistently at the API gateway boundary and within tool execution paths. **Updated** with enhanced policy matrix functionality that provides live visibility into effective permissions through a role × action permission table, server-side row scoping for different user contexts, and new policy actions (`tools:list`, `skills:read`) for enhanced workspace transparency.
 
 ## Project Structure
 Policy-related artifacts are distributed across documentation, schemas, runtime implementation, tests, and Kubernetes manifests:
 
 - Documentation and specifications define the policy model, evaluation semantics, and operational guidance.
-- Schemas formalize policy rules, decisions, and identity context structures used by services.
+- Schemas formalize policy rules, decisions, identity contexts, and matrix responses used by services.
 - The policy engine implements evaluation logic and integrates with request processing.
 - Tests validate behavior and edge cases for policy evaluation and enforcement.
 - Kubernetes manifests provide default policies and RBAC configurations for deployment.
-- **New**: Centralized policy validation and synchronization tooling via Makefile targets and Python scripts.
+- **New**: Policy matrix functionality provides live transparency surface for effective permissions.
 
 ```mermaid
 graph TB
@@ -69,12 +74,15 @@ subgraph "Schemas"
 SCHEMA_RULE["policy-rule.schema.json"]
 SCHEMA_DECISION["policy-decision.schema.json"]
 SCHEMA_IDENTITY["identity-context.schema.json"]
+SCHEMA_MATRIX["policy-matrix.schema.json"]
 end
 subgraph "Runtime"
 ENGINE_TOOL["tool-gateway policy-engine.py"]
 ENGINE_PLATFORM["platform-gateway policy-engine.py"]
+MATRIX_ENGINE["policy_matrix.py"]
 DEFAULT_POLICY["policy-default.yaml (canonical)"]
 AUDIT_ROUTE["audit.py route"]
+POLICY_ROUTE["policy.py route"]
 end
 subgraph "Validation & Tooling"
 VALIDATE_SCRIPT["validate_policy.py"]
@@ -84,6 +92,7 @@ subgraph "Tests"
 TEST_TOOL["test_policy_engine.py (tool-gateway)"]
 TEST_PLATFORM["test_policy_engine.py (platform-gateway)"]
 TEST_AUDIT["test_audit_proxy.py"]
+TEST_MATRIX["test_policy_matrix.py"]
 end
 subgraph "Deployment"
 K8S_POLICY["policy.yaml"]
@@ -96,6 +105,7 @@ SCHEMA_RULE --> ENGINE_TOOL
 SCHEMA_RULE --> ENGINE_PLATFORM
 SCHEMA_DECISION --> ENGINE_TOOL
 SCHEMA_DECISION --> ENGINE_PLATFORM
+SCHEMA_MATRIX --> MATRIX_ENGINE
 DEFAULT_POLICY --> VALIDATE_SCRIPT
 VALIDATE_SCRIPT --> MAKEFILE_TARGETS
 MAKEFILE_TARGETS --> ENGINE_TOOL
@@ -105,6 +115,8 @@ DEFAULT_POLICY --> ENGINE_PLATFORM
 ENGINE_TOOL --> TEST_TOOL
 ENGINE_PLATFORM --> TEST_PLATFORM
 AUDIT_ROUTE --> TEST_AUDIT
+POLICY_ROUTE --> TEST_MATRIX
+MATRIX_ENGINE --> TEST_MATRIX
 K8S_POLICY --> ENGINE_TOOL
 K8S_POLICY --> ENGINE_PLATFORM
 K8S_RBAC --> ENGINE_TOOL
@@ -118,15 +130,19 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
+- [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 - [Makefile](file://Makefile)
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
+- [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 
@@ -139,23 +155,27 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
+- [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
+- [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
 
 ## Core Components
 - Policy Engine: Evaluates requests against loaded policies, resolves identity context, applies rule precedence, and produces a decision with an audit trail.
 - Policy Definitions: Declarative YAML files defining rules, scopes, conditions, and actions.
-- Schemas: JSON schemas for policy rules, decisions, and identity contexts ensuring consistent structure across services.
+- Schemas: JSON schemas for policy rules, decisions, identity contexts, and matrix responses ensuring consistent structure across services.
 - Tests: Unit and integration tests validating policy evaluation outcomes and enforcement behavior.
 - Deployment Artifacts: Kubernetes manifests for policy configuration and RBAC controls.
-- **New**: Policy Validation Tools: Automated validation and synchronization utilities for maintaining policy consistency.
+- **New**: Policy Matrix Engine: Generates live role × action permission tables from currently enforced policy bundle with server-side row scoping.
 
 Key responsibilities:
 - Load and validate policy documents.
@@ -163,12 +183,14 @@ Key responsibilities:
 - Evaluate rules in order, handling conflicts via precedence and scope.
 - Generate structured decisions and audit records.
 - Expose metrics and observability hooks for monitoring.
-- **New**: Validate policy bundles against JSON Schema Draft 2020-12 and synchronize across service locations.
+- **New**: Build effective permission matrices with full policy semantics inheritance.
 - **Updated**: Enforce deny-by-default authorization for sensitive operations like audit trail access.
 
 **Section sources**
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
@@ -177,11 +199,12 @@ Key responsibilities:
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
+- [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 - [Makefile](file://Makefile)
 
 ## Architecture Overview
-The policy enforcement architecture integrates at the API gateway layer and tool invocation path. Requests carry identity context; the policy engine evaluates policies and returns decisions that gate access or modify behavior. Audit trails are recorded for compliance and debugging.
+The policy enforcement architecture integrates at the API gateway layer and tool invocation path. Requests carry identity context; the policy engine evaluates policies and returns decisions that gate access or modify behavior. Audit trails are recorded for compliance and debugging. **Updated** with policy matrix endpoint providing live transparency into effective permissions.
 
 ```mermaid
 sequenceDiagram
@@ -189,17 +212,20 @@ participant Client as "Client"
 participant Gateway as "API Gateway"
 participant Identity as "Identity Broker"
 participant Engine as "Policy Engine"
+participant Matrix as "Policy Matrix"
 participant AuditRoute as "Audit Route"
 participant Tool as "Tool Service"
-participant Validator as "Policy Validator"
 Client->>Gateway : "Request with token"
 Gateway->>Identity : "Validate token and resolve identity"
 Identity-->>Gateway : "Identity context"
-alt "Audit Trail Access"
+alt "Policy Matrix Access"
+Gateway->>Matrix : "GET /api/v1/policy/matrix"
+Matrix->>Engine : "Evaluate each role×action cell"
+Engine-->>Matrix : "Decision for each cell"
+Matrix-->>Client : "Permission matrix + metadata"
+else "Audit Trail Access"
 Gateway->>AuditRoute : "GET /api/v1/audit/events"
 AuditRoute->>Engine : "Evaluate 'audit : read' action"
-Engine->>Validator : "Validate policy bundle"
-Validator-->>Engine : "Validation result"
 Engine-->>AuditRoute : "Decision + audit trail"
 alt "Allowed (auditor/platform-admin)"
 AuditRoute->>Tool : "Forward request to audit service"
@@ -210,8 +236,6 @@ AuditRoute-->>Client : "403 Forbidden"
 end
 else "Other Actions"
 Gateway->>Engine : "Evaluate policy with request + identity"
-Engine->>Validator : "Validate policy bundle"
-Validator-->>Engine : "Validation result"
 Engine-->>Gateway : "Decision + audit trail"
 alt "Allowed"
 Gateway->>Tool : "Forward request"
@@ -226,14 +250,17 @@ end
 **Diagram sources**
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
-- [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 
 **Section sources**
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
@@ -252,7 +279,7 @@ Built-in rule types typically cover:
 - Rate limiting per user, tenant, or resource.
 - Tool usage restrictions by capability or environment.
 - Data access control by sensitivity labels or ownership.
-- **Updated**: Audit trail access control with role-based restrictions for `audit:read` action.
+- **Updated**: New policy actions including `tools:list` for tool discovery and `skills:read` for skills inventory access.
 
 Custom policy development involves extending condition evaluators and action handlers while adhering to schema constraints.
 
@@ -295,10 +322,58 @@ Audit --> End(["Return Decision"])
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 
-### Audit Trail Access Control
-**New Section** - Comprehensive coverage of audit trail access controls implementing deny-by-default authorization.
+### Policy Matrix Functionality
 
-The audit trail access control system enforces strict role-based permissions for the `audit:read` action:
+**New Section** - Comprehensive coverage of the policy matrix functionality that provides live visibility into effective permissions.
+
+#### Live Permission Transparency
+The policy matrix endpoint (`GET /api/v1/policy/matrix`) serves the effective role × action permission matrix derived from the policy bundle the gateway actually enforces. Every cell goes through the standard `evaluate()` path — priority, explicit-deny-wins, and disabled-rule semantics are inherited, never re-implemented — so a matrix cell always equals what `enforce_policy` would decide for that role.
+
+#### Server-Side Row Scoping
+The matrix implements strict server-side row scoping based on caller identity:
+- **Platform-Admin Role**: Receives full matrix showing all roles referenced by the bundle
+- **All Other Roles**: Receive only their own granted roles with boolean permissions for each action
+- **Action Catalog**: Shared across all scopes, showing complete action vocabulary
+
+#### Implementation Details
+The policy matrix builder extracts roles and actions from the loaded bundle, unions protected route actions, and evaluates each role × action combination:
+
+```python
+# In policy_matrix.py
+def build_policy_matrix(settings, identity):
+    rules = load_bundle(settings)
+    metadata = bundle_metadata(settings)
+    
+    bundle_roles = {role for rule in rules for role in rule.roles_any}
+    bundle_actions = {action for rule in rules for action in rule.actions_any}
+    actions = sorted(bundle_actions | PROTECTED_ACTIONS)
+    
+    is_admin = ADMIN_ROLE in identity.roles
+    visible_roles = sorted(bundle_roles) if is_admin else sorted(identity.roles)
+    
+    matrix = {
+        role: {
+            action: evaluate(settings, [role], action).decision == "allow"
+            for action in actions
+        }
+        for role in visible_roles
+    }
+```
+
+#### Security Model
+- **Deny-by-Default**: Matrix endpoint requires `policy:read` action
+- **Server-Side Filtering**: No client-side manipulation possible
+- **Bundle Provenance**: Response includes source and version metadata
+- **Schema Validation**: All responses validated against `policy-matrix.schema.json`
+
+**Section sources**
+- [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
+- [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
+- [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
+
+### Audit Trail Access Control
+Audit trail access control enforces strict role-based permissions for the `audit:read` action:
 
 #### Role-Based Authorization
 - **Auditor Role**: Granted exclusive access to query audit trails for compliance and investigation purposes
@@ -306,13 +381,7 @@ The audit trail access control system enforces strict role-based permissions for
 - **All Other Roles**: Denied by default, including operators, approvers, and read-only observers
 
 #### Implementation Details
-The audit route at `/api/v1/audit/events` enforces policy checks before forwarding requests to the audit service:
-
-```python
-# In audit.py route handler
-identity = await resolve_request_identity(settings, request, request_id)
-enforce_policy(settings, identity, "audit:read", request_id)
-```
+The audit route at `/api/v1/audit/events` enforces policy checks before forwarding requests to the audit service.
 
 #### Security Model
 - **Deny-by-Default**: No implicit access to audit trails
@@ -344,7 +413,10 @@ These records support compliance reporting, debugging, and performance analysis.
 - Rate Limiting: Enforce per-user or per-tenant request quotas using time-window counters and thresholds.
 - Data Access Control: Restrict access to sensitive data based on labels, ownership, or clearance levels.
 - Tool Usage Restrictions: Limit tool invocations by capability, environment, or role.
-- **Updated**: Audit Trail Access Control: Restrict audit trail queries to authorized roles only.
+- **Updated**: New policy actions for enhanced workspace transparency:
+  - `tools:list`: Discover available tools (granted to operational, developer, and observer roles)
+  - `skills:read`: View federated skills inventory (granted to all platform roles)
+  - `policy:read`: Access live permission matrix (granted to all platform roles)
 
 Examples are implemented via rule definitions and condition evaluators aligned with schemas.
 
@@ -366,6 +438,7 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - Caching: Cache identity context resolutions and frequent decision outcomes with TTL.
 - Short-Circuiting: Early exit on decisive rules to reduce evaluation overhead.
 - Batching: Batch audit writes and metrics updates to minimize I/O.
+- **New**: Policy matrix evaluation leverages existing policy engine caching and evaluation semantics.
 
 **Section sources**
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
@@ -375,7 +448,7 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - Identity Context: Resolved from tokens or upstream services; includes roles, groups, claims, and tenant identifiers.
 - Authorization Decisions: Policy engine consumes identity context to evaluate rules and produce decisions consumed by gateway and tool services.
 - Cross-Service Consistency: Shared schemas ensure uniform interpretation of identity and decisions across services.
-- **Updated**: Audit trail access requires specific role membership in normalized identity context.
+- **Updated**: Policy matrix functionality integrates with normalized identity context for server-side row scoping.
 
 **Section sources**
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
@@ -384,8 +457,6 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 
 ## Enhanced Policy Tooling
-
-**New Section** - Added comprehensive policy management tooling with automated validation and synchronization capabilities.
 
 ### Makefile Targets for Policy Management
 
@@ -426,8 +497,6 @@ The script provides detailed error reporting including:
 
 ### Integration with Development Workflow
 
-The enhanced tooling integrates seamlessly into the existing development workflow:
-
 ```mermaid
 flowchart TD
 Dev["Developer modifies policy"] --> Sync["make sync-policy"]
@@ -457,8 +526,48 @@ Fix --> Validate
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
 
+## Policy Matrix Functionality
+
+**New Section** - Detailed documentation of the policy matrix functionality introduced for live permission transparency.
+
+### Policy Matrix Endpoint
+The `/api/v1/policy/matrix` endpoint provides read-only transparency into effective permissions by evaluating the currently enforced policy bundle.
+
+#### Request Processing
+1. Identity resolution from request token
+2. Policy enforcement check for `policy:read` action
+3. Matrix construction with server-side row scoping
+4. Response validation against `policy-matrix.schema.json`
+
+#### Response Structure
+The endpoint returns a structured response containing:
+- `version`: Policy bundle version
+- `source`: Bundle provenance ("configured" or "packaged-default")
+- `scope`: Row scoping level ("full" for platform-admin, "own" for others)
+- `roles`: Array of visible roles (sorted)
+- `actions`: Complete action vocabulary (sorted)
+- `matrix`: Role → Action → Boolean permission map
+
+#### Server-Side Row Scoping
+- **Full Scope**: Platform-admin receives all roles referenced by the bundle
+- **Own Scope**: Regular users receive only their granted roles
+- **Action Catalog**: Always complete, shared across all scopes
+
+#### Policy Semantics Inheritance
+Every matrix cell evaluation inherits full policy engine semantics:
+- Priority-based rule resolution
+- Explicit deny overrides allow
+- Disabled rules are ignored
+- Deny-by-default for ungranted actions
+
+**Section sources**
+- [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
+- [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
+- [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
+
 ## Dependency Analysis
-Policy components depend on schemas for validation and consistency, and on identity services for context resolution. Deployment manifests configure runtime behavior and access controls. **Updated** with new dependencies on validation tooling and Makefile targets.
+Policy components depend on schemas for validation and consistency, and on identity services for context resolution. Deployment manifests configure runtime behavior and access controls. **Updated** with new dependencies on policy matrix functionality and validation tooling.
 
 ```mermaid
 graph TB
@@ -466,17 +575,21 @@ POLICY_SPEC["Policy Specification"]
 RULE_SCHEMA["policy-rule.schema.json"]
 DECISION_SCHEMA["policy-decision.schema.json"]
 IDENTITY_SCHEMA["identity-context.schema.json"]
+MATRIX_SCHEMA["policy-matrix.schema.json"]
 ENGINE_TOOL["tool-gateway policy-engine.py"]
 ENGINE_PLATFORM["platform-gateway policy-engine.py"]
+MATRIX_ENGINE["policy_matrix.py"]
 DEFAULT_YAML["policy-default.yaml (canonical)"]
 TEST_TOOL["test_policy_engine.py (tool-gateway)"]
 TEST_PLATFORM["test_policy_engine.py (platform-gateway)"]
 TEST_AUDIT["test_audit_proxy.py"]
+TEST_MATRIX["test_policy_matrix.py"]
 K8S_POLICY["policy.yaml"]
 K8S_RBAC["rbac.yaml"]
 VALIDATE_SCRIPT["validate_policy.py"]
 MAKEFILE_TARGETS["sync-policy, validate-policy"]
 AUDIT_ROUTE["audit.py route"]
+POLICY_ROUTE["policy.py route"]
 POLICY_SPEC --> RULE_SCHEMA
 POLICY_SPEC --> DECISION_SCHEMA
 RULE_SCHEMA --> ENGINE_TOOL
@@ -486,16 +599,20 @@ DECISION_SCHEMA --> ENGINE_TOOL
 DECISION_SCHEMA --> ENGINE_PLATFORM
 IDENTITY_SCHEMA --> ENGINE_TOOL
 IDENTITY_SCHEMA --> ENGINE_PLATFORM
+MATRIX_SCHEMA --> MATRIX_ENGINE
 DEFAULT_YAML --> VALIDATE_SCRIPT
 DEFAULT_YAML --> ENGINE_TOOL
 DEFAULT_YAML --> ENGINE_PLATFORM
 DEFAULT_YAML --> AUDIT_ROUTE
+DEFAULT_YAML --> POLICY_ROUTE
 VALIDATE_SCRIPT --> MAKEFILE_TARGETS
 MAKEFILE_TARGETS --> ENGINE_TOOL
 MAKEFILE_TARGETS --> ENGINE_PLATFORM
 ENGINE_TOOL --> TEST_TOOL
 ENGINE_PLATFORM --> TEST_PLATFORM
 AUDIT_ROUTE --> TEST_AUDIT
+POLICY_ROUTE --> TEST_MATRIX
+MATRIX_ENGINE --> TEST_MATRIX
 K8S_POLICY --> ENGINE_TOOL
 K8S_POLICY --> ENGINE_PLATFORM
 K8S_RBAC --> ENGINE_TOOL
@@ -507,13 +624,17 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
+- [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
+- [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
+- [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
@@ -522,14 +643,18 @@ K8S_RBAC --> ENGINE_PLATFORM
 **Section sources**
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
+- [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
+- [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
@@ -541,7 +666,7 @@ K8S_RBAC --> ENGINE_PLATFORM
 - Use short-circuit semantics to avoid unnecessary evaluations.
 - Batch audit and metrics emissions to reduce overhead.
 - Monitor hot paths and tune thresholds for rate limiting and caching.
-- **New**: Leverage validation tooling to catch performance issues early in development cycle.
+- **New**: Policy matrix evaluation benefits from existing policy engine caching and efficient role × action computation.
 - **Updated**: Audit trail access controls add minimal overhead through early policy evaluation.
 
 [No sources needed since this section provides general guidance]
@@ -554,6 +679,7 @@ Common issues and resolutions:
 - Performance regressions: Check cache hit rates and rule complexity; optimize scopes and conditions.
 - **New**: Policy validation failures: Use `make validate-policy` to identify specific schema violations and bundle issues.
 - **New**: Policy synchronization errors: Run `make sync-policy` to ensure all service locations have consistent policy definitions.
+- **New**: Policy matrix access denied: Verify caller has `policy:read` action; check bundle contains `allow-all-policy-read` rule.
 - **Updated**: Audit access denied (403): Verify caller has `auditor` or `platform-admin` role; check policy bundle contains `allow-auditors-audit-read` rule.
 
 Operational checks:
@@ -567,6 +693,7 @@ Operational checks:
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
+- [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
@@ -574,7 +701,7 @@ Operational checks:
 - [troubleshooting.md](file://docs/guides/troubleshooting.md)
 
 ## Conclusion
-The policy management system provides a robust, declarative framework for enforcing access control, rate limiting, and tool usage restrictions across services. With well-defined schemas, a clear evaluation flow, comprehensive auditing, strong testing and deployment practices, **and enhanced tooling for validation and synchronization**, it ensures consistent and secure behavior. Operators can extend capabilities through custom policies while maintaining performance and reliability. **Updated** with automated policy validation and synchronization capabilities that streamline policy management and reduce operational overhead, including comprehensive audit trail access controls with deny-by-default authorization for sensitive operations.
+The policy management system provides a robust, declarative framework for enforcing access control, rate limiting, and tool usage restrictions across services. With well-defined schemas, a clear evaluation flow, comprehensive auditing, strong testing and deployment practices, **and enhanced tooling for validation and synchronization**, it ensures consistent and secure behavior. Operators can extend capabilities through custom policies while maintaining performance and reliability. **Updated** with automated policy validation and synchronization capabilities that streamline policy management and reduce operational overhead, including comprehensive audit trail access controls with deny-by-default authorization for sensitive operations and new policy matrix functionality for live permission transparency.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -584,7 +711,10 @@ The policy management system provides a robust, declarative framework for enforc
 - Rate Limiting: Define per-user quotas with time windows and throttle actions.
 - Data Access Control: Restrict sensitive endpoints based on identity labels and ownership.
 - Tool Usage Restrictions: Limit tool invocations by capability and environment.
-- **Updated**: Audit Trail Access Control: Restrict audit trail queries to authorized roles only.
+- **Updated**: New policy actions for enhanced workspace transparency:
+  - `tools:list`: Tool discovery for operational, developer, and observer roles
+  - `skills:read`: Skills inventory access for all platform roles
+  - `policy:read`: Permission matrix access for all platform roles
 
 **Section sources**
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
@@ -607,8 +737,6 @@ The policy management system provides a robust, declarative framework for enforc
 - [Makefile](file://Makefile)
 
 ### Policy Bundle Validation Examples
-
-**New Section** - Practical examples of using the enhanced validation tooling.
 
 #### Basic Validation
 ```bash
@@ -645,8 +773,6 @@ python shared/shared-contracts/scripts/validate_policy.py /path/to/custom-policy
 
 ### Audit Trail Access Troubleshooting
 
-**New Section** - Specific guidance for resolving audit trail access issues.
-
 #### Common Symptoms
 - 403 Forbidden responses when accessing `/api/v1/audit/events`
 - Audit navigation hidden in portal UI
@@ -672,3 +798,33 @@ kubectl -n dev-luban-aiops exec deployment/platform-gateway -- \
 - [troubleshooting.md](file://docs/guides/troubleshooting.md)
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
+
+### Policy Matrix Troubleshooting
+
+**New Section** - Specific guidance for resolving policy matrix access and functionality issues.
+
+#### Common Symptoms
+- 403 Forbidden responses when accessing `/api/v1/policy/matrix`
+- Empty or incomplete permission matrix responses
+- Incorrect role scoping in matrix output
+
+#### Diagnostic Steps
+```bash
+# Check platform-gateway logs for policy:read denials
+kubectl -n dev-luban-aiops logs deployment/platform-gateway --tail=30 | grep "policy:read"
+
+# Verify deployed policy bundle contains policy read rule
+kubectl -n dev-luban-aiops exec deployment/platform-gateway -- \
+  cat /etc/luban/policy/policy.yaml | grep -A6 allow-all-policy-read
+```
+
+#### Resolution Steps
+1. **Verify User Roles**: Ensure user has one of the granted roles for `policy:read`
+2. **Check Policy Bundle**: Ensure `allow-all-policy-read` rule is present and enabled
+3. **Validate Bundle Path**: Confirm policy bundle is accessible and valid
+4. **Test Matrix Endpoint**: Direct curl test to verify endpoint functionality
+
+**Section sources**
+- [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
+- [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
+- [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)

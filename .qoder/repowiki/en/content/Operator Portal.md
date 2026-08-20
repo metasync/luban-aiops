@@ -16,10 +16,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive "Cited guidance" chips display system for skills.* tools success responses
-- Enhanced evidence card rendering with clickable skill citation elements showing title and namespaced ID
-- Integrated cited guidance feature into the existing tool evidence system with proper styling and user interaction
-- Updated documentation to reflect new skills integration capabilities and enhanced operational visibility
+- Enhanced navigation system with sectioned organization (Chat, Control, Workspace sections)
+- Added live permission visibility through permission matrix endpoint
+- Implemented workspace resource discovery for tools and skills catalogs
+- Added comprehensive sidebar restructuring with role-based section hiding
+- Integrated cited guidance chips display system for skills.* tools success responses
+- Enhanced evidence card rendering with clickable skill citation elements
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -27,24 +29,25 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Two-Column Shell Layout](#two-column-shell-layout)
+6. [Enhanced Navigation System](#enhanced-navigation-system)
 7. [Role-Gated Audit Trail System](#role-gated-audit-trail-system)
 8. [Authentication and Security](#authentication-and-security)
 9. [Markdown Rendering System](#markdown-rendering-system)
 10. [Real-time Streaming Interface](#real-time-streaming-interface)
 11. [Skills Integration and Cited Guidance](#skills-integration-and-cited-guidance)
-12. [Deployment Guide](#deployment-guide)
-13. [UI Customization](#ui-customization)
-14. [Accessibility Features](#accessibility-features)
-15. [Browser Compatibility](#browser-compatibility)
-16. [Troubleshooting Guide](#troubleshooting-guide)
-17. [Conclusion](#conclusion)
+12. [Permission Matrix and Workspace Resources](#permission-matrix-and-workspace-resources)
+13. [Deployment Guide](#deployment-guide)
+14. [UI Customization](#ui-customization)
+15. [Accessibility Features](#accessibility-features)
+16. [Browser Compatibility](#browser-compatibility)
+17. [Troubleshooting Guide](#troubleshooting-guide)
+18. [Conclusion](#conclusion)
 
 ## Introduction
 
 The Operator Portal is a modern web-based administrative interface designed for platform administration and monitoring within the Luban AIOPS ecosystem. Built with vanilla JavaScript and HTML/CSS, it provides operators with a sophisticated two-column shell interface featuring a persistent sidebar for navigation and a main content area for interactive operations. The portal serves as a centralized control plane for platform administrators, offering real-time visibility into system status through an interactive chat interface, comprehensive evidence panels for tool execution tracking, configuration management capabilities, and administrative functions necessary for maintaining the AI-powered agent platform infrastructure.
 
-**Updated** The portal has undergone significant enhancements including the addition of "Cited guidance" chips display system that shows matched skills as clickable elements with title and namespaced ID when skills.* tools succeed, providing enhanced operational visibility and traceability for team-owned guidance references.
+**Updated** The portal has undergone significant enhancements including an enhanced navigation system with sectioned organization (Chat, Control, Workspace sections), live permission visibility through the permission matrix endpoint, workspace resource discovery for tools and skills catalogs, and comprehensive sidebar restructuring with role-based section hiding. The interface now includes "Cited guidance" chips display system that shows matched skills as clickable elements with title and namespaced ID when skills.* tools succeed, providing enhanced operational visibility and traceability for team-owned guidance references.
 
 ## Project Structure
 
@@ -87,6 +90,7 @@ The Operator Portal consists of several key components that work together to pro
 
 ### Frontend Architecture
 - **Two-Column Shell Layout**: Professional interface with persistent sidebar and main content area
+- **Enhanced Sectioned Navigation**: Organized navigation with Chat, Control, and Workspace sections
 - **Chat-Based Interface**: Modern single-page application with real-time streaming responses
 - **Inline Per-Turn Evidence System**: Sophisticated turn-scoped evidence grouping with collapsible groups rendered directly after agent responses
 - **Skills Integration**: Enhanced evidence cards with "Cited guidance" chips displaying matched skills when skills.* tools succeed
@@ -113,12 +117,18 @@ The Operator Portal consists of several key components that work together to pro
 - **Evidence Integration**: Seamless integration with existing evidence card system
 - **Truncation Handling**: Smart handling of truncated data summaries to avoid partial citations
 
+### Permission and Resource Discovery
+- **Live Permission Matrix**: Real-time display of role-action permissions from policy bundle
+- **Tools Catalog**: Read-only inventory of available tools with filtering capabilities
+- **Skills Inventory**: Browseable catalog of available skills with source and tag filtering
+- **Workspace Resources**: Centralized view of platform resources and capabilities
+
 ### Deployment Components
 - **Container Image**: Dockerized application using nginxinc/nginx-unprivileged:1.27-alpine for non-root execution
 - **Kubernetes Resources**: Deployment and service definitions with enhanced security context
 - **Configuration Management**: Environment-specific settings and secrets
 
-**Updated** The interface now includes enhanced skills integration with "Cited guidance" chips that provide visual feedback when skills.* tools successfully execute, showing matched skills as clickable elements with title and namespaced ID for improved operational traceability.
+**Updated** The interface now includes enhanced skills integration with "Cited guidance" chips that provide visual feedback when skills.* tools successfully execute, showing matched skills as clickable elements with title and namespaced ID for improved operational traceability, along with comprehensive permission visibility and workspace resource discovery capabilities.
 
 **Section sources**
 - [app.js](file://products/operator-portal/web-ui/app.js)
@@ -145,6 +155,13 @@ Portal->>Gateway : /api/v1/auth/login
 Gateway->>Identity : Redirect to OIDC provider
 Identity-->>Gateway : Authorization code
 Gateway-->>Portal : Access tokens + identity
+Note over Portal : Enhanced Navigation
+Portal->>Gateway : /api/v1/policy/matrix (permissions)
+Gateway-->>Portal : Role-action matrix
+Portal->>Gateway : /api/v1/tools (tools catalog)
+Gateway-->>Portal : Available tools list
+Portal->>Gateway : /api/v1/skills (skills inventory)
+Gateway-->>Portal : Available skills list
 Note over Portal : Chat & Streaming
 User->>Portal : Send prompt
 Portal->>Gateway : POST /api/v1/chat/stream
@@ -180,7 +197,9 @@ The main HTML document defines the semantic structure of the operator portal wit
 
 The JavaScript application implements core functionality including:
 
-#### Two-Column Shell Navigation
+#### Enhanced Sectioned Navigation System
+- **Section Organization**: Navigation items grouped into logical sections (Control, Workspace)
+- **Automatic Section Visibility**: Sections hide automatically when all entries are hidden
 - **View Management**: Show/hide different views while preserving state and history
 - **Sidebar Controls**: Mobile drawer toggle with backdrop and keyboard navigation
 - **Active State Management**: Visual indicators for current active view
@@ -219,7 +238,7 @@ The JavaScript application implements core functionality including:
 - **Pagination Support**: Cursor-based pagination with load more functionality
 - **Event Detail View**: Expandable rows showing full event envelope JSON
 
-**Updated** The interface now includes comprehensive skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions, providing enhanced operational visibility and traceability for team-owned guidance references.
+**Updated** The interface now includes comprehensive skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions, providing enhanced operational visibility and traceability for team-owned guidance references, along with enhanced sectioned navigation and role-based section hiding.
 
 **Section sources**
 - [app.js](file://products/operator-portal/web-ui/app.js)
@@ -240,6 +259,12 @@ The styling system provides a comprehensive design foundation with:
 - **Sidebar Styling**: Professional navigation with hover effects and active states
 - **Main Area**: Full-height content area with proper overflow handling
 
+#### Enhanced Navigation Styling
+- **Section Labels**: Muted, uppercase labels for navigation sections with proper spacing
+- **Section Containers**: Flexbox-based layout with automatic hiding when all entries are hidden
+- **Navigation Items**: Clean button styling with active state indicators and hover effects
+- **Stream Indicator**: Pulsing dot showing when chat streaming is active
+
 #### Component Styles
 - **User Card**: Avatar display with initials, username badge, and role information
 - **Navigation Items**: Clean button styling with active state indicators
@@ -259,52 +284,83 @@ The styling system provides a comprehensive design foundation with:
 **Section sources**
 - [styles.css](file://products/operator-portal/web-ui/styles.css)
 
-## Two-Column Shell Layout
+## Enhanced Navigation System
 
-The Operator Portal features a professional two-column shell layout designed for optimal usability and information density.
+The Operator Portal features a sophisticated enhanced navigation system with sectioned organization and role-based visibility controls.
 
-### Layout Architecture
+### Sectioned Navigation Architecture
 
-The shell layout uses CSS Grid to create a fixed-width sidebar with a flexible main content area:
+The navigation system organizes functions into logical sections with automatic visibility management:
 
-- **Sidebar Width**: Fixed 230px width providing consistent navigation space
-- **Main Area**: Flexible content area that adapts to available screen space
-- **Grid Template**: `grid-template-columns: 230px minmax(0, 1fr)` for responsive behavior
-- **Full Height**: Both columns span the full viewport height with proper overflow handling
+#### Control Section
+- **Incidents**: Incident triage and management interface
+- **Audit Trail**: Durable audit event inspection with role-based access
+- **Permissions**: Live permission matrix display showing role-action relationships
 
-### Sidebar Functionality
+#### Workspace Section  
+- **Tools**: Read-only catalog of available tools with filtering capabilities
+- **Skills**: Browseable inventory of available skills with source and tag filtering
+- **Settings & Debug**: Configuration management and debugging tools
 
-The persistent sidebar contains three primary sections:
+#### Automatic Section Visibility
+- **Dynamic Hiding**: Sections automatically hide when all their entries are hidden due to role restrictions
+- **Role-Based Filtering**: Individual navigation items hidden based on user roles and authentication status
+- **Server-Side Enforcement**: All navigation items enforce server-side permissions on every request
 
-#### Branding and Identity
-- **Logo Display**: "Luban AIOps" branding with accent color styling
-- **User Card**: Interactive card showing user avatar, username, and role information
-- **Version Information**: Platform version display in footer section
+### Navigation Implementation Details
 
-#### Navigation Menu
-- **Function List**: Chat, Settings & Debug, and Audit trail navigation items
-- **Active State**: Visual indicator showing current active view
-- **Stream Indicator**: Pulsing dot showing when chat streaming is active
-- **Role-Based Visibility**: Audit trail link hidden unless user has appropriate roles
+The enhanced navigation system uses a structured approach with clear separation of concerns:
 
-#### Footer Section
-- **User Identity**: Persistent display of authenticated user with login/logout actions
-- **Platform Version**: Version information kept in sync with CHANGELOG milestones
-- **Auto-positioning**: Uses margin-top:auto to pin footer to bottom of sidebar
+#### Section Definition
+```javascript
+const NAV_SECTIONS = {
+  control: {
+    container: document.querySelector("#nav-section-control"),
+    entries: ["incidents", "audit", "permissions"]
+  },
+  workspace: {
+    container: document.querySelector("#nav-section-workspace"),
+    entries: ["tools", "skills", "settings"]
+  }
+};
+```
+
+#### Visibility Management
+- **Section Synchronization**: `syncNavSectionVisibility()` function manages automatic section hiding
+- **Entry-Level Control**: Individual navigation items controlled by role checks and authentication status
+- **State Preservation**: Navigation state preserved across view changes and page reloads
+
+### Role-Based Access Control
+
+The navigation system implements comprehensive role-based access control:
+
+#### Required Roles for Different Functions
+- **Audit Trail**: Requires "auditor" or "platform-admin" roles
+- **Incidents**: Requires specific incident-related roles (platform-admin, approver, operator, developer, read-only-observer)
+- **Permissions/Tools/Skills**: Available to all authenticated users
+- **Chat**: Available to all users regardless of role
+
+#### Client-Side and Server-Side Enforcement
+- **Client-Side Gating**: Immediate visual feedback by hiding unauthorized navigation items
+- **Server-Side Validation**: Gateway re-enforces permissions on every API request
+- **Graceful Fallback**: Users automatically redirected to chat if they lose required roles
 
 ### Mobile Responsive Design
 
-For screens below 800px, the layout transforms to a mobile-first approach:
+The enhanced navigation maintains excellent mobile experience:
 
-- **Off-Canvas Drawer**: Sidebar slides in from left as overlay when hamburger menu is tapped
-- **Top Bar**: Compact header with hamburger button and title
+#### Off-Canvas Drawer
+- **Hamburger Menu**: Compact header with hamburger button for mobile navigation
+- **Slide-In Navigation**: Sidebar slides in from left as overlay on narrow screens
 - **Backdrop Overlay**: Semi-transparent background when drawer is open
 - **Touch-Friendly**: Larger touch targets and swipe gestures support
 
+**Updated** The navigation system now provides enhanced organization with sectioned grouping, automatic visibility management, and comprehensive role-based access control, making it easier for operators to find relevant functions while maintaining security boundaries.
+
 **Section sources**
-- [index.html:14-77](file://products/operator-portal/web-ui/index.html#L14-L77)
-- [styles.css:41-77](file://products/operator-portal/web-ui/styles.css#L41-L77)
-- [styles.css:774-837](file://products/operator-portal/web-ui/styles.css#L774-L837)
+- [index.html:40-57](file://products/operator-portal/web-ui/index.html#L40-L57)
+- [app.js:93-110](file://products/operator-portal/web-ui/app.js#L93-L110)
+- [styles.css:211-228](file://products/operator-portal/web-ui/styles.css#L211-L228)
 
 ## Role-Gated Audit Trail System
 
@@ -594,6 +650,79 @@ The cited guidance chips follow the established design system:
 - [app.js:750-799](file://products/operator-portal/web-ui/app.js#L750-L799)
 - [styles.css:566-604](file://products/operator-portal/web-ui/styles.css#L566-L604)
 
+## Permission Matrix and Workspace Resources
+
+The Operator Portal now provides comprehensive visibility into platform permissions and workspace resources through dedicated views.
+
+### Live Permission Matrix
+
+The permissions view displays the current role-action matrix evaluated from the enforced policy bundle:
+
+#### Permission Matrix Features
+- **Real-Time Updates**: Fetches latest policy bundle from `/api/v1/policy/matrix` endpoint
+- **Role-Action Grid**: Tabular display showing which roles can perform which actions
+- **Status Badges**: Visual indicators (allow/deny) for each role-action combination
+- **Bundle Metadata**: Shows policy version, source, and scope information
+
+#### Implementation Details
+- **Automatic Loading**: Loads on view activation to ensure fresh data
+- **Error Handling**: Graceful error display with user-friendly messages
+- **Status Updates**: Shows count of roles and actions evaluated
+- **Server-Side Enforcement**: Gateway re-enforces policy:read permission on every request
+
+### Tools Catalog
+
+The tools view provides a read-only inventory of available tools in the workspace:
+
+#### Tools Catalog Features
+- **Complete Tool Listing**: Displays all registered tools with name, description, category, and risk level
+- **Empty State Handling**: Shows helpful message when no tools are available
+- **Status Indicators**: Shows total count of registered tools
+- **Read-Only Access**: No modification capabilities, ensuring safety
+
+#### Data Source
+- **API Endpoint**: `/api/v1/tools` returns array of tool objects
+- **Field Mapping**: Maps tool properties to table columns (name, description, category, risk_level)
+- **Server-Side Validation**: Gateway enforces tools:list permission on every request
+
+### Skills Inventory
+
+The skills view offers browseable access to available skills with filtering capabilities:
+
+#### Skills Inventory Features
+- **Comprehensive Listing**: Shows skill title, source, tags, version, and last updated timestamp
+- **Advanced Filtering**: Supports filtering by source and tag parameters
+- **Pagination Support**: Handles large skill inventories with limit parameter
+- **Total Count Display**: Shows both filtered results and total available skills
+
+#### Filtering System
+- **Source Filter**: Filter skills by their source identifier
+- **Tag Filter**: Filter skills by associated tags
+- **Query Building**: Dynamically constructs URL parameters based on filter values
+- **Auto-Refresh**: Re-loads data when filter values change
+
+### Workspace Resource Discovery
+
+The combined workspace views provide comprehensive resource discovery capabilities:
+
+#### Unified Resource View
+- **Centralized Access**: All workspace resources accessible from sidebar navigation
+- **Consistent Interface**: Uniform table-based display across tools and skills
+- **Status Feedback**: Clear status messages indicating resource availability
+- **Role-Based Access**: Sign-in required for workspace resource views
+
+#### Security Model
+- **Authentication Required**: All workspace views require signed-in session
+- **Server-Side Enforcement**: Gateway validates permissions on every request
+- **Read-Only Operations**: All workspace views are read-only for safety
+- **Policy Compliance**: Views respect current policy bundle and role assignments
+
+**Updated** The workspace resource discovery system provides operators with comprehensive visibility into platform capabilities, enabling better understanding of available tools and skills while maintaining strict security boundaries through role-based access control.
+
+**Section sources**
+- [app.js:626-763](file://products/operator-portal/web-ui/app.js#L626-L763)
+- [index.html:232-280](file://products/operator-portal/web-ui/index.html#L232-L280)
+
 ## Deployment Guide
 
 ### Prerequisites
@@ -652,7 +781,7 @@ Configure environment variables for the portal deployment:
 - **Logging Level**: Debug, info, warning, or error levels
 - **Feature Flags**: Enable/disable specific features
 
-**Updated** The deployment now supports the enhanced skills integration with "Cited guidance" chips, providing improved operational visibility for team-owned guidance references. The nginx configuration remains optimized for streaming support and non-root execution.
+**Updated** The deployment now supports the enhanced skills integration with "Cited guidance" chips, improved navigation system with sectioned organization, and comprehensive workspace resource discovery capabilities. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints.
 
 **Section sources**
 - [nginx.conf](file://products/operator-portal/nginx.conf)
@@ -693,7 +822,7 @@ The Operator Portal supports extensive UI customization to match organizational 
 - **Keyboard Navigation**: Full keyboard operability
 - **Font Scaling**: Support for increased font sizes
 
-### New Customization Options
+### Enhanced Customization Options
 
 The updated interface provides additional customization points:
 
@@ -701,7 +830,10 @@ The updated interface provides additional customization points:
 - **User Card Layout**: Customizable user card appearance and positioning
 - **Navigation Item Styling**: Custom styling for navigation items and active states
 - **Mobile Drawer Behavior**: Configurable drawer animation and positioning
+- **Section Label Styling**: Customizable appearance for navigation section labels
 - **Cited Guidance Styling**: Customizable chip appearance and behavior for skills integration
+- **Permission Matrix Styling**: Customizable table styling for permission displays
+- **Workspace Resource Styling**: Customizable table layouts for tools and skills catalogs
 
 **Section sources**
 - [styles.css](file://products/operator-portal/web-ui/styles.css)
@@ -748,6 +880,8 @@ The new interface includes additional accessibility improvements:
 - **Mobile Drawer**: Accessible off-canvas navigation with proper focus management
 - **Audit Trail**: Accessible table with proper headers and expandable details
 - **Cited Guidance Chips**: Accessible chip elements with proper labeling and keyboard navigation
+- **Permission Matrix**: Accessible table with proper headers and status badges
+- **Workspace Resources**: Accessible tables for tools and skills catalogs with proper headers
 
 **Section sources**
 - [styles.css](file://products/operator-portal/web-ui/styles.css)
@@ -781,7 +915,7 @@ The Operator Portal supports modern web browsers with progressive enhancement fo
 - **Babel Transpilation**: ES6+ to ES5 transpilation when needed
 - **Graceful Degradation**: Essential functionality works across all supported browsers
 
-### New Feature Compatibility
+### Enhanced Feature Compatibility
 
 The updated interface maintains broad browser compatibility:
 
@@ -790,6 +924,8 @@ The updated interface maintains broad browser compatibility:
 - **Modern JavaScript**: ES6+ features with appropriate polyfills
 - **Responsive Design**: Mobile-first approach with progressive enhancement
 - **Skills Integration**: Cited guidance chips work across all supported browsers
+- **Permission Matrix**: Table-based displays compatible with all modern browsers
+- **Workspace Resources**: Standard HTML tables with broad browser support
 
 **Section sources**
 - [Dockerfile](file://products/operator-portal/Dockerfile)
@@ -855,54 +991,35 @@ Common issues and their solutions when working with the Operator Portal.
 - Review browser console for JavaScript errors in streaming logic
 - Confirm nginx proxy configuration allows streaming responses
 
-### Two-Column Layout Issues
+### Enhanced Navigation Issues
 
-**Problem**: Sidebar not displaying correctly or main content overlapping
+**Problem**: Navigation sections not displaying correctly or items hidden unexpectedly
 **Solution**:
-- Verify CSS Grid template is properly defined with correct column widths
-- Check that app-shell class is applied to the root container
-- Ensure proper viewport meta tag is present for mobile responsiveness
-- Review CSS media queries for mobile breakpoint handling
-- Confirm sidebar has proper z-index and positioning styles
-
-### Mobile Drawer Issues
-
-**Problem**: Hamburger menu not working or drawer not appearing on mobile
-**Solution**:
-- Verify mobile-topbar class is present and styled correctly
-- Check that menu-button has proper event listeners attached
-- Ensure sidebar-backdrop is positioned correctly with proper z-index
-- Review CSS media queries for mobile-specific styles
-- Confirm JavaScript drawer toggle functions are properly initialized
-
-### Role-Based Access Issues
-
-**Problem**: Audit trail not visible or access denied despite having correct roles
-**Solution**:
-- Verify user has auditor or platform-admin roles in identity system
-- Check client-side role detection in canViewAudit function
-- Ensure server-side audit:read permission is properly enforced
+- Verify user has appropriate roles for accessing specific sections
+- Check client-side role detection in syncResolvedUser function
+- Ensure server-side permissions are properly configured
 - Review browser console for role detection errors
-- Confirm identity normalization is working correctly
+- Confirm navigation section visibility logic is working correctly
 
-### User Card Issues
+### Permission Matrix Issues
 
-**Problem**: User avatar not displaying or identity information incorrect
+**Problem**: Permission matrix not loading or showing incorrect permissions
 **Solution**:
-- Check userInitials function for proper username parsing
-- Verify identity payload contains expected fields
-- Ensure user card popup menu is properly positioned
-- Review CSS for user-card and related styling classes
-- Check for JavaScript errors in user identity management
+- Verify user is authenticated (required for permissions view)
+- Check /api/v1/policy/matrix endpoint is accessible
+- Review browser console for API call errors
+- Ensure gateway has proper policy:read permissions
+- Verify policy bundle is properly configured on backend
 
-### Sticky Scroll Issues
+### Workspace Resource Issues
 
-**Problem**: Auto-scroll not working correctly during streaming
+**Problem**: Tools or Skills catalogs not loading or showing empty results
 **Solution**:
-- Verify chat-main element has proper overflow and height settings
-- Check isNearBottom function logic for scroll threshold calculation
-- Ensure scrollToBottom function is called appropriately during streaming
-- Review CSS for any conflicting overflow or positioning styles
+- Verify user is authenticated (required for workspace views)
+- Check /api/v1/tools and /api/v1/skills endpoints are accessible
+- Review browser console for API call errors
+- Ensure gateway has proper tools:list and skills:read permissions
+- Verify workspace resources are properly registered in backend services
 
 ### Skills Integration Issues
 
@@ -926,7 +1043,17 @@ Common issues and their solutions when working with the Operator Portal.
 - Check for JavaScript errors in chip generation logic
 - Verify skill data contains required fields (skill_id, title)
 
-**Updated** Added troubleshooting guidance for the new skills integration and cited guidance chips feature, including common issues with chip display, skill data validation, and styling problems.
+### Role-Based Access Issues
+
+**Problem**: Navigation items hidden despite having correct roles
+**Solution**:
+- Verify user has required roles in identity system
+- Check client-side role detection functions (canViewAudit, canViewIncidents)
+- Ensure server-side permissions are properly enforced
+- Review browser console for role detection errors
+- Confirm identity normalization is working correctly
+
+**Updated** Added troubleshooting guidance for the enhanced navigation system, permission matrix, workspace resources, and skills integration features, including common issues with section visibility, permission displays, resource loading, and cited guidance chip rendering.
 
 **Section sources**
 - [app.js](file://products/operator-portal/web-ui/app.js)
@@ -935,10 +1062,10 @@ Common issues and their solutions when working with the Operator Portal.
 
 The Operator Portal provides a comprehensive, accessible, and customizable web interface for platform administration and monitoring within the Luban AIOPS ecosystem. Built with vanilla JavaScript and modern web standards, it delivers enterprise-grade functionality while maintaining simplicity and performance.
 
-**Updated** The recent enhancements include the addition of comprehensive skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions, providing enhanced operational visibility and traceability for team-owned guidance references. This feature significantly improves the portal's ability to show operators exactly which team-owned guidance was referenced during tool execution.
+**Updated** The recent enhancements include a significantly improved navigation system with sectioned organization (Chat, Control, Workspace sections), live permission visibility through the permission matrix endpoint, comprehensive workspace resource discovery for tools and skills catalogs, and enhanced skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions. These improvements provide enhanced operational visibility and traceability for team-owned guidance references while maintaining strict security boundaries through role-based access control.
 
-Key strengths of the enhanced portal include its modular architecture, extensive customization options, strong accessibility features, seamless integration with backend services, and now comprehensive skills integration capabilities. The deployment process remains streamlined through containerization and Kubernetes-native configurations, making it suitable for both development and production environments.
+Key strengths of the enhanced portal include its modular architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive skills integration capabilities, and improved navigation organization. The deployment process remains streamlined through containerization and Kubernetes-native configurations, making it suitable for both development and production environments.
 
-The enhanced skills integration provides significant improvements in operational traceability, allowing operators to quickly identify which team-owned guidance was used during automated processes. The cited guidance chips offer immediate visual feedback about skill usage while maintaining the existing evidence card system's integrity and performance characteristics.
+The enhanced navigation system provides better organization of platform functions, making it easier for operators to find relevant tools and information. The permission matrix offers transparency into platform policies and role assignments, while the workspace resource discovery enables operators to understand available capabilities without needing deep technical knowledge. The cited guidance chips provide immediate visual feedback about which team-owned guidance was referenced during automated processes.
 
-Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, and further improvements to the skills integration system to meet evolving operational requirements.
+Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the skills integration system, and continued refinement of the navigation and resource discovery interfaces to meet evolving operational requirements.

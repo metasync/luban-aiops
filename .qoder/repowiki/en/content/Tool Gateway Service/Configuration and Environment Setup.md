@@ -2,32 +2,25 @@
 
 <cite>
 **Referenced Files in This Document**
-- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
-- [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
-- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-- [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
-- [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
+- [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+- [runtime.py](file://products/platform-gateway/src/platform_gateway/core/runtime.py)
+- [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
+- [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
+- [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env)
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
-- [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
-- [Dockerfile](file://products/tool-gateway/Dockerfile)
-- [pyproject.toml](file://products/tool-gateway/pyproject.toml)
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
-- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+- [spec.md](file://docs/specs/SPEC-019-portal-transparency-navigation/spec.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for new Agent Platform configuration settings including AGENTSCOPE_KERNEL_TRACING, AGENTSCOPE_REPLY_TOKEN_BUDGET, input/output token weight multipliers, and AGENTSCOPE_TASK_TOOLS_ENABLED
-- Updated configuration reference to include the new runtime control settings for enhanced agent kernel tracing, reply token budgeting, and task tools
-- Enhanced middleware alignment documentation with opt-in kernel tracing capabilities and token budget controls
-- Added detailed examples of deployment configurations for the new Agent Platform settings
-- Updated troubleshooting guidance to cover the new configuration options and their validation rules
+- Added comprehensive documentation for new platform-gateway workspace resource integration settings including tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret
+- Updated configuration reference to include workspace transparency proxy endpoints for tools catalog and skills inventory
+- Enhanced deployment examples with workspace resource proxy configuration for development, staging, and production environments
+- Added detailed security considerations for workspace resource authentication and authorization
+- Updated troubleshooting guidance to cover workspace resource proxy connectivity and authentication issues
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -42,91 +35,74 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document explains how the Tool Gateway Service manages configuration and environment setup across layers: environment variables, configuration files, and runtime overrides. It details available options, defaults, validation rules, and deployment-specific settings for development, staging, and production. It also provides examples for Docker and Kubernetes (ConfigMaps/Secrets), and outlines security best practices for secrets management and consistent configuration across environments.
+This document explains how the Platform Gateway Service manages configuration and environment setup across layers: environment variables, configuration files, and runtime overrides. It details available options, defaults, validation rules, and deployment-specific settings for development, staging, and production. It also provides examples for Docker and Kubernetes (ConfigMaps/Secrets), and outlines security best practices for secrets management and consistent configuration across environments.
 
-**Updated** Enhanced documentation now includes comprehensive OpenTelemetry configuration support with opt-in telemetry push pipeline, OpenObserve integration, and secure authentication header management through runtime secrets. Additionally, this update covers the new Agent Platform configuration settings that provide enhanced runtime control through kernel tracing, reply token budgeting, and task tools functionality.
+**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, providing operators with self-service visibility into their workspace resources.
 
 ## Project Structure
-The Tool Gateway Service is implemented under products/tool-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/tool-gateway. The service image is built using a Dockerfile, and dependencies are declared in pyproject.toml. The service includes integrated OpenTelemetry support for traces, metrics, and logs export to OpenObserve backend.
+The Platform Gateway Service is implemented under products/platform-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/platform-gateway. The service includes workspace resource integration features that proxy requests to tool-gateway and skills-hub services for read-only inventory access.
 
 ```mermaid
 graph TB
-subgraph "Tool Gateway Service"
-A["src/tool_gateway/core/config.py"]
-B["src/tool_gateway/core/runtime.py"]
-C["src/tool_gateway/core/telemetry.py"]
-D["src/tool_gateway/policies/policy-default.yaml"]
-E["Dockerfile"]
-F["pyproject.toml"]
+subgraph "Platform Gateway Service"
+A["src/platform_gateway/core/config.py"]
+B["src/platform_gateway/core/runtime.py"]
+C["src/platform_gateway/api/routes/tools.py"]
+D["src/platform_gateway/api/routes/skills.py"]
+E["src/platform_gateway/services/tool_gateway_client.py"]
+F["src/platform_gateway/services/skills_hub_client.py"]
 end
-subgraph "Agent Platform Integration"
-G["AGENTSCOPE_KERNEL_TRACING"]
-H["AGENTSCOPE_REPLY_TOKEN_BUDGET"]
-I["AGENTSCOPE_TASK_TOOLS_ENABLED"]
-J["Token Weight Multipliers"]
-end
-subgraph "OpenTelemetry Infrastructure"
-K["OTEL_ENABLED"]
-L["OTEL_EXPORTER_OTLP_ENDPOINT"]
-M["OTEL_EXPORTER_OTLP_HEADERS"]
-N["OTEL_SERVICE_NAME"]
-O["OpenObserve Backend"]
+subgraph "Workspace Resource Integration"
+G["tool_gateway_url"]
+H["skills_hub_url"]
+I["skills_client_id"]
+J["skills_client_secret"]
+K["Delegated Token Flow"]
+L["Basic Auth Flow"]
 end
 subgraph "Kubernetes Base (dev)"
-P["base/tool-gateway/runtime-config.env"]
-Q["base/tool-gateway/tool-gateway-deployment.yaml"]
-R["base/shared/runtime.env"]
-S["base/tool-gateway/runtime-secrets.example.env"]
+M["base/platform-gateway/runtime-config.env"]
+N["base/platform-gateway/platform-gateway-deployment.yaml"]
+O["base/platform-gateway/runtime-secrets.example.env"]
+P["base/shared/runtime.env"]
 end
-A --> P
-B --> Q
-C --> K
-C --> L
-C --> M
-C --> N
-P --> Q
-R --> Q
-S --> Q
-D --> A
-E --> A
-F --> E
-G --> O
-H --> O
-I --> O
-J --> O
-K --> O
-L --> O
-M --> O
-N --> O
+A --> M
+B --> N
+C --> E
+D --> F
+E --> G
+F --> H
+M --> N
+O --> N
+P --> N
 ```
 
 **Diagram sources**
-- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
-- [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
-- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-- [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+- [runtime.py](file://products/platform-gateway/src/platform_gateway/core/runtime.py)
+- [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
+- [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
+- [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 
 **Section sources**
-- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
-- [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
-- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-- [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
-- [Dockerfile](file://products/tool-gateway/Dockerfile)
-- [pyproject.toml](file://products/tool-gateway/pyproject.toml)
+- [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+- [runtime.py](file://products/platform-gateway/src/platform_gateway/core/runtime.py)
+- [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
+- [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
+- [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 
 ## Core Components
 - Configuration loader and model: centralizes environment variable parsing, file-based configuration, and runtime overrides; exposes validated configuration to the application.
 - Runtime settings: handles service binding configuration with robust port resolution that ignores Kubernetes service-link formats.
-- OpenTelemetry telemetry: opt-in push pipeline for traces, metrics, and logs export via OTLP HTTP/protobuf to configured backend.
+- Workspace resource proxies: read-only proxy endpoints for tools catalog and skills inventory with appropriate authentication mechanisms.
 - Policy engine configuration: loads default policy definitions from YAML and supports environment-driven overrides.
 - Containerization and dependency management: Dockerfile defines runtime environment; pyproject.toml declares Python dependencies used by the gateway.
 
@@ -136,65 +112,57 @@ Key responsibilities:
 - Support layered precedence: defaults < config files < environment variables < runtime overrides.
 - Handle DNS-based service discovery with proper fallback mechanisms.
 - Ignore Kubernetes service-link environment variables to prevent conflicts.
-- Manage opt-in OpenTelemetry telemetry with fail-open behavior and secure authentication.
+- Manage workspace resource integration with secure authentication and authorization.
 
-**Updated** Enhanced core components to include comprehensive OpenTelemetry support with opt-in telemetry push pipeline, secure authentication header management, and integration with OpenObserve backend. Additionally, the system now supports Agent Platform integration with enhanced runtime control through kernel tracing, reply token budgeting, and task tools functionality.
+**Updated** Enhanced core components to include comprehensive workspace resource integration capabilities with read-only proxies for tools catalog and skills inventory, supporting both delegated token flow for tools and Basic authentication for skills.
 
 **Section sources**
-- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
-- [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
-- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-- [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
-- [Dockerfile](file://products/tool-gateway/Dockerfile)
-- [pyproject.toml](file://products/tool-gateway/pyproject.toml)
+- [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+- [runtime.py](file://products/platform-gateway/src/platform_gateway/core/runtime.py)
+- [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
+- [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
+- [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 
 ## Architecture Overview
-The configuration system follows a layered approach with enhanced observability capabilities:
+The configuration system follows a layered approach with enhanced workspace resource integration:
 - Defaults: defined in code or default YAML policies.
 - Config files: loaded from container filesystem or mounted volumes.
 - Environment variables: injected at runtime via platform orchestration (e.g., Kubernetes).
 - Runtime overrides: applied programmatically during startup or request processing.
 - DNS-based service discovery: services communicate via Kubernetes DNS names instead of injected environment variables.
-- Opt-in OpenTelemetry telemetry: traces, metrics, and logs exported via OTLP HTTP/protobuf to configured backend.
-- Agent Platform integration: enhanced runtime control through kernel tracing, reply token budgeting, and task tools.
+- Workspace resource proxies: read-only access to tools catalog and skills inventory with appropriate authentication.
 
 ```mermaid
 sequenceDiagram
-participant App as "Tool Gateway App"
-participant Config as "Configuration Loader"
-participant Env as "Environment Variables"
-participant File as "Config Files"
-participant DNS as "Kubernetes DNS"
-participant Service as "Identity Service"
-participant OTel as "OpenTelemetry Pipeline"
-participant Backend as "OpenObserve Backend"
-participant AgentPlatform as "Agent Platform"
-App->>Config : Initialize configuration
-Config->>Env : Read environment variables
-Config->>File : Load configuration files
-Config->>Config : Merge layers with precedence
-Config-->>App : Validated configuration
-App->>DNS : Resolve service name (identity-service)
-DNS-->>App : Service IP address
-App->>Service : Connect via DNS name
-Service-->>App : Service response
-App->>OTel : Check OTEL_ENABLED flag
-OTel->>Backend : Export traces/metrics/logs via OTLP
-Backend-->>OTel : Acknowledge receipt
-App->>AgentPlatform : Configure kernel tracing & budget
-AgentPlatform-->>App : Enhanced runtime control
-App->>App : Continue normal operation
+participant Portal as "Operator Portal"
+participant Gateway as "Platform Gateway"
+participant Identity as "Identity Broker"
+participant Tools as "Tool Gateway"
+participant Skills as "Skills Hub"
+participant Policy as "Policy Engine"
+Portal->>Gateway : GET /api/v1/tools
+Gateway->>Policy : enforce_policy(tools : list)
+Policy-->>Gateway : Allow/Deny
+Gateway->>Identity : obtain_delegated_token()
+Identity-->>Gateway : Delegated Token
+Gateway->>Tools : GET /api/v2/tools (Bearer token)
+Tools-->>Gateway : Tools List
+Gateway-->>Portal : Tools Catalog
+Portal->>Gateway : GET /api/v1/skills
+Gateway->>Policy : enforce_policy(skills : read)
+Policy-->>Gateway : Allow/Deny
+Gateway->>Skills : GET /skills (Basic auth)
+Skills-->>Gateway : Skills Inventory
+Gateway-->>Portal : Skills List
 ```
 
 **Diagram sources**
-- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
-- [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
-- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-- [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
+- [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
+- [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [spec.md](file://docs/specs/SPEC-019-portal-transparency-navigation/spec.md)
 
 ## Detailed Component Analysis
 
@@ -205,7 +173,7 @@ App->>App : Continue normal operation
 - Error handling: Aggregates validation errors and surfaces actionable messages.
 - Service discovery: Uses DNS-based resolution for inter-service communication.
 
-**Updated** Enhanced to support DNS-based service discovery, improved environment variable handling, and integration with OpenTelemetry configuration management. The system now supports Agent Platform integration with enhanced runtime control settings.
+**Updated** Enhanced to support workspace resource integration with new configuration fields for tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret, enabling read-only proxies for tools catalog and skills inventory.
 
 ```mermaid
 flowchart TD
@@ -222,10 +190,83 @@ Expose --> End
 ```
 
 **Diagram sources**
-- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
 
 **Section sources**
-- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+
+### Workspace Resource Proxy Routes
+- Purpose: Provide read-only access to workspace resources (tools catalog and skills inventory) through the platform gateway.
+- Tools proxy: `GET /api/v1/tools` enforces `tools:list` policy action and proxies to tool-gateway with delegated token.
+- Skills proxy: `GET /api/v1/skills` enforces `skills:read` policy action and proxies to skills-hub with Basic authentication.
+- Error handling: Returns 503 when services not configured, 502 on upstream failures, passes through 4xx client errors.
+
+**New Section** Comprehensive workspace resource proxy implementation with appropriate authentication mechanisms and error handling.
+
+```mermaid
+flowchart TD
+Request["API Request"] --> Route{"Route Type"}
+Route --> |Tools| ToolsRoute["GET /api/v1/tools"]
+Route --> |Skills| SkillsRoute["GET /api/v1/skills"]
+ToolsRoute --> PolicyCheck["enforce_policy(tools:list)"]
+SkillsRoute --> PolicyCheck
+PolicyCheck --> Auth{"Authentication Method"}
+Auth --> |Tools| Delegation["obtain_delegated_token()"]
+Auth --> |Skills| BasicAuth["Basic Auth with credentials"]
+Delegation --> ToolProxy["Forward to tool-gateway"]
+BasicAuth --> SkillsProxy["Forward to skills-hub"]
+ToolProxy --> Response["Return tools list"]
+SkillsProxy --> Response
+Response --> Client["Client Response"]
+```
+
+**Diagram sources**
+- [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
+- [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+
+**Section sources**
+- [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
+- [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+
+### Workspace Resource Clients
+- Purpose: Handle HTTP communication with downstream workspace resource services.
+- Tool gateway client: Forwards delegated tokens obtained through identity broker exchange.
+- Skills hub client: Uses Basic authentication with configured client credentials.
+- Error mapping: Consistent error handling with 503 for unconfigured services, 502 for upstream failures, 4xx passthrough for client errors.
+
+**New Section** Dedicated client implementations for workspace resource integration with appropriate authentication and error handling patterns.
+
+```mermaid
+classDiagram
+class ToolGatewayClient {
++list_tools(settings, request_id, delegated_token) list
++_base_url(settings) str
++_raise_upstream(response) None
+}
+class SkillsHubClient {
++list_skills(settings, request_id, params) dict
++_base_url(settings) str
++_credential(settings) tuple
++_raise_upstream(response) None
+}
+class PlatformGatewaySettings {
++tool_gateway_url : str
++skills_hub_url : str
++skills_client_id : str
++skills_client_secret : str
+}
+ToolGatewayClient --> PlatformGatewaySettings
+SkillsHubClient --> PlatformGatewaySettings
+```
+
+**Diagram sources**
+- [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
+- [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+
+**Section sources**
+- [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
+- [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 
 ### Runtime Settings and Port Resolution
 - Purpose: Handle service binding configuration with robust port resolution.
@@ -233,108 +274,8 @@ Expose --> End
 - Default behavior: Falls back to default host and port when environment variables are not set.
 - Development safety: Prevents conflicts between manual configuration and automatic service-link injection.
 
-**New Section** Enhanced runtime settings with intelligent port resolution that handles Kubernetes service-link formats gracefully.
-
-```mermaid
-flowchart TD
-PortValue{"Port Value<br/>Available?"}
-ParseInt{"Can Parse<br/>as Integer?"}
-UseDefault["Use Default<br/>Port"]
-ExtractPort["Extract Numeric<br/>Port"]
-Success["Resolved Port"]
-PortValue --> |No| UseDefault
-PortValue --> |Yes| ParseInt
-ParseInt --> |No| ExtractPort
-ParseInt --> |Yes| Success
-```
-
-**Diagram sources**
-- [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-
 **Section sources**
-- [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-
-### OpenTelemetry Telemetry Pipeline
-- Purpose: Opt-in telemetry push pipeline for traces, metrics, and logs export via OTLP HTTP/protobuf.
-- Gating: Controlled by `OTEL_ENABLED` environment variable (default false); when disabled, no overhead.
-- Authentication: Uses `OTEL_EXPORTER_OTLP_HEADERS` for Basic authentication to OpenObserve backend.
-- Fail-open: Setup errors are logged but never raised into request path; exporters drop telemetry on failure.
-- Log bridge: Mirrors structured logs to OTLP log pipeline while maintaining stdout as source of truth.
-- Service naming: Uses `OTEL_SERVICE_NAME` for resource identification, defaults to service metadata.
-
-**New Section** Comprehensive OpenTelemetry support with opt-in telemetry pipeline, secure authentication, and OpenObserve integration.
-
-```mermaid
-flowchart TD
-Enabled{"OTEL_ENABLED<br/>= true?"}
-Setup["Initialize Providers"]
-Traces["Tracer Provider"]
-Metrics["Meter Provider"]
-Logs["Logger Provider"]
-Exporters["OTLP Exporters"]
-Backend["OpenObserve Backend"]
-FailOpen["Fail Open on Error"]
-Enabled --> |No| Skip["Skip Initialization"]
-Enabled --> |Yes| Setup
-Setup --> Traces
-Setup --> Metrics
-Setup --> Logs
-Traces --> Exporters
-Metrics --> Exporters
-Logs --> Exporters
-Exporters --> Backend
-Backend --> |Error| FailOpen
-FailOpen --> Continue["Continue Service Operation"]
-Skip --> Continue
-```
-
-**Diagram sources**
-- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
-- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-
-**Section sources**
-- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
-- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-
-### Agent Platform Integration and Runtime Control
-- Purpose: Provides enhanced runtime control through Agent Platform integration with kernel tracing, reply token budgeting, and task tools.
-- Kernel Tracing: `AGENTSCOPE_KERNEL_TRACING` enables out-of-box TracingMiddleware for OTel kernel spans (inert without SDK TracerProvider).
-- Reply Token Budget: `AGENTSCOPE_REPLY_TOKEN_BUDGET` with configurable input/output token weights for per-reply token budgeting.
-- Task Tools: `AGENTSCOPE_TASK_TOOLS_ENABLED` provides opt-in agentscope task tools (TaskCreate/TaskGet/TaskList/TaskUpdate) with state-local persistence.
-- Token Weight Multipliers: `AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT` and `AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT` allow fine-grained control over token cost calculation.
-
-**New Section** Comprehensive Agent Platform integration with enhanced runtime control capabilities including kernel tracing, reply token budgeting, and task tools functionality.
-
-```mermaid
-flowchart TD
-KernelTracing{"AGENTSCOPE_KERNEL_TRACING<br/>= true?"}
-ReplyBudget{"AGENTSCOPE_REPLY_TOKEN_BUDGET<br/>set?"}
-TaskTools{"AGENTSCOPE_TASK_TOOLS_ENABLED<br/>= true?"}
-TracingMW["TracingMiddleware"]
-BudgetMW["ReplyBudgetControlMiddleware"]
-TaskToolsMW["Task Tools (Create/Get/List/Update)"]
-Middlewares["Kernel Middleware Stack"]
-KernelTracing --> |Yes| TracingMW
-KernelTracing --> |No| Middlewares
-ReplyBudget --> |Yes| BudgetMW
-ReplyBudget --> |No| Middlewares
-TaskTools --> |Yes| TaskToolsMW
-TaskTools --> |No| Middlewares
-TracingMW --> Middlewares
-BudgetMW --> Middlewares
-TaskToolsMW --> Middlewares
-Middlewares --> AgentKernel["Agent Kernel"]
-```
-
-**Diagram sources**
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
-- [configuration-reference.md](file://docs/guides/configuration-reference.md)
-
-**Section sources**
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
-- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+- [runtime.py](file://products/platform-gateway/src/platform_gateway/core/runtime.py)
 
 ### DNS-Based Service Discovery
 - Purpose: Enable reliable inter-service communication using Kubernetes DNS names.
@@ -342,119 +283,66 @@ Middlewares --> AgentKernel["Agent Kernel"]
 - Benefits: Eliminates service-link conflicts, improves reliability, and simplifies configuration.
 - Implementation: Services resolve DNS names like `identity-service` to their cluster IPs.
 
-**New Section** Comprehensive DNS-based service discovery replacing Kubernetes service-link injection.
-
-```mermaid
-graph LR
-Client["Tool Gateway Pod"] --> DNS["Kubernetes DNS Server"]
-DNS --> Identity["identity-service:8000"]
-Identity --> Resolver["DNS Resolution"]
-Resolver --> IP["Service IP Address"]
-IP --> Client
-```
-
-**Diagram sources**
-- [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-
 **Section sources**
-- [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
+- [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 
 ### Policy Engine Configuration
 - Default policy: Loaded from a YAML file defining baseline rules and behaviors.
 - Overrides: Can be adjusted via environment variables or mounted config files depending on implementation.
 - Usage: Provides decision context for tool invocation, access control, and rate limiting.
 
-```mermaid
-classDiagram
-class PolicyEngine {
-+load_default_policy()
-+apply_overrides(env_vars)
-+evaluate(context) Decision
-}
-class PolicyDefault {
-+rules : list
-+defaults : map
-}
-PolicyEngine --> PolicyDefault : "loads"
-```
-
-**Diagram sources**
-- [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
-
 **Section sources**
-- [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
+- [spec.md](file://docs/specs/SPEC-019-portal-transparency-navigation/spec.md)
 
 ### Docker Configuration
 - Image build: Defines base image, working directory, and dependency installation.
-- Entrypoint: Runs the Tool Gateway Service with environment variables passed through.
+- Entrypoint: Runs the Platform Gateway Service with environment variables passed through.
 - Best practices: Use multi-stage builds, pin versions, minimize attack surface.
 
-```mermaid
-flowchart TD
-Build["Build Stage"] --> Install["Install dependencies"]
-Install --> Copy["Copy application code"]
-Copy --> Entrypoint["Set entrypoint"]
-Entrypoint --> Run["Run service with env vars"]
-```
-
-**Diagram sources**
-- [Dockerfile](file://products/tool-gateway/Dockerfile)
-
 **Section sources**
-- [Dockerfile](file://products/tool-gateway/Dockerfile)
+- [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 
 ### Kubernetes Deployment and ConfigMaps
 - Deployment manifest: Mounts environment variables and config files into the pod.
 - ConfigMap: Holds non-sensitive configuration values including service endpoints.
 - Service discovery: Uses DNS names for inter-service communication.
 - Environment injection: Maps ConfigMap entries to environment variables consumed by the configuration loader.
-- Secrets management: Handles sensitive data like OpenTelemetry authentication headers separately from ConfigMaps.
+- Secrets management: Handles sensitive data like workspace resource credentials separately from ConfigMaps.
 
-**Updated** Enhanced deployment configuration with DNS-based service discovery, disabled service links, comprehensive OpenTelemetry integration, and secure authentication header management. Additionally supports Agent Platform integration with enhanced runtime control settings.
+**Updated** Enhanced deployment configuration with workspace resource integration, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access.
 
 ```mermaid
 graph TB
 CM["ConfigMap"] --> ENV["Environment Variables"]
 ENV --> POD["Pod Spec"]
-POD --> APP["Tool Gateway App"]
+POD --> APP["Platform Gateway App"]
 APP --> CFG["Configuration Loader"]
 DNS["Kubernetes DNS"] --> SVC["Service Names"]
 SVC --> APP
-Secrets["Secrets"] --> AuthHeaders["OTEL_EXPORTER_OTLP_HEADERS"]
-AuthHeaders --> APP
-OTelEnv["OTEL_* Variables"] --> APP
-APP --> OTel["OpenTelemetry Pipeline"]
-OTel --> Backend["OpenObserve Backend"]
-AgentEnv["AGENTSCOPE_* Variables"] --> APP
-APP --> AgentPlatform["Agent Platform Integration"]
-AgentPlatform --> EnhancedRuntime["Enhanced Runtime Control"]
+Secrets["Secrets"] --> WorkspaceCreds["Workspace Resource Credentials"]
+WorkspaceCreds --> APP
+AppEnv["PLATFORM_GATEWAY_* Variables"] --> APP
+APP --> ToolsProxy["Tools Catalog Proxy"]
+APP --> SkillsProxy["Skills Inventory Proxy"]
+ToolsProxy --> ToolsSvc["Tool Gateway Service"]
+SkillsProxy --> SkillsSvc["Skills Hub Service"]
 ```
 
 **Diagram sources**
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 
 **Section sources**
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
-
-### Dependency Management
-- Python dependencies: Declared in pyproject.toml for reproducible builds.
-- Lock file: Ensures deterministic dependency resolution.
-- Best practices: Pin versions, separate dev and prod dependencies, audit regularly.
-
-**Section sources**
-- [pyproject.toml](file://products/tool-gateway/pyproject.toml)
+- [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 
 ## Dependency Analysis
-Configuration components depend on environment variables and files, while the runtime settings handle DNS-based service discovery. The Docker image encapsulates runtime dependencies, and Kubernetes manifests inject configuration at deployment time. OpenTelemetry integration adds opt-in telemetry capabilities with secure authentication and fail-open behavior. Agent Platform integration provides enhanced runtime control through kernel tracing, reply token budgeting, and task tools.
+Configuration components depend on environment variables and files, while the runtime settings handle DNS-based service discovery. The Docker image encapsulates runtime dependencies, and Kubernetes manifests inject configuration at deployment time. Workspace resource integration adds dependencies on tool-gateway and skills-hub services with appropriate authentication mechanisms.
 
-**Updated** Added dependencies for DNS-based service discovery, enhanced environment variable handling, comprehensive OpenTelemetry integration with opt-in telemetry pipeline, secure authentication header management, and Agent Platform integration with enhanced runtime control capabilities.
+**Updated** Added dependencies for workspace resource integration including tool-gateway delegation flow and skills-hub Basic authentication, with proper error handling and service discovery.
 
 ```mermaid
 graph TB
@@ -462,34 +350,36 @@ CFG["config.py"] --> ENV["Environment Variables"]
 CFG --> FILE["Config Files"]
 RT["runtime.py"] --> PORT["Port Resolution"]
 DNS["Kubernetes DNS"] --> SVC["Service Discovery"]
-DOCKER["Dockerfile"] --> RUNTIME["Runtime Dependencies"]
-K8S["tool-gateway-deployment.yaml"] --> INJECT["Env Injection"]
+DOCKER["Deployment Manifest"] --> RUNTIME["Runtime Dependencies"]
+K8S["platform-gateway-deployment.yaml"] --> INJECT["Env Injection"]
 INJECT --> CFG
 SVC --> RT
-OTel["telemetry.py"] --> OTEL_ENV["OTEL_* Variables"]
-OTEL_ENV --> Backend["OpenObserve Backend"]
-Secrets["runtime-secrets.env"] --> AuthHeaders["OTEL_EXPORTER_OTLP_HEADERS"]
-AuthHeaders --> OTel
-AgentSettings["runtime_settings.py"] --> AgentKernel["runtime_kernel.py"]
-AgentKernel --> EnhancedRuntime["Enhanced Runtime Control"]
+WS["Workspace Resources"] --> TOOLS["Tool Gateway"]
+WS --> SKILLS["Skills Hub"]
+CFG --> WS
+Tools["tools.py"] --> ToolsClient["tool_gateway_client.py"]
+Skills["skills.py"] --> SkillsClient["skills_hub_client.py"]
+ToolsClient --> TOOLS
+SkillsClient --> SKILLS
 ```
 
 **Diagram sources**
-- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
-- [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
-- [Dockerfile](file://products/tool-gateway/Dockerfile)
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+- [runtime.py](file://products/platform-gateway/src/platform_gateway/core/runtime.py)
+- [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
+- [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
+- [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 
 **Section sources**
-- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
-- [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
-- [Dockerfile](file://products/tool-gateway/Dockerfile)
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
+- [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+- [runtime.py](file://products/platform-gateway/src/platform_gateway/core/runtime.py)
+- [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
+- [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
+- [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 
 ## Performance Considerations
 - Minimize configuration lookups by caching validated configuration at startup.
@@ -498,15 +388,10 @@ AgentKernel --> EnhancedRuntime["Enhanced Runtime Control"]
 - Monitor configuration-related metrics and errors to detect misconfigurations early.
 - Leverage Kubernetes DNS caching for improved service discovery performance.
 - Optimize port resolution to avoid unnecessary string parsing operations.
-- OpenTelemetry telemetry is opt-in and fails open to avoid performance impact when disabled.
-- Batch processors in OpenTelemetry reduce network overhead for telemetry export.
-- Configure appropriate OpenTelemetry exporter timeouts and batch sizes for optimal performance.
-- Monitor OpenTelemetry setup failures and exporter errors without affecting service operation.
-- Agent Platform kernel tracing is inert without an SDK TracerProvider, ensuring no performance impact when disabled.
-- Reply token budgeting provides controlled token usage without blocking operations.
-- Task tools are opt-in and only registered when explicitly enabled.
-
-[No sources needed since this section provides general guidance]
+- Workspace resource proxies use timeout-based connections to prevent hanging requests.
+- Delegated token acquisition is cached where possible to reduce identity broker load.
+- Skills hub requests use connection pooling for improved performance.
+- Monitor workspace resource proxy latency and error rates for capacity planning.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -518,42 +403,37 @@ Common issues and resolutions:
 - Service link conflicts: Ensure `enableServiceLinks: false` is set in all deployment manifests.
 - Port resolution issues: Check that port values are numeric and not in Kubernetes service-link format.
 - Inter-service communication failures: Verify DNS names are resolvable and services are running.
-- **New**: OpenTelemetry setup failures: Check OTEL_ENABLED flag and verify endpoint connectivity; setup errors are logged but don't affect service operation.
-- **New**: OpenTelemetry authentication failures: Verify OTEL_EXPORTER_OTLP_HEADERS contains valid Basic auth credentials; 401 responses indicate authentication issues.
-- **New**: OpenTelemetry endpoint connectivity: Ensure OTEL_EXPORTER_OTLP_ENDPOINT points to reachable OpenObserve backend; unreachable endpoints cause exporter failures but don't break service.
-- **New**: OpenTelemetry service naming: Verify OTEL_SERVICE_NAME is set appropriately for trace correlation; defaults to service metadata if not specified.
-- **New**: Log bridge issues: When OpenTelemetry is enabled, structured logs are mirrored to OTLP; ensure log level is set to INFO for proper audit trail.
-- **New**: Agent Platform kernel tracing issues: Verify AGENTSCOPE_KERNEL_TRACING is properly set; kernel tracing is inert without an SDK TracerProvider.
-- **New**: Reply token budget validation: Ensure AGENTSCOPE_REPLY_TOKEN_BUDGET is > 0 when set; invalid values fail startup with clear error messages.
-- **New**: Token weight configuration: Verify AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT and AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT are >= 0; zero values are valid for selective weighting.
-- **New**: Task tools registration: Check AGENTSCOPE_TASK_TOOLS_ENABLED is properly set; task tools are state-local and persisted via agent state store.
+- **New**: Workspace resource proxy failures: Check tool_gateway_url and skills_hub_url configuration; verify downstream services are running.
+- **New**: Tools catalog proxy issues: Verify delegated token acquisition works; check identity broker configuration and permissions.
+- **New**: Skills inventory proxy issues: Verify skills_client_id and skills_client_secret are properly configured; check skills-hub authentication.
+- **New**: Workspace resource 503 errors: Indicates workspace resource services are not configured; verify PLATFORM_GATEWAY_TOOL_GATEWAY_URL and PLATFORM_GATEWAY_SKILLS_HUB_URL.
+- **New**: Workspace resource 502 errors: Indicates upstream service failures; check tool-gateway and skills-hub service health and connectivity.
+- **New**: Workspace resource 4xx errors: Indicates client-side issues; verify delegated token validity and skills authentication credentials.
 
-**Updated** Added troubleshooting guidance for DNS-based service discovery, service link issues, comprehensive OpenTelemetry integration problems, authentication failures, endpoint connectivity issues, and Agent Platform integration with enhanced runtime control settings.
+**Updated** Added troubleshooting guidance for workspace resource integration including proxy configuration, authentication issues, and downstream service connectivity problems.
 
 **Section sources**
-- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
-- [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
-- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+- [runtime.py](file://products/platform-gateway/src/platform_gateway/core/runtime.py)
+- [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
+- [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
+- [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 
 ## Conclusion
-The Tool Gateway Service employs a robust, layered configuration system that integrates environment variables, configuration files, and runtime overrides with strict validation. By following the outlined best practices for Docker and Kubernetes deployments, teams can maintain secure, consistent configurations across environments while ensuring reliability and performance. The architectural shift to DNS-based service discovery eliminates service-link conflicts and provides more reliable inter-service communication patterns. The addition of opt-in OpenTelemetry telemetry enables comprehensive observability with traces, metrics, and logs export to OpenObserve backend, featuring secure authentication header management and fail-open behavior that ensures service continuity even when telemetry infrastructure is unavailable.
+The Platform Gateway Service employs a robust, layered configuration system that integrates environment variables, configuration files, and runtime overrides with strict validation. By following the outlined best practices for Docker and Kubernetes deployments, teams can maintain secure, consistent configurations across environments while ensuring reliability and performance. The architectural shift to DNS-based service discovery eliminates service-link conflicts and provides more reliable inter-service communication patterns. The addition of workspace resource integration enables operators to gain self-service visibility into their workspace resources through read-only proxies for tools catalog and skills inventory, enhancing operational transparency and reducing dependency on agent-mediated resource discovery.
 
-**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive OpenTelemetry integration with opt-in telemetry pipeline, secure authentication capabilities, and Agent Platform integration with enhanced runtime control through kernel tracing, reply token budgeting, and task tools functionality.
+**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, and comprehensive workspace resource integration capabilities that provide operators with direct visibility into their workspace resources.
 
 ## Appendices
 
 ### Environment-Specific Settings
-- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable OpenTelemetry with local OpenObserve instance, enable Agent Platform kernel tracing for development visibility.
-- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure OpenTelemetry with staging backend, enable Agent Platform reply token budgeting for cost control.
-- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure OpenTelemetry with production backend and proper authentication, enable Agent Platform kernel tracing with production monitoring.
+- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable workspace resource proxies with local tool-gateway and skills-hub instances.
+- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure workspace resource proxies with staging backend services.
+- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure workspace resource proxies with production backend services and proper authentication.
 
-**Updated** Added guidance for DNS-based service discovery configuration, OpenTelemetry telemetry setup across environments, secure authentication header management, and Agent Platform integration with enhanced runtime control settings.
-
-[No sources needed since this section provides general guidance]
+**Updated** Added guidance for workspace resource proxy configuration across environments, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access.
 
 ### Security and Secrets Management
 - Store secrets in Kubernetes Secrets or external vaults; never hardcode.
@@ -564,26 +444,16 @@ The Tool Gateway Service employs a robust, layered configuration system that int
 - Monitor redaction metrics and workload identity authentication attempts.
 - Use DNS-based service discovery to avoid exposing service endpoints in environment variables.
 - Disable service links to prevent accidental exposure of internal service information.
-- Secure Skills Hub PostgreSQL connections with proper authentication and network policies.
-- Validate Skills Hub source configurations to prevent injection attacks through malicious skill sources.
-- Protect SKILLS_GIT_TOKENS secrets with proper Kubernetes Secret management and rotation policies.
-- Implement token scoping for git repositories to limit access to minimum required permissions.
-- Monitor git authentication attempts and implement rate limiting for failed authentication attempts.
-- Validate git source paths to prevent path traversal attacks and ensure only safe subdirectories are selected.
-- **New**: Secure OpenTelemetry authentication headers using Kubernetes Secrets; never commit OTEL_EXPORTER_OTLP_HEADERS to version control.
-- **New**: Rotate OpenTelemetry authentication credentials regularly and monitor for unauthorized access attempts.
-- **New**: Use separate OpenTelemetry endpoints and authentication for different environments to prevent cross-environment telemetry leakage.
-- **New**: Monitor OpenTelemetry exporter failures and authentication errors without exposing sensitive credential information in logs.
-- **New**: Secure Agent Platform configuration settings with appropriate RBAC and environment isolation.
-- **New**: Monitor Agent Platform kernel tracing and reply token budget usage for cost optimization.
-- **New**: Validate Agent Platform task tools permissions and ensure they align with security policies.
+- **New**: Secure workspace resource credentials using Kubernetes Secrets; never commit PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET to version control.
+- **New**: Validate delegated token acquisition for tools catalog access; ensure proper identity broker configuration.
+- **New**: Monitor workspace resource proxy authentication attempts and failed authentication attempts.
+- **New**: Implement rate limiting for workspace resource proxy endpoints to prevent abuse.
+- **New**: Audit workspace resource access patterns for security monitoring and compliance.
 
-**Updated** Enhanced security guidance with DNS-based service discovery best practices, comprehensive OpenTelemetry security considerations, secure authentication header management practices, and Agent Platform integration security considerations.
-
-[No sources needed since this section provides general guidance]
+**Updated** Enhanced security guidance with workspace resource integration security considerations, including credential management, authentication monitoring, and access pattern auditing.
 
 ### Complete Environment Variables Reference
-**Updated** Comprehensive reference including DNS-based service discovery variables, OpenTelemetry configuration, authentication management, and Agent Platform runtime control settings.
+**Updated** Comprehensive reference including workspace resource integration variables for tools catalog and skills inventory access.
 
 #### Core Configuration
 - `AGENT_SERVICE_URL`: Agent service endpoint URL (DNS-based)
@@ -591,67 +461,55 @@ The Tool Gateway Service employs a robust, layered configuration system that int
 - `IDENTITY_JWKS_URL`: Identity service JWKS endpoint
 - `IDENTITY_JWKS_CACHE_SECONDS`: JWCS cache duration (default: 300)
 - `IDENTITY_TOKEN_ISSUER`: JWT issuer claim (default: "luban-identity-broker")
-- `GATEWAY_TOKEN_AUDIENCE`: Token audience (default: "tool-gateway")
-- `GATEWAY_DELEGATION_AUDIENCE`: Delegation audience (default: "tool-gateway")
+- `PLATFORM_GATEWAY_TOKEN_AUDIENCE`: Token audience (default: "platform-gateway")
+- `PLATFORM_GATEWAY_DELEGATION_AUDIENCE`: Delegation audience (default: "tool-gateway")
 
 #### Runtime Configuration
-- `GATEWAY_HOST`: Service bind host (default: 0.0.0.0)
-- `GATEWAY_PORT`: Service bind port (numeric only, service-link format ignored)
+- `PLATFORM_GATEWAY_HOST`: Service bind host (default: 0.0.0.0)
+- `PLATFORM_GATEWAY_PORT`: Service bind port (numeric only, service-link format ignored)
 
 #### Operational Configuration
-- `GATEWAY_REQUIRE_AUTH`: Require authentication (default: true)
-- `GATEWAY_K8S_ENABLED`: Enable Kubernetes integration (default: false)
-- `GATEWAY_K8S_NAMESPACE`: Kubernetes namespace
-- `GATEWAY_POLICY_PATH`: Policy file path
+- `PLATFORM_GATEWAY_REQUIRE_AUTH`: Require authentication (default: true)
+- `PLATFORM_GATEWAY_POLICY_PATH`: Policy file path
 - `CHAT_RESPONSE_TIMEOUT_SECONDS`: Chat response timeout (default: 30)
 
-#### Service Discovery Configuration
-- `IDENTITY_SERVICE_URL`: Identity service URL using DNS names (e.g., http://identity-service:8000)
-- `AGENT_SERVICE_URL`: Agent service URL using DNS names (e.g., http://agent-service:8000)
+#### Workspace Resource Integration
+- `PLATFORM_GATEWAY_TOOL_GATEWAY_URL`: Tool gateway URL for tools catalog proxy (e.g., http://tool-gateway:8000)
+- `PLATFORM_GATEWAY_SKILLS_HUB_URL`: Skills hub URL for skills inventory proxy (e.g., http://skills-hub:8000)
+- `PLATFORM_GATEWAY_SKILLS_CLIENT_ID`: Skills hub client ID for Basic authentication (default: "platform-gateway")
+- `PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET`: Skills hub client secret for Basic authentication (stored in secrets)
 
-#### OpenTelemetry Configuration
-- `OTEL_ENABLED`: Enable/disable OpenTelemetry push pipeline (default: false)
-- `OTEL_EXPORTER_OTLP_ENDPOINT`: OTLP HTTP endpoint for OpenObserve (e.g., http://openobserve-router:5080/api/default)
-- `OTEL_EXPORTER_OTLP_HEADERS`: Authentication headers for OTLP export (Basic auth for OpenObserve)
-- `OTEL_SERVICE_NAME`: Service name for telemetry resource identification (defaults to service metadata)
-
-#### Agent Platform Runtime Control
-- `AGENTSCOPE_KERNEL_TRACING`: Enable kernel tracing middleware for OTel spans (default: false)
-- `AGENTSCOPE_REPLY_TOKEN_BUDGET`: Reply token budget (must be > 0 when set; unset disables budget)
-- `AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT`: Input token weight multiplier (default: 1.0, must be >= 0)
-- `AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT`: Output token weight multiplier (default: 1.0, must be >= 0)
-- `AGENTSCOPE_TASK_TOOLS_ENABLED`: Enable built-in task tools (TaskCreate/TaskGet/TaskList/TaskUpdate; default: false)
-
-#### OpenTelemetry Authentication
-- `OTEL_EXPORTER_OTLP_HEADERS`: Contains `Authorization=Basic <base64(email:password)>` for OpenObserve authentication
-- Provisioned via runtime-secrets Secret and managed by sync-otel-secrets.sh script
-- Never committed to version control; always stored in Kubernetes Secrets
+#### Audit and Incident Services
+- `PLATFORM_GATEWAY_AUDIT_SERVICE_URL`: Audit service URL for durable audit trail
+- `PLATFORM_GATEWAY_AUDIT_CLIENT_ID`: Audit service client ID (default: "platform-gateway")
+- `PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET`: Audit service client secret (stored in secrets)
+- `PLATFORM_GATEWAY_INCIDENT_SERVICE_URL`: Incident service URL for incident triage
+- `PLATFORM_GATEWAY_INCIDENT_CLIENT_ID`: Incident service client ID (default: "platform-gateway")
+- `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET`: Incident service client secret (stored in secrets)
+- `PLATFORM_GATEWAY_INCIDENT_TRIAGE_TIMEOUT_SECONDS`: Incident triage timeout (default: 120)
 
 **Section sources**
-- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
-- [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
-- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
-- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-- [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+- [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+- [runtime.py](file://products/platform-gateway/src/platform_gateway/core/runtime.py)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 
-### OpenTelemetry Setup Guide
-**New Section** Step-by-step guide for configuring OpenTelemetry telemetry pipeline with OpenObserve integration.
+### Workspace Resource Integration Guide
+**New Section** Step-by-step guide for configuring workspace resource integration with tools catalog and skills inventory proxies.
 
 #### Prerequisites
-- OpenObserve backend deployed and accessible
-- Basic authentication credentials for OpenObserve ingest endpoint
-- Kubernetes cluster with network access to OpenObserve service
-- Proper secrets management for authentication headers
+- Tool-gateway service deployed and accessible
+- Skills-hub service deployed and accessible
+- Identity broker configured for delegated token exchange
+- Skills-hub configured with query clients registry
+- Proper network policies allowing platform-gateway to reach workspace resources
 
 #### Configuration Steps
-1. Set `OTEL_ENABLED=true` in shared runtime configuration
-2. Configure `OTEL_EXPORTER_OTLP_ENDPOINT` to point to OpenObserve ingest endpoint
-3. Generate Basic auth credentials and set `OTEL_EXPORTER_OTLP_HEADERS` in runtime secrets
-4. Deploy with proper secret mounting for authentication headers
-5. Verify telemetry export by checking OpenObserve backend
+1. Set `PLATFORM_GATEWAY_TOOL_GATEWAY_URL` to point to tool-gateway service
+2. Set `PLATFORM_GATEWAY_SKILLS_HUB_URL` to point to skills-hub service
+3. Configure `PLATFORM_GATEWAY_SKILLS_CLIENT_ID` and `PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET` in secrets
+4. Deploy with proper secret mounting for workspace resource credentials
+5. Verify workspace resource proxies by accessing `/api/v1/tools` and `/api/v1/skills`
 
 #### Example Configuration
 ```yaml
@@ -660,130 +518,48 @@ kind: ConfigMap
 metadata:
   name: platform-runtime-config
 data:
-  OTEL_ENABLED: "true"
-  OTEL_EXPORTER_OTLP_ENDPOINT: "http://openobserve-router.openobserve.svc.cluster.local:5080/api/default"
+  PLATFORM_GATEWAY_TOOL_GATEWAY_URL: "http://tool-gateway:8000"
+  PLATFORM_GATEWAY_SKILLS_HUB_URL: "http://skills-hub:8000"
+  PLATFORM_GATEWAY_SKILLS_CLIENT_ID: "platform-gateway"
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: tool-gateway-runtime-secrets
+  name: platform-gateway-runtime-secrets
 type: Opaque
 stringData:
-  OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Basic base64-encoded-email-colon-password"
+  PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET: "your-skills-client-secret"
 ```
 
-#### Authentication Header Generation
-Generate Basic auth header using email:password combination:
-```bash
-echo -n "email@example.com:password" | base64
-# Output: base64-encoded-string
-# Then use: Authorization=Basic base64-encoded-string
-```
+#### Authentication Flow
+- Tools catalog: Uses delegated token flow through identity broker exchange
+- Skills inventory: Uses Basic authentication with configured client credentials
+- Both proxies enforce appropriate policy actions before forwarding requests
 
 **Section sources**
-- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-- [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
-- [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
+- [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
+- [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 
-### Service Links Migration Guide
-**New Section** Migration strategy from Kubernetes service-link injection to DNS-based discovery.
-
-#### Migration Steps
-1. Identify all auto-generated service-link environment variables
-2. Replace with explicit DNS-based configuration in ConfigMaps
-3. Add `enableServiceLinks: false` to all deployment manifests
-4. Test DNS resolution and service connectivity
-5. Remove any legacy service-link references
-
-#### Common Migration Patterns
-- `SERVICE_NAME_PORT` → `SERVICE_NAME_URL=http://service-name:port`
-- `SERVICE_NAME_HOST` → Part of URL configuration
-- `SERVICE_NAME_PROTO` → Not needed with DNS-based approach
-
-**Section sources**
-- [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
-
-### OpenTelemetry Troubleshooting Guide
-**New Section** Comprehensive troubleshooting guide for OpenTelemetry configuration and connectivity issues.
+### Workspace Resource Troubleshooting Guide
+**New Section** Comprehensive troubleshooting guide for workspace resource integration configuration and connectivity issues.
 
 #### Common Issues and Solutions
-- **OTEL_ENABLED not taking effect**: Verify environment variable is properly set and service restarts after configuration changes
-- **Authentication failures (401)**: Check OTEL_EXPORTER_OTLP_HEADERS contains valid Basic auth credentials; verify OpenObserve user permissions
-- **Endpoint connectivity issues**: Ensure OTEL_EXPORTER_OTLP_ENDPOINT is reachable from pod network; check firewall rules and service availability
-- **High CPU usage**: Review OpenTelemetry batch processor settings; adjust batch sizes and export intervals for optimal performance
-- **Missing traces/metrics**: Verify service instrumentation is active; check that FastAPI and HTTPX instrumentors are properly initialized
-- **Log bridge not working**: Ensure log level is set to INFO; verify OTLP log exporter is properly configured
+- **Workspace resource 503 errors**: Indicates workspace resource services are not configured; verify PLATFORM_GATEWAY_TOOL_GATEWAY_URL and PLATFORM_GATEWAY_SKILLS_HUB_URL are set correctly
+- **Tools catalog 502 errors**: Indicates tool-gateway connectivity issues; check tool-gateway service health and network policies
+- **Skills inventory 401 errors**: Indicates skills authentication failures; verify PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET matches skills-hub configuration
+- **Delegated token acquisition failures**: Check identity broker configuration and permissions for platform-gateway service
+- **High latency on workspace resource requests**: Monitor downstream service performance and consider increasing timeouts if needed
 
 #### Monitoring and Diagnostics
-- Check service logs for OpenTelemetry initialization messages
-- Monitor exporter error rates and authentication failures
-- Verify OpenObserve backend receives telemetry data
-- Use OpenObserve dashboards to validate trace correlation and metric collection
+- Check platform-gateway logs for workspace resource proxy errors
+- Monitor delegated token acquisition success rates
+- Track skills authentication attempt success/failure ratios
+- Verify workspace resource proxy endpoint availability and response times
 
 **Section sources**
-- [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
-- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
-
-### Agent Platform Configuration Guide
-**New Section** Comprehensive guide for configuring Agent Platform runtime control settings.
-
-#### Kernel Tracing Configuration
-- Set `AGENTSCOPE_KERNEL_TRACING=true` to enable kernel-level tracing
-- Requires OpenTelemetry SDK TracerProvider to be active for meaningful spans
-- Inert when no TracerProvider is configured, ensuring no performance impact
-- Integrates with existing OTLP pipeline for unified observability
-
-#### Reply Token Budget Configuration
-- Set `AGENTSCOPE_REPLY_TOKEN_BUDGET` to a positive value to enable budget control
-- Configure `AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT` and `AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT` for fine-grained control
-- Zero weights are valid for selective token counting (e.g., count output tokens only)
-- Budget validation occurs at startup; invalid values fail with clear error messages
-
-#### Task Tools Configuration
-- Set `AGENTSCOPE_TASK_TOOLS_ENABLED=true` to enable built-in task tools
-- Provides TaskCreate, TaskGet, TaskList, and TaskUpdate operations
-- State-local persistence through agent state store (SPEC-017)
-- Always allowed by permission middleware, excluded from no-tools guard
-
-#### Example Deployment Configuration
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: agent-platform-runtime-config
-data:
-  AGENTSCOPE_KERNEL_TRACING: "true"
-  AGENTSCOPE_REPLY_TOKEN_BUDGET: "20000"
-  AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT: "0.5"
-  AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT: "2.0"
-  AGENTSCOPE_TASK_TOOLS_ENABLED: "true"
-```
-
-**Section sources**
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
-- [configuration-reference.md](file://docs/guides/configuration-reference.md)
-
-### Agent Platform Troubleshooting Guide
-**New Section** Troubleshooting guide for Agent Platform configuration and runtime control issues.
-
-#### Common Issues and Solutions
-- **Kernel tracing not producing spans**: Verify OpenTelemetry SDK TracerProvider is active; kernel tracing is inert without it
-- **Reply token budget validation errors**: Ensure AGENTSCOPE_REPLY_TOKEN_BUDGET is > 0 when set; check for negative or zero values
-- **Token weight configuration issues**: Verify weights are >= 0; zero values are valid for selective weighting
-- **Task tools not registering**: Check AGENTSCOPE_TASK_TOOLS_ENABLED is properly set; verify agent state store is accessible
-- **Budget enforcement not working**: Ensure ReplyBudgetControlMiddleware is registered; check budget state persistence
-
-#### Monitoring and Diagnostics
-- Monitor kernel tracing spans in OpenTelemetry backend
-- Track reply token budget usage and remaining budget
-- Verify task tools state persistence and retrieval
-- Check middleware registration and execution order
-
-**Section sources**
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
-- [test_runtime_settings.py](file://products/agent-platform/tests/test_runtime_settings.py)
+- [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
+- [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
+- [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)

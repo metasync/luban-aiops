@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: ""
-title: Incident Triage & Collaboration Service (R3)
+title: 'Incident Service (SPEC-015: Incident Triage & Collaboration)'
 scope: []
 source_files: []
 depends_on: []

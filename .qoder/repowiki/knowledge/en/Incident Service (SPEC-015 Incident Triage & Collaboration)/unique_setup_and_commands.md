@@ -1,0 +1,1 @@
+Built and run via `uv` per product (`pyproject.toml` declares `incident-service = "incident_service.main:run"`); deployment uses Kustomize overlays under `shared/platform-ops/gitops/dev-k8s/` with runtime profiles for agent providers (dashscope/deepseek/openai) and secret-sync scripts for audit, delegation, sessions DB, OTel, and skills secrets.

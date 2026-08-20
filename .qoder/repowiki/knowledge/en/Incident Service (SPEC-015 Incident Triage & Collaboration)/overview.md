@@ -1,0 +1,1 @@
+FastAPI service that ingests Alertmanager webhooks and manual reports, runs agent-driven triage against the agent-platform, persists incidents with a pluggable store, and dispatches triage reports to configured collaboration connectors.

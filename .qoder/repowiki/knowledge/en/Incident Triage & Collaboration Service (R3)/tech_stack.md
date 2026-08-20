@@ -1,1 +1,0 @@
-Python 3.11+ with FastAPI + Uvicorn, Pydantic v2 models, httpx for HTTP calls, psycopg[binary] v3 for Postgres storage, PyJWT for workload-token verification, OpenTelemetry OTLP exporter, Prometheus client, and uv as the build/lock manager.
