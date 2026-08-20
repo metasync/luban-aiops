@@ -16,15 +16,18 @@
 - [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
 - [Dockerfile](file://products/tool-gateway/Dockerfile)
 - [pyproject.toml](file://products/tool-gateway/pyproject.toml)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive OpenTelemetry configuration documentation including OTEL_ENABLED, OTEL_EXPORTER_OTLP_ENDPOINT, and authentication headers
-- Documented service-specific runtime secret configurations for OpenObserve integration
-- Updated observability conventions with opt-in OTel push pipeline details
-- Enhanced security guidance for OTLP authentication header management
-- Added troubleshooting section for OpenTelemetry setup and connectivity issues
+- Added comprehensive documentation for new Agent Platform configuration settings including AGENTSCOPE_KERNEL_TRACING, AGENTSCOPE_REPLY_TOKEN_BUDGET, input/output token weight multipliers, and AGENTSCOPE_TASK_TOOLS_ENABLED
+- Updated configuration reference to include the new runtime control settings for enhanced agent kernel tracing, reply token budgeting, and task tools
+- Enhanced middleware alignment documentation with opt-in kernel tracing capabilities and token budget controls
+- Added detailed examples of deployment configurations for the new Agent Platform settings
+- Updated troubleshooting guidance to cover the new configuration options and their validation rules
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -41,7 +44,7 @@
 ## Introduction
 This document explains how the Tool Gateway Service manages configuration and environment setup across layers: environment variables, configuration files, and runtime overrides. It details available options, defaults, validation rules, and deployment-specific settings for development, staging, and production. It also provides examples for Docker and Kubernetes (ConfigMaps/Secrets), and outlines security best practices for secrets management and consistent configuration across environments.
 
-**Updated** Enhanced documentation now includes comprehensive OpenTelemetry configuration support with opt-in telemetry push pipeline, OpenObserve integration, and secure authentication header management through runtime secrets.
+**Updated** Enhanced documentation now includes comprehensive OpenTelemetry configuration support with opt-in telemetry push pipeline, OpenObserve integration, and secure authentication header management through runtime secrets. Additionally, this update covers the new Agent Platform configuration settings that provide enhanced runtime control through kernel tracing, reply token budgeting, and task tools functionality.
 
 ## Project Structure
 The Tool Gateway Service is implemented under products/tool-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/tool-gateway. The service image is built using a Dockerfile, and dependencies are declared in pyproject.toml. The service includes integrated OpenTelemetry support for traces, metrics, and logs export to OpenObserve backend.
@@ -56,35 +59,45 @@ D["src/tool_gateway/policies/policy-default.yaml"]
 E["Dockerfile"]
 F["pyproject.toml"]
 end
+subgraph "Agent Platform Integration"
+G["AGENTSCOPE_KERNEL_TRACING"]
+H["AGENTSCOPE_REPLY_TOKEN_BUDGET"]
+I["AGENTSCOPE_TASK_TOOLS_ENABLED"]
+J["Token Weight Multipliers"]
+end
 subgraph "OpenTelemetry Infrastructure"
-G["OTEL_ENABLED"]
-H["OTEL_EXPORTER_OTLP_ENDPOINT"]
-I["OTEL_EXPORTER_OTLP_HEADERS"]
-J["OTEL_SERVICE_NAME"]
-K["OpenObserve Backend"]
+K["OTEL_ENABLED"]
+L["OTEL_EXPORTER_OTLP_ENDPOINT"]
+M["OTEL_EXPORTER_OTLP_HEADERS"]
+N["OTEL_SERVICE_NAME"]
+O["OpenObserve Backend"]
 end
 subgraph "Kubernetes Base (dev)"
-L["base/tool-gateway/runtime-config.env"]
-M["base/tool-gateway/tool-gateway-deployment.yaml"]
-N["base/shared/runtime.env"]
-O["base/tool-gateway/runtime-secrets.example.env"]
+P["base/tool-gateway/runtime-config.env"]
+Q["base/tool-gateway/tool-gateway-deployment.yaml"]
+R["base/shared/runtime.env"]
+S["base/tool-gateway/runtime-secrets.example.env"]
 end
-A --> L
-B --> M
-C --> G
-C --> H
-C --> I
-C --> J
-L --> M
-N --> M
-O --> M
+A --> P
+B --> Q
+C --> K
+C --> L
+C --> M
+C --> N
+P --> Q
+R --> Q
+S --> Q
 D --> A
 E --> A
 F --> E
-G --> K
-H --> K
-I --> K
-J --> K
+G --> O
+H --> O
+I --> O
+J --> O
+K --> O
+L --> O
+M --> O
+N --> O
 ```
 
 **Diagram sources**
@@ -95,6 +108,8 @@ J --> K
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
@@ -123,7 +138,7 @@ Key responsibilities:
 - Ignore Kubernetes service-link environment variables to prevent conflicts.
 - Manage opt-in OpenTelemetry telemetry with fail-open behavior and secure authentication.
 
-**Updated** Enhanced core components to include comprehensive OpenTelemetry support with opt-in telemetry push pipeline, secure authentication header management, and integration with OpenObserve backend.
+**Updated** Enhanced core components to include comprehensive OpenTelemetry support with opt-in telemetry push pipeline, secure authentication header management, and integration with OpenObserve backend. Additionally, the system now supports Agent Platform integration with enhanced runtime control through kernel tracing, reply token budgeting, and task tools functionality.
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
@@ -142,6 +157,7 @@ The configuration system follows a layered approach with enhanced observability 
 - Runtime overrides: applied programmatically during startup or request processing.
 - DNS-based service discovery: services communicate via Kubernetes DNS names instead of injected environment variables.
 - Opt-in OpenTelemetry telemetry: traces, metrics, and logs exported via OTLP HTTP/protobuf to configured backend.
+- Agent Platform integration: enhanced runtime control through kernel tracing, reply token budgeting, and task tools.
 
 ```mermaid
 sequenceDiagram
@@ -153,6 +169,7 @@ participant DNS as "Kubernetes DNS"
 participant Service as "Identity Service"
 participant OTel as "OpenTelemetry Pipeline"
 participant Backend as "OpenObserve Backend"
+participant AgentPlatform as "Agent Platform"
 App->>Config : Initialize configuration
 Config->>Env : Read environment variables
 Config->>File : Load configuration files
@@ -165,6 +182,8 @@ Service-->>App : Service response
 App->>OTel : Check OTEL_ENABLED flag
 OTel->>Backend : Export traces/metrics/logs via OTLP
 Backend-->>OTel : Acknowledge receipt
+App->>AgentPlatform : Configure kernel tracing & budget
+AgentPlatform-->>App : Enhanced runtime control
 App->>App : Continue normal operation
 ```
 
@@ -174,6 +193,8 @@ App->>App : Continue normal operation
 - [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 
 ## Detailed Component Analysis
 
@@ -184,7 +205,7 @@ App->>App : Continue normal operation
 - Error handling: Aggregates validation errors and surfaces actionable messages.
 - Service discovery: Uses DNS-based resolution for inter-service communication.
 
-**Updated** Enhanced to support DNS-based service discovery, improved environment variable handling, and integration with OpenTelemetry configuration management.
+**Updated** Enhanced to support DNS-based service discovery, improved environment variable handling, and integration with OpenTelemetry configuration management. The system now supports Agent Platform integration with enhanced runtime control settings.
 
 ```mermaid
 flowchart TD
@@ -275,6 +296,46 @@ Skip --> Continue
 - [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 
+### Agent Platform Integration and Runtime Control
+- Purpose: Provides enhanced runtime control through Agent Platform integration with kernel tracing, reply token budgeting, and task tools.
+- Kernel Tracing: `AGENTSCOPE_KERNEL_TRACING` enables out-of-box TracingMiddleware for OTel kernel spans (inert without SDK TracerProvider).
+- Reply Token Budget: `AGENTSCOPE_REPLY_TOKEN_BUDGET` with configurable input/output token weights for per-reply token budgeting.
+- Task Tools: `AGENTSCOPE_TASK_TOOLS_ENABLED` provides opt-in agentscope task tools (TaskCreate/TaskGet/TaskList/TaskUpdate) with state-local persistence.
+- Token Weight Multipliers: `AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT` and `AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT` allow fine-grained control over token cost calculation.
+
+**New Section** Comprehensive Agent Platform integration with enhanced runtime control capabilities including kernel tracing, reply token budgeting, and task tools functionality.
+
+```mermaid
+flowchart TD
+KernelTracing{"AGENTSCOPE_KERNEL_TRACING<br/>= true?"}
+ReplyBudget{"AGENTSCOPE_REPLY_TOKEN_BUDGET<br/>set?"}
+TaskTools{"AGENTSCOPE_TASK_TOOLS_ENABLED<br/>= true?"}
+TracingMW["TracingMiddleware"]
+BudgetMW["ReplyBudgetControlMiddleware"]
+TaskToolsMW["Task Tools (Create/Get/List/Update)"]
+Middlewares["Kernel Middleware Stack"]
+KernelTracing --> |Yes| TracingMW
+KernelTracing --> |No| Middlewares
+ReplyBudget --> |Yes| BudgetMW
+ReplyBudget --> |No| Middlewares
+TaskTools --> |Yes| TaskToolsMW
+TaskTools --> |No| Middlewares
+TracingMW --> Middlewares
+BudgetMW --> Middlewares
+TaskToolsMW --> Middlewares
+Middlewares --> AgentKernel["Agent Kernel"]
+```
+
+**Diagram sources**
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+
+**Section sources**
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+
 ### DNS-Based Service Discovery
 - Purpose: Enable reliable inter-service communication using Kubernetes DNS names.
 - Configuration: Service endpoints configured via environment variables pointing to DNS names.
@@ -351,7 +412,7 @@ Entrypoint --> Run["Run service with env vars"]
 - Environment injection: Maps ConfigMap entries to environment variables consumed by the configuration loader.
 - Secrets management: Handles sensitive data like OpenTelemetry authentication headers separately from ConfigMaps.
 
-**Updated** Enhanced deployment configuration with DNS-based service discovery, disabled service links, comprehensive OpenTelemetry integration, and secure authentication header management.
+**Updated** Enhanced deployment configuration with DNS-based service discovery, disabled service links, comprehensive OpenTelemetry integration, and secure authentication header management. Additionally supports Agent Platform integration with enhanced runtime control settings.
 
 ```mermaid
 graph TB
@@ -366,12 +427,16 @@ AuthHeaders --> APP
 OTelEnv["OTEL_* Variables"] --> APP
 APP --> OTel["OpenTelemetry Pipeline"]
 OTel --> Backend["OpenObserve Backend"]
+AgentEnv["AGENTSCOPE_* Variables"] --> APP
+APP --> AgentPlatform["Agent Platform Integration"]
+AgentPlatform --> EnhancedRuntime["Enhanced Runtime Control"]
 ```
 
 **Diagram sources**
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 
 **Section sources**
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
@@ -387,9 +452,9 @@ OTel --> Backend["OpenObserve Backend"]
 - [pyproject.toml](file://products/tool-gateway/pyproject.toml)
 
 ## Dependency Analysis
-Configuration components depend on environment variables and files, while the runtime settings handle DNS-based service discovery. The Docker image encapsulates runtime dependencies, and Kubernetes manifests inject configuration at deployment time. OpenTelemetry integration adds opt-in telemetry capabilities with secure authentication and fail-open behavior.
+Configuration components depend on environment variables and files, while the runtime settings handle DNS-based service discovery. The Docker image encapsulates runtime dependencies, and Kubernetes manifests inject configuration at deployment time. OpenTelemetry integration adds opt-in telemetry capabilities with secure authentication and fail-open behavior. Agent Platform integration provides enhanced runtime control through kernel tracing, reply token budgeting, and task tools.
 
-**Updated** Added dependencies for DNS-based service discovery, enhanced environment variable handling, comprehensive OpenTelemetry integration with opt-in telemetry pipeline, and secure authentication header management.
+**Updated** Added dependencies for DNS-based service discovery, enhanced environment variable handling, comprehensive OpenTelemetry integration with opt-in telemetry pipeline, secure authentication header management, and Agent Platform integration with enhanced runtime control capabilities.
 
 ```mermaid
 graph TB
@@ -405,6 +470,8 @@ OTel["telemetry.py"] --> OTEL_ENV["OTEL_* Variables"]
 OTEL_ENV --> Backend["OpenObserve Backend"]
 Secrets["runtime-secrets.env"] --> AuthHeaders["OTEL_EXPORTER_OTLP_HEADERS"]
 AuthHeaders --> OTel
+AgentSettings["runtime_settings.py"] --> AgentKernel["runtime_kernel.py"]
+AgentKernel --> EnhancedRuntime["Enhanced Runtime Control"]
 ```
 
 **Diagram sources**
@@ -414,6 +481,8 @@ AuthHeaders --> OTel
 - [Dockerfile](file://products/tool-gateway/Dockerfile)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
@@ -433,6 +502,9 @@ AuthHeaders --> OTel
 - Batch processors in OpenTelemetry reduce network overhead for telemetry export.
 - Configure appropriate OpenTelemetry exporter timeouts and batch sizes for optimal performance.
 - Monitor OpenTelemetry setup failures and exporter errors without affecting service operation.
+- Agent Platform kernel tracing is inert without an SDK TracerProvider, ensuring no performance impact when disabled.
+- Reply token budgeting provides controlled token usage without blocking operations.
+- Task tools are opt-in and only registered when explicitly enabled.
 
 [No sources needed since this section provides general guidance]
 
@@ -451,8 +523,12 @@ Common issues and resolutions:
 - **New**: OpenTelemetry endpoint connectivity: Ensure OTEL_EXPORTER_OTLP_ENDPOINT points to reachable OpenObserve backend; unreachable endpoints cause exporter failures but don't break service.
 - **New**: OpenTelemetry service naming: Verify OTEL_SERVICE_NAME is set appropriately for trace correlation; defaults to service metadata if not specified.
 - **New**: Log bridge issues: When OpenTelemetry is enabled, structured logs are mirrored to OTLP; ensure log level is set to INFO for proper audit trail.
+- **New**: Agent Platform kernel tracing issues: Verify AGENTSCOPE_KERNEL_TRACING is properly set; kernel tracing is inert without an SDK TracerProvider.
+- **New**: Reply token budget validation: Ensure AGENTSCOPE_REPLY_TOKEN_BUDGET is > 0 when set; invalid values fail startup with clear error messages.
+- **New**: Token weight configuration: Verify AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT and AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT are >= 0; zero values are valid for selective weighting.
+- **New**: Task tools registration: Check AGENTSCOPE_TASK_TOOLS_ENABLED is properly set; task tools are state-local and persisted via agent state store.
 
-**Updated** Added troubleshooting guidance for DNS-based service discovery, service link issues, comprehensive OpenTelemetry integration problems, authentication failures, and endpoint connectivity issues.
+**Updated** Added troubleshooting guidance for DNS-based service discovery, service link issues, comprehensive OpenTelemetry integration problems, authentication failures, endpoint connectivity issues, and Agent Platform integration with enhanced runtime control settings.
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
@@ -460,20 +536,22 @@ Common issues and resolutions:
 - [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 
 ## Conclusion
 The Tool Gateway Service employs a robust, layered configuration system that integrates environment variables, configuration files, and runtime overrides with strict validation. By following the outlined best practices for Docker and Kubernetes deployments, teams can maintain secure, consistent configurations across environments while ensuring reliability and performance. The architectural shift to DNS-based service discovery eliminates service-link conflicts and provides more reliable inter-service communication patterns. The addition of opt-in OpenTelemetry telemetry enables comprehensive observability with traces, metrics, and logs export to OpenObserve backend, featuring secure authentication header management and fail-open behavior that ensures service continuity even when telemetry infrastructure is unavailable.
 
-**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive OpenTelemetry integration with opt-in telemetry pipeline, and secure authentication capabilities.
+**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive OpenTelemetry integration with opt-in telemetry pipeline, secure authentication capabilities, and Agent Platform integration with enhanced runtime control through kernel tracing, reply token budgeting, and task tools functionality.
 
 ## Appendices
 
 ### Environment-Specific Settings
-- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable OpenTelemetry with local OpenObserve instance.
-- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure OpenTelemetry with staging backend.
-- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure OpenTelemetry with production backend and proper authentication.
+- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable OpenTelemetry with local OpenObserve instance, enable Agent Platform kernel tracing for development visibility.
+- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure OpenTelemetry with staging backend, enable Agent Platform reply token budgeting for cost control.
+- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure OpenTelemetry with production backend and proper authentication, enable Agent Platform kernel tracing with production monitoring.
 
-**Updated** Added guidance for DNS-based service discovery configuration, OpenTelemetry telemetry setup across environments, and secure authentication header management.
+**Updated** Added guidance for DNS-based service discovery configuration, OpenTelemetry telemetry setup across environments, secure authentication header management, and Agent Platform integration with enhanced runtime control settings.
 
 [No sources needed since this section provides general guidance]
 
@@ -496,19 +574,22 @@ The Tool Gateway Service employs a robust, layered configuration system that int
 - **New**: Rotate OpenTelemetry authentication credentials regularly and monitor for unauthorized access attempts.
 - **New**: Use separate OpenTelemetry endpoints and authentication for different environments to prevent cross-environment telemetry leakage.
 - **New**: Monitor OpenTelemetry exporter failures and authentication errors without exposing sensitive credential information in logs.
+- **New**: Secure Agent Platform configuration settings with appropriate RBAC and environment isolation.
+- **New**: Monitor Agent Platform kernel tracing and reply token budget usage for cost optimization.
+- **New**: Validate Agent Platform task tools permissions and ensure they align with security policies.
 
-**Updated** Enhanced security guidance with DNS-based service discovery best practices, comprehensive OpenTelemetry security considerations, and secure authentication header management practices.
+**Updated** Enhanced security guidance with DNS-based service discovery best practices, comprehensive OpenTelemetry security considerations, secure authentication header management practices, and Agent Platform integration security considerations.
 
 [No sources needed since this section provides general guidance]
 
 ### Complete Environment Variables Reference
-**Updated** Comprehensive reference including DNS-based service discovery variables, OpenTelemetry configuration, and authentication management.
+**Updated** Comprehensive reference including DNS-based service discovery variables, OpenTelemetry configuration, authentication management, and Agent Platform runtime control settings.
 
 #### Core Configuration
 - `AGENT_SERVICE_URL`: Agent service endpoint URL (DNS-based)
 - `IDENTITY_SERVICE_URL`: Identity broker service endpoint URL (DNS-based)
 - `IDENTITY_JWKS_URL`: Identity service JWKS endpoint
-- `IDENTITY_JWCS_CACHE_SECONDS`: JWCS cache duration (default: 300)
+- `IDENTITY_JWKS_CACHE_SECONDS`: JWCS cache duration (default: 300)
 - `IDENTITY_TOKEN_ISSUER`: JWT issuer claim (default: "luban-identity-broker")
 - `GATEWAY_TOKEN_AUDIENCE`: Token audience (default: "tool-gateway")
 - `GATEWAY_DELEGATION_AUDIENCE`: Delegation audience (default: "tool-gateway")
@@ -534,6 +615,13 @@ The Tool Gateway Service employs a robust, layered configuration system that int
 - `OTEL_EXPORTER_OTLP_HEADERS`: Authentication headers for OTLP export (Basic auth for OpenObserve)
 - `OTEL_SERVICE_NAME`: Service name for telemetry resource identification (defaults to service metadata)
 
+#### Agent Platform Runtime Control
+- `AGENTSCOPE_KERNEL_TRACING`: Enable kernel tracing middleware for OTel spans (default: false)
+- `AGENTSCOPE_REPLY_TOKEN_BUDGET`: Reply token budget (must be > 0 when set; unset disables budget)
+- `AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT`: Input token weight multiplier (default: 1.0, must be >= 0)
+- `AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT`: Output token weight multiplier (default: 1.0, must be >= 0)
+- `AGENTSCOPE_TASK_TOOLS_ENABLED`: Enable built-in task tools (TaskCreate/TaskGet/TaskList/TaskUpdate; default: false)
+
 #### OpenTelemetry Authentication
 - `OTEL_EXPORTER_OTLP_HEADERS`: Contains `Authorization=Basic <base64(email:password)>` for OpenObserve authentication
 - Provisioned via runtime-secrets Secret and managed by sync-otel-secrets.sh script
@@ -546,6 +634,8 @@ The Tool Gateway Service employs a robust, layered configuration system that int
 - [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [runtime.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
 
 ### OpenTelemetry Setup Guide
 **New Section** Step-by-step guide for configuring OpenTelemetry telemetry pipeline with OpenObserve integration.
@@ -636,3 +726,64 @@ echo -n "email@example.com:password" | base64
 - [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-secrets.example.env)
+
+### Agent Platform Configuration Guide
+**New Section** Comprehensive guide for configuring Agent Platform runtime control settings.
+
+#### Kernel Tracing Configuration
+- Set `AGENTSCOPE_KERNEL_TRACING=true` to enable kernel-level tracing
+- Requires OpenTelemetry SDK TracerProvider to be active for meaningful spans
+- Inert when no TracerProvider is configured, ensuring no performance impact
+- Integrates with existing OTLP pipeline for unified observability
+
+#### Reply Token Budget Configuration
+- Set `AGENTSCOPE_REPLY_TOKEN_BUDGET` to a positive value to enable budget control
+- Configure `AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT` and `AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT` for fine-grained control
+- Zero weights are valid for selective token counting (e.g., count output tokens only)
+- Budget validation occurs at startup; invalid values fail with clear error messages
+
+#### Task Tools Configuration
+- Set `AGENTSCOPE_TASK_TOOLS_ENABLED=true` to enable built-in task tools
+- Provides TaskCreate, TaskGet, TaskList, and TaskUpdate operations
+- State-local persistence through agent state store (SPEC-017)
+- Always allowed by permission middleware, excluded from no-tools guard
+
+#### Example Deployment Configuration
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-runtime-config
+data:
+  AGENTSCOPE_KERNEL_TRACING: "true"
+  AGENTSCOPE_REPLY_TOKEN_BUDGET: "20000"
+  AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT: "0.5"
+  AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT: "2.0"
+  AGENTSCOPE_TASK_TOOLS_ENABLED: "true"
+```
+
+**Section sources**
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+
+### Agent Platform Troubleshooting Guide
+**New Section** Troubleshooting guide for Agent Platform configuration and runtime control issues.
+
+#### Common Issues and Solutions
+- **Kernel tracing not producing spans**: Verify OpenTelemetry SDK TracerProvider is active; kernel tracing is inert without it
+- **Reply token budget validation errors**: Ensure AGENTSCOPE_REPLY_TOKEN_BUDGET is > 0 when set; check for negative or zero values
+- **Token weight configuration issues**: Verify weights are >= 0; zero values are valid for selective weighting
+- **Task tools not registering**: Check AGENTSCOPE_TASK_TOOLS_ENABLED is properly set; verify agent state store is accessible
+- **Budget enforcement not working**: Ensure ReplyBudgetControlMiddleware is registered; check budget state persistence
+
+#### Monitoring and Diagnostics
+- Monitor kernel tracing spans in OpenTelemetry backend
+- Track reply token budget usage and remaining budget
+- Verify task tools state persistence and retrieval
+- Check middleware registration and execution order
+
+**Section sources**
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [test_runtime_settings.py](file://products/agent-platform/tests/test_runtime_settings.py)

@@ -1,0 +1,1 @@
+FastAPI service that ingests Alertmanager alerts and manual reports, runs operator-initiated agent triage into a schema-validated report, and dispatches outcomes through a pluggable connector framework.

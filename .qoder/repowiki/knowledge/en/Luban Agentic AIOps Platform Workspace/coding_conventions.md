@@ -1,5 +1,0 @@
-- Each product follows an identical internal layout: `src/<package>/api/routes/`, `core/`, `schemas/`, `services/`, plus `app.py`, `main.py`, and `metadata.py` at the package root.
-- Per-product build configuration is isolated in each product's `Makefile` and `pyproject.toml`, while shared defaults (image platform, tag prefix, base image versions) are centralized in `mk/defaults.mk` and included via `include mk/image.mk` / `mk/python.mk`.
-- Inter-service contracts are expressed as JSON Schema files under `shared/shared-contracts/schemas/` rather than inline types, and services validate requests/responses against these schemas.
-- Policy enforcement uses a single canonical YAML (`shared/shared-contracts/policies/policy-default.yaml`) that is copied into consumer products and the deployed overlay via the `sync-policy` make target instead of being maintained per-service.
-- Container images use a coordinated tag scheme `<prefix>[-<profile>]-<gitsha>[-dirty-<timestamp>]` computed once by the root Makefile and reused across all product images written to `.images.env`.

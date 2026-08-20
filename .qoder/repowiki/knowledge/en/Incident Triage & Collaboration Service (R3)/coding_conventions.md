@@ -1,0 +1,6 @@
+- Services expose a `create_app()` factory with a lifespan context manager that initializes dependencies (store, connectors) and attaches them to `app.state` for route access.
+- Configuration is loaded from environment into frozen dataclasses via a `get_settings()` dependency injected into routes, keeping runtime config immutable and testable.
+- All cross-cutting concerns (metrics, telemetry, structured JSON logging, request-id propagation) are wired once in `core/` and reused by every route module.
+- Route handlers return a uniform `JSONResponse` with an `{error: {code, message}}` envelope for 4xx/5xx cases instead of raising raw exceptions.
+- External integrations are abstracted behind protocols with a registry pattern (e.g., `Connector` Protocol + `CONNECTOR_REGISTRY`) so new adapters register without touching core flow code.
+- Agent-driven outputs are never trusted verbatim: server-minted attribution fields (`session_id`, `generated_at`, `generated_by`) are forced before Pydantic validation to prevent spoofing the durable trail.

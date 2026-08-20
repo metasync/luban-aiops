@@ -3,25 +3,23 @@
 <cite>
 **Referenced Files in This Document**
 - [SPEC-007-tool-execution-framework/spec.md](file://docs/specs/SPEC-007-tool-execution-framework/spec.md)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
-- [base.py](file://products/tool-gateway/src/api_gateway/tools/base.py)
-- [registry.py](file://products/tool-gateway/src/api_gateway/tools/registry.py)
-- [k8s_connector.py](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
-- [tools.py](file://products/tool-gateway/src/api_gateway/api/routes/tools.py)
-- [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [delegation_client.py](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py)
+- [test_kernel_middleware.py](file://products/agent-platform/tests/test_kernel_middleware.py)
+- [test_runtime_kernel.py](file://products/agent-platform/tests/test_runtime_kernel.py)
 - [tool-invocation.schema.json](file://shared/shared-contracts/schemas/tool-invocation.schema.json)
 - [tool-result.schema.json](file://shared/shared-contracts/schemas/tool-result.schema.json)
-- [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced Security Considerations section with vetted allow-list mechanism
-- Added documentation for DEFAULT_AUTO_ALLOWED_TOOLS frozenset and AGENT_GATEWAY_TOOL_AUTO_ALLOW environment variable
-- Updated security model to explain dual-layer protection (read-only status AND explicit allow-list membership)
-- Added CWE-862 privilege management vulnerability mitigation details
-- Updated policy enforcement flow to include automatic approval gates
+- Updated permission handling architecture from GatewayFunctionTool subclass overrides to middleware-based approach using GatewayPermissionMiddleware
+- Enhanced toolkit caching with per-token isolation and context-aware token delegation support
+- Improved security model with dual-layer automatic approval (read-only status AND explicit allow-list membership)
+- Added comprehensive token delegation support through platform gateway with per-user caching
+- Updated agent-side tool execution to use function-based tools with middleware-based permission control
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -36,13 +34,13 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document explains the tool execution framework that enables agents to discover, register, and invoke tools through a centralized tool gateway. It covers the end-to-end invocation protocol, parameter passing, result handling, security and policy enforcement, sandboxing considerations, audit logging, performance optimization (caching and timeouts), and practical examples for integrating with the tool gateway and executing Kubernetes operations.
+This document explains the tool execution framework that enables agents to discover, register, and invoke tools through a centralized tool gateway. The framework has been updated to use a middleware-based architecture for permission handling, improved toolkit caching with per-token isolation, and enhanced token delegation support. It covers the end-to-end invocation protocol, parameter passing, result handling, security and policy enforcement, sandboxing considerations, audit logging, performance optimization (caching and timeouts), and practical examples for integrating with the tool gateway and executing Kubernetes operations.
 
-The framework implements a dual-layer security model where automatic tool approval requires both read-only status AND explicit membership in a vetted allow-list, addressing CWE-862 privilege management vulnerabilities.
+The framework implements a sophisticated dual-layer security model where automatic tool approval requires both read-only status AND explicit membership in a vetted allow-list, addressing CWE-862 privilege management vulnerabilities while maintaining operational efficiency.
 
 ## Project Structure
-The tool execution framework spans two primary services:
-- Agent Platform: Provides agent-side tool bindings and client utilities to call the tool gateway.
+The tool execution framework spans two primary services with an updated middleware-based architecture:
+- Agent Platform: Provides agent-side tool bindings, middleware-based permission handling, and client utilities to call the tool gateway.
 - Tool Gateway: Implements tool discovery, registration, policy enforcement, execution, and result serialization.
 
 ```mermaid
@@ -50,6 +48,13 @@ graph TB
 subgraph "Agent Platform"
 AG_APP["Agent App"]
 GW_TOOLS["Gateway Tools Client"]
+PERM_MW["GatewayPermissionMiddleware"]
+EVIDENCE_MW["ToolEvidenceMiddleware"]
+TOOL_CACHE["Per-Token Toolkit Cache"]
+end
+subgraph "Platform Gateway"
+DELEGATION["Delegation Client"]
+TOKEN_CACHE["Per-User Token Cache"]
 end
 subgraph "Tool Gateway"
 API_ROUTES["Tools API Routes"]
@@ -60,8 +65,12 @@ BASE_TOOL["Base Tool"]
 K8S_CONN["Kubernetes Connector"]
 end
 AG_APP --> GW_TOOLS
-GW_TOOLS --> API_ROUTES
-API_ROUTES --> GATEWAY_SVC
+GW_TOOLS --> PERM_MW
+PERM_MW --> EVIDENCE_MW
+EVIDENCE_MW --> TOOLS_API["Tools API"]
+TOOLS_API --> DELEGATION
+DELEGATION --> TOKEN_CACHE
+TOOLS_API --> GATEWAY_SVC
 GATEWAY_SVC --> POLICY_ENG
 GATEWAY_SVC --> TOOL_REG
 TOOL_REG --> BASE_TOOL
@@ -69,55 +78,62 @@ BASE_TOOL --> K8S_CONN
 ```
 
 **Diagram sources**
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
-- [tools.py](file://products/tool-gateway/src/api_gateway/api/routes/tools.py)
-- [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [registry.py](file://products/tool-gateway/src/api_gateway/tools/registry.py)
-- [base.py](file://products/tool-gateway/src/api_gateway/tools/base.py)
-- [k8s_connector.py](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [delegation_client.py](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py)
 
 **Section sources**
 - [SPEC-007-tool-execution-framework/spec.md](file://docs/specs/SPEC-007-tool-execution-framework/spec.md)
 
 ## Core Components
-- Tool Discovery and Registration: The tool registry exposes available tools and their schemas. Agents can query capabilities before invoking.
-- Tool Invocation Protocol: A standardized request/response contract defines how agents call tools and receive results.
-- Policy Enforcement: Before execution, requests are validated against policies to ensure authorization and safety constraints.
-- Execution Layer: Concrete tool implementations execute actions (e.g., Kubernetes operations) via connectors.
-- Result Handling: Responses are serialized according to the shared schema and include metadata for observability.
+- **Middleware-Based Permission Handling**: The system now uses `GatewayPermissionMiddleware` to pre-answer AgentScope's permission gate for headless streams, allowing vetted read-only tools to bypass interactive confirmation.
+- **Enhanced Toolkit Caching**: Per-token toolkit caching ensures tool discovery runs once per user token while closures read current tokens at call time for token refresh support.
+- **Token Delegation Support**: Platform gateway exchanges verified user tokens for short-lived delegated tokens with per-user caching for improved performance.
+- **Tool Discovery and Registration**: The tool registry exposes available tools and their schemas. Agents can query capabilities before invoking.
+- **Policy Enforcement**: Before execution, requests are validated against policies to ensure authorization and safety constraints.
+- **Execution Layer**: Concrete tool implementations execute actions (e.g., Kubernetes operations) via connectors.
+- **Result Handling**: Responses are serialized according to the shared schema and include metadata for observability.
 
 Key responsibilities:
 - Agent-side client constructs invocations using typed parameters and handles retries/timeouts.
+- Middleware stack handles permissions and evidence emission without requiring tool subclass overrides.
 - Gateway routes validate payloads, enforce policies, resolve tool implementations, and orchestrate execution.
 - Connectors encapsulate external system interactions (e.g., Kubernetes API).
 
 **Section sources**
-- [registry.py](file://products/tool-gateway/src/api_gateway/tools/registry.py)
-- [tools.py](file://products/tool-gateway/src/api_gateway/api/routes/tools.py)
-- [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [base.py](file://products/tool-gateway/src/api_gateway/tools/base.py)
-- [k8s_connector.py](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [delegation_client.py](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py)
 - [tool-invocation.schema.json](file://shared/shared-contracts/schemas/tool-invocation.schema.json)
 - [tool-result.schema.json](file://shared/shared-contracts/schemas/tool-result.schema.json)
 
 ## Architecture Overview
-The tool execution flow is designed around a clear separation of concerns:
-- Agent Platform uses a lightweight client to build tool invocations.
+The tool execution flow is designed around a clear separation of concerns with middleware-based architecture:
+- Agent Platform uses middleware to handle permissions and evidence, with function-based tools that delegate to the gateway.
+- Platform Gateway provides token delegation with per-user caching for improved performance.
 - Tool Gateway validates and enforces policies, resolves tools, executes them, and returns structured results.
 - External systems are accessed via connectors, ensuring isolation and controlled access.
 
 ```mermaid
 sequenceDiagram
 participant Agent as "Agent Platform"
+participant PermMW as "GatewayPermissionMiddleware"
+participant EvidenceMW as "ToolEvidenceMiddleware"
 participant GatewayAPI as "Tools API Routes"
+participant Delegation as "Delegation Client"
 participant GatewaySvc as "Gateway Service"
 participant Policy as "Policy Engine"
 participant Registry as "Tool Registry"
 participant Tool as "Concrete Tool"
 participant K8S as "Kubernetes Connector"
-Agent->>GatewayAPI : "POST /tools/invoke"
+Agent->>PermMW : "Check Permission"
+PermMW-->>Agent : "ALLOW/ASK decision"
+Agent->>EvidenceMW : "Execute Tool"
+EvidenceMW->>GatewayAPI : "POST /tools/invoke"
+GatewayAPI->>Delegation : "Get Delegated Token"
+Delegation-->>GatewayAPI : "Cached/Exchange Token"
 GatewayAPI->>GatewaySvc : "validate_and_route(invocation)"
 GatewaySvc->>Policy : "check_policy(invocation)"
 Policy-->>GatewaySvc : "decision (allow/deny)"
@@ -128,18 +144,95 @@ Tool->>K8S : "perform_operation()"
 K8S-->>Tool : "result"
 Tool-->>GatewaySvc : "structured_result"
 GatewaySvc-->>GatewayAPI : "response"
-GatewayAPI-->>Agent : "tool result + metadata"
+GatewayAPI-->>EvidenceMW : "tool result + metadata"
+EvidenceMW-->>Agent : "stream events with evidence"
 ```
 
 **Diagram sources**
-- [tools.py](file://products/tool-gateway/src/api_gateway/api/routes/tools.py)
-- [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [registry.py](file://products/tool-gateway/src/api_gateway/tools/registry.py)
-- [base.py](file://products/tool-gateway/src/api_gateway/tools/base.py)
-- [k8s_connector.py](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [delegation_client.py](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py)
 
 ## Detailed Component Analysis
+
+### Middleware-Based Permission Handling
+**Updated** Replaced GatewayFunctionTool subclass overrides with middleware-based approach
+
+The system now uses `GatewayPermissionMiddleware` to handle permission decisions at the kernel level rather than requiring tool-specific subclass implementations. This approach provides several benefits:
+
+1. **Centralized Permission Logic**: All permission handling is consolidated in one middleware class
+2. **Headless Stream Support**: Pre-answers AgentScope's permission gate for vetted tools, preventing stalls in headless SSE streams
+3. **Dual-Layer Security**: Requires both read-only status AND explicit allow-list membership for automatic approval
+4. **Task Tool Bypass**: Built-in task tools (TaskCreate, TaskGet, TaskList, TaskUpdate) are always allowed as they only mutate session-local state
+
+```mermaid
+flowchart TD
+ToolCall["Tool Invocation Request"] --> CheckReadOnly{"Is Read-Only?"}
+CheckReadOnly --> |No| TaskTool{"Is Task Tool?"}
+CheckReadOnly --> |Yes| AllowList{"In Vetted Allow-List?"}
+TaskTool --> |Yes| AutoAllow["Auto-Allow (Session Local)"]
+TaskTool --> |No| DelegateToBuiltin["Delegate to Built-in Resolution"]
+AllowList --> |Yes| AutoAllow
+AllowList --> |No| DelegateToBuiltin
+DelegateToBuiltin --> End(["Return ASK Decision"])
+AutoAllow --> End(["Return ALLOW Decision"])
+```
+
+**Diagram sources**
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+
+**Section sources**
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [test_kernel_middleware.py](file://products/agent-platform/tests/test_kernel_middleware.py)
+
+### Enhanced Toolkit Caching and Token Delegation
+**Updated** Implemented per-token toolkit caching with context-aware token delegation
+
+The toolkit system now features sophisticated caching and token delegation:
+
+1. **Per-Token Toolkit Cache**: Each user's delegated token gets its own cached toolkit, preventing cross-session token leakage
+2. **Context-Aware Token Reading**: Tool closures read the current token from `DELEGATED_TOKEN` context variable at call time, supporting token refresh scenarios
+3. **Per-User Token Caching**: Platform gateway caches delegated tokens per user subject with automatic refresh before expiry
+4. **Graceful Degradation**: Empty discovery results are not cached, allowing retry on subsequent attempts
+
+```mermaid
+sequenceDiagram
+participant Kernel as "AgentKernel"
+participant Cache as "Toolkit Cache"
+participant Delegation as "Delegation Client"
+participant TokenCache as "Per-User Token Cache"
+participant Gateway as "Tool Gateway"
+Note over Kernel,TokenCache : First request with token-a
+Kernel->>Cache : Get toolkit(token-a)
+Cache-->>Kernel : Not found
+Kernel->>Delegation : obtain_delegated_token(token-a)
+Delegation->>TokenCache : get_cached(token-a)
+TokenCache-->>Delegation : None (cache miss)
+Delegation->>Gateway : Exchange token
+Gateway-->>Delegation : Delegated token
+Delegation->>TokenCache : put(token-a, delegated_token)
+Delegation-->>Kernel : delegated_token
+Kernel->>Gateway : Discover tools
+Gateway-->>Kernel : Tool definitions
+Kernel->>Cache : Store toolkit(token-a)
+Note over Kernel,TokenCache : Second request with same token
+Kernel->>Cache : Get toolkit(token-a)
+Cache-->>Kernel : Cached toolkit
+Kernel->>TokenCache : get_cached(token-a)
+TokenCache-->>Kernel : Cached delegated token
+```
+
+**Diagram sources**
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [delegation_client.py](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+
+**Section sources**
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [delegation_client.py](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [test_runtime_kernel.py](file://products/agent-platform/tests/test_runtime_kernel.py)
 
 ### Tool Discovery and Registration
 - The registry maintains a map of tool names to implementations and associated schemas.
@@ -225,45 +318,24 @@ DenyResp --> End
 - [tool-result.schema.json](file://shared/shared-contracts/schemas/tool-result.schema.json)
 
 ### Integrating With the Tool Gateway (Agent-Side)
-- The agent platform includes a client module that constructs invocations and handles HTTP transport.
-- It supports retry logic, timeout configuration, and error mapping to domain exceptions.
-- Example usage patterns:
-  - Discover available tools and select one based on intent.
-  - Build a parameter set conforming to the tool's input schema.
-  - Invoke the tool and process the structured result.
+**Updated** Enhanced with middleware-based permission handling and improved toolkit caching
+
+The agent platform now uses function-based tools with middleware-based permission control:
+
+1. **Function-Based Tools**: Tools are created as simple async functions wrapped in `FunctionTool` objects, eliminating the need for complex subclass implementations
+2. **Middleware Stack**: `GatewayPermissionMiddleware` handles permission decisions while `ToolEvidenceMiddleware` emits evidence frames
+3. **Context-Aware Token Delegation**: Tools read the current delegated token from context variables, supporting token refresh scenarios
+4. **Per-Token Toolkit Caching**: Each user's toolkit is cached separately to prevent token leakage between sessions
 
 Best practices:
 - Use typed parameter builders to avoid schema mismatches.
 - Configure timeouts per tool category (fast vs. long-running).
 - Implement exponential backoff for transient failures.
-
-**Updated** Enhanced with vetted allow-list mechanism for automatic tool approval
-
-The agent platform implements a sophisticated permission system that automatically approves certain read-only tools while maintaining strict security controls. The system uses a dual-layer approach:
-
-1. **Read-Only Status Check**: Tools must be marked as read-only (`risk_level = "read"`)
-2. **Explicit Allow-List Membership**: Tools must be explicitly listed in the vetted allow-list
-
-```mermaid
-flowchart TD
-ToolRequest["Tool Permission Check"] --> ReadOnly{"Is Read-Only?"}
-ReadOnly --> |No| RequireApproval["Require User Approval (ASK)"]
-ReadOnly --> |Yes| AllowList{"In Vetted Allow-List?"}
-AllowList --> |No| RequireApproval
-AllowList --> |Yes| AutoApprove["Auto-Approve Tool"]
-RequireApproval --> HeadlessStream{"Headless Stream?"}
-HeadlessStream --> |Yes| BlockExecution["Block Execution"]
-HeadlessStream --> |No| ProceedToExecution["Proceed to Execution"]
-AutoApprove --> ProceedToExecution
-BlockExecution --> End(["No Output"])
-ProceedToExecution --> End(["Execute Tool"])
-```
-
-**Diagram sources**
-- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- Leverage middleware-based permission handling for consistent security behavior.
 
 **Section sources**
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 
 ### Executing Kubernetes Operations
 - Kubernetes operations are implemented as concrete tools backed by a connector.
@@ -278,10 +350,13 @@ Security considerations:
 ```mermaid
 sequenceDiagram
 participant Agent as "Agent Platform"
+participant PermMW as "GatewayPermissionMiddleware"
 participant GatewayAPI as "Tools API Routes"
 participant GatewaySvc as "Gateway Service"
 participant K8sTool as "Kubernetes Tool"
 participant K8SConn as "Kubernetes Connector"
+Agent->>PermMW : "Check Permission"
+PermMW-->>Agent : "ALLOW/ASK decision"
 Agent->>GatewayAPI : "Invoke k8s.create_resource"
 GatewayAPI->>GatewaySvc : "Route invocation"
 GatewaySvc->>K8sTool : "execute(params)"
@@ -315,9 +390,16 @@ Recommendations:
 - [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
 
 ### Security Considerations and Sandboxing
-**Updated** Enhanced with vetted allow-list mechanism addressing CWE-862 privilege management vulnerability
+**Updated** Enhanced with middleware-based permission handling and improved token delegation security
 
-The security model implements a comprehensive multi-layered approach to prevent unauthorized tool execution:
+The security model implements a comprehensive multi-layered approach with middleware-based permission control:
+
+#### Middleware-Based Permission Architecture
+The new architecture replaces tool-specific subclass implementations with a centralized middleware approach:
+
+1. **GatewayPermissionMiddleware**: Handles all permission decisions at the kernel level
+2. **ToolEvidenceMiddleware**: Emits standardized evidence frames for audit and observability
+3. **Default Deny Policy**: Only explicitly vetted tools receive automatic approval
 
 #### Dual-Layer Automatic Approval System
 Automatic tool approval requires BOTH conditions to be met:
@@ -334,6 +416,11 @@ DEFAULT_AUTO_ALLOWED_TOOLS = frozenset({
     "k8s.get_pod",
     "k8s.get_events",
     "k8s.get_pod_logs",
+    "skills.search",
+    "skills.get",
+    "skills.list",
+    "incidents.list",
+    "incidents.get",
 })
 ```
 
@@ -348,13 +435,13 @@ export AGENT_GATEWAY_TOOL_AUTO_ALLOW="k8s.list_pods,k8s.get_pod"
 export AGENT_GATEWAY_TOOL_AUTO_ALLOW=""
 ```
 
-#### Policy Enforcement Flow
-The enhanced security model follows this evaluation order:
+#### Enhanced Token Delegation Security
+The platform gateway provides secure token delegation with:
 
-1. **Agent-Side Permission Check**: Verify tool is read-only AND in allow-list
-2. **Gateway Admission Control**: Enforce token-based authentication
-3. **Policy Engine Evaluation**: Apply organizational policies
-4. **Tool Execution**: Execute with proper auditing and monitoring
+1. **Per-User Token Caching**: Delegated tokens are cached per user subject with automatic refresh
+2. **Short-Lived Tokens**: Delegated tokens have limited TTL to minimize exposure
+3. **Audience Binding**: Tokens are bound to specific audiences to prevent replay attacks
+4. **Graceful Degradation**: Token delegation failures don't break chat functionality
 
 #### Mitigation of CWE-862 Privilege Management Vulnerabilities
 The implementation addresses privilege escalation risks by:
@@ -362,7 +449,7 @@ The implementation addresses privilege escalation risks by:
 - **Principle of Least Privilege**: Only explicitly vetted tools receive automatic approval
 - **Defense in Depth**: Multiple security layers prevent bypass attempts  
 - **Audit Trail**: All tool invocations are logged with full context
-- **Separation of Concerns**: Agent-side permissions are independent from gateway policies
+- **Separation of Concerns**: Middleware-based permissions are independent from gateway policies
 
 #### Sandboxing Recommendations
 - Run tool executors in isolated processes or containers
@@ -377,27 +464,32 @@ The implementation addresses privilege escalation risks by:
 - Track permission check results for security analysis
 
 **Section sources**
-- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
-- [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
-- [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [delegation_client.py](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py)
+- [test_kernel_middleware.py](file://products/agent-platform/tests/test_kernel_middleware.py)
 
 ### Performance Optimization
-- Caching strategies:
-  - Cache read-only tool results with TTL and invalidation keys.
-  - Use distributed cache for cross-instance consistency.
-- Timeout handling:
+**Updated** Enhanced with improved toolkit caching and token delegation caching
+
+- **Caching strategies**:
+  - Per-token toolkit caching prevents redundant tool discovery
+  - Per-user delegated token caching reduces authentication overhead
+  - Cache invalidation based on token expiry and refresh windows
+- **Timeout handling**:
   - Set per-operation timeouts; fail fast on slow dependencies.
   - Implement circuit breakers for upstream services.
-- Concurrency control:
+- **Concurrency control**:
   - Rate-limit tool invocations to protect downstream systems.
   - Queue long-running tasks asynchronously when appropriate.
 
 [No sources needed since this section provides general guidance]
 
 ## Dependency Analysis
-The tool execution framework exhibits clear layering:
+The tool execution framework exhibits clear layering with middleware-based architecture:
 - API routes depend on the gateway service for orchestration.
 - Gateway service depends on policy engine and tool registry.
+- Agent platform uses middleware stack for permissions and evidence.
+- Platform gateway provides token delegation with caching.
 - Tool registry manages base tool implementations.
 - Concrete tools depend on connectors for external system access.
 
@@ -408,6 +500,11 @@ SVC --> POL["Policy Engine"]
 SVC --> REG["Tool Registry"]
 REG --> BASE["Base Tool"]
 BASE --> K8S["Kubernetes Connector"]
+AG_KERNEL["Agent Kernel"] --> MW_STACK["Middleware Stack"]
+MW_STACK --> GW_TOOLS["Gateway Tools"]
+GW_TOOLS --> PLAT_GW["Platform Gateway"]
+PLAT_GW --> DEL_CLIENT["Delegation Client"]
+DEL_CLIENT --> TOKEN_CACHE["Token Cache"]
 ```
 
 **Diagram sources**
@@ -417,6 +514,8 @@ BASE --> K8S["Kubernetes Connector"]
 - [registry.py](file://products/tool-gateway/src/api_gateway/tools/registry.py)
 - [base.py](file://products/tool-gateway/src/api_gateway/tools/base.py)
 - [k8s_connector.py](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [delegation_client.py](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py)
 
 **Section sources**
 - [tools.py](file://products/tool-gateway/src/api_gateway/api/routes/tools.py)
@@ -425,6 +524,8 @@ BASE --> K8S["Kubernetes Connector"]
 - [registry.py](file://products/tool-gateway/src/api_gateway/tools/registry.py)
 - [base.py](file://products/tool-gateway/src/api_gateway/tools/base.py)
 - [k8s_connector.py](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [delegation_client.py](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py)
 
 ## Performance Considerations
 - Prefer idempotent operations where possible to simplify retries.
@@ -432,6 +533,8 @@ BASE --> K8S["Kubernetes Connector"]
 - Monitor p95/p99 latencies and error budgets; adjust timeouts accordingly.
 - Use connection pooling for external APIs.
 - Profile tool execution paths to identify hotspots.
+- Leverage per-token toolkit caching to reduce discovery overhead.
+- Utilize per-user token delegation caching to minimize authentication calls.
 
 [No sources needed since this section provides general guidance]
 
@@ -442,6 +545,8 @@ Common issues and resolutions:
 - Upstream failures: Inspect connector logs and health checks.
 - Timeouts: Increase timeouts cautiously; investigate slow dependencies.
 - Permission blocks: Verify tool is in vetted allow-list and marked as read-only.
+- Toolkit caching issues: Check per-token cache isolation and token refresh scenarios.
+- Token delegation failures: Verify platform gateway configuration and credential setup.
 
 Debugging steps:
 - Enable detailed request tracing with correlation IDs.
@@ -449,14 +554,18 @@ Debugging steps:
 - Confirm policy decisions and audit logs.
 - Reproduce with minimal payloads to isolate issues.
 - Check `AGENT_GATEWAY_TOOL_AUTO_ALLOW` environment variable configuration.
+- Validate middleware stack composition and order.
+- Inspect per-token toolkit cache entries and token delegation cache hits/misses.
 
 **Section sources**
 - [tools.py](file://products/tool-gateway/src/api_gateway/api/routes/tools.py)
 - [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
 - [policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [delegation_client.py](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py)
 
 ## Conclusion
-The tool execution framework provides a robust, secure, and observable mechanism for agents to invoke tools through a centralized gateway. By implementing a dual-layer security model with vetted allow-lists, enforcing policies, and isolating external interactions via connectors, the system ensures safe and efficient tool execution. The enhanced security architecture addresses privilege management vulnerabilities while maintaining operational efficiency through intelligent automatic approval of trusted read-only operations. Proper caching, timeouts, and auditing further enhance reliability and performance.
+The tool execution framework provides a robust, secure, and observable mechanism for agents to invoke tools through a centralized gateway. The updated middleware-based architecture replaces complex tool subclass implementations with a centralized permission handling approach, while enhanced toolkit caching and token delegation support improve performance and security. By implementing dual-layer security with vetted allow-lists, enforcing policies through middleware, isolating external interactions via connectors, and providing sophisticated caching mechanisms, the system ensures safe and efficient tool execution. The middleware-based approach addresses privilege management vulnerabilities while maintaining operational efficiency through intelligent automatic approval of trusted read-only operations. Proper caching, timeouts, auditing, and token delegation further enhance reliability and performance.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
