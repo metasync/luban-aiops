@@ -31,3 +31,7 @@ shared/platform-ops/gitops/**/.images.env
 
 # Auto-generated dev signing keys (identity-broker JWT).
 .dev-keys/
+
+# IDE-local better-harness session reports (generated churn, like repowiki
+# but never tracked).
+.qoder/better-harness/
