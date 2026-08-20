@@ -41,3 +41,4 @@ Do not write an ADR for decisions local to a single spec; record those in the sp
 | `ADR-0003` | Platform-owned agent-service contract | `accepted` |
 | `ADR-0004` | Broker-mediated token delegation for service-to-service calls | `accepted` |
 | `ADR-0005` | Extract the platform API edge into a separate `platform-gateway` product | `accepted` |
+| `ADR-0006` | Contract purpose restated — invariant enforcement, not framework swappability | `accepted` |

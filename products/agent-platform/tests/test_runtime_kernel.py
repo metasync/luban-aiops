@@ -1,6 +1,5 @@
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
 
 from agent_service.runtime_kernel import AgentKernel
 from agent_service.runtime_settings import RuntimeSettings
@@ -339,10 +338,12 @@ class TestPerTokenToolkitCache:
 
     def test_no_token_degrades_to_empty_toolkit_without_discovery(self, monkeypatch):
         kernel = self._kernel()
+        calls = []
 
         async def fake_discover(gateway_url, bearer_token=None):
             # Without a token discovery short-circuits to an empty list.
             assert bearer_token is None
+            calls.append(gateway_url)
             return []
 
         monkeypatch.setattr(
@@ -352,17 +353,20 @@ class TestPerTokenToolkitCache:
         toolkit = asyncio.run(kernel._ensure_toolkit(None))
 
         assert toolkit is not None
-        # Cached under the empty-key bucket.
-        assert asyncio.run(kernel._ensure_toolkit(None)) is toolkit
+        # SPEC-018 R-2: an empty discovery is intentionally NOT cached, so a
+        # later turn retries discovery instead of being stuck with no tools.
+        assert asyncio.run(kernel._ensure_toolkit(None)) is not toolkit
+        assert calls == ["http://gw:8080", "http://gw:8080"]
 
 
-class TestRequestToolkitRegistration:
-    """Regression: per-request toolkits must actually register gateway tools.
+class TestToolkitRegistration:
+    """Regression: the token-cached toolkit must really register gateway tools.
 
     AgentScope 2.x removed ``Toolkit.add``; a toolkit built without tools is
     empty and the model can never invoke the gateway (root cause of the
-    hallucinated health report). These tests assert the schemas are really
-    present on the built toolkit.
+    hallucinated health report). After SPEC-018 removed the per-request
+    toolkit rebuild, these tests assert the schemas are really present on the
+    per-token cached toolkit.
     """
 
     DEFINITION = {
@@ -375,106 +379,208 @@ class TestRequestToolkitRegistration:
         },
     }
 
-    def _kernel(self):
+    def _kernel(self, **overrides):
         return AgentKernel(
             settings=RuntimeSettings(
                 api_key="test-key",
                 tool_gateway_url="http://gw:8080",
+                **overrides,
             )
         )
 
-    def test_request_toolkit_registers_cached_definitions(self):
-        kernel = self._kernel()
-        kernel._tool_definitions["token-a"] = [self.DEFINITION]
+    def _patch_discover(self, monkeypatch, definitions):
+        calls = []
 
-        toolkit = asyncio.run(
-            kernel._build_request_toolkit("token-a", asyncio.Queue())
+        async def fake_discover(gateway_url, bearer_token=None):
+            calls.append((gateway_url, bearer_token))
+            return definitions
+
+        monkeypatch.setattr(
+            "agent_service.tools.gateway_tools.discover_tools", fake_discover
         )
+        return calls
+
+    def test_ensure_toolkit_registers_discovered_definitions(self, monkeypatch):
+        kernel = self._kernel()
+        calls = self._patch_discover(monkeypatch, [self.DEFINITION])
+
+        toolkit = asyncio.run(kernel._ensure_toolkit("token-a"))
 
         schemas = asyncio.run(toolkit.get_tool_schemas())
         names = {schema["function"]["name"] for schema in schemas}
         assert names == {"k8s_list_pods"}
+        assert calls == [("http://gw:8080", "token-a")]
+        # Cached per token: a later turn reuses it without re-discovering.
+        assert asyncio.run(kernel._ensure_toolkit("token-a")) is toolkit
+        assert len(calls) == 1
 
-    def test_request_toolkit_empty_when_no_definitions_cached(self):
-        kernel = self._kernel()
-
-        with patch(
-            "agent_service.tools.gateway_tools.discover_tools",
-            new_callable=AsyncMock,
-        ) as mock_discover:
-            mock_discover.return_value = []
-            toolkit = asyncio.run(
-                kernel._build_request_toolkit("token-a", asyncio.Queue())
-            )
-
-        schemas = asyncio.run(toolkit.get_tool_schemas())
-        assert not any(
-            schema.get("type") == "function" for schema in schemas
-        )
-
-    def test_rotated_token_discovers_on_cache_miss(self):
+    def test_rotated_token_discovers_on_cache_miss(self, monkeypatch):
         """Regression: delegated tokens rotate mid-session (portal token
-        refresh) but the session-cached agent never re-runs discovery for the
-        new token. The per-request toolkit must discover on cache miss
-        instead of serving an empty toolkit (which injected the no-tools
-        notice for every subsequent turn until browser refresh)."""
+        refresh). A token with no cached toolkit must run discovery instead
+        of serving an empty toolkit (which injected the no-tools notice for
+        every subsequent turn until browser refresh)."""
         kernel = self._kernel()
-        kernel._tool_definitions["token-old"] = [self.DEFINITION]
+        calls = self._patch_discover(monkeypatch, [self.DEFINITION])
 
-        with patch(
-            "agent_service.tools.gateway_tools.discover_tools",
-            new_callable=AsyncMock,
-        ) as mock_discover:
-            mock_discover.return_value = [self.DEFINITION]
-            toolkit = asyncio.run(
-                kernel._build_request_toolkit("token-new", asyncio.Queue())
-            )
+        asyncio.run(kernel._ensure_toolkit("token-old"))
+        toolkit = asyncio.run(kernel._ensure_toolkit("token-new"))
 
-        mock_discover.assert_awaited_once_with("http://gw:8080", "token-new")
+        assert calls == [
+            ("http://gw:8080", "token-old"),
+            ("http://gw:8080", "token-new"),
+        ]
         schemas = asyncio.run(toolkit.get_tool_schemas())
         names = {schema["function"]["name"] for schema in schemas}
         assert names == {"k8s_list_pods"}
-        # The result is cached so later turns skip discovery.
-        assert kernel._tool_definitions["token-new"] == [self.DEFINITION]
+        # The result is cached under the new token.
+        assert asyncio.run(kernel._ensure_toolkit("token-new")) is toolkit
 
-    def test_empty_discovery_result_is_not_cached(self):
+    def test_empty_discovery_result_is_not_cached(self, monkeypatch):
         """A failed/empty discovery must not poison the cache: the next turn
         retries discovery instead of being stuck with no tools."""
         kernel = self._kernel()
+        results = [[], [self.DEFINITION]]
 
-        with patch(
-            "agent_service.tools.gateway_tools.discover_tools",
-            new_callable=AsyncMock,
-        ) as mock_discover:
-            mock_discover.return_value = []
-            asyncio.run(
-                kernel._build_request_toolkit("token-a", asyncio.Queue())
-            )
-            assert "token-a" not in kernel._tool_definitions
+        async def fake_discover(gateway_url, bearer_token=None):
+            return results.pop(0)
 
-            mock_discover.return_value = [self.DEFINITION]
-            toolkit = asyncio.run(
-                kernel._build_request_toolkit("token-a", asyncio.Queue())
-            )
+        monkeypatch.setattr(
+            "agent_service.tools.gateway_tools.discover_tools", fake_discover
+        )
 
-        assert mock_discover.await_count == 2
+        first = asyncio.run(kernel._ensure_toolkit("token-a"))
+        assert asyncio.run(first.get_tool_schemas()) == []
+
+        toolkit = asyncio.run(kernel._ensure_toolkit("token-a"))
+
         schemas = asyncio.run(toolkit.get_tool_schemas())
         names = {schema["function"]["name"] for schema in schemas}
         assert names == {"k8s_list_pods"}
 
-    def test_count_function_tools(self):
+    def test_task_tools_appended_and_excluded_from_gateway_count(self, monkeypatch):
+        """R-5: opt-in task tools join the cached toolkit but never count as
+        gateway tools, so the no-tools guard stays accurate."""
+        kernel = self._kernel(task_tools_enabled=True)
+        self._patch_discover(monkeypatch, [self.DEFINITION])
+
+        toolkit = asyncio.run(kernel._ensure_toolkit("token-a"))
+
+        schemas = asyncio.run(toolkit.get_tool_schemas())
+        names = {schema["function"]["name"] for schema in schemas}
+        assert names == {
+            "k8s_list_pods",
+            "TaskCreate",
+            "TaskGet",
+            "TaskList",
+            "TaskUpdate",
+        }
+        assert kernel._count_gateway_tools(toolkit) == 1
+
+    def test_task_tools_only_toolkit_when_gateway_empty(self, monkeypatch):
+        kernel = self._kernel(task_tools_enabled=True)
+        self._patch_discover(monkeypatch, [])
+
+        toolkit = asyncio.run(kernel._ensure_toolkit("token-a"))
+
+        schemas = asyncio.run(toolkit.get_tool_schemas())
+        names = {schema["function"]["name"] for schema in schemas}
+        assert names == {"TaskCreate", "TaskGet", "TaskList", "TaskUpdate"}
+        assert kernel._count_gateway_tools(toolkit) == 0
+        # Empty gateway discovery stays uncached even with task tools.
+        assert asyncio.run(kernel._ensure_toolkit("token-a")) is not toolkit
+
+    def test_count_gateway_tools(self):
         from agentscope.tool import Toolkit
 
         from agent_service.tools.gateway_tools import build_gateway_toolkit
 
         kernel = self._kernel()
 
-        assert asyncio.run(kernel._count_function_tools(Toolkit())) == 0
+        assert kernel._count_gateway_tools(Toolkit()) == 0
 
-        populated = build_gateway_toolkit(
-            [self.DEFINITION], "http://gw:8080", "token-a"
+        populated = build_gateway_toolkit([self.DEFINITION], "http://gw:8080")
+        assert kernel._count_gateway_tools(populated) == 1
+
+
+class TestAgentRebuildOnToolRecovery:
+    """SPEC-018 R-2: the agent is no longer rebuilt per request, so a cached
+    agent that started with zero gateway tools must be rebuilt once discovery
+    recovers — persisted state (SPEC-017 R-3) restores its memory."""
+
+    def test_cached_agent_rebuilds_when_gateway_tools_recover(self, monkeypatch):
+        kernel = AgentKernel(
+            settings=RuntimeSettings(
+                api_key="test-key",
+                tool_gateway_url="http://gw:8080",
+            )
         )
-        assert asyncio.run(kernel._count_function_tools(populated)) == 1
+        results = [[], [TestToolkitRegistration.DEFINITION]]
+
+        async def fake_discover(gateway_url, bearer_token=None):
+            return results.pop(0)
+
+        monkeypatch.setattr(
+            "agent_service.tools.gateway_tools.discover_tools", fake_discover
+        )
+
+        builds = 0
+
+        async def fake_build_agent(session_id, bearer_token=None):
+            nonlocal builds
+            builds += 1
+            agent = FakeMemoryAgent()
+            # Reflect the toolkit the real Agent would have received.
+            agent.toolkit = await kernel._ensure_toolkit(bearer_token)
+            return (agent, FakeUserMsg)
+
+        monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
+
+        agent_1, _ = asyncio.run(kernel.ensure_agent("ses-r", "token-a"))
+        assert builds == 1
+        assert kernel._count_gateway_tools(agent_1.toolkit) == 0
+
+        # Discovery recovers: the stale agent is replaced, not reused.
+        agent_2, _ = asyncio.run(kernel.ensure_agent("ses-r", "token-a"))
+        assert builds == 2
+        assert agent_2 is not agent_1
+        assert kernel._count_gateway_tools(agent_2.toolkit) == 1
+
+        # Steady state afterwards: no further rebuilds.
+        agent_3, _ = asyncio.run(kernel.ensure_agent("ses-r", "token-a"))
+        assert builds == 2
+        assert agent_3 is agent_2
+
+    def test_ensure_agent_survives_eviction_during_recovery_check(self, monkeypatch):
+        """The await in the recovery check opens a preemption window: LRU
+        eviction (or a concurrent rebuild) may remove the session entry while
+        ``_ensure_toolkit`` is awaiting. The fast path must fall through to
+        the locked rebuild instead of raising KeyError."""
+        kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
+        builds = 0
+
+        async def fake_build_agent(session_id, bearer_token=None):
+            nonlocal builds
+            builds += 1
+            return (FakeMemoryAgent(), FakeUserMsg)
+
+        monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
+
+        asyncio.run(kernel.ensure_agent("ses-e"))
+        assert builds == 1
+
+        # Simulate eviction happening inside the recovery-check await.
+        async def evicting_ensure_toolkit(bearer_token=None):
+            kernel._agents.pop("ses-e", None)
+            from agentscope.tool import Toolkit
+
+            return Toolkit()
+
+        monkeypatch.setattr(kernel, "_ensure_toolkit", evicting_ensure_toolkit)
+
+        agent, _ = asyncio.run(kernel.ensure_agent("ses-e"))
+
+        assert builds == 2
+        assert agent is not None
 
 
 # ---------------------------------------------------------------------------
@@ -669,3 +775,35 @@ def test_restore_state_discards_corrupt_row(monkeypatch):
 
     # A poisoned snapshot must never wedge the session: fresh agent instead.
     assert kernel._restore_state("ses-poison") is None
+
+
+def test_task_state_round_trips_through_state_store(monkeypatch):
+    """SPEC-018 R-5: task tools mutate only AgentState.tasks_context, so the
+    SPEC-017 snapshot/restore path persists them with no extra machinery."""
+    from agentscope.state import AgentState
+    from agentscope.tool import TaskCreate
+
+    from agent_service.services.agent_state_store import InMemoryAgentStateStore
+
+    store = InMemoryAgentStateStore()
+    monkeypatch.setattr(
+        "agent_service.runtime_kernel.AGENT_STATE_STORE", store
+    )
+    kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
+
+    state = AgentState()
+    asyncio.run(
+        TaskCreate().call(
+            _agent_state=state,
+            subject="diagnose crashloop",
+            description="inspect pod restarts",
+        )
+    )
+
+    # Post-turn snapshot, then restore as a freshly rebuilt agent would.
+    kernel._snapshot_state("ses-task", SimpleNamespace(state=state))
+    restored = kernel._restore_state("ses-task")
+
+    assert restored is not None
+    subjects = [task.subject for task in restored.tasks_context.tasks]
+    assert subjects == ["diagnose crashloop"]

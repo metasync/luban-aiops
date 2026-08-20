@@ -1,30 +1,32 @@
-"""Gateway-backed tool functions for AgentScope Toolkit (SPEC-007 R-6, SPEC-008 R-5, SPEC-011 R-2).
+"""Gateway-backed tool functions for AgentScope Toolkit (SPEC-007 R-6, SPEC-008 R-5, SPEC-011 R-2, SPEC-018).
 
 This module fetches available tools from the tool-gateway and creates
 callable functions suitable for registration with AgentScope's Toolkit.
 Each function calls POST /api/v2/tools/invoke on the gateway.
 
-The owning user's delegated token (forwarded by the gateway) is bound into the
-toolkit closures and presented as ``Authorization: Bearer`` on discovery and
-invocation; identity is carried exclusively by this token, never in the body.
+The owning user's delegated token is presented as ``Authorization: Bearer``
+on discovery and invocation; identity is carried exclusively by this token,
+never in the body. Closures read the current token from the
+``DELEGATED_TOKEN`` contextvar at call time (the runtime kernel sets it
+around each turn) so cached toolkits keep working across portal token
+refresh (SPEC-018 R-2).
 
-SPEC-011 R-2: each closure optionally posts tool_call / tool_result trace
-events to a per-request asyncio.Queue so the stream carries a complete audit
-of tool usage alongside text deltas.
+SPEC-011 R-2 / SPEC-018 R-2: tool_call / tool_result evidence frames are
+emitted by ``ToolEvidenceMiddleware`` from the gateway result carried on
+the returned ``ToolChunk`` metadata; closures no longer own trace plumbing.
+Permission decisions live in ``GatewayPermissionMiddleware`` (SPEC-018 R-1),
+so the tools built here are plain ``FunctionTool`` instances.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 import uuid
-from typing import Any, TYPE_CHECKING
+from contextvars import ContextVar
+from typing import Any
 
 import httpx
-
-if TYPE_CHECKING:
-    import asyncio
 
 LOGGER = logging.getLogger(__name__)
 
@@ -32,73 +34,13 @@ LOGGER = logging.getLogger(__name__)
 INVOKE_TIMEOUT_SECONDS = 30.0
 DISCOVER_TIMEOUT_SECONDS = 10.0
 
-# Vetted tool names that may bypass AgentScope's interactive ASK permission
-# gate. Only read-only tools on this explicit allow-list are auto-approved;
-# every other tool keeps the ASK default (effectively non-runnable in a
-# headless stream until interactively confirmed). Admission and policy are
-# still enforced by the tool-gateway on every invocation.
-DEFAULT_AUTO_ALLOWED_TOOLS = frozenset({
-    "k8s.list_pods",
-    "k8s.get_pod",
-    "k8s.get_events",
-    "k8s.get_pod_logs",
-    "skills.search",
-    "skills.get",
-    "skills.list",
-    "incidents.list",
-    "incidents.get",
-})
-AUTO_ALLOW_ENV = "AGENT_GATEWAY_TOOL_AUTO_ALLOW"
-
-
-def _load_auto_allowed_tools() -> frozenset[str]:
-    """Resolve the auto-approve allow-list (env override or vetted default).
-
-    ``AGENT_GATEWAY_TOOL_AUTO_ALLOW`` accepts a comma-separated list of
-    gateway tool names; an empty string auto-approves nothing. Entries are
-    normalized to the sanitized tool names used by AgentScope (dots become
-    underscores), matching ``FunctionTool.name``.
-    """
-    raw = os.environ.get(AUTO_ALLOW_ENV)
-    source = DEFAULT_AUTO_ALLOWED_TOOLS if raw is None else {
-        part.strip() for part in raw.split(",") if part.strip()
-    }
-    return frozenset(name.replace(".", "_") for name in source)
-
-
-def _build_gateway_function_tool_class(
-    auto_allowed: frozenset[str] | None = None,
-):
-    """Return the FunctionTool subclass used for gateway tools.
-
-    AgentScope 2.x pauses every custom function tool behind an interactive
-    ``RequireUserConfirmEvent`` (default permission decision: ASK). A headless
-    SSE stream can never answer that prompt, so the agent stalls and emits no
-    output at all. Tools on the explicit allow-list (read-only AND vetted) are
-    pre-approved — the tool-gateway still enforces admission and policy on
-    every invocation and each call is audit-logged; anything outside the
-    allow-list keeps the ASK default rather than being blanket-approved.
-    """
-    from agentscope.permission import PermissionBehavior, PermissionDecision
-    from agentscope.tool import FunctionTool
-
-    allow_list = (
-        auto_allowed if auto_allowed is not None else _load_auto_allowed_tools()
-    )
-
-    class GatewayFunctionTool(FunctionTool):
-        async def check_permissions(self, *_args, **_kwargs):
-            if self.is_read_only and self.name in allow_list:
-                return PermissionDecision(
-                    behavior=PermissionBehavior.ALLOW,
-                    message=(
-                        "Vetted read-only gateway tool; admission and policy "
-                        "are enforced by the tool-gateway."
-                    ),
-                )
-            return await super().check_permissions(*_args, **_kwargs)
-
-    return GatewayFunctionTool
+# Request-scoped delegated token (SPEC-018 R-2): set by the runtime kernel
+# around each turn so closures inside cached toolkits always present the
+# current token, even after a portal token refresh.
+DELEGATED_TOKEN: ContextVar[str | None] = ContextVar(
+    "DELEGATED_TOKEN",
+    default=None,
+)
 
 
 def _auth_headers(bearer_token: str | None) -> dict[str, str]:
@@ -167,23 +109,6 @@ async def invoke_gateway_tool(
         return response.json()
 
 
-def _make_data_summary(
-    data: Any, max_chars: int = 2000,
-) -> dict | None:
-    """Build a bounded data_summary for trace events (SPEC-011 R-2).
-
-    Serializes ``data`` to JSON and truncates if it exceeds ``max_chars``.
-    Returns None when data is None or empty.
-    """
-    if data is None:
-        return None
-    serialized = json.dumps(data, default=str)
-    if len(serialized) <= max_chars:
-        return data
-    # Truncate the serialized form and return a marker dict.
-    return {"_truncated": True, "_preview": serialized[:max_chars], "_original_length": len(serialized)}
-
-
 def _normalize_input_schema(schema: Any) -> dict:
     """Coerce a gateway parameters_schema into a Toolkit-valid shape.
 
@@ -203,57 +128,32 @@ def _make_tool_fn(
     gateway_url: str,
     name: str,
     desc: str,
-    token: str | None,
-    tq: "asyncio.Queue | None",
-    max_chars: int,
 ):
     """Build the async gateway-invocation closure for one tool.
 
-    The closure captures ``name``, ``gateway_url`` and the delegated token so
-    one user's credential is never used for another user's session. When
-    ``tq`` is provided it posts ``tool_call`` / ``tool_result`` trace events
-    for evidence panel rendering (SPEC-011 R-2).
+    The closure captures ``name`` and ``gateway_url``; the owning user's
+    delegated token is read from ``DELEGATED_TOKEN`` at call time so one
+    user's credential is never used for another user's session and cached
+    toolkits survive token refresh. The returned ``ToolChunk`` carries the
+    raw gateway result on its metadata so ``ToolEvidenceMiddleware`` can
+    emit evidence frames without re-parsing the model-visible text
+    (SPEC-018 R-2).
     """
-    async def tool_fn(**kwargs: Any) -> str:
+    from agentscope.message import TextBlock
+    from agentscope.tool import ToolChunk
+
+    async def tool_fn(**kwargs: Any) -> ToolChunk:
         """Invoke a platform tool via the tool-gateway."""
-        call_id = str(uuid.uuid4())
-
-        # Post tool_call trace event before invocation.
-        if tq is not None:
-            await tq.put({
-                "type": "tool_call",
-                "tool_name": name,
-                "call_id": call_id,
-                "parameters": kwargs,
-            })
-
         result = await invoke_gateway_tool(
             gateway_url=gateway_url,
             tool_name=name,
             parameters=kwargs,
-            bearer_token=token,
+            bearer_token=DELEGATED_TOKEN.get(),
         )
-
-        # Post tool_result trace event after invocation.
-        if tq is not None:
-            trace_event: dict[str, Any] = {
-                "type": "tool_result",
-                "tool_name": name,
-                "call_id": call_id,
-                "status": result.get("status", "error"),
-            }
-            evidence = result.get("evidence")
-            if evidence:
-                trace_event["evidence"] = evidence
-            trace_event["data_summary"] = _make_data_summary(
-                result.get("data"), max_chars,
-            )
-            error = result.get("error")
-            if error:
-                trace_event["error"] = error
-            await tq.put(trace_event)
-
-        return json.dumps(result, default=str)
+        return ToolChunk(
+            content=[TextBlock(text=json.dumps(result, default=str))],
+            metadata={"gateway_result": result},
+        )
 
     # Set function metadata for AgentScope tool discovery.
     tool_fn.__name__ = name.replace(".", "_")
@@ -265,41 +165,35 @@ def _make_tool_fn(
 def build_function_tools(
     gateway_url: str,
     tool_definitions: list[dict],
-    bearer_token: str | None = None,
-    trace_queue: "asyncio.Queue | None" = None,
-    data_summary_max_chars: int = 2000,
 ) -> list:
     """Build AgentScope ``FunctionTool`` objects for each gateway tool def.
 
     Each returned tool wraps an async closure that accepts **kwargs matching
-    the tool's parameter schema and returns a JSON string result. The
-    delegated token is bound into every closure so one user's credential is
+    the tool's parameter schema and returns a ``ToolChunk`` whose metadata
+    carries the gateway result dict. The delegated token is read from the
+    ``DELEGATED_TOKEN`` contextvar at call time so one user's credential is
     never used for another user's session.
 
     The closure only exposes **kwargs, so AgentScope would derive an empty
     input schema; the gateway's ``parameters_schema`` is therefore bound onto
     each tool explicitly so the model sees the real parameters.
 
-    Tools that fail to wrap are skipped with a warning (never a hard failure).
+    Permission decisions are made by ``GatewayPermissionMiddleware`` and
+    evidence frames by ``ToolEvidenceMiddleware`` (SPEC-018 R-1/R-2); each
+    tool carries its dotted gateway name on ``gateway_tool_name`` for
+    evidence-frame parity.
 
-    When ``trace_queue`` is provided, each closure posts ``tool_call`` and
-    ``tool_result`` trace events for evidence panel rendering (SPEC-011 R-2).
+    Tools that fail to wrap are skipped with a warning (never a hard failure).
     """
-    tool_cls = _build_gateway_function_tool_class()
+    from agentscope.tool import FunctionTool
+
     tools: list = []
     for tool_def in tool_definitions:
         tool_name = tool_def["name"]
         description = tool_def.get("description", "")
         try:
-            fn = _make_tool_fn(
-                gateway_url,
-                tool_name,
-                description,
-                bearer_token,
-                trace_queue,
-                data_summary_max_chars,
-            )
-            tool = tool_cls(
+            fn = _make_tool_fn(gateway_url, tool_name, description)
+            tool = FunctionTool(
                 fn,
                 name=tool_name.replace(".", "_"),
                 description=description or f"Invoke {tool_name}",
@@ -308,6 +202,7 @@ def build_function_tools(
             tool.input_schema = _normalize_input_schema(
                 tool_def.get("parameters_schema"),
             )
+            tool.gateway_tool_name = tool_name
             tools.append(tool)
             LOGGER.info("registered toolkit function: %s", tool_name)
         except Exception as exc:
@@ -318,9 +213,6 @@ def build_function_tools(
 def build_gateway_toolkit(
     tool_definitions: list[dict],
     gateway_url: str,
-    bearer_token: str | None = None,
-    trace_queue: "asyncio.Queue | None" = None,
-    data_summary_max_chars: int = 2000,
 ):
     """Assemble an AgentScope Toolkit from gateway tool definitions.
 
@@ -329,35 +221,18 @@ def build_gateway_toolkit(
     """
     from agentscope.tool import Toolkit
 
-    tools = build_function_tools(
-        gateway_url,
-        tool_definitions,
-        bearer_token,
-        trace_queue=trace_queue,
-        data_summary_max_chars=data_summary_max_chars,
-    )
+    tools = build_function_tools(gateway_url, tool_definitions)
     return Toolkit(tools=tools)
 
 
 async def build_toolkit(
     gateway_url: str,
     bearer_token: str | None = None,
-    trace_queue: "asyncio.Queue | None" = None,
-    data_summary_max_chars: int = 2000,
 ):
     """Build an AgentScope Toolkit populated with gateway tools.
 
     Returns a Toolkit instance (empty if no token is available or the gateway
     is unreachable).
-
-    When ``trace_queue`` is provided, toolkit functions emit tool trace
-    events for evidence panel rendering (SPEC-011 R-2).
     """
     tool_definitions = await discover_tools(gateway_url, bearer_token)
-    return build_gateway_toolkit(
-        tool_definitions,
-        gateway_url,
-        bearer_token,
-        trace_queue=trace_queue,
-        data_summary_max_chars=data_summary_max_chars,
-    )
+    return build_gateway_toolkit(tool_definitions, gateway_url)

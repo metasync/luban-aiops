@@ -62,6 +62,7 @@ Current implementation status:
 - enables real runtime replies when `AGENTSCOPE_API_KEY` is supplied to the service environment
 - emits per-request tool trace events (`tool_call` and `tool_result`) into the SSE stream when `TOOL_GATEWAY_URL` is configured; traces are merged with text deltas so the operator portal can render an evidence panel (SPEC-011)
 - carries the triage-report output discipline in the default system prompt so incident triage turns end with a schema-conformant fenced `triage-report` JSON block; `incidents.list` / `incidents.get` join the default auto-allowed tool set alongside the `skills.*` tools, so the agent can ground answers in live incidents without configuration changes (SPEC-015)
+- implements all cross-cutting kernel behavior on agentscope's supported `MiddlewareBase` hooks: an allow-listed permission middleware keeps vetted read-only gateway tools headless-safe, an evidence middleware emits the `tool_call`/`tool_result` frames, and the out-of-box `TracingMiddleware` and `ReplyBudgetControlMiddleware` are opt-in via settings; toolkits are cached per delegated token (tokens are read from a contextvar at call time, so portal token refresh never requires an agent rebuild) (SPEC-018)
 
 Service layout:
 
@@ -76,7 +77,7 @@ Service layout:
 - `src/agent_service/schemas/`
   - `v2.py`: pydantic models bound to the platform-owned contract; `api.py`: internal session models
 - `src/agent_service/services/`
-  - session store, session service, runtime dependencies
+  - session store, session service, runtime dependencies, kernel middleware stack (permission + evidence; SPEC-018)
 - `src/agent_service/runtime_*.py`, `providers/`, `agent_app.py`, `native_service.py`
   - runtime-focused modules that configure and expose AgentScope-backed execution paths
 
@@ -172,9 +173,19 @@ Current runtime environment knobs:
 - `AGENT_STATE_TTL_SECONDS`
   - sweep TTL for stale agent state rows; defaults to `3600`
 - `TOOL_GATEWAY_URL`
-  - base URL of the tool-gateway for tool discovery and invocation (SPEC-007); when set, the AgentScope kernel registers gateway tools into the LLM Toolkit; when unset, the agent builds with an empty Toolkit
-  - tool calls relay the gateway-forwarded delegated token (SPEC-008) as `Authorization: Bearer`; the token is bound per-user into the toolkit closures (no cross-user sharing) and identity is never carried in the request body; without a token, discovery degrades to an empty Toolkit and invocation returns a structured error
-  - when tools are active, each request creates a per-request trace queue; toolkit closures post `tool_call` and `tool_result` events that are drained into the SSE stream alongside text deltas (SPEC-011)
+  - base URL of the tool-gateway for tool discovery and invocation (SPEC-007); when set, the AgentScope kernel registers gateway tools into a per-token cached Toolkit; when unset, the agent builds with an empty Toolkit
+  - tool calls relay the gateway-forwarded delegated token (SPEC-008) as `Authorization: Bearer`; the token is exposed per-turn through a request-scoped contextvar and read by the tool closures at call time (toolkits stay per-token and are never shared across users), so portal token refresh works without rebuilding the agent; identity is never carried in the request body; without a token, discovery degrades to an empty Toolkit and invocation returns a structured error
+  - evidence frames (`tool_call`/`tool_result`) are emitted by the kernel's evidence middleware into a request-scoped sink and drained into the SSE stream alongside text deltas (SPEC-011, SPEC-018)
+- `AGENT_GATEWAY_TOOL_AUTO_ALLOW`
+  - comma-separated dotted gateway tool names auto-approved by the permission middleware when the tool is read-only; overrides the built-in vetted list; unvetted tools keep the built-in ASK resolution (SPEC-018)
+- `AGENTSCOPE_KERNEL_TRACING`
+  - registers agentscope's out-of-box `TracingMiddleware` for OTel kernel spans; defaults to `false`; inert without an SDK `TracerProvider` (SPEC-018)
+- `AGENTSCOPE_REPLY_TOKEN_BUDGET`
+  - reply token budget for the out-of-box `ReplyBudgetControlMiddleware`; must be > 0 when set; unset leaves replies unbudgeted (SPEC-018)
+- `AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT` / `AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT`
+  - token weights for the reply budget; each must be >= 0 (`0` is valid); default to `1.0` (SPEC-018)
+- `AGENTSCOPE_TASK_TOOLS_ENABLED`
+  - opts into agentscope's built-in task tools (`TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate`); defaults to `false`; task state is session-local agent state and persists through the agent state store; task tools never count toward the no-tools guard (SPEC-018)
 - `AGENT_TOOL_DATA_SUMMARY_MAX_CHARS`
   - maximum character length for `data_summary` fields in tool trace events; defaults to `2000`; payloads exceeding the limit are truncated with a structured marker; full payloads remain in audit logs only (SPEC-011)
 - `OTEL_ENABLED`

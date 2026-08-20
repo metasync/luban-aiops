@@ -160,6 +160,27 @@ incident-service → connectors → audit-service (incident_triaged on the durab
    `audit` connector puts an `incident_triaged` event on the durable trail.
    Ranked next steps are advisory — there is no execution surface in R3.
 
+### Agent Kernel Surfaces (SPEC-018)
+
+Inside agent-service, cross-cutting kernel behavior runs on agentscope's
+supported `MiddlewareBase` hooks rather than private surfaces:
+
+- **Adopted from agentscope**: `MiddlewareBase` hooks
+  (`on_check_permission`, `on_acting`) as the interception points; the
+  out-of-box `TracingMiddleware` (OTel kernel spans, opt-in via
+  `AGENTSCOPE_KERNEL_TRACING`) and `ReplyBudgetControlMiddleware`
+  (opt-in via `AGENTSCOPE_REPLY_TOKEN_BUDGET`); the built-in task tools
+  (opt-in via `AGENTSCOPE_TASK_TOOLS_ENABLED`).
+- **Platform-owned**: the permission allow-list policy
+  (`GatewayPermissionMiddleware`), the SSE evidence frames
+  (`ToolEvidenceMiddleware`, SPEC-011 contract), per-token toolkit
+  caching and delegated-token carriage (contextvar at call time), the
+  no-tools anti-hallucination guard, and the v2 contract boundary.
+- Tool execution stays exclusive to the tool-gateway; agentscope's
+  built-in file/shell tools, sandboxes, and the `agentscope.app`
+  application layer are deliberately not adopted (see
+  `docs/workspace/agentscope-utilization-audit.md`).
+
 ## Trust Chain
 
 The platform implements a progressive trust model: **identity → policy → audit**.

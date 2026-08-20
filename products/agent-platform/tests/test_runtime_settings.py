@@ -312,3 +312,100 @@ def test_default_system_prompt_is_format_neutral_for_triage():
     structured-output tool when active; the prompt must not hard-wire the
     fenced-block format as the only channel."""
     assert "structured-output" in DEFAULT_SYSTEM_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# SPEC-018: kernel middleware settings
+# ---------------------------------------------------------------------------
+
+
+def test_middleware_settings_default_to_off(monkeypatch):
+    """All SPEC-018 knobs are opt-in: unset deployments behave exactly as
+    before the middleware migration."""
+    for name in (
+        "AGENTSCOPE_KERNEL_TRACING",
+        "AGENTSCOPE_REPLY_TOKEN_BUDGET",
+        "AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT",
+        "AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT",
+        "AGENTSCOPE_TASK_TOOLS_ENABLED",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.kernel_tracing is False
+    assert settings.reply_token_budget is None
+    assert settings.reply_input_token_weight == 1.0
+    assert settings.reply_output_token_weight == 1.0
+    assert settings.task_tools_enabled is False
+
+
+def test_middleware_settings_read_env(monkeypatch):
+    monkeypatch.setenv("AGENTSCOPE_KERNEL_TRACING", "true")
+    monkeypatch.setenv("AGENTSCOPE_REPLY_TOKEN_BUDGET", "20000")
+    monkeypatch.setenv("AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT", "0.5")
+    monkeypatch.setenv("AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT", "2.0")
+    monkeypatch.setenv("AGENTSCOPE_TASK_TOOLS_ENABLED", "yes")
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.kernel_tracing is True
+    assert settings.reply_token_budget == 20000.0
+    assert settings.reply_input_token_weight == 0.5
+    assert settings.reply_output_token_weight == 2.0
+    assert settings.task_tools_enabled is True
+
+
+def test_middleware_settings_weight_zero_is_valid(monkeypatch):
+    """Regression guard: an explicit 0.0 weight (e.g. count output tokens
+    only) must survive parsing — a truthiness fallback would turn it into
+    1.0."""
+    monkeypatch.setenv("AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT", "0")
+    monkeypatch.setenv("AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT", "0.0")
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.reply_input_token_weight == 0.0
+    assert settings.reply_output_token_weight == 0.0
+
+
+@pytest.mark.parametrize("budget", ["0", "-5"])
+def test_middleware_settings_reject_nonpositive_budget(monkeypatch, budget):
+    monkeypatch.setenv("AGENTSCOPE_REPLY_TOKEN_BUDGET", budget)
+
+    try:
+        RuntimeSettings.from_env()
+    except ValueError as exc:
+        assert "AGENTSCOPE_REPLY_TOKEN_BUDGET" in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError(f"budget={budget} should be rejected")
+
+
+@pytest.mark.parametrize(
+    "env_name",
+    ["AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT", "AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT"],
+)
+def test_middleware_settings_reject_negative_weight(monkeypatch, env_name):
+    monkeypatch.setenv(env_name, "-0.5")
+
+    try:
+        RuntimeSettings.from_env()
+    except ValueError as exc:
+        assert env_name in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError(f"{env_name}=-0.5 should be rejected")
+
+
+@pytest.mark.parametrize(
+    "env_name",
+    ["AGENTSCOPE_KERNEL_TRACING", "AGENTSCOPE_TASK_TOOLS_ENABLED"],
+)
+def test_middleware_settings_reject_non_boolean(monkeypatch, env_name):
+    monkeypatch.setenv(env_name, "maybe")
+
+    try:
+        RuntimeSettings.from_env()
+    except ValueError as exc:
+        assert env_name in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError(f"{env_name}=maybe should be rejected")

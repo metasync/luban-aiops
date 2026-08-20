@@ -106,14 +106,11 @@ class AgentKernel:
         self._max_cached_agents = max_cached_agents
         self._last_error: str | None = None
         # Per-token toolkit cache (SPEC-008 R-5): a toolkit is built per owning
-        # user's delegated token so one user's credential is never used for
-        # another user's session. Keyed by token; the gateway reuses the same
-        # delegated token for a user until near-expiry, so discovery is cached.
+        # user's delegated token so discovery runs once per token. Tool
+        # closures read the current token from the DELEGATED_TOKEN contextvar
+        # at call time (SPEC-018 R-2), so cached toolkits keep working across
+        # portal token refresh.
         self._toolkits: dict[str, object] = {}
-        # Per-token tool definition cache (SPEC-011 R-2): discovery results
-        # are cached per token; per-request toolkits are built from these
-        # definitions with a fresh trace queue.
-        self._tool_definitions: dict[str, list[dict]] = {}
         self._toolkit_lock = asyncio.Lock()
         self._agent_lock = asyncio.Lock()
 
@@ -180,11 +177,11 @@ class AgentKernel:
     async def _ensure_toolkit(self, bearer_token: str | None = None):
         """Build (once per token) and return the Toolkit with gateway tools.
 
-        Toolkits are cached per delegated token so the owning user's credential
-        is bound into the closures and never shared across users.
-
-        Also caches tool definitions in ``_tool_definitions`` for per-request
-        toolkit rebuilding (SPEC-011 R-2).
+        Toolkits are cached per delegated token so discovery runs once per
+        token; tool closures read the current token from ``DELEGATED_TOKEN``
+        at call time, so a cached toolkit keeps working across portal token
+        refresh (SPEC-018 R-2). Empty discovery results are intentionally NOT
+        cached: the next caller retries discovery instead of being poisoned.
         """
         cache_key = bearer_token or ""
         cached = self._toolkits.get(cache_key)
@@ -199,6 +196,12 @@ class AgentKernel:
             if cached is not None:
                 return cached
 
+            task_tools = (
+                self._build_task_tools()
+                if self.settings.task_tools_enabled
+                else []
+            )
+
             if self.settings.tool_gateway_url:
                 from agent_service.tools.gateway_tools import (
                     build_gateway_toolkit,
@@ -206,73 +209,83 @@ class AgentKernel:
                 )
 
                 try:
-                    # Cache tool definitions separately for per-request
-                    # rebuilds; empty results are not cached so the next
-                    # caller retries discovery instead of being poisoned.
                     definitions = await discover_tools(
                         self.settings.tool_gateway_url, bearer_token
                     )
                     if definitions:
-                        self._tool_definitions[cache_key] = definitions
                         toolkit = build_gateway_toolkit(
                             definitions,
                             self.settings.tool_gateway_url,
-                            bearer_token,
                         )
+                        if task_tools:
+                            toolkit.tool_groups[0].tools.extend(task_tools)
                         self._toolkits[cache_key] = toolkit
                         return toolkit
                 except Exception as exc:
                     LOGGER.warning("failed to build gateway toolkit: %s", exc)
 
-            toolkit = Toolkit()
-            self._toolkits[cache_key] = toolkit
-            return toolkit
+            # No gateway (or nothing discovered): task tools only, returned
+            # uncached so a later turn can retry discovery.
+            return Toolkit(tools=task_tools)
 
-    async def _build_request_toolkit(
-        self,
-        bearer_token: str | None,
-        trace_queue: "asyncio.Queue",
-    ):
-        """Build a fresh Toolkit with closures bound to ``trace_queue``.
+    def _build_task_tools(self) -> list:
+        """Built-in agentscope task tools, opt-in (SPEC-018 R-5).
 
-        Uses cached tool definitions (from ``_ensure_toolkit``) to avoid
-        re-discovery. Delegated tokens rotate mid-session (portal token
-        refresh), and the session-cached agent short-circuits discovery for
-        the new token, so on a cache miss this method discovers with the
-        current token itself. Empty results are never cached: the next turn
-        retries instead of being stuck on a poisoned entry (SPEC-011 R-2).
+        These mutate only session-local agent state, so the SPEC-017
+        snapshot/restore persists them with no extra work.
         """
-        cache_key = bearer_token or ""
-        definitions = self._tool_definitions.get(cache_key, [])
-        if not definitions and self.settings.tool_gateway_url and bearer_token:
-            from agent_service.tools.gateway_tools import discover_tools
+        from agentscope.tool import TaskCreate, TaskGet, TaskList, TaskUpdate
 
-            definitions = await discover_tools(
-                self.settings.tool_gateway_url, bearer_token
-            )
-            if definitions:
-                self._tool_definitions[cache_key] = definitions
-        if not definitions:
-            from agentscope.tool import Toolkit
-            return Toolkit()
+        return [TaskCreate(), TaskGet(), TaskList(), TaskUpdate()]
 
-        from agent_service.tools.gateway_tools import build_gateway_toolkit
+    def _build_middlewares(self) -> list:
+        """Compose the kernel middleware stack (SPEC-018).
 
-        return build_gateway_toolkit(
-            definitions,
-            self.settings.tool_gateway_url or "",
-            bearer_token,
-            trace_queue=trace_queue,
-            data_summary_max_chars=self.settings.tool_data_summary_max_chars,
+        Permission and evidence middlewares are always registered; OTel
+        kernel tracing (R-3) and the reply token budget (R-4) are opt-in
+        via settings and stay absent when unconfigured.
+        """
+        from agent_service.services.kernel_middleware import (
+            GatewayPermissionMiddleware,
+            ToolEvidenceMiddleware,
         )
 
-    async def _count_function_tools(self, toolkit) -> int:
-        """Count real (function) tools in a toolkit, excluding meta tools."""
-        try:
-            schemas = await toolkit.get_tool_schemas()
-        except Exception:
-            return 0
-        return sum(1 for schema in schemas if schema.get("type") == "function")
+        settings = self.settings
+        middlewares: list = [
+            GatewayPermissionMiddleware(),
+            ToolEvidenceMiddleware(
+                data_summary_max_chars=settings.tool_data_summary_max_chars,
+            ),
+        ]
+        if settings.kernel_tracing:
+            from agentscope.middleware import TracingMiddleware
+
+            middlewares.append(TracingMiddleware())
+        if settings.reply_token_budget is not None:
+            from agentscope.middleware import ReplyBudgetControlMiddleware
+
+            middlewares.append(
+                ReplyBudgetControlMiddleware(
+                    token_budget=settings.reply_token_budget,
+                    input_token_weight=settings.reply_input_token_weight,
+                    output_token_weight=settings.reply_output_token_weight,
+                )
+            )
+        return middlewares
+
+    def _count_gateway_tools(self, toolkit) -> int:
+        """Count gateway-backed tools in a toolkit.
+
+        Task tools and builtins are excluded: only gateway tools ground the
+        model in live data, which is what the no-tools guard cares about
+        (SPEC-018 R-5).
+        """
+        count = 0
+        for group in getattr(toolkit, "tool_groups", None) or []:
+            for tool in getattr(group, "tools", None) or []:
+                if getattr(tool, "gateway_tool_name", None):
+                    count += 1
+        return count
 
     def _build_kernel_configs(self):
         """Settings-driven kernel configs (SPEC-017 R-1).
@@ -357,6 +370,7 @@ class AgentKernel:
             system_prompt=self.settings.system_prompt,
             model=self._build_model(),
             toolkit=toolkit,
+            middlewares=self._build_middlewares(),
             state=state,
             **configs,
         )
@@ -385,8 +399,30 @@ class AgentKernel:
         """
         cached = self._agents.get(session_id)
         if cached is not None:
-            self._agents.move_to_end(session_id)
-            return cached
+            # Gateway tools recovered after this agent was built with an
+            # empty toolkit (discovery failure): rebuild so the turn can see
+            # them. Persisted state (SPEC-017 R-3) restores the memory.
+            agent, _user_msg_cls = cached
+            current_toolkit = await self._ensure_toolkit(bearer_token)
+            if (
+                self._count_gateway_tools(getattr(agent, "toolkit", None)) == 0
+                and self._count_gateway_tools(current_toolkit) > 0
+            ):
+                LOGGER.info(
+                    "gateway tools recovered; rebuilding kernel agent for "
+                    "session %s",
+                    session_id,
+                )
+                self._agents.pop(session_id, None)
+            else:
+                # Re-check membership: the await above opens a preemption
+                # window where a concurrent turn's recovery branch may pop
+                # this entry, or LRU eviction may remove it. A vanished
+                # entry falls through to the locked path, which re-checks
+                # the cache before building.
+                if session_id in self._agents:
+                    self._agents.move_to_end(session_id)
+                    return cached
         async with self._agent_lock:
             cached = self._agents.get(session_id)
             if cached is not None:
@@ -454,12 +490,21 @@ class AgentKernel:
         if not self.is_configured():
             return self.build_unconfigured_message(message, session_id), None
 
+        from agent_service.tools.gateway_tools import DELEGATED_TOKEN
+
         try:
             agent, user_msg_cls = await self.ensure_agent(session_id, bearer_token)
-            reply_msg = await agent.reply(
-                user_msg_cls(name=user_name, content=message),
-                structured_schema=response_schema,
-            )
+            # Expose the turn's delegated token to the cached tool closures
+            # (SPEC-018 R-2). No evidence sink is set: blocking turns emit
+            # no trace frames.
+            token_var = DELEGATED_TOKEN.set(bearer_token)
+            try:
+                reply_msg = await agent.reply(
+                    user_msg_cls(name=user_name, content=message),
+                    structured_schema=response_schema,
+                )
+            finally:
+                DELEGATED_TOKEN.reset(token_var)
             self.clear_error()
             structured = getattr(reply_msg, "structured_output", None)
             if not isinstance(structured, dict):
@@ -518,37 +563,52 @@ class AgentKernel:
                 yield event
             return
 
+        from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
+        from agent_service.tools.gateway_tools import DELEGATED_TOKEN
+
         try:
-            # Ensure the agent (with cached toolkit + definitions) exists.
+            # Ensure the agent (with the token-cached toolkit) exists.
             agent, user_msg_cls = await self.ensure_agent(session_id, bearer_token)
 
-            # SPEC-011 R-2: create a per-request trace queue and rebuild the
-            # toolkit with closures bound to it. The agent retains conversation
-            # memory; only the toolkit functions are request-scoped.
-            trace_queue: asyncio.Queue = asyncio.Queue()
+            # Deterministic anti-hallucination guard: with a gateway
+            # configured but zero gateway tools registered the model has no
+            # real data to ground in, so inject an explicit notice for this
+            # turn instead of relying on the standing system prompt. Task
+            # tools never count: they provide no live data (SPEC-018 R-5).
             effective_message = message
-            if self.settings.tool_gateway_url:
-                request_toolkit = await self._build_request_toolkit(
-                    bearer_token, trace_queue,
-                )
-                agent.toolkit = request_toolkit
-
-                # Deterministic anti-hallucination guard: with a gateway
-                # configured but zero registered tools the model has no real
-                # data to ground in, so inject an explicit notice for this turn
-                # instead of relying on the standing system prompt.
-                if await self._count_function_tools(request_toolkit) == 0:
-                    LOGGER.warning(
-                        "tool gateway configured but no tools registered; "
-                        "injecting no-tools notice to prevent fabrication"
-                    )
-                    effective_message = f"{NO_TOOLS_NOTICE}\n\n{message}"
-
-            async for event in agent.reply_stream(
-                user_msg_cls(name=user_name, content=effective_message)
+            if (
+                self.settings.tool_gateway_url
+                and self._count_gateway_tools(agent.toolkit) == 0
             ):
-                self.clear_error()
-                # Drain any accumulated trace events before yielding text.
+                LOGGER.warning(
+                    "tool gateway configured but no tools registered; "
+                    "injecting no-tools notice to prevent fabrication"
+                )
+                effective_message = f"{NO_TOOLS_NOTICE}\n\n{message}"
+
+            # SPEC-018 R-2: a request-scoped evidence sink consumed by
+            # ToolEvidenceMiddleware replaces the per-request toolkit
+            # rebuild; the delegated token is exposed the same way for the
+            # cached tool closures.
+            trace_queue: asyncio.Queue = asyncio.Queue()
+            sink_var = TOOL_EVIDENCE_SINK.set(trace_queue)
+            token_var = DELEGATED_TOKEN.set(bearer_token)
+            try:
+                async for event in agent.reply_stream(
+                    user_msg_cls(name=user_name, content=effective_message)
+                ):
+                    self.clear_error()
+                    # Drain any accumulated trace events before yielding text.
+                    while not trace_queue.empty():
+                        trace = trace_queue.get_nowait()
+                        yield {
+                            **trace,
+                            "request_id": request_id,
+                            "session_id": session_id,
+                        }
+                    yield self.normalize_event(event, request_id, session_id)
+
+                # Drain any remaining trace events after the stream completes.
                 while not trace_queue.empty():
                     trace = trace_queue.get_nowait()
                     yield {
@@ -556,16 +616,9 @@ class AgentKernel:
                         "request_id": request_id,
                         "session_id": session_id,
                     }
-                yield self.normalize_event(event, request_id, session_id)
-
-            # Drain any remaining trace events after the stream completes.
-            while not trace_queue.empty():
-                trace = trace_queue.get_nowait()
-                yield {
-                    **trace,
-                    "request_id": request_id,
-                    "session_id": session_id,
-                }
+            finally:
+                DELEGATED_TOKEN.reset(token_var)
+                TOOL_EVIDENCE_SINK.reset(sink_var)
 
             # Persist conversation state after the completed turn so it
             # survives restarts (SPEC-017 R-3). Fail-open by design.

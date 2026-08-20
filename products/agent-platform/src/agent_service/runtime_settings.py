@@ -130,6 +130,13 @@ class RuntimeSettings:
     tool_result_limit: int = 50000
     timezone: str = "UTC"
     model_max_retries: int = 0
+    # Kernel middleware surfaces (SPEC-018). All opt-in: unset deployments
+    # behave exactly as before the settings existed.
+    kernel_tracing: bool = False
+    reply_token_budget: float | None = None
+    reply_input_token_weight: float = 1.0
+    reply_output_token_weight: float = 1.0
+    task_tools_enabled: bool = False
 
     @staticmethod
     def default_provider_options(provider: RuntimeProvider) -> RuntimeProviderOptions:
@@ -170,6 +177,20 @@ class RuntimeSettings:
             raise ValueError("AGENTSCOPE_TOOL_RESULT_LIMIT must be >= 1.")
         if self.model_max_retries < 0:
             raise ValueError("AGENTSCOPE_MODEL_MAX_RETRIES must be >= 0.")
+        # Kernel middleware validation (SPEC-018): opt-in knobs fail startup
+        # with a clear error instead of reaching the kernel misconfigured.
+        if self.reply_token_budget is not None and self.reply_token_budget <= 0:
+            raise ValueError(
+                "AGENTSCOPE_REPLY_TOKEN_BUDGET must be > 0 when set."
+            )
+        if self.reply_input_token_weight < 0:
+            raise ValueError(
+                "AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT must be >= 0."
+            )
+        if self.reply_output_token_weight < 0:
+            raise ValueError(
+                "AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT must be >= 0."
+            )
         if not self.timezone:
             raise ValueError("AGENTSCOPE_TIMEZONE must not be empty.")
         try:
@@ -254,6 +275,12 @@ class RuntimeSettings:
                 "Unsupported AGENTSCOPE_PROVIDER. "
                 f"Expected one of: {', '.join(SUPPORTED_RUNTIME_PROVIDERS)}."
             )
+        input_token_weight = _optional_float(
+            "AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT"
+        )
+        output_token_weight = _optional_float(
+            "AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT"
+        )
         return cls(
             profile=profile,
             provider=provider,
@@ -275,6 +302,17 @@ class RuntimeSettings:
             tool_result_limit=int(os.getenv("AGENTSCOPE_TOOL_RESULT_LIMIT", "50000")),
             timezone=os.getenv("AGENTSCOPE_TIMEZONE", "UTC").strip() or "UTC",
             model_max_retries=int(os.getenv("AGENTSCOPE_MODEL_MAX_RETRIES", "0")),
+            kernel_tracing=_optional_bool("AGENTSCOPE_KERNEL_TRACING") or False,
+            reply_token_budget=_optional_float("AGENTSCOPE_REPLY_TOKEN_BUDGET"),
+            reply_input_token_weight=(
+                1.0 if input_token_weight is None else input_token_weight
+            ),
+            reply_output_token_weight=(
+                1.0 if output_token_weight is None else output_token_weight
+            ),
+            task_tools_enabled=(
+                _optional_bool("AGENTSCOPE_TASK_TOOLS_ENABLED") or False
+            ),
         )
 
     def is_configured(self) -> bool:

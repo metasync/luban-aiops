@@ -13,9 +13,11 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.4.0 — 2026-08-20
+
 ### Added — Platform versioning discipline
 
-- New root `VERSION` file (semver, currently `0.3.0`) as the single source
+- New root `VERSION` file (semver) as the single source
   of truth for the platform version; all products and the portal track it in
   lockstep (`pyproject.toml`, `metadata.py` `SERVICE_VERSION`, portal
   `PLATFORM_VERSION` — all bumped from the stale `0.1.0`).
@@ -67,6 +69,36 @@ Release 1 entries are grouped retrospectively under 0.1.0.
   Snapshot/restore never fails a turn; corrupt rows are discarded with a
   counter. Session deletion also removes persisted state, and `/health`
   surfaces the `agent_state` backend.
+
+### Added — SPEC-018: Kernel middleware alignment
+
+- The agent-platform kernel moves all cross-cutting behavior onto
+  AgentScope's supported `MiddlewareBase` hooks and drops the private
+  surfaces: the `GatewayFunctionTool` subclass is gone (permission
+  decisions now come from `GatewayPermissionMiddleware.on_check_permission`
+  with the unchanged `AGENT_GATEWAY_TOOL_AUTO_ALLOW` allow-list), the
+  per-request toolkit rebuild and `agent.toolkit` mutation are gone
+  (evidence frames now come from `ToolEvidenceMiddleware.on_acting` with a
+  request-scoped sink; toolkits are cached per delegated token), and tool
+  closures read the delegated token from a contextvar at call time so
+  portal token refresh no longer needs an agent rebuild. The
+  `agent-stream-event.schema.json` frame contract is unchanged.
+- Opt-in kernel capabilities via new settings, each validated at startup:
+  `AGENTSCOPE_KERNEL_TRACING` (out-of-box `TracingMiddleware` for OTel
+  agent/LLM/tool spans through the existing OTLP pipeline),
+  `AGENTSCOPE_REPLY_TOKEN_BUDGET` (+ `_INPUT_TOKEN_WEIGHT` /
+  `_OUTPUT_TOKEN_WEIGHT`, out-of-box `ReplyBudgetControlMiddleware`), and
+  `AGENTSCOPE_TASK_TOOLS_ENABLED` (built-in `TaskCreate`/`TaskGet`/
+  `TaskList`/`TaskUpdate`, persisted through the SPEC-017 agent state
+  store). Unset deployments behave exactly as before.
+- dev-k8s enables `AGENTSCOPE_KERNEL_TRACING=true` for the deployed
+  agent-platform and documents recommended starting values for the
+  budget/task-tools opt-ins.
+- Delivery includes the utilization re-audit memo
+  (`docs/workspace/agentscope-utilization-audit.md`) with the adopted /
+  kept-platform-owned / spike-needed decision matrix, the entrypoint
+  surface clarification, and the HITL bridging / ASK → DENY future-scope
+  carry-forward.
 
 ### Changed
 

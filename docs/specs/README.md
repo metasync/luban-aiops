@@ -131,4 +131,4 @@ Mechanical enforcement:
 | `SPEC-015` | Incident triage and collaboration — incident-service intake/triage, connector framework, portal Incidents experience | `delivered` |
 | `SPEC-016` | Session store separation — Postgres session backend for agent-platform, kernel Redis untouched | `delivered` |
 | `SPEC-017` | Agent kernel utilization and conversation durability — kernel configs, structured triage output, AgentState persistence to Postgres | `delivered` |
-| `SPEC-018` | Kernel middleware alignment — middleware-based tracing/permission hooks, built-in task tools (sequenced after SPEC-017) | `planned` |
+| `SPEC-018` | Kernel middleware alignment — middleware-based tracing/permission hooks, built-in task tools (sequenced after SPEC-017) | `delivered` |

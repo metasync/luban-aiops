@@ -239,6 +239,12 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime
 | `AGENTSCOPE_TOOL_RESULT_LIMIT` | Tool result character limit (`ContextConfig.tool_result_limit`; must be >= 1) | `50000` | code default |
 | `AGENTSCOPE_TIMEZONE` | Runtime-state injection timezone (`InjectionConfig.timezone`; IANA name, validated at startup) | `UTC` | code default |
 | `AGENTSCOPE_MODEL_MAX_RETRIES` | Model call retry count (`ModelConfig.max_retries`; must be >= 0) | `0` | code default |
+| `AGENTSCOPE_KERNEL_TRACING` | Register agentscope's out-of-box `TracingMiddleware` for OTel kernel spans (inert without an SDK `TracerProvider`) | `false` | code default |
+| `AGENTSCOPE_REPLY_TOKEN_BUDGET` | Reply token budget (`ReplyBudgetControlMiddleware.token_budget`; must be > 0 when set; unset disables the budget) | unset | code default |
+| `AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT` | Input token weight for the reply budget (must be >= 0; `0` is valid) | `1.0` | code default |
+| `AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT` | Output token weight for the reply budget (must be >= 0; `0` is valid) | `1.0` | code default |
+| `AGENTSCOPE_TASK_TOOLS_ENABLED` | Opt-in agentscope task tools (`TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate`; state-local, persisted via the agent state store) | `false` | code default |
+| `AGENT_GATEWAY_TOOL_AUTO_ALLOW` | Comma-separated dotted gateway tool names auto-approved by the permission middleware when read-only (overrides the built-in vetted list) | built-in vetted list | code default |
 | `TOOL_GATEWAY_URL` | Upstream tool-gateway URL | `http://tool-gateway:8000` | runtime-config |
 
 ### platform-gateway

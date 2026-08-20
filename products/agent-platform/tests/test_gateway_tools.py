@@ -1,12 +1,12 @@
-"""Gateway tools integration tests (SPEC-007 R-6, SPEC-008 R-5)."""
+"""Gateway tools integration tests (SPEC-007 R-6, SPEC-008 R-5, SPEC-018 R-2)."""
 
 import asyncio
 import json
-import os
 import unittest
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from agent_service.tools.gateway_tools import (
+    DELEGATED_TOKEN,
     _make_tool_fn,
     build_function_tools,
     build_gateway_toolkit,
@@ -129,35 +129,34 @@ class InvokeGatewayToolTests(unittest.TestCase):
 
 
 class MakeToolFnTests(unittest.TestCase):
-    """The closure factory: metadata and token binding (SPEC-008 R-5)."""
+    """The closure factory: metadata and token carriage (SPEC-018 R-2)."""
 
     def test_function_name_sanitized(self) -> None:
-        fn = _make_tool_fn(
-            "http://gw:8080", "k8s.list_pods", "List pods.", None, None, 2000
-        )
+        fn = _make_tool_fn("http://gw:8080", "k8s.list_pods", "List pods.")
         self.assertEqual(fn.__name__, "k8s_list_pods")
 
     def test_function_docstring_set(self) -> None:
         fn = _make_tool_fn(
-            "http://gw:8080", "k8s.list_pods",
-            "List pods in a namespace.", None, None, 2000,
+            "http://gw:8080", "k8s.list_pods", "List pods in a namespace.",
         )
         self.assertEqual(fn.__doc__, "List pods in a namespace.")
 
-    def test_closure_binds_token_and_dotted_name(self) -> None:
-        fn = _make_tool_fn(
-            "http://gw:8080", "k8s.list_pods", "d", "user-token", None, 2000
-        )
+    def test_closure_reads_token_contextvar_and_dotted_name(self) -> None:
+        """The delegated token rides the DELEGATED_TOKEN contextvar (set per
+        turn by the kernel), so cached toolkits survive token refresh."""
+        fn = _make_tool_fn("http://gw:8080", "k8s.list_pods", "d")
         mock_result = {"status": "success", "data": {"pods": []}}
         with patch(
             "agent_service.tools.gateway_tools.invoke_gateway_tool",
             new_callable=AsyncMock,
         ) as mock_invoke:
             mock_invoke.return_value = mock_result
-            result_str = _run(fn(namespace="test"))
+            token_var = DELEGATED_TOKEN.set("user-token")
+            try:
+                chunk = _run(fn(namespace="test"))
+            finally:
+                DELEGATED_TOKEN.reset(token_var)
 
-        result = json.loads(result_str)
-        self.assertEqual(result["status"], "success")
         # The gateway receives the ORIGINAL dotted tool name; identity rides on
         # the token only (never in the body).
         mock_invoke.assert_called_once_with(
@@ -166,6 +165,23 @@ class MakeToolFnTests(unittest.TestCase):
             parameters={"namespace": "test"},
             bearer_token="user-token",
         )
+        # The ToolChunk carries the gateway result on its metadata for the
+        # evidence middleware, and the model-visible text is the JSON result.
+        self.assertEqual(chunk.metadata["gateway_result"], mock_result)
+        self.assertEqual(
+            json.loads(chunk.content[0].text),
+            mock_result,
+        )
+
+    def test_closure_without_token_contextvar_passes_none(self) -> None:
+        fn = _make_tool_fn("http://gw:8080", "k8s.list_pods", "d")
+        with patch(
+            "agent_service.tools.gateway_tools.invoke_gateway_tool",
+            new_callable=AsyncMock,
+        ) as mock_invoke:
+            mock_invoke.return_value = {"status": "error"}
+            _run(fn())
+        self.assertIsNone(mock_invoke.call_args[1]["bearer_token"])
 
 
 class BuildFunctionToolsTests(unittest.TestCase):
@@ -225,23 +241,24 @@ class BuildFunctionToolsTests(unittest.TestCase):
         tools = build_function_tools("http://gw:8080", MOCK_TOOL_DEFINITIONS)
         self.assertTrue(tools[0].is_read_only)
 
-    def test_vetted_read_only_tools_auto_allowed_without_user_confirmation(self) -> None:
-        """Regression: AgentScope 2.x defaults custom tools to ASK, which
-        stalls a headless SSE stream at RequireUserConfirmEvent. Read-only
-        gateway tools on the vetted allow-list must be pre-approved so
-        invocations actually run."""
-        from agentscope.permission import PermissionBehavior
+    def test_gateway_tool_name_carries_dotted_name(self) -> None:
+        """SPEC-018 R-2: each tool stashes its dotted gateway name so the
+        evidence middleware can emit frames with the original tool name."""
+        tools = build_function_tools("http://gw:8080", MOCK_TOOL_DEFINITIONS)
+        self.assertEqual(tools[0].gateway_tool_name, "k8s.list_pods")
+        self.assertEqual(tools[1].gateway_tool_name, "k8s.get_pod")
+
+    def test_tools_are_plain_function_tools(self) -> None:
+        """SPEC-018 R-1: permission decisions moved to
+        GatewayPermissionMiddleware; no FunctionTool subclass remains."""
+        from agentscope.tool import FunctionTool
 
         tools = build_function_tools("http://gw:8080", MOCK_TOOL_DEFINITIONS)
-        decision = _run(tools[0].check_permissions())
-        self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
+        for tool in tools:
+            self.assertEqual(type(tool), FunctionTool)
 
-    def test_skills_tools_auto_allowed_with_sanitized_names(self) -> None:
-        """SPEC-014 R-5: skills.search/skills.get/skills.list are vetted
-        read-only and auto-approved; the allow-list matches sanitized
-        FunctionTool names."""
-        from agentscope.permission import PermissionBehavior
-
+    def test_skills_tool_names_sanitized(self) -> None:
+        """SPEC-014 R-5: skills tools keep sanitized FunctionTool names."""
         defs = [
             {
                 "name": "skills.search",
@@ -269,16 +286,9 @@ class BuildFunctionToolsTests(unittest.TestCase):
         self.assertEqual(tools[0].name, "skills_search")
         self.assertEqual(tools[1].name, "skills_get")
         self.assertEqual(tools[2].name, "skills_list")
-        for tool in tools:
-            decision = _run(tool.check_permissions())
-            self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
 
-    def test_incidents_tools_auto_allowed_with_sanitized_names(self) -> None:
-        """SPEC-015 R-4: incidents.list/incidents.get are vetted read-only
-        and auto-approved; the allow-list matches sanitized FunctionTool
-        names."""
-        from agentscope.permission import PermissionBehavior
-
+    def test_incidents_tool_names_sanitized(self) -> None:
+        """SPEC-015 R-4: incidents tools keep sanitized FunctionTool names."""
         defs = [
             {
                 "name": "incidents.list",
@@ -298,45 +308,8 @@ class BuildFunctionToolsTests(unittest.TestCase):
         tools = build_function_tools("http://gw:8080", defs)
         self.assertEqual(tools[0].name, "incidents_list")
         self.assertEqual(tools[1].name, "incidents_get")
-        for tool in tools:
-            decision = _run(tool.check_permissions())
-            self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
 
-    def test_read_only_tool_outside_allow_list_still_requires_confirmation(self) -> None:
-        """Auto-approval is allow-listed, not blanket: a read-only tool that
-        is not vetted keeps the ASK default."""
-        from agentscope.permission import PermissionBehavior
-
-        defs = [{
-            "name": "k8s.list_secrets",
-            "description": "x",
-            "risk_level": "read",
-            "parameters_schema": {"type": "object"},
-        }]
-        tools = build_function_tools("http://gw:8080", defs)
-        self.assertTrue(tools[0].is_read_only)
-        decision = _run(tools[0].check_permissions())
-        self.assertEqual(decision.behavior, PermissionBehavior.ASK)
-
-    def test_auto_allow_list_env_override(self) -> None:
-        """AGENT_GATEWAY_TOOL_AUTO_ALLOW scopes auto-approval per deployment."""
-        from agentscope.permission import PermissionBehavior
-
-        with patch.dict(os.environ, {"AGENT_GATEWAY_TOOL_AUTO_ALLOW": "k8s.get_pod"}):
-            tools = build_function_tools("http://gw:8080", MOCK_TOOL_DEFINITIONS)
-        # k8s.list_pods is read-only but no longer on the allow-list.
-        self.assertEqual(
-            _run(tools[0].check_permissions()).behavior,
-            PermissionBehavior.ASK,
-        )
-        self.assertEqual(
-            _run(tools[1].check_permissions()).behavior,
-            PermissionBehavior.ALLOW,
-        )
-
-    def test_non_read_only_tools_still_require_confirmation(self) -> None:
-        from agentscope.permission import PermissionBehavior
-
+    def test_non_read_only_flag_from_risk_level(self) -> None:
         defs = [{
             "name": "k8s.restart_pod",
             "description": "x",
@@ -345,8 +318,6 @@ class BuildFunctionToolsTests(unittest.TestCase):
         }]
         tools = build_function_tools("http://gw:8080", defs)
         self.assertFalse(tools[0].is_read_only)
-        decision = _run(tools[0].check_permissions())
-        self.assertEqual(decision.behavior, PermissionBehavior.ASK)
 
 
 class BuildToolkitRegressionTests(unittest.TestCase):
