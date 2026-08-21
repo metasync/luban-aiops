@@ -12,16 +12,16 @@
 - [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
 - [web-ui-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-service.yaml)
 - [image.mk](file://mk/image.mk)
+- [VERSION](file://VERSION)
+- [validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced navigation system with sectioned organization (Chat, Control, Workspace sections)
-- Added live permission visibility through permission matrix endpoint
-- Implemented workspace resource discovery for tools and skills catalogs
-- Added comprehensive sidebar restructuring with role-based section hiding
-- Integrated cited guidance chips display system for skills.* tools success responses
-- Enhanced evidence card rendering with clickable skill citation elements
+- Updated PLATFORM_VERSION to v0.5.0 for consistency across platform ecosystem
+- Enhanced cache-buster mechanism with timestamp-based versioning (20260821-release-0.5.0)
+- Improved client-side caching behavior after deployment through query parameter versioning
+- Updated version validation system to enforce consistency across all platform components
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -32,7 +32,7 @@
 6. [Enhanced Navigation System](#enhanced-navigation-system)
 7. [Role-Gated Audit Trail System](#role-gated-audit-trail-system)
 8. [Authentication and Security](#authentication-and-security)
-9. [Markdown Rendering System](#markdown-rendering-system)
+9. [Markdown Rendering System](#markdown-rendering-interface)
 10. [Real-time Streaming Interface](#real-time-streaming-interface)
 11. [Skills Integration and Cited Guidance](#skills-integration-and-cited-guidance)
 12. [Permission Matrix and Workspace Resources](#permission-matrix-and-workspace-resources)
@@ -47,7 +47,7 @@
 
 The Operator Portal is a modern web-based administrative interface designed for platform administration and monitoring within the Luban AIOPS ecosystem. Built with vanilla JavaScript and HTML/CSS, it provides operators with a sophisticated two-column shell interface featuring a persistent sidebar for navigation and a main content area for interactive operations. The portal serves as a centralized control plane for platform administrators, offering real-time visibility into system status through an interactive chat interface, comprehensive evidence panels for tool execution tracking, configuration management capabilities, and administrative functions necessary for maintaining the AI-powered agent platform infrastructure.
 
-**Updated** The portal has undergone significant enhancements including an enhanced navigation system with sectioned organization (Chat, Control, Workspace sections), live permission visibility through the permission matrix endpoint, workspace resource discovery for tools and skills catalogs, and comprehensive sidebar restructuring with role-based section hiding. The interface now includes "Cited guidance" chips display system that shows matched skills as clickable elements with title and namespaced ID when skills.* tools succeed, providing enhanced operational visibility and traceability for team-owned guidance references.
+**Updated** The portal has been updated to version 0.5.0 with enhanced version consistency across the platform ecosystem. The PLATFORM_VERSION constant has been synchronized with the root VERSION file, and improved cache-busting mechanisms ensure proper client-side caching behavior after deployment. The interface includes enhanced skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions, providing enhanced operational visibility and traceability for team-owned guidance references.
 
 ## Project Structure
 
@@ -61,16 +61,17 @@ A --> C[styles.css]
 D[nginx.conf] --> A
 E[Dockerfile] --> A
 F[Makefile] --> E
+G[VERSION] --> H[validate_version.py]
 end
 subgraph "Kubernetes Deployment"
-G[web-ui-deployment.yaml] --> H[web-ui-service.yaml]
-H --> I[Service Endpoint]
+I[web-ui-deployment.yaml] --> J[web-ui-service.yaml]
+J --> K[Service Endpoint]
 end
-J[Backend Services] --> K[API Gateway]
-K --> L[Agent Platform]
-K --> M[Identity Broker]
-K --> N[Tool Gateway]
-I --> K
+L[Backend Services] --> M[API Gateway]
+M --> N[Agent Platform]
+M --> O[Identity Broker]
+M --> P[Tool Gateway]
+K --> M
 ```
 
 **Diagram sources**
@@ -78,6 +79,8 @@ I --> K
 - [app.js](file://products/operator-portal/web-ui/app.js)
 - [nginx.conf](file://products/operator-portal/nginx.conf)
 - [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
+- [VERSION](file://VERSION)
+- [validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 
 **Section sources**
 - [index.html](file://products/operator-portal/web-ui/index.html)
@@ -123,12 +126,13 @@ The Operator Portal consists of several key components that work together to pro
 - **Skills Inventory**: Browseable catalog of available skills with source and tag filtering
 - **Workspace Resources**: Centralized view of platform resources and capabilities
 
-### Deployment Components
-- **Container Image**: Dockerized application using nginxinc/nginx-unprivileged:1.27-alpine for non-root execution
-- **Kubernetes Resources**: Deployment and service definitions with enhanced security context
-- **Configuration Management**: Environment-specific settings and secrets
+### Version Management and Cache Busting
+- **Version Synchronization**: PLATFORM_VERSION constant synchronized with root VERSION file
+- **Cache-Busting Mechanism**: Query parameter versioning (v=20260821-release-0.5.0) ensures proper client-side caching
+- **Validation System**: Automated version consistency checks across all platform components
+- **Deployment Consistency**: Coordinated versioning across all platform services
 
-**Updated** The interface now includes enhanced skills integration with "Cited guidance" chips that provide visual feedback when skills.* tools successfully execute, showing matched skills as clickable elements with title and namespaced ID for improved operational traceability, along with comprehensive permission visibility and workspace resource discovery capabilities.
+**Updated** The interface now includes enhanced skills integration with "Cited guidance" chips that provide visual feedback when skills.* tools successfully execute, showing matched skills as clickable elements with title and namespaced ID for improved operational traceability, along with comprehensive permission visibility and workspace resource discovery capabilities. The version management system ensures consistency across the platform ecosystem with improved cache-busting mechanisms.
 
 **Section sources**
 - [app.js](file://products/operator-portal/web-ui/app.js)
@@ -147,9 +151,9 @@ participant Nginx as "Nginx Server (Port 8080)"
 participant Gateway as "API Gateway"
 participant Identity as "Identity Broker"
 participant Agent as "Agent Platform"
-User->>Portal : Load index.html
-Portal->>Nginx : Request static assets (Port 8080)
-Nginx-->>Portal : Serve HTML/CSS/JS
+User->>Portal : Load index.html?v=20260821-release-0.5.0
+Portal->>Nginx : Request static assets with cache-busting
+Nginx-->>Portal : Serve HTML/CSS/JS with no-store headers
 Note over Portal : Authentication Flow
 Portal->>Gateway : /api/v1/auth/login
 Gateway->>Identity : Redirect to OIDC provider
@@ -179,7 +183,7 @@ Portal->>User : Display cited guidance chips for skills.* tools
 - [app.js](file://products/operator-portal/web-ui/app.js)
 - [nginx.conf](file://products/operator-portal/nginx.conf)
 
-The architecture emphasizes simplicity, performance, and maintainability while providing enterprise-grade functionality for platform operations.
+The architecture emphasizes simplicity, performance, and maintainability while providing enterprise-grade functionality for platform operations. The cache-busting mechanism ensures clients always receive the latest version of static assets after deployments.
 
 ## Detailed Component Analysis
 
@@ -238,7 +242,7 @@ The JavaScript application implements core functionality including:
 - **Pagination Support**: Cursor-based pagination with load more functionality
 - **Event Detail View**: Expandable rows showing full event envelope JSON
 
-**Updated** The interface now includes comprehensive skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions, providing enhanced operational visibility and traceability for team-owned guidance references, along with enhanced sectioned navigation and role-based section hiding.
+**Updated** The interface now includes comprehensive skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions, providing enhanced operational visibility and traceability for team-owned guidance references, along with enhanced sectioned navigation and role-based section hiding. The version management system ensures consistent platform-wide versioning.
 
 **Section sources**
 - [app.js](file://products/operator-portal/web-ui/app.js)
@@ -771,6 +775,7 @@ The nginx configuration handles static file serving and reverse proxy setup on p
 - **Security Headers**: Content Security Policy and other security headers
 - **Compression**: Gzip compression for reduced bandwidth usage
 - **Non-root Execution**: Runs as unprivileged user for enhanced security
+- **Cache Control**: No-store headers for all static assets to prevent caching issues
 
 ### Environment Configuration
 
@@ -781,7 +786,16 @@ Configure environment variables for the portal deployment:
 - **Logging Level**: Debug, info, warning, or error levels
 - **Feature Flags**: Enable/disable specific features
 
-**Updated** The deployment now supports the enhanced skills integration with "Cited guidance" chips, improved navigation system with sectioned organization, and comprehensive workspace resource discovery capabilities. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints.
+### Version Management and Cache Busting
+
+The deployment process includes enhanced version management:
+
+- **Platform Version**: PLATFORM_VERSION set to v0.5.0 for consistency across the platform ecosystem
+- **Cache-Busting**: Query parameter versioning (v=20260821-release-0.5.0) ensures proper client-side caching behavior
+- **Version Validation**: Automated validation ensures all platform components use consistent versions
+- **Deployment Coordination**: Coordinated versioning across all platform services
+
+**Updated** The deployment now supports the enhanced skills integration with "Cited guidance" chips, improved navigation system with sectioned organization, and comprehensive workspace resource discovery capabilities. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. The cache-busting mechanism ensures clients always receive the latest version of static assets after deployments.
 
 **Section sources**
 - [nginx.conf](file://products/operator-portal/nginx.conf)
@@ -1053,7 +1067,17 @@ Common issues and their solutions when working with the Operator Portal.
 - Review browser console for role detection errors
 - Confirm identity normalization is working correctly
 
-**Updated** Added troubleshooting guidance for the enhanced navigation system, permission matrix, workspace resources, and skills integration features, including common issues with section visibility, permission displays, resource loading, and cited guidance chip rendering.
+### Version and Cache Issues
+
+**Problem**: Outdated static assets being served after deployment
+**Solution**:
+- Verify cache-busting query parameters are present in HTML references
+- Check that nginx is serving files with no-store headers
+- Clear browser cache and hard refresh the page
+- Verify VERSION file matches PLATFORM_VERSION in app.js
+- Ensure validate-version script passes during build process
+
+**Updated** Added troubleshooting guidance for the enhanced navigation system, permission matrix, workspace resources, and skills integration features, including common issues with section visibility, permission displays, resource loading, and cited guidance chip rendering. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism.
 
 **Section sources**
 - [app.js](file://products/operator-portal/web-ui/app.js)
@@ -1062,7 +1086,7 @@ Common issues and their solutions when working with the Operator Portal.
 
 The Operator Portal provides a comprehensive, accessible, and customizable web interface for platform administration and monitoring within the Luban AIOPS ecosystem. Built with vanilla JavaScript and modern web standards, it delivers enterprise-grade functionality while maintaining simplicity and performance.
 
-**Updated** The recent enhancements include a significantly improved navigation system with sectioned organization (Chat, Control, Workspace sections), live permission visibility through the permission matrix endpoint, comprehensive workspace resource discovery for tools and skills catalogs, and enhanced skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions. These improvements provide enhanced operational visibility and traceability for team-owned guidance references while maintaining strict security boundaries through role-based access control.
+**Updated** The recent enhancements include a significantly improved navigation system with sectioned organization (Chat, Control, Workspace sections), live permission visibility through the permission matrix endpoint, comprehensive workspace resource discovery for tools and skills catalogs, and enhanced skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions. The platform has been updated to version 0.5.0 with enhanced version consistency across the platform ecosystem and improved cache-busting mechanisms for proper client-side caching behavior after deployment.
 
 Key strengths of the enhanced portal include its modular architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive skills integration capabilities, and improved navigation organization. The deployment process remains streamlined through containerization and Kubernetes-native configurations, making it suitable for both development and production environments.
 

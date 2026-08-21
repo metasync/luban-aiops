@@ -4,6 +4,7 @@
 **Referenced Files in This Document**
 - [README.md](file://README.md)
 - [Makefile](file://Makefile)
+- [VERSION](file://VERSION)
 - [products/agent-platform/README.md](file://products/agent-platform/README.md)
 - [products/identity-broker/README.md](file://products/identity-broker/README.md)
 - [products/tool-gateway/README.md](file://products/tool-gateway/README.md)
@@ -27,9 +28,25 @@
 - [shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-service.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml)
-- [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/deploy.sh)
+- [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
 - [shared/platform-ops/gitops/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/reconcile-portal-oidc-client.sh)
+- [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
+- [products/audit-service/src/audit_service/metadata.py](file://products/audit-service/src/audit_service/metadata.py)
+- [products/incident-service/src/incident_service/metadata.py](file://products/incident-service/src/incident_service/metadata.py)
+- [products/agent-platform/src/agent_service/metadata.py](file://products/agent-platform/src/agent_service/metadata.py)
+- [products/identity-broker/src/identity_service/metadata.py](file://products/identity-broker/src/identity_service/metadata.py)
+- [products/platform-gateway/src/platform_gateway/metadata.py](file://products/platform-gateway/src/platform_gateway/metadata.py)
+- [products/skills-hub/src/skills_hub/metadata.py](file://products/skills-hub/src/skills_hub/metadata.py)
+- [products/tool-gateway/src/tool_gateway/metadata.py](file://products/tool-gateway/src/tool_gateway/metadata.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated version information to reflect coordinated lockstep version bump across all seven platform components (0.5.0)
+- Added documentation for the new audit-service and incident-service components introduced in this release
+- Enhanced environment configuration section with version validation requirements
+- Updated troubleshooting guide to include version consistency checks
+- Added new section on coordinated version management and release coordination
 
 ## Table of Contents
 1. Introduction
@@ -38,14 +55,17 @@
 4. Quick Start: Local Development
 5. Quick Start: Production Deployment
 6. Environment Configuration and Secrets
-7. Initial Validation and First API Call
-8. Troubleshooting Guide
-9. Next Steps by Persona
-10. Architecture Overview
-11. Conclusion
+7. Coordinated Version Management
+8. Initial Validation and First API Call
+9. Troubleshooting Guide
+10. Next Steps by Persona
+11. Architecture Overview
+12. Conclusion
 
 ## Introduction
 This guide helps you get up and running with the Luban AIOps Platform for local development and production deployment. It covers prerequisites, installation steps, environment configuration, secret management, initial validation, and common troubleshooting tips. You will also find links to additional resources and next steps tailored for developers, operators, and security teams.
+
+**Updated** This document reflects the coordinated 0.5.0 release with synchronized versions across all seven platform components: audit-service, incident-service, agent-platform, identity-broker, platform-gateway, skills-hub, and tool-gateway.
 
 ## Prerequisites
 Ensure your environment meets the following requirements before proceeding:
@@ -59,6 +79,7 @@ Ensure your environment meets the following requirements before proceeding:
 Notes:
 - The platform uses Kustomize overlays under shared/platform-ops/gitops for both development and production profiles.
 - Runtime profiles are provided for OpenAI, DashScope, and DeepSeek; select one based on your needs.
+- **New**: Version 0.5.0 introduces coordinated versioning that requires all components to maintain synchronized versions through the centralized VERSION file.
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
@@ -71,6 +92,9 @@ The repository is organized into product services and shared operational assets:
   - identity-broker: Identity and token services
   - tool-gateway: API gateway, policy enforcement, and tool orchestration
   - operator-portal: Web UI for operators
+  - **New**: audit-service: Durable audit trail service for authenticated event ingestion and retention
+  - **New**: incident-service: Incident intake, triage, and collaboration dispatch
+  - **Existing**: skills-hub: Skills and grounded guidance federation
 - Shared:
   - platform-ops: GitOps overlays, scripts, runtime profiles, and base Kustomize manifests
   - shared-contracts: JSON schemas and observability conventions
@@ -83,6 +107,9 @@ AP["Agent Platform"]
 IB["Identity Broker"]
 TG["Tool Gateway"]
 OP["Operator Portal"]
+AS["Audit Service"]
+IS["Incident Service"]
+SH["Skills Hub"]
 end
 subgraph "Shared Ops"
 KO["Kustomize Base"]
@@ -97,6 +124,9 @@ AP --> KO
 IB --> KO
 TG --> KO
 OP --> KO
+AS --> KO
+IS --> KO
+SH --> KO
 KO --> RDS
 KO --> K8S
 RP --> KO
@@ -125,7 +155,7 @@ Follow these steps to run the platform locally using Kustomize overlays:
    - Verify that Redis and core services are healthy.
 
 5. Deploy overlays
-   - Apply the dev overlay to deploy all platform components (agent-platform, identity-broker, tool-gateway, operator-portal).
+   - Apply the dev overlay to deploy all platform components (agent-platform, identity-broker, tool-gateway, operator-portal, audit-service, incident-service, skills-hub).
    - Confirm pods are running and services are exposed.
 
 6. Access the Operator Portal
@@ -160,7 +190,7 @@ For production, use the same Kustomize overlays with appropriate overlays and se
    - Use the sync script to apply secrets to the target namespace.
 
 3. Apply Kustomize overlays
-   - Apply the base and production-specific overlays to deploy all services.
+   - Apply the base and production-specific overlays to deploy all services including the new audit and incident services.
    - Verify deployments, services, and policies are applied correctly.
 
 4. Configure observability and policies
@@ -203,6 +233,7 @@ Best practices:
 - Never commit real secrets to version control; use the example templates and external secret stores.
 - Rotate secrets regularly and audit access.
 - Validate configurations with the verification script before deploying.
+- **New**: Ensure version consistency across all components using the coordinated version validation system.
 
 **Section sources**
 - [shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml)
@@ -210,11 +241,50 @@ Best practices:
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/platform-ops/gitops/dev-k8s/base/shared/observability.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/observability.env)
 
+## Coordinated Version Management
+Version 0.5.0 introduces a coordinated versioning system that ensures all platform components maintain synchronized versions:
+
+### Single Source of Truth
+- The root `VERSION` file serves as the single source of truth for the platform semver
+- All seven platform components must maintain lockstep version alignment with the central VERSION file
+
+### Components Covered
+The coordinated versioning applies to:
+- audit-service (SERVICE_VERSION: 0.5.0)
+- incident-service (SERVICE_VERSION: 0.5.0)
+- agent-platform (SERVICE_VERSION: 0.5.0)
+- identity-broker (SERVICE_VERSION: 0.5.0)
+- platform-gateway (SERVICE_VERSION: 0.5.0)
+- skills-hub (SERVICE_VERSION: 0.5.0)
+- tool-gateway (SERVICE_VERSION: 0.5.0)
+
+### Version Validation
+- Automated validation through `make validate-version` ensures version consistency
+- The validation script checks VERSION file, pyproject.toml files, and metadata.py files
+- Pre-commit/pre-push gates enforce version synchronization
+
+### Release Process
+- Update the root VERSION file to coordinate releases across all components
+- Run `make validate-version` to verify all components are synchronized
+- Build and deploy using coordinated image tags generated from the VERSION file
+
+**Section sources**
+- [VERSION](file://VERSION)
+- [Makefile:29-32](file://Makefile#L29-L32)
+- [shared/shared-contracts/scripts/validate_version.py:1-121](file://shared/shared-contracts/scripts/validate_version.py#L1-L121)
+- [products/audit-service/src/audit_service/metadata.py:1-6](file://products/audit-service/src/audit_service/metadata.py#L1-L6)
+- [products/incident-service/src/incident_service/metadata.py:1-6](file://products/incident-service/src/incident_service/metadata.py#L1-L6)
+- [products/agent-platform/src/agent_service/metadata.py:1-12](file://products/agent-platform/src/agent_service/metadata.py#L1-L12)
+- [products/identity-broker/src/identity_service/metadata.py:1-6](file://products/identity-broker/src/identity_service/metadata.py#L1-L6)
+- [products/platform-gateway/src/platform_gateway/metadata.py:1-6](file://products/platform-gateway/src/platform_gateway/metadata.py#L1-L6)
+- [products/skills-hub/src/skills_hub/metadata.py:1-6](file://products/skills-hub/src/skills_hub/metadata.py#L1-L6)
+- [products/tool-gateway/src/tool_gateway/metadata.py:1-6](file://products/tool-gateway/src/tool_gateway/metadata.py#L1-L6)
+
 ## Initial Validation and First API Call
 After deployment, validate the platform and make your first API call:
 
 1. Health checks
-   - Verify health endpoints for each service (tool-gateway, identity-broker, agent-platform).
+   - Verify health endpoints for each service (tool-gateway, identity-broker, agent-platform, audit-service, incident-service, skills-hub).
    - Ensure all pods are Running and Services are Ready.
 
 2. Operator Portal
@@ -228,6 +298,10 @@ After deployment, validate the platform and make your first API call:
 4. Session and tools
    - Explore session management and tool invocation through the gateway.
    - Validate policy enforcement by attempting restricted actions.
+
+5. New service validation
+   - Test audit-service endpoints for event ingestion and querying
+   - Validate incident-service functionality for incident management workflows
 
 Use curl or an HTTP client to test endpoints. Refer to service READMEs for endpoint details and examples.
 
@@ -260,11 +334,22 @@ Common issues and resolutions:
   - Review policy definitions and RBAC rules.
   - Adjust policies to allow intended operations while maintaining security.
 
+- **New**: Version consistency issues
+  - Run `make validate-version` to check for version drift between components
+  - Ensure all SERVICE_VERSION values match the root VERSION file
+  - Verify pyproject.toml files have consistent version declarations
+
+- **New**: New service connectivity issues
+  - Check audit-service and incident-service health endpoints
+  - Verify database connections for stateful services
+  - Validate inter-service communication through the platform gateway
+
 Useful commands:
 - kubectl get pods, svc, ing -n <namespace>
 - kubectl describe pod <pod-name> -n <namespace>
 - kubectl logs <pod-name> -n <namespace>
 - kubectl get configmaps, secrets -n <namespace>
+- **New**: make validate-version
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
@@ -283,21 +368,25 @@ Useful commands:
   - Explore service codebases and APIs under products/* directories.
   - Run unit tests and integration tests locally.
   - Extend providers and tools as needed.
+  - **New**: Understand the coordinated versioning system and contribute to version updates.
 
 - Operators
   - Manage Kustomize overlays and secrets lifecycle.
   - Implement CI/CD pipelines for automated deployments.
   - Configure monitoring, alerting, and log aggregation.
+  - **New**: Monitor version consistency across all seven platform components.
 
 - Security Teams
   - Review RBAC rules and policy definitions.
   - Audit secrets management and rotation procedures.
   - Enforce compliance policies and conduct periodic assessments.
+  - **New**: Validate audit-service and incident-service security configurations.
 
 Additional resources:
 - Repository README for high-level overview and links
 - Product READMEs for detailed service documentation
 - GitOps scripts and overlays for deployment automation
+- **New**: Version validation scripts and coordinated release processes
 
 **Section sources**
 - [README.md](file://README.md)
@@ -311,6 +400,9 @@ The platform consists of several microservices orchestrated via Kubernetes and e
 - Identity Broker: Authentication, authorization, and token management
 - Agent Platform: Agent runtime and provider integrations
 - Operator Portal: Web UI for operational tasks
+- **New**: Audit Service: Durable audit trail with authenticated event ingestion and retention
+- **New**: Incident Service: Incident intake, triage, and collaboration dispatch
+- **Existing**: Skills Hub: Skills and grounded guidance federation
 - Redis: Stateful component for sessions and caching
 
 ```mermaid
@@ -320,17 +412,25 @@ GW["Tool Gateway"]
 IDB["Identity Broker"]
 AP["Agent Platform"]
 OP["Operator Portal"]
+AS["Audit Service"]
+IS["Incident Service"]
 RDS["Redis"]
 K8S["Kubernetes"]
 Client --> GW
 GW --> IDB
 GW --> AP
+GW --> AS
+GW --> IS
 OP --> K8S
 AP --> RDS
 IDB --> RDS
+AS --> RDS
+IS --> RDS
 ```
 
 [No sources needed since this diagram shows conceptual architecture]
 
 ## Conclusion
-You now have the essential information to install, configure, and operate the Luban AIOps Platform for both local development and production. Use the provided scripts and overlays to manage deployments, secrets, and runtime profiles. For deeper exploration, consult the product READMEs and GitOps assets. If you encounter issues, refer to the troubleshooting guide and leverage Kubernetes diagnostics.
+You now have the essential information to install, configure, and operate the Luban AIOps Platform for both local development and production. Version 0.5.0 introduces coordinated versioning across all seven platform components, ensuring consistent releases and simplified maintenance. Use the provided scripts and overlays to manage deployments, secrets, and runtime profiles. For deeper exploration, consult the product READMEs and GitOps assets. If you encounter issues, refer to the troubleshooting guide and leverage Kubernetes diagnostics.
+
+**Updated** The coordinated version management system in version 0.5.0 provides enhanced reliability and simplifies multi-component releases across the entire platform ecosystem.
