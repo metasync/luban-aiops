@@ -4,6 +4,7 @@
 **Referenced Files in This Document**
 - [policy-specification.md](file://docs/agentic-aiops-platform/policy-specification.md)
 - [SPEC-004-policy-enforcement/spec.md](file://docs/specs/SPEC-004-policy-enforcement/spec.md)
+- [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 - [Makefile](file://Makefile)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
@@ -13,8 +14,10 @@
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
 - [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
+- [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
+- [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
@@ -27,12 +30,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new policy matrix functionality that evaluates currently enforced policy bundle to generate role × action permission table
-- Documented server-side row scoping for different user contexts (full matrix for platform-admin, own rows for other roles)
-- Updated policy actions vocabulary to include new `tools:list` and `skills:read` actions
-- Enhanced policy evaluation flow with transparency endpoint for live permission visibility
-- Added detailed coverage of policy matrix schema validation and response structure
-- Updated troubleshooting guide with policy matrix access scenarios
+- Added comprehensive documentation for the new `chat:confirm` policy action introduced by SPEC-020 (HITL Confirmation Bridging)
+- Updated authorization matrix to include `chat:confirm` action with role-based access control
+- Documented the deny-by-default security model for the mutating chat confirmation capability
+- Added detailed coverage of HITL confirmation flow, audit trail generation, and portal integration
+- Enhanced policy evaluation flow with new protected action constant and route implementation
+- Updated troubleshooting guide with chat confirmation access scenarios
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -42,16 +45,17 @@
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Enhanced Policy Tooling](#enhanced-policy-tooling)
 7. [Policy Matrix Functionality](#policy-matrix-functionality)
-8. [Dependency Analysis](#dependency-analysis)
-9. [Performance Considerations](#performance-considerations)
-10. [Troubleshooting Guide](#troubleshooting-guide)
-11. [Conclusion](#conclusion)
-12. [Appendices](#appendices)
+8. [HITL Confirmation Bridging](#hitl-confirmation-bridging)
+9. [Dependency Analysis](#dependency-analysis)
+10. [Performance Considerations](#performance-considerations)
+11. [Troubleshooting Guide](#troubleshooting-guide)
+12. [Conclusion](#conclusion)
+13. [Appendices](#appendices)
 
 ## Introduction
 This document describes the policy management system that enables declarative policy definitions and runtime enforcement across the platform. It covers the policy language syntax, built-in rule types, custom policy development, evaluation flow, decision logic, audit trail generation, testing, validation, deployment, versioning, conflict resolution, performance optimization, and integration with identity contexts and authorization decisions across services.
 
-The system is designed to be declarative, auditable, and extensible, allowing operators to define policies centrally and enforce them consistently at the API gateway boundary and within tool execution paths. **Updated** with enhanced policy matrix functionality that provides live visibility into effective permissions through a role × action permission table, server-side row scoping for different user contexts, and new policy actions (`tools:list`, `skills:read`) for enhanced workspace transparency.
+The system is designed to be declarative, auditable, and extensible, allowing operators to define policies centrally and enforce them consistently at the API gateway boundary and within tool execution paths. **Updated** with enhanced policy matrix functionality that provides live visibility into effective permissions through a role × action permission table, server-side row scoping for different user contexts, new policy actions (`tools:list`, `skills:read`, `chat:confirm`) for enhanced workspace transparency, and comprehensive HITL (Human-in-the-Loop) confirmation bridging for approval-gated bounded actions.
 
 ## Project Structure
 Policy-related artifacts are distributed across documentation, schemas, runtime implementation, tests, and Kubernetes manifests:
@@ -62,12 +66,14 @@ Policy-related artifacts are distributed across documentation, schemas, runtime 
 - Tests validate behavior and edge cases for policy evaluation and enforcement.
 - Kubernetes manifests provide default policies and RBAC configurations for deployment.
 - **New**: Policy matrix functionality provides live transparency surface for effective permissions.
+- **New**: HITL confirmation bridging provides approval-gated workflow for mutating operations.
 
 ```mermaid
 graph TB
 subgraph "Documentation"
 PS["Policy Specification"]
 SPEC["SPEC-004 Policy Enforcement"]
+SPEC20["SPEC-020 HITL Confirmation"]
 AUTH_MATRIX["Authorization Matrix"]
 end
 subgraph "Schemas"
@@ -75,11 +81,13 @@ SCHEMA_RULE["policy-rule.schema.json"]
 SCHEMA_DECISION["policy-decision.schema.json"]
 SCHEMA_IDENTITY["identity-context.schema.json"]
 SCHEMA_MATRIX["policy-matrix.schema.json"]
+SCHEMA_CONFIRM["chat-confirm.schema.json"]
 end
 subgraph "Runtime"
 ENGINE_TOOL["tool-gateway policy-engine.py"]
 ENGINE_PLATFORM["platform-gateway policy-engine.py"]
 MATRIX_ENGINE["policy_matrix.py"]
+CHAT_ROUTE["chat.py confirm route"]
 DEFAULT_POLICY["policy-default.yaml (canonical)"]
 AUDIT_ROUTE["audit.py route"]
 POLICY_ROUTE["policy.py route"]
@@ -91,6 +99,7 @@ end
 subgraph "Tests"
 TEST_TOOL["test_policy_engine.py (tool-gateway)"]
 TEST_PLATFORM["test_policy_engine.py (platform-gateway)"]
+TEST_CHAT["test_chat_confirm.py"]
 TEST_AUDIT["test_audit_proxy.py"]
 TEST_MATRIX["test_policy_matrix.py"]
 end
@@ -100,12 +109,14 @@ K8S_RBAC["rbac.yaml"]
 end
 PS --> SCHEMA_RULE
 SPEC --> SCHEMA_DECISION
+SPEC20 --> SCHEMA_CONFIRM
 AUTH_MATRIX --> DEFAULT_POLICY
 SCHEMA_RULE --> ENGINE_TOOL
 SCHEMA_RULE --> ENGINE_PLATFORM
 SCHEMA_DECISION --> ENGINE_TOOL
 SCHEMA_DECISION --> ENGINE_PLATFORM
 SCHEMA_MATRIX --> MATRIX_ENGINE
+SCHEMA_CONFIRM --> CHAT_ROUTE
 DEFAULT_POLICY --> VALIDATE_SCRIPT
 VALIDATE_SCRIPT --> MAKEFILE_TARGETS
 MAKEFILE_TARGETS --> ENGINE_TOOL
@@ -114,6 +125,7 @@ DEFAULT_POLICY --> ENGINE_TOOL
 DEFAULT_POLICY --> ENGINE_PLATFORM
 ENGINE_TOOL --> TEST_TOOL
 ENGINE_PLATFORM --> TEST_PLATFORM
+CHAT_ROUTE --> TEST_CHAT
 AUDIT_ROUTE --> TEST_AUDIT
 POLICY_ROUTE --> TEST_MATRIX
 MATRIX_ENGINE --> TEST_MATRIX
@@ -126,21 +138,25 @@ K8S_RBAC --> ENGINE_PLATFORM
 **Diagram sources**
 - [policy-specification.md](file://docs/agentic-aiops-platform/policy-specification.md)
 - [SPEC-004-policy-enforcement/spec.md](file://docs/specs/SPEC-004-policy-enforcement/spec.md)
+- [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
 - [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
+- [chat-confirm.schema.json](file://shared/shared-contracts/schemas/chat-confirm.schema.json)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 - [Makefile](file://Makefile)
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
+- [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
@@ -149,6 +165,7 @@ K8S_RBAC --> ENGINE_PLATFORM
 **Section sources**
 - [policy-specification.md](file://docs/agentic-aiops-platform/policy-specification.md)
 - [SPEC-004-policy-enforcement/spec.md](file://docs/specs/SPEC-004-policy-enforcement/spec.md)
+- [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
 - [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 - [Makefile](file://Makefile)
@@ -156,10 +173,12 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
+- [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
@@ -176,6 +195,7 @@ K8S_RBAC --> ENGINE_PLATFORM
 - Tests: Unit and integration tests validating policy evaluation outcomes and enforcement behavior.
 - Deployment Artifacts: Kubernetes manifests for policy configuration and RBAC controls.
 - **New**: Policy Matrix Engine: Generates live role × action permission tables from currently enforced policy bundle with server-side row scoping.
+- **New**: HITL Confirmation Bridge: Provides approval-gated workflow for mutating operations with durable audit trails.
 
 Key responsibilities:
 - Load and validate policy documents.
@@ -184,12 +204,14 @@ Key responsibilities:
 - Generate structured decisions and audit records.
 - Expose metrics and observability hooks for monitoring.
 - **New**: Build effective permission matrices with full policy semantics inheritance.
-- **Updated**: Enforce deny-by-default authorization for sensitive operations like audit trail access.
+- **New**: Handle HITL confirmation flows with proper delegation and audit trails.
+- **Updated**: Enforce deny-by-default authorization for sensitive operations like audit trail access and chat confirmations.
 
 **Section sources**
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
@@ -198,13 +220,14 @@ Key responsibilities:
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
+- [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 - [Makefile](file://Makefile)
 
 ## Architecture Overview
-The policy enforcement architecture integrates at the API gateway layer and tool invocation path. Requests carry identity context; the policy engine evaluates policies and returns decisions that gate access or modify behavior. Audit trails are recorded for compliance and debugging. **Updated** with policy matrix endpoint providing live transparency into effective permissions.
+The policy enforcement architecture integrates at the API gateway layer and tool invocation path. Requests carry identity context; the policy engine evaluates policies and returns decisions that gate access or modify behavior. Audit trails are recorded for compliance and debugging. **Updated** with policy matrix endpoint providing live transparency into effective permissions and HITL confirmation bridging for approval-gated workflows.
 
 ```mermaid
 sequenceDiagram
@@ -213,8 +236,9 @@ participant Gateway as "API Gateway"
 participant Identity as "Identity Broker"
 participant Engine as "Policy Engine"
 participant Matrix as "Policy Matrix"
-participant AuditRoute as "Audit Route"
-participant Tool as "Tool Service"
+participant Confirm as "Confirm Route"
+participant Agent as "Agent Platform"
+participant Audit as "Audit Service"
 Client->>Gateway : "Request with token"
 Gateway->>Identity : "Validate token and resolve identity"
 Identity-->>Gateway : "Identity context"
@@ -223,23 +247,34 @@ Gateway->>Matrix : "GET /api/v1/policy/matrix"
 Matrix->>Engine : "Evaluate each role×action cell"
 Engine-->>Matrix : "Decision for each cell"
 Matrix-->>Client : "Permission matrix + metadata"
+else "Chat Confirmation"
+Gateway->>Confirm : "POST /api/v1/chat/confirm"
+Confirm->>Engine : "Enforce 'chat : confirm' action"
+Engine-->>Confirm : "Decision + audit trail"
+alt "Allowed (operator/approver/etc)"
+Confirm->>Agent : "Proxy with delegated token"
+Agent-->>Confirm : "SSE stream with confirmation_result"
+Confirm->>Audit : "Emit confirmation_decided event"
+Confirm-->>Client : "Resumed SSE stream"
+else "Denied (observer)"
+Confirm-->>Client : "403 Forbidden"
+end
 else "Audit Trail Access"
-Gateway->>AuditRoute : "GET /api/v1/audit/events"
-AuditRoute->>Engine : "Evaluate 'audit : read' action"
-Engine-->>AuditRoute : "Decision + audit trail"
+Gateway->>Audit : "GET /api/v1/audit/events"
+Audit->>Engine : "Evaluate 'audit : read' action"
+Engine-->>Audit : "Decision + audit trail"
 alt "Allowed (auditor/platform-admin)"
-AuditRoute->>Tool : "Forward request to audit service"
-Tool-->>AuditRoute : "Response"
-AuditRoute-->>Client : "Response"
+Audit->>Audit : "Forward request to audit service"
+Audit-->>Client : "Response"
 else "Denied (other roles)"
-AuditRoute-->>Client : "403 Forbidden"
+Audit-->>Client : "403 Forbidden"
 end
 else "Other Actions"
 Gateway->>Engine : "Evaluate policy with request + identity"
 Engine-->>Gateway : "Decision + audit trail"
 alt "Allowed"
-Gateway->>Tool : "Forward request"
-Tool-->>Gateway : "Response"
+Gateway->>Agent : "Forward request"
+Agent-->>Gateway : "Response"
 Gateway-->>Client : "Response"
 else "Denied"
 Gateway-->>Client : "Deny response"
@@ -251,6 +286,7 @@ end
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
@@ -260,6 +296,7 @@ end
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
@@ -279,7 +316,7 @@ Built-in rule types typically cover:
 - Rate limiting per user, tenant, or resource.
 - Tool usage restrictions by capability or environment.
 - Data access control by sensitivity labels or ownership.
-- **Updated**: New policy actions including `tools:list` for tool discovery and `skills:read` for skills inventory access.
+- **Updated**: New policy actions including `tools:list` for tool discovery, `skills:read` for skills inventory access, and `chat:confirm` for HITL confirmation bridging.
 
 Custom policy development involves extending condition evaluators and action handlers while adhering to schema constraints.
 
@@ -372,6 +409,68 @@ def build_policy_matrix(settings, identity):
 - [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 
+### HITL Confirmation Bridging
+
+**New Section** - Comprehensive coverage of the Human-in-the-Loop confirmation bridging functionality introduced by SPEC-020.
+
+#### Approval-Gated Workflow
+The HITL confirmation bridge provides a secure mechanism for approving or denying potentially mutating tool calls before they execute. When the agent kernel encounters a non-allow-listed tool call, it parks the request and emits a `confirmation_request` frame, suspending execution until human approval is received.
+
+#### Chat Confirmation Endpoint
+The `/api/v1/chat/confirm` endpoint handles approval decisions with the following flow:
+1. Identity resolution and policy enforcement for `chat:confirm` action
+2. Delegated token acquisition for downstream authentication
+3. Proxy to agent-platform's `/api/v2/chat/confirm` endpoint
+4. SSE stream passthrough with confirmation result frames
+5. Durable audit trail emission for all decisions
+
+#### Role-Based Authorization
+Access to the `chat:confirm` action is restricted to specific roles:
+- **Granted**: `platform-admin`, `approver`, `operator`, `developer`
+- **Denied**: `read-only-observer` (by design, as confirmation is an act-on-system action)
+
+#### Implementation Details
+The confirmation route follows established patterns for request correlation, structured logging, and error handling:
+
+```python
+# In chat.py
+@router.post("/api/v1/chat/confirm")
+async def chat_confirm_route(
+    request: Request,
+    body: ChatConfirmRequest,
+    x_request_id: str | None = Header(default=None),
+    settings: PlatformGatewaySettings = Depends(get_settings),
+) -> StreamingResponse:
+    request_id = resolve_request_id(x_request_id)
+    identity = await resolve_request_identity(settings, request, request_id)
+    enforce_policy(settings, identity, ACTION_CHAT_CONFIRM, request_id)
+    delegated_token = await obtain_delegated_token(
+        settings,
+        identity.subject,
+        _bearer_token(request),
+    )
+    log_event(LOGGER, "chat_confirm_started", ...)
+    return await chat_confirm(...)
+```
+
+#### Audit Trail Integration
+Every confirmation decision generates a durable `confirmation_decided` audit event containing:
+- Session and confirmation identifiers
+- Decision outcome (approve/deny)
+- Tool names involved in the confirmation
+- User identity and roles
+- Timestamp and correlation information
+
+#### Portal Integration
+The operator portal renders parked confirmations as inline approval cards with Approve/Deny buttons, hidden for users without `chat:confirm` permissions. The UI handles various states including expired confirmations, concurrent turn conflicts, and streaming continuation after decisions.
+
+**Section sources**
+- [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
+- [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
+- [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
+- [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
+
 ### Audit Trail Access Control
 Audit trail access control enforces strict role-based permissions for the `audit:read` action:
 
@@ -413,10 +512,11 @@ These records support compliance reporting, debugging, and performance analysis.
 - Rate Limiting: Enforce per-user or per-tenant request quotas using time-window counters and thresholds.
 - Data Access Control: Restrict access to sensitive data based on labels, ownership, or clearance levels.
 - Tool Usage Restrictions: Limit tool invocations by capability, environment, or role.
-- **Updated**: New policy actions for enhanced workspace transparency:
+- **Updated**: New policy actions for enhanced workspace transparency and HITL workflows:
   - `tools:list`: Discover available tools (granted to operational, developer, and observer roles)
   - `skills:read`: View federated skills inventory (granted to all platform roles)
   - `policy:read`: Access live permission matrix (granted to all platform roles)
+  - `chat:confirm`: Approve or deny parked HITL tool confirmations (granted to platform-admin, approver, operator, and developer roles)
 
 Examples are implemented via rule definitions and condition evaluators aligned with schemas.
 
@@ -439,6 +539,8 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - Short-Circuiting: Early exit on decisive rules to reduce evaluation overhead.
 - Batching: Batch audit writes and metrics updates to minimize I/O.
 - **New**: Policy matrix evaluation leverages existing policy engine caching and evaluation semantics.
+- **New**: HITL confirmation bridging minimizes overhead through efficient SSE passthrough and deferred audit emission.
+- **Updated**: Audit trail access controls add minimal overhead through early policy evaluation.
 
 **Section sources**
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
@@ -449,6 +551,7 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - Authorization Decisions: Policy engine consumes identity context to evaluate rules and produce decisions consumed by gateway and tool services.
 - Cross-Service Consistency: Shared schemas ensure uniform interpretation of identity and decisions across services.
 - **Updated**: Policy matrix functionality integrates with normalized identity context for server-side row scoping.
+- **New**: HITL confirmation bridging uses delegated tokens to maintain identity continuity through approval workflows.
 
 **Section sources**
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
@@ -566,8 +669,55 @@ Every matrix cell evaluation inherits full policy engine semantics:
 - [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 
+## HITL Confirmation Bridging
+
+**New Section** - Comprehensive documentation of the Human-in-the-Loop confirmation bridging system.
+
+### HITL Confirmation Flow
+The HITL confirmation bridge creates a secure approval workflow for potentially mutating operations:
+
+#### Request Parking
+When the agent kernel encounters a non-allow-listed tool call, it:
+1. Emits a `RequireUserConfirmEvent` 
+2. Creates a `confirmation_request` frame with tool details
+3. Parks the tool call in an in-memory registry
+4. Ends the stream without a message_end frame
+
+#### Approval Interface
+The operator portal renders parked confirmations as inline cards showing:
+- Pending tool name(s) and parameters
+- Permission message explaining why approval is needed
+- Approve and Deny buttons (hidden for unauthorized users)
+- Status indicators for pending, approved, denied, or expired states
+
+#### Decision Processing
+Approval decisions follow this flow:
+1. Client posts to `/api/v1/chat/confirm` with session_id, confirm_id, and decision
+2. Gateway enforces `chat:confirm` policy action
+3. If allowed, obtains delegated token and proxies to agent-platform
+4. Agent-platform resumes parked tool calls with confirmation result
+5. Gateway emits `confirmation_decided` audit event
+6. Original SSE stream continues with confirmation_result frame
+
+#### Security Model
+- **Deny-by-Default**: Only specific roles can approve confirmations
+- **Delegation**: Confirmer identity rides delegated token into resulting tool invocations
+- **Expiration**: Pending confirmations expire after configurable timeout (default 600 seconds)
+- **Concurrency**: Sessions with pending confirmations reject new turns until resolved
+
+### Configuration and Testing
+- **Timeout Configuration**: `AGENT_HITL_CONFIRM_TIMEOUT` controls confirmation expiration
+- **Testing Coverage**: Comprehensive tests for policy enforcement, proxy behavior, error handling, and audit emission
+- **Portal Integration**: Client-side button hiding mirrors server-side authorization
+
+**Section sources**
+- [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
+- [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
+- [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
+
 ## Dependency Analysis
-Policy components depend on schemas for validation and consistency, and on identity services for context resolution. Deployment manifests configure runtime behavior and access controls. **Updated** with new dependencies on policy matrix functionality and validation tooling.
+Policy components depend on schemas for validation and consistency, and on identity services for context resolution. Deployment manifests configure runtime behavior and access controls. **Updated** with new dependencies on policy matrix functionality, HITL confirmation bridging, and validation tooling.
 
 ```mermaid
 graph TB
@@ -576,12 +726,15 @@ RULE_SCHEMA["policy-rule.schema.json"]
 DECISION_SCHEMA["policy-decision.schema.json"]
 IDENTITY_SCHEMA["identity-context.schema.json"]
 MATRIX_SCHEMA["policy-matrix.schema.json"]
+CONFIRM_SCHEMA["chat-confirm.schema.json"]
 ENGINE_TOOL["tool-gateway policy-engine.py"]
 ENGINE_PLATFORM["platform-gateway policy-engine.py"]
 MATRIX_ENGINE["policy_matrix.py"]
+CHAT_ROUTE["chat.py confirm route"]
 DEFAULT_YAML["policy-default.yaml (canonical)"]
 TEST_TOOL["test_policy_engine.py (tool-gateway)"]
 TEST_PLATFORM["test_policy_engine.py (platform-gateway)"]
+TEST_CHAT["test_chat_confirm.py"]
 TEST_AUDIT["test_audit_proxy.py"]
 TEST_MATRIX["test_policy_matrix.py"]
 K8S_POLICY["policy.yaml"]
@@ -592,6 +745,7 @@ AUDIT_ROUTE["audit.py route"]
 POLICY_ROUTE["policy.py route"]
 POLICY_SPEC --> RULE_SCHEMA
 POLICY_SPEC --> DECISION_SCHEMA
+SPEC20 --> CONFIRM_SCHEMA
 RULE_SCHEMA --> ENGINE_TOOL
 RULE_SCHEMA --> ENGINE_PLATFORM
 RULE_SCHEMA --> VALIDATE_SCRIPT
@@ -600,16 +754,19 @@ DECISION_SCHEMA --> ENGINE_PLATFORM
 IDENTITY_SCHEMA --> ENGINE_TOOL
 IDENTITY_SCHEMA --> ENGINE_PLATFORM
 MATRIX_SCHEMA --> MATRIX_ENGINE
+CONFIRM_SCHEMA --> CHAT_ROUTE
 DEFAULT_YAML --> VALIDATE_SCRIPT
 DEFAULT_YAML --> ENGINE_TOOL
 DEFAULT_YAML --> ENGINE_PLATFORM
 DEFAULT_YAML --> AUDIT_ROUTE
 DEFAULT_YAML --> POLICY_ROUTE
+DEFAULT_YAML --> CHAT_ROUTE
 VALIDATE_SCRIPT --> MAKEFILE_TARGETS
 MAKEFILE_TARGETS --> ENGINE_TOOL
 MAKEFILE_TARGETS --> ENGINE_PLATFORM
 ENGINE_TOOL --> TEST_TOOL
 ENGINE_PLATFORM --> TEST_PLATFORM
+CHAT_ROUTE --> TEST_CHAT
 AUDIT_ROUTE --> TEST_AUDIT
 POLICY_ROUTE --> TEST_MATRIX
 MATRIX_ENGINE --> TEST_MATRIX
@@ -621,18 +778,23 @@ K8S_RBAC --> ENGINE_PLATFORM
 
 **Diagram sources**
 - [policy-specification.md](file://docs/agentic-aiops-platform/policy-specification.md)
+- [SPEC-004-policy-enforcement/spec.md](file://docs/specs/SPEC-004-policy-enforcement/spec.md)
+- [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
+- [chat-confirm.schema.json](file://shared/shared-contracts/schemas/chat-confirm.schema.json)
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
+- [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
@@ -644,6 +806,7 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
@@ -651,8 +814,10 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
+- [chat-confirm.schema.json](file://shared/shared-contracts/schemas/chat-confirm.schema.json)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
+- [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
@@ -667,6 +832,7 @@ K8S_RBAC --> ENGINE_PLATFORM
 - Batch audit and metrics emissions to reduce overhead.
 - Monitor hot paths and tune thresholds for rate limiting and caching.
 - **New**: Policy matrix evaluation benefits from existing policy engine caching and efficient role × action computation.
+- **New**: HITL confirmation bridging uses efficient SSE passthrough and deferred audit emission to minimize latency.
 - **Updated**: Audit trail access controls add minimal overhead through early policy evaluation.
 
 [No sources needed since this section provides general guidance]
@@ -680,6 +846,7 @@ Common issues and resolutions:
 - **New**: Policy validation failures: Use `make validate-policy` to identify specific schema violations and bundle issues.
 - **New**: Policy synchronization errors: Run `make sync-policy` to ensure all service locations have consistent policy definitions.
 - **New**: Policy matrix access denied: Verify caller has `policy:read` action; check bundle contains `allow-all-policy-read` rule.
+- **New**: Chat confirmation access denied (403): Verify caller has one of the granted roles (`platform-admin`, `approver`, `operator`, `developer`); check bundle contains `allow-chat-confirm` rule.
 - **Updated**: Audit access denied (403): Verify caller has `auditor` or `platform-admin` role; check policy bundle contains `allow-auditors-audit-read` rule.
 
 Operational checks:
@@ -688,10 +855,12 @@ Operational checks:
 - Validate test coverage for new rules and scenarios.
 - **New**: Run `make verify` to execute complete validation pipeline including policy checks.
 - **Updated**: For audit access issues, verify OIDC group membership for `ops-auditors` and `ops-admins`.
+- **New**: For chat confirmation issues, verify user has appropriate role and confirmation hasn't expired.
 
 **Section sources**
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
+- [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
@@ -701,7 +870,7 @@ Operational checks:
 - [troubleshooting.md](file://docs/guides/troubleshooting.md)
 
 ## Conclusion
-The policy management system provides a robust, declarative framework for enforcing access control, rate limiting, and tool usage restrictions across services. With well-defined schemas, a clear evaluation flow, comprehensive auditing, strong testing and deployment practices, **and enhanced tooling for validation and synchronization**, it ensures consistent and secure behavior. Operators can extend capabilities through custom policies while maintaining performance and reliability. **Updated** with automated policy validation and synchronization capabilities that streamline policy management and reduce operational overhead, including comprehensive audit trail access controls with deny-by-default authorization for sensitive operations and new policy matrix functionality for live permission transparency.
+The policy management system provides a robust, declarative framework for enforcing access control, rate limiting, and tool usage restrictions across services. With well-defined schemas, a clear evaluation flow, comprehensive auditing, strong testing and deployment practices, **and enhanced tooling for validation and synchronization**, it ensures consistent and secure behavior. Operators can extend capabilities through custom policies while maintaining performance and reliability. **Updated** with automated policy validation and synchronization capabilities that streamline policy management and reduce operational overhead, including comprehensive audit trail access controls with deny-by-default authorization for sensitive operations, new policy matrix functionality for live permission transparency, and HITL confirmation bridging for approval-gated workflows that ensure safe execution of potentially mutating operations.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -711,10 +880,11 @@ The policy management system provides a robust, declarative framework for enforc
 - Rate Limiting: Define per-user quotas with time windows and throttle actions.
 - Data Access Control: Restrict sensitive endpoints based on identity labels and ownership.
 - Tool Usage Restrictions: Limit tool invocations by capability and environment.
-- **Updated**: New policy actions for enhanced workspace transparency:
+- **Updated**: New policy actions for enhanced workspace transparency and HITL workflows:
   - `tools:list`: Tool discovery for operational, developer, and observer roles
   - `skills:read`: Skills inventory access for all platform roles
   - `policy:read`: Permission matrix access for all platform roles
+  - `chat:confirm`: HITL confirmation approval for platform-admin, approver, operator, and developer roles
 
 **Section sources**
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
@@ -731,6 +901,7 @@ The policy management system provides a robust, declarative framework for enforc
 **Section sources**
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
+- [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
@@ -828,3 +999,89 @@ kubectl -n dev-luban-aiops exec deployment/platform-gateway -- \
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
+
+### Chat Confirmation Troubleshooting
+
+**New Section** - Specific guidance for resolving chat confirmation access and functionality issues.
+
+#### Common Symptoms
+- 403 Forbidden responses when accessing `/api/v1/chat/confirm`
+- Confirmation cards not appearing in portal UI
+- Expired confirmations preventing approval
+- Missing approval buttons for authorized users
+
+#### Diagnostic Steps
+```bash
+# Check platform-gateway logs for chat:confirm denials
+kubectl -n dev-luban-aiops logs deployment/platform-gateway --tail=30 | grep "chat:confirm"
+
+# Verify deployed policy bundle contains chat confirm rule
+kubectl -n dev-luban-aiops exec deployment/platform-gateway -- \
+  cat /etc/luban/policy/policy.yaml | grep -A6 allow-chat-confirm
+
+# Check agent-platform logs for confirmation state
+kubectl -n dev-luban-aiops logs deployment/agent-platform --tail=50 | grep "confirmation"
+```
+
+#### Resolution Steps
+1. **Verify User Roles**: Ensure user has one of the granted roles (`platform-admin`, `approver`, `operator`, `developer`)
+2. **Check Policy Bundle**: Ensure `allow-chat-confirm` rule is present and enabled
+3. **Validate Confirmation State**: Check if confirmation has expired or been resolved
+4. **Test Confirm Endpoint**: Direct curl test to verify endpoint functionality
+5. **Review Portal Integration**: Verify client-side button visibility matches server-side authorization
+
+#### Common Issues
+- **Observer Role**: `read-only-observer` is intentionally denied `chat:confirm` as it's an act-on-system action
+- **Expired Confirmations**: Default 600-second timeout may cause confirmations to expire before approval
+- **Concurrent Turns**: Sessions with pending confirmations reject new chat turns until resolved
+- **Delegation Token Issues**: Problems obtaining delegated tokens prevent confirmation processing
+
+**Section sources**
+- [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
+- [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
+- [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
+
+### Protected Actions Reference
+
+**New Section** - Complete reference of all protected actions enforced by the policy engine.
+
+#### Platform Gateway Protected Actions
+The platform-gateway enforces policy for the following actions:
+- `chat`: Standard chat operations
+- `chat:confirm`: HITL confirmation approvals (SPEC-020)
+- `session:create`: Create new chat sessions
+- `session:read`: Read chat session information
+- `audit:read`: Query audit trails (restricted to auditor/platform-admin)
+- `incident:read`: View incidents and triage reports
+- `incident:create`: Report manual incidents
+- `incident:triage`: Initiate agent triage of incidents
+- `policy:read`: Access live permission matrix
+- `tools:list`: List available tools
+- `skills:read`: View federated skills inventory
+
+#### Tool Gateway Protected Actions
+The tool-gateway enforces policy for:
+- `tools:list`: List available tools
+- `tools:invoke`: Invoke tool functions
+
+#### Role-Based Access Matrix
+| Action | platform-admin | approver | operator | developer | read-only-observer | auditor |
+|--------|----------------|----------|----------|-----------|-------------------|---------|
+| chat | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
+| chat:confirm | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| session:create | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
+| session:read | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
+| audit:read | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| incident:read | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
+| incident:create | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| incident:triage | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| policy:read | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| tools:list | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
+| skills:read | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+**Section sources**
+- [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
+- [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
+- [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)

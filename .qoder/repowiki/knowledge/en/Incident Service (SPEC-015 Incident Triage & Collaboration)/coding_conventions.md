@@ -1,6 +1,0 @@
-- Each product follows the shared layout `src/<service>/api/routes/*.py`, `services/*.py`, `schemas/*.py`, `core/config.py` + `core/runtime.py` + `core/metrics.py` + `core/telemetry.py` + `core/observability.py` + `core/request_context.py`.
-- Configuration is read once at startup into a frozen dataclass via `from_env()` and exposed through an `@lru_cache` `get_settings()` accessor used by routes via FastAPI `Depends`.
-- External integrations are abstracted behind a `Protocol` plus a registry/factory pattern (e.g. `IncidentStore` with `build_incident_store`, `Connector` with `CONNECTOR_REGISTRY` and `build_connectors`) so implementations can be swapped by environment variables without touching callers.
-- All inbound requests are authenticated before state mutation: webhook endpoints use HMAC token comparison, while query endpoints use `authenticate_caller` supporting both Basic and Bearer (workload JWT) flows.
-- Errors are returned as uniform `JSONResponse` objects with `{error: {code, message}}` shape produced by a local `_error(status_code, code, message)` helper, never raw exceptions.
-- Every service path emits structured events via `log_event(LOGGER, <event_name>, ...)` and updates counters via `record_*` helpers in `core/metrics.py`, keeping observability consistent across intake, triage, and connector dispatch.

@@ -2,22 +2,26 @@
 
 <cite>
 **Referenced Files in This Document**
-- [routes.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
-- [router.py](file://products/tool-gateway/src/api_gateway/api/router.py)
-- [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [agent_client.py](file://products/tool-gateway/src/api_gateway/services/agent_client.py)
-- [token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
-- [policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [api.py](file://products/tool-gateway/src/api_gateway/schemas/api.py)
-- [chat-request.schema.json](file://shared/shared-contracts/schemas/chat-request.schema.json)
-- [chat-response.schema.json](file://shared/shared-contracts/schemas/chat-response.schema.json)
+- [routes.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [agent_client.py](file://products/platform-gateway/src/platform_gateway/services/agent_client.py)
+- [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
+- [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [v2 routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
+- [v2 schemas.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
+- [api.py](file://products/platform-gateway/src/platform_gateway/schemas/api.py)
+- [chat-confirm.schema.json](file://shared/shared-contracts/schemas/chat-confirm.schema.json)
 - [stream-event.schema.json](file://shared/shared-contracts/schemas/stream-event.schema.json)
-- [identity-token.schema.json](file://shared/shared-contracts/schemas/identity-token.schema.json)
-- [auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
-- [config.py](file://products/tool-gateway/src/api_gateway/core/config.py)
-- [metrics.py](file://products/tool-gateway/src/api_gateway/core/metrics.py)
-- [observability.py](file://products/tool-gateway/src/api_gateway/core/observability.py)
+- [policy-default.yaml](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive documentation for the new POST /api/v1/chat/confirm endpoint on platform-gateway
+- Added detailed documentation for the POST /api/v2/chat/confirm endpoint on agent-platform
+- Enhanced streaming response documentation to include confirmation events (confirmation_request, confirmation_result)
+- Updated authentication and authorization sections to cover the new chat:confirm action
+- Added HITL (Human-in-the-Loop) confirmation workflow documentation
+- Updated error handling patterns to include confirmation-specific errors (409, 410)
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -32,61 +36,58 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides detailed API documentation for chat-related endpoints exposed by the Agent Platform’s API Gateway. It covers HTTP methods, request/response schemas, authentication using JWT tokens, rate limiting and policy enforcement, streaming responses, error handling patterns, and practical usage examples across multiple programming languages. The goal is to enable clients to send messages, manage conversations, and handle both synchronous and streaming responses reliably.
+This document provides detailed API documentation for chat-related endpoints exposed by the Agent Platform's API Gateway. It covers HTTP methods, request/response schemas, authentication using JWT tokens, rate limiting and policy enforcement, streaming responses with Human-in-the-Loop (HITL) confirmation support, error handling patterns, and practical usage examples across multiple programming languages. The goal is to enable clients to send messages, manage conversations, handle both synchronous and streaming responses, and participate in human approval workflows for sensitive operations.
 
 ## Project Structure
-The chat endpoints are implemented in the Tool Gateway service under the API routes layer, with business logic delegated to gateway services and external agent runtime clients. Shared JSON schemas define the contract between clients and the platform. Authentication and authorization are enforced via an Identity Broker and a Policy Engine.
+The chat endpoints are implemented across two main services: the Platform Gateway (external-facing API) and the Agent Platform (internal agent runtime). The Platform Gateway handles authentication, authorization, and request routing, while the Agent Platform manages session state, agent execution, and confirmation workflows. Shared JSON schemas define the contract between clients and the platform.
 
 ```mermaid
 graph TB
-Client["Client"] --> GW["API Gateway<br/>Chat Routes"]
+Client["Client"] --> GW["Platform Gateway<br/>Chat Routes"]
 GW --> Auth["Token Verifier"]
 GW --> Policy["Policy Engine"]
 GW --> GS["Gateway Service"]
 GS --> AC["Agent Client"]
-AC --> AR["Agent Runtime"]
-AR --> Store["Session Store"]
+AC --> AP["Agent Platform<br/>v2 Routes"]
+AP --> Kernel["Runtime Kernel"]
+Kernel --> Store["Session Store"]
 GW --> Obs["Observability & Metrics"]
 ```
 
 **Diagram sources**
-- [routes.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
-- [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [agent_client.py](file://products/tool-gateway/src/api_gateway/services/agent_client.py)
-- [token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
-- [policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [metrics.py](file://products/tool-gateway/src/api_gateway/core/metrics.py)
-- [observability.py](file://products/tool-gateway/src/api_gateway/core/observability.py)
+- [routes.py:36-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L36-L175)
+- [gateway_service.py:306-409](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L306-L409)
+- [agent_client.py:61-159](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L61-L159)
+- [v2 routes.py:100-228](file://products/agent-platform/src/agent_service/api/v2/routes.py#L100-L228)
 
 **Section sources**
-- [router.py](file://products/tool-gateway/src/api_gateway/api/router.py)
-- [routes.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
+- [routes.py:36-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L36-L175)
+- [v2 routes.py:100-228](file://products/agent-platform/src/agent_service/api/v2/routes.py#L100-L228)
 
 ## Core Components
-- Chat Routes: Define HTTP endpoints for chat interactions (POST for sending messages, GET for retrieving conversation context or status).
-- Gateway Service: Orchestrates request processing, session management, and response formatting.
-- Agent Client: Communicates with the underlying Agent Runtime to execute prompts and retrieve results.
-- Token Verifier: Validates JWT tokens from the Identity Broker.
-- Policy Engine: Enforces access control and rate limiting policies.
-- Schemas: JSON Schema definitions for requests, responses, and stream events.
+- **Chat Routes**: Define HTTP endpoints for chat interactions including message sending, conversation management, and confirmation decisions
+- **Gateway Service**: Orchestrates request processing, session management, and response formatting with confirmation event handling
+- **Agent Client**: Communicates with the underlying Agent Platform to execute prompts and retrieve results, including confirmation streams
+- **Policy Engine**: Enforces access control with specific actions for chat operations and confirmation decisions
+- **Confirmation Registry**: Manages parked confirmations and their lifecycle within sessions
+- **Schemas**: JSON Schema definitions for requests, responses, and stream events including confirmation frames
 
 Key responsibilities:
-- Validate incoming requests against shared schemas.
-- Authenticate and authorize requests using JWT and policy rules.
-- Manage conversation state through sessions.
-- Stream partial responses when supported.
-- Emit metrics and observability data.
+- Validate incoming requests against shared schemas
+- Authenticate and authorize requests using JWT and policy rules with specific actions
+- Manage conversation state through sessions with confirmation support
+- Stream partial responses including confirmation events when supported
+- Emit metrics and observability data for all operations
+- Handle human-in-the-loop confirmation workflows
 
 **Section sources**
-- [routes.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
-- [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [agent_client.py](file://products/tool-gateway/src/api_gateway/services/agent_client.py)
-- [token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
-- [policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [api.py](file://products/tool-gateway/src/api_gateway/schemas/api.py)
+- [routes.py:36-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L36-L175)
+- [gateway_service.py:306-409](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L306-L409)
+- [agent_client.py:61-159](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L61-L159)
+- [policy_engine.py:28-56](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L28-L56)
 
 ## Architecture Overview
-The chat flow involves client requests routed through the API Gateway, authenticated and authorized, then forwarded to the Agent Runtime. Responses may be returned synchronously or streamed incrementally. Sessions persist conversation context.
+The chat flow involves client requests routed through the Platform Gateway, authenticated and authorized, then forwarded to the Agent Platform. Responses may be returned synchronously or streamed incrementally, including confirmation events for human approval workflows. Sessions persist conversation context and manage confirmation states.
 
 ```mermaid
 sequenceDiagram
@@ -96,117 +97,212 @@ participant TV as "Token Verifier"
 participant PE as "Policy Engine"
 participant GS as "Gateway Service"
 participant AC as "Agent Client"
-participant AR as "Agent Runtime"
-C->>R : POST /chat/messages
+participant AP as "Agent Platform"
+participant K as "Runtime Kernel"
+Note over C,K : Standard Chat Flow
+C->>R : POST /api/v1/chat
 R->>TV : Verify JWT
 TV-->>R : Valid/Invalid
-R->>PE : Check policy/rate limit
+R->>PE : Check policy (chat)
 PE-->>R : Allow/Deny
 R->>GS : Process message
 GS->>AC : Invoke agent
-AC->>AR : Execute prompt
-AR-->>AC : Result or stream
-AC-->>GS : Aggregated or streamed chunks
+AC->>AP : POST /api/v2/chat
+AP->>K : Execute prompt
+K-->>AP : Result or stream
+AP-->>AC : Aggregated or streamed chunks
+AC-->>GS : Response payload
 GS-->>R : Response payload
 R-->>C : 200 OK with payload or SSE stream
+Note over C,K : Confirmation Flow
+C->>R : POST /api/v1/chat/confirm
+R->>PE : Check policy (chat : confirm)
+PE-->>R : Allow/Deny
+R->>GS : Process confirmation
+GS->>AC : Open confirm stream
+AC->>AP : POST /api/v2/chat/confirm
+AP->>K : Resume confirmation
+K-->>AP : Resumed stream with events
+AP-->>AC : SSE stream with confirmation_result
+AC-->>GS : Streamed events
+GS-->>R : Forwarded events
+R-->>C : SSE stream with confirmation_result
 ```
 
 **Diagram sources**
-- [routes.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
-- [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [agent_client.py](file://products/tool-gateway/src/api_gateway/services/agent_client.py)
-- [token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
-- [policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
+- [routes.py:36-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L36-L175)
+- [gateway_service.py:336-396](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L336-L396)
+- [agent_client.py:108-159](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L108-L159)
+- [v2 routes.py:156-228](file://products/agent-platform/src/agent_service/api/v2/routes.py#L156-L228)
 
 ## Detailed Component Analysis
 
 ### Chat Endpoints
-- POST /chat/messages
-  - Purpose: Send a message to the agent within a conversation context.
-  - Authentication: Requires a valid JWT token in the Authorization header.
-  - Rate Limiting: Enforced by the Policy Engine based on configured limits per identity or tenant.
-  - Request Body: Follows the chat request schema.
-  - Response: Returns a chat response object or streams incremental events if enabled.
-  - Errors: Standardized error codes for validation failures, authentication errors, policy denials, and runtime errors.
 
-- GET /chat/conversations/{conversation_id}
-  - Purpose: Retrieve conversation metadata and history for a given conversation ID.
-  - Authentication: Requires a valid JWT token.
-  - Response: Returns conversation details including messages and timestamps.
-  - Errors: Not found, unauthorized, internal server error.
+#### Standard Chat Operations
 
-- GET /chat/status
-  - Purpose: Retrieve current system health and capability status relevant to chat operations.
-  - Authentication: Optional depending on configuration; typically public for health checks.
-  - Response: Health and capability indicators.
+**POST /api/v1/chat**
+- Purpose: Send a message to the agent within a conversation context
+- Authentication: Requires a valid JWT token in the Authorization header
+- Policy Action: `chat` (granted to operator, developer, approver, platform-admin, and read-only-observer roles)
+- Request Body: Follows the chat request schema with message and optional session_id
+- Response: Returns a chat response object or streams incremental events if enabled
+- Errors: Standardized error codes for validation failures, authentication errors, policy denials, and runtime errors
+
+**GET /api/v1/chat/stream**
+- Purpose: Stream real-time responses from the agent
+- Authentication: Requires a valid JWT token
+- Policy Action: `chat`
+- Query Parameters: message (required), session_id (optional)
+- Response: Server-Sent Events (SSE) stream with incremental updates
+- Events: message_start, message_delta, message_end, tool_call, tool_result, confirmation_request, confirmation_result, error
+
+**GET /api/v1/sessions/{session_id}**
+- Purpose: Retrieve session metadata and status
+- Authentication: Requires a valid JWT token
+- Policy Action: `session:read`
+- Response: Session details including user_id, created_at, and status
+
+#### Human-in-the-Loop Confirmation Operations
+
+**POST /api/v1/chat/confirm** *(New)*
+- Purpose: Answer a parked kernel confirmation to approve or deny pending tool calls
+- Authentication: Requires a valid JWT token
+- Policy Action: `chat:confirm` (granted to operator, developer, approver, platform-admin roles; denied by default for read-only-observer)
+- Request Body: 
+  - `session_id`: String identifying the session holding the parked confirmation
+  - `confirm_id`: String identifier from the confirmation_request frame being answered
+  - `decision`: Enum value "approve" or "deny" applied to every parked tool call (all-or-nothing)
+- Response: Server-Sent Events (SSE) stream that resumes the paused conversation with confirmation_result events
+- Error Handling:
+  - 403 Forbidden: Insufficient permissions for chat:confirm action
+  - 404 Not Found: Confirmation not found or expired
+  - 409 Conflict: Confirmation pending resolution
+  - 410 Gone: Confirmation has expired
+  - 502 Bad Gateway: Upstream service unavailable
+
+**POST /api/v2/chat/confirm** *(Agent Platform Internal)*
+- Purpose: Internal endpoint for answering parked kernel confirmations
+- Authentication: Requires X-User-ID header and delegated bearer token
+- Request Body: Same schema as /api/v1/chat/confirm but without policy enforcement
+- Response: SSE stream with resumed conversation events including confirmation_result
+- Error Handling:
+  - 404 Not Found: Confirmation not found
+  - 409 Conflict: Confirmation pending resolution
+  - 410 Gone: Confirmation expired
+  - 401 Unauthorized: Missing or invalid user identity
 
 Request and response schemas are defined in shared contracts:
-- Chat Request: Fields include user message, optional conversation_id, model parameters, and metadata.
-- Chat Response: Includes generated content, usage statistics, and optional streaming markers.
-- Stream Event: Represents incremental updates during long-running operations.
+- **Chat Request**: Fields include user message, optional conversation_id, model parameters, and metadata
+- **Chat Confirm Request**: Required fields: session_id, confirm_id, decision (approve/deny)
+- **Chat Response**: Includes generated content, usage statistics, and optional streaming markers
+- **Stream Event**: Represents incremental updates during long-running operations, including confirmation events
 
 Validation rules:
-- Required fields must be present and non-empty.
-- Data types must match schema constraints.
-- Conversation IDs must follow UUID format where applicable.
-- Model parameters must fall within allowed ranges.
+- Required fields must be present and non-empty
+- Data types must match schema constraints
+- Conversation IDs must follow UUID format where applicable
+- Model parameters must fall within allowed ranges
+- Decision values must be exactly "approve" or "deny"
 
 Examples:
-- Sending a message returns either a complete response or a stream of events.
-- Retrieving a conversation returns a structured list of messages with timestamps.
+- Sending a message returns either a complete response or a stream of events
+- Retrieving a conversation returns a structured list of messages with timestamps
+- Confirming a parked decision resumes the stream with confirmation_result events
 
 **Section sources**
-- [routes.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
-- [chat-request.schema.json](file://shared/shared-contracts/schemas/chat-request.schema.json)
-- [chat-response.schema.json](file://shared/shared-contracts/schemas/chat-response.schema.json)
-- [stream-event.schema.json](file://shared/shared-contracts/schemas/stream-event.schema.json)
+- [routes.py:36-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L36-L175)
+- [v2 routes.py:100-228](file://products/agent-platform/src/agent_service/api/v2/routes.py#L100-L228)
+- [chat-confirm.schema.json:1-27](file://shared/shared-contracts/schemas/chat-confirm.schema.json#L1-L27)
+- [api.py:20-28](file://products/platform-gateway/src/platform_gateway/schemas/api.py#L20-L28)
 
 ### Authentication and Authorization
-- JWT Tokens: Issued by the Identity Broker and validated by the Token Verifier.
-- Header: Authorization: Bearer <token>.
-- Validation: Signature verification, expiration checks, and claim extraction.
-- Authorization: Policy Engine evaluates permissions based on claims and resource access rules.
+
+#### JWT Token Validation
+- **JWT Tokens**: Issued by the Identity Broker and validated by the Token Verifier
+- **Header**: Authorization: Bearer <token>
+- **Validation**: Signature verification, expiration checks, and claim extraction
+- **Authorization**: Policy Engine evaluates permissions based on claims and resource access rules
+
+#### Policy Actions
+- **chat**: Standard chat operations (message sending, streaming)
+- **chat:confirm**: Human-in-the-loop confirmation decisions (mutating operation)
+- **session:create**: Create new sessions
+- **session:read**: Read session information
+- **audit:read**: Access audit trail
+- **incident:read/create/triage**: Incident management operations
+- **policy:read**: View policy matrix
+- **tools:list/invoke**: Tool discovery and invocation
+- **skills:read**: Skills inventory access
+
+#### Role-Based Access Control
+- **platform-admin**: Full access to all actions
+- **approver**: Can perform confirmations and operational tasks
+- **operator**: Operational access including confirmations
+- **developer**: Development access including confirmations
+- **read-only-observer**: Read-only access to chat, sessions, tools, and skills (denied chat:confirm by default)
+- **auditor**: Audit trail access only
 
 Error patterns:
-- 401 Unauthorized: Invalid or missing token.
-- 403 Forbidden: Insufficient permissions.
-- 429 Too Many Requests: Rate limit exceeded.
+- 401 Unauthorized: Invalid or missing token
+- 403 Forbidden: Insufficient permissions for the required action
+- 429 Too Many Requests: Rate limit exceeded
 
 **Section sources**
-- [token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
-- [policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
-- [identity-token.schema.json](file://shared/shared-contracts/schemas/identity-token.schema.json)
+- [policy_engine.py:28-56](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L28-L56)
+- [policy-default.yaml:20-54](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L20-L54)
+- [routes.py:44-49](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L44-L49)
 
-### Streaming Responses
-- Support for Server-Sent Events (SSE) or chunked transfer encoding.
-- Stream events conform to the stream event schema.
-- Clients should handle partial updates and final completion signals.
+### Streaming Responses and Confirmation Events
+
+#### Standard Streaming
+- Support for Server-Sent Events (SSE) with chunked transfer encoding
+- Stream events conform to the stream event schema
+- Clients should handle partial updates and final completion signals
+
+#### Confirmation Event Streaming
+- **confirmation_request**: Indicates a parked tool call requiring human approval
+- **confirmation_result**: Indicates the result of a confirmation decision
+- **Event Flow**: When an agent encounters a tool call requiring confirmation, it parks the call and sends a confirmation_request event. The client can then call POST /api/v1/chat/confirm to approve or deny, which resumes the stream with confirmation_result events.
 
 Best practices:
-- Implement retry logic for transient network issues.
-- Buffer and render incremental content appropriately.
-- Close connections gracefully upon completion or error.
+- Implement retry logic for transient network issues
+- Buffer and render incremental content appropriately
+- Close connections gracefully upon completion or error
+- Handle confirmation events specially to provide UI feedback
+- Manage confirmation timeouts and expired confirmations
 
 **Section sources**
-- [stream-event.schema.json](file://shared/shared-contracts/schemas/stream-event.schema.json)
-- [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
+- [v2 routes.py:198-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L198-L227)
+- [agent_client.py:108-159](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L108-L159)
+- [gateway_service.py:381-409](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L381-L409)
 
 ### Error Handling Patterns
+
 Standardized error responses include:
-- Error code: Machine-readable identifier.
-- Message: Human-readable description.
-- Details: Additional context for debugging.
+- **Error code**: Machine-readable identifier
+- **Message**: Human-readable description
+- **Details**: Additional context for debugging
 
 Common scenarios:
-- Validation errors: Malformed request body or invalid parameters.
-- Authentication errors: Expired or invalid JWT.
-- Policy violations: Access denied or rate limited.
-- Runtime errors: Agent unavailability or internal failures.
+- **Validation errors**: Malformed request body or invalid parameters
+- **Authentication errors**: Expired or invalid JWT
+- **Policy violations**: Access denied or rate limited
+- **Runtime errors**: Agent unavailability or internal failures
+- **Confirmation errors**: 
+  - 409 Conflict: Confirmation pending resolution
+  - 410 Gone: Confirmation expired
+  - 404 Not Found: Confirmation not found
+
+Confirmation-specific error handling:
+- **Expired confirmations**: Return 410 Gone with appropriate error message
+- **Concurrent confirmations**: Handle race conditions with proper locking
+- **Owner mismatches**: Ensure only session owners can confirm their parked calls
+- **Upstream failures**: Map transport errors to 502 Bad Gateway
 
 **Section sources**
-- [api.py](file://products/tool-gateway/src/api_gateway/schemas/api.py)
-- [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
+- [v2 routes.py:176-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L176-L227)
+- [gateway_service.py:381-409](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L381-L409)
 
 ## Dependency Analysis
 The chat endpoints depend on several internal services and shared schemas:
@@ -214,9 +310,9 @@ The chat endpoints depend on several internal services and shared schemas:
 ```mermaid
 classDiagram
 class ChatRoutes {
-+post_messages()
-+get_conversation()
-+get_status()
++chat_route()
++chat_stream_route()
++chat_confirm_route()
 }
 class TokenVerifier {
 +verify(token) bool
@@ -225,17 +321,21 @@ class TokenVerifier {
 class PolicyEngine {
 +check_access(identity, resource) bool
 +check_rate_limit(identity) bool
++ACTION_CHAT_CONFIRM
 }
 class GatewayService {
 +process_message(request) Response
 +manage_session(conversation_id) Session
++chat_confirm(...) StreamingResponse
 }
 class AgentClient {
 +invoke_agent(prompt) Result
 +stream_events(prompt) Iterator
++open_chat_confirm_stream(...) AsyncIterator
 }
 class Schemas {
 +ChatRequest
++ChatConfirmRequest
 +ChatResponse
 +StreamEvent
 }
@@ -247,65 +347,192 @@ ChatRoutes --> Schemas : "uses for validation"
 ```
 
 **Diagram sources**
-- [routes.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
-- [token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
-- [policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [agent_client.py](file://products/tool-gateway/src/api_gateway/services/agent_client.py)
-- [api.py](file://products/tool-gateway/src/api_gateway/schemas/api.py)
+- [routes.py:36-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L36-L175)
+- [policy_engine.py:28-56](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L28-L56)
+- [gateway_service.py:306-409](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L306-L409)
+- [agent_client.py:61-159](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L61-L159)
+- [api.py:9-28](file://products/platform-gateway/src/platform_gateway/schemas/api.py#L9-L28)
 
 **Section sources**
-- [router.py](file://products/tool-gateway/src/api_gateway/api/router.py)
-- [api.py](file://products/tool-gateway/src/api_gateway/schemas/api.py)
+- [routes.py:36-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L36-L175)
+- [api.py:9-28](file://products/platform-gateway/src/platform_gateway/schemas/api.py#L9-L28)
 
 ## Performance Considerations
-- Connection pooling: Reuse HTTP connections to reduce latency.
-- Streaming: Prefer streaming for large responses to improve perceived performance.
-- Caching: Cache frequent queries and reusable resources where appropriate.
-- Rate limiting: Configure limits to prevent abuse and ensure fairness.
-- Observability: Monitor latency, throughput, and error rates using metrics and logs.
-
-[No sources needed since this section provides general guidance]
+- **Connection pooling**: Reuse HTTP connections to reduce latency
+- **Streaming**: Prefer streaming for large responses to improve perceived performance
+- **Caching**: Cache frequent queries and reusable resources where appropriate
+- **Rate limiting**: Configure limits to prevent abuse and ensure fairness
+- **Observability**: Monitor latency, throughput, and error rates using metrics and logs
+- **Confirmation handling**: Optimize confirmation registry lookups and avoid blocking operations
+- **Memory management**: Properly close streaming connections and release resources
 
 ## Troubleshooting Guide
+
 Common issues and resolutions:
-- Authentication failures: Ensure JWT is valid and not expired.
-- Policy denials: Review access controls and quotas assigned to the identity.
-- Rate limiting: Reduce request frequency or upgrade plan if necessary.
-- Streaming interruptions: Implement retries and handle partial data correctly.
-- Internal errors: Check logs and metrics for root cause analysis.
+- **Authentication failures**: Ensure JWT is valid and not expired
+- **Policy denials**: Review access controls and quotas assigned to the identity
+- **Rate limiting**: Reduce request frequency or upgrade plan if necessary
+- **Streaming interruptions**: Implement retries and handle partial data correctly
+- **Internal errors**: Check logs and metrics for root cause analysis
+- **Confirmation issues**:
+  - 409 Conflict: Wait for pending confirmation to resolve before retrying
+  - 410 Gone: Refresh confirmation state and obtain new confirm_id
+  - 404 Not Found: Verify session_id and confirm_id are correct
+  - Permission denied: Ensure user has chat:confirm action permission
 
 Debugging tips:
-- Enable verbose logging for failed requests.
-- Use health check endpoints to verify service availability.
-- Validate request payloads against shared schemas before sending.
+- Enable verbose logging for failed requests
+- Use health check endpoints to verify service availability
+- Validate request payloads against shared schemas before sending
+- Monitor confirmation registry state for stuck confirmations
+- Check upstream agent platform connectivity
 
 **Section sources**
-- [metrics.py](file://products/tool-gateway/src/api_gateway/core/metrics.py)
-- [observability.py](file://products/tool-gateway/src/api_gateway/core/observability.py)
+- [v2 routes.py:176-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L176-L227)
+- [policy_engine.py:158-189](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L158-L189)
 
 ## Conclusion
-The chat endpoints provide a robust interface for interacting with AI agents through secure, scalable, and observable APIs. By adhering to the documented schemas, authentication requirements, and best practices, clients can build reliable integrations that leverage both synchronous and streaming capabilities. Proper error handling and monitoring ensure resilience and maintainability in production environments.
-
-[No sources needed since this section summarizes without analyzing specific files]
+The chat endpoints provide a robust interface for interacting with AI agents through secure, scalable, and observable APIs with comprehensive Human-in-the-Loop support. By adhering to the documented schemas, authentication requirements, and best practices, clients can build reliable integrations that leverage both synchronous and streaming capabilities, including sophisticated confirmation workflows for sensitive operations. Proper error handling and monitoring ensure resilience and maintainability in production environments.
 
 ## Appendices
 
 ### Practical Code Examples
 
-#### Python Example
-- Send a message using requests library.
-- Handle streaming responses with iter_lines or similar.
-- Manage conversation context by passing conversation_id.
+#### Python Example - Basic Chat
+```python
+import httpx
 
-#### JavaScript Example
-- Use fetch API to send POST requests.
-- Read streaming data with ReadableStream.
-- Parse JSON responses and update UI incrementally.
+# Send a message
+response = httpx.post(
+    "/api/v1/chat",
+    json={"message": "Hello, agent!"},
+    headers={"Authorization": "Bearer <token>"}
+)
+print(response.json())
+```
 
-#### Go Example
-- Create HTTP client with proper headers.
-- Implement goroutines for concurrent streaming.
-- Handle errors and retries effectively.
+#### Python Example - Streaming Chat
+```python
+import httpx
 
-[No sources needed since this section provides general guidance]
+# Stream responses
+with httpx.stream("GET", "/api/v1/chat/stream", 
+                 params={"message": "Tell me a story"},
+                 headers={"Authorization": "Bearer <token>"}) as response:
+    for line in response.iter_lines():
+        if line.startswith("data: "):
+            event = json.loads(line[6:])
+            print(f"Event: {event['type']}")
+```
+
+#### Python Example - Confirmation Workflow
+```python
+import httpx
+
+# Handle confirmation request
+def handle_confirmation(event):
+    if event['type'] == 'confirmation_request':
+        # Show approval card to user
+        confirm_id = event['confirm_id']
+        session_id = event['session_id']
+        
+        # User approves
+        response = httpx.post(
+            "/api/v1/chat/confirm",
+            json={
+                "session_id": session_id,
+                "confirm_id": confirm_id,
+                "decision": "approve"
+            },
+            headers={"Authorization": "Bearer <token>"}
+        )
+        
+        # Continue streaming from confirmation response
+        return response
+```
+
+#### JavaScript Example - Web Integration
+```javascript
+// Send confirmation via fetch
+async function sendConfirmation(sessionId, confirmId, decision) {
+    const response = await fetch('/api/v1/chat/confirm', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+            session_id: sessionId,
+            confirm_id: confirmId,
+            decision: decision
+        })
+    });
+    
+    if (response.status === 410) {
+        throw new Error('Confirmation expired');
+    }
+    
+    return response;
+}
+```
+
+#### Go Example - Concurrent Streaming
+```go
+// Create HTTP client with proper headers
+client := &http.Client{
+    Timeout: 30 * time.Second,
+}
+
+// Implement goroutines for concurrent streaming
+func streamConfirmation(sessionID, confirmID, decision string) {
+    req, _ := http.NewRequest("POST", "/api/v1/chat/confirm", 
+        bytes.NewBufferString(fmt.Sprintf(`{"session_id":"%s","confirm_id":"%s","decision":"%s"}`, 
+        sessionID, confirmID, decision)))
+    req.Header.Set("Authorization", "Bearer "+token)
+    
+    resp, err := client.Do(req)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer resp.Body.Close()
+    
+    // Handle SSE stream
+    scanner := bufio.NewScanner(resp.Body)
+    for scanner.Scan() {
+        line := scanner.Text()
+        if strings.HasPrefix(line, "data: ") {
+            // Parse and handle event
+        }
+    }
+}
+```
+
+### Confirmation Workflow Diagram
+
+```mermaid
+sequenceDiagram
+participant Client as "Client"
+participant Gateway as "Platform Gateway"
+participant Agent as "Agent Platform"
+participant Kernel as "Runtime Kernel"
+Note over Client,Kernel : Normal Operation
+Client->>Gateway : POST /api/v1/chat
+Gateway->>Agent : POST /api/v2/chat
+Agent->>Kernel : Execute prompt
+Note over Client,Kernel : Confirmation Required
+Kernel-->>Agent : confirmation_request event
+Agent-->>Gateway : SSE stream with confirmation_request
+Gateway-->>Client : Stream event with confirmation_request
+Note over Client,Kernel : Human Decision
+Client->>Gateway : POST /api/v1/chat/confirm
+Gateway->>Agent : POST /api/v2/chat/confirm
+Agent->>Kernel : resume_confirmation(decision)
+Kernel-->>Agent : Resumed stream with confirmation_result
+Agent-->>Gateway : SSE stream with confirmation_result
+Gateway-->>Client : Stream event with confirmation_result
+```
+
+**Diagram sources**
+- [routes.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
+- [v2 routes.py:156-228](file://products/agent-platform/src/agent_service/api/v2/routes.py#L156-L228)
+- [agent_client.py:108-159](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L108-L159)

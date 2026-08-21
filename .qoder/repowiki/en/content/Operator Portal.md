@@ -14,14 +14,17 @@
 - [image.mk](file://mk/image.mk)
 - [VERSION](file://VERSION)
 - [validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
+- [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [2026-08-21-hitl-confirmation-bridging.md](file://docs/agentic-aiops-platform/release-notes/2026-08-21-hitl-confirmation-bridging.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated PLATFORM_VERSION to v0.5.0 for consistency across platform ecosystem
-- Enhanced cache-buster mechanism with timestamp-based versioning (20260821-release-0.5.0)
-- Improved client-side caching behavior after deployment through query parameter versioning
-- Updated version validation system to enforce consistency across all platform components
+- Added comprehensive HITL (Human-in-the-Loop) confirmation card component with Approve/Deny buttons
+- Implemented role-based visibility for confirmation controls based on user permissions
+- Integrated stream continuation handling for pending tool approvals with SSE streaming
+- Enhanced evidence system with inline approval surfaces for ASK-gated tool executions
+- Updated version to v0.6.0 with enhanced platform ecosystem consistency
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -31,23 +34,24 @@
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Enhanced Navigation System](#enhanced-navigation-system)
 7. [Role-Gated Audit Trail System](#role-gated-audit-trail-system)
-8. [Authentication and Security](#authentication-and-security)
-9. [Markdown Rendering System](#markdown-rendering-interface)
-10. [Real-time Streaming Interface](#real-time-streaming-interface)
-11. [Skills Integration and Cited Guidance](#skills-integration-and-cited-guidance)
-12. [Permission Matrix and Workspace Resources](#permission-matrix-and-workspace-resources)
-13. [Deployment Guide](#deployment-guide)
-14. [UI Customization](#ui-customization)
-15. [Accessibility Features](#accessibility-features)
-16. [Browser Compatibility](#browser-compatibility)
-17. [Troubleshooting Guide](#troubleshooting-guide)
-18. [Conclusion](#conclusion)
+8. [HITL Confirmation Card System](#hitl-confirmation-card-system)
+9. [Authentication and Security](#authentication-and-security)
+10. [Markdown Rendering System](#markdown-rendering-interface)
+11. [Real-time Streaming Interface](#real-time-streaming-interface)
+12. [Skills Integration and Cited Guidance](#skills-integration-and-cited-guidance)
+13. [Permission Matrix and Workspace Resources](#permission-matrix-and-workspace-resources)
+14. [Deployment Guide](#deployment-guide)
+15. [UI Customization](#ui-customization)
+16. [Accessibility Features](#accessibility-features)
+17. [Browser Compatibility](#browser-compatibility)
+18. [Troubleshooting Guide](#troubleshooting-guide)
+19. [Conclusion](#conclusion)
 
 ## Introduction
 
 The Operator Portal is a modern web-based administrative interface designed for platform administration and monitoring within the Luban AIOPS ecosystem. Built with vanilla JavaScript and HTML/CSS, it provides operators with a sophisticated two-column shell interface featuring a persistent sidebar for navigation and a main content area for interactive operations. The portal serves as a centralized control plane for platform administrators, offering real-time visibility into system status through an interactive chat interface, comprehensive evidence panels for tool execution tracking, configuration management capabilities, and administrative functions necessary for maintaining the AI-powered agent platform infrastructure.
 
-**Updated** The portal has been updated to version 0.5.0 with enhanced version consistency across the platform ecosystem. The PLATFORM_VERSION constant has been synchronized with the root VERSION file, and improved cache-busting mechanisms ensure proper client-side caching behavior after deployment. The interface includes enhanced skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions, providing enhanced operational visibility and traceability for team-owned guidance references.
+**Updated** The portal has been updated to version 0.6.0 with comprehensive HITL (Human-in-the-Loop) confirmation bridging capabilities. The new inline confirmation card component allows operators to approve or deny ASK-gated tool executions directly within the chat interface, with role-based visibility controls ensuring only authorized users can make decisions. The platform maintains enhanced version consistency across the ecosystem with improved cache-busting mechanisms and comprehensive skills integration with "Cited guidance" chips for operational traceability.
 
 ## Project Structure
 
@@ -67,11 +71,13 @@ subgraph "Kubernetes Deployment"
 I[web-ui-deployment.yaml] --> J[web-ui-service.yaml]
 J --> K[Service Endpoint]
 end
-L[Backend Services] --> M[API Gateway]
-M --> N[Agent Platform]
-M --> O[Identity Broker]
-M --> P[Tool Gateway]
-K --> M
+subgraph "Backend Services"
+L[Agent Platform] --> M[HITL Confirmations]
+N[Platform Gateway] --> O[Identity Broker]
+P[Tool Gateway] --> Q[Policy Engine]
+K --> N
+M --> L
+end
 ```
 
 **Diagram sources**
@@ -79,6 +85,7 @@ K --> M
 - [app.js](file://products/operator-portal/web-ui/app.js)
 - [nginx.conf](file://products/operator-portal/nginx.conf)
 - [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
+- [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [VERSION](file://VERSION)
 - [validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 
@@ -96,6 +103,7 @@ The Operator Portal consists of several key components that work together to pro
 - **Enhanced Sectioned Navigation**: Organized navigation with Chat, Control, and Workspace sections
 - **Chat-Based Interface**: Modern single-page application with real-time streaming responses
 - **Inline Per-Turn Evidence System**: Sophisticated turn-scoped evidence grouping with collapsible groups rendered directly after agent responses
+- **HITL Confirmation Cards**: Inline approval surfaces for ASK-gated tool executions with Approve/Deny buttons
 - **Skills Integration**: Enhanced evidence cards with "Cited guidance" chips displaying matched skills when skills.* tools succeed
 - **Authentication System**: OIDC integration with automatic token refresh and session management
 - **Markdown Renderer**: Comprehensive text formatting with syntax highlighting support
@@ -103,6 +111,7 @@ The Operator Portal consists of several key components that work together to pro
 
 ### Backend Integration
 - **Streaming API Client**: Real-time communication with backend services via Server-Sent Events
+- **HITL Confirmation Bridge**: Seamless integration with agent-platform confirmation registry for pending tool approvals
 - **Authentication Handler**: Seamless integration with identity broker for secure access
 - **Session Management**: Persistent session handling with automatic refresh mechanisms
 - **Error Handling**: Comprehensive error management with user-friendly feedback
@@ -114,11 +123,12 @@ The Operator Portal consists of several key components that work together to pro
 - **Mobile Drawer**: Off-canvas navigation for narrow screens with hamburger menu
 - **Settings & Debug Panel**: Configuration management and debugging tools
 
-### Skills Evidence Enhancement
-- **Cited Guidance Chips**: Visual indicators showing matched skills from successful skills.* tool executions
-- **Skill Citation Display**: Clickable elements displaying skill titles and namespaced IDs
+### HITL Confirmation System
+- **Inline Approval Cards**: Warning-toned bordered cards for pending tool confirmations
+- **Role-Based Controls**: Approve/Deny buttons visible only to authorized roles (platform-admin, approver, operator, developer)
+- **Stream Continuation**: Automatic resumption of parked replies upon decision with SSE streaming
 - **Evidence Integration**: Seamless integration with existing evidence card system
-- **Truncation Handling**: Smart handling of truncated data summaries to avoid partial citations
+- **Status Management**: Visual indicators showing awaiting decision, approved, denied, or expired states
 
 ### Permission and Resource Discovery
 - **Live Permission Matrix**: Real-time display of role-action permissions from policy bundle
@@ -128,11 +138,11 @@ The Operator Portal consists of several key components that work together to pro
 
 ### Version Management and Cache Busting
 - **Version Synchronization**: PLATFORM_VERSION constant synchronized with root VERSION file
-- **Cache-Busting Mechanism**: Query parameter versioning (v=20260821-release-0.5.0) ensures proper client-side caching
+- **Cache-Busting Mechanism**: Query parameter versioning (v=20260821-spec-020-hitl-5) ensures proper client-side caching
 - **Validation System**: Automated version consistency checks across all platform components
 - **Deployment Consistency**: Coordinated versioning across all platform services
 
-**Updated** The interface now includes enhanced skills integration with "Cited guidance" chips that provide visual feedback when skills.* tools successfully execute, showing matched skills as clickable elements with title and namespaced ID for improved operational traceability, along with comprehensive permission visibility and workspace resource discovery capabilities. The version management system ensures consistency across the platform ecosystem with improved cache-busting mechanisms.
+**Updated** The interface now includes comprehensive HITL confirmation bridging with inline approval cards that allow operators to approve or deny ASK-gated tool executions directly within the chat interface. The system supports role-based visibility controls, stream continuation handling, and seamless integration with the existing evidence system. The platform has been updated to version 0.6.0 with enhanced version consistency across the platform ecosystem.
 
 **Section sources**
 - [app.js](file://products/operator-portal/web-ui/app.js)
@@ -149,15 +159,15 @@ participant User as "Browser"
 participant Portal as "Operator Portal"
 participant Nginx as "Nginx Server (Port 8080)"
 participant Gateway as "API Gateway"
-participant Identity as "Identity Broker"
 participant Agent as "Agent Platform"
-User->>Portal : Load index.html?v=20260821-release-0.5.0
+participant HITL as "HITL Registry"
+User->>Portal : Load index.html?v=20260821-spec-020-hitl-5
 Portal->>Nginx : Request static assets with cache-busting
 Nginx-->>Portal : Serve HTML/CSS/JS with no-store headers
 Note over Portal : Authentication Flow
 Portal->>Gateway : /api/v1/auth/login
-Gateway->>Identity : Redirect to OIDC provider
-Identity-->>Gateway : Authorization code
+Gateway->>Agent : Redirect to OIDC provider
+Agent-->>Gateway : Authorization code
 Gateway-->>Portal : Access tokens + identity
 Note over Portal : Enhanced Navigation
 Portal->>Gateway : /api/v1/policy/matrix (permissions)
@@ -166,24 +176,31 @@ Portal->>Gateway : /api/v1/tools (tools catalog)
 Gateway-->>Portal : Available tools list
 Portal->>Gateway : /api/v1/skills (skills inventory)
 Gateway-->>Portal : Available skills list
-Note over Portal : Chat & Streaming
+Note over Portal : Chat & Streaming with HITL
 User->>Portal : Send prompt
 Portal->>Gateway : POST /api/v1/chat/stream
 Gateway->>Agent : Forward request
 Agent-->>Gateway : Stream events
 Gateway-->>Portal : SSE stream
-Portal->>User : Render markdown response
-Portal->>User : Create inline evidence group
-Portal->>User : Update per-turn audit card
-Portal->>User : Display cited guidance chips for skills.* tools
+Note over Portal : HITL Confirmation Flow
+Portal->>Portal : Render confirmation card (awaiting decision)
+User->>Portal : Click Approve/Deny
+Portal->>Gateway : POST /api/v1/chat/confirm
+Gateway->>Agent : Forward decision
+Agent->>HITL : Claim confirmation
+HITL-->>Agent : Confirmation claimed
+Agent-->>Gateway : confirmation_result + resumed stream
+Gateway-->>Portal : SSE stream with resumed reply
+Portal->>User : Update card status + continue response
 ```
 
 **Diagram sources**
 - [index.html](file://products/operator-portal/web-ui/index.html)
 - [app.js](file://products/operator-portal/web-ui/app.js)
 - [nginx.conf](file://products/operator-portal/nginx.conf)
+- [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 
-The architecture emphasizes simplicity, performance, and maintainability while providing enterprise-grade functionality for platform operations. The cache-busting mechanism ensures clients always receive the latest version of static assets after deployments.
+The architecture emphasizes simplicity, performance, and maintainability while providing enterprise-grade functionality for platform operations. The HITL confirmation bridge enables human oversight of automated tool executions while maintaining seamless user experience through inline approval interfaces.
 
 ## Detailed Component Analysis
 
@@ -221,6 +238,14 @@ The JavaScript application implements core functionality including:
 - **Sticky Smart-scroll**: Intelligent scrolling that respects user reading position during streaming
 - **Input Handling**: Keyboard shortcuts and form validation
 
+#### HITL Confirmation Card System
+- **Inline Approval Cards**: Warning-toned bordered cards displayed for ASK-gated tool executions
+- **Role-Based Controls**: Approve/Deny buttons visible only to authorized roles (platform-admin, approver, operator, developer)
+- **Stream Continuation**: Automatic resumption of parked replies upon decision with SSE streaming
+- **Evidence Integration**: Seamless integration with existing evidence card system
+- **Status Management**: Visual indicators showing awaiting decision, approved, denied, or expired states
+- **Confirmation Registry**: In-memory per-process registry managing pending confirmations with TTL expiry
+
 #### Inline Per-Turn Evidence System
 - **Per-turn Evidence Grouping**: Organizes evidence by conversation turns with collapsible groups rendered inline after agent responses
 - **Turn-based Organization**: Uses currentTurn object to track active conversation turn with anchor, group, body, summaryLine, counts, entries, and cardMap properties
@@ -242,7 +267,7 @@ The JavaScript application implements core functionality including:
 - **Pagination Support**: Cursor-based pagination with load more functionality
 - **Event Detail View**: Expandable rows showing full event envelope JSON
 
-**Updated** The interface now includes comprehensive skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions, providing enhanced operational visibility and traceability for team-owned guidance references, along with enhanced sectioned navigation and role-based section hiding. The version management system ensures consistent platform-wide versioning.
+**Updated** The interface now includes comprehensive HITL confirmation bridging with inline approval cards that allow operators to approve or deny ASK-gated tool executions directly within the chat interface. The system supports role-based visibility controls, stream continuation handling, and seamless integration with the existing evidence system. The platform has been updated to version 0.6.0 with enhanced version consistency across the platform ecosystem.
 
 **Section sources**
 - [app.js](file://products/operator-portal/web-ui/app.js)
@@ -268,6 +293,13 @@ The styling system provides a comprehensive design foundation with:
 - **Section Containers**: Flexbox-based layout with automatic hiding when all entries are hidden
 - **Navigation Items**: Clean button styling with active state indicators and hover effects
 - **Stream Indicator**: Pulsing dot showing when chat streaming is active
+
+#### HITL Confirmation Card Styling
+- **Warning Border**: Yellow border indicating pending decision required
+- **Locked State**: Border changes to standard when confirmation is resolved
+- **Action Buttons**: Green approve button and red deny button with hover effects
+- **Status Messages**: Clear status indicators for awaiting decision, approving/denying, and final states
+- **Call Details**: Collapsible sections showing tool parameters for review
 
 #### Component Styles
 - **User Card**: Avatar display with initials, username badge, and role information
@@ -417,6 +449,98 @@ The audit trail system implements multiple security layers:
 - [app.js:403-506](file://products/operator-portal/web-ui/app.js#L403-L506)
 - [index.html:124-156](file://products/operator-portal/web-ui/index.html#L124-L156)
 
+## HITL Confirmation Card System
+
+The Operator Portal now includes comprehensive Human-in-the-Loop (HITL) confirmation bridging that allows operators to approve or deny ASK-gated tool executions directly within the chat interface.
+
+### HITL Confirmation Architecture
+
+The HITL system bridges the gap between automated agent tool execution and human oversight:
+
+#### Confirmation Request Flow
+- **ASK-Gated Tools**: When the kernel encounters a tool requiring user confirmation, it parks the reply and emits a `confirmation_request` SSE frame
+- **Inline Card Rendering**: The portal renders an inline approval card with warning-toned border and detailed tool information
+- **Role-Based Controls**: Approve/Deny buttons are only visible to authorized roles (platform-admin, approver, operator, developer)
+- **Stream Continuation**: Upon decision, the parked reply resumes with the operator's choice applied
+
+#### Confirmation Registry Management
+- **In-Memory Storage**: Per-process confirmation registry manages pending confirmations with unique IDs
+- **TTL Expiry**: Confirmations expire after a timeout period, preventing indefinite parking
+- **Single-Flight Claims**: Atomic claim mechanism prevents duplicate confirmations
+- **Owner Verification**: Ensures only the original requester can confirm their own parked calls
+
+#### Stream Continuation Handling
+- **SSE Resume**: The confirm endpoint returns a resumed SSE stream containing the remainder of the parked reply
+- **Evidence Context Preservation**: Tool frames from the resumed reply attach to the same turn group as the original request
+- **Nested Confirmations**: Supports chained confirmations where a resumed turn may park again on another ASK-gated tool
+- **Error Recovery**: Handles mid-stream errors, timeouts, and connection issues gracefully
+
+### Confirmation Card Interface
+
+The inline confirmation card provides a focused interface for reviewing and deciding on tool executions:
+
+#### Card Components
+- **Warning Header**: Yellow-bordered card with "Tool confirmation required" title and "awaiting decision" status badge
+- **Message Display**: Clear explanation of why confirmation is needed
+- **Tool Details**: Expandable sections showing tool name and parameters for review
+- **Action Buttons**: Prominent Approve (green) and Deny (red) buttons for authorized users
+- **Status Line**: Real-time status updates showing "Approving…"/"Denying…" during processing
+
+#### Role-Based Visibility
+- **Authorized Roles**: platform-admin, approver, operator, developer roles can see and interact with confirmation buttons
+- **Read-Only Access**: Other roles see a message indicating they cannot approve or deny tool confirmations
+- **Server-Side Enforcement**: Gateway validates chat:confirm permission on every confirmation request
+
+#### Visual Feedback
+- **Pending State**: Yellow border and pulsing status indicator while awaiting decision
+- **Processing State**: Disabled buttons with "Approving…"/"Denying…" status during decision processing
+- **Resolved State**: Border changes to standard gray, buttons disabled, final status displayed
+- **Error Handling**: Clear error messages for network failures, timeouts, and permission issues
+
+### Backend Integration
+
+The HITL system integrates seamlessly with the agent-platform confirmation registry:
+
+#### Confirmation Lifecycle
+1. **Registration**: When kernel parks a reply, agent-platform registers the confirmation in memory with unique ID
+2. **Frontend Rendering**: Portal receives confirmation_request frame and renders inline approval card
+3. **Decision Processing**: User clicks Approve/Deny, portal sends decision to gateway
+4. **Registry Claim**: Agent-platform claims the confirmation atomically to prevent duplicates
+5. **Reply Resume**: Kernel resumes parked reply with decision applied (approve executes tools, deny reports refusal)
+6. **Stream Continuation**: Resumed reply streams back to portal, updating evidence and completing the interaction
+
+#### Security and Safety
+- **Deny-by-Default**: All tool executions require explicit approval unless on auto-allow list
+- **Owner Verification**: Only the original requester can confirm their own parked calls
+- **TTL Protection**: Expired confirmations fail closed rather than auto-executing
+- **Audit Trail**: All confirmation decisions are recorded in durable audit events
+
+### User Experience Benefits
+
+The HITL confirmation system provides several operational benefits:
+
+#### Enhanced Safety
+- **Human Oversight**: Operators can review potentially risky tool executions before they run
+- **Contextual Information**: Full tool parameters visible for informed decision-making
+- **Immediate Feedback**: Real-time status updates during decision processing
+
+#### Improved Workflow
+- **Inline Interface**: No need to switch contexts or navigate away from chat
+- **Streamlined Process**: Single-click approval or denial with immediate effect
+- **Evidence Integration**: Decisions appear alongside other tool execution evidence
+
+#### Operational Transparency
+- **Clear Status**: Visual indicators show confirmation state throughout the process
+- **Audit Trail**: All decisions recorded with timestamps and user context
+- **Error Recovery**: Graceful handling of network issues and timeouts
+
+**Updated** The HITL confirmation system represents a significant enhancement to the operator portal, enabling safe automation of complex workflows while maintaining human oversight for critical operations. The system supports nested confirmations, handles various error scenarios gracefully, and integrates seamlessly with the existing evidence and streaming systems.
+
+**Section sources**
+- [app.js:1670-1863](file://products/operator-portal/web-ui/app.js#L1670-L1863)
+- [styles.css:749-823](file://products/operator-portal/web-ui/styles.css#L749-L823)
+- [hitl_confirmations.py:1-209](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L1-L209)
+
 ## Authentication and Security
 
 The Operator Portal implements comprehensive authentication and security features using OpenID Connect (OIDC) protocol with automatic session management.
@@ -517,8 +641,8 @@ Consistent visual presentation across all rendered content:
 - **Accessibility**: Proper semantic markup for screen readers
 
 **Section sources**
-- [app.js:111-177](file://products/operator-portal/web-ui/app.js#L111-L177)
-- [styles.css:473-549](file://products/operator-portal/web-ui/styles.css#L473-L549)
+- [app.js:202-268](file://products/operator-portal/web-ui/app.js#L202-L268)
+- [styles.css:496-571](file://products/operator-portal/web-ui/styles.css#L496-L571)
 
 ## Real-time Streaming Interface
 
@@ -541,6 +665,8 @@ Different event types are processed appropriately:
 - **Tool Calls**: Evidence drawer updates for tool execution via renderToolCall function
 - **Tool Results**: Completion notifications with status and data via renderToolResult function
 - **Stream Completion**: Finalization signals for response ending
+- **Confirmation Requests**: HITL approval cards for ASK-gated tool executions
+- **Confirmation Results**: Status updates for confirmation decisions
 
 ### User Experience Features
 
@@ -567,11 +693,12 @@ The new interface includes additional streaming enhancements:
 - **Thinking Indicator**: Animated placeholder shown while agent processes requests
 - **Sidebar Pulse**: Visual indicator in sidebar showing active streaming state
 - **Turn Scoping**: Each conversation turn maintains its own evidence context
+- **HITL Integration**: Seamless handling of confirmation requests within streaming flow
 - **Error Recovery**: Graceful handling of streaming errors with user feedback
 
 **Section sources**
-- [app.js:925-1050](file://products/operator-portal/web-ui/app.js#L925-L1050)
-- [styles.css:330-359](file://products/operator-portal/web-ui/styles.css#L330-L359)
+- [app.js:1900-2050](file://products/operator-portal/web-ui/app.js#L1900-L2050)
+- [styles.css:353-382](file://products/operator-portal/web-ui/styles.css#L353-L382)
 
 ## Skills Integration and Cited Guidance
 
@@ -652,7 +779,7 @@ The cited guidance chips follow the established design system:
 
 **Section sources**
 - [app.js:750-799](file://products/operator-portal/web-ui/app.js#L750-L799)
-- [styles.css:566-604](file://products/operator-portal/web-ui/styles.css#L566-L604)
+- [styles.css:589-627](file://products/operator-portal/web-ui/styles.css#L589-L627)
 
 ## Permission Matrix and Workspace Resources
 
@@ -790,12 +917,12 @@ Configure environment variables for the portal deployment:
 
 The deployment process includes enhanced version management:
 
-- **Platform Version**: PLATFORM_VERSION set to v0.5.0 for consistency across the platform ecosystem
-- **Cache-Busting**: Query parameter versioning (v=20260821-release-0.5.0) ensures proper client-side caching behavior
+- **Platform Version**: PLATFORM_VERSION set to v0.6.0 for consistency across the platform ecosystem
+- **Cache-Busting**: Query parameter versioning (v=20260821-spec-020-hitl-5) ensures proper client-side caching behavior
 - **Version Validation**: Automated validation ensures all platform components use consistent versions
 - **Deployment Coordination**: Coordinated versioning across all platform services
 
-**Updated** The deployment now supports the enhanced skills integration with "Cited guidance" chips, improved navigation system with sectioned organization, and comprehensive workspace resource discovery capabilities. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. The cache-busting mechanism ensures clients always receive the latest version of static assets after deployments.
+**Updated** The deployment now supports the enhanced HITL confirmation bridging system with inline approval cards, improved navigation system with sectioned organization, comprehensive workspace resource discovery capabilities, and enhanced skills integration with "Cited guidance" chips. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. The cache-busting mechanism ensures clients always receive the latest version of static assets after deployments.
 
 **Section sources**
 - [nginx.conf](file://products/operator-portal/nginx.conf)
@@ -845,6 +972,7 @@ The updated interface provides additional customization points:
 - **Navigation Item Styling**: Custom styling for navigation items and active states
 - **Mobile Drawer Behavior**: Configurable drawer animation and positioning
 - **Section Label Styling**: Customizable appearance for navigation section labels
+- **HITL Confirmation Card Styling**: Customizable appearance for approval cards with warning borders and action buttons
 - **Cited Guidance Styling**: Customizable chip appearance and behavior for skills integration
 - **Permission Matrix Styling**: Customizable table styling for permission displays
 - **Workspace Resource Styling**: Customizable table layouts for tools and skills catalogs
@@ -892,6 +1020,7 @@ The new interface includes additional accessibility improvements:
 - **Sidebar Navigation**: Accessible navigation with proper ARIA attributes
 - **User Card**: Accessible user identity display with proper labeling
 - **Mobile Drawer**: Accessible off-canvas navigation with proper focus management
+- **HITL Confirmation Cards**: Accessible approval interfaces with proper ARIA labels and keyboard navigation
 - **Audit Trail**: Accessible table with proper headers and expandable details
 - **Cited Guidance Chips**: Accessible chip elements with proper labeling and keyboard navigation
 - **Permission Matrix**: Accessible table with proper headers and status badges
@@ -937,6 +1066,7 @@ The updated interface maintains broad browser compatibility:
 - **CSS Custom Properties**: Theme customization with fallback values
 - **Modern JavaScript**: ES6+ features with appropriate polyfills
 - **Responsive Design**: Mobile-first approach with progressive enhancement
+- **HITL Confirmation Cards**: Inline approval interfaces compatible with all modern browsers
 - **Skills Integration**: Cited guidance chips work across all supported browsers
 - **Permission Matrix**: Table-based displays compatible with all modern browsers
 - **Workspace Resources**: Standard HTML tables with broad browser support
@@ -1046,23 +1176,33 @@ Common issues and their solutions when working with the Operator Portal.
 - Verify CSS classes are properly applied for chip styling
 - Check that _truncated flag is not set in data_summary
 
-### Cited Guidance Display Issues
+### HITL Confirmation Card Issues
 
-**Problem**: Cited guidance chips displaying incorrectly or not at all
+**Problem**: Confirmation cards not appearing or buttons not working
 **Solution**:
-- Verify renderCitedGuidance function is being called with proper payload
-- Check that evidence card exists and has proper structure
-- Ensure CSS classes for cited-guidance, cited-chips, and cited-chip are applied
-- Review CSS for proper styling of chip elements
-- Check for JavaScript errors in chip generation logic
-- Verify skill data contains required fields (skill_id, title)
+- Verify user has appropriate roles (platform-admin, approver, operator, developer) for confirmation
+- Check that confirmation_request events are being received in the stream
+- Ensure /api/v1/chat/confirm endpoint is accessible and properly configured
+- Review browser console for JavaScript errors in confirmation handling
+- Verify confirmation registry is properly initialized in agent-platform
+- Check that confirm_id values are properly passed between frontend and backend
+
+### Stream Continuation Issues
+
+**Problem**: Stream doesn't resume after confirmation decision
+**Solution**:
+- Verify confirmation decision is properly sent to backend
+- Check that agent-platform confirmation registry is functioning
+- Ensure resumed stream events are properly handled in frontend
+- Review network requests for confirmation endpoint responses
+- Check for proper error handling in sendConfirmation function
 
 ### Role-Based Access Issues
 
 **Problem**: Navigation items hidden despite having correct roles
 **Solution**:
 - Verify user has required roles in identity system
-- Check client-side role detection functions (canViewAudit, canViewIncidents)
+- Check client-side role detection functions (canViewAudit, canViewIncidents, canConfirmTools)
 - Ensure server-side permissions are properly enforced
 - Review browser console for role detection errors
 - Confirm identity normalization is working correctly
@@ -1077,7 +1217,7 @@ Common issues and their solutions when working with the Operator Portal.
 - Verify VERSION file matches PLATFORM_VERSION in app.js
 - Ensure validate-version script passes during build process
 
-**Updated** Added troubleshooting guidance for the enhanced navigation system, permission matrix, workspace resources, and skills integration features, including common issues with section visibility, permission displays, resource loading, and cited guidance chip rendering. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism.
+**Updated** Added troubleshooting guidance for the enhanced navigation system, permission matrix, workspace resources, skills integration, and HITL confirmation bridging features, including common issues with section visibility, permission displays, resource loading, cited guidance chip rendering, confirmation card functionality, and stream continuation handling. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism.
 
 **Section sources**
 - [app.js](file://products/operator-portal/web-ui/app.js)
@@ -1086,10 +1226,10 @@ Common issues and their solutions when working with the Operator Portal.
 
 The Operator Portal provides a comprehensive, accessible, and customizable web interface for platform administration and monitoring within the Luban AIOPS ecosystem. Built with vanilla JavaScript and modern web standards, it delivers enterprise-grade functionality while maintaining simplicity and performance.
 
-**Updated** The recent enhancements include a significantly improved navigation system with sectioned organization (Chat, Control, Workspace sections), live permission visibility through the permission matrix endpoint, comprehensive workspace resource discovery for tools and skills catalogs, and enhanced skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions. The platform has been updated to version 0.5.0 with enhanced version consistency across the platform ecosystem and improved cache-busting mechanisms for proper client-side caching behavior after deployment.
+**Updated** The recent enhancements include comprehensive HITL (Human-in-the-Loop) confirmation bridging with inline approval cards that allow operators to approve or deny ASK-gated tool executions directly within the chat interface, significantly improved navigation system with sectioned organization (Chat, Control, Workspace sections), live permission visibility through the permission matrix endpoint, comprehensive workspace resource discovery for tools and skills catalogs, and enhanced skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions. The platform has been updated to version 0.6.0 with enhanced version consistency across the platform ecosystem and improved cache-busting mechanisms for proper client-side caching behavior after deployment.
 
-Key strengths of the enhanced portal include its modular architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive skills integration capabilities, and improved navigation organization. The deployment process remains streamlined through containerization and Kubernetes-native configurations, making it suitable for both development and production environments.
+Key strengths of the enhanced portal include its modular architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities, enhanced skills integration capabilities, and improved navigation organization. The deployment process remains streamlined through containerization and Kubernetes-native configurations, making it suitable for both development and production environments.
 
-The enhanced navigation system provides better organization of platform functions, making it easier for operators to find relevant tools and information. The permission matrix offers transparency into platform policies and role assignments, while the workspace resource discovery enables operators to understand available capabilities without needing deep technical knowledge. The cited guidance chips provide immediate visual feedback about which team-owned guidance was referenced during automated processes.
+The HITL confirmation system represents a significant advancement in operator capabilities, enabling safe automation of complex workflows while maintaining human oversight for critical operations. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions.
 
-Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the skills integration system, and continued refinement of the navigation and resource discovery interfaces to meet evolving operational requirements.
+Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system, continued refinement of the navigation and resource discovery interfaces, and expanded support for more complex multi-step approval workflows to meet evolving operational requirements.

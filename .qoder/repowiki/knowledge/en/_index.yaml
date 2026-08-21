@@ -3,11 +3,11 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-08-20T16:48:49Z"
+exported_at: "2026-08-21T10:32:28Z"
 modules:
     "":
-        dir_name: Incident Service (SPEC-015 Incident Triage & Collaboration)
-        title: 'Incident Service (SPEC-015: Incident Triage & Collaboration)'
+        dir_name: Luban Agentic AIOps Platform Workspace
+        title: Luban Agentic AIOps Platform Workspace
         scope: []
         source_files: []
         children: []
