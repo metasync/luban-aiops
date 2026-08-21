@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator
 
@@ -330,3 +331,115 @@ def chat_stream(
             yield chunk
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+async def chat_confirm(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    identity: IdentityContext,
+    session_id: str,
+    confirm_id: str,
+    decision: str,
+    delegated_token: str | None = None,
+) -> StreamingResponse:
+    """Proxy a parked-confirmation decision to agent-service (SPEC-020 R-3).
+
+    Upstream 4xx (unknown/expired confirmation, parked session) passes
+    through unchanged; transport failures and upstream 5xx map to 502.
+    The ``confirmation_decided`` audit event is emitted when the matching
+    ``confirmation_result`` frame flows through, so only decisions the
+    kernel actually applied reach the durable trail.
+    """
+    try:
+        upstream = await agent_client.open_chat_confirm_stream(
+            settings,
+            request_id,
+            identity.username,
+            session_id,
+            confirm_id,
+            decision,
+            delegated_token,
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            # Pass client errors through unchanged (unknown/expired
+            # confirmation, parked session) so operators can tell them
+            # apart from an upstream outage.
+            raise HTTPException(
+                status_code=status,
+                detail="agent service rejected the confirmation",
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail="agent service confirm failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+    audited = False
+
+    async def _stream() -> AsyncIterator[str]:
+        nonlocal audited
+        async for chunk in upstream:
+            if not audited:
+                frame = _extract_confirmation_result(chunk)
+                if frame is not None:
+                    audited = True
+                    _emit_confirmation_decided(
+                        settings, request_id, identity,
+                        session_id, confirm_id, decision, frame,
+                    )
+            yield chunk
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+def _extract_confirmation_result(chunk: str) -> dict | None:
+    """Parse an SSE chunk into a confirmation_result frame, or None."""
+    if not chunk.startswith("data: "):
+        return None
+    try:
+        frame = json.loads(chunk.removeprefix("data: ").strip())
+    except ValueError:
+        return None
+    if isinstance(frame, dict) and frame.get("type") == "confirmation_result":
+        return frame
+    return None
+
+
+def _emit_confirmation_decided(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    identity: IdentityContext,
+    session_id: str,
+    confirm_id: str,
+    decision: str,
+    frame: dict,
+) -> None:
+    """Record the applied decision in the durable audit trail (SPEC-020 R-3)."""
+    tool_names = [
+        str(call.get("tool_name") or "")
+        for call in frame.get("pending_calls") or []
+        if isinstance(call, dict)
+    ]
+    emit_audit_event(
+        settings,
+        build_audit_event(
+            "confirmation_decided",
+            request_id,
+            "allow" if decision == "approve" else "deny",
+            subject=identity.subject,
+            username=identity.username,
+            actor=identity.actor,
+            roles=identity.roles,
+            session_id=session_id,
+            details={
+                "session_id": session_id,
+                "confirm_id": confirm_id,
+                "decision": decision,
+                "tool_names": tool_names,
+            },
+        ),
+    )

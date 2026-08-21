@@ -18,6 +18,7 @@ EventType = Literal[
     "session_created",
     "chat_started",
     "chat_completed",
+    "confirmation_decided",
     "incident_triaged",
 ]
 

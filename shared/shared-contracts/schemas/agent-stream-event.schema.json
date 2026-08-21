@@ -1,15 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/agent-stream-event.schema.json",
-  "title": "Agent Stream Event (v3)",
-  "description": "SSE frame payload for GET /api/v2/chat/stream. v3 adds tool_call and tool_result event types for evidence panel rendering (SPEC-011 R-1).",
+  "title": "Agent Stream Event (v5)",
+  "description": "SSE frame payload for GET /api/v2/chat/stream. v3 added tool_call and tool_result event types for evidence panel rendering (SPEC-011 R-1). v4 adds confirmation_request and confirmation_result event types for HITL confirmation bridging (SPEC-020 R-1). v5 adds an optional data field on tool_result frames carrying the full tool payload within the stream size cap.",
   "type": "object",
   "additionalProperties": false,
   "required": ["type", "session_id", "request_id"],
   "properties": {
     "type": {
       "type": "string",
-      "enum": ["message_start", "message_delta", "message_end", "error", "tool_call", "tool_result"]
+      "enum": ["message_start", "message_delta", "message_end", "error", "tool_call", "tool_result", "confirmation_request", "confirmation_result"]
     },
     "session_id": {
       "type": "string"
@@ -23,7 +23,25 @@
     },
     "message": {
       "type": "string",
-      "description": "Terminal metadata. Present on message_end and error frames."
+      "description": "Terminal metadata. Present on message_end and error frames. Carries the kernel permission message on confirmation_request frames."
+    },
+    "confirm_id": {
+      "type": "string",
+      "description": "Unique identifier correlating a confirmation_request with its confirmation_result and the confirm endpoint call. Present on confirmation_request and confirmation_result frames."
+    },
+    "pending_calls": {
+      "type": "array",
+      "description": "Batch of parked tool calls awaiting confirmation. Present on confirmation_request frames and echoed on the matching confirmation_result frame.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["call_id", "tool_name"],
+        "properties": {
+          "call_id": { "type": "string" },
+          "tool_name": { "type": "string" },
+          "parameters": { "type": "object", "additionalProperties": true }
+        }
+      }
     },
     "tool_name": {
       "type": "string",
@@ -40,8 +58,8 @@
     },
     "status": {
       "type": "string",
-      "enum": ["success", "error", "denied"],
-      "description": "Tool execution outcome. Present on tool_result frames."
+      "enum": ["success", "error", "denied", "approved", "expired", "interrupted"],
+      "description": "Outcome marker. Present on tool_result frames (success/error/denied) and confirmation_result frames (approved/denied/expired/interrupted)."
     },
     "evidence": {
       "type": "object",
@@ -57,6 +75,11 @@
     "data_summary": {
       "type": ["object", "null"],
       "description": "Condensed tool result for UI rendering (bounded size). Present on tool_result frames.",
+      "additionalProperties": true
+    },
+    "data": {
+      "type": ["object", "array", "string", "number", "boolean", "null"],
+      "description": "Full tool result payload when its serialized size stays within the stream cap (AGENT_TOOL_DATA_MAX_CHARS); omitted when oversized. Present on tool_result frames.",
       "additionalProperties": true
     },
     "error": {

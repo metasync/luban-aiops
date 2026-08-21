@@ -7,6 +7,14 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-21-hitl-confirmation-bridging.md`
+  - delivers SPEC-020: kernel ASK decisions surface as inline approval
+    cards (park/resume bridging via `confirmation_request` /
+    `confirmation_result` frames and `POST /api/v1/chat/confirm` under
+    the new deny-by-default `chat:confirm` action), platform-owned
+    permission gating (the allow-list is the only auto-approval
+    surface), TTL-safe expiry, `confirmation_decided` audit events, and
+    stream schema v5 full-output evidence transparency
 - `2026-08-20-portal-transparency-and-navigation.md`
   - delivers SPEC-019: sectioned portal navigation (Chat / Control /
     Workspace) with auto-hiding sections and a logo-row version chip,

@@ -105,6 +105,60 @@ async def stream_chat(
                     yield line + "\n\n"
 
 
+async def open_chat_confirm_stream(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+    session_id: str,
+    confirm_id: str,
+    decision: str,
+    delegated_token: str | None = None,
+) -> AsyncIterator[str]:
+    """Open the confirm stream and return an SSE line iterator (SPEC-020 R-3).
+
+    The upstream status is checked eagerly, before any frame is yielded, so
+    the caller can map 4xx (unknown/expired/parked) and outages to HTTP
+    responses instead of corrupting an already-open SSE stream. Raises
+    ``httpx.HTTPStatusError`` on upstream 4xx/5xx and ``httpx.HTTPError``
+    on transport failure.
+    """
+    timeout = httpx.Timeout(connect=5.0, read=None, write=None, pool=None)
+    payload = {
+        "session_id": session_id,
+        "confirm_id": confirm_id,
+        "decision": decision,
+    }
+    client = httpx.AsyncClient(timeout=timeout)
+    try:
+        request = client.build_request(
+            "POST",
+            f"{settings.agent_service_url}/api/v2/chat/confirm",
+            json=payload,
+            headers=_headers(request_id, user_id, delegated_token),
+        )
+        response = await client.send(request, stream=True)
+    except httpx.HTTPError:
+        await client.aclose()
+        raise
+    if response.status_code >= 400:
+        # Read the body to release the connection, then surface the status.
+        await response.aread()
+        await response.aclose()
+        await client.aclose()
+        response.raise_for_status()
+
+    async def _iter() -> AsyncIterator[str]:
+        try:
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    yield line + "\n\n"
+        finally:
+            await response.aclose()
+            await client.aclose()
+
+    return _iter()
+
+
 async def runtime_metadata(settings: PlatformGatewaySettings) -> dict:
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(

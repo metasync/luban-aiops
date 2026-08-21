@@ -8,6 +8,11 @@ from agent_service.core.metrics import record_agent_state_error
 from agent_service.providers import get_provider
 from agent_service.runtime_settings import RuntimeSettings
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
+from agent_service.services.hitl_confirmations import (
+    CONFIRMATION_REGISTRY,
+    ConfirmationOwnerMismatch,
+    PendingConfirmation,
+)
 
 LOGGER = logging.getLogger(__name__)
 MAX_CACHED_AGENTS = 1000
@@ -255,6 +260,7 @@ class AgentKernel:
             GatewayPermissionMiddleware(),
             ToolEvidenceMiddleware(
                 data_summary_max_chars=settings.tool_data_summary_max_chars,
+                data_max_chars=settings.tool_data_max_chars,
             ),
         ]
         if settings.kernel_tracing:
@@ -606,6 +612,19 @@ class AgentKernel:
                             "request_id": request_id,
                             "session_id": session_id,
                         }
+                    # SPEC-020 R-2: a kernel ASK park surfaces as a
+                    # confirmation_request frame and ends the stream without
+                    # message_end; the confirm endpoint resumes it.
+                    frame = self._build_confirmation_frame(
+                        event, session_id, user_name
+                    )
+                    if frame is not None:
+                        yield {
+                            **frame,
+                            "request_id": request_id,
+                            "session_id": session_id,
+                        }
+                        break
                     yield self.normalize_event(event, request_id, session_id)
 
                 # Drain any remaining trace events after the stream completes.
@@ -632,3 +651,184 @@ class AgentKernel:
                 delta=self.build_provider_error_message(message, session_id),
             ):
                 yield event
+
+    # --- HITL confirmation bridging (SPEC-020 R-2) ---
+
+    def _build_confirmation_frame(
+        self,
+        event: object,
+        session_id: str,
+        user_name: str,
+    ) -> dict[str, object] | None:
+        """Register a kernel ASK park and build its confirmation_request frame.
+
+        Returns None for non-park events and when bridging is disabled
+        (``hitl_confirm_timeout == 0``), preserving the legacy silent-park
+        posture. A parked reply is registered per session and the stream
+        ends without ``message_end``; the confirm endpoint resumes it.
+        """
+        if self.settings.hitl_confirm_timeout <= 0:
+            return None
+        from agentscope.event import RequireUserConfirmEvent
+
+        if not isinstance(event, RequireUserConfirmEvent):
+            return None
+        pending = CONFIRMATION_REGISTRY.register(
+            session_id=session_id,
+            user_id=user_name,
+            reply_id=str(getattr(event, "reply_id", "") or ""),
+            tool_calls=list(getattr(event, "tool_calls", None) or []),
+            timeout=self.settings.hitl_confirm_timeout,
+        )
+        LOGGER.info(
+            "kernel confirmation parked",
+            extra={
+                "session_id": session_id,
+                "confirm_id": pending.confirm_id,
+                "tool_names": pending.tool_names(),
+            },
+        )
+        return {
+            "type": "confirmation_request",
+            "confirm_id": pending.confirm_id,
+            "pending_calls": pending.pending_calls_payload(),
+            "message": self._confirmation_message(event),
+        }
+
+    @staticmethod
+    def _confirmation_message(event: object) -> str:
+        """Prefer a kernel-provided message; fall back to a deterministic one."""
+        metadata = getattr(event, "metadata", None)
+        if isinstance(metadata, dict):
+            message = metadata.get("message")
+            if isinstance(message, str) and message.strip():
+                return message
+        return "Tool execution requires your confirmation."
+
+    async def resume_confirmation(
+        self,
+        session_id: str,
+        pending: PendingConfirmation,
+        decision: str,
+        user_name: str,
+        request_id: str,
+        bearer_token: str | None = None,
+    ) -> AsyncIterator[dict[str, object]]:
+        """Resume a parked reply with the operator's decision (SPEC-020 R-2).
+
+        The caller must pass the entry as returned by
+        ``ConfirmationRegistry.claim`` — the claim runs before response
+        headers go out, so one parked batch can never be resumed twice.
+        Raises ``ConfirmationOwnerMismatch`` when the confirmer does not
+        own the parked entry; the v2 route maps it to an error frame.
+        The resumed stream follows the v2 frame contract and begins with
+        the matching ``confirmation_result`` frame. The confirmer's
+        bearer token rides ``DELEGATED_TOKEN`` so the tool-gateway sees
+        the approving identity on any resulting invocation.
+        """
+        from agentscope.event import ConfirmResult, UserConfirmResultEvent
+
+        from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
+        from agent_service.tools.gateway_tools import DELEGATED_TOKEN
+
+        if pending.user_id != user_name:
+            raise ConfirmationOwnerMismatch(user_name)
+
+        agent, _user_msg_cls = await self.ensure_agent(session_id, bearer_token)
+        confirmed = decision == "approve"
+        confirm_event = UserConfirmResultEvent(
+            reply_id=pending.reply_id,
+            confirm_results=[
+                ConfirmResult(confirmed=confirmed, tool_call=tool_call)
+                for tool_call in pending.tool_calls
+            ],
+        )
+
+        trace_queue: asyncio.Queue = asyncio.Queue()
+        sink_var = TOOL_EVIDENCE_SINK.set(trace_queue)
+        token_var = DELEGATED_TOKEN.set(bearer_token)
+        try:
+            yield {
+                "type": "confirmation_result",
+                "confirm_id": pending.confirm_id,
+                "status": "approved" if confirmed else "denied",
+                # Echo the parked batch so downstream consumers (gateway
+                # audit, portal card) can name the decided tools.
+                "pending_calls": pending.pending_calls_payload(),
+                "request_id": request_id,
+                "session_id": session_id,
+            }
+            async for event in agent.reply_stream(confirm_event):
+                self.clear_error()
+                while not trace_queue.empty():
+                    trace = trace_queue.get_nowait()
+                    yield {
+                        **trace,
+                        "request_id": request_id,
+                        "session_id": session_id,
+                    }
+                # A resumed turn can park again on another ASK-gated tool.
+                frame = self._build_confirmation_frame(
+                    event, session_id, user_name
+                )
+                if frame is not None:
+                    yield {
+                        **frame,
+                        "request_id": request_id,
+                        "session_id": session_id,
+                    }
+                    return
+                yield self.normalize_event(event, request_id, session_id)
+            while not trace_queue.empty():
+                trace = trace_queue.get_nowait()
+                yield {
+                    **trace,
+                    "request_id": request_id,
+                    "session_id": session_id,
+                }
+        finally:
+            DELEGATED_TOKEN.reset(token_var)
+            TOOL_EVIDENCE_SINK.reset(sink_var)
+            CONFIRMATION_REGISTRY.resolve(session_id, pending.confirm_id)
+
+        self._snapshot_state(session_id, agent)
+
+    async def expire_confirmation(
+        self,
+        session_id: str,
+        confirm_id: str,
+    ) -> None:
+        """Close a TTL-expired parked reply without resuming it (SPEC-020 R-2).
+
+        Feeds ``UserInterruptEvent`` so the kernel closes the parked calls
+        with an interrupted result, then drops the registry entry. Never
+        streams to a client; a failed interrupt still resolves the entry so
+        the session cannot wedge. Claimed entries are unreachable here:
+        an in-flight resume owns the entry and resolves it in its own
+        ``finally``, so a racing expiry can never interrupt an approved
+        batch mid-stream (``take_for_expiry`` raises instead).
+        """
+        from agentscope.event import UserInterruptEvent
+
+        # Take-for-expiry ignores TTL (this path exists precisely to close
+        # an expired entry) but claims the entry first, keeping the
+        # interrupt single-flight against confirms and concurrent expiries.
+        pending = CONFIRMATION_REGISTRY.take_for_expiry(session_id, confirm_id)
+        try:
+            agent, _user_msg_cls = await self.ensure_agent(session_id, None)
+            interrupt = UserInterruptEvent(reply_id=pending.reply_id)
+            async for _event in agent.reply_stream(interrupt):
+                pass
+            self._snapshot_state(session_id, agent)
+        except Exception as exc:  # pragma: no cover - defensive cleanup
+            LOGGER.warning(
+                "expiring confirmation %s failed to interrupt parked reply: %s",
+                confirm_id,
+                exc,
+            )
+        finally:
+            CONFIRMATION_REGISTRY.resolve(session_id, confirm_id)
+        LOGGER.info(
+            "kernel confirmation expired",
+            extra={"session_id": session_id, "confirm_id": confirm_id},
+        )

@@ -409,3 +409,26 @@ def test_middleware_settings_reject_non_boolean(monkeypatch, env_name):
         assert env_name in str(exc)
     else:  # pragma: no cover - defensive assertion
         raise AssertionError(f"{env_name}=maybe should be rejected")
+
+
+def test_hitl_confirm_timeout_defaults_and_reads_env(monkeypatch):
+    """SPEC-020 R-2: parked-confirmation TTL; 0 disables the bridge."""
+    monkeypatch.delenv("AGENT_HITL_CONFIRM_TIMEOUT", raising=False)
+    assert RuntimeSettings.from_env().hitl_confirm_timeout == 600
+
+    monkeypatch.setenv("AGENT_HITL_CONFIRM_TIMEOUT", "0")
+    assert RuntimeSettings.from_env().hitl_confirm_timeout == 0
+
+    monkeypatch.setenv("AGENT_HITL_CONFIRM_TIMEOUT", "120")
+    assert RuntimeSettings.from_env().hitl_confirm_timeout == 120
+
+
+def test_hitl_confirm_timeout_rejects_negative(monkeypatch):
+    monkeypatch.setenv("AGENT_HITL_CONFIRM_TIMEOUT", "-1")
+
+    try:
+        RuntimeSettings.from_env()
+    except ValueError as exc:
+        assert "AGENT_HITL_CONFIRM_TIMEOUT" in str(exc)
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("AGENT_HITL_CONFIRM_TIMEOUT=-1 should be rejected")

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import jsonschema
+import pytest
 from fastapi.testclient import TestClient
 
 from agent_service.api.v2.routes import _normalize_stream_event
@@ -157,3 +158,79 @@ def test_non_object_data_summary_is_wrapped() -> None:
 def test_unknown_event_type_still_degrades_to_message_delta() -> None:
     event = _normalize_stream_event({"type": "thinking_block"}, "ses-1", "req-1")
     assert event.type == "message_delta"
+
+
+# --- Confirmation frames (SPEC-020 R-1, stream schema v5) ---
+
+
+def test_confirmation_request_frame_conforms_to_contract() -> None:
+    raw = {
+        "type": "confirmation_request",
+        "confirm_id": "cf-1",
+        "pending_calls": [
+            {
+                "call_id": "call-1",
+                "tool_name": "k8s.restart_service",
+                "parameters": {"namespace": "ops"},
+            }
+        ],
+        "message": "Tool execution requires your confirmation.",
+    }
+    event = _normalize_stream_event(raw, "ses-1", "req-1")
+    dumped = json.loads(event.model_dump_json(exclude_none=True))
+    assert dumped["type"] == "confirmation_request"
+    assert dumped["confirm_id"] == "cf-1"
+    assert dumped["pending_calls"][0]["tool_name"] == "k8s.restart_service"
+    jsonschema.validate(dumped, load_schema("agent-stream-event.schema.json"))
+
+
+def test_confirmation_result_frame_conforms_to_contract() -> None:
+    for status in ("approved", "denied", "expired", "interrupted"):
+        raw = {
+            "type": "confirmation_result",
+            "confirm_id": "cf-1",
+            "status": status,
+        }
+        event = _normalize_stream_event(raw, "ses-1", "req-1")
+        dumped = json.loads(event.model_dump_json(exclude_none=True))
+        assert dumped["status"] == status
+        jsonschema.validate(
+            dumped, load_schema("agent-stream-event.schema.json")
+        )
+
+
+def test_pending_calls_coercion_drops_malformed_entries() -> None:
+    raw = {
+        "type": "confirmation_request",
+        "confirm_id": "cf-2",
+        "pending_calls": [
+            "not-a-dict",
+            {"call_id": 7, "tool_name": "k8s.restart_service"},
+            {
+                "call_id": "call-1",
+                "tool_name": "k8s.restart_service",
+                "parameters": "not-a-dict",
+            },
+        ],
+    }
+    event = _normalize_stream_event(raw, "ses-1", "req-1")
+    dumped = json.loads(event.model_dump_json(exclude_none=True))
+    jsonschema.validate(dumped, load_schema("agent-stream-event.schema.json"))
+
+
+def test_chat_confirm_request_conforms_to_contract() -> None:
+    schema = load_schema("chat-confirm.schema.json")
+    jsonschema.validate(
+        {"session_id": "ses-1", "confirm_id": "cf-1", "decision": "approve"},
+        schema,
+    )
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(
+            {"session_id": "ses-1", "confirm_id": "cf-1", "decision": "maybe"},
+            schema,
+        )
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(
+            {"session_id": "ses-1", "decision": "approve", "user_id": "alice"},
+            schema,
+        )

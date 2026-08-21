@@ -22,6 +22,7 @@ from agent_service.services.kernel_middleware import (
     ToolEvidenceMiddleware,
     _load_auto_allowed_tools,
     _make_data_summary,
+    _make_full_data,
 )
 
 SCHEMAS_DIR = (
@@ -133,6 +134,26 @@ class DataSummaryTests(unittest.TestCase):
         self.assertEqual(_make_data_summary(data), data)
 
 
+class FullDataTests(unittest.TestCase):
+    """Test the size-guarded full-payload passthrough (stream schema v5)."""
+
+    def test_none_data_returns_none(self) -> None:
+        self.assertIsNone(_make_full_data(None))
+
+    def test_data_within_cap_returned_unchanged(self) -> None:
+        data = {"logs": "\n".join(f"line-{i}" for i in range(50))}
+        self.assertEqual(_make_full_data(data), data)
+
+    def test_oversized_data_returns_none(self) -> None:
+        data = {"logs": "x" * 5000}
+        self.assertIsNone(_make_full_data(data, max_chars=100))
+
+    def test_exact_boundary_included(self) -> None:
+        data = {"key": "val"}
+        serialized = json.dumps(data, default=str)
+        self.assertEqual(_make_full_data(data, max_chars=len(serialized)), data)
+
+
 # --- R-1: permission middleware ---------------------------------------------
 
 
@@ -154,7 +175,7 @@ class AllowListTests(unittest.TestCase):
 
 
 class GatewayPermissionMiddlewareTests(unittest.TestCase):
-    def _decide(self, middleware, tool, next_decision=None):
+    def _decide(self, middleware, tool, next_decision=None, tool_call=None):
         from agentscope.permission import PermissionBehavior, PermissionDecision
 
         if next_decision is None:
@@ -162,7 +183,9 @@ class GatewayPermissionMiddlewareTests(unittest.TestCase):
                 behavior=PermissionBehavior.ASK, message="stub-ask",
             )
         calls = []
-        input_kwargs = {"tool": tool, "tool_call": None, "tool_input": {}}
+        input_kwargs = {
+            "tool": tool, "tool_call": tool_call, "tool_input": {},
+        }
         decision = _run(
             middleware.on_check_permission(
                 None, input_kwargs, _permission_next(next_decision, calls),
@@ -179,18 +202,20 @@ class GatewayPermissionMiddlewareTests(unittest.TestCase):
         self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
         self.assertEqual(calls, [])  # built-in resolution bypassed
 
-    def test_read_only_tool_outside_allow_list_delegates_to_builtin(self) -> None:
-        """Auto-approval is allow-listed, not blanket: unvetted tools keep
-        the built-in resolution (ASK default) — headless parity."""
+    def test_read_only_tool_outside_allow_list_asks_without_delegation(self) -> None:
+        """Auto-approval is allow-listed, not blanket: unvetted read-only
+        tools get an explicit ASK. Delegation to the built-in engine is
+        bypassed because its read-only fast path auto-allows read-only
+        invocations in every mode, silently skipping the allow-list."""
         from agentscope.permission import PermissionBehavior
 
         mw = GatewayPermissionMiddleware()
         tool = _StubTool("k8s_list_secrets", is_read_only=True)
         decision, calls = self._decide(mw, tool)
         self.assertEqual(decision.behavior, PermissionBehavior.ASK)
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls, [])  # engine fast path never reached
 
-    def test_non_read_only_tool_delegates_even_if_name_listed(self) -> None:
+    def test_non_read_only_tool_asks_even_if_name_listed(self) -> None:
         from agentscope.permission import PermissionBehavior
 
         mw = GatewayPermissionMiddleware(
@@ -199,7 +224,56 @@ class GatewayPermissionMiddlewareTests(unittest.TestCase):
         tool = _StubTool("k8s_restart_pod", is_read_only=False)
         decision, calls = self._decide(mw, tool)
         self.assertEqual(decision.behavior, PermissionBehavior.ASK)
+        self.assertEqual(calls, [])
+
+    def test_missing_tool_still_delegates_to_builtin(self) -> None:
+        """Without a tool surface there is nothing to policy-check; the
+        built-in resolution is preserved."""
+        from agentscope.permission import PermissionBehavior
+
+        mw = GatewayPermissionMiddleware()
+        decision, calls = self._decide(mw, None)
+        self.assertEqual(decision.behavior, PermissionBehavior.ASK)
         self.assertEqual(len(calls), 1)
+
+    def test_allowed_state_call_delegates_instead_of_re_asking(self) -> None:
+        """SPEC-020 resume regression: agentscope re-traverses the
+        middleware chain for calls the operator already confirmed (state
+        ALLOWED). The middleware must delegate so the built-in resolution
+        short-circuits them to ALLOW — an explicit ASK here would re-park
+        the resumed reply forever (live check: approve loop on
+        k8s.get_pod_logs)."""
+        from agentscope.message import ToolCallState
+        from agentscope.permission import (
+            PermissionBehavior,
+            PermissionDecision,
+        )
+
+        mw = GatewayPermissionMiddleware()
+        tool = _StubTool("k8s_list_secrets", is_read_only=True)
+        tool_call = SimpleNamespace(state=ToolCallState.ALLOWED)
+        already_allowed = PermissionDecision(
+            behavior=PermissionBehavior.ALLOW,
+            message="Already allowed by user confirmation.",
+        )
+        decision, calls = self._decide(
+            mw, tool, next_decision=already_allowed, tool_call=tool_call,
+        )
+        self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
+        self.assertEqual(len(calls), 1)
+
+    def test_pending_state_call_still_asks(self) -> None:
+        """Only the ALLOWED state short-circuits; fresh calls (PENDING)
+        keep the explicit ASK even when the tool_call block is present."""
+        from agentscope.message import ToolCallState
+        from agentscope.permission import PermissionBehavior
+
+        mw = GatewayPermissionMiddleware()
+        tool = _StubTool("k8s_list_secrets", is_read_only=True)
+        tool_call = SimpleNamespace(state=ToolCallState.PENDING)
+        decision, calls = self._decide(mw, tool, tool_call=tool_call)
+        self.assertEqual(decision.behavior, PermissionBehavior.ASK)
+        self.assertEqual(calls, [])
 
     def test_task_tools_always_allowed(self) -> None:
         """R-5: state-local task tools must never hit the interactive ASK
@@ -358,6 +432,35 @@ class ToolEvidenceMiddlewareTests(unittest.TestCase):
         summary = events[1]["data_summary"]
         self.assertTrue(summary["_truncated"])
         self.assertEqual(len(summary["_preview"]), 50)
+
+    def test_tool_result_frame_carries_full_data_within_cap(self) -> None:
+        from agentscope.tool import ToolResponse
+
+        result = self._gateway_result()
+        tool = _StubTool("k8s_list_pods", gateway_tool_name="k8s.list_pods")
+        agent = _StubAgent([tool])
+        tool_call = _tool_call_block("k8s_list_pods", {})
+        events = self._emit(
+            ToolEvidenceMiddleware(), agent, tool_call,
+            [ToolResponse(metadata={"gateway_result": result})],
+        )
+        self.assertEqual(events[1]["data"], {"pods": []})
+
+    def test_tool_result_frame_omits_full_data_when_oversized(self) -> None:
+        from agentscope.tool import ToolResponse
+
+        result = self._gateway_result()
+        result["data"] = {"logs": "x" * 5000}
+        tool = _StubTool("k8s_list_pods", gateway_tool_name="k8s.list_pods")
+        agent = _StubAgent([tool])
+        tool_call = _tool_call_block("k8s_list_pods", {})
+        events = self._emit(
+            ToolEvidenceMiddleware(data_max_chars=100), agent, tool_call,
+            [ToolResponse(metadata={"gateway_result": result})],
+        )
+        # The frame stays bounded: no full payload, truncated summary only.
+        self.assertNotIn("data", events[1])
+        self.assertTrue(events[1]["data_summary"]["_truncated"])
 
     def test_no_frames_when_sink_unset(self) -> None:
         """Blocking turns (reply_text) never set the sink: the middleware
@@ -525,6 +628,14 @@ class MiddlewareCompositionTests(unittest.TestCase):
             if isinstance(mw, ToolEvidenceMiddleware)
         ][0]
         self.assertEqual(evidence._max_chars, 123)
+
+    def test_evidence_middleware_receives_full_data_limit(self) -> None:
+        kernel = self._kernel(tool_data_max_chars=456)
+        evidence = [
+            mw for mw in kernel._build_middlewares()
+            if isinstance(mw, ToolEvidenceMiddleware)
+        ][0]
+        self.assertEqual(evidence._data_max_chars, 456)
 
 
 if __name__ == "__main__":

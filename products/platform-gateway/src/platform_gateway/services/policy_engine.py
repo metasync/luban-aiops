@@ -36,9 +36,13 @@ ACTION_INCIDENT_TRIAGE = "incident:triage"
 ACTION_POLICY_READ = "policy:read"
 ACTION_TOOLS_LIST = "tools:list"
 ACTION_SKILLS_READ = "skills:read"
+# HITL confirmation bridging (SPEC-020): mutating chat capability with its
+# own action name; observer is denied by default per the bundle convention.
+ACTION_CHAT_CONFIRM = "chat:confirm"
 PROTECTED_ACTIONS = frozenset(
     {
         ACTION_CHAT,
+        ACTION_CHAT_CONFIRM,
         ACTION_SESSION_CREATE,
         ACTION_SESSION_READ,
         ACTION_AUDIT_READ,

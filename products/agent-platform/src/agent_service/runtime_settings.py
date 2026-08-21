@@ -123,6 +123,7 @@ class RuntimeSettings:
     provider_options: RuntimeProviderOptions | None = None
     tool_gateway_url: str | None = None
     tool_data_summary_max_chars: int = 2000
+    tool_data_max_chars: int = 32000
     # Kernel tuning surfaces (SPEC-017 R-1). Defaults mirror the agentscope
     # defaults so unset deployments behave exactly as before.
     max_iters: int = 20
@@ -137,6 +138,10 @@ class RuntimeSettings:
     reply_input_token_weight: float = 1.0
     reply_output_token_weight: float = 1.0
     task_tools_enabled: bool = False
+    # HITL confirmation bridging (SPEC-020 R-2): seconds a parked kernel
+    # confirmation stays answerable. 0 disables the bridge and restores the
+    # pre-SPEC-020 silent-park posture.
+    hitl_confirm_timeout: int = 600
 
     @staticmethod
     def default_provider_options(provider: RuntimeProvider) -> RuntimeProviderOptions:
@@ -193,6 +198,8 @@ class RuntimeSettings:
             )
         if not self.timezone:
             raise ValueError("AGENTSCOPE_TIMEZONE must not be empty.")
+        if self.hitl_confirm_timeout < 0:
+            raise ValueError("AGENT_HITL_CONFIRM_TIMEOUT must be >= 0.")
         try:
             from zoneinfo import ZoneInfo
 
@@ -295,6 +302,9 @@ class RuntimeSettings:
             tool_data_summary_max_chars=int(
                 os.getenv("AGENT_TOOL_DATA_SUMMARY_MAX_CHARS", "2000")
             ),
+            tool_data_max_chars=int(
+                os.getenv("AGENT_TOOL_DATA_MAX_CHARS", "32000")
+            ),
             max_iters=int(os.getenv("AGENTSCOPE_MAX_ITERS", "20")),
             context_trigger_ratio=float(
                 os.getenv("AGENTSCOPE_CONTEXT_TRIGGER_RATIO", "0.8")
@@ -313,6 +323,7 @@ class RuntimeSettings:
             task_tools_enabled=(
                 _optional_bool("AGENTSCOPE_TASK_TOOLS_ENABLED") or False
             ),
+            hitl_confirm_timeout=int(os.getenv("AGENT_HITL_CONFIRM_TIMEOUT", "600")),
         )
 
     def is_configured(self) -> bool:

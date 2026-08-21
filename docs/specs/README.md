@@ -133,3 +133,4 @@ Mechanical enforcement:
 | `SPEC-017` | Agent kernel utilization and conversation durability — kernel configs, structured triage output, AgentState persistence to Postgres | `delivered` |
 | `SPEC-018` | Kernel middleware alignment — middleware-based tracing/permission hooks, built-in task tools (sequenced after SPEC-017) | `delivered` |
 | `SPEC-019` | Portal transparency — permission matrix, workspace resource views, sectioned navigation | `delivered` |
+| `SPEC-020` | HITL confirmation bridging — kernel ASK to portal approve/deny, `chat:confirm` action, `confirmation_decided` audit | `delivered` |

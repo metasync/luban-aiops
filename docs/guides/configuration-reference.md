@@ -254,7 +254,10 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime
 | `AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT` | Input token weight for the reply budget (must be >= 0; `0` is valid) | `1.0` | code default |
 | `AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT` | Output token weight for the reply budget (must be >= 0; `0` is valid) | `1.0` | code default |
 | `AGENTSCOPE_TASK_TOOLS_ENABLED` | Opt-in agentscope task tools (`TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate`; state-local, persisted via the agent state store) | `false` | code default |
-| `AGENT_GATEWAY_TOOL_AUTO_ALLOW` | Comma-separated dotted gateway tool names auto-approved by the permission middleware when read-only (overrides the built-in vetted list) | built-in vetted list | code default |
+| `AGENT_GATEWAY_TOOL_AUTO_ALLOW` | Comma-separated dotted gateway tool names auto-approved by the permission middleware when read-only (overrides the built-in vetted list); the allow-list is the only auto-approval surface — every other tool is answered with an explicit ASK and parks for operator confirmation (SPEC-020) | built-in vetted list | code default |
+| `AGENT_HITL_CONFIRM_TIMEOUT` | HITL confirmation timeout in seconds; an expired parked batch is closed via `UserInterruptEvent` on the next confirm attempt (410) or next chat turn. `0` disables HITL confirmation bridging entirely (SPEC-020) | `600` | code default |
+| `AGENT_TOOL_DATA_SUMMARY_MAX_CHARS` | Serialized-size cap for the `data_summary` field on `tool_result` evidence frames; oversized payloads are truncated with a marker | `2000` | code default |
+| `AGENT_TOOL_DATA_MAX_CHARS` | Serialized-size cap for the full `data` field on `tool_result` evidence frames (stream schema v5); oversized payloads are omitted from the frame and stay in the audit trail only | `32000` | code default |
 | `TOOL_GATEWAY_URL` | Upstream tool-gateway URL | `http://tool-gateway:8000` | runtime-config |
 
 ### platform-gateway

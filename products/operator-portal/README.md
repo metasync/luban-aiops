@@ -62,8 +62,17 @@ Current browser baseline capabilities:
 - request ID visibility for debug-oriented validation
 - evidence panel rendering tool trace events (`tool_call` and `tool_result`)
   as cards with status badges, collapsible parameters and data summaries, and
-  evidence metadata — visible when the agent invokes tools, hidden otherwise
-  (SPEC-011)
+  evidence metadata — when a `tool_result` frame carries the full `data`
+  payload (stream schema v5), the card offers a "Show full output" expander
+  with the complete tool result — multi-line text fields (such as pod logs)
+  render as raw log-style blocks rather than escaped JSON; visible when the
+  agent invokes tools, hidden otherwise (SPEC-011)
+- inline HITL confirmation card: when the agent parks a tool batch awaiting
+  approval, the chat renders a warning-toned card listing the pending tools
+  with collapsible parameters plus Approve/Deny buttons; the decision posts
+  to `/api/v1/chat/confirm` and the resumed stream renders in place; expired
+  or already-decided cards lock with a status badge; buttons hide for roles
+  without `chat:confirm` (the gateway re-enforces server-side) (SPEC-020)
 - read-only durable audit trail view: filter bar, newest-first table, cursor
   pagination with a persistent "Load more" bar, and expandable event
   envelopes; the navigation entry renders only for identities whose roles

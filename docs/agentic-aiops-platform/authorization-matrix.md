@@ -336,7 +336,11 @@ Permissions view renders it, so the granted role × action surface is
 self-service and always reflects what the gateway actually enforces.
 Transparency actions `policy:read` and `skills:read` (read-only workspace
 inventory) are granted to all operational roles; deny-by-default semantics
-are unchanged.
+are unchanged. SPEC-020 adds `chat:confirm` (approve or deny a parked HITL
+tool confirmation), granted to `platform-admin`, `approver`, `operator`, and
+`developer`; `read-only-observer` is excluded because confirming a parked
+tool call is an act-on-the-system action, not observation. Every decision is
+recorded as a durable `confirmation_decided` audit event by platform-gateway.
 
 ## Final Recommendation
 

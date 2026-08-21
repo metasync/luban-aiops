@@ -62,7 +62,8 @@ Current implementation status:
 - enables real runtime replies when `AGENTSCOPE_API_KEY` is supplied to the service environment
 - emits per-request tool trace events (`tool_call` and `tool_result`) into the SSE stream when `TOOL_GATEWAY_URL` is configured; traces are merged with text deltas so the operator portal can render an evidence panel (SPEC-011)
 - carries the triage-report output discipline in the default system prompt so incident triage turns end with a schema-conformant fenced `triage-report` JSON block; `incidents.list` / `incidents.get` join the default auto-allowed tool set alongside the `skills.*` tools, so the agent can ground answers in live incidents without configuration changes (SPEC-015)
-- implements all cross-cutting kernel behavior on agentscope's supported `MiddlewareBase` hooks: an allow-listed permission middleware keeps vetted read-only gateway tools headless-safe, an evidence middleware emits the `tool_call`/`tool_result` frames, and the out-of-box `TracingMiddleware` and `ReplyBudgetControlMiddleware` are opt-in via settings; toolkits are cached per delegated token (tokens are read from a contextvar at call time, so portal token refresh never requires an agent rebuild) (SPEC-018)
+- implements all cross-cutting kernel behavior on agentscope's supported `MiddlewareBase` hooks: a permission middleware that owns the gate for a headless runtime — vetted read-only gateway tools and state-local task tools are ALLOWed, every other tool is answered with an explicit ASK rather than delegated to agentscope's `PermissionEngine` (whose read-only fast path auto-allows read-only invocations in every mode, bypassing the platform allow-list) — an evidence middleware emits the `tool_call`/`tool_result` frames, and the out-of-box `TracingMiddleware` and `ReplyBudgetControlMiddleware` are opt-in via settings; toolkits are cached per delegated token (tokens are read from a contextvar at call time, so portal token refresh never requires an agent rebuild) (SPEC-018)
+- bridges kernel ASKs to the portal: a permission-middleware ASK parks the active reply on `RequireUserConfirmEvent`, emits a `confirmation_request` SSE frame (stream schema v5), and holds the batch in an in-memory confirmation registry; `POST /api/v2/chat/confirm` resumes the parked reply with the operator's decision; expired entries abort the reply via `UserInterruptEvent`; `AGENT_HITL_CONFIRM_TIMEOUT=0` disables bridging (SPEC-020)
 
 Service layout:
 
@@ -77,7 +78,7 @@ Service layout:
 - `src/agent_service/schemas/`
   - `v2.py`: pydantic models bound to the platform-owned contract; `api.py`: internal session models
 - `src/agent_service/services/`
-  - session store, session service, runtime dependencies, kernel middleware stack (permission + evidence; SPEC-018)
+  - session store, session service, runtime dependencies, kernel middleware stack (permission + evidence; SPEC-018), HITL confirmation registry (SPEC-020)
 - `src/agent_service/runtime_*.py`, `providers/`, `agent_app.py`, `native_service.py`
   - runtime-focused modules that configure and expose AgentScope-backed execution paths
 
@@ -175,9 +176,11 @@ Current runtime environment knobs:
 - `TOOL_GATEWAY_URL`
   - base URL of the tool-gateway for tool discovery and invocation (SPEC-007); when set, the AgentScope kernel registers gateway tools into a per-token cached Toolkit; when unset, the agent builds with an empty Toolkit
   - tool calls relay the gateway-forwarded delegated token (SPEC-008) as `Authorization: Bearer`; the token is exposed per-turn through a request-scoped contextvar and read by the tool closures at call time (toolkits stay per-token and are never shared across users), so portal token refresh works without rebuilding the agent; identity is never carried in the request body; without a token, discovery degrades to an empty Toolkit and invocation returns a structured error
-  - evidence frames (`tool_call`/`tool_result`) are emitted by the kernel's evidence middleware into a request-scoped sink and drained into the SSE stream alongside text deltas (SPEC-011, SPEC-018)
+  - evidence frames (`tool_call`/`tool_result`) are emitted by the kernel's evidence middleware into a request-scoped sink and drained into the SSE stream alongside text deltas; besides the bounded `data_summary`, a `tool_result` frame carries the full `data` payload when it stays within `AGENT_TOOL_DATA_MAX_CHARS` (stream schema v5) so the portal can show the complete output of a run regardless of how the model phrases its reply (SPEC-011, SPEC-018)
 - `AGENT_GATEWAY_TOOL_AUTO_ALLOW`
-  - comma-separated dotted gateway tool names auto-approved by the permission middleware when the tool is read-only; overrides the built-in vetted list; unvetted tools keep the built-in ASK resolution (SPEC-018)
+  - comma-separated dotted gateway tool names auto-approved by the permission middleware when the tool is read-only; overrides the built-in vetted list; the allow-list is the only auto-approval surface — every other tool is answered with an explicit ASK (which parks the batch for operator confirmation under SPEC-020) instead of being delegated to agentscope's read-only auto-allow fast path (SPEC-018)
+- `AGENT_HITL_CONFIRM_TIMEOUT`
+  - seconds a parked tool batch may wait for an operator decision before expiring; defaults to `600`; `0` disables HITL confirmation bridging so ASKs fall through to the built-in resolution (SPEC-020)
 - `AGENTSCOPE_KERNEL_TRACING`
   - registers agentscope's out-of-box `TracingMiddleware` for OTel kernel spans; defaults to `false`; inert without an SDK `TracerProvider` (SPEC-018)
 - `AGENTSCOPE_REPLY_TOKEN_BUDGET`
@@ -187,7 +190,9 @@ Current runtime environment knobs:
 - `AGENTSCOPE_TASK_TOOLS_ENABLED`
   - opts into agentscope's built-in task tools (`TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate`); defaults to `false`; task state is session-local agent state and persists through the agent state store; task tools never count toward the no-tools guard (SPEC-018)
 - `AGENT_TOOL_DATA_SUMMARY_MAX_CHARS`
-  - maximum character length for `data_summary` fields in tool trace events; defaults to `2000`; payloads exceeding the limit are truncated with a structured marker; full payloads remain in audit logs only (SPEC-011)
+  - maximum character length for `data_summary` fields in tool trace events; defaults to `2000`; payloads exceeding the limit are truncated with a structured marker (SPEC-011)
+- `AGENT_TOOL_DATA_MAX_CHARS`
+  - serialized-size cap for the full `data` field on `tool_result` evidence frames (stream schema v5); defaults to `32000`; oversized payloads are omitted from the frame and remain in audit logs only (SPEC-020 live-check enhancement)
 - `OTEL_ENABLED`
   - master switch for the OTLP push pipeline (traces + metrics); defaults to `false`; when disabled, the `/metrics` surface is unaffected
 - `OTEL_EXPORTER_OTLP_ENDPOINT`
@@ -212,6 +217,16 @@ Agent state durability (SPEC-017):
 - a corrupt persisted snapshot is discarded (fresh agent) instead of wedging the session
 - session deletion also removes the session's persisted state (best-effort)
 - `POST /api/v2/chat` accepts an optional `response_schema` (JSON-schema dict) and returns the kernel-validated `structured_output` alongside the text reply (null when no schema was requested or the turn produced none)
+
+HITL confirmation bridging (SPEC-020):
+
+- when the permission middleware resolves an unvetted tool batch as ASK, the kernel parks the active reply on `RequireUserConfirmEvent` and emits a `confirmation_request` frame carrying `confirm_id` and the pending calls; the stream ends without `message_end`
+- parked entries live in an in-memory registry scoped to session and owner (`X-User-ID`); a new chat against a parked session answers `409`
+- `POST /api/v2/chat/confirm` resumes the parked reply with `UserConfirmResultEvent` (approve runs the batch under the confirmer's delegated token, deny feeds the refusal back to the model), emits a `confirmation_result` frame first (echoing the decided calls), continues the paused reply on the same SSE stream, and snapshots agent state after completion
+- unknown, foreign, or already-answered confirmations answer `404`; expired entries answer `410`; a TTL-expired park is closed via `UserInterruptEvent` on the confirm attempt or the next chat turn — expiry never silently evicts a parked reply
+- the confirm route claims the entry before any headers go out, so a duplicate confirm (retry, second tab) fails closed with `404` instead of double-resuming the parked batch
+- confirmed calls are never re-asked: agentscope re-traverses the permission middleware chain for operator-approved calls (state ALLOWED), and the middleware delegates them to the built-in resolution's ALLOWED short-circuit so the approved batch executes on resume instead of re-parking
+- `AGENT_HITL_CONFIRM_TIMEOUT=0` disables bridging entirely and ASKs keep the built-in permission-middleware resolution
 
 Current runtime status surface:
 

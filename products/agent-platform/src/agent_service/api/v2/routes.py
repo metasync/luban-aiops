@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 
 from agent_service.core.metrics import record_chat_request
 from agent_service.schemas.v2 import (
+    AgentChatConfirmRequest,
     AgentChatRequest,
     AgentChatResponse,
     AgentHealth,
@@ -26,7 +27,15 @@ from agent_service.schemas.v2 import (
     AgentStreamEvent,
 )
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
-from agent_service.services.runtime_dependencies import get_runtime_kernel
+from agent_service.services.hitl_confirmations import (
+    ConfirmationExpired,
+    ConfirmationNotFound,
+    ConfirmationOwnerMismatch,
+)
+from agent_service.services.runtime_dependencies import (
+    get_confirmation_registry,
+    get_runtime_kernel,
+)
 from agent_service.services.session_service import (
     create_named_session,
     ensure_session,
@@ -53,6 +62,38 @@ def _bearer_token(authorization: str | None) -> str | None:
     return token
 
 
+async def _reject_if_parked(session_id: str) -> None:
+    """SPEC-020 R-2: a parked session rejects new turns until resolved.
+
+    A TTL-expired park is closed through ``expire_confirmation``
+    (``UserInterruptEvent``) before the new turn proceeds — the kernel
+    cannot accept a fresh message while a reply sits parked, so silent
+    eviction would wedge the session.
+    """
+    kernel = get_runtime_kernel()
+    pending = get_confirmation_registry().peek_parked(session_id)
+    if pending is None:
+        return
+    if pending.is_expired(kernel.settings.hitl_confirm_timeout):
+        try:
+            await kernel.expire_confirmation(session_id, pending.confirm_id)
+        except ConfirmationNotFound:
+            # A concurrent confirm or expiry claimed the entry first — the
+            # session is still busy with the resumed stream, so the new
+            # turn stays rejected until that stream resolves the entry.
+            raise HTTPException(
+                status_code=409,
+                detail="confirmation pending: the parked tool confirmation "
+                "is being resolved; retry shortly",
+            ) from None
+        return
+    raise HTTPException(
+        status_code=409,
+        detail="confirmation pending: answer or expire the parked "
+        "tool confirmation before sending a new message",
+    )
+
+
 # --- Chat ---
 
 
@@ -67,6 +108,7 @@ async def chat(
     request_id = x_request_id or "untracked"
     record_chat_request()
     session = ensure_session(body.session_id, user_id)
+    await _reject_if_parked(session.session_id)
     content, structured_output = await get_runtime_kernel().reply_text(
         message=body.message,
         session_id=session.session_id,
@@ -94,6 +136,7 @@ async def chat_stream(
     request_id = x_request_id or "untracked"
     record_chat_request()
     session = ensure_session(session_id, user_id)
+    await _reject_if_parked(session.session_id)
     bearer_token = _bearer_token(authorization)
 
     async def _events() -> AsyncIterator[str]:
@@ -110,6 +153,80 @@ async def chat_stream(
     return StreamingResponse(_events(), media_type="text/event-stream")
 
 
+@router.post("/chat/confirm")
+async def chat_confirm(
+    body: AgentChatConfirmRequest,
+    x_user_id: str | None = Header(None),
+    x_request_id: str | None = Header(None),
+    authorization: str | None = Header(None),
+) -> StreamingResponse:
+    """Answer a parked kernel confirmation and stream the resumed turn.
+
+    SPEC-020 R-2: session ownership rides the existing session lookup
+    (foreign sessions 404, matching the session routes' anti-enumeration
+    convention); registry errors map to 404/410. The entry is claimed
+    before any headers go out, so a duplicate confirm fails closed with
+    404 instead of double-resuming the parked batch.
+    """
+    user_id = _user_id(x_user_id)
+    request_id = x_request_id or "untracked"
+    session = get_session(body.session_id, user_id)
+    kernel = get_runtime_kernel()
+    registry = get_confirmation_registry()
+    try:
+        pending = registry.claim(
+            session.session_id,
+            body.confirm_id,
+            kernel.settings.hitl_confirm_timeout,
+        )
+    except ConfirmationExpired:
+        try:
+            await kernel.expire_confirmation(
+                session.session_id, body.confirm_id
+            )
+        except ConfirmationNotFound:
+            # A concurrent request already closed the expired entry.
+            pass
+        raise HTTPException(
+            status_code=410, detail="confirmation expired"
+        ) from None
+    except ConfirmationNotFound:
+        raise HTTPException(
+            status_code=404, detail="confirmation not found"
+        ) from None
+
+    async def _events() -> AsyncIterator[str]:
+        try:
+            async for chunk in kernel.resume_confirmation(
+                session_id=session.session_id,
+                pending=pending,
+                decision=body.decision,
+                user_name=user_id,
+                request_id=request_id,
+                bearer_token=_bearer_token(authorization),
+            ):
+                event = _normalize_stream_event(
+                    chunk, session.session_id, request_id
+                )
+                yield f"data: {event.model_dump_json(exclude_none=True)}\n\n"
+        except ConfirmationOwnerMismatch:
+            # Mid-stream guard (registry owner and session owner diverged);
+            # surface as an error frame since headers already went out.
+            error_event = AgentStreamEvent(
+                type="error",
+                session_id=session.session_id,
+                request_id=request_id,
+                error={
+                    "code": "confirmation_owner_mismatch",
+                    "message": "only the session owner may answer this "
+                    "confirmation",
+                },
+            )
+            yield f"data: {error_event.model_dump_json(exclude_none=True)}\n\n"
+
+    return StreamingResponse(_events(), media_type="text/event-stream")
+
+
 _STREAM_EVENT_TYPES = frozenset(
     {
         "message_start",
@@ -118,10 +235,14 @@ _STREAM_EVENT_TYPES = frozenset(
         "error",
         "tool_call",
         "tool_result",
+        "confirmation_request",
+        "confirmation_result",
     }
 )
 
-_TOOL_RESULT_STATUSES = frozenset({"success", "error", "denied"})
+_TOOL_RESULT_STATUSES = frozenset(
+    {"success", "error", "denied", "approved", "expired", "interrupted"}
+)
 
 
 def _normalize_stream_event(
@@ -142,6 +263,12 @@ def _normalize_stream_event(
         request_id=request_id,
         delta=raw.get("delta") if isinstance(raw.get("delta"), str) else None,
         message=raw.get("message") if isinstance(raw.get("message"), str) else None,
+        confirm_id=(
+            raw.get("confirm_id")
+            if isinstance(raw.get("confirm_id"), str)
+            else None
+        ),
+        pending_calls=_coerce_pending_calls(raw.get("pending_calls")),
         tool_name=raw.get("tool_name") if isinstance(raw.get("tool_name"), str) else None,
         call_id=raw.get("call_id") if isinstance(raw.get("call_id"), str) else None,
         parameters=(
@@ -154,6 +281,9 @@ def _normalize_stream_event(
         ),
         evidence=raw.get("evidence") if isinstance(raw.get("evidence"), dict) else None,
         data_summary=_coerce_data_summary(raw.get("data_summary")),
+        # Full tool payload (v5): already size-capped by the evidence
+        # middleware, so pass it through untouched.
+        data=raw.get("data"),
         error=raw.get("error") if isinstance(raw.get("error"), dict) else None,
     )
 
@@ -165,6 +295,29 @@ def _coerce_data_summary(value: object) -> dict[str, object] | None:
     if isinstance(value, dict):
         return value
     return {"value": value}
+
+
+def _coerce_pending_calls(value: object) -> list[dict[str, object]] | None:
+    """Keep confirmation_request batches schema-conformant (SPEC-020 R-1)."""
+    if not isinstance(value, list):
+        return None
+    calls: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        call_id = item.get("call_id")
+        tool_name = item.get("tool_name")
+        parameters = item.get("parameters")
+        calls.append(
+            {
+                "call_id": call_id if isinstance(call_id, str) else "",
+                "tool_name": tool_name if isinstance(tool_name, str) else "",
+                "parameters": (
+                    parameters if isinstance(parameters, dict) else {}
+                ),
+            }
+        )
+    return calls or None
 
 
 # --- Sessions ---

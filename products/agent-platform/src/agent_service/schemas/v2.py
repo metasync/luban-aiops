@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 __all__ = [
     "AgentChatRequest",
+    "AgentChatConfirmRequest",
     "AgentChatResponse",
     "AgentStreamEvent",
     "AgentSession",
@@ -51,14 +52,29 @@ class AgentChatResponse(BaseModel):
     )
 
 
+class AgentChatConfirmRequest(BaseModel):
+    """Body for ``POST /api/v2/chat/confirm`` (SPEC-020 R-1).
+
+    Answers a parked kernel confirmation; the decision applies to every
+    parked tool call (all-or-nothing). Identity stays in headers.
+    """
+
+    session_id: str = Field(min_length=1)
+    confirm_id: str = Field(min_length=1)
+    decision: Literal["approve", "deny"]
+
+
 # --- Streaming ---
 
 
 class AgentStreamEvent(BaseModel):
-    """SSE frame payload conforming to agent-stream-event.schema.json (v3).
+    """SSE frame payload conforming to agent-stream-event.schema.json (v5).
 
-    v3 adds tool_call/tool_result frames for evidence panel rendering
-    (SPEC-011 R-1).
+    v3 added tool_call/tool_result frames for evidence panel rendering
+    (SPEC-011 R-1). v4 adds confirmation_request/confirmation_result frames
+    for HITL confirmation bridging (SPEC-020 R-1). v5 adds the optional
+    ``data`` field on tool_result frames: the full tool payload within the
+    stream size cap, so the portal can show the complete output of a run.
     """
 
     type: Literal[
@@ -68,17 +84,25 @@ class AgentStreamEvent(BaseModel):
         "error",
         "tool_call",
         "tool_result",
+        "confirmation_request",
+        "confirmation_result",
     ]
     session_id: str
     request_id: str
     delta: str | None = None
     message: str | None = None
+    confirm_id: str | None = None
+    pending_calls: list[dict[str, Any]] | None = None
     tool_name: str | None = None
     call_id: str | None = None
     parameters: dict[str, Any] | None = None
-    status: Literal["success", "error", "denied"] | None = None
+    status: (
+        Literal["success", "error", "denied", "approved", "expired", "interrupted"]
+        | None
+    ) = None
     evidence: dict[str, Any] | None = None
     data_summary: dict[str, Any] | None = None
+    data: Any = None
     error: dict[str, Any] | None = None
 
 

@@ -13,6 +13,70 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.6.0 — 2026-08-21
+
+### Added — SPEC-020: HITL confirmation bridging
+
+- **Kernel ASK to portal approve/deny** (SPEC-020): non-allow-listed gateway
+  tool batches no longer park silently. agent-platform translates the kernel's
+  `RequireUserConfirmEvent` into a `confirmation_request` SSE frame (stream
+  schema v3 → v4), parks the reply in an in-memory confirmation registry, and
+  resumes it via `POST /api/v2/chat/confirm` (`UserConfirmResultEvent`; the
+  confirmer's delegated token rides any resulting tool invocation). The entry
+  is claimed pre-header, so a duplicate confirm fails closed with 404.
+  Pending confirmations expire after `AGENT_HITL_CONFIRM_TIMEOUT` seconds
+  (default 600; `0` disables bridging); an expired park is closed via
+  `UserInterruptEvent` on the confirm attempt (410) or the next chat turn,
+  never silently evicted; parked sessions reject new chat turns with 409.
+- **The allow-list is the only auto-approval surface** (SPEC-018 R-1 hardening):
+  the permission middleware now answers every non-allow-listed tool with an
+  explicit ASK instead of delegating to AgentScope's `PermissionEngine`, whose
+  read-only fast path auto-allows read-only invocations in every mode and was
+  silently skipping `AGENT_GATEWAY_TOOL_AUTO_ALLOW` — under the locked
+  agentscope 2.0.6 no read-only tool outside the allow-list ever parked.
+  Unvetted read-only tools now park as confirmation cards like any other
+  ASK-gated batch.
+- **Confirmed calls are never re-asked** (SPEC-020 live-check fix): agentscope
+  re-traverses the permission middleware chain for calls the operator already
+  confirmed (state ALLOWED) and expects the built-in resolution to
+  short-circuit them. The middleware now delegates ALLOWED-state calls so an
+  approved batch actually executes on resume instead of re-parking the reply
+  in an endless approve loop.
+- **Portal card status reaches its final state** (SPEC-020 live-check fix):
+  the confirmation card's status line now always switches from the
+  in-progress "Approving…/Denying…" text to the final outcome once the
+  decision is applied; previously only the badge updated and the line stayed
+  on "Approving…" forever.
+- **Full tool output on evidence cards** (SPEC-020 live-check enhancement):
+  stream schema v5 adds an optional `data` field to `tool_result` frames —
+  the full tool payload when its serialized size stays within
+  `AGENT_TOOL_DATA_MAX_CHARS` (default `32000`; oversized payloads remain
+  audit-trail-only). The portal renders it behind a "Show full output"
+  expander on the evidence card, so operators can inspect the complete
+  result (e.g. all requested log lines) regardless of how the model chooses
+  to phrase its reply. Multi-line text fields (such as the `logs` blob from
+  `k8s.get_pod_logs`) render as raw log-style blocks with wrapping lines
+  instead of one escaped JSON string.
+- **Expiry can no longer race an in-flight resume** (post-delivery review
+  fix): the TTL cleanup path now claims the registry entry through
+  `take_for_expiry` before interrupting, so an approved resume that
+  outlives its TTL is never aborted mid-stream and two concurrent expiries
+  cannot double-fire; a turn racing such a resume gets a retryable 409.
+- **Confirm card always reaches a final state** (post-delivery review fix):
+  the portal locks the confirmation card on mid-stream `error` frames and
+  when the confirm stream ends without a `confirmation_result`, instead of
+  leaving it on "Approving…/Denying…".
+- platform-gateway gains `POST /api/v1/chat/confirm` under the new
+  deny-by-default `chat:confirm` action (granted to `platform-admin`,
+  `approver`, `operator`, `developer`; `read-only-observer` excluded) and
+  emits a durable `confirmation_decided` audit event, tee'd off the
+  kernel-applied `confirmation_result` frame so only actually-applied
+  decisions reach the trail.
+- Operator portal chat renders an inline Approve/Deny confirmation card
+  (pending tools with collapsible parameters, decision locks the card, 410
+  renders as expired) and resumes the stream in place; buttons hide for
+  roles without `chat:confirm`.
+
 ## 0.5.0 — 2026-08-21
 
 ### Added — SPEC-019: Portal transparency and navigation

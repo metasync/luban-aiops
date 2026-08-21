@@ -107,6 +107,11 @@ class PolicyMatrixScopingTests(PolicyMatrixBase):
         self.assertTrue(matrix["operator"]["incident:triage"])
         self.assertTrue(matrix["read-only-observer"]["tools:list"])
         self.assertTrue(matrix["read-only-observer"]["policy:read"])
+        # SPEC-020: chat:confirm is a mutating chat capability — granted to
+        # operational roles, observer excluded per the bundle convention.
+        self.assertTrue(matrix["operator"]["chat:confirm"])
+        self.assertTrue(matrix["approver"]["chat:confirm"])
+        self.assertFalse(matrix["read-only-observer"]["chat:confirm"])
         # Deny-by-default and role scoping.
         self.assertFalse(matrix["read-only-observer"]["audit:read"])
         self.assertFalse(matrix["read-only-observer"]["incident:create"])

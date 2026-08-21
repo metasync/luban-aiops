@@ -4,7 +4,7 @@ const gatewayInput = document.querySelector("#gateway-url");
 // must match the root VERSION file (enforced by make validate-version). A
 // gateway-served /api/v1/version endpoint is the intended long-term source
 // of truth.
-const PLATFORM_VERSION = "v0.5.0";
+const PLATFORM_VERSION = "v0.6.0";
 document.querySelector("#version-output").textContent = PLATFORM_VERSION;
 const userInput = document.querySelector("#user-id");
 const promptInput = document.querySelector("#prompt-input");
@@ -1529,7 +1529,19 @@ function renderToolResult(payload) {
     errorDiv.textContent = `${payload.error.code}: ${payload.error.message}`;
     card.appendChild(errorDiv);
   }
-  if (payload.data_summary != null) {
+  if (payload.data != null) {
+    // Stream schema v5: the frame carries the full tool payload within
+    // the size cap — surface it verbatim so operators can inspect the
+    // complete output (e.g. full log lines) regardless of how the model
+    // phrases its reply.
+    const details = document.createElement("details");
+    details.className = "evidence-full-output";
+    const summary = document.createElement("summary");
+    summary.textContent = "Show full output";
+    details.appendChild(summary);
+    appendFullOutputBody(details, payload.data);
+    card.appendChild(details);
+  } else if (payload.data_summary != null) {
     const details = document.createElement("details");
     const summary = document.createElement("summary");
     summary.textContent = "Data summary";
@@ -1542,6 +1554,71 @@ function renderToolResult(payload) {
     card.appendChild(details);
   }
   renderCitedGuidance(card, payload);
+}
+
+// Readable full-output rendition: multi-line text fields (e.g. the
+// `logs` blob from k8s.get_pod_logs) are lifted out of the JSON envelope
+// and shown as raw text blocks; the remaining fields surface as a compact
+// meta line, with any structured leftovers pretty-printed afterwards.
+function appendFullOutputBody(container, data) {
+  if (typeof data === "string") {
+    const pre = document.createElement("pre");
+    pre.textContent = data;
+    container.appendChild(pre);
+    return;
+  }
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const textFields = [];
+    const rest = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (typeof value === "string" && value.includes("\n")) {
+        textFields.push([key, value]);
+      } else {
+        rest[key] = value;
+      }
+    }
+    if (textFields.length > 0) {
+      for (const [key, value] of textFields) {
+        const label = document.createElement("div");
+        label.className = "evidence-output-label";
+        label.textContent = key;
+        container.appendChild(label);
+        const pre = document.createElement("pre");
+        pre.textContent = value;
+        container.appendChild(pre);
+      }
+      const restEntries = Object.entries(rest);
+      if (restEntries.length > 0) {
+        const scalars = restEntries.filter(
+          ([, value]) => typeof value !== "object" || value === null
+        );
+        const structured = restEntries.filter(
+          ([, value]) => typeof value === "object" && value !== null
+        );
+        if (scalars.length > 0) {
+          const meta = document.createElement("div");
+          meta.className = "evidence-meta";
+          meta.innerHTML = scalars
+            .map(([key, value]) => `<span>${escapeHtml(key)}: ${escapeHtml(String(value))}</span>`)
+            .join("");
+          container.appendChild(meta);
+        }
+        for (const [key, value] of structured) {
+          const label = document.createElement("div");
+          label.className = "evidence-output-label";
+          label.textContent = key;
+          container.appendChild(label);
+          const pre = document.createElement("pre");
+          pre.textContent = JSON.stringify(value, null, 2);
+          container.appendChild(pre);
+        }
+      }
+      return;
+    }
+  }
+  const pre = document.createElement("pre");
+  pre.textContent = JSON.stringify(data, null, 2);
+  container.appendChild(pre);
 }
 
 // Tool execution card: aggregates what the stream delivered for ONE turn
@@ -1588,6 +1665,201 @@ function renderAuditCard(requestId) {
   table.appendChild(tbody);
   card.appendChild(table);
   turn.body.prepend(card);
+}
+
+// --- HITL confirmation card (SPEC-020 R-4) ---
+// The kernel parks an ASK-gated tool batch and the stream surfaces a
+// confirmation_request frame; this renders the inline approval card and
+// resumes the reply from the confirm response. Button visibility is a
+// client convenience only — the gateway re-enforces chat:confirm.
+const CHAT_CONFIRM_ROLES = new Set([
+  "platform-admin", "approver", "operator", "developer"
+]);
+
+function canConfirmTools() {
+  return currentRoles().some((role) => CHAT_CONFIRM_ROLES.has(role));
+}
+
+function findConfirmationCard(confirmId) {
+  if (!confirmId) return null;
+  return document.querySelector(`.confirm-card[data-confirm-id="${CSS.escape(confirmId)}"]`);
+}
+
+function renderConfirmationRequest(payload, agentDiv, parkedTurn, textSink) {
+  const card = document.createElement("div");
+  card.className = "confirm-card";
+  card.dataset.confirmId = payload.confirm_id || "";
+
+  const header = document.createElement("div");
+  header.className = "confirm-card-header";
+  header.innerHTML = '<span class="confirm-card-title">Tool confirmation required</span>'
+    + '<span class="status-badge pending">awaiting decision</span>';
+  card.appendChild(header);
+
+  const message = document.createElement("p");
+  message.className = "confirm-card-message";
+  message.textContent = payload.message || "Tool execution requires your confirmation.";
+  card.appendChild(message);
+
+  for (const call of payload.pending_calls || []) {
+    const callDetails = document.createElement("details");
+    callDetails.className = "confirm-call";
+    callDetails.innerHTML =
+      `<summary><span class="tool-name">${escapeHtml(call.tool_name || call.call_id || "tool")}</span></summary>`
+      + `<pre>${escapeHtml(JSON.stringify(call.parameters || {}, null, 2))}</pre>`;
+    card.appendChild(callDetails);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "confirm-card-actions";
+  const statusLine = document.createElement("div");
+  statusLine.className = "confirm-card-status";
+  if (canConfirmTools()) {
+    const approveButton = document.createElement("button");
+    approveButton.className = "confirm-approve";
+    approveButton.textContent = "Approve";
+    const denyButton = document.createElement("button");
+    denyButton.className = "confirm-deny";
+    denyButton.textContent = "Deny";
+    const decide = (decision) => {
+      sendConfirmation(card, payload.confirm_id, decision, parkedTurn, textSink)
+        .catch((error) => {
+          statusLine.textContent = error.message;
+        });
+    };
+    approveButton.addEventListener("click", () => decide("approve"));
+    denyButton.addEventListener("click", () => decide("deny"));
+    actions.append(approveButton, denyButton);
+  } else {
+    statusLine.textContent = "Your role cannot approve or deny tool confirmations.";
+  }
+  card.append(actions, statusLine);
+  agentDiv.after(card);
+  return card;
+}
+
+function lockConfirmationCard(card, status, note) {
+  if (!card || card.dataset.locked === "true") return;
+  card.dataset.locked = "true";
+  const badge = card.querySelector(".status-badge");
+  if (badge) {
+    const badgeClass = status === "approved" ? "success"
+      : status === "denied" ? "denied" : "error";
+    badge.className = `status-badge ${badgeClass}`;
+    badge.textContent = status || "resolved";
+  }
+  for (const button of card.querySelectorAll("button")) button.disabled = true;
+  // The in-progress line ("Approving…"/"Denying…") must always be
+  // replaced once the decision is applied; callers only pass a note for
+  // out-of-band outcomes (expiry, transport errors).
+  const statusLine = card.querySelector(".confirm-card-status");
+  if (statusLine) {
+    const finalNotes = {
+      approved: "Approved — the parked reply resumed.",
+      denied: "Denied — the refusal was reported to the agent.",
+      expired: "This confirmation expired before a decision was applied."
+    };
+    statusLine.textContent = note || finalNotes[status] || `Confirmation ${status || "resolved"}.`;
+  }
+}
+
+async function sendConfirmation(card, confirmId, decision, parkedTurn, textSink) {
+  const sessionId = sessionIdOutput.textContent;
+  if (sessionId === "Not created") {
+    throw new Error("No active session for this confirmation.");
+  }
+  const requestId = buildRequestId();
+  requestIdOutput.textContent = requestId;
+  for (const button of card.querySelectorAll("button")) button.disabled = true;
+  const statusLine = card.querySelector(".confirm-card-status");
+  statusLine.textContent = decision === "approve" ? "Approving…" : "Denying…";
+
+  const response = await fetch(`${currentGateway()}/api/v1/chat/confirm`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-request-id": requestId,
+      ...authHeaders()
+    },
+    body: JSON.stringify({ session_id: sessionId, confirm_id: confirmId, decision })
+  });
+  if (response.status === 410) {
+    lockConfirmationCard(
+      card, "expired", "This confirmation expired before a decision was applied."
+    );
+    return;
+  }
+  if (!response.ok || !response.body) {
+    statusLine.textContent = `Confirm request failed (${response.status}).`;
+    for (const button of card.querySelectorAll("button")) button.disabled = false;
+    return;
+  }
+
+  // The response IS the resumed SSE stream. Restore the parked turn's
+  // evidence context so tool frames from the resumed reply attach to the
+  // same turn group, then drive it through the chat frame parser.
+  currentTurn = parkedTurn;
+  chatStreamDot.hidden = false;
+  try {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+      for (const event of events) {
+        if (!event.startsWith("data: ")) continue;
+        const payload = JSON.parse(event.slice(6));
+        sessionIdOutput.textContent = payload.session_id || sessionIdOutput.textContent;
+        const eventType = streamEventType(payload);
+        if (eventType === "confirmation_result") {
+          lockConfirmationCard(card, payload.status);
+          continue;
+        }
+        if (eventType === "error") {
+          // Mid-stream guard (e.g. owner mismatch) — the stream ends
+          // without a confirmation_result, so lock the card explicitly
+          // instead of leaving it on "Approving…/Denying…".
+          lockConfirmationCard(
+            card, "error",
+            (payload.error && payload.error.message) || payload.message
+              || "The confirmation failed."
+          );
+          continue;
+        }
+        // A resumed turn can park again on another ASK-gated tool.
+        if (eventType === "confirmation_request") {
+          renderConfirmationRequest(payload, card, parkedTurn, textSink);
+          continue;
+        }
+        if (eventType === "tool_call") {
+          renderToolCall(payload);
+          continue;
+        }
+        if (eventType === "tool_result") {
+          renderToolResult(payload);
+          continue;
+        }
+        if (shouldAppendStreamDelta(payload)) {
+          textSink.append(payload.delta);
+        }
+      }
+    }
+    // Guarantee a final card state even when the stream ends without a
+    // confirmation_result (truncated stream, upstream outage).
+    if (card.dataset.locked !== "true") {
+      lockConfirmationCard(
+        card, "error", "The confirmation stream ended unexpectedly."
+      );
+    }
+    renderAuditCard(requestId);
+  } finally {
+    chatStreamDot.hidden = true;
+    currentTurn = null;
+  }
 }
 
 function isNearBottom(threshold = 80) {
@@ -1679,6 +1951,9 @@ async function streamPrompt() {
 
   let streamCompleted = false;
   let accumulatedText = "";
+  // A parked confirmation ends the stream without message_end; suppress the
+  // "No response received" placeholder so the approval card speaks instead.
+  let confirmationPending = false;
   // Sidebar pulse so other views stay aware the agent is still working.
   chatStreamDot.hidden = false;
 
@@ -1723,6 +1998,28 @@ async function streamPrompt() {
           renderToolResult(payload);
           continue;
         }
+        if (eventType === "confirmation_request") {
+          // SPEC-020 R-4: the kernel parked an ASK-gated tool call. Render
+          // the inline approval card and end this stream without the
+          // no-response placeholder; the confirm response resumes the reply.
+          removeThinking(thinking);
+          confirmationPending = true;
+          renderConfirmationRequest(payload, agentDiv, currentTurn, {
+            append: (delta) => {
+              removeThinking(thinking);
+              accumulatedText += delta;
+              agentDiv.innerHTML = renderMarkdown(accumulatedText);
+              scrollToBottom();
+            }
+          });
+          continue;
+        }
+        if (eventType === "confirmation_result") {
+          lockConfirmationCard(
+            findConfirmationCard(payload.confirm_id), payload.status
+          );
+          continue;
+        }
 
         if (shouldAppendStreamDelta(payload)) {
           removeThinking(thinking);
@@ -1736,7 +2033,7 @@ async function streamPrompt() {
       }
     }
 
-    if (!accumulatedText.trim()) {
+    if (!accumulatedText.trim() && !confirmationPending) {
       agentDiv.innerHTML = '<p style="color: var(--text-muted)"><em>No response received.</em></p>';
     }
     removeThinking(thinking);

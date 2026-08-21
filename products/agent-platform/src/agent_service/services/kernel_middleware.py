@@ -3,10 +3,13 @@
 All cross-cutting kernel behavior lives on the supported ``MiddlewareBase``
 surface instead of private agentscope internals:
 
-- ``GatewayPermissionMiddleware`` (R-1) pre-answers the permission gate for
-  a headless SSE runtime: vetted read-only gateway tools and the built-in
-  task tools are ALLOWed; everything else delegates to the built-in
-  resolution (ASK default), which a headless stream cannot answer.
+- ``GatewayPermissionMiddleware`` (R-1) owns the permission gate for a
+  headless SSE runtime: vetted read-only gateway tools and the built-in
+  task tools are ALLOWed; every other tool is answered with an explicit
+  ASK instead of delegating to agentscope's PermissionEngine, whose
+  read-only fast path auto-allows read-only invocations in every mode and
+  would silently bypass the platform allow-list. The ASK parks the batch
+  on ``RequireUserConfirmEvent`` for the SPEC-020 confirmation bridge.
 - ``ToolEvidenceMiddleware`` (R-2) emits the ``tool_call`` / ``tool_result``
   evidence frames (SPEC-011 R-2 contract) into a request-scoped sink set by
   the runtime kernel; blocking turns with no sink emit nothing.
@@ -23,7 +26,7 @@ import os
 from contextvars import ContextVar
 from typing import Any
 
-from agentscope.message import ToolCallBlock
+from agentscope.message import ToolCallBlock, ToolCallState
 from agentscope.middleware import MiddlewareBase
 from agentscope.permission import PermissionBehavior, PermissionDecision
 from agentscope.tool import ToolResponse
@@ -49,11 +52,11 @@ TASK_TOOL_NAMES = frozenset({
     "TaskUpdate",
 })
 
-# Vetted tool names that may bypass AgentScope's interactive ASK permission
-# gate. Only read-only tools on this explicit allow-list are auto-approved;
-# every other tool keeps the ASK default (effectively non-runnable in a
-# headless stream until interactively confirmed). Admission and policy are
-# still enforced by the tool-gateway on every invocation.
+# Vetted tool names that may bypass the permission gate. Only read-only
+# tools on this explicit allow-list are auto-approved; every other tool is
+# answered with an explicit ASK and parks for operator confirmation
+# (SPEC-020). Admission and policy are still enforced by the tool-gateway
+# on every invocation.
 DEFAULT_AUTO_ALLOWED_TOOLS = frozenset({
     "k8s.list_pods",
     "k8s.get_pod",
@@ -100,16 +103,40 @@ def _make_data_summary(
     return {"_truncated": True, "_preview": serialized[:max_chars], "_original_length": len(serialized)}
 
 
-class GatewayPermissionMiddleware(MiddlewareBase):
-    """Pre-answers AgentScope's permission gate for a headless kernel (R-1).
+def _make_full_data(data: Any, max_chars: int = 32000) -> Any:
+    """Return the full tool payload for evidence frames, size-guarded.
 
-    AgentScope 2.x pauses every custom function tool behind an interactive
-    confirmation prompt (default permission decision: ASK). A headless SSE
-    stream can never answer that prompt, so the agent stalls and emits no
-    output at all. Tools on the explicit allow-list (read-only AND vetted)
-    are pre-approved — the tool-gateway still enforces admission and policy
-    on every invocation and each call is audit-logged; anything outside the
-    allow-list keeps the ASK default rather than being blanket-approved.
+    Streams stay bounded: when the serialized payload exceeds
+    ``max_chars`` the field is omitted from the frame entirely — the
+    truncated ``data_summary`` still surfaces and the full result stays
+    in the audit trail. Returns None when data is None.
+    """
+    if data is None:
+        return None
+    serialized = json.dumps(data, default=str)
+    if len(serialized) > max_chars:
+        return None
+    return data
+
+
+class GatewayPermissionMiddleware(MiddlewareBase):
+    """Owns AgentScope's permission gate for a headless kernel (R-1).
+
+    The platform allow-list is the only auto-approval surface (deny by
+    default): tools that are read-only AND vetted are pre-approved, and
+    state-local task tools always run — the tool-gateway still enforces
+    admission and policy on every invocation and each call is
+    audit-logged. Every other tool is answered with an explicit ASK
+    rather than delegated to agentscope's PermissionEngine: the engine
+    auto-allows read-only invocations in every mode (read-only fast
+    path), which would silently skip the allow-list. The ASK parks the
+    batch on RequireUserConfirmEvent, which the kernel bridges to the
+    operator portal (SPEC-020).
+
+    Calls already approved through that bridge traverse the middleware
+    chain again on resume (state ALLOWED); they are delegated to the
+    built-in resolution, which short-circuits ALLOWED calls — re-ASKing
+    them would park the resumed reply forever.
     """
 
     def __init__(self, auto_allowed: frozenset[str] | None = None) -> None:
@@ -125,6 +152,14 @@ class GatewayPermissionMiddleware(MiddlewareBase):
     ) -> PermissionDecision:
         tool = input_kwargs.get("tool")
         name = getattr(tool, "name", None)
+        tool_call = input_kwargs.get("tool_call")
+        if getattr(tool_call, "state", None) == ToolCallState.ALLOWED:
+            # SPEC-020 resume: the operator already confirmed this exact
+            # call. Agentscope re-traverses the middleware chain for
+            # confirmed calls and expects the built-in resolution to
+            # short-circuit the ALLOWED state; re-ASKing here would
+            # re-park the resumed reply indefinitely.
+            return await next_handler(**input_kwargs)
         if name in TASK_TOOL_NAMES:
             # State-local task tools never touch external systems.
             return PermissionDecision(
@@ -143,9 +178,22 @@ class GatewayPermissionMiddleware(MiddlewareBase):
                     "are enforced by the tool-gateway."
                 ),
             )
-        # Everything else keeps the built-in resolution (ASK default for
-        # custom function tools), preserving today's headless parity.
-        return await next_handler(**input_kwargs)
+        if tool is None:
+            # No tool surface to reason about; keep the built-in resolution.
+            return await next_handler(**input_kwargs)
+        # Explicit ASK instead of delegating to agentscope's
+        # PermissionEngine: its read-only fast path auto-allows read-only
+        # invocations in every mode, which would silently bypass the
+        # platform allow-list for unvetted read-only gateway tools. The
+        # ASK parks the batch on RequireUserConfirmEvent for the SPEC-020
+        # confirmation bridge.
+        return PermissionDecision(
+            behavior=PermissionBehavior.ASK,
+            message=(
+                f"{name} is outside the auto-approve allow-list; "
+                "operator confirmation is required."
+            ),
+        )
 
 
 class ToolEvidenceMiddleware(MiddlewareBase):
@@ -158,10 +206,22 @@ class ToolEvidenceMiddleware(MiddlewareBase):
     silently, matching pre-middleware behavior. The gateway result dict is
     carried on ``ToolChunk``/``ToolResponse`` metadata by the tool closures
     so no JSON re-parse is needed.
+
+    Besides the bounded ``data_summary``, each tool_result frame carries
+    the full ``data`` payload when its serialized size stays within
+    ``data_max_chars`` so the portal can offer a full-output view of a
+    tool run regardless of how the model chooses to phrase its reply.
+    Oversized payloads are omitted from the frame (the truncated summary
+    still surfaces, and the full result remains in the audit trail).
     """
 
-    def __init__(self, data_summary_max_chars: int = 2000) -> None:
+    def __init__(
+        self,
+        data_summary_max_chars: int = 2000,
+        data_max_chars: int = 32000,
+    ) -> None:
         self._max_chars = data_summary_max_chars
+        self._data_max_chars = data_max_chars
 
     async def on_acting(
         self,
@@ -210,6 +270,11 @@ class ToolEvidenceMiddleware(MiddlewareBase):
             frame["data_summary"] = _make_data_summary(
                 gateway_result.get("data"), self._max_chars,
             )
+            full_data = _make_full_data(
+                gateway_result.get("data"), self._data_max_chars,
+            )
+            if full_data is not None:
+                frame["data"] = full_data
             error = gateway_result.get("error")
             if error:
                 frame["error"] = error

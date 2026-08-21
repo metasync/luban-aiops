@@ -734,6 +734,93 @@ body {
   max-height: 200px;
   margin-top: 6px;
 }
+/* Full-output expander: multi-line text fields render as raw log-style
+   blocks, so long lines wrap instead of scrolling sideways. */
+.evidence-full-output pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.evidence-output-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
+
+/* HITL confirmation card (SPEC-020 R-4): inline approval surface for a
+   parked kernel ASK. Warning-toned border signals a pending decision. */
+.confirm-card {
+  border: 1px solid var(--warning);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px;
+  margin-bottom: 16px;
+}
+.confirm-card[data-locked="true"] {
+  border-color: var(--border);
+}
+.confirm-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.confirm-card-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.confirm-card-message {
+  margin: 8px 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.confirm-call summary {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.confirm-call pre {
+  font-size: 0.75rem;
+  background: var(--code-bg);
+  padding: 8px;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  max-height: 200px;
+  margin-top: 6px;
+}
+.confirm-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.confirm-card-actions button {
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.confirm-card-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.confirm-approve {
+  background: #166534;
+  color: var(--success);
+  border-color: #166534;
+}
+.confirm-approve:hover:not(:disabled) { filter: brightness(1.15); }
+.confirm-deny {
+  background: var(--surface-alt);
+  color: var(--error);
+}
+.confirm-deny:hover:not(:disabled) { filter: brightness(1.15); }
+.confirm-card-status {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.confirm-card-status:empty {
+  display: none;
+}
 
 /* Tool execution card inside the evidence group (per-turn rendition of the
    streamed tool calls; not the durable audit trail). */

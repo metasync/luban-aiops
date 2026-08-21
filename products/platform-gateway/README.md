@@ -21,6 +21,12 @@ combined api-gateway by SPEC-010, per ADR-0005).
   use the gateway's incident-service credential; triage additionally relays
   `X-User-ID` and the operator's delegated bearer. Unset upstream fails
   closed (503).
+- Proxies HITL confirmation decisions (`POST /api/v1/chat/confirm`) to
+  `agent-platform`, gated by the deny-by-default `chat:confirm` action
+  (granted to `platform-admin`, `approver`, `operator`, `developer`;
+  `read-only-observer` excluded); the confirm response is the resumed SSE
+  stream, and a durable `confirmation_decided` audit event is emitted when
+  the kernel-applied `confirmation_result` frame passes through (SPEC-020).
 - Forwards policy decision, session, and chat lifecycle audit events to
   `audit-service` fire-and-forget when `PLATFORM_GATEWAY_AUDIT_SERVICE_URL`
   is set (log-only otherwise; SPEC-013).

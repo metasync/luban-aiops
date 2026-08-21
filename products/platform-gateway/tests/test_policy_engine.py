@@ -238,7 +238,8 @@ class ContractAlignmentTests(unittest.TestCase):
         self.assertEqual(
             PROTECTED_ACTIONS,
             frozenset({
-                "chat", "session:create", "session:read", "audit:read",
+                "chat", "chat:confirm", "session:create", "session:read",
+                "audit:read",
                 "incident:read", "incident:create", "incident:triage",
                 "policy:read", "tools:list", "skills:read",
             }),

@@ -39,6 +39,20 @@ rules:
     decision:
       outcome: allow
 
+  # chat:confirm answers a parked kernel confirmation (SPEC-020): it can
+  # release a mutating tool call, so it gets its own action name and
+  # read-only-observer is denied it by default, per the convention above.
+  - id: allow-chat-confirm
+    domain: action_authz
+    description: Operational and developer roles may approve or deny parked tool confirmations.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator", "developer"]
+      actions_any: ["chat:confirm"]
+    decision:
+      outcome: allow
+
   # tools:invoke / tools:list are also granted to read-only-observer: the
   # authorization matrix permits observers to perform tier-0 reads (read-status,
   # read-logs, read-metrics) and every registered tool is currently read-only.

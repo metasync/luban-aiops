@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/chat-confirm.schema.json",
+  "title": "Chat Confirm Request",
+  "description": "Request body for POST /api/v2/chat/confirm (SPEC-020 R-1). Answers a parked kernel confirmation; identity is conveyed via headers, never in the body.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["session_id", "confirm_id", "decision"],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Session holding the parked confirmation."
+    },
+    "confirm_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier from the confirmation_request frame being answered."
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["approve", "deny"],
+      "description": "Operator decision applied to every parked tool call (all-or-nothing, SPEC-020 R-2)."
+    }
+  }
+}

@@ -25,6 +25,8 @@ EXPECTED_ROUTES = {
     ("GET", "/api/v1/sessions/{session_id}"),
     ("POST", "/api/v1/chat"),
     ("GET", "/api/v1/chat/stream"),
+    # HITL confirmation bridging (SPEC-020): answers a parked kernel ASK.
+    ("POST", "/api/v1/chat/confirm"),
     ("GET", "/api/v1/audit/events"),
     ("GET", "/api/v1/incidents"),
     ("POST", "/api/v1/incidents"),

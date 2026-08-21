@@ -294,13 +294,15 @@ promotion; until then they stay here.
 | Semantic (vector) skill retrieval | Does an Elasticsearch vector store measurably beat skills-hub's scoring search on our corpus? We already run Elastic (SPEC-011). | skills-hub enhancement spec |
 | Long-term operator memory | Do agentscope long-term-memory middlewares (mem0/reme) add real triage continuity across sessions, and where would that state live? ReME was evaluated 2026-08-20 and does not fit as-is (file-based vault vs Postgres durability, unaudited LLM write-back, no per-user isolation); a spike needs a governed storage backend, per-tenant scoping, and audit hooks first (see `docs/workspace/agentscope-utilization-audit.md`). | follow-up to SPEC-017 durability |
 | Kernel-side SQL storage | When would adopting `AsyncSQLAlchemyStorage` for the kernel app beat platform-owned state snapshots (SPEC-017 R-3)? | revisit if the native entrypoint is ever deployed |
-| HITL confirmation bridging | Map kernel `ASK` / `RequireUserConfirmEvent` onto v2 SSE frames with portal approve/deny and session suspend/resume; which agentscope.app HITL projectors / AGUI surfaces are worth referencing? | own spec; MUST precede any write/mutating tool (SPEC-018 Future Scope) |
-| ASK → DENY tightening | Non-allow-listed gateway tools headlessly mean "silently never runs" under the ASK default; does an explicit observable DENY improve operator diagnostics without changing outcomes? | follow-up to the HITL bridging spec (SPEC-018 Future Scope) |
+| HITL confirmation bridging | Delivered 2026-08-21 as `SPEC-020-hitl-confirmation-bridging` (kernel ASK → portal approve/deny, `chat:confirm` action, `confirmation_decided` audit). MUST still precede any write/mutating tool. | `docs/specs/SPEC-020-hitl-confirmation-bridging/` |
+| ASK → DENY tightening | Resolved 2026-08-21 during SPEC-020 live-check hardening: `GatewayPermissionMiddleware` now answers every non-allow-listed tool with an explicit ASK (parked as a confirmation card) instead of delegating to the built-in engine, whose read-only fast path silently auto-allowed read-only tools; "silently never runs" no longer describes any path. | superseded by SPEC-020 hardening |
 
 Promotion rule: a spike lands its findings as a short memo (workspace docs);
 only then does the item get a SPEC number. SPEC-018 (kernel middleware
 alignment) was delivered after SPEC-017 and re-confirmed this backlog in its
 utilization memo (`docs/workspace/agentscope-utilization-audit.md`).
+SPEC-020 (HITL confirmation bridging) was promoted from this backlog on
+2026-08-21 after its spike memo landed.
 
 ## Validation Model Per Release
 

@@ -17,6 +17,16 @@ class ChatRequest(BaseModel):
     request_id: str | None = None
 
 
+class ChatConfirmRequest(BaseModel):
+    """Mirror of `shared-contracts/schemas/chat-confirm.schema.json` (SPEC-020)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1)
+    confirm_id: str = Field(min_length=1)
+    decision: Literal["approve", "deny"]
+
+
 class ChatResponse(BaseModel):
     """Mirror of `shared-contracts/schemas/agent-chat-response.schema.json` (v2)."""
 
