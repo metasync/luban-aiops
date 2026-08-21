@@ -6,6 +6,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+# Tool risk tiers (SPEC-007 vocabulary, enforced since SPEC-021 R-1).
+# read tools require tools:invoke; write/admin tools additionally require
+# tools:mutate at the gateway and can never be auto-approved by the agent.
+VALID_RISK_LEVELS = frozenset({"read", "write", "admin"})
+
 
 @dataclass(frozen=True)
 class ToolDefinition:
@@ -13,7 +18,7 @@ class ToolDefinition:
 
     name: str
     description: str
-    risk_level: str  # "read" | "write" | "admin"
+    risk_level: str  # "read" | "write" | "admin" (validated by the registry)
     category: str  # e.g. "kubernetes"
     parameters_schema: dict = field(default_factory=dict)
 
@@ -84,12 +89,18 @@ def make_error_result(
 def make_denied_result(
     tool_name: str,
     reason: str,
+    risk_level: str = "read",
 ) -> ToolResult:
-    """Create a structured policy-denied result."""
+    """Create a structured policy-denied result.
+
+    ``risk_level`` keeps the evidence envelope honest for denied mutating
+    invocations (SPEC-021 R-1): the default "read" applies to pre-discovery
+    denials where the tool definition is not yet resolved.
+    """
     return ToolResult(
         tool_name=tool_name,
         status="denied",
-        evidence=build_evidence("read", "platform", 0),
+        evidence=build_evidence(risk_level, "platform", 0),
         error={"code": "POLICY_DENIED", "message": reason},
     )
 

@@ -341,6 +341,14 @@ tool confirmation), granted to `platform-admin`, `approver`, `operator`, and
 `developer`; `read-only-observer` is excluded because confirming a parked
 tool call is an act-on-the-system action, not observation. Every decision is
 recorded as a durable `confirmation_decided` audit event by platform-gateway.
+SPEC-021 adds `tools:mutate` (execute mutating — write/admin risk — tools at
+the tool-gateway), granted only to `platform-admin` and `operator`, matching
+this matrix's `restart-service` example; `developer`, `approver`, `auditor`,
+and `read-only-observer` are denied by default, and `approver` stays
+approve-only (`chat:confirm` without execution). The full approval model —
+policy actions, risk-tier admission, the agent auto-allow list, and HITL
+confirmation — is documented in the
+[Approval and HITL Governance Guide](../guides/approval-and-hitl.md).
 
 ## Final Recommendation
 

@@ -27,6 +27,7 @@ class GatewaySettings:
     require_auth: bool = True
     k8s_enabled: bool = False
     k8s_namespace: str = ""
+    mutating_tools_enabled: bool = False
     redaction_enabled: bool = True
     redaction_overflow_fraction: float = 0.2
     elastic_enabled: bool = False
@@ -71,6 +72,12 @@ class GatewaySettings:
             k8s_enabled=os.getenv("GATEWAY_K8S_ENABLED", "false").strip().lower()
             in {"1", "true", "yes", "on"},
             k8s_namespace=os.getenv("GATEWAY_K8S_NAMESPACE", ""),
+            mutating_tools_enabled=os.getenv(
+                "GATEWAY_MUTATING_TOOLS_ENABLED", "false"
+            )
+            .strip()
+            .lower()
+            in {"1", "true", "yes", "on"},
             redaction_enabled=os.getenv("GATEWAY_REDACTION_ENABLED", "true")
             .strip()
             .lower()

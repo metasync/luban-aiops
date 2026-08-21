@@ -112,6 +112,15 @@ class PolicyMatrixScopingTests(PolicyMatrixBase):
         self.assertTrue(matrix["operator"]["chat:confirm"])
         self.assertTrue(matrix["approver"]["chat:confirm"])
         self.assertFalse(matrix["read-only-observer"]["chat:confirm"])
+        # SPEC-021: tools:mutate is the mutating-tool admission gate —
+        # granted only to the execution roles; approver stays approve-only,
+        # developer and observer are denied by default.
+        self.assertIn("tools:mutate", payload["actions"])
+        self.assertTrue(matrix["platform-admin"]["tools:mutate"])
+        self.assertTrue(matrix["operator"]["tools:mutate"])
+        self.assertFalse(matrix["approver"]["tools:mutate"])
+        self.assertFalse(matrix["developer"]["tools:mutate"])
+        self.assertFalse(matrix["read-only-observer"]["tools:mutate"])
         # Deny-by-default and role scoping.
         self.assertFalse(matrix["read-only-observer"]["audit:read"])
         self.assertFalse(matrix["read-only-observer"]["incident:create"])

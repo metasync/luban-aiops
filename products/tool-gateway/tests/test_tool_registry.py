@@ -29,6 +29,30 @@ class _EchoTool(BaseTool):
         )
 
 
+def _make_tool(name: str, risk_level: str) -> BaseTool:
+    """Build a minimal tool with a given risk tier (SPEC-021 R-1 tests)."""
+
+    class _Tool(BaseTool):
+        @property
+        def definition(self) -> ToolDefinition:
+            return ToolDefinition(
+                name=name,
+                description="test",
+                risk_level=risk_level,
+                category="test",
+            )
+
+        async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+            return ToolResult(
+                tool_name=name,
+                status="success",
+                data={},
+                evidence=build_evidence(risk_level, "test", 1),
+            )
+
+    return _Tool()
+
+
 class ToolRegistryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.registry = ToolRegistry()
@@ -67,6 +91,42 @@ class ToolRegistryTests(unittest.TestCase):
         self.registry.register(_EchoTool())
         self.registry.register(_EchoTool())
         self.assertEqual(len(self.registry.list_definitions()), 1)
+
+
+class ToolRegistryRiskGateTests(unittest.TestCase):
+    """Risk-tier admission (SPEC-021 R-1)."""
+
+    def test_mutating_tool_refused_by_default_registry(self) -> None:
+        registry = ToolRegistry()
+        registry.register(_make_tool("test.mutate", "write"))
+        self.assertIsNone(registry.get("test.mutate"))
+        result = asyncio.run(registry.invoke("test.mutate", {}, {}))
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "TOOL_NOT_FOUND")
+
+    def test_admin_risk_tool_refused_by_default_registry(self) -> None:
+        registry = ToolRegistry()
+        registry.register(_make_tool("test.admin", "admin"))
+        self.assertIsNone(registry.get("test.admin"))
+
+    def test_mutating_tool_admitted_when_gate_open(self) -> None:
+        registry = ToolRegistry(allow_mutating=True)
+        registry.register(_make_tool("test.mutate", "write"))
+        self.assertIsNotNone(registry.get("test.mutate"))
+        result = asyncio.run(registry.invoke("test.mutate", {}, {}))
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.evidence["risk_level"], "write")
+
+    def test_read_tool_unaffected_by_gate(self) -> None:
+        for allow_mutating in (False, True):
+            registry = ToolRegistry(allow_mutating=allow_mutating)
+            registry.register(_make_tool("test.read", "read"))
+            self.assertIsNotNone(registry.get("test.read"))
+
+    def test_invalid_risk_level_fails_registration(self) -> None:
+        registry = ToolRegistry(allow_mutating=True)
+        with self.assertRaises(ValueError):
+            registry.register(_make_tool("test.bogus", "destructive"))
 
 
 class ToolDefinitionTests(unittest.TestCase):

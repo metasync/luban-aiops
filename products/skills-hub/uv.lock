@@ -1181,7 +1181,7 @@ wheels = [
 
 [[package]]
 name = "skills-hub"
-version = "0.6.1"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },

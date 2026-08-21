@@ -38,6 +38,19 @@ NO_TOOLS_NOTICE = (
     "requested check right now."
 )
 
+# Deterministic guard for the HITL-disabled posture (SPEC-021 R-3): when
+# confirmation bridging is off, mutating tools are excluded from the toolkit
+# entirely; this notice keeps that posture honest instead of letting the
+# model imply it could act.
+MUTATING_TOOLS_UNAVAILABLE_NOTICE = (
+    "[SYSTEM NOTICE] Mutating operational actions (e.g. deleting or "
+    "restarting workloads) are currently unavailable in this workspace; only "
+    "read-only diagnostics can be executed. Human confirmation bridging is "
+    "disabled, so do NOT propose, promise, or imply that you can perform any "
+    "mutating action. If the user asks for one, say it requires operator "
+    "enablement of HITL confirmation."
+)
+
 
 def make_serializable(value: object) -> object:
     if value is None or isinstance(value, (str, int, float, bool)):
@@ -118,6 +131,10 @@ class AgentKernel:
         self._toolkits: dict[str, object] = {}
         self._toolkit_lock = asyncio.Lock()
         self._agent_lock = asyncio.Lock()
+        # SPEC-021 R-3: set when a toolkit build excluded mutating tools
+        # because HITL bridging is disabled, so streamed turns surface the
+        # mutating-unavailable posture honestly.
+        self._mutating_tools_excluded = False
 
     def mode(self) -> str:
         return "agentscope" if self.is_configured() else "placeholder"
@@ -218,6 +235,10 @@ class AgentKernel:
                         self.settings.tool_gateway_url, bearer_token
                     )
                     if definitions:
+                        definitions = self._filter_mutating_for_hitl(
+                            definitions
+                        )
+                    if definitions:
                         toolkit = build_gateway_toolkit(
                             definitions,
                             self.settings.tool_gateway_url,
@@ -232,6 +253,31 @@ class AgentKernel:
             # No gateway (or nothing discovered): task tools only, returned
             # uncached so a later turn can retry discovery.
             return Toolkit(tools=task_tools)
+
+    def _filter_mutating_for_hitl(self, definitions: list[dict]) -> list[dict]:
+        """Drop non-read tools when HITL bridging is disabled (SPEC-021 R-3).
+
+        A mutating tool can never execute without a human confirmation; when
+        ``AGENT_HITL_CONFIRM_TIMEOUT=0`` there is no confirmation surface, so
+        non-read tools are excluded from the toolkit entirely instead of
+        parking silently. Read tools are untouched.
+        """
+        if self.settings.hitl_confirm_timeout > 0:
+            return definitions
+        kept = [
+            definition
+            for definition in definitions
+            if definition.get("risk_level", "read") == "read"
+        ]
+        excluded = len(definitions) - len(kept)
+        if excluded:
+            self._mutating_tools_excluded = True
+            LOGGER.warning(
+                "HITL bridging disabled (AGENT_HITL_CONFIRM_TIMEOUT=0); "
+                "excluded %d mutating tool(s) from the agent toolkit",
+                excluded,
+            )
+        return kept
 
     def _build_task_tools(self) -> list:
         """Built-in agentscope task tools, opt-in (SPEC-018 R-5).
@@ -591,6 +637,10 @@ class AgentKernel:
                     "injecting no-tools notice to prevent fabrication"
                 )
                 effective_message = f"{NO_TOOLS_NOTICE}\n\n{message}"
+            elif self._mutating_tools_excluded:
+                effective_message = (
+                    f"{MUTATING_TOOLS_UNAVAILABLE_NOTICE}\n\n{message}"
+                )
 
             # SPEC-018 R-2: a request-scoped evidence sink consumed by
             # ToolEvidenceMiddleware replaces the per-request toolkit
@@ -616,7 +666,7 @@ class AgentKernel:
                     # confirmation_request frame and ends the stream without
                     # message_end; the confirm endpoint resumes it.
                     frame = self._build_confirmation_frame(
-                        event, session_id, user_name
+                        event, session_id, user_name, agent.toolkit
                     )
                     if frame is not None:
                         yield {
@@ -659,6 +709,7 @@ class AgentKernel:
         event: object,
         session_id: str,
         user_name: str,
+        toolkit: object | None = None,
     ) -> dict[str, object] | None:
         """Register a kernel ASK park and build its confirmation_request frame.
 
@@ -679,6 +730,7 @@ class AgentKernel:
             reply_id=str(getattr(event, "reply_id", "") or ""),
             tool_calls=list(getattr(event, "tool_calls", None) or []),
             timeout=self.settings.hitl_confirm_timeout,
+            risk_levels=self._toolkit_risk_map(toolkit),
         )
         LOGGER.info(
             "kernel confirmation parked",
@@ -694,6 +746,23 @@ class AgentKernel:
             "pending_calls": pending.pending_calls_payload(),
             "message": self._confirmation_message(event),
         }
+
+    @staticmethod
+    def _toolkit_risk_map(toolkit: object | None) -> dict[str, str]:
+        """Map sanitized tool names to gateway risk tiers (SPEC-021 R-3).
+
+        Only gateway-backed tools carry ``gateway_risk_level``; task tools
+        and builtins stay absent, so their parked entries (which cannot
+        happen today — they are auto-allowed) would omit ``risk_level``.
+        """
+        risks: dict[str, str] = {}
+        for group in getattr(toolkit, "tool_groups", None) or []:
+            for tool in getattr(group, "tools", None) or []:
+                name = getattr(tool, "name", None)
+                risk = getattr(tool, "gateway_risk_level", None)
+                if name and risk:
+                    risks[name] = risk
+        return risks
 
     @staticmethod
     def _confirmation_message(event: object) -> str:
@@ -769,7 +838,7 @@ class AgentKernel:
                     }
                 # A resumed turn can park again on another ASK-gated tool.
                 frame = self._build_confirmation_frame(
-                    event, session_id, user_name
+                    event, session_id, user_name, agent.toolkit
                 )
                 if frame is not None:
                     yield {

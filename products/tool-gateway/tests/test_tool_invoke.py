@@ -58,6 +58,27 @@ class _ExplodingTool(BaseTool):
         raise RuntimeError("boom")
 
 
+class _WriteTool(BaseTool):
+    """Mutating test tool (SPEC-021 R-1 endpoint tests)."""
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="test.mutate",
+            description="Pretends to mutate something.",
+            risk_level="write",
+            category="test",
+        )
+
+    async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+        return ToolResult(
+            tool_name="test.mutate",
+            status="success",
+            data={"mutated_by": identity.get("username")},
+            evidence=build_evidence("write", "test", 5),
+        )
+
+
 def _build_registry() -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(_EchoTool())
@@ -244,6 +265,140 @@ class ToolInvokeEndpointTests(unittest.TestCase):
                 _mint_delegated("operator", "other-service"), "test.echo", {}, "req-6"
             )
         self.assertEqual(response.status_code, 401)
+
+
+class MutatingInvokeEndpointTests(unittest.TestCase):
+    """Risk-tier admission at the invoke endpoint (SPEC-021 R-1)."""
+
+    def setUp(self) -> None:
+        reset_policy_state()
+        token_verifier.reset_verifier_state()
+        app = create_app()
+        registry = ToolRegistry(allow_mutating=True)
+        registry.register(_EchoTool())
+        registry.register(_WriteTool())
+        app.state.tool_registry = registry
+        app.dependency_overrides[get_settings] = lambda: GatewaySettings(
+            require_auth=True
+        )
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        reset_policy_state()
+        token_verifier.reset_verifier_state()
+
+    def _invoke(self, token: str, tool_name: str, request_id: str):
+        return self.client.post(
+            "/api/v2/tools/invoke",
+            json={"tool_name": tool_name, "parameters": {}, "request_id": request_id},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    def test_operator_may_invoke_mutating_tool(self) -> None:
+        with _patch_jwks():
+            response = self._invoke(
+                _mint_delegated("operator"), "test.mutate", "req-m1"
+            )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "success")
+        self.assertEqual(body["evidence"]["risk_level"], "write")
+
+    def test_platform_admin_may_invoke_mutating_tool(self) -> None:
+        with _patch_jwks():
+            response = self._invoke(
+                _mint_delegated("platform-admin"), "test.mutate", "req-m2"
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "success")
+
+    def test_observer_denied_mutating_tool(self) -> None:
+        with _patch_jwks():
+            response = self._invoke(
+                _mint_delegated("read-only-observer"), "test.mutate", "req-m3"
+            )
+        self.assertEqual(response.status_code, 403)
+        body = response.json()
+        self.assertEqual(body["status"], "denied")
+        # The denied envelope must carry the tool's true tier, not "read".
+        self.assertEqual(body["evidence"]["risk_level"], "write")
+
+    def test_developer_denied_mutating_tool(self) -> None:
+        with _patch_jwks():
+            response = self._invoke(
+                _mint_delegated("developer"), "test.mutate", "req-m4"
+            )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "denied")
+
+    def test_approver_denied_mutating_tool(self) -> None:
+        with _patch_jwks():
+            response = self._invoke(
+                _mint_delegated("approver"), "test.mutate", "req-m5"
+            )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "denied")
+
+    def test_observer_still_allowed_read_tool(self) -> None:
+        with _patch_jwks():
+            response = self._invoke(
+                _mint_delegated("read-only-observer"), "test.echo", "req-m6"
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "success")
+
+    def test_discovery_exposes_mutating_tool_risk(self) -> None:
+        with _patch_jwks():
+            response = self.client.get(
+                "/api/v2/tools",
+                headers={"Authorization": f"Bearer {_mint_delegated('operator')}"},
+            )
+        self.assertEqual(response.status_code, 200)
+        tools = {tool["name"]: tool for tool in response.json()}
+        self.assertEqual(tools["test.mutate"]["risk_level"], "write")
+
+
+class MutatingToolsDisabledEndpointTests(unittest.TestCase):
+    """Default registry refuses mutating tools (SPEC-021 R-1)."""
+
+    def setUp(self) -> None:
+        reset_policy_state()
+        token_verifier.reset_verifier_state()
+        app = create_app()
+        registry = ToolRegistry()
+        registry.register(_EchoTool())
+        registry.register(_WriteTool())
+        app.state.tool_registry = registry
+        app.dependency_overrides[get_settings] = lambda: GatewaySettings(
+            require_auth=True
+        )
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        reset_policy_state()
+        token_verifier.reset_verifier_state()
+
+    def test_discovery_excludes_mutating_tool(self) -> None:
+        with _patch_jwks():
+            response = self.client.get(
+                "/api/v2/tools",
+                headers={"Authorization": f"Bearer {_mint_delegated('operator')}"},
+            )
+        self.assertEqual(response.status_code, 200)
+        names = {tool["name"] for tool in response.json()}
+        self.assertNotIn("test.mutate", names)
+
+    def test_invoke_mutating_tool_not_found(self) -> None:
+        with _patch_jwks():
+            response = self.client.post(
+                "/api/v2/tools/invoke",
+                json={"tool_name": "test.mutate", "parameters": {}, "request_id": "req-d1"},
+                headers={"Authorization": f"Bearer {_mint_delegated('operator')}"},
+            )
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertEqual(body["status"], "error")
+        self.assertEqual(body["error"]["code"], "TOOL_NOT_FOUND")
 
 
 class ToolRegistryDependencyTests(unittest.TestCase):

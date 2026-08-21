@@ -67,6 +67,9 @@ class FakeAgent:
         self.events = events if events is not None else []
         self.raise_on_stream = raise_on_stream
         self.inputs: list = []
+        # SPEC-021 R-3: parked confirmations snapshot risk tiers from the
+        # toolkit; tests default to no toolkit (no risk_level on frames).
+        self.toolkit = None
 
     async def reply_stream(self, inputs):
         self.inputs.append(inputs)
@@ -182,6 +185,23 @@ def test_pending_calls_payload_parses_tool_call_input() -> None:
     assert pending.tool_names() == ["k8s.restart_service"]
 
 
+def test_pending_calls_payload_carries_known_risk_level() -> None:
+    """SPEC-021 R-3: risk tiers snapshotted at park time ride the frames."""
+    registry = ConfirmationRegistry()
+    pending = registry.register(
+        "s1", "alice", "r1", [TOOL_CALL], timeout=600,
+        risk_levels={"k8s.restart_service": "write"},
+    )
+    payload = pending.pending_calls_payload()
+    assert payload[0]["risk_level"] == "write"
+
+
+def test_pending_calls_payload_omits_unknown_risk_level() -> None:
+    registry = ConfirmationRegistry()
+    pending = registry.register("s1", "alice", "r1", [TOOL_CALL], timeout=600)
+    assert "risk_level" not in pending.pending_calls_payload()[0]
+
+
 # --- Kernel: park on RequireUserConfirmEvent ---
 
 
@@ -210,6 +230,64 @@ def test_stream_events_parks_and_emits_confirmation_request(monkeypatch):
     # The stream ends without message_end after parking.
     assert not any(f.get("event") == "message_end" for f in frames)
     assert CONFIRMATION_REGISTRY.is_parked("s1", 600)
+
+
+def test_confirmation_request_carries_risk_level(monkeypatch):
+    """SPEC-021 R-3: parked mutating calls surface their risk tier."""
+    from types import SimpleNamespace
+
+    kernel = _configured_kernel()
+    agent = FakeAgent(events=[_park_event()])
+    agent.toolkit = SimpleNamespace(
+        tool_groups=[
+            SimpleNamespace(
+                tools=[_FakeToolkitTool("k8s.restart_service", "write")]
+            )
+        ]
+    )
+    _patch_agent(monkeypatch, kernel, agent)
+
+    frames = _drain(
+        kernel.stream_events(
+            message="restart it",
+            request_id="req-1",
+            session_id="s1",
+            user_name="alice",
+        )
+    )
+    frame = [f for f in frames if f.get("type") == "confirmation_request"][0]
+    assert frame["pending_calls"][0]["risk_level"] == "write"
+
+
+class _FakeToolkitTool:
+    """Minimal toolkit tool exposing the gateway risk tier attribute."""
+
+    def __init__(self, name: str, risk_level: str) -> None:
+        self.name = name
+        self.gateway_risk_level = risk_level
+
+
+def test_filter_mutating_for_hitl_drops_non_read_when_disabled():
+    """SPEC-021 R-3: HITL off -> mutating tools never reach the toolkit."""
+    kernel = _configured_kernel(hitl_confirm_timeout=0)
+    definitions = [
+        {"name": "k8s.list_pods", "risk_level": "read"},
+        {"name": "k8s.delete_pod", "risk_level": "write"},
+    ]
+    kept = kernel._filter_mutating_for_hitl(definitions)
+    assert [d["name"] for d in kept] == ["k8s.list_pods"]
+    assert kernel._mutating_tools_excluded
+
+
+def test_filter_mutating_for_hitl_keeps_all_when_bridging_enabled():
+    kernel = _configured_kernel(hitl_confirm_timeout=600)
+    definitions = [
+        {"name": "k8s.list_pods", "risk_level": "read"},
+        {"name": "k8s.delete_pod", "risk_level": "write"},
+    ]
+    kept = kernel._filter_mutating_for_hitl(definitions)
+    assert kept == definitions
+    assert not kernel._mutating_tools_excluded
 
 
 def test_stream_events_disabled_mode_keeps_silent_park(monkeypatch):

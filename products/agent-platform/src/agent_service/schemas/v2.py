@@ -68,13 +68,15 @@ class AgentChatConfirmRequest(BaseModel):
 
 
 class AgentStreamEvent(BaseModel):
-    """SSE frame payload conforming to agent-stream-event.schema.json (v5).
+    """SSE frame payload conforming to agent-stream-event.schema.json (v6).
 
     v3 added tool_call/tool_result frames for evidence panel rendering
     (SPEC-011 R-1). v4 adds confirmation_request/confirmation_result frames
     for HITL confirmation bridging (SPEC-020 R-1). v5 adds the optional
     ``data`` field on tool_result frames: the full tool payload within the
     stream size cap, so the portal can show the complete output of a run.
+    v6 adds the optional ``risk_level`` on confirmation ``pending_calls``
+    entries so the portal can flag mutating batches (SPEC-021 R-3).
     """
 
     type: Literal[

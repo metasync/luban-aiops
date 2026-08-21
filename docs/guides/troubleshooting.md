@@ -572,3 +572,101 @@ kubectl -n dev-luban-aiops logs deployment/skills-hub --tail=50 | grep -i otel
   (`.../api/default`); the exporters append `/v1/{traces,metrics,logs}`.
 - Conventions and the log-bridge semantics:
   `shared/shared-contracts/observability-conventions.md`.
+
+## Symptom: Mutating tool absent from discovery ("k8s.delete_pod" not listed)
+
+**Most likely cause:** Mutating tools are deny-by-default at the execution
+boundary (SPEC-021). `GATEWAY_MUTATING_TOOLS_ENABLED` is `false` (the shipped
+default), so write/admin tools are never registered — they are absent from
+`GET /api/v2/tools` and invoke answers `TOOL_NOT_FOUND`.
+
+**Diagnostic:**
+
+```bash
+kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
+  sh -c 'echo "${GATEWAY_MUTATING_TOOLS_ENABLED:-<unset>}"'
+kubectl -n dev-luban-aiops logs deployment/tool-gateway --tail=200 \
+  | grep "mutating tool not registered"
+```
+
+**Resolution:**
+
+- This is the intended default posture. To opt in, follow the full activation
+  checklist in the
+  [Tool and Connector Guide](tool-configuration.md#mutating-tool-activation-checklist-k8sdelete_pod)
+  — gateway flag, opt-in pod-delete RBAC, HITL bridging, and `tools:mutate`
+  grants all need to hold together.
+- If the flag is already `true` but the tool is missing, the Kubernetes
+  connector itself is off (`GATEWAY_K8S_ENABLED=false`).
+
+## Symptom: Mutating tool invoke returns 403 "denied"
+
+**Most likely cause:** The caller holds `tools:invoke` but not `tools:mutate`.
+Read tools keep requiring only `tools:invoke`; write/admin tools additionally
+require `tools:mutate`, granted by default only to `platform-admin` and
+`operator` (SPEC-021).
+
+**Diagnostic:**
+
+```bash
+# The deny is policy-decision logged and audited with action=tools:mutate
+kubectl -n dev-luban-aiops logs deployment/tool-gateway --tail=200 \
+  | grep "mutating tool invocation denied"
+
+# Live matrix: check the caller's role against tools:mutate
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:18000/api/v1/policy/matrix | jq '.matrix["operator"]["tools:mutate"]'
+```
+
+**Resolution:**
+
+- Expected behavior for `developer`, `approver`, `auditor`, and
+  `read-only-observer`. Extending the grant is a deliberate policy-bundle
+  edit — see the
+  [Approval and HITL Governance Guide](approval-and-hitl.md#defining-approval-requirements-today).
+
+## Symptom: Agent proposes an action but no confirmation card appears
+
+**Most likely cause:** HITL confirmation bridging is disabled
+(`AGENT_HITL_CONFIRM_TIMEOUT=0`). With bridging off, agent-platform excludes
+mutating tools from the toolkit entirely, so the agent should not offer them;
+if the model still describes an action it cannot perform, the turn carries a
+system notice saying mutating actions are unavailable — no card ever appears
+and nothing silently runs.
+
+**Diagnostic:**
+
+```bash
+kubectl -n dev-luban-aiops exec deployment/agent-service -- \
+  sh -c 'echo "${AGENT_HITL_CONFIRM_TIMEOUT:-<unset>}"'
+kubectl -n dev-luban-aiops logs deployment/agent-service --tail=200 \
+  | grep "HITL bridging disabled"
+```
+
+**Resolution:**
+
+- Set `AGENT_HITL_CONFIRM_TIMEOUT` to a positive value (dev-k8s ships `600`)
+  and restart agent-service; mutating tools reappear in the toolkit and park
+  for confirmation as designed.
+
+## Symptom: Approved a mutating confirmation but it fails with K8S_PERMISSION_DENIED
+
+**Most likely cause:** The platform gates passed (policy + confirmation), but
+the tool-gateway's Kubernetes service account lacks `delete` on pods. The
+opt-in pod-delete RBAC manifest was not applied.
+
+**Diagnostic:**
+
+```bash
+kubectl -n dev-luban-aiops auth can-i delete pods \
+  --as=system:serviceaccount:dev-luban-aiops:tool-gateway
+# expected: yes (only after the opt-in Role/RoleBinding is applied)
+```
+
+**Resolution:**
+
+- Apply the pod-delete Role/RoleBinding
+  (`shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-pod-delete.yaml`)
+  and retry. The structured error, the `confirmation_decided` audit event, and
+  the failed `tool_invoked` event all stay in the trail — nothing half-deleted:
+  pod deletion is a single API call that either succeeded or did not.

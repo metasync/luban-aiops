@@ -40,6 +40,11 @@ class PendingConfirmation:
     # Kernel ToolCallBlock instances, held opaquely until resume feeds them
     # back into ``reply_stream`` — no agentscope types leak past this module.
     tool_calls: list = field(default_factory=list)
+    # Sanitized tool name -> risk tier snapshot taken at park time (SPEC-021
+    # R-3); entries exist only for gateway tools with a known risk level and
+    # ride the confirmation_request/confirmation_result frames so the portal
+    # can flag mutating batches.
+    risk_levels: dict = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
     resolved: bool = False
     # Single-flight guard set by ``claim`` before a decision streams back:
@@ -54,13 +59,16 @@ class PendingConfirmation:
         """Serialize the parked calls for the confirmation_request frame."""
         payload = []
         for tool_call in self.tool_calls:
-            payload.append(
-                {
-                    "call_id": str(getattr(tool_call, "id", "") or ""),
-                    "tool_name": str(getattr(tool_call, "name", "") or ""),
-                    "parameters": _parse_parameters(tool_call),
-                }
-            )
+            tool_name = str(getattr(tool_call, "name", "") or "")
+            entry = {
+                "call_id": str(getattr(tool_call, "id", "") or ""),
+                "tool_name": tool_name,
+                "parameters": _parse_parameters(tool_call),
+            }
+            risk_level = self.risk_levels.get(tool_name)
+            if risk_level:
+                entry["risk_level"] = risk_level
+            payload.append(entry)
         return payload
 
     def tool_names(self) -> list[str]:
@@ -105,6 +113,7 @@ class ConfirmationRegistry:
         reply_id: str,
         tool_calls: list,
         timeout: float,
+        risk_levels: dict | None = None,
     ) -> PendingConfirmation:
         pending = PendingConfirmation(
             confirm_id=str(uuid.uuid4()),
@@ -112,6 +121,7 @@ class ConfirmationRegistry:
             user_id=user_id,
             reply_id=reply_id,
             tool_calls=list(tool_calls),
+            risk_levels=dict(risk_levels or {}),
         )
         self._by_session[session_id] = pending
         return pending

@@ -134,3 +134,4 @@ Mechanical enforcement:
 | `SPEC-018` | Kernel middleware alignment — middleware-based tracing/permission hooks, built-in task tools (sequenced after SPEC-017) | `delivered` |
 | `SPEC-019` | Portal transparency — permission matrix, workspace resource views, sectioned navigation | `delivered` |
 | `SPEC-020` | HITL confirmation bridging — kernel ASK to portal approve/deny, `chat:confirm` action, `confirmation_decided` audit | `delivered` |
+| `SPEC-021` | Bounded mutating actions — first approval-gated write tool (`k8s.delete_pod`), `tools:mutate` action, Approval and HITL Governance Guide | `delivered` |

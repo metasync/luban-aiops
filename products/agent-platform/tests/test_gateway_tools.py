@@ -2,9 +2,11 @@
 
 import asyncio
 import json
+import os
 import unittest
 from unittest.mock import AsyncMock, patch, MagicMock
 
+from agent_service.services.kernel_middleware import AUTO_ALLOW_ENV
 from agent_service.tools.gateway_tools import (
     DELEGATED_TOKEN,
     _make_tool_fn,
@@ -318,6 +320,74 @@ class BuildFunctionToolsTests(unittest.TestCase):
         }]
         tools = build_function_tools("http://gw:8080", defs)
         self.assertFalse(tools[0].is_read_only)
+
+    def test_gateway_risk_level_carries_risk_tier(self) -> None:
+        """SPEC-021 R-3: the risk tier rides each tool so parked
+        confirmations can flag mutating calls on their stream frames."""
+        defs = [
+            {
+                "name": "k8s.list_pods",
+                "description": "x",
+                "risk_level": "read",
+                "parameters_schema": {"type": "object"},
+            },
+            {
+                "name": "k8s.delete_pod",
+                "description": "x",
+                "risk_level": "write",
+                "parameters_schema": {"type": "object"},
+            },
+        ]
+        tools = build_function_tools("http://gw:8080", defs)
+        self.assertEqual(tools[0].gateway_risk_level, "read")
+        self.assertEqual(tools[1].gateway_risk_level, "write")
+
+
+class MutatingAutoAllowExclusionTests(unittest.TestCase):
+    """Auto-allow is read-only by construction (SPEC-021 R-3)."""
+
+    _WRITE_DEF = {
+        "name": "k8s.delete_pod",
+        "description": "Delete one pod.",
+        "risk_level": "write",
+        "parameters_schema": {"type": "object"},
+    }
+
+    def test_mutating_tool_in_auto_allow_list_is_logged(self) -> None:
+        with patch.dict(os.environ, {AUTO_ALLOW_ENV: "k8s.delete_pod"}):
+            with self.assertLogs(
+                "agent_service.tools.gateway_tools", level="WARNING"
+            ) as captured:
+                build_gateway_toolkit([self._WRITE_DEF], "http://gw:8080")
+        self.assertTrue(
+            any("read-only" in line and "k8s.delete_pod" in line
+                for line in captured.output),
+            captured.output,
+        )
+
+    def test_mutating_tool_still_registered_despite_exclusion_log(self) -> None:
+        """Exclusion from auto-approval is not exclusion from the toolkit:
+        the tool stays available and parks for HITL confirmation."""
+        with patch.dict(os.environ, {AUTO_ALLOW_ENV: "k8s.delete_pod"}):
+            toolkit = build_gateway_toolkit([self._WRITE_DEF], "http://gw:8080")
+        schemas = _run(toolkit.get_tool_schemas())
+        names = {
+            s["function"]["name"]
+            for s in schemas
+            if s.get("type") == "function"
+        }
+        self.assertEqual(names, {"k8s_delete_pod"})
+
+    def test_read_tool_in_auto_allow_list_not_warned(self) -> None:
+        defs = [dict(MOCK_TOOL_DEFINITIONS[0])]
+        with patch.dict(os.environ, {AUTO_ALLOW_ENV: "k8s.list_pods"}):
+            with self.assertLogs(
+                "agent_service.tools.gateway_tools", level="INFO"
+            ) as captured:
+                build_gateway_toolkit(defs, "http://gw:8080")
+        self.assertFalse(
+            any("read-only by construction" in line for line in captured.output)
+        )
 
 
 class BuildToolkitRegressionTests(unittest.TestCase):

@@ -4,7 +4,7 @@ const gatewayInput = document.querySelector("#gateway-url");
 // must match the root VERSION file (enforced by make validate-version). A
 // gateway-served /api/v1/version endpoint is the intended long-term source
 // of truth.
-const PLATFORM_VERSION = "v0.6.1";
+const PLATFORM_VERSION = "v0.7.0";
 document.querySelector("#version-output").textContent = PLATFORM_VERSION;
 const userInput = document.querySelector("#user-id");
 const promptInput = document.querySelector("#prompt-input");
@@ -694,12 +694,21 @@ function renderToolsCatalog(tools) {
   }
   const table = document.createElement("table");
   table.className = "audit-table tools-table";
-  const headers = ["name", "description", "category", "risk"];
+  const headers = ["name", "description", "category", "risk", "confirmation"];
   table.innerHTML = `<thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead>`;
   const tbody = document.createElement("tbody");
   for (const tool of tools) {
     const row = document.createElement("tr");
-    for (const value of [tool.name, tool.description, tool.category, tool.risk_level]) {
+    // SPEC-021 R-3: non-read tools can never auto-execute — confirmation is
+    // mandatory. Read tools follow the agent auto-allow list.
+    const mutating = tool.risk_level && tool.risk_level !== "read";
+    for (const value of [
+      tool.name,
+      tool.description,
+      tool.category,
+      tool.risk_level,
+      mutating ? "required" : "auto-allow list"
+    ]) {
       const td = document.createElement("td");
       td.textContent = value ?? "\u2014";
       row.appendChild(td);
@@ -709,7 +718,7 @@ function renderToolsCatalog(tools) {
   table.appendChild(tbody);
   toolsOutput.appendChild(table);
   toolsStatus.textContent =
-    `${tools.length} tool${tools.length === 1 ? "" : "s"} registered \u00b7 read-only catalog`;
+    `${tools.length} tool${tools.length === 1 ? "" : "s"} registered \u00b7 risk-tiered catalog`;
 }
 
 // --- Skills inventory view (SPEC-019 R-4) ---
@@ -1690,9 +1699,16 @@ function renderConfirmationRequest(payload, agentDiv, parkedTurn, textSink) {
   card.className = "confirm-card";
   card.dataset.confirmId = payload.confirm_id || "";
 
+  // SPEC-021 R-3: any non-read pending call makes this a mutating batch;
+  // the badge is a visible warning, the gateway still enforces admission.
+  const mutating = (payload.pending_calls || []).some(
+    (call) => call.risk_level && call.risk_level !== "read"
+  );
+
   const header = document.createElement("div");
   header.className = "confirm-card-header";
   header.innerHTML = '<span class="confirm-card-title">Tool confirmation required</span>'
+    + (mutating ? '<span class="status-badge mutating">mutating</span>' : "")
     + '<span class="status-badge pending">awaiting decision</span>';
   card.appendChild(header);
 
@@ -1704,8 +1720,11 @@ function renderConfirmationRequest(payload, agentDiv, parkedTurn, textSink) {
   for (const call of payload.pending_calls || []) {
     const callDetails = document.createElement("details");
     callDetails.className = "confirm-call";
+    const riskBadge = call.risk_level && call.risk_level !== "read"
+      ? `<span class="status-badge mutating">${escapeHtml(call.risk_level)}</span>`
+      : "";
     callDetails.innerHTML =
-      `<summary><span class="tool-name">${escapeHtml(call.tool_name || call.call_id || "tool")}</span></summary>`
+      `<summary><span class="tool-name">${escapeHtml(call.tool_name || call.call_id || "tool")}</span>${riskBadge}</summary>`
       + `<pre>${escapeHtml(JSON.stringify(call.parameters || {}, null, 2))}</pre>`;
     card.appendChild(callDetails);
   }

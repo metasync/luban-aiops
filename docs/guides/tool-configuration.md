@@ -5,9 +5,12 @@ configuring the platform's tool execution framework.
 
 ## Tool Inventory
 
-All registered tools are **read-only** (risk level: `read`). The agent discovers available
-tools via the `tools:list` action and invokes them via `tools:invoke`. Both actions are
-governed by the policy bundle.
+Tools are registered with a risk tier (`read`, `write`, or `admin`). Read tools are invoked
+under the `tools:invoke` action; mutating tools (`write`/`admin`) additionally require the
+deny-by-default `tools:mutate` action and always execute behind a human confirmation
+(SPEC-021). The agent discovers available tools via `tools:list` and invokes them via
+`tools:invoke`. All actions are governed by the policy bundle; the full approval model is
+covered in the [Approval and HITL Governance Guide](approval-and-hitl.md).
 
 ### Kubernetes Connector Tools
 
@@ -17,6 +20,7 @@ governed by the policy bundle.
 | `k8s.get_pod` | Get detailed status of a specific pod | `name` (required), `namespace` (optional) | read |
 | `k8s.get_events` | List Kubernetes events in a namespace | `namespace` (optional), `field_selector` (optional) | read |
 | `k8s.get_pod_logs` | Retrieve recent logs from a pod container | `name` (required), `namespace` (optional), `container` (optional), `tail_lines` (default 100, max 1000) | read |
+| `k8s.delete_pod` | Delete a single named pod — the platform's bounded "restart" primitive; the owning controller recreates the pod. One named object per invocation, no selector/wildcard variants. Requires `GATEWAY_MUTATING_TOOLS_ENABLED=true` plus opt-in pod-delete RBAC; every execution parks for human confirmation (SPEC-021) | `name` (required), `namespace` (optional) | write |
 
 ### Elastic Connector Tools
 
@@ -41,9 +45,28 @@ governed by the policy bundle.
 | `incidents.list` | List tracked incidents (summary fields, newest first) with optional status/severity/source filters | `status` (optional: `new`, `triaging`, `triaged`, `triage_failed`, `resolved`), `severity` (optional: `critical`, `warning`, `info`), `source` (optional: `alertmanager`, `manual`), `limit` (default 20), `offset` (default 0) | read |
 | `incidents.get` | Fetch one full incident record including the latest triage report and connector dispatch outcomes | `incident_id` (required, `inc-...`) | read |
 
-> **Important:** All registered tools are currently read-only. Before any mutating (write or
-> admin) tool is registered, the policy bundle must be updated to scope the
-> `read-only-observer` grants to read-only tools only.
+> **Mutating tools are triple-gated (SPEC-021).** A `write`/`admin` tool registers only when
+> `GATEWAY_MUTATING_TOOLS_ENABLED=true`, invokes only for roles granted the deny-by-default
+> `tools:mutate` policy action, and never executes without an operator confirmation through
+> the HITL bridge. See the [Approval and HITL Governance Guide](approval-and-hitl.md) for
+> the full model and the activation checklist below for `k8s.delete_pod`.
+
+### Mutating Tool Activation Checklist (`k8s.delete_pod`)
+
+- [ ] **`GATEWAY_MUTATING_TOOLS_ENABLED=true`** — set in `tool-gateway/runtime-config.env`
+      (default `false`; while false, mutating tools are absent from discovery and invoke)
+- [ ] **`GATEWAY_K8S_ENABLED=true`** — the Kubernetes connector must be active
+- [ ] **Opt-in pod-delete RBAC** — apply the separate pod-delete Role/RoleBinding from the
+      dev-k8s overlay (`tool-gateway-pod-delete.yaml`); it is never part of the default
+      read-only ClusterRole
+- [ ] **HITL confirmation enabled** — `AGENT_HITL_CONFIRM_TIMEOUT > 0` on agent-platform;
+      while bridging is disabled, agent-platform excludes mutating tools from the toolkit
+      entirely
+- [ ] **`tools:mutate` grants reviewed** — the default bundle grants the action to
+      `platform-admin` and `operator` only; confirm the live matrix
+      (`GET /api/v1/policy/matrix`) matches your intent
+- [ ] **`chat:confirm` grants reviewed** — the confirmer needs `chat:confirm` (granted to
+      `platform-admin`, `approver`, `operator`, `developer` by default)
 
 ## Kubernetes Connector
 

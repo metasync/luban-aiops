@@ -50,14 +50,14 @@ Current implementation status:
 - verifies bearer tokens locally via JWKS (no per-request network call to identity-broker)
 - validates the `iss` claim against `IDENTITY_TOKEN_ISSUER` and the `aud` claim against `GATEWAY_TOKEN_AUDIENCE`; rejects expired/malformed/wrong-audience tokens with `401`
 - when auth is optional and no token is present, injects a synthetic dev identity (logged as `synthetic: true`)
-- enforces deny-by-default authorization on the tool actions (`tools:list`, `tools:invoke`) against the shared versioned role→action policy bundle (the same bundle platform-gateway loads); denials return a structured `403` and are audit-logged
+- enforces deny-by-default authorization on the tool actions (`tools:list`, `tools:invoke`, `tools:mutate`) against the shared versioned role→action policy bundle (the same bundle platform-gateway loads); denials return a structured `403` and are audit-logged
 - loads the policy bundle from `GATEWAY_POLICY_PATH`, falling back to a packaged default kept in sync with `shared/shared-contracts`
 - provides a tool execution framework (`src/tool_gateway/tools/`) with a `ToolRegistry`, `BaseTool` abstraction, and structured evidence envelope (SPEC-007)
-- ships a Kubernetes read-only connector (`k8s.list_pods`, `k8s.get_pod`, `k8s.get_events`, `k8s.get_pod_logs`) using `kubernetes-client/python`
+- ships a Kubernetes connector (`k8s.list_pods`, `k8s.get_pod`, `k8s.get_events`, `k8s.get_pod_logs`, plus the bounded mutating `k8s.delete_pod`) using `kubernetes-client/python`; tools carry a risk tier (`read`/`write`/`admin`), and write/admin tools register only when `GATEWAY_MUTATING_TOOLS_ENABLED=true` and invoke under the deny-by-default `tools:mutate` action (SPEC-021)
 - ships an Elastic observability connector (`elastic.search_logs`, `elastic.get_service_health`, `elastic.get_active_alerts`) using the `elasticsearch` Python client; lazy-initialized, feature-gated by `GATEWAY_ELASTIC_ENABLED` (SPEC-011)
 - ships a skills connector (`skills.search`, `skills.get`, `skills.list`) against the `skills-hub` service with Basic-auth httpx transport, 10s timeout, and structured error mapping (404 → `SKILL_NOT_FOUND`, unreachable → `TOOL_EXECUTION_ERROR`); registered only when `GATEWAY_SKILLS_SERVICE_URL` is set (SPEC-014)
 - ships an incidents connector (`incidents.list`, `incidents.get`) against the `incident-service` service with the same Basic-auth httpx transport and error-mapping pattern (404 → `INCIDENT_NOT_FOUND`, unreachable → `TOOL_EXECUTION_ERROR`); registered only when `GATEWAY_INCIDENTS_SERVICE_URL` is set; read-only by design — no mutating incident tool exists (SPEC-015)
-- exposes `GET /api/v2/tools` (tool discovery, gated by `tools:list`) and `POST /api/v2/tools/invoke` (tool execution gated by `tools:invoke`); both derive identity solely from the verified token — any identity in a request body is never trusted
+- exposes `GET /api/v2/tools` (tool discovery, gated by `tools:list`) and `POST /api/v2/tools/invoke` (tool execution gated by `tools:invoke` for read tools and additionally by `tools:mutate` for write/admin tools); both derive identity solely from the verified token — any identity in a request body is never trusted
 - redacts credential-shaped spans (JWTs, `Bearer`/`Basic` values, PEM private keys, key-list fields such as `token`/`password`/`api_key`) from every tool result at the single invoke choke point before both the response and the audit log; when the redacted fraction exceeds `GATEWAY_REDACTION_OVERFLOW_FRACTION` the output is withheld with a `REDACTION_OVERFLOW` error (fail-closed, SPEC-009)
 - forwards `tool_invoked` audit events (including policy-denied invocations, post-redaction) to `audit-service` via a fire-and-forget emitter when `GATEWAY_AUDIT_SERVICE_URL` is set; unreachability degrades to log-only auditing and never blocks the invoke path (SPEC-013)
 
@@ -80,7 +80,9 @@ Current runtime environment knobs (tool-scoped; the portal-facing `PLATFORM_GATE
 - `GATEWAY_POLICY_PATH`
   - path to the action-authorization policy bundle (YAML); when unset, the packaged default bundle is used; a configured-but-invalid path fails readiness rather than falling back
 - `GATEWAY_K8S_ENABLED`
-  - when `true`, registers the Kubernetes read-only connector; defaults to `false`
+  - when `true`, registers the Kubernetes connector; defaults to `false`
+- `GATEWAY_MUTATING_TOOLS_ENABLED`
+  - risk-tier admission gate (SPEC-021): when `true`, write/admin risk tools (currently `k8s.delete_pod`) register; while `false` (default) they are absent from discovery and invoke fails closed with `TOOL_NOT_FOUND`
 - `GATEWAY_K8S_NAMESPACE`
   - default namespace for K8s tool operations; when unset, tools use the `namespace` parameter or fall back to `default`
 - `GATEWAY_REDACTION_ENABLED`

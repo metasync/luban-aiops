@@ -18,7 +18,10 @@ LOGGER = logging.getLogger(__name__)
 def _build_tool_registry() -> ToolRegistry:
     """Build and populate the tool registry from enabled connectors."""
     settings = get_settings()
-    registry = ToolRegistry()
+    # Risk-tier admission (SPEC-021 R-1): mutating (write/admin) tools are
+    # only admitted when GATEWAY_MUTATING_TOOLS_ENABLED is true; otherwise
+    # the registry refuses their registration entirely.
+    registry = ToolRegistry(allow_mutating=settings.mutating_tools_enabled)
 
     if settings.k8s_enabled:
         from tool_gateway.tools.k8s_connector import KubernetesConnector

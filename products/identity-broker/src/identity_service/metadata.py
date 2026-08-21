@@ -1,5 +1,5 @@
 SERVICE_NAME = "identity-service"
 SERVICE_TITLE = "identity-service"
-SERVICE_VERSION = "0.6.1"
+SERVICE_VERSION = "0.7.0"
 DEFAULT_HTTP_HOST = "0.0.0.0"
 DEFAULT_HTTP_PORT = 8000

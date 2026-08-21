@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/agent-stream-event.schema.json",
-  "title": "Agent Stream Event (v5)",
-  "description": "SSE frame payload for GET /api/v2/chat/stream. v3 added tool_call and tool_result event types for evidence panel rendering (SPEC-011 R-1). v4 adds confirmation_request and confirmation_result event types for HITL confirmation bridging (SPEC-020 R-1). v5 adds an optional data field on tool_result frames carrying the full tool payload within the stream size cap.",
+  "title": "Agent Stream Event (v6)",
+  "description": "SSE frame payload for GET /api/v2/chat/stream. v3 added tool_call and tool_result event types for evidence panel rendering (SPEC-011 R-1). v4 adds confirmation_request and confirmation_result event types for HITL confirmation bridging (SPEC-020 R-1). v5 adds an optional data field on tool_result frames carrying the full tool payload within the stream size cap. v6 adds an optional risk_level on each pending_calls entry so confirmation cards can surface mutating (write/admin) tool calls (SPEC-021 R-3).",
   "type": "object",
   "additionalProperties": false,
   "required": ["type", "session_id", "request_id"],
@@ -39,7 +39,12 @@
         "properties": {
           "call_id": { "type": "string" },
           "tool_name": { "type": "string" },
-          "parameters": { "type": "object", "additionalProperties": true }
+          "parameters": { "type": "object", "additionalProperties": true },
+          "risk_level": {
+            "type": "string",
+            "enum": ["read", "write", "admin"],
+            "description": "Tool risk tier when known at park time (SPEC-021 R-3); absent for tools without a gateway risk tier."
+          }
         }
       }
     },

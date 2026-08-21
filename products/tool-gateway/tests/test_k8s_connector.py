@@ -52,7 +52,9 @@ class K8sConnectorNotConfiguredTests(unittest.TestCase):
 class K8sConnectorRegistrationTests(unittest.TestCase):
     """Verify tool registration and metadata."""
 
-    def test_registers_four_tools(self) -> None:
+    def test_registers_four_read_tools_by_default(self) -> None:
+        # SPEC-021 R-1: the default registry refuses mutating tools, so the
+        # write-risk k8s.delete_pod is filtered out of the read-only surface.
         connector = KubernetesConnector()
         registry = ToolRegistry()
         connector.register_tools(registry)
@@ -61,7 +63,16 @@ class K8sConnectorRegistrationTests(unittest.TestCase):
         names = {d.name for d in definitions}
         self.assertEqual(names, {"k8s.list_pods", "k8s.get_pod", "k8s.get_events", "k8s.get_pod_logs"})
 
-    def test_all_tools_are_read_level(self) -> None:
+    def test_registers_delete_pod_when_mutating_allowed(self) -> None:
+        connector = KubernetesConnector()
+        registry = ToolRegistry(allow_mutating=True)
+        connector.register_tools(registry)
+        definitions = {d.name: d for d in registry.list_definitions()}
+        self.assertEqual(len(definitions), 5)
+        self.assertEqual(definitions["k8s.delete_pod"].risk_level, "write")
+        self.assertEqual(definitions["k8s.delete_pod"].category, "kubernetes")
+
+    def test_read_tools_are_read_level(self) -> None:
         connector = KubernetesConnector()
         registry = ToolRegistry()
         connector.register_tools(registry)
@@ -226,3 +237,87 @@ class K8sConnectorExecutionTests(unittest.TestCase):
         self.assertEqual(result.status, "error")
         self.assertEqual(result.error["code"], "K8S_API_ERROR")
         self.assertIn("connection refused", result.error["message"])
+
+
+class _FakeApiException(Exception):
+    """Stand-in for kubernetes.client.ApiException (carries .status)."""
+
+    def __init__(self, status: int, reason: str) -> None:
+        super().__init__(reason)
+        self.status = status
+        self.reason = reason
+
+
+class DeletePodToolTests(unittest.TestCase):
+    """k8s.delete_pod behavior (SPEC-021 R-2)."""
+
+    def setUp(self) -> None:
+        self.connector = KubernetesConnector(default_namespace="test-ns")
+        self.connector._configured = True
+        self.mock_api = MagicMock()
+        self.connector._core_v1 = self.mock_api
+        self.registry = ToolRegistry(allow_mutating=True)
+        self.connector.register_tools(self.registry)
+
+    def test_delete_pod_success(self) -> None:
+        result = _run(
+            self.registry.invoke("k8s.delete_pod", {"name": "web-1"}, {})
+        )
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.data["deleted_pod"], "web-1")
+        self.assertEqual(result.evidence["risk_level"], "write")
+        self.mock_api.delete_namespaced_pod.assert_called_once_with(
+            name="web-1", namespace="test-ns"
+        )
+
+    def test_delete_pod_explicit_namespace(self) -> None:
+        result = _run(
+            self.registry.invoke(
+                "k8s.delete_pod", {"name": "web-1", "namespace": "other-ns"}, {}
+            )
+        )
+        self.assertEqual(result.status, "success")
+        self.mock_api.delete_namespaced_pod.assert_called_once_with(
+            name="web-1", namespace="other-ns"
+        )
+
+    def test_delete_pod_requires_name(self) -> None:
+        result = _run(self.registry.invoke("k8s.delete_pod", {}, {}))
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "INVALID_PARAMETERS")
+        self.mock_api.delete_namespaced_pod.assert_not_called()
+
+    def test_delete_pod_not_found_maps_to_pod_not_found(self) -> None:
+        self.mock_api.delete_namespaced_pod.side_effect = _FakeApiException(404, "Not Found")
+        result = _run(
+            self.registry.invoke("k8s.delete_pod", {"name": "ghost"}, {})
+        )
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "POD_NOT_FOUND")
+        self.assertIn("ghost", result.error["message"])
+        self.assertEqual(result.evidence["risk_level"], "write")
+
+    def test_delete_pod_forbidden_maps_to_permission_denied(self) -> None:
+        self.mock_api.delete_namespaced_pod.side_effect = _FakeApiException(403, "Forbidden")
+        result = _run(
+            self.registry.invoke("k8s.delete_pod", {"name": "web-1"}, {})
+        )
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "K8S_PERMISSION_DENIED")
+
+    def test_delete_pod_generic_api_error(self) -> None:
+        self.mock_api.delete_namespaced_pod.side_effect = Exception("connection refused")
+        result = _run(
+            self.registry.invoke("k8s.delete_pod", {"name": "web-1"}, {})
+        )
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "K8S_API_ERROR")
+
+    def test_delete_pod_not_configured(self) -> None:
+        connector = KubernetesConnector(default_namespace="test-ns")
+        connector._configured = False
+        registry = ToolRegistry(allow_mutating=True)
+        connector.register_tools(registry)
+        result = _run(registry.invoke("k8s.delete_pod", {"name": "web-1"}, {}))
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "K8S_NOT_CONFIGURED")

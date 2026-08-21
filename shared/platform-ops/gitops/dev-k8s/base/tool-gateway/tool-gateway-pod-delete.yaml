@@ -1,0 +1,45 @@
+---
+# Opt-in pod-delete RBAC for the bounded mutating tool k8s.delete_pod
+# (SPEC-021 R-6).
+#
+# THIS FILE IS NOT PART OF THE DEFAULT KUSTOMIZATION. The committed
+# deployment grants the tool-gateway read-only cluster access only
+# (rbac.yaml). Apply this file explicitly when — and only when — you opt
+# into mutating tools:
+#
+#   kubectl apply -f shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-pod-delete.yaml
+#
+# Activation prerequisites (docs/guides/tool-configuration.md, "Mutating
+# Tool Activation Checklist"):
+#   1. GATEWAY_MUTATING_TOOLS_ENABLED=true in tool-gateway runtime-config
+#   2. tools:mutate grants reviewed in the policy bundle
+#   3. This manifest applied
+#   4. AGENT_HITL_CONFIRM_TIMEOUT>0 on agent-platform (HITL confirmation)
+#
+# Scope: the `delete` verb on pods in dev-luban-aiops only. Deliberately
+# no create/update/patch, no other resources, no other namespaces — this
+# is the minimal RBAC surface for the bounded "restart" primitive
+# (delete one named pod; the owning controller recreates it).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tool-gateway-pod-delete
+  namespace: dev-luban-aiops
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tool-gateway-pod-delete
+  namespace: dev-luban-aiops
+subjects:
+  - kind: ServiceAccount
+    name: tool-gateway
+    namespace: dev-luban-aiops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tool-gateway-pod-delete

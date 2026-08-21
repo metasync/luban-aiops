@@ -679,6 +679,8 @@ body {
 .status-badge.success { background: #166534; color: var(--success); }
 .status-badge.error { background: #7f1d1d; color: var(--error); }
 .status-badge.denied { background: #7f1d1d; color: var(--error); }
+/* SPEC-021 R-3: mutating badge on confirmation cards / tool rows. */
+.status-badge.mutating { background: #78350f; color: var(--warning); }
 
 /* Permissions matrix (SPEC-019 R-3): provenance line above the table and a
    compact role x action grid (centers badge cells, keeps names readable). */

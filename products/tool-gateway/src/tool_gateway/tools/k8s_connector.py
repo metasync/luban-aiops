@@ -1,10 +1,14 @@
-"""Kubernetes read-only connector (SPEC-007 R-3).
+"""Kubernetes connector (SPEC-007 R-3, SPEC-021 R-2).
 
 Provides four read-only tools backed by the official kubernetes-client/python:
   - k8s.list_pods
   - k8s.get_pod
   - k8s.get_events
   - k8s.get_pod_logs
+
+and one bounded mutating tool (SPEC-021, registered only when
+GATEWAY_MUTATING_TOOLS_ENABLED admits write-risk tools):
+  - k8s.delete_pod
 
 The connector uses in-cluster config when available, falling back to kubeconfig
 for local development. When neither is available, tools return a structured
@@ -35,7 +39,7 @@ DEFAULT_TAIL_LINES = 100
 
 
 class KubernetesConnector:
-    """Manages K8s client lifecycle and registers read-only tools."""
+    """Manages K8s client lifecycle and registers connector tools."""
 
     def __init__(self, default_namespace: str | None = None) -> None:
         self._default_namespace = default_namespace or "default"
@@ -74,11 +78,17 @@ class KubernetesConnector:
         return parameters.get("namespace") or self._default_namespace
 
     def register_tools(self, registry: ToolRegistry) -> None:
-        """Register all K8s tools with the given registry."""
+        """Register all K8s tools with the given registry.
+
+        The mutating k8s.delete_pod is offered unconditionally here; the
+        registry's risk-tier admission (SPEC-021 R-1) refuses it when
+        GATEWAY_MUTATING_TOOLS_ENABLED is off.
+        """
         registry.register(ListPodsTool(self))
         registry.register(GetPodTool(self))
         registry.register(GetEventsTool(self))
         registry.register(GetPodLogsTool(self))
+        registry.register(DeletePodTool(self))
 
     # --- Sync operations (run in executor) ---
 
@@ -171,6 +181,18 @@ class KubernetesConnector:
             kwargs["container"] = container
         logs = self._core_v1.read_namespaced_pod_log(**kwargs)
         return {"logs": logs, "pod": name, "container": container, "tail_lines": tail_lines}
+
+    def _delete_pod_sync(self, name: str, namespace: str) -> dict:
+        self._core_v1.delete_namespaced_pod(name=name, namespace=namespace)
+        return {
+            "deleted_pod": name,
+            "namespace": namespace,
+            "note": (
+                "The pod was deleted. If a controller (Deployment, "
+                "StatefulSet, ...) manages it, a replacement pod is "
+                "created automatically."
+            ),
+        }
 
 
 def _container_state(state) -> str:
@@ -412,3 +434,84 @@ class GetPodLogsTool(BaseTool):
             duration_ms = int((time.perf_counter() - start) * 1000)
             LOGGER.exception("k8s.get_pod_logs failed")
             return make_error_result("k8s.get_pod_logs", "K8S_API_ERROR", str(exc), source_system=SOURCE_SYSTEM, duration_ms=duration_ms)
+
+
+class DeletePodTool(BaseTool):
+    """Bounded mutating tool (SPEC-021 R-2): delete one named pod.
+
+    Deleting a controller-managed pod is the platform's bounded "restart"
+    primitive — the controller recreates the pod. No selector, wildcard, or
+    multi-pod variants exist by design.
+    """
+
+    def __init__(self, connector: KubernetesConnector) -> None:
+        self._connector = connector
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="k8s.delete_pod",
+            description=(
+                "Delete a single named Kubernetes pod. This is a mutating "
+                "action that requires operator confirmation. If the pod is "
+                "managed by a controller (Deployment, StatefulSet, ...), "
+                "the controller recreates it, which makes this the bounded "
+                "'restart pod' primitive. Never use it on pods you do not "
+                "intend to restart."
+            ),
+            risk_level="write",
+            category="kubernetes",
+            parameters_schema={
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string", "description": "Exact name of the pod to delete."},
+                    "namespace": {"type": "string", "description": "Target namespace (defaults to configured namespace)."},
+                },
+            },
+        )
+
+    async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+        start = time.perf_counter()
+        if not self._connector._ensure_client():
+            return make_error_result("k8s.delete_pod", "K8S_NOT_CONFIGURED", "Kubernetes client is not configured.", risk_level="write", source_system=SOURCE_SYSTEM)
+
+        name = parameters.get("name")
+        if not name:
+            return make_error_result("k8s.delete_pod", "INVALID_PARAMETERS", "Parameter 'name' is required.", risk_level="write", source_system=SOURCE_SYSTEM)
+
+        namespace = self._connector._resolve_namespace(parameters)
+
+        try:
+            loop = asyncio.get_running_loop()
+            data = await loop.run_in_executor(
+                None,
+                partial(self._connector._delete_pod_sync, name, namespace),
+            )
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            return ToolResult(
+                tool_name="k8s.delete_pod",
+                status="success",
+                data=data,
+                evidence=build_evidence("write", SOURCE_SYSTEM, duration_ms),
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            LOGGER.exception("k8s.delete_pod failed")
+            # Structured mapping for the two expected failure classes
+            # (ApiException carries .status); anything else stays generic.
+            api_status = getattr(exc, "status", None)
+            if api_status == 404:
+                code = "POD_NOT_FOUND"
+                message = f"Pod '{name}' was not found in namespace '{namespace}'."
+            elif api_status == 403:
+                code = "K8S_PERMISSION_DENIED"
+                message = (
+                    "The Kubernetes API denied the pod delete. The "
+                    "tool-gateway service account needs the opt-in "
+                    "pod-delete RBAC (see the Tool and Connector Guide)."
+                )
+            else:
+                code = "K8S_API_ERROR"
+                message = str(exc)
+            return make_error_result("k8s.delete_pod", code, message, risk_level="write", source_system=SOURCE_SYSTEM, duration_ms=duration_ms)

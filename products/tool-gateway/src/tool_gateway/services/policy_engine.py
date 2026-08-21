@@ -27,7 +27,12 @@ DEFAULT_BUNDLE_RESOURCE = "policy-default.yaml"
 # enforcement; portal-facing actions (chat, session:*) live in platform-gateway.
 ACTION_TOOLS_LIST = "tools:list"
 ACTION_TOOLS_INVOKE = "tools:invoke"
-PROTECTED_ACTIONS = frozenset({ACTION_TOOLS_LIST, ACTION_TOOLS_INVOKE})
+# Mutating tool execution (SPEC-021 R-1): write/admin risk tools additionally
+# require this action; deny-by-default like every other platform action.
+ACTION_TOOLS_MUTATE = "tools:mutate"
+PROTECTED_ACTIONS = frozenset(
+    {ACTION_TOOLS_LIST, ACTION_TOOLS_INVOKE, ACTION_TOOLS_MUTATE}
+)
 
 # Module-level bundle singleton, keyed on the configured path.
 _bundle: list[PolicyRule] | None = None

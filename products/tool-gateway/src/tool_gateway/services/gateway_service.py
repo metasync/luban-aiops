@@ -219,6 +219,49 @@ async def invoke_tool(
         result = make_denied_result(tool_name, decision.reason)
         return JSONResponse(content=result.to_dict(), status_code=403)
 
+    # Risk-tier gating (SPEC-021 R-1): mutating (write/admin) tools
+    # additionally require tools:mutate; read tools are unaffected.
+    target = registry.get(tool_name)
+    if target is not None and target.definition.risk_level != "read":
+        mutate_decision = evaluate(settings, identity.roles, "tools:mutate")
+        record_policy_decision("tools:mutate", mutate_decision.decision)
+        if mutate_decision.decision == "deny":
+            LOGGER.warning(
+                "mutating tool invocation denied by policy",
+                extra={
+                    "request_id": request_id,
+                    "tool_name": tool_name,
+                    "risk_level": target.definition.risk_level,
+                    "subject": identity.subject,
+                    "roles": identity.roles,
+                    "reason": mutate_decision.reason,
+                },
+            )
+            emit_audit_event(
+                settings,
+                build_audit_event(
+                    "policy_decision",
+                    request_id,
+                    "deny",
+                    subject=identity.subject,
+                    username=identity.username,
+                    actor=identity.actor,
+                    roles=identity.roles,
+                    details={
+                        "action": "tools:mutate",
+                        "decision": "deny",
+                        "reason": mutate_decision.reason,
+                        "tool_name": tool_name,
+                        "risk_level": target.definition.risk_level,
+                        "matched_rule_ids": mutate_decision.matched_rule_ids,
+                    },
+                ),
+            )
+            result = make_denied_result(
+                tool_name, mutate_decision.reason, target.definition.risk_level
+            )
+            return JSONResponse(content=result.to_dict(), status_code=403)
+
     # Dispatch to registry.
     identity_dict = {
         "sub": identity.subject,
@@ -264,6 +307,7 @@ async def invoke_tool(
         tool_name=tool_name,
         status=result.status,
         duration_ms=result.evidence.get("duration_ms", 0),
+        risk_level=result.evidence.get("risk_level", "read"),
         user_id=identity.username,
         sub=identity.subject,
         act=identity.actor,
@@ -285,6 +329,7 @@ async def invoke_tool(
                 "tool_name": tool_name,
                 "status": result.status,
                 "duration_ms": result.evidence.get("duration_ms", 0),
+                "risk_level": result.evidence.get("risk_level", "read"),
                 "redacted_spans": redacted_spans,
             },
         ),

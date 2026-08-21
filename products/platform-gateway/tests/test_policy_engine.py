@@ -234,14 +234,16 @@ class ContractAlignmentTests(unittest.TestCase):
 
     def test_protected_actions_boundary(self) -> None:
         # Exempt routes (health, runtime, auth, identity) carry no action; this
-        # set is the complete protected surface.
+        # set is the complete protected surface. tools:mutate is enforced by
+        # the tool-gateway but listed here so the permission matrix always
+        # carries it (SPEC-021).
         self.assertEqual(
             PROTECTED_ACTIONS,
             frozenset({
                 "chat", "chat:confirm", "session:create", "session:read",
                 "audit:read",
                 "incident:read", "incident:create", "incident:triage",
-                "policy:read", "tools:list", "skills:read",
+                "policy:read", "tools:list", "tools:mutate", "skills:read",
             }),
         )
 

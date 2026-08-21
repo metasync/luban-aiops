@@ -171,6 +171,11 @@ class GatewayPermissionMiddleware(MiddlewareBase):
             and getattr(tool, "is_read_only", False)
             and name in self._allow_list
         ):
+            # SPEC-021 R-3 invariant: the allow-list is read-only by
+            # construction. Mutating tools carry is_read_only=False, so
+            # naming one in AGENT_GATEWAY_TOOL_AUTO_ALLOW can never grant
+            # auto-execution — it falls through to the ASK below and parks
+            # for HITL confirmation regardless of configuration.
             return PermissionDecision(
                 behavior=PermissionBehavior.ALLOW,
                 message=(

@@ -203,6 +203,9 @@ def build_function_tools(
                 tool_def.get("parameters_schema"),
             )
             tool.gateway_tool_name = tool_name
+            # Risk tier rides the tool so parked confirmations can surface
+            # it on confirmation_request frames (SPEC-021 R-3).
+            tool.gateway_risk_level = tool_def.get("risk_level", "read")
             tools.append(tool)
             LOGGER.info("registered toolkit function: %s", tool_name)
         except Exception as exc:
@@ -221,8 +224,37 @@ def build_gateway_toolkit(
     """
     from agentscope.tool import Toolkit
 
+    _log_mutating_auto_allow_exclusions(tool_definitions)
     tools = build_function_tools(gateway_url, tool_definitions)
     return Toolkit(tools=tools)
+
+
+def _log_mutating_auto_allow_exclusions(tool_definitions: list[dict]) -> None:
+    """Log once per toolkit build when mutating tools hit the auto-allow list.
+
+    The auto-allow surface is read-only by construction (SPEC-021 R-3):
+    ``GatewayPermissionMiddleware`` only auto-approves tools that are BOTH
+    vetted and ``is_read_only``, so a mutating tool named in
+    ``AGENT_GATEWAY_TOOL_AUTO_ALLOW`` can never auto-execute — it always
+    parks for HITL confirmation. The exclusion is logged here so the
+    misconfiguration stays visible instead of silently ignored.
+    """
+    from agent_service.services.kernel_middleware import (
+        _load_auto_allowed_tools,
+    )
+
+    allow_list = _load_auto_allowed_tools()
+    for tool_def in tool_definitions:
+        if tool_def.get("risk_level", "read") == "read":
+            continue
+        tool_name = tool_def["name"]
+        if tool_name.replace(".", "_") in allow_list:
+            LOGGER.warning(
+                "mutating tool %s appears in the auto-allow list but will "
+                "never auto-execute: the auto-allow surface is read-only "
+                "by construction (SPEC-021 R-3)",
+                tool_name,
+            )
 
 
 async def build_toolkit(

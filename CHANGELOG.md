@@ -13,6 +13,50 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.7.0 — 2026-08-21
+
+### Added — SPEC-021: Bounded mutating actions (first approval-gated write tool)
+
+- **First mutating capability, triple-gated**: `k8s.delete_pod` (risk tier
+  `write`) deletes one named pod — the bounded "restart" primitive whose
+  owning controller recreates it. It registers only when
+  `GATEWAY_MUTATING_TOOLS_ENABLED=true` (committed `false`), invokes only
+  under the new deny-by-default `tools:mutate` policy action, and never
+  executes without a human confirmation through the SPEC-020 HITL bridge.
+  Every gate fails closed independently.
+- **Risk-tier admission at the tool-gateway (R-1)**: the registry validates
+  the `risk_level` vocabulary (`read`/`write`/`admin`) at registration and
+  skips non-read tools while the gate is off (absent from discovery,
+  `TOOL_NOT_FOUND` on invoke); the invoke path selects the required action
+  by risk tier (`tools:invoke` vs `tools:mutate`) with structured 403 +
+  metric on deny.
+- **Policy bundle (R-4)**: new deny-by-default `tools:mutate` action granted
+  to `platform-admin` and `operator` only (`allow-operators-tools-mutate`),
+  synced to all four bundle copies; the live permission matrix and both
+  gateway policy vocabularies carry the action.
+- **HITL invariant for mutating tools (R-3)**: the agent auto-allow surface
+  is read-only by construction (naming a mutating tool in
+  `AGENT_GATEWAY_TOOL_AUTO_ALLOW` logs a warning and can never grant
+  auto-execution); with HITL bridging disabled
+  (`AGENT_HITL_CONFIRM_TIMEOUT=0`) mutating tools are excluded from the
+  toolkit and each turn carries an explicit system notice instead of a
+  silent omission. Stream schema moved v5 → v6: confirmation frames carry
+  the optional `risk_level` per pending call, and the portal renders a
+  `mutating` badge plus per-call risk tiers (cache-busting bumped).
+- **Operator documentation (R-5)**: new Approval and HITL Governance Guide
+  (`docs/guides/approval-and-hitl.md`) covering the four-layer approval
+  model, auto-allow management, the policy-bundle approval workflow, and the
+  HITL knobs; tool guide gains the `k8s.delete_pod` inventory row and
+  activation checklist; configuration reference gains the mutating action
+  approval chain; troubleshooting gains four SPEC-021 symptoms.
+- **Deployment and e2e (R-6)**: dev-k8s commits
+  `GATEWAY_MUTATING_TOOLS_ENABLED=false` with a documented opt-in path and a
+  separate, out-of-kustomization pod-delete RBAC manifest (pods `delete`
+  only); new deterministic smoke test
+  `shared/platform-ops/e2e/mutating-demo.sh` asserts the deny-by-default
+  posture (or the opt-in chain incl. the observer 403) and an optional HITL
+  chat leg (park → approve → audit chain).
+
 ## 0.6.1 — 2026-08-21
 
 ### Fixed — Durable OTLP ingest credential provisioning

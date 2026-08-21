@@ -15,6 +15,7 @@ activate them. A feature is **active** when all required variables are set to no
 | **Portal authentication** | `PLATFORM_GATEWAY_REQUIRE_AUTH=true`, `IDENTITY_TOKEN_AUDIENCE` | platform-gateway, identity-service | enabled |
 | **Token delegation** | `PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET` ↔ `IDENTITY_SERVICE_CLIENTS` | platform-gateway ↔ identity-service | **must be provisioned** |
 | **Kubernetes tools** | `GATEWAY_K8S_ENABLED=true`, `GATEWAY_K8S_NAMESPACE` | tool-gateway | enabled (`dev-luban-aiops`) |
+| **Mutating tools (`k8s.delete_pod`)** | `GATEWAY_MUTATING_TOOLS_ENABLED=true`, `GATEWAY_K8S_ENABLED=true`, `AGENT_HITL_CONFIRM_TIMEOUT>0`, `tools:mutate` policy grant, opt-in pod-delete RBAC | tool-gateway, agent-service, policy bundle | disabled (`false`) |
 | **Elastic observability** | `GATEWAY_ELASTIC_ENABLED=true`, `GATEWAY_ELASTIC_URL`, auth (`_API_KEY` or `_USERNAME`+`_PASSWORD`) | tool-gateway | disabled |
 | **Output redaction** | `GATEWAY_REDACTION_ENABLED` | tool-gateway | enabled (`true`) |
 | **Policy enforcement** | `GATEWAY_POLICY_PATH`, `PLATFORM_GATEWAY_POLICY_PATH` | tool-gateway, platform-gateway | `/etc/luban/policy/policy.yaml` |
@@ -81,6 +82,32 @@ platform-gateway          agent-service               tool-gateway
 │   8000       │          │              │            │              │
 └──────────────┘          └──────────────┘            └──────────────┘
 ```
+
+### Mutating Action Approval Chain (SPEC-021)
+
+A mutating tool (`risk_level: write/admin`) only reaches execution when every
+link in this chain holds; each link fails closed independently:
+
+```
+tool-gateway                     agent-service                    policy bundle
+┌──────────────────────┐         ┌──────────────────────┐         ┌──────────────────────┐
+│ GATEWAY_MUTATING_    │         │ auto-allow list is   │         │ tools:mutate granted │
+│ TOOLS_ENABLED=true   │◄─gate──►│ read-only by         │◄─HITL──►│ to platform-admin +  │
+│ (registers write/    │         │ construction;        │         │ operator only        │
+│ admin tools)         │         │ AGENT_HITL_CONFIRM_  │         │ (deny-by-default)    │
+│ tools:mutate checked │         │ TIMEOUT>0 (else      │         │ chat:confirm granted │
+│ on every invoke      │         │ mutating tools are   │         │ to confirmation      │
+│                      │         │ excluded)            │         │ roles                │
+└──────────────────────┘         └──────────────────────┘         └──────────────────────┘
+```
+
+**Dependency chain:** tool-gateway risk-tier gate (`GATEWAY_MUTATING_TOOLS_ENABLED`
++ `tools:mutate`) → agent-platform invariant (mutating tools never auto-approved;
+`AGENT_HITL_CONFIRM_TIMEOUT=0` drops them from the toolkit) → HITL confirmation
+(`chat:confirm`) → `tools:mutate` grant in the policy bundle. Turning on only the
+gateway flag is deliberately insufficient: without HITL bridging the agent cannot
+even offer the tool, and without the policy grant the invocation 403s at the
+gateway. See the [Approval and HITL Governance Guide](approval-and-hitl.md).
 
 ### Audit Ingestion Chain
 
@@ -254,10 +281,10 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime
 | `AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT` | Input token weight for the reply budget (must be >= 0; `0` is valid) | `1.0` | code default |
 | `AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT` | Output token weight for the reply budget (must be >= 0; `0` is valid) | `1.0` | code default |
 | `AGENTSCOPE_TASK_TOOLS_ENABLED` | Opt-in agentscope task tools (`TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate`; state-local, persisted via the agent state store) | `false` | code default |
-| `AGENT_GATEWAY_TOOL_AUTO_ALLOW` | Comma-separated dotted gateway tool names auto-approved by the permission middleware when read-only (overrides the built-in vetted list); the allow-list is the only auto-approval surface — every other tool is answered with an explicit ASK and parks for operator confirmation (SPEC-020) | built-in vetted list | code default |
-| `AGENT_HITL_CONFIRM_TIMEOUT` | HITL confirmation timeout in seconds; an expired parked batch is closed via `UserInterruptEvent` on the next confirm attempt (410) or next chat turn. `0` disables HITL confirmation bridging entirely (SPEC-020) | `600` | code default |
+| `AGENT_GATEWAY_TOOL_AUTO_ALLOW` | Comma-separated dotted gateway tool names auto-approved by the permission middleware when read-only (overrides the built-in vetted list); the allow-list is the only auto-approval surface — every other tool is answered with an explicit ASK and parks for operator confirmation (SPEC-020). Mutating tools are never auto-approved regardless of this setting (SPEC-021) | built-in vetted list | code default |
+| `AGENT_HITL_CONFIRM_TIMEOUT` | HITL confirmation timeout in seconds; an expired parked batch is closed via `UserInterruptEvent` on the next confirm attempt (410) or next chat turn. `0` disables HITL confirmation bridging entirely (SPEC-020) and excludes mutating tools from the agent toolkit (SPEC-021) | `600` | code default |
 | `AGENT_TOOL_DATA_SUMMARY_MAX_CHARS` | Serialized-size cap for the `data_summary` field on `tool_result` evidence frames; oversized payloads are truncated with a marker | `2000` | code default |
-| `AGENT_TOOL_DATA_MAX_CHARS` | Serialized-size cap for the full `data` field on `tool_result` evidence frames (stream schema v5); oversized payloads are omitted from the frame and stay in the audit trail only | `32000` | code default |
+| `AGENT_TOOL_DATA_MAX_CHARS` | Serialized-size cap for the full `data` field on `tool_result` evidence frames (stream schema v6); oversized payloads are omitted from the frame and stay in the audit trail only | `32000` | code default |
 | `TOOL_GATEWAY_URL` | Upstream tool-gateway URL | `http://tool-gateway:8000` | runtime-config |
 
 ### platform-gateway
@@ -306,6 +333,7 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-c
 | `GATEWAY_TOKEN_AUDIENCE` | Expected JWT audience claim | `tool-gateway` | runtime-config |
 | `GATEWAY_K8S_ENABLED` | Enable Kubernetes connector | `true` | runtime-config |
 | `GATEWAY_K8S_NAMESPACE` | Default namespace for K8s tools | `dev-luban-aiops` | runtime-config |
+| `GATEWAY_MUTATING_TOOLS_ENABLED` | Register write/admin risk tools (SPEC-021); while `false` they are absent from discovery and invoke | `false` | runtime-config |
 | `GATEWAY_REDACTION_ENABLED` | Enable output redaction | `true` | code default |
 | `GATEWAY_REDACTION_OVERFLOW_FRACTION` | Fail-closed redaction threshold | `0.2` | code default |
 | `GATEWAY_ELASTIC_ENABLED` | Enable Elastic connector | `false` | runtime-config |

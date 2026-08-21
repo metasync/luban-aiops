@@ -39,6 +39,10 @@ ACTION_SKILLS_READ = "skills:read"
 # HITL confirmation bridging (SPEC-020): mutating chat capability with its
 # own action name; observer is denied by default per the bundle convention.
 ACTION_CHAT_CONFIRM = "chat:confirm"
+# Mutating tool execution (SPEC-021): enforced by the tool-gateway, listed
+# here so the live permission matrix always carries the action even if the
+# deployed bundle predates the grant.
+ACTION_TOOLS_MUTATE = "tools:mutate"
 PROTECTED_ACTIONS = frozenset(
     {
         ACTION_CHAT,
@@ -52,6 +56,7 @@ PROTECTED_ACTIONS = frozenset(
         ACTION_POLICY_READ,
         ACTION_TOOLS_LIST,
         ACTION_SKILLS_READ,
+        ACTION_TOOLS_MUTATE,
     }
 )
 
