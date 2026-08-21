@@ -19,23 +19,25 @@
 - [tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [platform-gateway/src/platform_gateway/core/telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [audit-service/src/audit_service/core/telemetry.py](file://products/audit-service/src/audit_service/core/telemetry.py)
-- [skills-hub/src/skills_hub/core/telemetry.py](file://products/skills-hub/src/skills_hub/core/telemetry.py)
+- [skills-hub/src/skills_hub/core/telemetry.py](file://products/skills_hub/core/telemetry.py)
 - [shared/shared-contracts/schemas/health-response.schema.json](file://shared/shared-contracts/schemas/health-response.schema.json)
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [2026-08-21-durable-otlp-secret-provisioning.md](file://docs/agentic-aiops-platform/release-notes/2026-08-21-durable-otlp-secret-provisioning.md)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive OpenObserve telemetry push implementation across all six platform services with OTLP HTTP/protobuf protocol
-- Enhanced distributed tracing section to document the opt-in OpenTelemetry pipeline with log bridge functionality
-- Updated architecture diagrams to show end-to-end observability capabilities including traces, metrics, and logs
-- Added configuration guidance for OTEL_ENABLED environment variable and OpenObserve endpoint setup
-- Updated troubleshooting guide with OpenObserve-specific debugging procedures
-- Documented fail-open behavior when OpenObserve collector is unreachable
+- Enhanced OTLP credential management with robust secret synchronization that prevents 401 Unauthorized errors during telemetry export to OpenObserve
+- Updated secret provisioning workflow to use cluster-side merging via kubectl patch for durable credential persistence
+- Added comprehensive documentation for sibling script coordination that preserves OTLP headers across environment file regenerations
+- Enhanced troubleshooting guidance for OTLP authentication issues and credential lifecycle management
+- Updated configuration reference to reflect the improved secret synchronization process
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -50,7 +52,7 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides comprehensive guidance for monitoring and observability across the Luban AIOps Platform. It consolidates the platform's metrics collection strategy using Prometheus with direct prometheus_client implementation, structured logging conventions, distributed tracing implementation with OpenObserve integration, health check endpoints, readiness/liveness probes configuration, alerting rules, dashboard templates, and incident response procedures. The platform now includes a comprehensive OpenTelemetry push pipeline that exports traces, metrics, and logs to OpenObserve via OTLP HTTP/protobuf protocol, enabling end-to-end observability across all six platform services.
+This document provides comprehensive guidance for monitoring and observability across the Luban AIOps Platform. It consolidates the platform's metrics collection strategy using Prometheus with direct prometheus_client implementation, structured logging conventions, distributed tracing implementation with OpenObserve integration, health check endpoints, readiness/liveness probes configuration, alerting rules, dashboard templates, and incident response procedures. The platform includes a comprehensive OpenTelemetry push pipeline that exports traces, metrics, and logs to OpenObserve via OTLP HTTP/protobuf protocol, enabling end-to-end observability across all six platform services. **Updated**: The platform now features robust OTLP credential management with durable secret synchronization that prevents 401 Unauthorized errors during telemetry export.
 
 ## Project Structure
 Observability is implemented consistently across all six services with standardized metrics collection using direct prometheus_client implementation and comprehensive OpenTelemetry telemetry:
@@ -61,6 +63,7 @@ Observability is implemented consistently across all six services with standardi
 - Audit Service and Skills Hub services complete the observability coverage with consistent telemetry patterns
 - Shared contracts define observability conventions and schemas used by all services
 - Kubernetes manifests configure probes and environment variables for observability components
+- **Enhanced**: Secret synchronization scripts ensure OTLP credentials persist across environment file regenerations
 
 ```mermaid
 graph TB
@@ -71,6 +74,11 @@ TG["Tool Gateway<br/>prometheus_client + OpenTelemetry"]
 PG["Platform Gateway<br/>prometheus_client + OpenTelemetry"]
 AS["Audit Service<br/>prometheus_client + OpenTelemetry"]
 SH["Skills Hub<br/>prometheus_client + OpenTelemetry"]
+end
+subgraph "Secret Management"
+SYNC["sync-otel-secrets.sh<br/>Cluster-side Merge"]
+SECRETS["Kubernetes Secrets<br/>OTEL_EXPORTER_OTLP_HEADERS"]
+SIBLINGS["Sibling Scripts<br/>Header Preservation"]
 end
 subgraph "OpenTelemetry Pipeline"
 OTEL["OpenTelemetry SDK<br/>Traces + Metrics + Logs"]
@@ -91,6 +99,8 @@ TG --> OTEL
 PG --> OTEL
 AS --> OTEL
 SH --> OTEL
+SYNC --> SECRETS
+SECRETS --> SIBLINGS
 OTEL --> EXPORTER
 EXPORTER --> OO_TRACES
 EXPORTER --> OO_METRICS
@@ -104,12 +114,10 @@ SH --> PROM
 ```
 
 **Diagram sources**
-- [agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
-- [identity-broker/src/identity_service/core/telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
-- [tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
-- [platform-gateway/src/platform_gateway/core/telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
-- [audit-service/src/audit_service/core/telemetry.py](file://products/audit-service/src/audit_service/core/telemetry.py)
-- [skills-hub/src/skills_hub/core/telemetry.py](file://products/skills-hub/src/skills_hub/core/telemetry.py)
+- [sync-otel-secrets.sh:73-90](file://shared/platform-ops/gitops/sync-otel-secrets.sh#L73-L90)
+- [sync-delegation-secrets.sh:48-57](file://shared/platform-ops/gitops/sync-delegation-secrets.sh#L48-L57)
+- [sync-audit-secrets.sh:76-85](file://shared/platform-ops/gitops/sync-audit-secrets.sh#L76-L85)
+- [sync-skills-secrets.sh:97-106](file://shared/platform-ops/gitops/sync-skills-secrets.sh#L97-L106)
 
 **Section sources**
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
@@ -126,6 +134,7 @@ SH --> PROM
   - Uses OTLP HTTP/protobuf protocol to match OpenObserve ingest contract
   - Log bridge mirrors structured logs to OTLP pipeline for correlation with traces
   - Fail-open design ensures service continues operating if OpenObserve is unreachable
+  - **New**: Robust OTLP credential management with durable secret synchronization
 - Structured Logging Conventions:
   - All services call `configure_logging()` at startup to raise root logger from WARNING to INFO level
   - LOG_LEVEL environment variable supports per-deployment log level overrides (default: INFO)
@@ -147,6 +156,7 @@ The observability architecture centers around dual pipelines: direct prometheus_
 - Services implement custom RED middleware using prometheus_client for metrics collection
 - Application startup sequences call configure_logging() before FastAPI initialization
 - OpenTelemetry pipeline is initialized conditionally based on OTEL_ENABLED flag
+- **Enhanced**: Durable OTLP credential management via cluster-side secret merging
 - OTLP exporters send traces, metrics, and logs to OpenObserve via HTTP/protobuf
 - Kubernetes configurations inject environment variables and define probes
 - Prometheus scrapes metrics; logs are aggregated centrally; traces are exported to OpenObserve
@@ -157,9 +167,14 @@ participant Client as "Client"
 participant Gateway as "Tool Gateway"
 participant Agent as "Agent Platform"
 participant Identity as "Identity Broker"
+participant SecretSync as "Secret Sync"
 participant Prometheus as "Prometheus"
 participant OpenObserve as "OpenObserve"
 participant Logger as "Log Aggregator"
+Note over SecretSync : Cluster-side merge via kubectl patch
+SecretSync->>SecretSync : Generate Basic Auth Header
+SecretSync->>SecretSync : Patch Secrets (OTEL key only)
+SecretSync->>SecretSync : Restart Deployments
 Client->>Gateway : HTTP Request
 Gateway->>Gateway : configure_logging() + Record Metrics (prometheus_client)
 Gateway->>Gateway : setup_telemetry() (if OTEL_ENABLED)
@@ -171,21 +186,50 @@ Gateway->>Gateway : log_event("tool_invoked")
 Gateway->>Prometheus : Export metrics (prometheus_client)
 Agent->>Prometheus : Export metrics (prometheus_client)
 Identity->>Prometheus : Export metrics (prometheus_client)
-Gateway->>OpenObserve : OTLP traces/metrics/logs (if enabled)
-Agent->>OpenObserve : OTLP traces/metrics/logs (if enabled)
-Identity->>OpenObserve : OTLP traces/metrics/logs (if enabled)
+Gateway->>OpenObserve : OTLP traces/metrics/logs (authenticated)
+Agent->>OpenObserve : OTLP traces/metrics/logs (authenticated)
+Identity->>OpenObserve : OTLP traces/metrics/logs (authenticated)
 Gateway->>Logger : Structured logs with trace_id
 Agent->>Logger : Structured logs with trace_id
 Identity->>Logger : Structured logs with trace_id
 ```
 
 **Diagram sources**
-- [tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
-- [agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
-- [identity-broker/src/identity_service/core/telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
-- [platform-gateway/src/platform_gateway/core/telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
+- [sync-otel-secrets.sh:73-90](file://shared/platform-ops/gitops/sync-otel-secrets.sh#L73-L90)
+- [sync-delegation-secrets.sh:48-57](file://shared/platform-ops/gitops/sync-delegation-secrets.sh#L48-L57)
+- [sync-audit-secrets.sh:76-85](file://shared/platform-ops/gitops/sync-audit-secrets.sh#L76-L85)
 
 ## Detailed Component Analysis
+
+### **Enhanced** OTLP Credential Management and Secret Synchronization
+- **Robust Authentication**: Eliminates 401 Unauthorized errors through cluster-side secret merging
+- **Durable Provisioning**: Uses `kubectl patch --type merge` to touch only the OTEL key while preserving other secrets
+- **Sibling Script Coordination**: All sibling secret sync scripts preserve existing OTLP headers across environment file regenerations
+- **Automatic Recovery**: Fresh clusters require initial OpenObserve root credentials export; otherwise push fails open by design
+- **Best-Effort Local Mirroring**: Maintains consistency between cluster secrets and local environment files
+
+```mermaid
+flowchart TD
+Start(["Secret Sync Process"]) --> CheckEnv{"OO_ROOT_USER_EMAIL/PASSWORD set?"}
+CheckEnv --> |No| Skip["Skip provisioning<br/>Anonymous push (401 expected)"]
+CheckEnv --> |Yes| Generate["Generate Basic Auth Header<br/>base64(email:password)"]
+Generate --> MergeSecret["Merge into Cluster Secrets<br/>kubectl patch --type merge"]
+MergeSecret --> PreserveHeaders["Preserve Headers in Sibling Scripts<br/>grep + append pattern"]
+PreserveHeaders --> MirrorLocal["Mirror to Local Env Files<br/>upsert_env_line function"]
+MirrorLocal --> Restart["Restart All Deployments<br/>rollout restart"]
+Restart --> Verify["Verify Rollout Status<br/>rollout status --timeout=120s"]
+Skip --> End(["Process Complete"])
+Verify --> End
+```
+
+**Diagram sources**
+- [sync-otel-secrets.sh:47-52](file://shared/platform-ops/gitops/sync-otel-secrets.sh#L47-L52)
+- [sync-otel-secrets.sh:73-90](file://shared/platform-ops/gitops/sync-otel-secrets.sh#L73-L90)
+- [sync-delegation-secrets.sh:48-57](file://shared/platform-ops/gitops/sync-delegation-secrets.sh#L48-L57)
+
+**Section sources**
+- [sync-otel-secrets.sh:1-162](file://shared/platform-ops/gitops/sync-otel-secrets.sh#L1-L162)
+- [2026-08-21-durable-otlp-secret-provisioning.md:1-79](file://docs/agentic-aiops-platform/release-notes/2026-08-21-durable-otlp-secret-provisioning.md#L1-L79)
 
 ### **Updated** OpenTelemetry Push Pipeline Implementation
 - **Comprehensive Coverage**: All six platform services implement identical OpenTelemetry push pipeline
@@ -194,7 +238,8 @@ Identity->>Logger : Structured logs with trace_id
 - **Three Signal Types**: Exports traces, metrics, and logs to OpenObserve backend
 - **Fail-Open Design**: Setup errors are logged but never raised into request path
 - **Resource Context**: Service name propagated via OTEL_SERVICE_NAME or defaults to service metadata
-- **Authentication**: Supports OTEL_EXPORTER_OTLP_HEADERS for OpenObserve authentication
+- **Enhanced Authentication**: Robust OTLP header management prevents authentication failures
+- **Authentication**: Supports OTEL_EXPORTER_OTLP_HEADERS for OpenObserve authentication with automatic credential synchronization
 
 ```mermaid
 flowchart TD
@@ -207,9 +252,13 @@ SetupTracer --> SetupMeter["Setup MeterProvider<br/>+ PeriodicExportingMetricRea
 SetupMeter --> AttachBridge["Attach Log Bridge<br/>Structured → OTLP"]
 AttachBridge --> InstrumentHTTPX["Instrument HTTPX Client"]
 InstrumentHTTPX --> EnableFastAPI["Enable FastAPI Instrumentation"]
-EnableFastAPI --> Export["Export to OpenObserve<br/>OTLP HTTP/protobuf"]
-Skip --> End(["Service Running"])
-Export --> End
+EnableFastAPI --> CheckAuth{"OTLP Headers Available?"}
+CheckAuth --> |Yes| Export["Export to OpenObserve<br/>OTLP HTTP/protobuf (Authenticated)"]
+CheckAuth --> |No| Anonymous["Export Anonymously<br/>OpenObserve returns 401"]
+Anonymous --> FailOpen["Fail Open<br/>Continue Service Operation"]
+Export --> End(["Service Running"])
+FailOpen --> End
+Skip --> End
 ```
 
 **Diagram sources**
@@ -223,7 +272,7 @@ Export --> End
 - [tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [platform-gateway/src/platform_gateway/core/telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [audit-service/src/audit_service/core/telemetry.py](file://products/audit-service/src/audit_service/core/telemetry.py)
-- [skills-hub/src/skills_hub/core/telemetry.py](file://products/skills-hub/src/skills_hub/core/telemetry.py)
+- [skills-hub/src/skills_hub/core/telemetry.py](file://products/skills_hub/core/telemetry.py)
 
 ### **Updated** Metrics Collection Strategy
 - Each service defines metrics using direct prometheus_client implementation:
@@ -289,7 +338,7 @@ PrometheusMetrics <|-- SkillsMetrics
 - [tool-gateway/src/tool_gateway/core/metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
 - [platform-gateway/src/platform_gateway/core/metrics.py](file://products/platform-gateway/src/platform_gateway/core/metrics.py)
 - [audit-service/src/audit_service/core/metrics.py](file://products/audit-service/src/audit_service/core/metrics.py)
-- [skills-hub/src/skills_hub/core/metrics.py](file://products/skills-hub/src/skills_hub/core/metrics.py)
+- [skills-hub/src/skills_hub/core/metrics.py](file://products/skills_hub/src/skills_hub/core/metrics.py)
 
 **Section sources**
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
@@ -340,6 +389,7 @@ Analyze --> End(["Insights & Alerts"])
 - **Batch Processing**: Spans exported in batches for optimal performance
 - **Resource Context**: Service metadata included in all telemetry signals
 - **Current Trace ID**: Available via current_trace_id() function for correlation
+- **Enhanced Authentication**: Reliable OTLP authentication prevents trace export failures
 
 ```mermaid
 sequenceDiagram
@@ -357,9 +407,9 @@ Gateway->>Agent : Agent Call (propagate trace_id)
 Agent->>Agent : StartSpan("agent.execute")
 Agent-->>Gateway : Response
 Gateway->>Gateway : log_event("tool_invoked")
-Gateway->>OpenObserve : ExportSpans()
-Identity->>OpenObserve : ExportSpans()
-Agent->>OpenObserve : ExportSpans()
+Gateway->>OpenObserve : ExportSpans() (Authenticated)
+Identity->>OpenObserve : ExportSpans() (Authenticated)
+Agent->>OpenObserve : ExportSpans() (Authenticated)
 ```
 
 **Diagram sources**
@@ -374,7 +424,7 @@ Agent->>OpenObserve : ExportSpans()
 - [tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [platform-gateway/src/platform_gateway/core/telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [audit-service/src/audit_service/core/telemetry.py](file://products/audit-service/src/audit_service/core/telemetry.py)
-- [skills-hub/src/skills_hub/core/telemetry.py](file://products/skills-hub/src/skills_hub/core/telemetry.py)
+- [skills-hub/src/skills_hub/core/telemetry.py](file://products/skills_hub/core/telemetry.py)
 
 ### Health Check Endpoints, Readiness Probes, and Liveness Probes
 - Health endpoints return responses conforming to the shared health schema.
@@ -435,10 +485,11 @@ Dashboards --> Ops["Operations Team"]
 - Logs must include correlation identifiers (request_id, trace_id) for cross-service correlation.
 - Traces should be exported with consistent span names and attributes.
 - Tool invocation events provide enhanced audit trail for debugging and compliance.
-- **Updated** OpenObserve Integration:
+- **Enhanced** OpenObserve Integration:
   - All three signal types (traces, metrics, logs) exported to OpenObserve when enabled
   - Automatic correlation between logs and traces via trace context
   - Batch processing optimizes network usage and reduces overhead
+  - **New**: Reliable authentication prevents telemetry export failures
 
 ```mermaid
 flowchart TD
@@ -451,7 +502,7 @@ CheckOTEL --> |false| Aggregate["Log Aggregator"]
 CheckOTEL --> |true| Bridge["Log Bridge<br/>to OTLP"]
 Bridge --> Correlate["Correlate with Traces"]
 Aggregate --> Search["Search & Filter"]
-ExportTrace["Export Spans<br/>with trace_id"] --> OpenObserve["OpenObserve Backend"]
+ExportTrace["Export Spans<br/>with trace_id"] --> OpenObserve["OpenObserve Backend<br/>Authenticated Export"]
 OpenObserve --> Correlate
 ```
 
@@ -465,10 +516,11 @@ Observability components depend on shared contracts and Kubernetes configuration
 - Prometheus scrapes metrics from each service's /metrics endpoint
 - All services call configure_logging() during startup for consistent log levels
 - Direct prometheus_client implementation replaces prometheus-fastapi-instrumentator
-- **Updated** OpenTelemetry dependencies:
+- **Enhanced** OpenTelemetry dependencies:
   - Optional OpenTelemetry SDK components loaded only when OTEL_ENABLED is true
   - OTLP HTTP/protobuf exporters for traces, metrics, and logs
   - Automatic instrumentation for FastAPI and HTTPX client libraries
+  - **New**: Robust secret synchronization ensures credential availability
 
 ```mermaid
 graph TB
@@ -489,10 +541,11 @@ AP_TELEMETRY["Agent Telemetry"] --> OTEL
 IB_TELEMETRY["Identity Telemetry"] --> OTEL
 TG_TELEMETRY["Gateway Telemetry"] --> OTEL
 PG_TELEMETRY["Platform Gateway Telemetry"] --> OTEL
+SECRET_SYNC["Secret Synchronization"] --> OTEL
 ```
 
 **Diagram sources**
-- [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
+- [sync-otel-secrets.sh:73-90](file://shared/platform-ops/gitops/sync-otel-secrets.sh#L73-L90)
 
 **Section sources**
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
@@ -504,11 +557,12 @@ PG_TELEMETRY["Platform Gateway Telemetry"] --> OTEL
 - Capacity planning should be informed by trends in throughput, latency, and error rates.
 - Tool invocation patterns can reveal performance issues in external integrations.
 - Direct prometheus_client implementation provides better performance than external instrumentation libraries.
-- **Updated** OpenTelemetry Performance:
+- **Enhanced** OpenTelemetry Performance:
   - Batch processing reduces network overhead for traces, metrics, and logs
   - Fail-open design prevents OpenObserve connectivity issues from impacting service performance
   - Optional feature allows disabling telemetry in high-performance environments
   - Resource-efficient implementation with minimal CPU and memory overhead
+  - **New**: Reliable authentication eliminates retry overhead from failed authentication attempts
 
 ## Troubleshooting Guide
 - Use structured logs with correlation IDs to trace requests across services.
@@ -520,21 +574,24 @@ PG_TELEMETRY["Platform Gateway Telemetry"] --> OTEL
 - Verify that configure_logging() is called during service startup to ensure proper log level configuration.
 - **Updated** If metrics are not appearing in Prometheus, verify that the /metrics endpoint is accessible and returning prometheus_client format data.
 - **Updated** The direct prometheus_client implementation avoids compatibility issues with pinned starlette versions that affected prometheus-fastapi-instrumentator.
-- **New** OpenTelemetry Troubleshooting:
+- **Enhanced** OpenTelemetry Troubleshooting:
   - Set OTEL_ENABLED=true to enable telemetry pipeline
   - Configure OTEL_EXPORTER_OTLP_ENDPOINT to point to OpenObserve
   - Check service logs for "otel telemetry enabled" confirmation message
-  - Verify OpenObserve authentication headers via OTEL_EXPORTER_OTLP_HEADERS
-  - Test connectivity to OpenObserve endpoint independently
-  - Monitor for "otel telemetry setup failed" messages indicating configuration issues
-  - Use fail-open behavior to continue service operation even if OpenObserve is unavailable
+  - **New**: Verify OTLP authentication headers via `kubectl get secret <secret-name> -o jsonpath='{.data.OTEL_EXPORTER_OTLP_HEADERS}'`
+  - **New**: Test connectivity to OpenObserve endpoint independently
+  - **New**: Monitor for "otel telemetry setup failed" messages indicating configuration issues
+  - **New**: Use fail-open behavior to continue service operation even if OpenObserve is unavailable
+  - **New**: Run `sync-otel-secrets.sh` to re-provision credentials if experiencing 401 Unauthorized errors
+  - **New**: Check sibling script output for preserved OTLP header lines
+  - **New**: Verify all seven deployment rollouts completed successfully after secret provisioning
 
 **Section sources**
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
 
 ## Conclusion
-The Luban AIOps Platform implements a robust observability framework centered on direct prometheus_client implementation for metrics collection, enhanced structured logging with configurable log levels, and comprehensive distributed tracing with OpenObserve integration. The platform now includes an opt-in OpenTelemetry push pipeline that exports traces, metrics, and logs to OpenObserve via OTLP HTTP/protobuf protocol, providing end-to-end observability across all six platform services. By using direct prometheus_client instead of prometheus-fastapi-instrumentator, the platform avoids compatibility issues with pinned starlette versions while maintaining equivalent functionality. The framework adheres to shared conventions, calls configure_logging() at startup, and configures Kubernetes probes appropriately, enabling operators to effectively monitor, diagnose, and respond to incidents while planning for future capacity needs. The enhanced audit trail with tool_invoked events and OpenObserve integration provides comprehensive visibility into tool execution patterns and potential security concerns.
+The Luban AIOps Platform implements a robust observability framework centered on direct prometheus_client implementation for metrics collection, enhanced structured logging with configurable log levels, and comprehensive distributed tracing with OpenObserve integration. The platform includes an opt-in OpenTelemetry push pipeline that exports traces, metrics, and logs to OpenObserve via OTLP HTTP/protobuf protocol, providing end-to-end observability across all six platform services. **Enhanced**: The platform now features robust OTLP credential management with durable secret synchronization that prevents 401 Unauthorized errors during telemetry export. By using direct prometheus_client instead of prometheus-fastapi-instrumentator, the platform avoids compatibility issues with pinned starlette versions while maintaining equivalent functionality. The framework adheres to shared conventions, calls configure_logging() at startup, and configures Kubernetes probes appropriately, enabling operators to effectively monitor, diagnose, and respond to incidents while planning for future capacity needs. The enhanced audit trail with tool_invoked events and OpenObserve integration provides comprehensive visibility into tool execution patterns and potential security concerns.
 
 ## Appendices
 - Reference specifications for observability baseline and conventions.
@@ -542,7 +599,8 @@ The Luban AIOps Platform implements a robust observability framework centered on
 - Health response schema for consistent health checks.
 - LOG_LEVEL environment variable configuration for different environments.
 - **Updated** Migration notes from prometheus-fastapi-instrumentator to direct prometheus_client implementation.
-- **New** OpenTelemetry configuration guide for OpenObserve integration including environment variables and authentication setup.
+- **Enhanced** OpenTelemetry configuration guide for OpenObserve integration including environment variables and authentication setup.
+- **New**: Secret synchronization workflow documentation for OTLP credential management.
 
 **Section sources**
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
@@ -551,3 +609,5 @@ The Luban AIOps Platform implements a robust observability framework centered on
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
+- [configuration-reference.md:417-428](file://docs/guides/configuration-reference.md#L417-L428)
+- [sync-otel-secrets.sh:1-162](file://shared/platform-ops/gitops/sync-otel-secrets.sh#L1-L162)

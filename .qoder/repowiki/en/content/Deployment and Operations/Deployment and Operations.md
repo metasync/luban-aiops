@@ -28,6 +28,7 @@
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [shared/platform-ops/gitops/sync-skills-secrets.sh](file://shared/platform-ops/gitops/sync-skills-secrets.sh)
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 - [shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml)
@@ -78,10 +79,10 @@
 
 ## Update Summary
 **Changes Made**
-- Updated version management section to reflect 0.5.0 release with synchronized SERVICE_VERSION constants across all services
-- Enhanced documentation for version validation and consistency enforcement mechanisms
-- Added comprehensive coverage of audit-service and incident-service version synchronization
-- Updated deployment procedures to include version verification steps
+- Enhanced OpenTelemetry secret provisioning with durable cluster-side merging using kubectl patch for atomic header updates
+- Improved error handling and synchronization across sibling scripts (delegation, audit, skills)
+- Updated documentation to reflect the new robust OTLP credential management system
+- Added comprehensive coverage of the enhanced secret provisioning workflow and failure recovery mechanisms
 
 ## Table of Contents
 1. Introduction
@@ -400,7 +401,7 @@ K8s-->>Dev : Resources created/updated
 - OIDC client reconciliation is supported by a helper script.
 - **Enhanced**: Delegation secrets are automatically provisioned for secure cross-service authentication.
 - **New**: Audit secrets are automatically provisioned for audit event ingestion across all platform components.
-- **Updated**: OpenTelemetry credentials are automatically provisioned for centralized observability via OpenObserve with enhanced CI/CD support.
+- **Updated**: OpenTelemetry credentials are automatically provisioned for centralized observability via OpenObserve with enhanced CI/CD support and durable cluster-side merging.
 - **Version Management**: All services configured with version 0.5.0 metadata and consistent versioning.
 
 Best practices:
@@ -409,7 +410,7 @@ Best practices:
 - Validate overlays before applying to prevent misconfiguration.
 - Use delegation secret provisioning to ensure consistent service-to-service authentication.
 - Use audit secret provisioning to ensure consistent audit event ingestion credentials.
-- Use OpenTelemetry secret provisioning to ensure consistent telemetry authentication headers.
+- Use OpenTelemetry secret provisioning to ensure consistent telemetry authentication headers with durable cluster-side merging.
 - **CI/CD Integration**: Set `SKIP_OTEL_SECRETS=true` in CI environments where secrets are injected externally.
 - **Version Validation**: Ensure all services maintain version 0.5.0 consistency during deployment.
 
@@ -545,11 +546,12 @@ The platform implements a unified observability pipeline using OpenTelemetry wit
 
 - **Opt-in Pipeline**: Controlled by `OTEL_ENABLED` environment variable (default false) with zero overhead when disabled
 - **Unified Signals**: Traces, metrics, and logs exported via OTLP HTTP/protobuf to OpenObserve
-- **Enhanced Authentication**: `sync-otel-secrets.sh` provisions Basic auth headers for OpenObserve ingestion with intelligent fallback handling
+- **Enhanced Authentication**: `sync-otel-secrets.sh` provisions Basic auth headers for OpenObserve ingestion with intelligent fallback handling and durable cluster-side merging
 - **Fail-open Design**: Telemetry failures don't impact application functionality
 - **Centralized Configuration**: Shared endpoint configuration via ConfigMap with per-service secret headers
 - **CI/CD Integration**: Skip mechanism (`SKIP_OTEL_SECRETS=true`) for environments where secrets are injected externally
-- **Intelligent Secret Handling**: Automatically detects when runtime-secrets.env files are missing and patches existing cluster secrets instead
+- **Intelligent Secret Handling**: Uses `kubectl patch --type merge` for atomic header updates instead of wholesale file rewrites, preserving other secret keys
+- **Robust Synchronization**: Sibling scripts (delegation, audit, skills) preserve existing OTLP headers during their env-file rewrites
 - **Version 0.5.0**: All services emit telemetry with consistent version metadata
 
 ```mermaid
@@ -815,6 +817,8 @@ Common issues and resolutions:
   - Check OpenObserve ingestion logs for 401 unauthorized responses.
   - **CI/CD Issues**: If running in CI/CD, ensure `SKIP_OTEL_SECRETS=true` is set when secrets are injected externally.
   - **Missing Local Files**: When runtime-secrets.env files are missing locally, the script will automatically patch existing cluster secrets instead of failing.
+  - **Durable Merging Issues**: If OTLP headers are being wiped, verify that sibling scripts are preserving existing headers during their env-file rewrites.
+  - **kubectl Patch Failures**: Check cluster permissions for patch operations and verify secret existence before patching.
 - **Version Consistency Issues**:
   - Use `validate_version.py` to check version drift across all services.
   - Ensure all services maintain version 0.5.0 consistency.
@@ -851,7 +855,7 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - sync-runtime-secret.sh: Synchronizes runtime secrets into the cluster securely.
 - sync-delegation-secrets.sh: Automatically provisions delegation secrets for cross-service authentication between platform-gateway and identity-broker.
 - sync-audit-secrets.sh: Automatically provisions audit secrets for audit event ingestion across all platform components.
-- **sync-otel-secrets.sh**: Automatically provisions OpenTelemetry credentials for centralized observability via OpenObserve with enhanced CI/CD support.
+- **sync-otel-secrets.sh**: Automatically provisions OpenTelemetry credentials for centralized observability via OpenObserve with enhanced CI/CD support and durable cluster-side merging using kubectl patch.
 - verify-runtime-profile.sh: Validates that the active runtime profile matches expectations.
 - reconcile-portal-oidc-client.sh: Ensures OIDC client configuration remains consistent with Keycloak.
 - **validate_version.py**: Validates version consistency across all platform services and ensures version 0.5.0 synchronization.
@@ -953,7 +957,7 @@ Configuration details:
 - [products/audit-service/src/audit_service/core/config.py](file://products/audit-service/src/audit_service/core/config.py)
 
 ### Appendix E: OpenTelemetry Secret Management
-**Updated Section** Comprehensive OpenTelemetry credential management for centralized observability with enhanced CI/CD support.
+**Updated Section** Comprehensive OpenTelemetry credential management for centralized observability with enhanced CI/CD support and durable cluster-side merging.
 
 The OpenTelemetry secret system ensures secure telemetry ingestion via OpenObserve:
 
@@ -962,7 +966,8 @@ The OpenTelemetry secret system ensures secure telemetry ingestion via OpenObser
 - **ConfigMap-Based Endpoint**: Shared OTLP endpoint configuration via ConfigMap with per-service secret headers
 - **Fail-Open Design**: Missing credentials result in anonymous push attempts that fail gracefully without impacting services
 - **Enhanced CI/CD Support**: Intelligent handling of externally provisioned secrets with skip mechanisms
-- **Robust Fallback**: Automatically patches existing cluster secrets when local runtime-secrets.env files are missing
+- **Robust Fallback**: Uses `kubectl patch --type merge` for atomic header updates instead of wholesale file rewrites, preserving other secret keys
+- **Sibling Script Synchronization**: All sibling scripts (delegation, audit, skills) preserve existing OTLP headers during their env-file rewrites
 - **Version 0.5.0 Metadata**: All telemetry includes consistent version information for accurate tracking
 
 Usage:
