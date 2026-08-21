@@ -73,9 +73,16 @@ BASE_DIR="$SCRIPT_DIR/dev-k8s/base"
 # --- audit-service registry -------------------------------------------------
 
 AUDIT_SECRET_FILE="$BASE_DIR/audit-service/runtime-secrets.env"
+# Preserve a previously provisioned OTLP header across the file rewrite:
+# sync-otel-secrets.sh merges it cluster-side and mirrors it into this file,
+# and dropping it here would make the secret sync below wipe it again.
+PRESERVED_OTEL_LINE=$(grep '^OTEL_EXPORTER_OTLP_HEADERS=' "$AUDIT_SECRET_FILE" 2>/dev/null || true)
 cat > "$AUDIT_SECRET_FILE" <<EOF
 AUDIT_INGEST_CLIENTS=tool-gateway=${AUDIT_INGEST_SECRET},platform-gateway=${AUDIT_INGEST_SECRET},identity-broker=${AUDIT_INGEST_SECRET},incident-service=${AUDIT_INGEST_SECRET}
 EOF
+if [ -n "$PRESERVED_OTEL_LINE" ]; then
+  printf '%s\n' "$PRESERVED_OTEL_LINE" >> "$AUDIT_SECRET_FILE"
+fi
 sync_secret audit-service-runtime-secrets "$AUDIT_SECRET_FILE"
 
 # --- emitter credentials (in-place update, preserves existing secrets) ------

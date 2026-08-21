@@ -45,9 +45,16 @@ fi
 PG_SECRET_DIR="$SCRIPT_DIR/dev-k8s/base/platform-gateway"
 PG_SECRET_FILE="$PG_SECRET_DIR/runtime-secrets.env"
 
+# Preserve a previously provisioned OTLP header across the file rewrite:
+# sync-otel-secrets.sh mirrors it into this file, and dropping it here would
+# make the secret re-apply below wipe it from the cluster Secret.
+PRESERVED_OTEL_LINE=$(grep '^OTEL_EXPORTER_OTLP_HEADERS=' "$PG_SECRET_FILE" 2>/dev/null || true)
 cat > "$PG_SECRET_FILE" <<EOF
 PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET=$DELEGATION_CLIENT_SECRET
 EOF
+if [ -n "$PRESERVED_OTEL_LINE" ]; then
+  printf '%s\n' "$PRESERVED_OTEL_LINE" >> "$PG_SECRET_FILE"
+fi
 
 kubectl -n "$NAMESPACE" create secret generic platform-gateway-runtime-secrets \
   --from-env-file="$PG_SECRET_FILE" \
@@ -60,9 +67,13 @@ echo "Synced secret 'platform-gateway-runtime-secrets' in namespace '$NAMESPACE'
 IB_SECRET_DIR="$SCRIPT_DIR/dev-k8s/base/identity-broker"
 IB_SECRET_FILE="$IB_SECRET_DIR/runtime-secrets.env"
 
+PRESERVED_OTEL_LINE=$(grep '^OTEL_EXPORTER_OTLP_HEADERS=' "$IB_SECRET_FILE" 2>/dev/null || true)
 cat > "$IB_SECRET_FILE" <<EOF
 IDENTITY_SERVICE_CLIENTS=platform-gateway:${DELEGATION_CLIENT_SECRET}:tool-gateway
 EOF
+if [ -n "$PRESERVED_OTEL_LINE" ]; then
+  printf '%s\n' "$PRESERVED_OTEL_LINE" >> "$IB_SECRET_FILE"
+fi
 
 kubectl -n "$NAMESPACE" create secret generic identity-service-runtime-secrets \
   --from-env-file="$IB_SECRET_FILE" \

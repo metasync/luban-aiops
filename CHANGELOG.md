@@ -13,6 +13,28 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.6.1 — 2026-08-21
+
+### Fixed — Durable OTLP ingest credential provisioning
+
+- **OTLP push 401 regression repaired**: five of the seven services
+  (audit-service, identity-service, incident-service, platform-gateway,
+  skills-hub) were exporting traces/metrics/logs anonymously because
+  sibling secret-sync scripts re-applied their runtime Secrets from
+  regenerated env files, wiping `OTEL_EXPORTER_OTLP_HEADERS`. All seven
+  Secrets now carry the OpenObserve ingest header and push is
+  authenticated end to end.
+- **`sync-otel-secrets.sh` merges the OTLP header cluster-side** via
+  `kubectl patch` (OTEL key only, all other keys preserved) instead of
+  rebuilding Secrets from local env files; a missing Secret is created
+  with just the header. The agent-platform runtime profile file stays
+  authoritative for its own Secret, with the cluster merge as fallback.
+- **Sibling sync scripts preserve the header**: the env-file rewrites
+  in `sync-delegation-secrets.sh`, `sync-audit-secrets.sh`, and
+  `sync-skills-secrets.sh` capture and re-append any existing
+  `OTEL_EXPORTER_OTLP_HEADERS` line, so a credential-less `make deploy`
+  can no longer resurrect the anonymous-push state.
+
 ## 0.6.0 — 2026-08-21
 
 ### Added — SPEC-020: HITL confirmation bridging

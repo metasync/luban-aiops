@@ -6,9 +6,18 @@
 # Every service pushes traces/metrics/logs over OTLP HTTP to the endpoint in
 # the shared ConfigMap (OTEL_EXPORTER_OTLP_ENDPOINT). OpenObserve requires
 # Basic auth on ingest, delivered via OTEL_EXPORTER_OTLP_HEADERS. This script
-# computes the header from the OpenObserve root credentials and upserts it
-# into every service's runtime-secrets.env (in place, preserving all other
-# secrets), syncs the seven Kubernetes Secrets, and restarts the workloads.
+# computes the header from the OpenObserve root credentials and MERGES it
+# cluster-side into every service's runtime-secrets Secret (kubectl patch
+# touches only the OTEL key, preserving all other keys), then restarts the
+# workloads.
+#
+# The merge is deliberately independent of the local runtime-secrets.env
+# files: sibling sync scripts (delegation/audit/skills/incident)
+# regenerate those files and re-apply their Secrets wholesale, which would
+# wipe any header written through the env files. Merging in the cluster
+# keeps OTel provisioning durable across those regenerations.
+# Best-effort mirror into existing local env files (and the active runtime
+# profile file) keeps local re-provisioning paths consistent.
 #
 # Usage:
 #   OO_ROOT_USER_EMAIL=... OO_ROOT_USER_PASSWORD=... \
@@ -61,13 +70,23 @@ upsert_env_line() {
   fi
 }
 
-sync_secret() {
+# Merge the OTLP header into an existing cluster Secret without touching any
+# other key; create the Secret with just the header if it does not exist yet
+# (sibling sync scripts fill in the remaining keys on their next run).
+merge_secret() {
   secret_name="$1"
-  env_file="$2"
-  kubectl -n "$NAMESPACE" create secret generic "$secret_name" \
-    --from-env-file="$env_file" \
-    --dry-run=client -o yaml | kubectl apply -f -
-  echo "Synced secret '$secret_name' in namespace '$NAMESPACE'."
+  value_b64=$(printf '%s' "${OTEL_HEADER_LINE#OTEL_EXPORTER_OTLP_HEADERS=}" \
+    | base64 | tr -d '\n')
+  if kubectl -n "$NAMESPACE" get secret "$secret_name" >/dev/null 2>&1; then
+    kubectl -n "$NAMESPACE" patch secret "$secret_name" \
+      --type merge \
+      -p "{\"data\":{\"OTEL_EXPORTER_OTLP_HEADERS\":\"${value_b64}\"}}"
+    echo "Merged OTel header into existing secret '$secret_name'."
+  else
+    kubectl -n "$NAMESPACE" create secret generic "$secret_name" \
+      --from-literal="${OTEL_HEADER_LINE}"
+    echo "Created secret '$secret_name' with the OTel header only."
+  fi
 }
 
 BASE_DIR="$SCRIPT_DIR/dev-k8s/base"
@@ -79,36 +98,46 @@ PROFILE_DIR=$(sed -n 's|^ *- *\.\./runtime-profiles/||p' \
   "$SCRIPT_DIR/dev-k8s/kustomization.yaml" | head -1)
 PROFILE_FILE="$SCRIPT_DIR/runtime-profiles/$PROFILE_DIR/runtime-secrets.env"
 if [ -n "$PROFILE_DIR" ] && [ -f "$PROFILE_FILE" ]; then
+  # The local profile file is the authoritative source for this Secret (its
+  # model/API keys only exist there), so sync it wholesale with the header
+  # upserted. This path never loses the header: the upsert runs on every
+  # invocation before the secret is re-applied.
   upsert_env_line "$PROFILE_FILE" OTEL_EXPORTER_OTLP_HEADERS "$OTEL_HEADER_LINE"
-  sync_secret agent-platform-runtime-secrets "$PROFILE_FILE"
-elif kubectl -n "$NAMESPACE" get secret agent-platform-runtime-secrets \
-    >/dev/null 2>&1; then
-  # No local profile secret file, but the cluster Secret exists (provisioned
-  # by Luban CI or an earlier run): merge the header in cluster-side,
-  # preserving all existing keys.
-  VALUE_B64=$(printf '%s' "${OTEL_HEADER_LINE#OTEL_EXPORTER_OTLP_HEADERS=}" \
-    | base64 | tr -d '\n')
-  kubectl -n "$NAMESPACE" patch secret agent-platform-runtime-secrets \
-    --type merge \
-    -p "{\"data\":{\"OTEL_EXPORTER_OTLP_HEADERS\":\"${VALUE_B64}\"}}"
-  echo "Patched existing secret 'agent-platform-runtime-secrets' in namespace '$NAMESPACE'."
+  kubectl -n "$NAMESPACE" create secret generic agent-platform-runtime-secrets \
+    --from-env-file="$PROFILE_FILE" \
+    --dry-run=client -o yaml | kubectl apply -f -
+  echo "Synced secret 'agent-platform-runtime-secrets' from profile '$PROFILE_DIR'."
 else
-  echo "No local runtime-profile secret file (profile: ${PROFILE_DIR:-none})"
-  echo "and no cluster secret; agent-service pushes anonymously (401s fail open)."
+  echo "No local runtime-profile secret file (profile: ${PROFILE_DIR:-none});"
+  echo "merging the OTel header into the cluster Secret instead."
+  merge_secret agent-platform-runtime-secrets
 fi
 
-for entry in \
-  "audit-service-runtime-secrets|$BASE_DIR/audit-service/runtime-secrets.env" \
-  "identity-service-runtime-secrets|$BASE_DIR/identity-broker/runtime-secrets.env" \
-  "incident-service-runtime-secrets|$BASE_DIR/incident-service/runtime-secrets.env" \
-  "platform-gateway-runtime-secrets|$BASE_DIR/platform-gateway/runtime-secrets.env" \
-  "skills-hub-runtime-secrets|$BASE_DIR/skills-hub/runtime-secrets.env" \
-  "tool-gateway-runtime-secrets|$BASE_DIR/tool-gateway/runtime-secrets.env"
+for secret_name in \
+  audit-service-runtime-secrets \
+  identity-service-runtime-secrets \
+  incident-service-runtime-secrets \
+  platform-gateway-runtime-secrets \
+  skills-hub-runtime-secrets \
+  tool-gateway-runtime-secrets
 do
-  secret_name="${entry%%|*}"
-  env_file="${entry#*|}"
-  upsert_env_line "$env_file" OTEL_EXPORTER_OTLP_HEADERS "$OTEL_HEADER_LINE"
-  sync_secret "$secret_name" "$env_file"
+  merge_secret "$secret_name"
+done
+
+# Best-effort mirror into the local env files so later sibling syncs that
+# happen to rebuild a Secret from one of them do not resurrect a headerless
+# state from stale local files. Missing files are simply skipped.
+for env_file in \
+  "$BASE_DIR/audit-service/runtime-secrets.env" \
+  "$BASE_DIR/identity-broker/runtime-secrets.env" \
+  "$BASE_DIR/incident-service/runtime-secrets.env" \
+  "$BASE_DIR/platform-gateway/runtime-secrets.env" \
+  "$BASE_DIR/skills-hub/runtime-secrets.env" \
+  "$BASE_DIR/tool-gateway/runtime-secrets.env"
+do
+  if [ -f "$env_file" ]; then
+    upsert_env_line "$env_file" OTEL_EXPORTER_OTLP_HEADERS "$OTEL_HEADER_LINE"
+  fi
 done
 
 # --- restart all seven workloads ----------------------------------------------

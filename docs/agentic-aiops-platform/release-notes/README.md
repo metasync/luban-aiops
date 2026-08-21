@@ -7,6 +7,12 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-21-durable-otlp-secret-provisioning.md`
+  - closes 0.6.1: fixes the OTLP ingest 401 regression where sibling
+    secret-sync scripts wiped `OTEL_EXPORTER_OTLP_HEADERS` from five
+    service Secrets; provisioning now merges the header cluster-side
+    and file rewrites preserve it, restoring authenticated telemetry
+    push to OpenObserve for all seven services
 - `2026-08-21-hitl-confirmation-bridging.md`
   - delivers SPEC-020: kernel ASK decisions surface as inline approval
     cards (park/resume bridging via `confirmation_request` /

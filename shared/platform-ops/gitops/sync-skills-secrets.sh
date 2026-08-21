@@ -94,9 +94,16 @@ BASE_DIR="$SCRIPT_DIR/dev-k8s/base"
 # --- skills-hub registry -----------------------------------------------------
 
 SKILLS_SECRET_FILE="$BASE_DIR/skills-hub/runtime-secrets.env"
+# Preserve a previously provisioned OTLP header across the file rewrite:
+# sync-otel-secrets.sh mirrors it into this file, and dropping it here would
+# make the secret sync below wipe it from the cluster Secret.
+PRESERVED_OTEL_LINE=$(grep '^OTEL_EXPORTER_OTLP_HEADERS=' "$SKILLS_SECRET_FILE" 2>/dev/null || true)
 cat > "$SKILLS_SECRET_FILE" <<EOF
 SKILLS_QUERY_CLIENTS=tool-gateway=${SKILLS_QUERY_SECRET},platform-gateway=${SKILLS_QUERY_SECRET}
 EOF
+if [ -n "$PRESERVED_OTEL_LINE" ]; then
+  printf '%s\n' "$PRESERVED_OTEL_LINE" >> "$SKILLS_SECRET_FILE"
+fi
 # Git-source PAT: the secret file was just truncated, so a plain append is
 # idempotent. The token is never echoed to the terminal.
 if [ -n "${SKILLS_GIT_TOKEN:-}" ]; then
