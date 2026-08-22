@@ -8,7 +8,11 @@ any drift between VERSION and:
   - products/*/pyproject.toml          ([project] version)
   - products/*/src/*/metadata.py       (SERVICE_VERSION)
   - products/*/src/*/__init__.py       (__version__, where present)
-  - products/operator-portal/web-ui/app.js (PLATFORM_VERSION)
+  - products/operator-portal/web-ui/app.js (PLATFORM_VERSION, until the
+    SPEC-023 stage-6 removal of the legacy vanilla UI)
+  - products/operator-portal/web-ui/app/vite.config.ts (SPEC-023: the
+    build-time PLATFORM_VERSION injection must keep reading the root
+    VERSION file)
 
 Usage:
     python validate_version.py [repo-root]
@@ -28,6 +32,14 @@ SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 SERVICE_VERSION_RE = re.compile(r'^SERVICE_VERSION = "([^"]+)"', re.MULTILINE)
 DUNDER_VERSION_RE = re.compile(r'^__version__ = "([^"]+)"', re.MULTILINE)
 PORTAL_VERSION_RE = re.compile(r'const PLATFORM_VERSION = "v([^"]+)";')
+# SPEC-023 R-1: the rebuild injects PLATFORM_VERSION at build time from the
+# root VERSION file; assert the injection wiring instead of a literal.
+VITE_VERSION_READ_RE = re.compile(
+    r'new URL\("\.\./\.\./\.\./\.\./VERSION", import\.meta\.url\)'
+)
+VITE_VERSION_DEFINE_RE = re.compile(
+    r"__PLATFORM_VERSION__:\s*JSON\.stringify\(platformVersion\)"
+)
 
 
 def repo_root() -> Path:
@@ -50,6 +62,15 @@ def check_file(
     found = match.group(1)
     if found != expected:
         errors.append(f"{label}: {path} has {found!r}, expected {expected!r}")
+
+
+def check_wiring(errors: list[str], path: Path, pattern: re.Pattern, label: str) -> None:
+    """Assert a pattern exists in a file (no version capture involved)."""
+    if not path.is_file():
+        errors.append(f"{label}: missing file: {path}")
+        return
+    if not pattern.search(path.read_text(encoding="utf-8")):
+        errors.append(f"{label}: expected wiring not found in {path}")
 
 
 def main() -> int:
@@ -97,13 +118,29 @@ def main() -> int:
                 continue
             check_file(errors, init, DUNDER_VERSION_RE, product, expected)
 
-    # Portal constant (displayed in the sidebar footer).
-    check_file(
+    # Portal version constant. The legacy vanilla app.js keeps its literal
+    # until SPEC-023 stage 6 removes it; the Vite rebuild derives
+    # PLATFORM_VERSION from the root VERSION file at build time, so we
+    # assert the injection wiring in vite.config.ts instead.
+    legacy_app = products_dir / "operator-portal" / "web-ui" / "app.js"
+    if legacy_app.is_file():
+        check_file(
+            errors, legacy_app, PORTAL_VERSION_RE, "operator-portal", expected
+        )
+    vite_config = (
+        products_dir / "operator-portal" / "web-ui" / "app" / "vite.config.ts"
+    )
+    check_wiring(
         errors,
-        products_dir / "operator-portal" / "web-ui" / "app.js",
-        PORTAL_VERSION_RE,
-        "operator-portal",
-        expected,
+        vite_config,
+        VITE_VERSION_READ_RE,
+        "operator-portal (vite VERSION read)",
+    )
+    check_wiring(
+        errors,
+        vite_config,
+        VITE_VERSION_DEFINE_RE,
+        "operator-portal (vite PLATFORM_VERSION define)",
     )
 
     if errors:

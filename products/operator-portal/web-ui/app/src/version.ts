@@ -1,0 +1,1 @@
+export const PLATFORM_VERSION = __PLATFORM_VERSION__;

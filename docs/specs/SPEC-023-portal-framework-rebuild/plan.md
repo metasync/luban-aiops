@@ -83,6 +83,17 @@ frame translation, fixture-tested) → session workspace (Appendix A contract)
   the `chat_started` audit event's `details` and forwards it upstream.
   Gateway and agent-service tests pin the default and voice pass-through;
   the adapter always sends the parameter explicitly.
+- source tree: the new Vite/React/TS project lives in
+  `web-ui/app/` (own `package.json`, `index.html`, `src/`) while the
+  legacy vanilla trio (`index.html`, `app.js`, `styles.css`) stays at the
+  `web-ui/` root and keeps being served by the deployed image until stage
+  6 removes it; the build stage runs `npm ci && npm run build` in
+  `web-ui/app/` and outputs to `web-ui/dist/`. During coexistence the
+  image mounts the compiled SPA at `/next/` (Vite `base: "/next/"`,
+  nginx `^~ /next/` with immutable-cache `/next/assets/`) so the rebuild
+  is previewable without disturbing the legacy portal; stage 6 flips the
+  runtime root to the bundle and drops the `base`. Local development uses
+  `npm run dev` with a Vite proxy for `/api/`.
 
 ### R-5: View migration and role-scoped visibility
 

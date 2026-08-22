@@ -4,12 +4,12 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 
 ## R-1: Framework foundation and build toolchain
 
-- [ ] Scaffold Vite + React 18 + TypeScript tree under `products/operator-portal/web-ui/src/` (`package.json`, `tsconfig.json`, `vite.config.ts`) with Vitest for unit tests
-- [ ] Multi-stage Dockerfile: Node build stage → existing nginx runtime stage; hashed assets under `/assets/` (`products/operator-portal/Dockerfile`)
-- [ ] nginx cache policy: `no-store` for `index.html`, `public, immutable` for `/assets/`; SPA fallback unchanged (`products/operator-portal/nginx.conf`)
-- [ ] Build-time `PLATFORM_VERSION` injection from root `VERSION`; move `make validate-version` to assert it at the new home (`shared/shared-contracts/scripts/validate_version.py`)
-- [ ] Dark theme: antd/XProvider tokens seeded 1:1 from the current `:root` CSS variables; sidebar/drawer layout shell (SPEC-019) rebuilt (`web-ui/src/theme/`, `web-ui/src/layout/`)
-- [ ] OIDC shell ported: Keycloak login/logout, token refresh, per-request Bearer (`web-ui/src/auth/`)
+- [x] Scaffold Vite + React 18 + TypeScript tree under `products/operator-portal/web-ui/app/` (`package.json`, `tsconfig.json`, `vite.config.ts`) with Vitest for unit tests
+- [x] Multi-stage Dockerfile: Node build stage → existing nginx runtime stage; hashed assets under `/assets/`; during coexistence the bundle is mounted at `/next/` while the legacy trio keeps serving `/` (`products/operator-portal/Dockerfile`)
+- [x] nginx cache policy: `no-store` for `index.html`, `public, immutable` for hashed assets (`^~ /next/assets/` during coexistence; root-level after stage 6); SPA fallback intact (`products/operator-portal/nginx.conf`)
+- [x] Build-time `PLATFORM_VERSION` injection from root `VERSION`; `make validate-version` asserts the injection wiring at the new home (`shared/shared-contracts/scripts/validate_version.py`)
+- [x] Dark theme: antd/XProvider tokens seeded 1:1 from the current `:root` CSS variables; sidebar/drawer layout shell (SPEC-019) rebuilt (`web-ui/app/src/theme/`, `web-ui/app/src/App.tsx`)
+- [x] OIDC shell ported: Keycloak login/logout, token refresh, per-request Bearer (`web-ui/app/src/auth/`)
 
 ## R-2: Platform-owned SSE contract adapter
 
@@ -30,7 +30,7 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 
 - [ ] `Sender` speech input composing `input_modality: "voice"` turns; capability detection fallback (`web-ui/src/chat/Composer.tsx`)
 - [ ] Recognition language selector (`en-US`/`zh-CN` minimum, constant-driven list): default from `navigator.language` with `en-US` fallback, `localStorage` persistence, drives the recognizer `lang` only (never sent to the backend) + unit test for the default/fallback resolution
-- [ ] Additive `input_modality` query parameter on `GET /api/v1/chat/stream` (gateway route → service → agent client) and agent `GET /api/v2/chat/stream`, recorded on `chat_started` audit `details` + gateway/agent tests for default and `voice` pass-through
+- [x] Additive `input_modality` query parameter on `GET /api/v1/chat/stream` (gateway route → service → agent client) and agent `GET /api/v2/chat/stream`, recorded on `chat_started` audit `details` + gateway/agent tests for default and `voice` pass-through (commit `67073af`)
 - [ ] Invariant II unit test: no voice path reaches a confirmation decision handler
 - [ ] Approval and HITL guide voice-readiness subsection updated to record portal voice composition (`docs/guides/`)
 

@@ -2,7 +2,9 @@
 #
 # Included by each product Makefile (via `include ../../mk/image.mk`). The
 # including Makefile must set IMAGE_NAME (the short image name, e.g. platform-gateway)
-# and may set IMAGE_CONTEXT (the docker build context, default: product dir).
+# and may set IMAGE_CONTEXT (the docker build context, default: product dir)
+# and IMAGE_DOCKERFILE (default: $(IMAGE_CONTEXT)/Dockerfile — needed when
+# the context is wider than the product dir).
 #
 # Overridable settings (IMAGE_PLATFORM, REGISTRY, ...) default in
 # mk/defaults.mk, included below; command-line overrides always win, e.g.:
@@ -17,7 +19,8 @@ SHELL         := /bin/sh
 # builds resolve the same configuration as root-driven builds.
 include $(dir $(lastword $(MAKEFILE_LIST)))defaults.mk
 
-IMAGE_CONTEXT  ?= .
+IMAGE_CONTEXT    ?= .
+IMAGE_DOCKERFILE ?= $(IMAGE_CONTEXT)/Dockerfile
 IMAGE_TAG      ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
 ifeq ($(REGISTRY),)
@@ -33,7 +36,7 @@ help: ## Show available targets for this product
 		| awk 'BEGIN {FS = ":.*## "} {printf "  %-16s %s\n", $$1, $$2}'
 
 build: ## Build this product's container image (local tag; +registry tag if REGISTRY set)
-	docker build --platform $(IMAGE_PLATFORM) -t luban-aiops/$(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_CONTEXT)
+	docker build --platform $(IMAGE_PLATFORM) -f $(IMAGE_DOCKERFILE) -t luban-aiops/$(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_CONTEXT)
 ifneq ($(REGISTRY),)
 	docker tag luban-aiops/$(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_REF)
 endif
@@ -46,9 +49,9 @@ endif
 
 lint: ## Lint this product's Dockerfile (hadolint; docker-run fallback)
 	@if command -v hadolint >/dev/null 2>&1; then \
-		hadolint $(IMAGE_CONTEXT)/Dockerfile; \
+		hadolint $(IMAGE_DOCKERFILE); \
 	elif command -v docker >/dev/null 2>&1; then \
-		docker run --rm -i hadolint/hadolint < $(IMAGE_CONTEXT)/Dockerfile; \
+		docker run --rm -i hadolint/hadolint < $(IMAGE_DOCKERFILE); \
 	else \
 		echo "hadolint not available; skipping Dockerfile lint"; \
 	fi
