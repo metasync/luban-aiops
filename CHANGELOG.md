@@ -13,6 +13,22 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+### Fixed — post-v0.8.0 code-review hardening
+
+- **Redis session title is now atomically set-once**: titles live in a
+  dedicated `session:title:{id}` key minted with `SET ... NX`, so the
+  `touch_session` blob rewrite can no longer clobber a minted title and
+  concurrent first turns cannot both win (the Postgres backend was
+  already atomic via its `title IS NULL` guard). Adds store-level tests
+  for touch/title bookkeeping on both backends.
+- **Gateway session-list proxy error posture aligned**: upstream `4xx`
+  now passes through unchanged like the get/delete proxies instead of
+  surfacing as `502`.
+- `select-runtime-profile.sh` rejects `mutating-dev` as an LLM profile
+  argument; `has_pending`/`is_parked` deduplicated; the
+  delete-vs-in-flight-turn limitation is documented on the delete route
+  and in the agent-platform README.
+
 ## 0.8.0 — 2026-08-22
 
 ### Added — SPEC-022: Multi-session foundations (backend-first)

@@ -123,6 +123,20 @@ class ListSessionsProxyTests(SessionWorkspaceProxyBase):
         self.assertEqual(response.json()["detail"]["action"], "session:list")
         upstream.assert_not_called()
 
+    def test_upstream_4xx_passes_through(self) -> None:
+        # Same posture as the get/delete proxies: upstream client errors
+        # reach the caller unchanged instead of surfacing as a 502.
+        upstream = AsyncMock(side_effect=_status_error(400))
+        with (
+            self._patch_identity("operator"),
+            patch(LIST_PATCH, upstream),
+        ):
+            response = self.client.get(SESSIONS_PATH)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["detail"], "agent service rejected the session list"
+        )
+
     def test_upstream_status_error_maps_to_502(self) -> None:
         upstream = AsyncMock(side_effect=_status_error(500))
         with (

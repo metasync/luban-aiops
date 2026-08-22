@@ -11,6 +11,13 @@ if [ -z "$PROFILE" ]; then
   exit 1
 fi
 
+if [ "$PROFILE" = "mutating-dev" ]; then
+  # mutating-dev is the committed dev posture (SPEC-022 R-3), always
+  # wired in below — it is never a switchable LLM provider profile.
+  echo "mutating-dev is not a switchable LLM runtime profile" >&2
+  exit 1
+fi
+
 if [ ! -d "$PROFILE_DIR" ]; then
   echo "Unknown runtime profile: $PROFILE" >&2
   exit 1

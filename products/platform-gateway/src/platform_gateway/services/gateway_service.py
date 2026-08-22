@@ -331,10 +331,20 @@ async def list_sessions(
     request_id: str,
     user_id: str,
 ) -> dict:
-    """Proxy the caller's workspace session list (SPEC-022 R-1)."""
+    """Proxy the caller's workspace session list (SPEC-022 R-1).
+
+    Same posture as the get/delete proxies: upstream 4xx passes through
+    unchanged; transport failures and upstream 5xx map to 502.
+    """
     try:
         return await agent_client.list_sessions(settings, request_id, user_id)
     except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail="agent service rejected the session list",
+            ) from exc
         raise HTTPException(
             status_code=502, detail="agent service session list failed"
         ) from exc

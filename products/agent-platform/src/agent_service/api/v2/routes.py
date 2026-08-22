@@ -405,6 +405,13 @@ async def delete_session_route(
     Foreign or unknown ids 404 per the anti-enumeration house convention;
     a session holding a parked confirmation 409s so a delete can never
     orphan an awaiting-approval workflow.
+
+    Known limitation: the parked check is check-then-act. If a chat turn
+    is still in flight on this session during the delete, its tail may
+    park a confirmation and re-snapshot agent state after the delete
+    completed, recreating the durable snapshot. Avoid deleting a session
+    while its last turn is still streaming; a conditional-delete design
+    is tracked as follow-up hardening.
     """
     user_id = _user_id(x_user_id)
     session = get_session(session_id, user_id)

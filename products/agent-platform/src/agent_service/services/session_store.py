@@ -179,6 +179,11 @@ class RedisSessionStore:
     Sessions are stored as JSON blobs keyed by ``session:{session_id}``
     with Redis-native ``EXPIRE`` for TTL.  User-scoped listing uses a
     sorted set ``user_sessions:{user_id}`` scored by ``created_at`` epoch.
+
+    Titles live in a dedicated ``session:title:{session_id}`` key minted
+    with ``SET ... NX`` (SPEC-022 R-1 set-once contract): the blob
+    read-modify-write path in ``touch_session`` can never clobber a
+    minted title, and two concurrent first turns cannot both win.
     """
 
     backend_name = "redis"
@@ -193,6 +198,9 @@ class RedisSessionStore:
 
     def _session_key(self, session_id: str) -> str:
         return f"{_SESSION_KEY_PREFIX}{session_id}"
+
+    def _title_key(self, session_id: str) -> str:
+        return f"{_SESSION_KEY_PREFIX}title:{session_id}"
 
     def _user_key(self, user_id: str) -> str:
         return f"{_USER_SESSIONS_KEY_PREFIX}{user_id}"
@@ -238,10 +246,26 @@ class RedisSessionStore:
             if record is not None:
                 # Refresh TTL on access.
                 self._client.expire(key, self.ttl_seconds)
+                self._overlay_title(record)
             return record
         except Exception:
             record_session_store_error("get")
             raise
+
+    def _overlay_title(self, record: SessionRecord) -> None:
+        """Merge the atomically-minted title key into the record.
+
+        The blob itself never carries the title, so ``touch_session``'s
+        rewrite cannot erase it.
+        """
+        title_key = self._title_key(record.session_id)
+        raw_title = self._client.get(title_key)
+        if raw_title is None:
+            return
+        record.title = (
+            raw_title.decode() if isinstance(raw_title, bytes) else raw_title
+        )
+        self._client.expire(title_key, self.ttl_seconds)
 
     def list_sessions_by_user(self, user_id: str) -> list[SessionRecord]:
         try:
@@ -267,6 +291,7 @@ class RedisSessionStore:
                 return False
             record = self._deserialize(raw)
             deleted = self._client.delete(key)
+            self._client.delete(self._title_key(session_id))
             if record and record.user_id:
                 self._client.zrem(self._user_key(record.user_id), session_id)
             return bool(deleted)
@@ -275,6 +300,9 @@ class RedisSessionStore:
             raise
 
     def touch_session(self, session_id: str) -> None:
+        # The blob never carries the title (it lives in the NX-minted
+        # title key), so this read-modify-write can only race on
+        # last_active_at, where a lost update is harmless.
         key = self._session_key(session_id)
         try:
             raw = self._client.get(key)
@@ -290,16 +318,17 @@ class RedisSessionStore:
             raise
 
     def set_session_title(self, session_id: str, title: str) -> None:
-        key = self._session_key(session_id)
         try:
-            raw = self._client.get(key)
-            if raw is None:
+            if self._client.get(self._session_key(session_id)) is None:
                 return
-            record = self._deserialize(raw)
-            if record is None or record.title is not None:
-                return
-            record.title = title
-            self._client.setex(key, self.ttl_seconds, self._serialize(record))
+            # Atomic set-once: NX never overwrites a minted title, and
+            # concurrent first turns cannot both win.
+            self._client.set(
+                self._title_key(session_id),
+                title,
+                nx=True,
+                ex=self.ttl_seconds,
+            )
         except Exception:
             record_session_store_error("set_title")
             raise
@@ -311,10 +340,19 @@ class RedisSessionStore:
             return False
 
     def __len__(self) -> int:
-        # Count session keys only (exclude user sorted sets).
+        # Count session keys only (exclude user sorted sets and the
+        # session:title:* keys that carry minted titles).
         try:
             keys = self._client.keys(f"{_SESSION_KEY_PREFIX}*")
-            return len(keys)
+            return len(
+                [
+                    key
+                    for key in keys
+                    if not (
+                        key if isinstance(key, str) else key.decode()
+                    ).startswith(f"{_SESSION_KEY_PREFIX}title:")
+                ]
+            )
         except Exception:
             return 0
 

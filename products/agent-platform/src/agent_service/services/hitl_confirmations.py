@@ -209,8 +209,7 @@ class ConfirmationRegistry:
             del self._by_session[session_id]
 
     def is_parked(self, session_id: str, timeout: float) -> bool:
-        pending = self._by_session.get(session_id)
-        return pending is not None and not pending.resolved
+        return self.has_pending(session_id)
 
     def has_pending(self, session_id: str) -> bool:
         """True when the session holds an unresolved parked confirmation.

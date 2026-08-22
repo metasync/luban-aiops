@@ -179,6 +179,32 @@ class TestPostgresSessionStore:
         assert "LIMIT %(limit)s" in sql
         assert calls[0]["params"]["limit"] == 50
 
+    def test_touch_session_updates_last_active(self):
+        calls: list[dict] = []
+        store = PostgresSessionStore(
+            "postgresql://fake", ttl_seconds=600, connect=_fake_connect(calls)
+        )
+        store.touch_session("ses-1")
+        assert len(calls) == 1
+        assert "UPDATE sessions" in calls[0]["sql"]
+        assert "last_active_at" in calls[0]["sql"]
+        assert calls[0]["params"]["session_id"] == "ses-1"
+
+    def test_set_session_title_is_set_once_in_sql(self):
+        # The set-once contract (SPEC-022 R-1) is enforced server-side:
+        # the UPDATE only matches rows whose title is still NULL, so
+        # concurrent first turns cannot both win.
+        calls: list[dict] = []
+        store = PostgresSessionStore(
+            "postgresql://fake", ttl_seconds=600, connect=_fake_connect(calls)
+        )
+        store.set_session_title("ses-1", "check the pods")
+        assert len(calls) == 1
+        assert "SET title" in calls[0]["sql"]
+        assert "title IS NULL" in calls[0]["sql"]
+        assert calls[0]["params"]["session_id"] == "ses-1"
+        assert calls[0]["params"]["title"] == "check the pods"
+
     def test_delete_session_true_when_row_returned(self):
         calls: list[dict] = []
         store = PostgresSessionStore(

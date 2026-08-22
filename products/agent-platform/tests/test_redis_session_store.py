@@ -95,6 +95,72 @@ class TestRedisUserListing:
 
 
 # ---------------------------------------------------------------------------
+# Workspace bookkeeping (SPEC-022 R-1): touch + set-once title
+# ---------------------------------------------------------------------------
+
+
+class TestRedisWorkspaceBookkeeping:
+    def test_touch_updates_last_active_at(self, redis_store):
+        record = redis_store.create_session("alice")
+        before = record.last_active_at
+        redis_store.touch_session(record.session_id)
+        fetched = redis_store.get_session(record.session_id)
+        assert fetched is not None
+        assert fetched.last_active_at >= before
+
+    def test_touch_missing_session_is_noop(self, redis_store):
+        redis_store.touch_session("ses-nonexistent")  # no error
+
+    def test_set_title_mints_and_get_overlays(self, redis_store):
+        record = redis_store.create_session("alice")
+        redis_store.set_session_title(record.session_id, "check the pods")
+        fetched = redis_store.get_session(record.session_id)
+        assert fetched is not None
+        assert fetched.title == "check the pods"
+
+    def test_title_overlay_flows_into_user_listing(self, redis_store):
+        record = redis_store.create_session("alice")
+        redis_store.set_session_title(record.session_id, "check the pods")
+        listed = redis_store.list_sessions_by_user("alice")
+        assert [s.title for s in listed] == ["check the pods"]
+
+    def test_set_title_is_set_once(self, redis_store):
+        # The NX-minted title key must never be overwritten.
+        record = redis_store.create_session("alice")
+        redis_store.set_session_title(record.session_id, "first turn")
+        redis_store.set_session_title(record.session_id, "second turn")
+        fetched = redis_store.get_session(record.session_id)
+        assert fetched is not None
+        assert fetched.title == "first turn"
+
+    def test_touch_never_clobbers_a_minted_title(self, redis_store):
+        # Regression for the read-modify-write clobber: the blob carries
+        # no title, so a touch rewrite cannot erase the NX-minted one.
+        record = redis_store.create_session("alice")
+        redis_store.set_session_title(record.session_id, "first turn")
+        redis_store.touch_session(record.session_id)
+        redis_store.touch_session(record.session_id)
+        fetched = redis_store.get_session(record.session_id)
+        assert fetched is not None
+        assert fetched.title == "first turn"
+
+    def test_set_title_missing_session_is_noop(self, redis_client, redis_store):
+        redis_store.set_session_title("ses-nonexistent", "orphan")
+        assert redis_client.get("session:title:ses-nonexistent") is None
+
+    def test_delete_removes_title_key(self, redis_client, redis_store):
+        record = redis_store.create_session("alice")
+        redis_store.set_session_title(record.session_id, "first turn")
+        redis_store.delete_session(record.session_id)
+        assert redis_client.get(f"session:title:{record.session_id}") is None
+
+    def test_len_excludes_title_keys(self, redis_store):
+        record = redis_store.create_session("alice")
+        redis_store.set_session_title(record.session_id, "first turn")
+        assert len(redis_store) == 1
+
+
+# ---------------------------------------------------------------------------
 # TTL behaviour
 # ---------------------------------------------------------------------------
 
