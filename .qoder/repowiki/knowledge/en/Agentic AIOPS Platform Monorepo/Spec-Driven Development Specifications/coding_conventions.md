@@ -1,6 +1,0 @@
-- Each spec directory contains exactly three files — `spec.md`, `plan.md`, `tasks.md` — mirroring the template layout.
-- Every `spec.md` begins with a Status header declaring `status`, `owner`, `created`, `release slice`, and `related ADRs`.
-- Requirements are numbered `R-1`, `R-2`, … inside each spec and remain stable once the spec reaches `approved` status.
-- Tasks in `tasks.md` reference specific requirement IDs to maintain traceability from requirement to implementation.
-- Specs explicitly enumerate `Non-Goals` and an `Impact` section listing products, contracts, identity/policy/audit effects, and living-state docs to update on delivery.
-- Spec status transitions follow the defined lifecycle (draft → approved → in-progress → delivered → superseded) and changes are recorded in a `Changelog` section at the bottom of `spec.md`.

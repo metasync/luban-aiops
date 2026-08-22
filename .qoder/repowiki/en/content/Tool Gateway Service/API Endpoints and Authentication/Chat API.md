@@ -16,6 +16,8 @@
 - [stream-event.schema.json](file://shared/shared-contracts/schemas/stream-event.schema.json)
 - [tool-invocation.schema.json](file://shared/shared-contracts/schemas/tool-invocation.schema.json)
 - [tool-result.schema.json](file://shared/shared-contracts/schemas/tool-result.schema.json)
+- [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
+- [test_session_workspace.py](file://products/platform-gateway/tests/test_session_workspace.py)
 </cite>
 
 ## Update Summary
@@ -24,6 +26,8 @@
 - Added voice-readiness contract section explaining security invariants and privilege escalation prevention
 - Updated request/response patterns to include modality handling throughout the gateway audit trail
 - Added examples demonstrating modality propagation and validation behavior
+- Updated streaming event types to reflect v6 stream schema with confirmation support
+- Enhanced error scenarios to include modality validation failures
 
 ## Table of Contents
 1. [Introduction](#introduction)

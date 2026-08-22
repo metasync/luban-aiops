@@ -13,54 +13,65 @@ source_files:
 
 ## What system/approach is used
 
-The Operator Portal (`products/operator-portal/web-ui/`) is a **vanilla HTML/CSS/JS single-page application** served by an embedded Nginx container. There is no build step, component framework, or CSS preprocessor. Styling is implemented as a single `styles.css` file that defines a dark-themed design token palette via CSS custom properties and applies them throughout the app shell, sidebar navigation, chat view, audit trail, incidents triage, permissions matrix, tools catalog, and skills inventory views.
+The Operator Portal (`products/operator-portal/web-ui/`) is a **vanilla HTML + CSS + JavaScript** single-page application. There is no component framework, CSS-in-JS library, or build-time toolchain (no Tailwind, Sass, PostCSS, webpack, Vite, etc.). Styling is delivered as a single `styles.css` file linked directly from `index.html`, and behavior lives in a single `app.js`. The UI is served by an Nginx container that statically hosts these three files.
 
 ## Key files and packages
 
-- `products/operator-portal/web-ui/index.html` — static HTML defining the two-column app shell (sidebar + main area) and all function views; views are toggled via the `hidden` attribute rather than destroyed/recreated.
-- `products/operator-portal/web-ui/styles.css` — the entire stylesheet (~1200 lines), organized into sections: design tokens (`:root` variables), app shell, sidebar, chat, settings/debug, markdown rendering, evidence/audit cards, HITL confirmation cards, durable audit trail table, incidents triage form, and pagination.
-- `products/operator-portal/web-ui/app.js` — client-side logic for view switching, streaming chat, identity/session management, and server calls (not styled).
-- `products/operator-portal/nginx.conf` / `Dockerfile` — serve the static assets; no asset pipeline.
+- `products/operator-portal/web-ui/index.html` — app shell: two-column layout (sidebar + main), mobile topbar, view sections for Chat / Settings & Debug / Audit trail.
+- `products/operator-portal/web-ui/styles.css` — all visual styling, design tokens, responsive rules, animations, and accessibility preferences.
+- `products/operator-portal/web-ui/app.js` — DOM manipulation, view navigation, markdown rendering, streaming chat, OIDC auth flow, audit table rendering.
+- `products/operator-portal/nginx.conf` — serves the static web UI.
+
+No other frontend assets exist elsewhere in the repository; the remaining products are Python FastAPI services with no client-side code.
 
 ## Architecture and conventions
 
-### Design tokens
-All colors, spacing, and radii are centralized in `:root`:
-- Color scheme: `color-scheme: dark` sets native OS-level dark mode.
-- Semantic palette: `--bg`, `--surface`, `--surface-alt`, `--border`, `--text`, `--text-muted`, `--accent`, `--accent-hover`, `--success`, `--error`, `--warning`, `--code-bg`, `--radius`.
-- Typography: Inter font stack with monospace fallbacks for code (`JetBrains Mono`, `Fira Code`).
+### Design tokens via CSS custom properties
+All colors, spacing, and radii are centralized in a `:root` block at the top of `styles.css`:
+- Color palette: `--bg`, `--surface`, `--surface-alt`, `--border`, `--text`, `--text-muted`, `--accent`, `--accent-hover`, `--success`, `--error`, `--warning`, `--code-bg`.
+- Typography: `Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif`.
+- Spacing/radius: `--radius: 8px`.
+- Semantic roles: `color-scheme: dark` forces the browser's native dark UI chrome.
+
+This token layer is the single source of truth — every color in the stylesheet references a variable rather than a hard-coded hex value.
 
 ### Layout model
-- Two-column grid layout: `.app-shell` uses `grid-template-columns: 230px minmax(0, 1fr)` to pin a fixed-width sidebar and fluid main area.
-- Sidebar contains branding/logo, grouped navigation sections (`nav-section` with muted labels), and a pinned user card at the bottom via `margin-top:auto`.
-- Views are sibling `<section>` elements inside `.main-area`; only one is visible at a time, toggled by adding/removing the `hidden` attribute. The `[hidden] { display: none !important; }` rule ensures author rules cannot override visibility.
+- Desktop: CSS Grid `.app-shell` with a fixed 230px sidebar and a fluid main area (`grid-template-columns: 230px minmax(0, 1fr)`).
+- Mobile (≤800px): the grid collapses to one column; the sidebar becomes a fixed-position off-canvas drawer (`transform: translateX(-100%)`) toggled via JS class `.open`, with a semi-transparent backdrop.
+- Views are `<section>` elements toggled via the `hidden` attribute — they are never destroyed so chat history, session state, and loaded audit rows survive navigation.
 
-### Component patterns
-- **Navigation items**: `.nav-item` with `.active` state using an inset left accent border (`box-shadow: inset 3px 0 0 var(--accent)`).
-- **Status badges**: `.status-badge` variants for `pending`, `success`, `error`, `denied`, and mutating actions (`mutating` per SPEC-021 R-3).
-- **Evidence/audit cards**: Collapsible `<details>/<summary>` blocks with `.evidence-turn`, `.evidence-card`, and inline tool execution tables (`.tool-execution-card`).
-- **HITL confirmation cards**: `.confirm-card` with warning-toned borders, approve/deny action buttons, and locked-state styling via `[data-locked="true"]`.
-- **Tables**: Shared `.audit-table` and `.tools-table` with sticky headers, fixed column widths for the tools catalog, and hover row highlighting.
-- **Markdown content**: `.md-content` styles for headings, lists, code blocks, blockquotes, links, horizontal rules, and tables rendered from agent responses.
+### Component-style classes
+There is no component framework, but the CSS defines reusable visual primitives:
+- Buttons: `.btn-sm`, `.btn-send`, `.icon-button`.
+- Cards: `.user-card`, `.evidence-card`, `.tool-execution-card`.
+- Badges: `.status-badge` with semantic variants (`.pending`, `.success`, `.error`, `.denied`).
+- Navigation: `.nav-item` with `.active` state and an inset accent border.
+- Markdown content: `.md-content` with consistent heading, code, blockquote, table, and link styles.
 
-### Accessibility
-- Explicit `:focus-visible` outline using the accent color.
-- ARIA attributes on interactive elements (`aria-expanded`, `aria-haspopup`, `aria-label`, `role="menu"`, `aria-current="page"`).
-- Keyboard focus must remain visible on custom buttons.
+### Animations and motion
+- A `thinking-blink` keyframe animates the three-dot "Thinking…" indicator and the stream pulse dot on the Chat nav item.
+- A `spin` keyframe drives the spinner inside pending tool execution cards.
+- A `prefers-reduced-motion: reduce` media query disables all blinking/spinning animations and transitions for motion-sensitive users.
+
+### Accessibility conventions
+- Keyboard focus is explicit: `:focus-visible` gets a 2px accent-colored outline with offset.
+- Interactive elements use proper ARIA attributes (`aria-expanded`, `aria-haspopup`, `aria-controls`, `aria-label`, `role="menu"`).
+- The `hidden` attribute is enforced globally with `display: none !important` to override any inline `display:flex` set by author rules.
+- The mobile drawer supports Escape-to-close and backdrop-click-to-close.
 
 ### Responsive strategy
-- A mobile top bar with hamburger menu appears below 800px (defined in `index.html` comments); the sidebar becomes an off-canvas drawer controlled by JS, while the main area retains full height.
-- No media-query breakpoints are present in the provided snippet beyond the mobile topbar behavior described in comments.
+A single breakpoint at `@media (max-width: 800px)` switches between the desktop two-column grid and the mobile drawer pattern. No other breakpoints exist — the rest of the layout uses flexible units (`minmax`, `flex: 1`, `overflow-y: auto`) to adapt within each mode.
 
-### Versioning
-- The stylesheet link includes a cache-busting query string tied to spec releases: `?v=20260821-spec-021-mutate-1`, keeping UI assets synchronized with spec versions.
+### Markdown rendering
+The JS includes a lightweight regex-based markdown renderer (`renderMarkdown`) that escapes HTML first, then converts headers, lists, tables, code blocks, links, blockquotes, bold/italic/strikethrough, and paragraphs into HTML. This avoids pulling in a third-party markdown library.
 
 ## Conventions and constraints
 
-- **No CSS frameworks or preprocessors** — everything is plain CSS custom properties and class selectors.
-- **Design tokens are the single source of truth** for colors, spacing, and radius; new UI elements should consume `var(--*)` variables rather than hardcoding values.
-- **View visibility is exclusively managed via the `hidden` attribute**, never via JS-driven `display` toggles, so CSS can enforce it authoritatively.
-- **Role-gated features** (Incidents, Audit, Permissions, Tools, Skills) are hidden by default in the HTML and revealed only after identity resolution; the server re-enforces policy on every request regardless of this client-side gating.
-- **Section-based navigation grouping** follows SPEC-019 R-1: nav entries are grouped under labeled sections (`Control`, `Workspace`) that hide themselves when all child entries are hidden.
-- **Dark-only theme** — `color-scheme: dark` is set globally; no light-mode toggle exists.
-- **Sticky headers** are used for long tables (audit results, tools catalog) to keep column labels visible during scroll.
+- **Single-file CSS**: All styles live in `styles.css`; there are no scoped styles, CSS modules, or per-component style files.
+- **Dark theme only**: `color-scheme: dark` and the full palette are hardcoded — no light-mode toggle or theme switching exists.
+- **Token-only colors**: Hex values appear only in the `:root` token block; all other rules reference `var(--*)` variables.
+- **Mobile-first-ish**: Base styles target desktop; mobile behavior is layered via a single `@media (max-width: 800px)` block.
+- **No external CSS dependencies**: No CDN imports, no npm packages — the stylesheet is self-contained and versioned via cache-busting query strings on the `<link>` tag.
+- **View persistence**: Views are hidden/shown via the `hidden` attribute rather than being created/destroyed, preserving DOM state across navigation.
+- **Role-gated views**: The Audit trail view is hidden unless the resolved identity carries an `auditor` or `platform-admin` role (client-side gating only; server re-enforces `audit:read`).
+- **Motion sensitivity**: All animations respect `prefers-reduced-motion: reduce` by disabling them while keeping visible state.

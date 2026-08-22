@@ -1,0 +1,1 @@
+Python services managed with `uv` (per-product `pyproject.toml` + `uv.lock`), FastAPI-style HTTP services, Docker images built from a shared `base-uv` image, Kubernetes deployment via Kustomize overlays under `shared/platform-ops/gitops/dev-k8s`, and JSON Schema–backed contract validation for inter-service payloads.

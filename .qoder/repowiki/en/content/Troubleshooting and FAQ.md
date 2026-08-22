@@ -15,7 +15,11 @@
 - [agent-platform/src/agent_platform/services/runtime_service.py](file://products/agent-platform/src/agent_platform/services/runtime_service.py)
 - [agent-platform/src/agent_platform/services/session_service.py](file://products/agent-platform/src/agent_platform/services/session_service.py)
 - [agent-platform/src/agent_platform/services/session_store.py](file://products/agent-platform/src/agent_platform/services/session_store.py)
+- [agent-platform/src/agent_platform/services/session_transcript.py](file://products/agent-platform/src/agent_platform/services/session_transcript.py)
+- [agent-platform/src/agent_platform/services/hitl_confirmations.py](file://products/agent-platform/src/agent_platform/services/hitl_confirmations.py)
 - [agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
+- [platform-gateway/src/platform_gateway/services/gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
+- [platform-gateway/tests/test_session_workspace.py](file://products/platform-gateway/tests/test_session_workspace.py)
 - [identity-broker/src/identity_service/app.py](file://products/identity-broker/src/identity_service/app.py)
 - [identity-broker/src/identity_service/api/routes/auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
 - [identity-broker/src/identity_service/api/routes/identity.py](file://products/identity-broker/src/identity_service/api/routes/identity.py)
@@ -47,11 +51,10 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive OpenObserve telemetry troubleshooting section covering exporter connectivity, authentication failures, and log bridge issues
-- Enhanced telemetry pipeline validation procedures with diagnostic tools and commands
-- Updated configuration reference with OpenObserve-specific settings and secrets management
-- Added OpenObserve probe scripts for cross-service trace validation
-- Expanded troubleshooting guide with telemetry-specific symptoms and resolutions
+- Added comprehensive transcript fallback troubleshooting section covering kernel state snapshot unavailability scenarios
+- Enhanced session delete conflict resolution documentation for sessions with parked HITL confirmations returning 409 status
+- Updated session enumeration prevention guidance with anti-enumeration 404 responses for unknown or foreign session IDs
+- Expanded diagnostic procedures for transcript reconstruction failures and confirmation parking issues
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -66,7 +69,7 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides comprehensive troubleshooting guidance for the Luban AIOps Platform, focusing on deployment issues, service connectivity problems, performance bottlenecks, configuration mistakes, and integration failures. It includes step-by-step diagnostic procedures, log analysis techniques, metric interpretation, trace correlation, and platform-specific FAQs covering agent execution, policy enforcement, identity integration, and OpenObserve telemetry pipeline issues. Escalation procedures and community resources are also included to help you resolve issues efficiently.
+This document provides comprehensive troubleshooting guidance for the Luban AIOps Platform, focusing on deployment issues, service connectivity problems, performance bottlenecks, configuration mistakes, and integration failures. It includes step-by-step diagnostic procedures, log analysis techniques, metric interpretation, trace correlation, and platform-specific FAQs covering agent execution, policy enforcement, identity integration, OpenObserve telemetry pipeline issues, transcript fallback scenarios, session delete conflicts, and session enumeration prevention. Escalation procedures and community resources are also included to help you resolve issues efficiently.
 
 ## Project Structure
 The platform is organized into multiple products:
@@ -117,6 +120,9 @@ Common areas where issues occur:
 - Session persistence failures (Redis connectivity)
 - Performance bottlenecks (provider latency, queueing, resource limits)
 - **OpenObserve telemetry pipeline failures** (exporter connectivity, authentication, log bridging)
+- **Transcript fallback scenarios** when kernel state snapshots are unavailable
+- **Session delete conflicts** with parked HITL confirmations returning 409 status
+- **Session enumeration prevention** through anti-enumeration 404 responses
 
 **Section sources**
 - [agent-platform/README.md](file://products/agent-platform/README.md)
@@ -170,6 +176,8 @@ Responsibilities:
 - Session management and persistence
 - Provider integrations and tool execution
 - **OpenTelemetry push pipeline initialization and log bridging**
+- **Transcript reconstruction from kernel state snapshots**
+- **HITL confirmation parking and resolution**
 
 Common issues:
 - Misconfigured environment variables or secrets
@@ -179,6 +187,9 @@ Common issues:
 - **OTel exporter connectivity failures**
 - **Authentication header missing or invalid**
 - **Log bridge not attaching properly**
+- **Kernel state snapshot unavailability causing transcript fallback**
+- **Parked HITL confirmations blocking session deletion**
+- **Foreign session ID access attempts triggering anti-enumeration**
 
 Diagnostics:
 - Validate startup logs and health endpoints
@@ -188,6 +199,8 @@ Diagnostics:
 - **Check OTel setup logs for initialization status**
 - **Validate OTEL_EXPORTER_OTLP_ENDPOINT configuration**
 - **Verify OTEL_EXPORTER_OTLP_HEADERS secret presence**
+- **Monitor transcript extraction failures and fallback behavior**
+- **Check for parked confirmation states blocking operations**
 
 Resolution steps:
 - Confirm env var presence and correctness
@@ -197,6 +210,8 @@ Resolution steps:
 - **Run sync-otel-secrets.sh to provision authentication headers**
 - **Verify OpenObserve endpoint accessibility**
 - **Check pod logs for "otel telemetry setup failed" messages**
+- **Resolve parked confirmations before attempting session deletion**
+- **Handle 404 responses for foreign session access attempts**
 
 **Section sources**
 - [agent-platform/src/agent_platform/app.py](file://products/agent-platform/src/agent_platform/app.py)
@@ -207,6 +222,8 @@ Resolution steps:
 - [agent-platform/src/agent_platform/services/runtime_service.py](file://products/agent-platform/src/agent_platform/services/runtime_service.py)
 - [agent-platform/src/agent_platform/services/session_service.py](file://products/agent-platform/src/agent_platform/services/session_service.py)
 - [agent-platform/src/agent_platform/services/session_store.py](file://products/agent-platform/src/agent_platform/services/session_store.py)
+- [agent-platform/src/agent_platform/services/session_transcript.py](file://products/agent-platform/src/agent_platform/services/session_transcript.py)
+- [agent-platform/src/agent_platform/services/hitl_confirmations.py](file://products/agent-platform/src/agent_platform/services/hitl_confirmations.py)
 - [agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
 
 ### Identity Broker
@@ -251,6 +268,7 @@ Responsibilities:
 - Token verification
 - Orchestration of agent and tool calls
 - **OpenTelemetry telemetry export**
+- **Anti-enumeration posture preservation for session operations**
 
 Common issues:
 - Policy rule misconfigurations
@@ -258,6 +276,7 @@ Common issues:
 - Upstream service timeouts
 - RBAC or namespace restrictions
 - **OTel exporter connectivity issues**
+- **Incorrect mapping of upstream 4xx errors to gateway responses**
 
 Diagnostics:
 - Review policy engine decisions and logs
@@ -265,6 +284,7 @@ Diagnostics:
 - Check upstream health endpoints
 - Inspect Kubernetes RBAC and network policies
 - **Verify OTel endpoint configuration**
+- **Check that 404 responses pass through unchanged for anti-enumeration**
 
 Resolution steps:
 - Update policy rules and scopes
@@ -272,6 +292,7 @@ Resolution steps:
 - Increase timeouts or scale upstream services
 - Fix RBAC roles and permissions
 - **Ensure OTel headers are properly configured**
+- **Preserve upstream 404 responses for unknown/foreign sessions**
 
 **Section sources**
 - [tool-gateway/src/api_gateway/app.py](file://products/tool-gateway/src/api_gateway/app.py)
@@ -341,6 +362,8 @@ OP["Operator Portal"] --> GW
 - Profile slow paths in policy evaluation and tool invocation
 - **Monitor OTel exporter batch processing and network performance**
 - **Track OpenObserve ingestion throughput and latency**
+- **Monitor transcript reconstruction performance and fallback frequency**
+- **Track parked confirmation resolution times and session operation delays**
 
 ## Troubleshooting Guide
 
@@ -613,6 +636,112 @@ done
 - [.ooq2.py:1-69](file://.ooq2.py#L1-L69)
 - [agent-platform/src/agent_service/core/telemetry.py:1-133](file://products/agent-platform/src/agent_service/core/telemetry.py#L1-L133)
 
+### Transcript Fallback Scenarios
+
+#### Symptom: Session transcript returns empty despite active conversation
+**Most likely cause:** Kernel state snapshot is unavailable, corrupted, or in an unexpected format. The system gracefully falls back to `transcript_available: false` with an empty transcript list rather than failing the request.
+
+**Diagnostic:**
+
+```bash
+# Check session detail for transcript availability flag
+curl -s -H "X-User-ID: alice" \
+  http://localhost:8080/api/v2/sessions/<session_id> | jq '{transcript_available, pending_confirmation}'
+
+# Verify kernel state snapshot exists
+kubectl -n dev-luban-aiops exec deployment/agent-service -- \
+  python -c "
+from agent_service.services.agent_state_store import AGENT_STATE_STORE
+state = AGENT_STATE_STORE.load_state('<session_id>')
+print('State exists:', state is not None)
+if state:
+    import json
+    try:
+        parsed = json.loads(state)
+        print('Has context:', 'context' in parsed)
+        print('Context type:', type(parsed.get('context')))
+    except:
+        print('State is corrupted')
+"
+```
+
+**Resolution:**
+
+- Accept that transcripts are best-effort by design — missing snapshots degrade gracefully
+- For production systems, ensure kernel state snapshots are being persisted successfully
+- Investigate kernel state store connectivity and capacity issues
+- Note that system messages and tool frames are intentionally excluded from transcripts
+- Evidence panel remains live-stream-scoped regardless of transcript availability
+
+**Section sources**
+- [agent-platform/src/agent_platform/services/session_transcript.py:1-83](file://products/agent-platform/src/agent_platform/services/session_transcript.py#L1-L83)
+
+### Session Delete Conflict Resolution
+
+#### Symptom: Session delete returns 409 (cannot delete a session)
+**Most likely cause:** The session holds an unresolved parked HITL confirmation (SPEC-020). Deleting it would orphan the parked decision, so the API refuses the delete until the confirmation is resolved. A foreign or unknown session id returns `404` instead — both anti-enumeration by design.
+
+**Diagnostic:**
+
+```bash
+# The session detail flags the pending confirmation
+curl -s -H "X-User-ID: $USER" \
+  http://localhost:8080/api/v1/sessions/<session_id> | jq '.pending_confirmation'
+
+# Check for parked confirmations in the confirmation registry
+kubectl -n dev-luban-aiops exec deployment/agent-service -- \
+  python -c "
+from agent_service.services.hitl_confirmations import CONFIRMATION_REGISTRY
+is_parked = CONFIRMATION_REGISTRY.is_parked('<session_id>', timeout=0)
+has_pending = CONFIRMATION_REGISTRY.has_pending('<session_id>')
+print('Is parked:', is_parked)
+print('Has pending:', has_pending)
+"
+```
+
+**Resolution:**
+
+- Resolve the parked confirmation first — approve or deny it through the
+  portal's confirmation card (or `POST /api/v1/chat/confirm`) — then retry
+  the delete. Expired parks still block deletion until they are resolved:
+  the flag is TTL-agnostic on purpose, so a stale confirmation card is
+  closed deliberately rather than silently dropped.
+- If the confirmation has expired, use the expire endpoint to close it properly
+- After resolution, the session can be deleted normally
+
+**Section sources**
+- [docs/guides/troubleshooting.md:703-725](file://docs/guides/troubleshooting.md#L703-L725)
+- [agent-platform/src/agent_platform/services/hitl_confirmations.py:205-228](file://products/agent-platform/src/agent_platform/services/hitl_confirmations.py#L205-L228)
+
+### Session Enumeration Prevention
+
+#### Symptom: Accessing unknown or foreign session IDs returns 404
+**Most likely cause:** Anti-enumeration protection prevents distinguishing between unknown session IDs and foreign session IDs (belonging to other users). Both cases return 404 to prevent session ID enumeration attacks.
+
+**Diagnostic:**
+
+```bash
+# Test accessing unknown session ID
+curl -s -w "\nStatus: %{http_code}\n" -H "X-User-ID: alice" \
+  http://localhost:8080/api/v2/sessions/nonexistent-session-id
+
+# Test accessing foreign session ID (owned by another user)
+curl -s -w "\nStatus: %{http_code}\n" -H "X-User-ID: alice" \
+  http://localhost:8080/api/v2/sessions/bob-session-id
+```
+
+**Resolution:**
+
+- This behavior is by design for security — treat 404 as "session not found" without distinguishing between unknown and foreign sessions
+- Applications should handle 404 responses gracefully without retrying with different session IDs
+- The platform gateway preserves upstream 404 responses unchanged to maintain anti-enumeration posture
+- Focus on legitimate session management workflows rather than probing for valid session IDs
+
+**Section sources**
+- [agent-platform/src/agent_platform/services/session_service.py:19-24](file://products/agent-platform/src/agent_platform/services/session_service.py#L19-L24)
+- [platform-gateway/src/platform_gateway/services/gateway_service.py:305-327](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L305-L327)
+- [platform-gateway/tests/test_session_workspace.py:160-172](file://products/platform-gateway/tests/test_session_workspace.py#L160-L172)
+
 ### Log Analysis Techniques
 - Centralize logs and use structured formats
 - Correlate logs by request IDs and trace spans
@@ -629,6 +758,8 @@ done
 - Observe provider call success/failure ratios
 - Alert on anomalies and threshold breaches
 - **Monitor OTel exporter metrics and OpenObserve ingestion rates**
+- **Track transcript fallback frequency and kernel state snapshot success rates**
+- **Monitor parked confirmation resolution times and session operation delays**
 
 **Section sources**
 - [agent-platform/src/agent_platform/core/metrics.py](file://products/agent-platform/src/agent_platform/core/metrics.py)
@@ -709,6 +840,7 @@ Resolution:
 - Engage platform maintainers with detailed diagnostics
 - Follow up with community channels for additional support
 - **For OpenObserve issues, include telemetry pipeline validation results and exporter logs**
+- **For session issues, include confirmation registry state and transcript fallback logs**
 
 ### Community Resources
 - Repository documentation and specs
@@ -720,7 +852,7 @@ Resolution:
 - [CONTRIBUTING.md](file://CONTRIBUTING.md)
 
 ## Conclusion
-This troubleshooting guide equips you with systematic approaches to diagnose and resolve common issues across the Luban AIOps Platform. By leveraging logs, metrics, and traces, and following the step-by-step resolutions provided, you can quickly address deployment, connectivity, performance, configuration, integration, and OpenObserve telemetry challenges. For further assistance, consult community resources and escalate with comprehensive diagnostics when necessary.
+This troubleshooting guide equips you with systematic approaches to diagnose and resolve common issues across the Luban AIOps Platform. By leveraging logs, metrics, and traces, and following the step-by-step resolutions provided, you can quickly address deployment, connectivity, performance, configuration, integration, OpenObserve telemetry challenges, transcript fallback scenarios, session delete conflicts, and session enumeration prevention. For further assistance, consult community resources and escalate with comprehensive diagnostics when necessary.
 
 ## Appendices
 
@@ -741,6 +873,12 @@ This troubleshooting guide equips you with systematic approaches to diagnose and
   - Use `.ooq.py` and `.ooq2.py` probes to check OpenObserve connectivity and trace propagation across services.
 - **What causes log bridge failures?**
   - Ensure `OTEL_ENABLED=true`, verify structured logging is configured, and check that `setup_telemetry()` is called during service startup.
+- **Why does my session transcript show as unavailable?**
+  - Kernel state snapshots may be missing or corrupted; transcripts are best-effort and fall back gracefully to empty lists.
+- **Why can't I delete a session?**
+  - Check for parked HITL confirmations that must be resolved first; 409 status indicates unresolved confirmations.
+- **Why do I get 404 for session access attempts?**
+  - Anti-enumeration protection treats unknown and foreign session IDs identically to prevent enumeration attacks.
 
 ### OpenObserve Configuration Reference
 **Environment Variables:**

@@ -1,1 +1,0 @@
-Python services built with uv and packaged into Docker images; Kubernetes deployment via Kustomize overlays; OpenTelemetry-based observability conventions shared across all services; JSON Schema contracts in `shared/shared-contracts/schemas/` define inter-service APIs.

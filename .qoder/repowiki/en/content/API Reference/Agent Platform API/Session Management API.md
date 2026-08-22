@@ -12,8 +12,6 @@
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [session.schema.json](file://shared/shared-contracts/schemas/session.schema.json)
 - [agent-session.schema.json](file://shared/shared-contracts/schemas/agent-session.schema.json)
-- [auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
-- [token_service.py](file://products/identity-broker/src/identity_service/services/token_service.py)
 </cite>
 
 ## Update Summary

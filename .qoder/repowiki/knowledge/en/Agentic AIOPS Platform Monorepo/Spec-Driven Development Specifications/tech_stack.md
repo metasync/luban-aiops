@@ -1,1 +1,0 @@
-Markdown-based spec documents following a strict template; no executable tooling lives in this module — enforcement is delegated to the root Makefile (`make verify`) and CI workflows described in SPEC-001.

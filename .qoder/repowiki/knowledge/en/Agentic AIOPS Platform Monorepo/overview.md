@@ -1,1 +1,0 @@
-Monorepo that composes the agentic AIOPS platform from independently built Python services (agent-platform, gateway, identity-broker, audit, incident, skills-hub, tool-gateway) coordinated by shared contracts, specs, and GitOps overlays.

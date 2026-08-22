@@ -23,25 +23,25 @@
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
+- [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
+- [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
+- [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
+- [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
+- [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)
+- [README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
 - [spec.md](file://docs/specs/SPEC-019-portal-transparency-navigation/spec.md)
 - [approval-and-hitl.md](file://docs/guides/approval-and-hitl.md)
-- [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
-- [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
-- [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
-- [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)
-- [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
-- [README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
 - [tool-configuration.md](file://docs/guides/tool-configuration.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new mutating-dev kustomize profile that enables GATEWAY_MUTATING_TOOLS_ENABLED=true for development environments
+- Added comprehensive documentation for the new mutating-dev kustomize runtime profile that enables GATEWAY_MUTATING_TOOLS_ENABLED=true for development environments with bounded RBAC permissions
 - Updated configuration reference to include the new runtime-profiles/mutating-dev overlay and its pod-delete Role/RoleBinding
 - Enhanced environment-specific settings section with detailed guidance for the mutating-dev profile integration
 - Added new section documenting the mutating-dev profile architecture and deployment considerations
 - Updated troubleshooting guide with profile-specific issues and resolution steps
+- Integrated triple-gate security model documentation covering risk-tier admission, policy grants, and HITL confirmation requirements
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -58,7 +58,7 @@
 ## Introduction
 This document explains how the Platform Gateway Service manages configuration and environment setup across layers: environment variables, configuration files, and runtime overrides. It details available options, defaults, validation rules, and deployment-specific settings for development, staging, and production. It also provides examples for Docker and Kubernetes (ConfigMaps/Secrets), and outlines security best practices for secrets management and consistent configuration across environments.
 
-**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations, risk-tier admission gates for mutating tools via GATEWAY_MUTATING_TOOLS_ENABLED, configurable HITL confirmation timeouts through AGENT_HITL_CONFIRM_TIMEOUT, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, and the new mutating-dev kustomize profile that provides a committed, environment-scoped development posture for enabling mutating tools safely.
+**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations, risk-tier admission gates for mutating tools via GATEWAY_MUTATING_TOOLS_ENABLED, configurable HITL confirmation timeouts through AGENT_HITL_CONFIRM_TIMEOUT, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, and the new mutating-dev kustomize profile that provides a committed, environment-scoped development posture for enabling mutating tools safely with bounded RBAC permissions while preserving configuration across LLM provider switches.
 
 ## Project Structure
 The Platform Gateway Service is implemented under products/platform-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/platform-gateway. The service includes workspace resource integration features that proxy requests to tool-gateway and skills-hub services for read-only inventory access, plus enhanced OpenTelemetry configuration with durable secret management. The new mutating-dev profile provides a dedicated development posture for enabling mutating tools with appropriate RBAC controls.

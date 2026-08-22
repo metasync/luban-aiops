@@ -3,22 +3,12 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-08-22T04:56:37Z"
+exported_at: "2026-08-22T05:57:01Z"
 modules:
     "":
-        dir_name: Agentic AIOPS Platform Monorepo
-        title: Agentic AIOPS Platform Monorepo
+        dir_name: Agentic AIOps Platform Monorepo Workspace
+        title: Agentic AIOps Platform Monorepo Workspace
         scope: []
-        source_files: []
-        children:
-            - specs
-        depends_on: []
-        related_to: []
-    specs:
-        dir_name: Spec-Driven Development Specifications
-        title: Spec-Driven Development Specifications
-        scope:
-            - docs/specs/
         source_files: []
         children: []
         depends_on: []

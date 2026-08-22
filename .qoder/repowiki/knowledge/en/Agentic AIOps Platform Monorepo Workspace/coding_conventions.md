@@ -1,0 +1,5 @@
+- Each product mirrors a fixed internal package layout — `api/routes`, `services`, `schemas`, `core/{config,metrics,observability,request_context,telemetry}`, `app.py`/`main.py` entry points, and a sibling `tests/` directory — enabling the root Makefile to treat all products uniformly.
+- Inter-service boundaries are enforced exclusively through JSON schemas and YAML policies stored in `shared/shared-contracts/schemas` and `policies/`, rather than through shared Python packages.
+- Policy files are centralized as a single canonical `policy-default.yaml` in `shared/shared-contracts/policies/` and copied into consumers via the `make sync-policy` target instead of being edited per product.
+- Container images use a coordinated tag derived from the root `VERSION` file combined with git SHA and optional profile, written into `.images.env` so all products ship the same release slice.
+- Per-product Python environments are isolated with `uv` via `pyproject.toml` + `uv.lock` plus a local `.python-version` pinning the interpreter, and tests run inside that environment rather than a global venv.

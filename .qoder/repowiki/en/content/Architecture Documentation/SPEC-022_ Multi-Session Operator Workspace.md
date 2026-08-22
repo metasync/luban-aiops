@@ -7,7 +7,6 @@
 - [tasks.md](file://docs/specs/SPEC-022-multi-session-operator-workspace/tasks.md)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
-- [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
@@ -16,11 +15,17 @@
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
 - [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
-- [dev-k8s kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
-- [select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
-- [dev-k8s README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 - [agent-chat-request.schema.json](file://shared/shared-contracts/schemas/agent-chat-request.schema.json)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated to reflect delivered status of SPEC-022 with comprehensive implementation
+- Enhanced session API endpoints documentation with v2 endpoints (GET/DELETE /api/v2/sessions)
+- Added voice-readiness contract details with input_modality field implementation
+- Documented mutating-dev kustomize profile for development environments
+- Updated HITL confirmation integration and transcript reconstruction capabilities
+- Revised authorization matrix with new session actions (session:list, session:delete)
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -35,21 +40,21 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document specifies and explains the implementation of SPEC-022: Multi-Session Operator Workspace. It delivers framework-agnostic foundations for a multi-session operator workspace by exposing session lifecycle operations, adding voice-readiness contract discipline, and committing an environment-scoped mutating dev profile. The portal UI is intentionally deferred to a future rebuild spec; this release focuses on durable APIs, policy enforcement, schema discipline, and deployment posture.
+This document specifies and explains the implementation of SPEC-022: Multi-Session Operator Workspace. The specification has been **delivered** in version 0.8.0, providing framework-agnostic foundations for a multi-session operator workspace by exposing session lifecycle operations, adding voice-readiness contract discipline, and committing an environment-scoped mutating dev profile. The portal UI is intentionally deferred to a future rebuild spec; this release focuses on durable APIs, policy enforcement, schema discipline, and deployment posture.
 
-Key outcomes:
+Key outcomes delivered:
 - Session API surface under agent-platform v2 and platform-gateway proxies with deny-by-default policy actions.
 - Voice-readiness contract via optional modality metadata that never changes authorization or HITL behavior.
 - Environment-scoped mutating dev profile so dev deployments opt-in without changing base deny-by-default posture.
 - Authorization matrix updates and documentation reflecting new session actions.
 
 **Section sources**
+- [spec.md:5-13](file://docs/specs/SPEC-022-multi-session-operator-workspace/spec.md#L5-L13)
 - [spec.md:15-64](file://docs/specs/SPEC-022-multi-session-operator-workspace/spec.md#L15-L64)
-- [spec.md:66-158](file://docs/specs/SPEC-022-multi-session-operator-workspace/spec.md#L66-L158)
 
 ## Project Structure
-SPEC-022 spans multiple layers:
-- Agent-platform v2 routes expose session list, get-with-transcript, and delete endpoints.
+SPEC-022 spans multiple layers with comprehensive implementation:
+- Agent-platform v2 routes expose session list, get-with-transcript, and delete endpoints with full functionality.
 - Platform-gateway adds proxy routes gated by new policy actions and emits audit events.
 - Shared contracts extend chat request schema with modality metadata.
 - Kustomize overlays commit the mutating dev posture into dev-k8s while keeping base deny-by-default.
@@ -70,7 +75,7 @@ Gateway --> Audit["Audit Emitter<br/>session_created/deleted"]
 - [sessions.py:29-153](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L29-L153)
 - [routes.py:334-419](file://products/agent-platform/src/agent_service/api/v2/routes.py#L334-L419)
 - [session_store.py:327-398](file://products/agent-platform/src/agent_service/services/session_store.py#L327-L398)
-- [session_transcript.py:30-64](file://products/agent-platform/src/agent_service/services/session_transcript.py#LL30-L64)
+- [session_transcript.py:30-64](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L64)
 - [hitl_confirmations.py:93-223](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L93-L223)
 - [gateway_service.py:225-259](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L225-L259)
 
@@ -175,12 +180,10 @@ Success -- Yes --> ReturnOK["Return {session_id, deleted: true}"]
 
 **Diagram sources**
 - [routes.py:398-419](file://products/agent-platform/src/agent_service/api/v2/routes.py#L398-L419)
-- [session_service.py:104-122](file://products/agent-platform/src/agent_service/services/session_service.py#L104-L122)
 - [hitl_confirmations.py:215-223](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L215-L223)
 
 **Section sources**
 - [routes.py:354-419](file://products/agent-platform/src/agent_service/api/v2/routes.py#L354-L419)
-- [session_service.py:72-122](file://products/agent-platform/src/agent_service/services/session_service.py#L72-L122)
 
 ### Session Store and Bookkeeping
 - Postgres backend includes idempotent DDL adding title and last_active_at columns.
@@ -216,7 +219,6 @@ SessionStore <|.. PostgresSessionStore
 **Section sources**
 - [session_store.py:327-398](file://products/agent-platform/src/agent_service/services/session_store.py#L327-L398)
 - [session_store.py:519-591](file://products/agent-platform/src/agent_service/services/session_store.py#L519-L591)
-- [session_service.py:86-102](file://products/agent-platform/src/agent_service/services/session_service.py#L86-L102)
 
 ### Transcript Reconstruction
 - Best-effort extraction from kernel state snapshot; returns availability flag and empty transcript on failure.
@@ -277,9 +279,6 @@ Iterate --> Done["Return (true, turns)"]
 
 **Section sources**
 - [kustomization.yaml:1-21](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml#L1-L21)
-- [dev-k8s kustomization.yaml:1-12](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L12)
-- [select-runtime-profile.sh:19-34](file://shared/platform-ops/gitops/select-runtime-profile.sh#L19-L34)
-- [dev-k8s README.md:598-630](file://shared/platform-ops/gitops/dev-k8s/README.md#L598-L630)
 
 ## Dependency Analysis
 - Agent-platform v2 routes depend on session service, session store, agent state store, and HITL registry.
@@ -308,15 +307,13 @@ Policy --> PolicyBundle["Policy Bundle"]
 
 **Section sources**
 - [policy-default.yaml:19-44](file://shared/shared-contracts/policies/policy-default.yaml#L19-L44)
-- [authorization-matrix.md:329-357](file://docs/agentic-aiops-platform/authorization-matrix.md#L329-L357)
+- [authorization-matrix.md:329-370](file://docs/agentic-aiops-platform/authorization-matrix.md#L329-L370)
 
 ## Performance Considerations
 - Session listing is capped at 50 rows and ordered by last_active_at; Postgres query uses indexes to minimize cost.
 - Transcript extraction is best-effort and avoids heavy transformations; failures return quickly with availability flag.
 - HITL registry is in-memory; accurate within single replica and documented as such.
 - Bookkeeping (title minting, last_active_at touch) is fail-open to prevent chat latency spikes.
-
-[No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
 - Unknown or foreign session IDs return 404 to prevent enumeration; verify caller owns the session.
@@ -332,12 +329,10 @@ Policy --> PolicyBundle["Policy Bundle"]
 - [kustomization.yaml:1-21](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml#L1-L21)
 
 ## Conclusion
-SPEC-022 establishes durable, auditable, and policy-gated session management foundations for the operator workspace. It introduces a robust session API, voice-readiness contract discipline, and a committed mutating dev profile while deferring portal UI work to a dedicated rebuild effort. The result is a safer, more observable, and deployable foundation for multi-session workflows.
-
-[No sources needed since this section summarizes without analyzing specific files]
+SPEC-022 has been successfully delivered in version 0.8.0, establishing durable, auditable, and policy-gated session management foundations for the operator workspace. It introduces a robust session API, voice-readiness contract discipline, and a committed mutating dev profile while deferring portal UI work to a dedicated rebuild effort. The result is a safer, more observable, and deployable foundation for multi-session workflows.
 
 ## Appendices
-- Deferred portal UI requirements are preserved verbatim in the spec’s Appendix A for handoff to the rebuild spec.
+- Deferred portal UI requirements are preserved verbatim in the spec's Appendix A for handoff to the rebuild spec.
 - Delivery tasks and version bump to 0.8.0 are tracked in the tasks file.
 
 **Section sources**

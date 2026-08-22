@@ -1,0 +1,1 @@
+Monorepo workspace that assembles the enterprise agentic AIOps platform from product-oriented Python services, shared API/event/policy contracts, and Kustomize-based GitOps deployment overlays.
