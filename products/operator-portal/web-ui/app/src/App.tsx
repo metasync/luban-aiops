@@ -27,6 +27,12 @@ import {
 import { useAuth } from "./auth/AuthContext";
 import ChatView from "./chat/ChatView";
 import { AUDIT_ROLES, INCIDENT_VIEW_ROLES, hasAnyRole } from "./roles";
+import { useSessionWorkspace } from "./sessions/useSessionWorkspace";
+import AuditView from "./views/audit/AuditView";
+import PermissionsView from "./views/control/PermissionsView";
+import SkillsView from "./views/control/SkillsView";
+import ToolsView from "./views/control/ToolsView";
+import IncidentsView from "./views/incidents/IncidentsView";
 import { PLATFORM_VERSION } from "./version";
 
 export type ViewId =
@@ -200,11 +206,25 @@ function SidebarContent({
 export default function App() {
   const [active, setActive] = useState<ViewId>("chat");
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const { booting } = useAuth();
+  const { booting, username } = useAuth();
+  // The session workspace lives here so the incidents view can pin
+  // incident sessions into the chat panel (SPEC-023 R-3 deep links).
+  const workspace = useSessionWorkspace(Boolean(username));
 
   const navigate = (view: ViewId) => {
     setActive(view);
     setDrawerOpen(false);
+  };
+
+  const openIncidentSession = (incident: {
+    incident_id: string;
+    session_id?: string | null;
+  }) => {
+    workspace.pinIncidentSession(
+      incident.incident_id,
+      incident.session_id ?? undefined,
+    );
+    navigate("chat");
   };
 
   if (booting) {
@@ -243,7 +263,17 @@ export default function App() {
           }
         >
           {active === "chat" ? (
-            <ChatView />
+            <ChatView workspace={workspace} />
+          ) : active === "incidents" ? (
+            <IncidentsView onOpenIncidentSession={openIncidentSession} />
+          ) : active === "audit" ? (
+            <AuditView />
+          ) : active === "permissions" ? (
+            <PermissionsView />
+          ) : active === "tools" ? (
+            <ToolsView />
+          ) : active === "skills" ? (
+            <SkillsView />
           ) : (
             <ViewPlaceholder view={active} />
           )}
@@ -270,8 +300,8 @@ export default function App() {
   );
 }
 
-// Stage-1 shell placeholder: the remaining views land in stage 5
-// (control/workspace parity). Chat is wired up in stage 3.
+// Stage-1 shell placeholder: settings keeps the debug surface out of the
+// SPEC-023 acceptance scope for now.
 function ViewPlaceholder({ view }: { view: ViewId }) {
   return (
     <div>

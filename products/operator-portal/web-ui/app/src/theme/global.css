@@ -347,3 +347,27 @@ body {
     width: 200px;
   }
 }
+
+/* --- Shared view chrome (SPEC-023 R-5) --- */
+.view-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.report-form {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.incident-section {
+  margin-top: 8px;
+}

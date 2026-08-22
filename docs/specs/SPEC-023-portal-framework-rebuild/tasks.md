@@ -24,7 +24,7 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 - [x] Switch/resume: transcript load with explicit `transcript_available=false` state, stream repointing, per-tab active-session persistence, previous-stream close (`web-ui/app/src/chat/transcript.ts`, `useChatStream.setSession`)
 - [x] New session via existing create path; delete with in-UI confirm, 409 parked refusal, neutral 404
 - [x] Confirmation anchoring: cards stay bound to the parking session; approve/deny resumes that session's stream via `POST /api/v1/chat/confirm` (per-session turn cache in `useChatStream`)
-- [ ] Incident deep links: `incident-<id>` sessions open as additional panel entries (`web-ui/src/incidents/` — panel pinning ready via `pinIncidentSession`; incidents-view trigger lands in stage 5)
+- [x] Incident deep links: `incident-<id>` sessions open as additional panel entries (panel pinning via `pinIncidentSession`; incidents-view *Continue in chat* trigger in `web-ui/app/src/views/incidents/IncidentsView.tsx`)
 
 ## R-4: Voice input
 
@@ -36,10 +36,10 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 
 ## R-5: View migration and role-scoped visibility
 
-- [ ] Audit view: filters, cursor pagination, expandable envelopes — auditor/platform-admin only (`web-ui/src/views/audit/`)
-- [ ] Permissions matrix, tools, and skills inventory views (`web-ui/src/views/control/`)
-- [ ] Incidents view: list/detail/triage, connector outcomes, session pinning (`web-ui/src/views/incidents/`)
-- [ ] Sectioned navigation auto-hide derived from token roles + policy matrix endpoint (SPEC-019 parity)
+- [x] Audit view: filters, cursor pagination, expandable envelopes — auditor/platform-admin only (`web-ui/app/src/views/audit/AuditView.tsx`)
+- [x] Permissions matrix, tools, and skills inventory views (`web-ui/app/src/views/control/`)
+- [x] Incidents view: list/detail/triage, connector outcomes, session pinning (`web-ui/app/src/views/incidents/`)
+- [x] Sectioned navigation auto-hide derived from token roles + policy matrix endpoint (SPEC-019 parity) — role-derived sections in `App.tsx`; matrix endpoint consumed by the permissions view
 - [x] Evidence panel parity: inline anchored turn groups with full-output expander (SPEC-011 R-4) — delivered with the chat view (`web-ui/app/src/chat/ChatView.tsx`)
 - [ ] Remove the vanilla web-ui tree once parity is complete (`products/operator-portal/web-ui/app.js`, `styles.css`, legacy `index.html`)
 

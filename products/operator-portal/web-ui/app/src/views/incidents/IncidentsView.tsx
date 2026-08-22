@@ -1,0 +1,599 @@
+// Incident triage view (SPEC-015 R-6, SPEC-023 R-5): role-gated list with
+// filters + 15s auto-refresh, manual intake form, detail with triage
+// report, connector dispatches, and the chat deep-link that pins the
+// incident's session into the chat workspace (SPEC-023 R-3). The gateway
+// re-enforces incident:* policy on every request regardless.
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Alert,
+  Button,
+  Input,
+  Select,
+  Spin,
+  Table,
+  Tag,
+  Typography,
+  type TableColumnsType,
+} from "antd";
+import { ArrowLeftOutlined, MessageOutlined } from "@ant-design/icons";
+import {
+  getIncident,
+  listIncidents,
+  reportIncident,
+  runTriage,
+  type ConnectorDispatch,
+  type IncidentDetailPayload,
+  type IncidentFilters,
+  type IncidentSummary,
+  type TriageReport,
+} from "../../api/incidents";
+import { useAuth } from "../../auth/AuthContext";
+import { renderMarkdown } from "../../chat/markdown";
+import {
+  INCIDENT_ACT_ROLES,
+  INCIDENT_VIEW_ROLES,
+  hasAnyRole,
+} from "../../roles";
+import { formatTimestamp } from "../format";
+import { parseLabelsInput } from "./labels";
+
+const AUTO_REFRESH_MS = 15_000;
+
+const SEVERITY_COLOR: Record<string, string> = {
+  critical: "red",
+  warning: "orange",
+  info: "blue",
+};
+
+const STATUS_COLOR: Record<string, string> = {
+  new: "default",
+  triaging: "processing",
+  triaged: "green",
+  triage_failed: "red",
+  resolved: "default",
+};
+
+const DISPATCH_COLOR: Record<string, string> = {
+  pending: "processing",
+  sent: "blue",
+  succeeded: "green",
+  failed: "red",
+};
+
+const PRIORITY_COLOR: Record<string, string> = {
+  immediate: "red",
+  soon: "orange",
+  later: "default",
+};
+
+function SeverityBadge({ value }: { value: string }) {
+  return <Tag color={SEVERITY_COLOR[value] ?? "default"}>{value}</Tag>;
+}
+
+function StatusBadge({ value }: { value: string }) {
+  return <Tag color={STATUS_COLOR[value] ?? "default"}>{value}</Tag>;
+}
+
+export interface IncidentsViewProps {
+  // Chat deep-link: pins incident-<id> into the session panel and opens
+  // the chat view (SPEC-023 R-3 deep links).
+  onOpenIncidentSession: (incident: IncidentSummary) => void;
+}
+
+export default function IncidentsView({
+  onOpenIncidentSession,
+}: IncidentsViewProps) {
+  const { roles } = useAuth();
+  const canView = hasAnyRole(roles, INCIDENT_VIEW_ROLES);
+  const canAct = hasAnyRole(roles, INCIDENT_ACT_ROLES);
+
+  const [filters, setFilters] = useState<IncidentFilters>({});
+  const [incidents, setIncidents] = useState<IncidentSummary[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Detail mode state.
+  const [detail, setDetail] = useState<IncidentDetailPayload | null>(null);
+  const [triaging, setTriaging] = useState(false);
+
+  // Manual intake form state.
+  const [formOpen, setFormOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [summary, setSummary] = useState("");
+  const [severity, setSeverity] = useState("warning");
+  const [labelsInput, setLabelsInput] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const loadInFlightRef = useRef(false);
+
+  const loadList = useCallback(
+    async (activeFilters: IncidentFilters) => {
+      if (!canView || loadInFlightRef.current) return;
+      loadInFlightRef.current = true;
+      setLoading(true);
+      try {
+        const payload = await listIncidents(activeFilters);
+        setIncidents(payload.incidents ?? []);
+        setTotal(payload.total ?? 0);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        loadInFlightRef.current = false;
+        setLoading(false);
+      }
+    },
+    [canView],
+  );
+
+  // Initial + filter-driven load.
+  useEffect(() => {
+    if (!canView) return;
+    setDetail(null);
+    void loadList(filters);
+  }, [canView, filters, loadList]);
+
+  // 15s auto-refresh while the list is showing (legacy parity).
+  useEffect(() => {
+    if (!canView || detail) return;
+    const timer = window.setInterval(() => void loadList(filters), AUTO_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [canView, detail, filters, loadList]);
+
+  const openDetail = useCallback(async (incidentId: string) => {
+    setLoading(true);
+    try {
+      const payload = await getIncident(incidentId);
+      setDetail(payload);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const backToList = () => {
+    setDetail(null);
+    void loadList(filters);
+  };
+
+  const triggerTriage = async (incidentId: string) => {
+    setTriaging(true);
+    setError(null);
+    try {
+      const payload = await runTriage(incidentId);
+      setDetail(payload);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTriaging(false);
+    }
+  };
+
+  const submitReport = async () => {
+    setFormError(null);
+    let labels: Record<string, string>;
+    try {
+      labels = parseLabelsInput(labelsInput);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : String(err));
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const created = await reportIncident({
+        title: title.trim(),
+        summary: summary.trim(),
+        severity,
+        labels,
+      });
+      setFormOpen(false);
+      setTitle("");
+      setSummary("");
+      setSeverity("warning");
+      setLabelsInput("");
+      await openDetail(created.incident_id);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!canView) {
+    return (
+      <Alert
+        type="info"
+        showIcon
+        message="The incidents view requires an incident-visible role."
+      />
+    );
+  }
+
+  if (detail) {
+    return (
+      <IncidentDetail
+        payload={detail}
+        triaging={triaging}
+        canAct={canAct}
+        error={error}
+        onBack={backToList}
+        onTriage={() => void triggerTriage(detail.incident.incident_id)}
+        onOpenChat={() => onOpenIncidentSession(detail.incident)}
+      />
+    );
+  }
+
+  const columns: TableColumnsType<IncidentSummary> = [
+    {
+      title: "opened",
+      dataIndex: "created_at",
+      render: (value: string) => formatTimestamp(value),
+    },
+    { title: "title", dataIndex: "title" },
+    {
+      title: "severity",
+      dataIndex: "severity",
+      render: (value: string) => <SeverityBadge value={value} />,
+    },
+    {
+      title: "status",
+      dataIndex: "status",
+      render: (value: string) => <StatusBadge value={value} />,
+    },
+    { title: "source", dataIndex: "source" },
+    { title: "id", dataIndex: "incident_id" },
+  ];
+
+  return (
+    <div>
+      <Typography.Title level={4} style={{ marginTop: 0 }}>
+        Incidents
+      </Typography.Title>
+      <div className="view-toolbar">
+        <Select
+          value={filters.status ?? ""}
+          onChange={(value) =>
+            setFilters((f) => ({ ...f, status: value || undefined }))
+          }
+          style={{ width: 160 }}
+          aria-label="Filter by status"
+          options={[
+            { value: "", label: "all statuses" },
+            ...["new", "triaging", "triaged", "triage_failed", "resolved"].map(
+              (status) => ({ value: status, label: status }),
+            ),
+          ]}
+        />
+        <Select
+          value={filters.severity ?? ""}
+          onChange={(value) =>
+            setFilters((f) => ({ ...f, severity: value || undefined }))
+          }
+          style={{ width: 160 }}
+          aria-label="Filter by severity"
+          options={[
+            { value: "", label: "all severities" },
+            ...["critical", "warning", "info"].map((sev) => ({
+              value: sev,
+              label: sev,
+            })),
+          ]}
+        />
+        <Select
+          value={filters.source ?? ""}
+          onChange={(value) =>
+            setFilters((f) => ({ ...f, source: value || undefined }))
+          }
+          style={{ width: 160 }}
+          aria-label="Filter by source"
+          options={[
+            { value: "", label: "all sources" },
+            { value: "alertmanager", label: "alertmanager" },
+            { value: "manual", label: "manual" },
+          ]}
+        />
+        <Button onClick={() => void loadList(filters)}>Refresh</Button>
+        {canAct ? (
+          <Button onClick={() => setFormOpen((open) => !open)}>
+            Report incident
+          </Button>
+        ) : null}
+      </div>
+      {formOpen && canAct ? (
+        <div className="report-form">
+          <Typography.Text strong>Report an incident</Typography.Text>
+          <Input
+            placeholder="Short incident title"
+            maxLength={200}
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            aria-label="Incident title"
+          />
+          <Input.TextArea
+            placeholder="What is happening, where, since when?"
+            rows={3}
+            maxLength={2000}
+            value={summary}
+            onChange={(event) => setSummary(event.target.value)}
+            aria-label="Incident summary"
+          />
+          <div className="view-toolbar">
+            <Select
+              value={severity}
+              onChange={setSeverity}
+              style={{ width: 140 }}
+              aria-label="Incident severity"
+              options={[
+                { value: "warning", label: "warning" },
+                { value: "critical", label: "critical" },
+                { value: "info", label: "info" },
+              ]}
+            />
+            <Input
+              placeholder="team=payments, cluster=dev-k8s"
+              value={labelsInput}
+              onChange={(event) => setLabelsInput(event.target.value)}
+              aria-label="Labels"
+            />
+          </div>
+          {formError ? (
+            <Alert type="error" showIcon message={formError} />
+          ) : null}
+          <div className="view-toolbar">
+            <Button
+              type="primary"
+              loading={submitting}
+              disabled={!title.trim()}
+              onClick={() => void submitReport()}
+            >
+              Submit report
+            </Button>
+            <Button onClick={() => setFormOpen(false)}>Cancel</Button>
+          </div>
+        </div>
+      ) : null}
+      {error ? (
+        <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />
+      ) : null}
+      <Spin spinning={loading}>
+        {incidents.length === 0 && !loading ? (
+          <Typography.Text type="secondary">
+            No incidents match these filters.
+          </Typography.Text>
+        ) : (
+          <Table<IncidentSummary>
+            size="small"
+            rowKey="incident_id"
+            columns={columns}
+            dataSource={incidents}
+            pagination={false}
+            onRow={(incident) => ({
+              onClick: () => void openDetail(incident.incident_id),
+              style: { cursor: "pointer" },
+            })}
+          />
+        )}
+      </Spin>
+      <Typography.Text type="secondary">
+        {incidents.length} incident{incidents.length === 1 ? "" : "s"} shown ·{" "}
+        {total} total
+      </Typography.Text>
+    </div>
+  );
+}
+
+function IncidentDetail({
+  payload,
+  triaging,
+  canAct,
+  error,
+  onBack,
+  onTriage,
+  onOpenChat,
+}: {
+  payload: IncidentDetailPayload;
+  triaging: boolean;
+  canAct: boolean;
+  error: string | null;
+  onBack: () => void;
+  onTriage: () => void;
+  onOpenChat: () => void;
+}) {
+  const { incident, report, dispatches } = payload;
+  const labels = incident.labels ?? {};
+
+  const dispatchColumns: TableColumnsType<ConnectorDispatch> = [
+    { title: "connector", dataIndex: "connector" },
+    {
+      title: "status",
+      dataIndex: "status",
+      render: (value: string, dispatch) => (
+        <Tag
+          color={DISPATCH_COLOR[value] ?? "default"}
+          title={value === "failed" ? dispatch.error ?? undefined : undefined}
+        >
+          {value}
+        </Tag>
+      ),
+    },
+    {
+      title: "reference",
+      dataIndex: "reference",
+      render: (value) => value || "—",
+    },
+    {
+      title: "dispatched",
+      dataIndex: "created_at",
+      render: (value: string) => formatTimestamp(value),
+    },
+  ];
+
+  return (
+    <div>
+      <Button
+        size="small"
+        icon={<ArrowLeftOutlined />}
+        onClick={onBack}
+        style={{ marginBottom: 12 }}
+      >
+        All incidents
+      </Button>
+      <Typography.Title level={4} style={{ marginTop: 0 }}>
+        {incident.title}{" "}
+        <SeverityBadge value={incident.severity} />
+        <StatusBadge value={incident.status} />
+        <Tag>{incident.source}</Tag>
+      </Typography.Title>
+      <div className="evidence-meta">
+        <span>id: {incident.incident_id}</span>
+        <span>fingerprint: {incident.fingerprint}</span>
+        <span>opened: {formatTimestamp(incident.created_at)}</span>
+        <span>updated: {formatTimestamp(incident.updated_at)}</span>
+        {incident.reported_by ? (
+          <span>reported by: {incident.reported_by}</span>
+        ) : null}
+        {incident.resolved_at ? (
+          <span>resolved: {formatTimestamp(incident.resolved_at)}</span>
+        ) : null}
+      </div>
+      {Object.keys(labels).length > 0 ? (
+        <div style={{ marginTop: 8 }}>
+          {Object.entries(labels).map(([key, value]) => (
+            <Tag key={key}>
+              {key}={value}
+            </Tag>
+          ))}
+        </div>
+      ) : null}
+      {incident.summary ? (
+        <Typography.Paragraph style={{ marginTop: 12 }}>
+          {incident.summary}
+        </Typography.Paragraph>
+      ) : null}
+      {error ? (
+        <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />
+      ) : null}
+      <div className="view-toolbar" style={{ marginTop: 12 }}>
+        {canAct ? (
+          <Button
+            type="primary"
+            loading={triaging}
+            disabled={incident.status === "triaging"}
+            onClick={onTriage}
+          >
+            {report ? "Re-run triage" : "Run triage"}
+          </Button>
+        ) : null}
+        <Button icon={<MessageOutlined />} onClick={onOpenChat}>
+          Continue in chat
+        </Button>
+      </div>
+      {report ? (
+        <TriageReportSection report={report} />
+      ) : incident.status === "triage_failed" && incident.triage_raw ? (
+        // Failed triage keeps the raw agent output for inspection.
+        <details style={{ marginTop: 12 }}>
+          <summary>Raw triage output (validation failed)</summary>
+          <pre className="evidence-pre">{incident.triage_raw}</pre>
+        </details>
+      ) : incident.status === "new" ? (
+        <Typography.Paragraph type="secondary" style={{ marginTop: 12 }}>
+          No triage report yet — run triage to let the agent gather evidence.
+        </Typography.Paragraph>
+      ) : null}
+      <Typography.Title level={5} style={{ marginTop: 20 }}>
+        Connector dispatch
+      </Typography.Title>
+      {dispatches.length === 0 ? (
+        <Typography.Text type="secondary">
+          No connector dispatches yet.
+        </Typography.Text>
+      ) : (
+        <Table<ConnectorDispatch>
+          size="small"
+          rowKey={(dispatch) => `${dispatch.connector}-${dispatch.created_at}`}
+          columns={dispatchColumns}
+          dataSource={dispatches}
+          pagination={false}
+        />
+      )}
+    </div>
+  );
+}
+
+function TriageReportSection({ report }: { report: TriageReport }) {
+  return (
+    <div className="incident-section">
+      <Typography.Title level={5} style={{ marginTop: 20 }}>
+        Triage report
+      </Typography.Title>
+      <div className="view-toolbar">
+        <SeverityBadge value={report.severity_assessment} />
+        <Typography.Text type="secondary">
+          {report.generated_by} · {formatTimestamp(report.generated_at)} ·
+          session {report.session_id}
+        </Typography.Text>
+      </div>
+      <div
+        className="md-content"
+        // Safe by construction: renderMarkdown escapes every source
+        // character before introducing markup (legacy parity).
+        dangerouslySetInnerHTML={{
+          __html: renderMarkdown(report.summary),
+        }}
+      />
+      {(report.evidence ?? []).length > 0 ? (
+        <>
+          <Typography.Title level={5}>Evidence</Typography.Title>
+          <ul>
+            {(report.evidence ?? []).map((ref, index) => (
+              <li key={index}>
+                {ref.source}: {ref.description}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      {(report.hypotheses ?? []).length > 0 ? (
+        <>
+          <Typography.Title level={5}>Hypotheses</Typography.Title>
+          <ul>
+            {(report.hypotheses ?? []).map((hypothesis, index) => (
+              <li key={index}>{hypothesis}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      {(report.next_steps ?? []).length > 0 ? (
+        <>
+          <Typography.Title level={5}>Next steps (advisory)</Typography.Title>
+          <ol>
+            {(report.next_steps ?? []).map((step, index) => (
+              <li key={index}>
+                <strong>{step.title}</strong>{" "}
+                <Tag color={PRIORITY_COLOR[step.priority] ?? "default"}>
+                  {step.priority}
+                </Tag>
+                <p>{step.rationale}</p>
+              </li>
+            ))}
+          </ol>
+        </>
+      ) : null}
+      {(report.skills_cited ?? []).length > 0 ? (
+        <>
+          <Typography.Title level={5}>Cited guidance</Typography.Title>
+          <div>
+            {(report.skills_cited ?? []).map((skillId) => (
+              <Tag key={skillId}>{skillId}</Tag>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}

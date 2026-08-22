@@ -31,7 +31,7 @@ export interface SessionWorkspace {
   // SPEC-023 R-3 deep links: incident sessions appear as extra panel
   // entries even before the server list catches up.
   pinned: SessionSummary[];
-  pinIncidentSession: (incidentId: string) => string;
+  pinIncidentSession: (incidentId: string, sessionId?: string) => string;
 }
 
 function loadActiveSessionId(): string | null {
@@ -134,15 +134,17 @@ export function useSessionWorkspace(authenticated: boolean): SessionWorkspace {
   );
 
   const pinIncidentSession = useCallback(
-    (incidentId: string): string => {
-      const sessionId = `incident-${incidentId}`;
+    (incidentId: string, sessionId?: string): string => {
+      // The incident detail carries its triage session id; fall back to the
+      // well-known incident-<id> naming (legacy parity).
+      const resolvedId = sessionId || `incident-${incidentId}`;
       setPinned((current) =>
-        current.some((entry) => entry.session_id === sessionId)
+        current.some((entry) => entry.session_id === resolvedId)
           ? current
           : [
               ...current,
               {
-                session_id: sessionId,
+                session_id: resolvedId,
                 title: `Incident ${incidentId}`,
                 created_at: new Date().toISOString(),
                 last_active_at: null,
@@ -150,8 +152,8 @@ export function useSessionWorkspace(authenticated: boolean): SessionWorkspace {
               },
             ],
       );
-      setActiveSessionId(sessionId);
-      return sessionId;
+      setActiveSessionId(resolvedId);
+      return resolvedId;
     },
     [setActiveSessionId],
   );

@@ -27,7 +27,7 @@ import relativeTime from "dayjs/plugin/relativeTime";
 import { getSession, type SessionSummary } from "../api/sessions";
 import { useAuth } from "../auth/AuthContext";
 import { CHAT_CONFIRM_ROLES, hasAnyRole } from "../roles";
-import { useSessionWorkspace } from "../sessions/useSessionWorkspace";
+import type { SessionWorkspace } from "../sessions/useSessionWorkspace";
 import type { ToolResultFrame } from "../stream/models";
 import {
   useChatStream,
@@ -455,10 +455,15 @@ function SessionPanel({
 
 // --- ChatView --------------------------------------------------------------
 
-export default function ChatView() {
+// The session workspace is owned by App so the incidents view can pin
+// incident sessions into the panel (SPEC-023 R-3 deep links).
+export default function ChatView({
+  workspace,
+}: {
+  workspace: SessionWorkspace;
+}) {
   const { username, roles } = useAuth();
   const authenticated = Boolean(username);
-  const workspace = useSessionWorkspace(authenticated);
   const chat = useChatStream();
   const [draft, setDraft] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
