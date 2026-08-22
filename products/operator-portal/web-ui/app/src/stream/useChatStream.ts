@@ -43,6 +43,9 @@ export interface ChatTurn {
   toolCalls: ToolCallFrame[];
   toolResults: ToolResultFrame[];
   confirmations: ConfirmationCard[];
+  // Transcript-seeded turns carry chat text only (SPEC-022 R-1 keeps tool
+  // frames out of v1 transcripts); views skip the evidence panel for them.
+  history?: boolean;
 }
 
 export type ConfirmationDecision = "approve" | "deny";
@@ -89,12 +92,18 @@ export interface ChatStreamApi {
   send: (message: string, options?: SendOptions) => Promise<void>;
   decide: (confirmId: string, decision: ConfirmationDecision) => Promise<void>;
   // Session-switch support (SPEC-023 R-3): aborts any in-flight stream,
-  // clears the workspace turns, and repoints the session id.
-  setSession: (sessionId: string | null) => void;
+  // stashes the current session's turns, and restores the target session's
+  // cached turns — or seeds them from `history` (the loaded transcript).
+  setSession: (sessionId: string | null, history?: ChatTurn[]) => void;
 }
 
 export function useChatStream(): ChatStreamApi {
   const turnsRef = useRef<ChatTurn[]>([]);
+  // Per-tab turn cache keyed by session id (SPEC-023 R-3): switching
+  // sessions stashes the current turns and restores them on the way back,
+  // so parked confirmation cards stay anchored to their session instead of
+  // being discarded by the switch.
+  const turnsCacheRef = useRef(new Map<string, ChatTurn[]>());
   const sessionIdRef = useRef<string | null>(null);
   const streamingRef = useRef(false);
   const controllerRef = useRef<AbortController | null>(null);
@@ -304,15 +313,26 @@ export function useChatStream(): ChatStreamApi {
     [handleEvent],
   );
 
-  const setSession = useCallback((sessionId: string | null) => {
-    controllerRef.current?.abort();
-    controllerRef.current = null;
-    streamingRef.current = false;
-    setStreaming(false);
-    sessionIdRef.current = sessionId;
-    turnsRef.current = [];
-    bump();
-  }, []);
+  const setSession = useCallback(
+    (sessionId: string | null, history?: ChatTurn[]) => {
+      controllerRef.current?.abort();
+      controllerRef.current = null;
+      streamingRef.current = false;
+      setStreaming(false);
+
+      const previousId = sessionIdRef.current;
+      if (previousId !== null && turnsRef.current.length > 0) {
+        turnsCacheRef.current.set(previousId, turnsRef.current);
+      }
+      sessionIdRef.current = sessionId;
+      turnsRef.current =
+        (sessionId !== null ? turnsCacheRef.current.get(sessionId) : undefined) ??
+        history ??
+        [];
+      bump();
+    },
+    [],
+  );
 
   return {
     turns: turnsRef.current,

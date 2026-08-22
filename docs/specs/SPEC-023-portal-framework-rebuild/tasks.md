@@ -20,11 +20,11 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 
 ## R-3: Multi-session workspace UI (SPEC-022 Appendix A)
 
-- [ ] Session panel: list with title, relative last-active, amber *awaiting approval* badge; 30s poll + lifecycle refresh (`web-ui/src/sessions/`)
-- [ ] Switch/resume: transcript load with explicit `transcript_available=false` state, stream repointing, per-tab active-session persistence, previous-stream close
-- [ ] New session via existing create path; delete with in-UI confirm, 409 parked refusal, neutral 404
-- [ ] Confirmation anchoring: cards stay bound to the parking session; approve/deny resumes that session's stream via `POST /api/v1/chat/confirm`
-- [ ] Incident deep links: `incident-<id>` sessions open as additional panel entries (`web-ui/src/incidents/`)
+- [x] Session panel: list with title, relative last-active, amber *awaiting approval* badge; 30s poll + lifecycle refresh (`web-ui/app/src/sessions/useSessionWorkspace.ts`, `web-ui/app/src/chat/ChatView.tsx`)
+- [x] Switch/resume: transcript load with explicit `transcript_available=false` state, stream repointing, per-tab active-session persistence, previous-stream close (`web-ui/app/src/chat/transcript.ts`, `useChatStream.setSession`)
+- [x] New session via existing create path; delete with in-UI confirm, 409 parked refusal, neutral 404
+- [x] Confirmation anchoring: cards stay bound to the parking session; approve/deny resumes that session's stream via `POST /api/v1/chat/confirm` (per-session turn cache in `useChatStream`)
+- [ ] Incident deep links: `incident-<id>` sessions open as additional panel entries (`web-ui/src/incidents/` — panel pinning ready via `pinIncidentSession`; incidents-view trigger lands in stage 5)
 
 ## R-4: Voice input
 
@@ -40,7 +40,7 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 - [ ] Permissions matrix, tools, and skills inventory views (`web-ui/src/views/control/`)
 - [ ] Incidents view: list/detail/triage, connector outcomes, session pinning (`web-ui/src/views/incidents/`)
 - [ ] Sectioned navigation auto-hide derived from token roles + policy matrix endpoint (SPEC-019 parity)
-- [ ] Evidence panel parity: inline anchored turn groups with full-output expander (SPEC-011 R-4)
+- [x] Evidence panel parity: inline anchored turn groups with full-output expander (SPEC-011 R-4) — delivered with the chat view (`web-ui/app/src/chat/ChatView.tsx`)
 - [ ] Remove the vanilla web-ui tree once parity is complete (`products/operator-portal/web-ui/app.js`, `styles.css`, legacy `index.html`)
 
 ## R-6: Documentation and living state

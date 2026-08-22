@@ -25,6 +25,7 @@ import {
   WarningOutlined,
 } from "@ant-design/icons";
 import { useAuth } from "./auth/AuthContext";
+import ChatView from "./chat/ChatView";
 import { AUDIT_ROLES, INCIDENT_VIEW_ROLES, hasAnyRole } from "./roles";
 import { PLATFORM_VERSION } from "./version";
 
@@ -234,8 +235,18 @@ export default function App() {
         <SidebarContent active={active} onNavigate={navigate} />
       </Layout.Sider>
       <Layout>
-        <Layout.Content className="view-container">
-          <ViewPlaceholder view={active} />
+        <Layout.Content
+          className={
+            active === "chat"
+              ? "view-container view-container-flush"
+              : "view-container"
+          }
+        >
+          {active === "chat" ? (
+            <ChatView />
+          ) : (
+            <ViewPlaceholder view={active} />
+          )}
         </Layout.Content>
       </Layout>
       {/* Off-canvas sidebar for narrow viewports (legacy drawer parity). */}
@@ -259,8 +270,8 @@ export default function App() {
   );
 }
 
-// Stage-1 shell placeholder: the real views land in stages 3 (chat +
-// session workspace) and 5 (control/workspace parity).
+// Stage-1 shell placeholder: the remaining views land in stage 5
+// (control/workspace parity). Chat is wired up in stage 3.
 function ViewPlaceholder({ view }: { view: ViewId }) {
   return (
     <div>
