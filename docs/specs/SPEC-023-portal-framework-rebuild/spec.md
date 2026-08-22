@@ -2,9 +2,10 @@
 
 ## Status
 
-- status: `draft`
+- status: `in-progress`
 - owner: chi
 - created: 2026-08-22
+- approved: 2026-08-22
 - release slice: R5 operator workspace — second slice (0.9.0 train)
 - related ADRs: none new; consumes SPEC-022 Appendix A (deferred portal UI
   contract) verbatim, re-asserts SPEC-020 (click-gated HITL) and SPEC-022
@@ -154,6 +155,11 @@ Acceptance criteria:
   back to `en-US`; the choice persists per browser. The selector affects
   transcription only — it is never sent to the backend and never influences
   policy, modality metadata, or HITL behavior.
+- Voice-composed turns ride `input_modality: "voice"` end to end: the
+  streaming route accepts the additive `input_modality` query parameter
+  (gateway and agent service, default `text`, validated `text`|`voice`),
+  the `chat_started` audit event records it in `details`, and no policy,
+  auto-allow, or HITL behavior keys off it.
 - The Approval and HITL guide's voice-readiness subsection is updated to
   state that the portal now offers voice composition under these invariants.
 
@@ -200,8 +206,18 @@ Acceptance criteria:
   only ensures the composer area leaves room for a model selector).
 - Speech-to-text engines, audio capture pipelines, or audio transport
   (SPEC-022 non-goal, unchanged).
-- Any backend, shared-contract, or policy-bundle change: the session API,
-  chat contract, policy actions, and audit events are all already shipped.
+- Any backend, shared-contract, or policy-bundle change beyond the single
+  additive exception below: the session API, chat contract, policy actions,
+  and audit events are all already shipped.
+  - Exception (discovered during implementation, 2026-08-22): SPEC-022 R-2
+    wired `input_modality` onto `POST /api/v1/chat` only, but the portal's
+    streaming surface (`GET /api/v1/chat/stream` → agent `GET
+    /api/v2/chat/stream`) carried no modality, so voice turns over the
+    stream could never be audited. R-4 therefore adds one additive,
+    backward-compatible query parameter (`input_modality`, default `text`)
+    to both stream routes; it rides as metadata only and is recorded on
+    the `chat_started` audit event. No new actions, contracts, or policy
+    semantics are introduced.
 - AgentScope Spark adoption (spike runner-up; revisit only if the adapter
   boundary proves costly and upstream stabilizes).
 - Light-mode theming or i18n beyond the current single dark theme.
@@ -233,3 +249,6 @@ Acceptance criteria:
   `docs/workspace/portal-framework-rebuild-spike.md` (approved 2026-08-22)
 - 2026-08-22: R-4 gains explicit recognition-language selection (default
   browser locale, `en-US`/`zh-CN` minimum set, per-browser persistence)
+- 2026-08-22: approved; implementation started (0.9.0 train)
+- 2026-08-22: Non-Goals records the additive `input_modality` stream-route
+  parameter exception; R-4 gains the end-to-end modality criterion

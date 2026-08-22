@@ -121,11 +121,15 @@ async def stream_chat(
     message: str,
     session_id: str | None,
     delegated_token: str | None = None,
+    input_modality: str = "text",
 ) -> AsyncIterator[str]:
     timeout = httpx.Timeout(connect=5.0, read=None, write=None, pool=None)
     params: dict[str, str] = {"message": message}
     if session_id:
         params["session_id"] = session_id
+    # SPEC-023 R-4: modality rides the query as metadata only, matching
+    # the POST /api/v2/chat payload convention (SPEC-022 R-2).
+    params["input_modality"] = input_modality
     async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream(
             "GET",

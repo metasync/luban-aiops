@@ -413,10 +413,17 @@ def chat_stream(
     message: str,
     session_id: str | None,
     delegated_token: str | None = None,
+    input_modality: str = "text",
 ) -> StreamingResponse:
     async def _stream() -> AsyncIterator[str]:
         async for chunk in agent_client.stream_chat(
-            settings, request_id, user_id, message, session_id, delegated_token
+            settings,
+            request_id,
+            user_id,
+            message,
+            session_id,
+            delegated_token,
+            input_modality,
         ):
             yield chunk
 

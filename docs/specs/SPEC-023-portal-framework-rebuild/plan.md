@@ -77,6 +77,12 @@ frame translation, fixture-tested) → session workspace (Appendix A contract)
   against the supported set with `en-US` fallback; the choice persists in
   `localStorage`. The selection stays client-side — it never reaches the
   gateway or the audit trail.
+- stream modality parity: `GET /api/v1/chat/stream` and the agent's
+  `GET /api/v2/chat/stream` gain an additive `input_modality` query
+  parameter (`text`|`voice`, default `text`); the gateway records it on
+  the `chat_started` audit event's `details` and forwards it upstream.
+  Gateway and agent-service tests pin the default and voice pass-through;
+  the adapter always sends the parameter explicitly.
 
 ### R-5: View migration and role-scoped visibility
 

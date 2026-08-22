@@ -30,6 +30,7 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 
 - [ ] `Sender` speech input composing `input_modality: "voice"` turns; capability detection fallback (`web-ui/src/chat/Composer.tsx`)
 - [ ] Recognition language selector (`en-US`/`zh-CN` minimum, constant-driven list): default from `navigator.language` with `en-US` fallback, `localStorage` persistence, drives the recognizer `lang` only (never sent to the backend) + unit test for the default/fallback resolution
+- [ ] Additive `input_modality` query parameter on `GET /api/v1/chat/stream` (gateway route → service → agent client) and agent `GET /api/v2/chat/stream`, recorded on `chat_started` audit `details` + gateway/agent tests for default and `voice` pass-through
 - [ ] Invariant II unit test: no voice path reaches a confirmation decision handler
 - [ ] Approval and HITL guide voice-readiness subsection updated to record portal voice composition (`docs/guides/`)
 

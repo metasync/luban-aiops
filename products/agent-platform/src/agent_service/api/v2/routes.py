@@ -11,6 +11,7 @@ never inspects or signs it.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Literal
 
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
@@ -135,6 +136,9 @@ async def chat(
 async def chat_stream(
     message: str,
     session_id: str | None = None,
+    # SPEC-023 R-4: voice-readiness parity with POST /chat's body field —
+    # modality is metadata only and never changes policy or HITL outcomes.
+    input_modality: Literal["text", "voice"] = "text",
     x_user_id: str | None = Header(None),
     x_request_id: str | None = Header(None),
     authorization: str | None = Header(None),

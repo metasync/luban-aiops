@@ -1,4 +1,5 @@
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import StreamingResponse
@@ -91,6 +92,9 @@ async def chat_stream_route(
     request: Request,
     message: str,
     session_id: str | None = None,
+    # SPEC-023 R-4: voice-readiness parity for the streaming surface —
+    # modality rides as metadata only, mirroring POST /api/v1/chat.
+    input_modality: Literal["text", "voice"] = "text",
     x_request_id: str | None = Header(default=None),
     settings: PlatformGatewaySettings = Depends(get_settings),
 ) -> StreamingResponse:
@@ -109,6 +113,8 @@ async def chat_stream_route(
         request_id=request_id,
         session_id=session_id,
         user_id=user_id,
+        # SPEC-022 R-2: modality is recorded, never decision-bearing.
+        input_modality=input_modality,
         authenticated=identity.subject != "dev",  # type: ignore[union-attr]
         roles=identity.roles,  # type: ignore[union-attr]
     )
@@ -118,6 +124,7 @@ async def chat_stream_route(
             "chat_started",
             request_id,
             "success",
+            details={"input_modality": input_modality},
             subject=identity.subject,  # type: ignore[union-attr]
             username=user_id,
             actor=identity.actor,  # type: ignore[union-attr]
@@ -132,6 +139,7 @@ async def chat_stream_route(
         message=message,
         session_id=session_id,
         delegated_token=delegated_token,
+        input_modality=input_modality,
     )
 
 
