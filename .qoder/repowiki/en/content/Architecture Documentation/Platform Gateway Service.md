@@ -32,13 +32,10 @@
 
 ## Update Summary
 **Changes Made**
-- Added Session Workspace Proxy Routes section documenting deny-by-default policy actions (session:list, session:delete) with proper error handling
-- Enhanced Sessions API section with complete session lifecycle management including create, list, read, and delete operations
-- Updated Policy Engine section with new session workspace actions and role-based access control
-- Added Session Workspace Proxy Error Handling section documenting upstream 4xx passthrough and transport failure mapping to 502
-- Enhanced Audit Trail Integration section with durable session_deleted event emission
-- Updated Architecture Overview to include session workspace proxy flow
-- Enhanced Troubleshooting Guide with session workspace specific issues and diagnostics
+- Enhanced Session Workspace Proxy Error Handling section with detailed HTTP status code passthrough behavior for list_sessions() function
+- Updated Session Listing functionality to document proper 4xx passthrough and 502 mapping patterns
+- Enhanced Troubleshooting Guide with specific guidance on session workspace error handling patterns
+- Updated Architecture Overview diagrams to reflect consistent error handling across all session operations
 
 ## Table of Contents
 1. Introduction
@@ -148,7 +145,7 @@ A --> RT
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
 - [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
-- [gateway_service.py:1-526](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L526)
+- [gateway_service.py:1-536](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L536)
 - [agent_client.py:1-212](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L212)
 - [incident_client.py:1-193](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L1-L193)
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
@@ -211,7 +208,7 @@ A --> RT
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
 - [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
-- [gateway_service.py:1-526](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L526)
+- [gateway_service.py:1-536](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L536)
 - [agent_client.py:1-212](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L212)
 - [incident_client.py:1-193](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L1-L193)
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
@@ -263,7 +260,7 @@ GW-->>Portal : Delete response
 
 **Diagram sources**
 - [sessions.py:29-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L29-L154)
-- [gateway_service.py:289-377](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L377)
+- [gateway_service.py:289-387](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L387)
 - [agent_client.py:32-89](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L32-L89)
 - [audit_emitter.py:1-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L1-L99)
 
@@ -361,6 +358,7 @@ Router --> SkillsRoutes : "includes"
 - **Scoping**: Server-side filtering returns only caller's own sessions (SPEC-022 R-1)
 - **Response**: List of sessions belonging to the authenticated user
 - **Logging**: Tracks session count and user context
+- **Error Handling**: **Enhanced** - Upstream 4xx errors pass through unchanged, transport failures and upstream 5xx map to 502
 
 #### Session Reading
 - **Endpoint**: GET /api/v1/sessions/{session_id}
@@ -420,19 +418,20 @@ end
 
 **Diagram sources**
 - [sessions.py:29-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L29-L154)
-- [gateway_service.py:289-377](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L377)
+- [gateway_service.py:289-387](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L387)
 
 **Section sources**
 - [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
-- [gateway_service.py:289-377](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L377)
+- [gateway_service.py:289-387](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L387)
 
 ### Session Workspace Proxy Error Handling
-**New** - Implements consistent error handling strategy for session workspace operations with proper status code mapping.
+**Enhanced** - Implements consistent error handling strategy for session workspace operations with proper HTTP status code passthrough behavior.
 
 #### Upstream 4xx Passthrough
 - Unknown or foreign sessions result in 404 responses passed through unchanged
 - Parked confirmation conflicts result in 409 responses preserved for better error visibility
 - Anti-enumeration posture maintained by not masking client errors as gateway errors
+- **Enhanced**: `list_sessions()` function specifically implements this pattern with proper status code detection
 
 #### Transport Failure Mapping
 - Network connectivity issues and upstream service unavailability map to 502 status codes
@@ -441,7 +440,7 @@ end
 
 #### Error Handling Patterns
 - **Get Session**: Upstream 4xx (unknown/foreign session) passes through unchanged; transport failures and upstream 5xx map to 502
-- **List Sessions**: All upstream errors map to 502 (no client-specific errors expected)
+- **List Sessions**: **Enhanced** - Upstream 4xx errors pass through unchanged; transport failures and upstream 5xx map to 502 with specific "session list failed" detail
 - **Delete Session**: Upstream 4xx (unknown/foreign session, parked confirmation) passes through unchanged; transport failures and upstream 5xx map to 502
 
 ```mermaid
@@ -457,10 +456,10 @@ Success --> Return
 ```
 
 **Diagram sources**
-- [gateway_service.py:297-377](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L297-L377)
+- [gateway_service.py:297-387](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L297-L387)
 
 **Section sources**
-- [gateway_service.py:297-377](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L297-L377)
+- [gateway_service.py:297-387](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L297-L387)
 
 ### Enhanced Agent Client
 **Updated** - Added new `open_chat_confirm_stream()` method and enhanced session workspace methods for handling streams and proper error mapping.
@@ -545,12 +544,12 @@ PassThrough --> Return
 
 **Diagram sources**
 - [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
-- [gateway_service.py:416-477](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L416-L477)
+- [gateway_service.py:426-487](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L426-L487)
 - [agent_client.py:142-193](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L142-L193)
 
 **Section sources**
 - [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
-- [gateway_service.py:416-477](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L416-L477)
+- [gateway_service.py:426-487](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L426-L487)
 
 ### Policy Matrix Endpoint
 **Existing** - Provides live permission matrix evaluation derived from the currently enforced policy bundle with role-scoped visibility.
@@ -745,7 +744,7 @@ IncidentClient --> ErrorMapping : "uses"
 - [incident_client.py:1-193](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L1-L193)
 
 ### Gateway Service
-**Updated** - Enhanced with session workspace proxy functionality and chat confirm handling.
+**Enhanced** - Enhanced with session workspace proxy functionality and chat confirm handling with improved error handling.
 
 - Identity resolution supports local JWT verification and synthetic dev identity when auth is optional.
 - Policy enforcement uses evaluate() from the policy engine; denies by default and records decisions.
@@ -753,6 +752,7 @@ IncidentClient --> ErrorMapping : "uses"
 - Provides streaming chat via StreamingResponse.
 - **Enhanced**: Session workspace proxy with proper error handling (upstream 4xx passthrough, transport failures map to 502).
 - **Enhanced**: Chat confirm handling with SSE streaming and confirmation_decided audit event emission.
+- **Enhanced**: `list_sessions()` function with consistent error handling pattern matching other session operations.
 
 ```mermaid
 flowchart TD
@@ -775,12 +775,12 @@ Proxy --> Return(["Return Response/Stream"])
 ```
 
 **Diagram sources**
-- [gateway_service.py:1-526](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L526)
+- [gateway_service.py:1-536](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L536)
 - [token_verifier.py:1-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L1-L99)
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
 
 **Section sources**
-- [gateway_service.py:1-526](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L526)
+- [gateway_service.py:1-536](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L536)
 
 ### Agent Client
 **Updated** - Enhanced with new confirm stream functionality and session workspace methods.
@@ -937,7 +937,7 @@ MW-->>Uvicorn : response with logs/metrics
 - [app.py:1-44](file://products/platform-gateway/src/platform_gateway/app.py#L1-L44)
 
 ## Dependency Analysis
-**Updated** - Enhanced with new session workspace proxy dependencies.
+**Enhanced** - Enhanced with new session workspace proxy dependencies and improved error handling patterns.
 
 High-level dependencies:
 - main.py depends on app.py and runtime settings.
@@ -990,7 +990,7 @@ App --> Runtime["core/runtime.py"]
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
 - [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
-- [gateway_service.py:1-526](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L526)
+- [gateway_service.py:1-536](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L536)
 - [incident_client.py:1-193](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L1-L193)
 - [agent_client.py:1-212](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L212)
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
@@ -1008,7 +1008,7 @@ App --> Runtime["core/runtime.py"]
 - [README.md:1-46](file://products/platform-gateway/README.md#L1-L46)
 
 ## Performance Considerations
-**Updated** - Enhanced with new session workspace performance considerations.
+**Enhanced** - Enhanced with new session workspace performance considerations and improved error handling efficiency.
 
 - JWKS client caching reduces repeated key fetches; lifespan controlled by environment.
 - Delegated token per-user cache avoids frequent broker exchanges; refresh fraction triggers early renewal.
@@ -1016,7 +1016,8 @@ App --> Runtime["core/runtime.py"]
 - Health and readiness checks validate policy load and upstream connectivity to surface degraded states quickly.
 - **Enhanced**: Session workspace operations use efficient HTTP client with 10-second timeouts to prevent resource exhaustion.
 - **Enhanced**: Session listing and deletion operations benefit from server-side scoping, reducing unnecessary network overhead.
-- **New**: Session workspace error handling minimizes retry storms through consistent status code mapping.
+- **Enhanced**: Session workspace error handling minimizes retry storms through consistent status code mapping.
+- **Enhanced**: `list_sessions()` function implements efficient error handling with immediate 4xx passthrough to avoid unnecessary processing.
 - **New**: Confirmation result parsing occurs only once per stream to minimize overhead.
 - **New**: Audit event emission is fire-and-forget to avoid blocking confirm stream processing.
 - **Existing**: Policy matrix endpoint builds matrix efficiently using cached bundle with minimal overhead.
@@ -1027,7 +1028,7 @@ App --> Runtime["core/runtime.py"]
 [No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
-**Updated** - Enhanced with new session workspace and audit trail troubleshooting.
+**Enhanced** - Enhanced with new session workspace and audit trail troubleshooting with specific guidance on error handling patterns.
 
 Common issues and diagnostics:
 - Authentication failures:
@@ -1047,6 +1048,7 @@ Common issues and diagnostics:
 - **Enhanced**: Session workspace endpoint issues:
   - Upstream 4xx errors (unknown/foreign sessions, parked confirmations) pass through unchanged for better error visibility.
   - Transport failures and upstream 5xx errors map to 502 with appropriate detail messages.
+  - **Enhanced**: `list_sessions()` function specifically implements consistent error handling with "agent service session list failed" detail for 502 errors.
   - Server-side scoping ensures callers can only access their own sessions.
   - Consistent error handling across all session operations (create, list, read, delete).
 - **Enhanced**: Audit trail issues:
@@ -1075,6 +1077,7 @@ Operational tips:
 - **Enhanced**: Monitor session workspace endpoint performance and session lifecycle audit event volume.
 - **Enhanced**: Check session workspace error rates and upstream connectivity issues.
 - **Enhanced**: Validate session workspace policy rules and role assignments for session management workflows.
+- **Enhanced**: Monitor `list_sessions()` function error rates and verify proper 4xx passthrough behavior.
 - **New**: Monitor chat confirm endpoint performance and confirmation_decided audit event volume.
 - **New**: Check audit service connectivity and event ingestion success rates.
 - **New**: Validate chat:confirm policy rules and role assignments for HITL workflows.
@@ -1089,12 +1092,12 @@ Operational tips:
 - [tools.py:53-59](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L53-L59)
 - [skills.py:30-31](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L30-L31)
 - [sessions.py:29-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L29-L154)
-- [gateway_service.py:289-377](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L377)
+- [gateway_service.py:289-387](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L387)
 - [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
-- [gateway_service.py:416-477](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L416-L477)
+- [gateway_service.py:426-487](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L426-L487)
 - [audit_emitter.py:68-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L68-L99)
 
 ## Conclusion
-The Platform Gateway Service cleanly separates portal-facing security and control-plane concerns from tool execution capabilities. It enforces strong authentication and authorization, proxies to agent-platform securely with least-privilege delegated tokens, provides unified API access to the incident service with comprehensive policy enforcement and credential management, and now offers transparency through live permission matrix evaluation, workspace inventory discovery, and Human-in-the-Loop confirmation bridging with durable audit trails. The addition of complete session workspace lifecycle management demonstrates the gateway's extensibility in supporting complex interactive workflows while maintaining consistent security patterns and operational visibility. The session workspace proxy routes implement deny-by-default policy enforcement with proper error handling, server-side scoping to caller's own sessions, and durable audit trail coverage for complete session lifecycle monitoring. These enhancements enable operators to manage sessions with full audit coverage, approve or deny pending tool executions with durable audit trails, and maintain comprehensive visibility into platform operations while ensuring strict security boundaries and least-privilege access controls.
+The Platform Gateway Service cleanly separates portal-facing security and control-plane concerns from tool execution capabilities. It enforces strong authentication and authorization, proxies to agent-platform securely with least-privilege delegated tokens, provides unified API access to the incident service with comprehensive policy enforcement and credential management, and now offers transparency through live permission matrix evaluation, workspace inventory discovery, and Human-in-the-Loop confirmation bridging with durable audit trails. The addition of complete session workspace lifecycle management demonstrates the gateway's extensibility in supporting complex interactive workflows while maintaining consistent security patterns and operational visibility. The session workspace proxy routes implement deny-by-default policy enforcement with proper error handling, server-side scoping to caller's own sessions, and durable audit trail coverage for complete session lifecycle monitoring. These enhancements enable operators to manage sessions with full audit coverage, approve or deny pending tool executions with durable audit trails, and maintain comprehensive visibility into platform operations while ensuring strict security boundaries and least-privilege access controls. The enhanced error handling in `list_sessions()` and other session operations ensures consistent behavior across all session management endpoints, with proper distinction between client errors (4xx) and server errors (500+) for better debugging and operational clarity.
 
 [No sources needed since this section summarizes without analyzing specific files]

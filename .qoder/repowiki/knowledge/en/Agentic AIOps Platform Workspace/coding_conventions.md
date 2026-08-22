@@ -1,0 +1,6 @@
+- Each Python product follows a uniform internal layout with `src/<pkg>/api/routes`, `services`, `schemas`, `core/{config,metrics,observability,request_context,runtime,telemetry}`, and `__init__.py`/`app.py`/`main.py` entry points.
+- Inter-service contracts are declared as JSON Schema files under `shared/shared-contracts/schemas/` and consumed by products instead of being redefined locally.
+- Policy enforcement uses a canonical `policy-default.yaml` under `shared/shared-contracts/policies/` that is copied into each consuming product's `policies/` directory via `make sync-policy`.
+- Product versions are kept lockstep with the root `VERSION` file and validated by `make validate-version` using the script in `shared/shared-contracts/scripts/validate_version.py`.
+- Container images are built with a coordinated tag computed from `VERSION`, `IMAGE_TAG_PREFIX`, and `IMAGE_TAG_PROFILE`, then written to `.images.env` and referenced by the dev-k8s Kustomize overlay.
+- Tests mirror source structure under each product's `tests/` directory and cover routes, services, schemas, telemetry, and contract compliance.

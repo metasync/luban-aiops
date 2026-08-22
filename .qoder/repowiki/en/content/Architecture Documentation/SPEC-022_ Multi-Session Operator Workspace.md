@@ -16,6 +16,8 @@
 - [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
 - [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
 - [agent-chat-request.schema.json](file://shared/shared-contracts/schemas/agent-chat-request.schema.json)
+- [test_redis_session_store.py](file://products/agent-platform/tests/test_redis_session_store.py)
+- [test_postgres_session_store.py](file://products/agent-platform/tests/test_postgres_session_store.py)
 </cite>
 
 ## Update Summary
@@ -26,6 +28,7 @@
 - Documented mutating-dev kustomize profile for development environments
 - Updated HITL confirmation integration and transcript reconstruction capabilities
 - Revised authorization matrix with new session actions (session:list, session:delete)
+- **Added comprehensive SPEC-022 R-1 contract requirements for set-once title semantics with atomic Redis operations and full test coverage**
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -47,6 +50,7 @@ Key outcomes delivered:
 - Voice-readiness contract via optional modality metadata that never changes authorization or HITL behavior.
 - Environment-scoped mutating dev profile so dev deployments opt-in without changing base deny-by-default posture.
 - Authorization matrix updates and documentation reflecting new session actions.
+- **SPEC-022 R-1 contract requirements fully implemented with atomic set-once title semantics across all backends (Redis, Postgres, In-Memory) and comprehensive test coverage.**
 
 **Section sources**
 - [spec.md:5-13](file://docs/specs/SPEC-022-multi-session-operator-workspace/spec.md#L5-L13)
@@ -59,6 +63,7 @@ SPEC-022 spans multiple layers with comprehensive implementation:
 - Shared contracts extend chat request schema with modality metadata.
 - Kustomize overlays commit the mutating dev posture into dev-k8s while keeping base deny-by-default.
 - Authorization matrix documents role grants for new session actions.
+- **Comprehensive test suite covering SPEC-022 R-1 contract requirements including atomic title semantics, concurrent access safety, and backend-specific behaviors.**
 
 ```mermaid
 graph TB
@@ -66,6 +71,9 @@ Client["Client / Portal"] --> Gateway["Platform Gateway<br/>/api/v1/sessions"]
 Gateway --> Policy["Policy Engine<br/>session:list, session:read, session:delete"]
 Gateway --> Agent["Agent Platform v2<br/>/api/v2/sessions"]
 Agent --> Store["Session Store<br/>Postgres/Redis/Memory"]
+Store --> Redis["Redis Backend<br/>Atomic SET NX"]
+Store --> Postgres["Postgres Backend<br/>Server-side NULL guard"]
+Store --> Memory["In-Memory Backend<br/>Title state check"]
 Agent --> State["Agent State Store<br/>Kernel snapshots"]
 Agent --> HITL["HITL Confirmation Registry<br/>In-memory"]
 Gateway --> Audit["Audit Emitter<br/>session_created/deleted"]
@@ -74,7 +82,8 @@ Gateway --> Audit["Audit Emitter<br/>session_created/deleted"]
 **Diagram sources**
 - [sessions.py:29-153](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L29-L153)
 - [routes.py:334-419](file://products/agent-platform/src/agent_service/api/v2/routes.py#L334-L419)
-- [session_store.py:327-398](file://products/agent-platform/src/agent_service/services/session_store.py#L327-L398)
+- [session_store.py:176-358](file://products/agent-platform/src/agent_service/services/session_store.py#L176-L358)
+- [session_store.py:458-650](file://products/agent-platform/src/agent_service/services/session_store.py#L458-L650)
 - [session_transcript.py:30-64](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L64)
 - [hitl_confirmations.py:93-223](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L93-L223)
 - [gateway_service.py:225-259](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L225-L259)
@@ -91,10 +100,12 @@ Gateway --> Audit["Audit Emitter<br/>session_created/deleted"]
 - Platform-gateway proxies: enforce policy actions, log events, emit audit events for session lifecycle.
 - Schema extension: optional input_modality field in chat request across gateway and agent-platform schemas.
 - Mutating dev profile: committed kustomize overlay enabling mutating tools in dev only.
+- **SPEC-022 R-1 Contract: Atomic set-once title semantics ensuring first-turn titles are preserved across all backends with comprehensive test coverage.**
 
 **Section sources**
 - [routes.py:334-419](file://products/agent-platform/src/agent_service/api/v2/routes.py#L334-L419)
-- [session_store.py:327-398](file://products/agent-platform/src/agent_service/services/session_store.py#L327-L398)
+- [session_store.py:176-358](file://products/agent-platform/src/agent_service/services/session_store.py#L176-L358)
+- [session_store.py:458-650](file://products/agent-platform/src/agent_service/services/session_store.py#L458-L650)
 - [session_transcript.py:30-64](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L64)
 - [hitl_confirmations.py:93-223](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L93-L223)
 - [sessions.py:70-153](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L70-L153)
@@ -189,6 +200,11 @@ Success -- Yes --> ReturnOK["Return {session_id, deleted: true}"]
 - Postgres backend includes idempotent DDL adding title and last_active_at columns.
 - Touch and set_title are fail-open bookkeeping to avoid impacting chat turns.
 - Listing uses indexed queries with ordering and limit; memory/Redis backends sort client-side.
+- **SPEC-022 R-1 Contract Implementation**: All backends implement atomic set-once title semantics:
+  - **Redis Backend**: Uses `SET ... NX` command to atomically mint titles, preventing overwrites
+  - **Postgres Backend**: Server-side SQL constraint with `title IS NULL` guard ensures single assignment
+  - **In-Memory Backend**: Title state check prevents multiple assignments
+  - **Test Coverage**: Comprehensive tests verify atomicity, concurrent access safety, and backend-specific behaviors
 
 ```mermaid
 classDiagram
@@ -202,9 +218,16 @@ class SessionStore {
 +set_session_title(session_id, title)
 +is_ready()
 }
-class InMemorySessionStore
-class RedisSessionStore
-class PostgresSessionStore
+class InMemorySessionStore {
++set_session_title() : Title state check
+}
+class RedisSessionStore {
++set_session_title() : Atomic SET NX
++_overlay_title() : Merge title key
+}
+class PostgresSessionStore {
++set_session_title() : SQL NULL guard
+}
 SessionStore <|.. InMemorySessionStore
 SessionStore <|.. RedisSessionStore
 SessionStore <|.. PostgresSessionStore
@@ -212,13 +235,60 @@ SessionStore <|.. PostgresSessionStore
 
 **Diagram sources**
 - [session_store.py:46-73](file://products/agent-platform/src/agent_service/services/session_store.py#L46-L73)
-- [session_store.py:81-169](file://products/agent-platform/src/agent_service/services/session_store.py#L81-L169)
-- [session_store.py:176-319](file://products/agent-platform/src/agent_service/services/session_store.py#L176-L319)
-- [session_store.py:420-611](file://products/agent-platform/src/agent_service/services/session_store.py#L420-L611)
+- [session_store.py:159-163](file://products/agent-platform/src/agent_service/services/session_store.py#L159-L163)
+- [session_store.py:176-358](file://products/agent-platform/src/agent_service/services/session_store.py#L176-L358)
+- [session_store.py:458-650](file://products/agent-platform/src/agent_service/services/session_store.py#L458-L650)
 
 **Section sources**
-- [session_store.py:327-398](file://products/agent-platform/src/agent_service/services/session_store.py#L327-L398)
-- [session_store.py:519-591](file://products/agent-platform/src/agent_service/services/session_store.py#L519-L591)
+- [session_store.py:176-358](file://products/agent-platform/src/agent_service/services/session_store.py#L176-L358)
+- [session_store.py:458-650](file://products/agent-platform/src/agent_service/services/session_store.py#L458-L650)
+
+### SPEC-022 R-1 Contract: Set-Once Title Semantics
+**Updated** Comprehensive implementation of atomic set-once title semantics across all backends with full test coverage.
+
+- **Redis Implementation**: Titles stored in dedicated `session:title:{session_id}` keys with atomic `SET ... NX` command ensuring first-write-wins semantics
+- **Postgres Implementation**: Server-side SQL constraint using `UPDATE ... WHERE title IS NULL` preventing concurrent title assignments
+- **In-Memory Implementation**: Simple title state check preventing multiple assignments within process lifetime
+- **Test Coverage**: Extensive test suite covering:
+  - Atomic title minting and retrieval
+  - Concurrent access safety (no double-title wins)
+  - Touch operation safety (never clobbers minted titles)
+  - Missing session handling (no-op behavior)
+  - Cleanup on session deletion (title key removal)
+  - Length counting (excludes title keys)
+
+```mermaid
+flowchart TD
+SetTitle["set_session_title(session_id, title)"] --> CheckExists{"Session exists?"}
+CheckExists -- No --> ReturnNoop["Return (no-op)"]
+CheckExists -- Yes --> BackendType{"Backend Type"}
+BackendType -- Redis --> RedisNX["Redis: SET NX session:title:{id}"]
+BackendType -- Postgres --> PostgresSQL["Postgres: UPDATE WHERE title IS NULL"]
+BackendType -- Memory --> MemoryCheck["Memory: if title is None"]
+RedisNX --> RedisSuccess{"SET successful?"}
+PostgresSQL --> PostgresSuccess{"Rows affected > 0?"}
+MemoryCheck --> MemorySuccess{"Title was None?"}
+RedisSuccess -- Yes --> TitleMinted["Title minted successfully"]
+RedisSuccess -- No --> TitleExists["Title already exists (ignore)"]
+PostgresSuccess -- Yes --> TitleMinted
+PostgresSuccess -- No --> TitleExists
+MemorySuccess -- Yes --> TitleMinted
+MemorySuccess -- No --> TitleExists
+TitleMinted --> Complete["Complete"]
+TitleExists --> Complete
+ReturnNoop --> Complete
+```
+
+**Diagram sources**
+- [session_store.py:320-334](file://products/agent-platform/src/agent_service/services/session_store.py#L320-L334)
+- [session_store.py:614-629](file://products/agent-platform/src/agent_service/services/session_store.py#L614-L629)
+- [session_store.py:159-163](file://products/agent-platform/src/agent_service/services/session_store.py#L159-L163)
+
+**Section sources**
+- [session_store.py:176-358](file://products/agent-platform/src/agent_service/services/session_store.py#L176-L358)
+- [session_store.py:458-650](file://products/agent-platform/src/agent_service/services/session_store.py#L458-L650)
+- [test_redis_session_store.py:114-160](file://products/agent-platform/tests/test_redis_session_store.py#L114-L160)
+- [test_postgres_session_store.py:193-207](file://products/agent-platform/tests/test_postgres_session_store.py#L193-L207)
 
 ### Transcript Reconstruction
 - Best-effort extraction from kernel state snapshot; returns availability flag and empty transcript on failure.
@@ -285,6 +355,7 @@ Iterate --> Done["Return (true, turns)"]
 - Platform-gateway depends on policy engine, audit emitter, and agent client for proxies.
 - Shared contracts define schemas validated by both services.
 - Kustomize overlays compose runtime profiles and config maps for environment-specific posture.
+- **Test dependencies include fakeredis for Redis backend testing and mock database connections for Postgres testing.**
 
 ```mermaid
 graph LR
@@ -297,6 +368,9 @@ GWRoutes --> AgentClient["Agent Client"]
 GWRoutes --> Audit["Audit Emitter"]
 AgentClient --> V2Routes
 Policy --> PolicyBundle["Policy Bundle"]
+Tests["Test Suite"] --> RedisStore["RedisSessionStore"]
+Tests --> PostgresStore["PostgresSessionStore"]
+Tests --> MemoryStore["InMemorySessionStore"]
 ```
 
 **Diagram sources**
@@ -304,6 +378,8 @@ Policy --> PolicyBundle["Policy Bundle"]
 - [gateway_service.py:225-259](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L225-L259)
 - [sessions.py:70-153](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L70-L153)
 - [policy-default.yaml:19-44](file://shared/shared-contracts/policies/policy-default.yaml#L19-L44)
+- [test_redis_session_store.py:1-274](file://products/agent-platform/tests/test_redis_session_store.py#L1-L274)
+- [test_postgres_session_store.py:1-327](file://products/agent-platform/tests/test_postgres_session_store.py#L1-L327)
 
 **Section sources**
 - [policy-default.yaml:19-44](file://shared/shared-contracts/policies/policy-default.yaml#L19-L44)
@@ -314,6 +390,11 @@ Policy --> PolicyBundle["Policy Bundle"]
 - Transcript extraction is best-effort and avoids heavy transformations; failures return quickly with availability flag.
 - HITL registry is in-memory; accurate within single replica and documented as such.
 - Bookkeeping (title minting, last_active_at touch) is fail-open to prevent chat latency spikes.
+- **SPEC-022 R-1 Contract Performance**: Atomic title operations are optimized:
+  - Redis: Single `SET NX` operation with TTL management
+  - Postgres: Server-side constraint evaluation minimizes application logic
+  - In-Memory: Simple dictionary lookup for title state
+  - All operations are O(1) and non-blocking
 
 ## Troubleshooting Guide
 - Unknown or foreign session IDs return 404 to prevent enumeration; verify caller owns the session.
@@ -321,6 +402,10 @@ Policy --> PolicyBundle["Policy Bundle"]
 - Transcript unavailable indicates missing or corrupt kernel state snapshot; live stream evidence remains available during streaming.
 - Policy denial (403) indicates missing action grant; ensure roles include session:list or session:delete where required.
 - Mutating tools disabled in non-dev environments unless the mutating-dev profile is applied; check ConfigMap and RBAC.
+- **SPEC-022 R-1 Contract Issues**: 
+  - Title not appearing: Verify session exists before setting title; check backend connectivity
+  - Multiple title attempts: First-write-wins semantics apply; subsequent attempts are ignored
+  - Title persistence: Ensure proper TTL configuration and backend health monitoring
 
 **Section sources**
 - [routes.py:398-419](file://products/agent-platform/src/agent_service/api/v2/routes.py#L398-L419)
@@ -331,10 +416,15 @@ Policy --> PolicyBundle["Policy Bundle"]
 ## Conclusion
 SPEC-022 has been successfully delivered in version 0.8.0, establishing durable, auditable, and policy-gated session management foundations for the operator workspace. It introduces a robust session API, voice-readiness contract discipline, and a committed mutating dev profile while deferring portal UI work to a dedicated rebuild effort. The result is a safer, more observable, and deployable foundation for multi-session workflows.
 
+**Enhanced with SPEC-022 R-1 Contract Requirements**: The implementation now includes comprehensive atomic set-once title semantics across all backends (Redis, Postgres, In-Memory) with extensive test coverage ensuring data integrity and concurrent access safety. This provides a solid foundation for session identification and organization in multi-user environments.
+
 ## Appendices
 - Deferred portal UI requirements are preserved verbatim in the spec's Appendix A for handoff to the rebuild spec.
 - Delivery tasks and version bump to 0.8.0 are tracked in the tasks file.
+- **SPEC-022 R-1 Contract Test Coverage**: Comprehensive test suite validates atomic title semantics, concurrent access safety, and backend-specific behaviors across Redis, Postgres, and In-Memory implementations.
 
 **Section sources**
 - [spec.md:159-199](file://docs/specs/SPEC-022-multi-session-operator-workspace/spec.md#L159-L199)
 - [tasks.md:40-45](file://docs/specs/SPEC-022-multi-session-operator-workspace/tasks.md#L40-L45)
+- [test_redis_session_store.py:114-160](file://products/agent-platform/tests/test_redis_session_store.py#L114-L160)
+- [test_postgres_session_store.py:193-207](file://products/agent-platform/tests/test_postgres_session_store.py#L193-L207)

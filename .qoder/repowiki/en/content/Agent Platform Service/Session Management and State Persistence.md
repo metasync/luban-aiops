@@ -31,13 +31,13 @@
 
 ## Update Summary
 **Changes Made**
-- Added Postgres session store backend alongside existing Redis and memory backends (SPEC-016)
-- Updated architecture diagrams to reflect multi-backend support with fail-open fallback behavior
-- Enhanced data models section to include Postgres schema and idle-TTL refresh mechanism
-- Added bounded sweep mechanism documentation for expired session cleanup
-- Updated configuration section to document SESSION_STORE_BACKEND and SESSION_DB_URL environment variables
-- Expanded disaster recovery procedures to cover Postgres-specific scenarios
-- Added comprehensive test coverage documentation for all three backends
+- Enhanced Redis session store with atomic title storage implementation per SPEC-022 R-1 contract requirements
+- Added new `_title_key()` method for dedicated title key management
+- Implemented `_overlay_title()` method for merging atomically-minted titles into session records
+- Improved cleanup logic to handle title key deletion alongside session deletion
+- Enforced set-once title semantics using Redis SET NX operations
+- Updated test coverage to validate atomic title minting and overlay behavior
+- Enhanced documentation to reflect the separation of title storage from session blob storage
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -53,6 +53,8 @@
 
 ## Introduction
 This document explains session management and state persistence for the Agent Platform, focusing on how sessions are created, updated, retrieved, and cleaned up across multiple storage backends. The platform now supports three pluggable session stores: in-memory (development), Redis (legacy deployments), and Postgres (production). It covers the unified interface abstraction, serialization formats, data models, security measures, performance considerations for large conversations, migration strategies between backends, and disaster recovery procedures. The goal is to provide both a conceptual overview and code-level insights to help developers operate and extend session functionality safely and efficiently.
+
+**Updated** Enhanced Redis backend now implements atomic title storage with set-once semantics per SPEC-022 R-1 contract requirements, ensuring server-minted titles are never overwritten once established.
 
 ## Project Structure
 Session-related logic resides primarily in the agent-platform service with a unified interface supporting multiple backends:
@@ -143,6 +145,8 @@ Key responsibilities:
 - Support idempotent operations where applicable
 - Implement fail-open fallback when primary backend is unavailable
 
+**Updated** Redis backend now implements atomic title storage with dedicated keys and set-once semantics to ensure server-minted titles are never overwritten once established.
+
 **Section sources**
 - [session_store.py:47-66](file://products/agent-platform/src/agent_service/services/session_store.py#L47-L66)
 - [session_store.py:536-615](file://products/agent-platform/src/agent_service/services/session_store.py#L536-L615)
@@ -191,6 +195,8 @@ Note over Factory,Store : "Fail-open : Postgres/Redis failure → InMemory"
 - Append Messages: Efficiently appends conversation turns while maintaining order and size limits
 - Cleanup: Uses TTL-based expiration; Postgres backend includes bounded sweep mechanism for expired row cleanup
 
+**Updated** Title management: Server-minted titles are stored in separate Redis keys with atomic set-once semantics, preventing overwrites once established.
+
 ```mermaid
 flowchart TD
 Start(["Function Entry"]) --> Validate["Validate Input"]
@@ -199,7 +205,7 @@ Valid --> |No| ReturnError["Return Validation Error"]
 Valid --> |Yes| SelectBackend["Select Backend via Factory"]
 SelectBackend --> BackendType{"Backend Type"}
 BackendType --> |Memory| MemoryPersist["InMemory Storage"]
-BackendType --> |Redis| RedisPersist["Redis Storage"]
+BackendType --> |Redis| RedisPersist["Redis Storage with Atomic Titles"]
 BackendType --> |Postgres| PostgresPersist["Postgres Storage"]
 MemoryPersist --> Success{"Persist Success?"}
 RedisPersist --> Success
@@ -232,6 +238,7 @@ The platform now supports three distinct storage backends, each optimized for di
 - JSON blob storage with Redis-native EXPIRE for TTL
 - Sorted sets for user-scoped session listing
 - Native atomic operations and high throughput
+- **Enhanced**: Dedicated title storage with atomic set-once semantics
 - Suitable for legacy deployments and high-performance scenarios
 
 #### PostgresSessionStore (SPEC-016)
@@ -269,6 +276,24 @@ SESSION ||--|| INDEX_ACCESSED : "indexed"
 - [session_store.py:157-270](file://products/agent-platform/src/agent_service/services/session_store.py#L157-L270)
 - [session_store.py:349-495](file://products/agent-platform/src/agent_service/services/session_store.py#L349-L495)
 
+### Redis Backend Implementation Details
+The Redis backend has been enhanced with atomic title storage implementation per SPEC-022 R-1 contract requirements:
+
+- **Dedicated Title Keys**: Titles are stored in separate `session:title:{session_id}` keys, isolated from session blob storage
+- **Atomic Set-Once Semantics**: Uses Redis `SET ... NX` operations to ensure titles can only be set once, preventing overwrites
+- **Title Overlay Mechanism**: `_overlay_title()` method merges atomically-minted titles into session records during read operations
+- **Improved Cleanup Logic**: Title keys are properly deleted alongside session deletion to prevent orphaned title keys
+- **TTL Management**: Title keys inherit the same TTL as their corresponding sessions
+- **Concurrent Safety**: Two concurrent first turns cannot both win the title minting race condition
+
+**Updated** The title storage is completely separate from the session blob, ensuring that touch operations cannot clobber minted titles.
+
+**Section sources**
+- [session_store.py:202-203](file://products/agent-platform/src/agent_service/services/session_store.py#L202-L203)
+- [session_store.py:255-268](file://products/agent-platform/src/agent_service/services/session_store.py#L255-L268)
+- [session_store.py:320-334](file://products/agent-platform/src/agent_service/services/session_store.py#L320-L334)
+- [session_store.py:286-300](file://products/agent-platform/src/agent_service/services/session_store.py#L286-L300)
+
 ### Postgres Backend Implementation Details
 The Postgres backend implements SPEC-016 requirements with sophisticated TTL management:
 
@@ -289,6 +314,7 @@ The Postgres backend implements SPEC-016 requirements with sophisticated TTL man
 - Encryption: Secrets and sensitive fields are encrypted at rest and in transit; TLS enforced for database connections
 - Auditability: Operations emit structured logs and metrics for compliance and monitoring
 - Fail-Open Security: When primary backend fails, service falls back to in-memory storage with warning logs and metrics
+- **Enhanced**: Title integrity protection ensures server-minted titles cannot be tampered with through normal session operations
 
 **Section sources**
 - [session_store.py:564-572](file://products/agent-platform/src/agent_service/services/session_store.py#L564-L572)
@@ -299,6 +325,7 @@ The Postgres backend implements SPEC-016 requirements with sophisticated TTL man
 - Retrieve session: GET by ID; returns full session state or not found
 - Update session: PATCH with allowed fields; returns updated state
 - Append message: POST to append a turn; enforces ordering and size limits
+- **Enhanced**: Title management: First user turn mints a server-side title with atomic set-once semantics
 - Cleanup: TTL-based expiration; Postgres backend includes automatic sweep mechanism
 
 **Section sources**
@@ -312,6 +339,7 @@ The Postgres backend implements SPEC-016 requirements with sophisticated TTL man
 - Caching: Cache frequently accessed session metadata near the application layer
 - Backpressure: Rate-limit writes and reads during high load; use queues for batch updates
 - Backend Selection: Choose appropriate backend based on workload characteristics
+- **Enhanced**: Separate title storage reduces session blob size and improves cache efficiency
 
 **Section sources**
 - [session_store.py:73-150](file://products/agent-platform/src/agent_service/services/session_store.py#L73-L150)
@@ -378,6 +406,8 @@ class InMemorySessionStore {
 class RedisSessionStore {
 +client : redis.Redis
 +ttl_seconds : int
++_title_key(session_id) : string
+_overlay_title(record) : void
 }
 class PostgresSessionStore {
 +db_url : string
@@ -415,6 +445,7 @@ SessionService --> Observability : "traces/logs"
 - Monitoring: Track latency percentiles, error rates, and backend utilization
 - Scaling: Horizontal scaling of application instances behind a load balancer; choose appropriate backend for workload
 - Backend Selection: Use Postgres for production workloads, Redis for high-throughput scenarios, in-memory for development
+- **Enhanced**: Separate title storage improves cache hit ratios and reduces session blob sizes
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -424,6 +455,7 @@ Common issues and resolutions:
 - High memory usage: Identify oversized sessions; implement chunking and compression
 - Data inconsistency: Review atomic update patterns and rollback strategies
 - Postgres-specific issues: Check database connectivity, table existence, and index health
+- **Enhanced**: Title consistency issues: Verify atomic title minting and overlay behavior in Redis backend
 
 Operational checks:
 - Health endpoints for all backends and session service
@@ -438,6 +470,8 @@ Operational checks:
 
 ## Conclusion
 The session management system now provides robust, multi-backend support with fail-open resilience, enabling flexible deployment strategies across development, staging, and production environments. The unified interface abstracts storage complexity while maintaining performance and reliability guarantees. By adhering to shared schemas, implementing clear lifecycle operations, and following performance and disaster recovery best practices, the platform ensures reliable session handling across diverse workloads and storage backends.
+
+**Updated** The enhanced Redis backend with atomic title storage ensures server-minted titles maintain integrity and are never overwritten once established, providing stronger guarantees for multi-session operator workspace functionality.
 
 ## Appendices
 
@@ -472,7 +506,9 @@ The session management system now provides robust, multi-backend support with fa
 - Mock Redis client for isolated testing
 - Integration tests for backend selection and fallback behavior
 - Performance benchmarking across different backends
+- **Enhanced**: Title atomicity tests validating set-once semantics and overlay behavior
 
 **Section sources**
 - [test_postgres_session_store.py:1-286](file://products/agent-platform/tests/test_postgres_session_store.py#L1-L286)
-- [test_redis_session_store.py:1-200](file://products/agent-platform/tests/test_redis_session_store.py#L1-L200)
+- [test_redis_session_store.py:1-274](file://products/agent-platform/tests/test_redis_session_store.py#L1-L274)
+- [test_session_workspace.py:284-311](file://products/agent-platform/tests/test_session_workspace.py#L284-L311)
