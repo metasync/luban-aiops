@@ -218,8 +218,21 @@ export function useChatStream(): ChatStreamApi {
         await consumeStream(opened.chunks, (event) =>
           handleEvent(turn, event),
         );
+        // Natural stream end completes the turn even when no terminal
+        // frame arrives (legacy parity: the kernel may close the stream
+        // after its last delta without a message_end). Parked
+        // confirmations keep their pending marker instead.
+        if (!turn.confirmationPending) {
+          turn.completed = true;
+        }
       } catch (error) {
-        if (!isAbortError(error)) {
+        if (isAbortError(error)) {
+          // A session switch closed this stream: keep the partial reply
+          // visible instead of leaving the bubble loading forever.
+          if (!turn.confirmationPending) {
+            turn.completed = true;
+          }
+        } else {
           turn.error =
             error instanceof StreamOpenError && error.status === 401
               ? "Not authenticated. Please sign in from the sidebar first."
@@ -292,6 +305,9 @@ export function useChatStream(): ChatStreamApi {
             "The confirmation stream ended unexpectedly.",
           );
         }
+        // A resumed stream that closes without a terminal frame still
+        // completes the parked turn (legacy parity).
+        turn.completed = true;
       } catch (error) {
         if (error instanceof StreamOpenError && error.status === 410) {
           lockCard(
@@ -305,6 +321,11 @@ export function useChatStream(): ChatStreamApi {
         } else if (!isAbortError(error)) {
           decided.note =
             error instanceof Error ? error.message : String(error);
+        } else {
+          // Aborted by a session switch: settle the parked turn.
+          if (!turn.confirmationPending) {
+            turn.completed = true;
+          }
         }
       } finally {
         endStream();

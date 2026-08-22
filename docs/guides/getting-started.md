@@ -145,9 +145,12 @@ and open `http://localhost:18080` in your browser.
 Use this checklist to confirm the full platform is operational:
 
 - [ ] **Portal login**: click Login, complete Keycloak OIDC authentication, return to the portal
-- [ ] **Session creation**: create a new chat session
+- [ ] **Session creation**: create a new chat session (the session panel lists it with
+  title and relative last-active; multiple sessions can coexist and be switched)
 - [ ] **Agent reply**: send a prompt (e.g. "What pods are running?") and receive a streamed
   response
+- [ ] **Voice input** *(optional, Chrome/Edge)*: click the microphone in the composer,
+  dictate a prompt, and confirm the turn submits (audited with `input_modality: voice`)
 - [ ] **Tool invocation**: the agent should invoke `k8s.list_pods` (visible in the response)
 - [ ] **Evidence panel**: tool call details appear in the collapsible evidence group below
   the reply (tool name, status badge, duration, data summary)

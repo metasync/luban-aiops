@@ -16,13 +16,10 @@ export default defineConfig({
   define: {
     __PLATFORM_VERSION__: JSON.stringify(platformVersion),
   },
-  // Coexistence serving path (nginx.conf): the compiled SPA ships at /next/
-  // until stage 6 flips the runtime root to the hashed bundle.
-  base: "/next/",
   build: {
-    // The runtime stage serves web-ui/dist; content-hash filenames make
-    // the hashed assets immutable-cacheable while index.html stays
-    // no-store (nginx.conf, SPEC-023 R-1).
+    // The runtime stage serves web-ui/dist at / (nginx.conf); content-hash
+    // filenames make the hashed assets immutable-cacheable while index.html
+    // stays no-store (SPEC-023 R-1).
     outDir: "../dist",
     emptyOutDir: true,
   },

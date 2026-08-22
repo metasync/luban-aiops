@@ -2,10 +2,11 @@
 
 ## Status
 
-- status: `in-progress`
+- status: `delivered`
 - owner: chi
 - created: 2026-08-22
 - approved: 2026-08-22
+- delivered: 2026-08-22 (0.9.0)
 - release slice: R5 operator workspace — second slice (0.9.0 train)
 - related ADRs: none new; consumes SPEC-022 Appendix A (deferred portal UI
   contract) verbatim, re-asserts SPEC-020 (click-gated HITL) and SPEC-022

@@ -722,3 +722,43 @@ curl -s -H "X-User-ID: $USER" \
   the delete. Expired parks still block deletion until they are resolved:
   the flag is TTL-agnostic on purpose, so a stale confirmation card is
   closed deliberately rather than silently dropped.
+
+## Symptom: Portal shows a stale UI after a redeploy
+
+**Most likely cause:** A browser tab opened before the deploy kept the old
+`index.html`. The rebuilt portal (SPEC-023) serves hashed `/assets/*` with
+`Cache-Control: immutable`, so the only mutable document is `index.html`
+(`no-store`); a stale tab keeps referencing the previous bundle until it
+reloads the shell.
+
+**Diagnostic:**
+
+```bash
+# Shell must be no-store; hashed assets immutable
+curl -sI http://localhost:18080/ | grep -i cache-control
+curl -sI http://localhost:18080/assets/<hashed>.js | grep -i cache-control
+```
+
+**Resolution:**
+
+- Reload the tab (the fresh `index.html` points at the new hashed bundle).
+  No manual cache busting is needed: asset filenames change with every
+  build, so old assets are never reused by a new shell.
+
+## Symptom: Voice input microphone button is missing or does nothing
+
+**Most likely cause:** Voice composition uses the browser's Web Speech API
+(SPEC-023 R-4). Browsers without `SpeechRecognition`/`webkitSpeechRecognition`
+(e.g. Firefox) show a disabled microphone with a tooltip; nothing is sent to
+the backend. Recognition also requires microphone permission and a browser
+supporting the selected language.
+
+**Resolution:**
+
+- Use Chrome or Edge (desktop), grant microphone permission, and retry.
+- If recognition errors appear above the composer (not-allowed, no-speech,
+  audio-capture, network), they map 1:1 to the browser's error codes.
+- Switch the recognition language in the composer selector (en-US / zh-CN);
+  the choice drives the recognizer only and is never sent to the platform.
+- Voice turns are audited with `details.input_modality: voice` on the
+  `chat_started` event; approval/HITL behavior never changes with modality.

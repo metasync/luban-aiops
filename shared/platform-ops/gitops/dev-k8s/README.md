@@ -154,7 +154,7 @@ Each profile contributes a committed non-secret `ConfigMap` named `agent-platfor
 
 That keeps provider switching Git-diffable and aligned with a future GitOps reconciliation flow.
 
-The `web-ui` image serves the static portal through `nginx` and proxies `/api/` requests to the in-cluster `platform-gateway` service. That keeps the browser entrypoint simple for development verification and avoids a separate CORS layer in this first slice.
+The `web-ui` image serves the rebuilt SPA portal (Vite + React on antd / Ant Design X, SPEC-023) through `nginx` and proxies `/api/` requests to the in-cluster `platform-gateway` service. That keeps the browser entrypoint simple for development verification and avoids a separate CORS layer in this first slice. The image build is multi-stage: a Node stage compiles the bundle from `products/operator-portal/web-ui/app/` (injecting the root `VERSION` as `PLATFORM_VERSION`), and the runtime stage serves it with immutable-cache hashed `/assets/*` plus a `no-store` `index.html` SPA fallback — deploys roll over on reload with no cache busting.
 
 ### Portal Ingress (HTTPRoute)
 

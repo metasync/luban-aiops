@@ -29,14 +29,30 @@ This project covers:
 
 Current implementation artifacts:
 
-- `Dockerfile`
-- `nginx.conf`
-- `web-ui/index.html`
-- `web-ui/app.js`
-- `web-ui/styles.css`
+- `Dockerfile` (multi-stage: Node build → nginx runtime)
+- `nginx.conf` (immutable-cache hashed assets, no-store SPA shell, `/api/` proxy)
+- `web-ui/app/` — Vite + React 18 + TypeScript SPA on antd / Ant Design X
+  (SPEC-023 rebuild; sources under `src/`, Vitest unit tests under `src/**/__tests__/`)
+
+Build and develop:
+
+- `npm ci && npm run dev` inside `web-ui/app/` (proxies `/api` to localhost:8080)
+- `npm test` runs the Vitest suite; `make build` produces the image with the
+  root `VERSION` injected as `PLATFORM_VERSION` at bundle time
 
 Current browser baseline capabilities:
 
+- multi-session workspace: a session panel lists operator–agent sessions with
+  titles, relative last-active, and amber *awaiting approval* badges;
+  switching sessions aborts/repoints the stream, loads the transcript, and
+  keeps confirmation cards anchored to the parking session; sessions can be
+  deleted with an in-UI confirm (parked sessions refuse with 409) (SPEC-022,
+  SPEC-023)
+- voice input: a composer microphone button performs browser speech-to-text
+  (Web Speech API, no audio stored) and submits turns with
+  `input_modality=voice`; a language selector (en-US / zh-CN, defaulting from
+  the browser locale and persisted locally) drives the recognizer only
+  (SPEC-023)
 - two-column app shell: a left sidebar carries the logo and the function
   list; the main column shows one function view at a time (Chat, Settings &
   Debug, Audit trail) with state preserved across switches; narrow

@@ -13,6 +13,55 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.9.0 — 2026-08-22
+
+### Added — SPEC-023: Portal framework rebuild (multi-session workspace UI on Ant Design X)
+
+- **Framework foundation and build toolchain** (SPEC-023 R-1): the operator
+  portal is rebuilt as a Vite + React 18 + TypeScript SPA on antd 6 and Ant
+  Design X under `products/operator-portal/web-ui/app/` (Vitest unit suite).
+  The image build gains a Node stage that compiles the bundle with the root
+  `VERSION` injected as `PLATFORM_VERSION` (asserted by
+  `make validate-version`); nginx serves hashed `/assets/*` immutable and the
+  SPA shell `no-store`. During the rebuild the SPA shipped at `/next/`
+  alongside the vanilla trio; delivery flips the runtime root to the bundle
+  and removes the legacy `app.js`/`styles.css`/`index.html` tree.
+- **Platform-owned SSE contract adapter** (SPEC-023 R-2): `fetch` +
+  `ReadableStream` transport with abort-controller session switching, a
+  schema v6 decoder mapped 1:1 from the vanilla dispatch (deltas, tool
+  frames, confirmation frames, error frames, truncation-locked cards), and a
+  `useChatStream()` hook exposing typed models; fixture tests cover every
+  schema v6 event type.
+- **Multi-session workspace UI** (SPEC-023 R-3, consuming SPEC-022 Appendix
+  A): session panel with titles, relative last-active, and amber *awaiting
+  approval* badges (30s poll); switch/resume with transcript load and an
+  explicit `transcript_available=false` state; in-UI session delete with 409
+  parked refusal and neutral 404; confirmation cards stay anchored to the
+  parking session across switches; incidents gain *Continue in chat*
+  deep links that pin `incident-<id>` sessions into the panel.
+- **Voice input** (SPEC-023 R-4): composer microphone performs browser
+  speech-to-text (Web Speech API; no audio stored) and submits turns with
+  `input_modality=voice`; a recognition-language selector (en-US / zh-CN,
+  browser-locale default, `localStorage` persistence) drives the recognizer
+  only and never reaches the backend; confirmation decisions never carry
+  modality (Invariant II, test-pinned).
+- **View migration parity** (SPEC-023 R-5): audit trail (filters, cursor
+  pagination, expandable envelopes, auditor/platform-admin gate),
+  permissions matrix, tools and skills inventories, and the incidents
+  list/detail/triage/dispatch/report flows are rebuilt on antd primitives
+  with the legacy role-scoped visibility and the 15s incident auto-refresh
+  preserved.
+- **Docs and living state** (SPEC-023 R-6): operator-portal README, operator
+  guide, configuration reference, troubleshooting guide, and dev-k8s README
+  updated for the rebuilt portal (build step, cache behavior, voice
+  availability); 0.9.0 version lockstep across all products.
+- **In-release walkthrough fix**: the stream hook completes a turn when the
+  stream closes naturally (or is abort-closed by a session switch) without
+  a `message_end` frame — live capture showed the kernel may close right
+  after the last delta with empty `message_delta` frames; parked
+  confirmation turns keep their pending marker (fixture test pins the
+  behavior).
+
 ## 0.8.1 — 2026-08-22
 
 Patch release closing the post-v0.8.0 code review. No API, contract, or

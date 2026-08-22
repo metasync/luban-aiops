@@ -7,6 +7,18 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-22-portal-framework-rebuild.md`
+  - delivers SPEC-023 (v0.9.0): the operator portal rebuilt as a
+    Vite + React 18 + TypeScript SPA on antd / Ant Design X — a
+    platform-owned SSE contract adapter (schema v6, unit-tested), the
+    SPEC-022 multi-session workspace UI (session panel, switch/resume
+    with transcripts, anchored confirmation cards, parked-delete 409
+    posture, incident deep links), browser voice composition with a
+    recognition-language selector (`input_modality=voice` metadata only,
+    HITL stays click-gated), full view-migration parity (audit,
+    permissions, tools, skills, incidents) with role-scoped navigation,
+    immutable-cache hashed assets with a no-store SPA shell, and the
+    vanilla trio removed at delivery
 - `2026-08-22-post-release-hardening.md`
   - closes v0.8.1: post-v0.8.0 code-review hardening — atomic set-once
     Redis session titles (dedicated NX title key), gateway session-list

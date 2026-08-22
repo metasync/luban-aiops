@@ -136,4 +136,4 @@ Mechanical enforcement:
 | `SPEC-020` | HITL confirmation bridging — kernel ASK to portal approve/deny, `chat:confirm` action, `confirmation_decided` audit | `delivered` |
 | `SPEC-021` | Bounded mutating actions — first approval-gated write tool (`k8s.delete_pod`), `tools:mutate` action, Approval and HITL Governance Guide | `delivered` |
 | `SPEC-022` | Multi-session foundations — session lifecycle API with transcripts and parked-confirmation flags, voice-readiness contract, `mutating-dev` deployment profile (portal UI deferred to the rebuild spec) | `delivered` |
-| `SPEC-023` | Portal framework rebuild — multi-session workspace UI on Ant Design X behind a platform-owned SSE contract adapter (consumes SPEC-022 Appendix A) | `draft` |
+| `SPEC-023` | Portal framework rebuild — multi-session workspace UI on Ant Design X behind a platform-owned SSE contract adapter (consumes SPEC-022 Appendix A) | `delivered` |

@@ -8,8 +8,6 @@ any drift between VERSION and:
   - products/*/pyproject.toml          ([project] version)
   - products/*/src/*/metadata.py       (SERVICE_VERSION)
   - products/*/src/*/__init__.py       (__version__, where present)
-  - products/operator-portal/web-ui/app.js (PLATFORM_VERSION, until the
-    SPEC-023 stage-6 removal of the legacy vanilla UI)
   - products/operator-portal/web-ui/app/vite.config.ts (SPEC-023: the
     build-time PLATFORM_VERSION injection must keep reading the root
     VERSION file)
@@ -31,7 +29,6 @@ from pathlib import Path
 SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 SERVICE_VERSION_RE = re.compile(r'^SERVICE_VERSION = "([^"]+)"', re.MULTILINE)
 DUNDER_VERSION_RE = re.compile(r'^__version__ = "([^"]+)"', re.MULTILINE)
-PORTAL_VERSION_RE = re.compile(r'const PLATFORM_VERSION = "v([^"]+)";')
 # SPEC-023 R-1: the rebuild injects PLATFORM_VERSION at build time from the
 # root VERSION file; assert the injection wiring instead of a literal.
 VITE_VERSION_READ_RE = re.compile(
@@ -118,15 +115,9 @@ def main() -> int:
                 continue
             check_file(errors, init, DUNDER_VERSION_RE, product, expected)
 
-    # Portal version constant. The legacy vanilla app.js keeps its literal
-    # until SPEC-023 stage 6 removes it; the Vite rebuild derives
+    # Portal version constant. The Vite rebuild (SPEC-023) derives
     # PLATFORM_VERSION from the root VERSION file at build time, so we
-    # assert the injection wiring in vite.config.ts instead.
-    legacy_app = products_dir / "operator-portal" / "web-ui" / "app.js"
-    if legacy_app.is_file():
-        check_file(
-            errors, legacy_app, PORTAL_VERSION_RE, "operator-portal", expected
-        )
+    # assert the injection wiring in vite.config.ts.
     vite_config = (
         products_dir / "operator-portal" / "web-ui" / "app" / "vite.config.ts"
     )

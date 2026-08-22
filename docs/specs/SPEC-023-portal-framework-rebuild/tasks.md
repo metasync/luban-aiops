@@ -41,18 +41,18 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 - [x] Incidents view: list/detail/triage, connector outcomes, session pinning (`web-ui/app/src/views/incidents/`)
 - [x] Sectioned navigation auto-hide derived from token roles + policy matrix endpoint (SPEC-019 parity) — role-derived sections in `App.tsx`; matrix endpoint consumed by the permissions view
 - [x] Evidence panel parity: inline anchored turn groups with full-output expander (SPEC-011 R-4) — delivered with the chat view (`web-ui/app/src/chat/ChatView.tsx`)
-- [ ] Remove the vanilla web-ui tree once parity is complete (`products/operator-portal/web-ui/app.js`, `styles.css`, legacy `index.html`)
+- [x] Remove the vanilla web-ui tree once parity is complete (`products/operator-portal/web-ui/app.js`, `styles.css`, legacy `index.html`)
 
 ## R-6: Documentation and living state
 
-- [ ] Update operator portal README, operator guide, configuration reference, troubleshooting guide, dev-k8s README (build step, cache behavior, voice availability; drop single-session language)
-- [ ] `CHANGELOG.md` entry referencing SPEC-023
-- [ ] Release note following the established structure + release-notes index entry
-- [ ] Spec index and roadmap backlog updated; spec status set to `delivered`
+- [x] Update operator portal README, operator guide, configuration reference, troubleshooting guide, dev-k8s README (build step, cache behavior, voice availability; drop single-session language)
+- [x] `CHANGELOG.md` entry referencing SPEC-023
+- [x] Release note following the established structure + release-notes index entry
+- [x] Spec index and roadmap backlog updated; spec status set to `delivered`
 
 ## Delivery Gate
 
-- [ ] all acceptance criteria in `spec.md` verified (unit + live walkthrough on dev-k8s: login → multi-session create/switch/resume → voice turn → parked badge + anchored approve/deny → delete 409-then-success → incident deep link → per-role visibility)
-- [ ] `make verify` green including version lockstep; `make build` + `make deploy` green
-- [ ] living state docs updated (see spec `Impact` section)
-- [ ] spec status set to `delivered`
+- [x] all acceptance criteria in `spec.md` verified (unit + live walkthrough on dev-k8s: login → multi-session create/switch/resume → voice turn → parked badge + anchored approve/deny → delete 409-then-success → incident deep link → per-role visibility) — voice and HITL anchoring pinned by unit tests (browser mic/mutating opt-in unavailable in the automated walkthrough); the walkthrough surfaced and fixed one stream-completion defect
+- [x] `make verify` green including version lockstep; `make build` + `make deploy` green
+- [x] living state docs updated (see spec `Impact` section)
+- [x] spec status set to `delivered`

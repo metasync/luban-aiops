@@ -73,6 +73,34 @@ describe("useChatStream", () => {
     expect(turn?.completed).toBe(true);
   });
 
+  it("completes a turn when the stream closes without a terminal frame", async () => {
+    // Live dev-k8s capture (SPEC-023 walkthrough): the kernel may emit
+    // empty message_delta frames and close the stream right after the
+    // last delta, with no message_end. The turn must still complete so
+    // the bubble stops loading (legacy parity).
+    queueFetch(
+      okStream(
+        sse(
+          { type: "message_delta", session_id: "s-1" },
+          { type: "message_delta", delta: "p", session_id: "s-1" },
+          { type: "message_delta", delta: "ong", session_id: "s-1" },
+          { type: "message_delta", session_id: "s-1" },
+        ),
+      ),
+    );
+
+    const { result } = renderHook(() => useChatStream());
+    await act(async () => {
+      await result.current.send("ping", { userId: "amy" });
+    });
+
+    expect(result.current.streaming).toBe(false);
+    const turn = result.current.turns[0];
+    expect(turn?.replyText).toBe("pong");
+    expect(turn?.completed).toBe(true);
+    expect(turn?.confirmationPending).toBe(false);
+  });
+
   it("parks on confirmation_request and resumes via POST confirm", async () => {
     const calls = queueFetch(
       okStream(
