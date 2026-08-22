@@ -18,6 +18,9 @@ IMAGE_PRODUCTS := agent-platform audit-service identity-broker incident-service 
 
 # GitOps overlays rendered as part of verification.
 GITOPS_DIR := shared/platform-ops/gitops
+
+# End-to-end demo scripts run against a deployed cluster via `make e2e`.
+E2E_DIR := shared/platform-ops/e2e
 OVERLAYS := dev-k8s \
 	runtime-profiles/dashscope \
 	runtime-profiles/deepseek \
@@ -152,6 +155,19 @@ verify: test overlays validate-policy validate-version ## Verification gate: tes
 .PHONY: deploy
 deploy: ## Deploy the dev-k8s overlay to the current cluster (wraps deploy.sh)
 	@$(GITOPS_DIR)/dev-k8s/deploy.sh
+
+.PHONY: e2e
+e2e: ## Run the e2e demo scripts against the deployed dev cluster
+	@echo "Prerequisites: 'make deploy' completed, plus port-forwards for the chat legs:"
+	@echo "  kubectl -n dev-luban-aiops port-forward svc/platform-gateway 18083:8000"
+	@echo "  kubectl -n dev-luban-aiops port-forward svc/identity-service 18081:8000"
+	@status=0; \
+	for script in $(E2E_DIR)/skills-demo.sh $(E2E_DIR)/incident-demo.sh $(E2E_DIR)/mutating-demo.sh; do \
+		echo "==> $$script"; \
+		sh $$script || status=1; \
+	done; \
+	if [ $$status -ne 0 ]; then echo "E2E: one or more demos failed"; exit 1; fi; \
+	echo "E2E_OK: all demos passed"
 
 .PHONY: clean
 clean: ## Remove Python caches and image build state

@@ -13,4 +13,7 @@ sync: ## Install/refresh this product's dependencies (frozen lock)
 
 test: ## Run this product's test suite
 	uv sync --frozen
-	uv run pytest
+	# No-op exporters keep test output free of OTLP retry noise while the
+	# SDK stays active for tracing tests (OTEL_SDK_DISABLED would break them).
+	OTEL_TRACES_EXPORTER=none OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=none \
+		uv run pytest

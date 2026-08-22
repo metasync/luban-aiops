@@ -54,8 +54,23 @@ WEB_UI_IMAGE="${WEB_UI_IMAGE:-luban-aiops/web-ui:$IMAGE_TAG}"
 # LoadRestrictionsNone: the skills-hub base pulls sample skill content from
 # shared/platform-ops/skills/ (outside the overlay root) so team sample
 # sources stay single-sourced (SPEC-014 R-6).
-kubectl kustomize --load-restrictor LoadRestrictionsNone "$OVERLAY_DIR" \
-  | kubectl apply -f -
+APPLY_OUTPUT=$(kubectl kustomize --load-restrictor LoadRestrictionsNone "$OVERLAY_DIR" \
+  | kubectl apply -f -)
+printf '%s\n' "$APPLY_OUTPUT"
+
+# Env/policy ConfigMaps feed services via envFrom/mounts, so a change only
+# takes effect on pod restart. `kubectl set image` with an unchanged tag
+# does not bounce pods, so restart the app deployments explicitly when the
+# authoritative runtime/policy ConfigMaps changed (keeps `make deploy`
+# convergent for env-only edits).
+if printf '%s\n' "$APPLY_OUTPUT" \
+  | grep -qE '^configmap/(platform-runtime-config|platform-policy) configured$'; then
+  echo "Env/policy ConfigMap changed; restarting app deployments to pick up new values..."
+  for deployment in web-ui platform-gateway tool-gateway agent-service \
+    identity-service audit-service skills-hub incident-service; do
+    kubectl -n "$NAMESPACE" rollout restart "deployment/$deployment"
+  done
+fi
 
 kubectl -n "$NAMESPACE" set image deployment/web-ui \
   "web-ui=$WEB_UI_IMAGE"
