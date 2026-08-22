@@ -7,11 +7,14 @@ import {
   Button,
   Collapse,
   Modal,
+  Select,
   Spin,
   Tag,
+  Tooltip,
   Typography,
 } from "antd";
 import {
+  AudioOutlined,
   CheckOutlined,
   CloseOutlined,
   DeleteOutlined,
@@ -34,6 +37,12 @@ import {
 } from "../stream/useChatStream";
 import { renderMarkdown } from "./markdown";
 import { transcriptToTurns } from "./transcript";
+import {
+  VOICE_LANGUAGES,
+  loadVoiceLanguage,
+  saveVoiceLanguage,
+} from "../voice/languages";
+import { useSpeechRecognition } from "../voice/useSpeechRecognition";
 
 dayjs.extend(relativeTime);
 
@@ -470,6 +479,32 @@ export default function ChatView() {
   const { setSession } = chat;
   const { activeSessionId, setActiveSessionId, refresh } = workspace;
 
+  // Voice input (SPEC-023 R-4): browser STT only; the composed text enters
+  // the draft like typing and the turn is tagged input_modality=voice.
+  const speech = useSpeechRecognition();
+  const [voiceLanguage, setVoiceLanguageState] = useState(() =>
+    loadVoiceLanguage(),
+  );
+  const voiceUsedRef = useRef(false);
+
+  const changeVoiceLanguage = (code: string) => {
+    setVoiceLanguageState(code);
+    saveVoiceLanguage(code);
+  };
+
+  const appendVoiceText = (text: string) => {
+    voiceUsedRef.current = true;
+    setDraft((current) => (current ? `${current} ${text}` : text));
+  };
+
+  const toggleVoice = () => {
+    if (speech.listening) {
+      speech.stop();
+      return;
+    }
+    speech.start(voiceLanguage, appendVoiceText);
+  };
+
   // Session switch: load the transcript once per tab, then let the stream
   // hook's per-session cache take over on subsequent switches.
   useEffect(() => {
@@ -563,8 +598,11 @@ export default function ChatView() {
   const submitMessage = (message: string) => {
     const text = message.trim();
     if (!text || !authenticated || chat.streaming) return;
+    speech.stop();
     setDraft("");
-    void chat.send(text, { userId: username ?? undefined });
+    const inputModality = voiceUsedRef.current ? "voice" : undefined;
+    voiceUsedRef.current = false;
+    void chat.send(text, { userId: username ?? undefined, inputModality });
   };
 
   return (
@@ -609,14 +647,73 @@ export default function ChatView() {
           )}
         </div>
         <div className="chat-composer">
+          {speech.error ? (
+            <Alert
+              type="warning"
+              showIcon
+              message={speech.error}
+              style={{ marginBottom: 8 }}
+            />
+          ) : null}
           <Sender
             value={draft}
             onChange={setDraft}
             onSubmit={submitMessage}
             loading={chat.streaming}
             disabled={!authenticated}
-            placeholder="Message the operations agent…"
+            placeholder={
+              speech.listening
+                ? "Listening… speak now"
+                : "Message the operations agent…"
+            }
             autoSize={{ minRows: 1, maxRows: 6 }}
+            prefix={
+              speech.supported ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <Select
+                    size="small"
+                    variant="borderless"
+                    aria-label="Recognition language"
+                    value={voiceLanguage}
+                    onChange={changeVoiceLanguage}
+                    options={VOICE_LANGUAGES.map((lang) => ({
+                      value: lang.code,
+                      label: lang.label,
+                    }))}
+                    popupMatchSelectWidth={false}
+                  />
+                  <Tooltip
+                    title={
+                      speech.listening
+                        ? "Stop listening"
+                        : "Dictate with the microphone"
+                    }
+                  >
+                    <Button
+                      type="text"
+                      size="small"
+                      danger={speech.listening}
+                      icon={<AudioOutlined />}
+                      aria-label="Voice input"
+                      aria-pressed={speech.listening}
+                      onClick={toggleVoice}
+                    />
+                  </Tooltip>
+                </div>
+              ) : (
+                // Graceful degradation: affordance disabled with an
+                // explanation when the browser lacks the Web Speech API.
+                <Tooltip title="Voice input is unavailable in this browser (no Web Speech API).">
+                  <Button
+                    type="text"
+                    size="small"
+                    disabled
+                    icon={<AudioOutlined />}
+                    aria-label="Voice input unavailable"
+                  />
+                </Tooltip>
+              )
+            }
           />
         </div>
       </div>

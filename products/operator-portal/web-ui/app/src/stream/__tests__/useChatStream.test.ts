@@ -301,4 +301,49 @@ describe("useChatStream", () => {
       "Not authenticated. Please sign in from the sidebar first.",
     );
   });
+
+  // SPEC-023 R-4 invariant II: a voice-composed turn can park a
+  // confirmation, but the decision surface stays pure — POST confirm
+  // carries only {session_id, confirm_id, decision}, never a modality.
+  it("keeps input_modality off the confirmation decision surface", async () => {
+    const calls = queueFetch(
+      okStream(
+        sse({
+          type: "confirmation_request",
+          confirm_id: "cf-v",
+          session_id: "s-v",
+          pending_calls: [
+            { tool_name: "k8s.restart_pod", call_id: "c-v", risk_level: "write" },
+          ],
+        }),
+      ),
+      okStream(
+        sse(
+          { type: "confirmation_result", confirm_id: "cf-v", status: "approved" },
+          { type: "message_end", session_id: "s-v" },
+        ),
+      ),
+    );
+
+    const { result } = renderHook(() => useChatStream());
+    await act(async () => {
+      await result.current.send("restart it", {
+        userId: "amy",
+        inputModality: "voice",
+      });
+    });
+    expect(calls[0]?.url).toContain("input_modality=voice");
+
+    await act(async () => {
+      await result.current.decide("cf-v", "approve");
+    });
+
+    const confirmCall = calls[1];
+    expect(confirmCall?.url).toContain("/api/v1/chat/confirm");
+    expect(JSON.parse(String(confirmCall?.init?.body))).toEqual({
+      session_id: "s-v",
+      confirm_id: "cf-v",
+      decision: "approve",
+    });
+  });
 });

@@ -164,11 +164,16 @@ Note the deliberate asymmetry: `chat:confirm` gates the *decision*, while
 `tools:mutate` gates the *execution*. An `approver` can confirm a card but cannot
 execute the tool themselves; an `operator` can do both.
 
-### Voice-readiness: modality is never privilege (SPEC-022 R-2)
+### Voice-readiness: modality is never privilege (SPEC-022 R-2, SPEC-023 R-4)
 
 Chat requests may carry an optional `input_modality` (`text` | `voice`,
-default `text`) in anticipation of voice input. The modality is **metadata
-only**:
+default `text`). The operator portal composes voice turns itself: the chat
+composer offers a microphone affordance backed by the browser's Web Speech
+API (speech-to-text only — no audio is captured, stored, or transmitted),
+with an explicit recognition-language selector (`en-US` / `zh-CN`,
+client-side only). The transcribed text enters the draft like typing, and
+the submitted turn is tagged `input_modality: "voice"`. The modality is
+**metadata only**:
 
 - It is forwarded to agent-platform, recorded in the chat log event, and
   mirrored into the `chat_started` audit details.
@@ -176,7 +181,12 @@ only**:
   matching, or HITL confirmation — a voice-originated request passes through
   exactly the same four layers as a typed one.
 - Confirmations stay click-gated: `POST /api/v1/chat/confirm` has no
-  modality field and its schema is unchanged.
+  modality field and its schema is unchanged. Confirmation cards render
+  Approve/Deny buttons as the only decision surface — a voice-composed
+  turn can park a confirmation, but no voice path can decide it
+  (SPEC-023 invariant II, pinned by adapter tests).
+- Browsers without the Web Speech API degrade gracefully: the affordance
+  is disabled with an explanation and typing remains the input path.
 
 Invalid modalities are rejected with `422` before any upstream call.
 
