@@ -13,6 +13,12 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.8.1 — 2026-08-22
+
+Patch release closing the post-v0.8.0 code review. No API, contract, or
+deployment-shape changes; the dev-k8s cluster was rebuilt and redeployed
+with the hardened images.
+
 ### Fixed — post-v0.8.0 code-review hardening
 
 - **Redis session title is now atomically set-once**: titles live in a

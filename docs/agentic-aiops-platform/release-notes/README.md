@@ -7,6 +7,13 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-22-post-release-hardening.md`
+  - closes v0.8.1: post-v0.8.0 code-review hardening — atomic set-once
+    Redis session titles (dedicated NX title key), gateway session-list
+    proxy 4xx passthrough parity, twelve new store/proxy tests,
+    `is_parked`/`has_pending` dedupe, `select-runtime-profile.sh`
+    guard against `mutating-dev`, and the documented
+    delete-vs-in-flight-turn limitation; no API or contract changes
 - `2026-08-22-multi-session-operator-workspace.md`
   - delivers SPEC-022 (v0.8.0), backend-first: session workspace
     lifecycle API (list cap-50 / title + transcript detail /
