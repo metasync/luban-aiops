@@ -36,8 +36,5 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    // Stage-1 scaffolding has no suites yet; the SSE adapter tests land
-    // in stage 2.
-    passWithNoTests: true,
   },
 });

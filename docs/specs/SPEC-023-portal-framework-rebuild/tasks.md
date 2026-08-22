@@ -13,10 +13,10 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 
 ## R-2: Platform-owned SSE contract adapter
 
-- [ ] Transport: `fetch` + `ReadableStream` with abort-controller session switching (`web-ui/src/stream/transport.ts`)
-- [ ] Decoder: schema v6 frame → typed models mapping, ported 1:1 from the vanilla dispatch including locked-card-on-truncation (`web-ui/src/stream/decoder.ts`, `models.ts`)
-- [ ] `useChatStream()` hook exposing typed models to views (`web-ui/src/stream/`)
-- [ ] Fixture-frame unit tests covering every schema v6 event type and the truncation terminal state (`web-ui/src/stream/__tests__/`)
+- [x] Transport: `fetch` + `ReadableStream` with abort-controller session switching (`web-ui/app/src/stream/transport.ts`)
+- [x] Decoder: schema v6 frame → typed models mapping, ported 1:1 from the vanilla dispatch including locked-card-on-truncation (`web-ui/app/src/stream/decoder.ts`, `models.ts`)
+- [x] `useChatStream()` hook exposing typed models to views (`web-ui/app/src/stream/useChatStream.ts`)
+- [x] Fixture-frame unit tests covering every schema v6 event type and the truncation terminal state (`web-ui/app/src/stream/__tests__/`)
 
 ## R-3: Multi-session workspace UI (SPEC-022 Appendix A)
 
