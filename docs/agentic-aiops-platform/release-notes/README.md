@@ -7,6 +7,15 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-22-bounded-mutating-actions.md`
+  - delivers SPEC-021 (v0.7.0): the platform's first write capability
+    (`k8s.delete_pod`), triple-gated — tool-gateway risk-tier admission
+    behind `GATEWAY_MUTATING_TOOLS_ENABLED`, read-only-by-construction
+    agent auto-allow, and SPEC-020 HITL confirmation with `mutating`
+    badges on stream schema v6 — under the deny-by-default
+    `tools:mutate` action; disabled by default in dev-k8s with opt-in
+    RBAC, the Approval & HITL Governance Guide, and a deterministic
+    `mutating-demo.sh`
 - `2026-08-21-durable-otlp-secret-provisioning.md`
   - closes 0.6.1: fixes the OTLP ingest 401 regression where sibling
     secret-sync scripts wiped `OTEL_EXPORTER_OTLP_HEADERS` from five
