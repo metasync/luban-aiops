@@ -11,6 +11,7 @@
 - [api.py](file://products/platform-gateway/src/platform_gateway/schemas/api.py)
 - [chat-confirm.schema.json](file://shared/shared-contracts/schemas/chat-confirm.schema.json)
 - [stream-event.schema.json](file://shared/shared-contracts/schemas/stream-event.schema.json)
+- [chat-request.schema.json](file://shared/shared-contracts/schemas/chat-request.schema.json)
 - [policy-default.yaml](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml)
 </cite>
 
@@ -22,6 +23,7 @@
 - Updated authentication and authorization sections to cover the new chat:confirm action
 - Added HITL (Human-in-the-Loop) confirmation workflow documentation
 - Updated error handling patterns to include confirmation-specific errors (409, 410)
+- **Updated**: Added documentation for input_modality parameter in streaming endpoints, enabling voice-readiness parity between POST /api/v1/chat and GET /api/v1/chat/stream endpoints
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -149,11 +151,14 @@ R-->>C : SSE stream with confirmation_result
 - Response: Returns a chat response object or streams incremental events if enabled
 - Errors: Standardized error codes for validation failures, authentication errors, policy denials, and runtime errors
 
-**GET /api/v1/chat/stream**
+**GET /api/v1/chat/stream** *(Updated)*
 - Purpose: Stream real-time responses from the agent
 - Authentication: Requires a valid JWT token
 - Policy Action: `chat`
-- Query Parameters: message (required), session_id (optional)
+- Query Parameters: 
+  - `message` (required): The user message to process
+  - `session_id` (optional): Session identifier for continuing existing conversations
+  - `input_modality` (optional, default "text"): Voice-readiness metadata indicating input type ("text" or "voice")
 - Response: Server-Sent Events (SSE) stream with incremental updates
 - Events: message_start, message_delta, message_end, tool_call, tool_result, confirmation_request, confirmation_result, error
 
@@ -204,6 +209,7 @@ Validation rules:
 - Conversation IDs must follow UUID format where applicable
 - Model parameters must fall within allowed ranges
 - Decision values must be exactly "approve" or "deny"
+- Input modality must be either "text" or "voice" (default "text")
 
 Examples:
 - Sending a message returns either a complete response or a stream of events
@@ -260,6 +266,13 @@ Error patterns:
 - Stream events conform to the stream event schema
 - Clients should handle partial updates and final completion signals
 
+#### Voice-Readiness Parity *(Updated)*
+- **input_modality Parameter**: Both POST `/api/v1/chat` and GET `/api/v1/chat/stream` now support the `input_modality` parameter
+- **Parameter Values**: "text" (default) or "voice"
+- **Purpose**: Metadata-only field that enables voice-readiness parity between endpoints without affecting policy or HITL outcomes
+- **Behavior**: The modality is recorded in audit logs and passed through to upstream services as metadata only
+- **Validation**: FastAPI validates the literal type at the route level, rejecting invalid values with 422 status
+
 #### Confirmation Event Streaming
 - **confirmation_request**: Indicates a parked tool call requiring human approval
 - **confirmation_result**: Indicates the result of a confirmation decision
@@ -271,11 +284,13 @@ Best practices:
 - Close connections gracefully upon completion or error
 - Handle confirmation events specially to provide UI feedback
 - Manage confirmation timeouts and expired confirmations
+- Treat input_modality as metadata only - it never changes policy or HITL outcomes
 
 **Section sources**
 - [v2 routes.py:198-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L198-L227)
 - [agent_client.py:108-159](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L108-L159)
 - [gateway_service.py:381-409](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L381-L409)
+- [routes.py:90-143](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L90-L143)
 
 ### Error Handling Patterns
 
@@ -299,6 +314,10 @@ Confirmation-specific error handling:
 - **Concurrent confirmations**: Handle race conditions with proper locking
 - **Owner mismatches**: Ensure only session owners can confirm their parked calls
 - **Upstream failures**: Map transport errors to 502 Bad Gateway
+
+Voice-readiness validation errors:
+- **422 Unprocessable Entity**: Invalid input_modality value (must be "text" or "voice")
+- **Validation occurs at route level**: FastAPI rejects invalid literal types before route logic executes
 
 **Section sources**
 - [v2 routes.py:176-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L176-L227)
@@ -365,6 +384,7 @@ ChatRoutes --> Schemas : "uses for validation"
 - **Observability**: Monitor latency, throughput, and error rates using metrics and logs
 - **Confirmation handling**: Optimize confirmation registry lookups and avoid blocking operations
 - **Memory management**: Properly close streaming connections and release resources
+- **Input modality processing**: Treat modality as lightweight metadata to minimize overhead
 
 ## Troubleshooting Guide
 
@@ -380,19 +400,25 @@ Common issues and resolutions:
   - 404 Not Found: Verify session_id and confirm_id are correct
   - Permission denied: Ensure user has chat:confirm action permission
 
+Voice-readiness troubleshooting:
+- **422 Validation errors**: Ensure input_modality is either "text" or "voice"
+- **Modality not affecting behavior**: Remember that input_modality is metadata only and doesn't change policy or HITL outcomes
+- **Audit logging**: Check logs for "chat_stream_started" events to verify modality is being recorded
+
 Debugging tips:
 - Enable verbose logging for failed requests
 - Use health check endpoints to verify service availability
 - Validate request payloads against shared schemas before sending
 - Monitor confirmation registry state for stuck confirmations
 - Check upstream agent platform connectivity
+- Verify input_modality values in audit logs for voice-readiness tracking
 
 **Section sources**
 - [v2 routes.py:176-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L176-L227)
 - [policy_engine.py:158-189](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L158-L189)
 
 ## Conclusion
-The chat endpoints provide a robust interface for interacting with AI agents through secure, scalable, and observable APIs with comprehensive Human-in-the-Loop support. By adhering to the documented schemas, authentication requirements, and best practices, clients can build reliable integrations that leverage both synchronous and streaming capabilities, including sophisticated confirmation workflows for sensitive operations. Proper error handling and monitoring ensure resilience and maintainability in production environments.
+The chat endpoints provide a robust interface for interacting with AI agents through secure, scalable, and observable APIs with comprehensive Human-in-the-Loop support. By adhering to the documented schemas, authentication requirements, and best practices, clients can build reliable integrations that leverage both synchronous and streaming capabilities, including sophisticated confirmation workflows for sensitive operations. The addition of voice-readiness parity through the input_modality parameter ensures consistent behavior across different input types while maintaining clear separation between metadata and decision-making logic. Proper error handling and monitoring ensure resilience and maintainability in production environments.
 
 ## Appendices
 
@@ -411,13 +437,16 @@ response = httpx.post(
 print(response.json())
 ```
 
-#### Python Example - Streaming Chat
+#### Python Example - Streaming Chat with Voice Modality
 ```python
 import httpx
 
-# Stream responses
+# Stream responses with voice modality
 with httpx.stream("GET", "/api/v1/chat/stream", 
-                 params={"message": "Tell me a story"},
+                 params={
+                     "message": "Tell me a story",
+                     "input_modality": "voice"  # Voice-readiness metadata
+                 },
                  headers={"Authorization": "Bearer <token>"}) as response:
     for line in response.iter_lines():
         if line.startswith("data: "):
@@ -474,6 +503,15 @@ async function sendConfirmation(sessionId, confirmId, decision) {
     
     return response;
 }
+
+// Stream with voice modality
+async function streamWithVoice(message) {
+    const response = await fetch(`/api/v1/chat/stream?message=${encodeURIComponent(message)}&input_modality=voice`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+    
+    // Handle SSE stream...
+}
 ```
 
 #### Go Example - Concurrent Streaming
@@ -504,6 +542,17 @@ func streamConfirmation(sessionID, confirmID, decision string) {
             // Parse and handle event
         }
     }
+}
+
+// Stream with voice modality
+func streamWithVoice(message string) {
+    url := fmt.Sprintf("/api/v1/chat/stream?message=%s&input_modality=voice", 
+        url.QueryEscape(message))
+    req, _ := http.NewRequest("GET", url, nil)
+    req.Header.Set("Authorization", "Bearer "+token)
+    
+    resp, err := client.Do(req)
+    // Handle response...
 }
 ```
 

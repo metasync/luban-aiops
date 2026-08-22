@@ -8,6 +8,14 @@
 - [products/agent-platform/README.md](file://products/agent-platform/README.md)
 - [products/identity-broker/README.md](file://products/identity-broker/README.md)
 - [products/tool-gateway/README.md](file://products/tool-gateway/README.md)
+- [products/operator-portal/Dockerfile](file://products/operator-portal/Dockerfile)
+- [products/operator-portal/Makefile](file://products/operator-portal/Makefile)
+- [products/operator-portal/nginx.conf](file://products/operator-portal/nginx.conf)
+- [products/operator-portal/web-ui/app/package.json](file://products/operator-portal/web-ui/app/package.json)
+- [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
+- [products/operator-portal/web-ui/app/tsconfig.json](file://products/operator-portal/web-ui/app/tsconfig.json)
+- [products/operator-portal/web-ui/app/src/main.tsx](file://products/operator-portal/web-ui/app/src/main.tsx)
+- [products/operator-portal/web-ui/app/src/App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
 - [shared/platform-ops/gitops/dev-k8s/README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 - [shared/platform-ops/gitops/deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
 - [shared/platform-ops/gitops/select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
@@ -42,11 +50,12 @@
 
 ## Update Summary
 **Changes Made**
-- Updated version information to reflect coordinated lockstep version bump across all seven platform components (0.5.0)
-- Added documentation for the new audit-service and incident-service components introduced in this release
-- Enhanced environment configuration section with version validation requirements
-- Updated troubleshooting guide to include version consistency checks
-- Added new section on coordinated version management and release coordination
+- Updated development workflow section to reflect new Vite/React/TypeScript stack for the operator portal web UI
+- Added Node.js 22+ prerequisite requirement for local frontend development
+- Updated build and deployment instructions to include frontend asset compilation with Vite
+- Enhanced troubleshooting guide with Vite-specific development issues
+- Added documentation for React-based operator portal with Ant Design components
+- Updated Docker build process to include multi-stage build for frontend assets
 
 ## Table of Contents
 1. Introduction
@@ -65,11 +74,12 @@
 ## Introduction
 This guide helps you get up and running with the Luban AIOps Platform for local development and production deployment. It covers prerequisites, installation steps, environment configuration, secret management, initial validation, and common troubleshooting tips. You will also find links to additional resources and next steps tailored for developers, operators, and security teams.
 
-**Updated** This document reflects the coordinated 0.5.0 release with synchronized versions across all seven platform components: audit-service, incident-service, agent-platform, identity-broker, platform-gateway, skills-hub, and tool-gateway.
+**Updated** This document reflects the coordinated 0.5.0 release with synchronized versions across all seven platform components, plus the modernized operator portal built with Vite, React, and TypeScript instead of the legacy vanilla JavaScript setup.
 
 ## Prerequisites
 Ensure your environment meets the following requirements before proceeding:
 - Python 3.x (for local development and building services)
+- **Node.js 22+** (required for Vite/React/TypeScript frontend development)
 - Docker (container build and runtime)
 - Kubernetes cluster (local or managed) with kubectl configured
 - kustomize (used by GitOps overlays)
@@ -80,8 +90,10 @@ Notes:
 - The platform uses Kustomize overlays under shared/platform-ops/gitops for both development and production profiles.
 - Runtime profiles are provided for OpenAI, DashScope, and DeepSeek; select one based on your needs.
 - **New**: Version 0.5.0 introduces coordinated versioning that requires all components to maintain synchronized versions through the centralized VERSION file.
+- **Updated**: The operator portal now uses a modern Vite/React/TypeScript stack requiring Node.js 22+ for local development and builds.
 
 **Section sources**
+- [products/operator-portal/web-ui/app/package.json:6-8](file://products/operator-portal/web-ui/app/package.json#L6-L8)
 - [shared/platform-ops/gitops/dev-k8s/README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 - [shared/platform-ops/gitops/runtime-profiles/README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
 
@@ -91,7 +103,7 @@ The repository is organized into product services and shared operational assets:
   - agent-platform: Agent runtime service and providers
   - identity-broker: Identity and token services
   - tool-gateway: API gateway, policy enforcement, and tool orchestration
-  - operator-portal: Web UI for operators
+  - **Updated**: operator-portal: Modern React/TypeScript web UI built with Vite and Ant Design
   - **New**: audit-service: Durable audit trail service for authenticated event ingestion and retention
   - **New**: incident-service: Incident intake, triage, and collaboration dispatch
   - **Existing**: skills-hub: Skills and grounded guidance federation
@@ -106,7 +118,7 @@ subgraph "Products"
 AP["Agent Platform"]
 IB["Identity Broker"]
 TG["Tool Gateway"]
-OP["Operator Portal"]
+OP["Operator Portal (Vite/React)"]
 AS["Audit Service"]
 IS["Incident Service"]
 SH["Skills Hub"]
@@ -119,11 +131,12 @@ end
 subgraph "Infra"
 RDS["Redis"]
 K8S["Kubernetes Cluster"]
+NGINX["Nginx (Portal)"]
 end
 AP --> KO
 IB --> KO
 TG --> KO
-OP --> KO
+OP --> NGINX
 AS --> KO
 IS --> KO
 SH --> KO
@@ -131,6 +144,7 @@ KO --> RDS
 KO --> K8S
 RP --> KO
 DS --> KO
+NGINX --> TG
 ```
 
 [No sources needed since this diagram shows conceptual structure]
@@ -138,6 +152,7 @@ DS --> KO
 ## Quick Start: Local Development
 Follow these steps to run the platform locally using Kustomize overlays:
 
+### Backend Services
 1. Prepare your environment
    - Ensure Docker, kubectl, and kustomize are installed and working.
    - Create or switch to a local Kubernetes context (e.g., minikube, kind, docker-desktop).
@@ -158,10 +173,23 @@ Follow these steps to run the platform locally using Kustomize overlays:
    - Apply the dev overlay to deploy all platform components (agent-platform, identity-broker, tool-gateway, operator-portal, audit-service, incident-service, skills-hub).
    - Confirm pods are running and services are exposed.
 
-6. Access the Operator Portal
-   - Port-forward or expose the web UI service to access the portal locally.
+### Frontend Development (Vite/React)
+6. Set up frontend development environment
+   - Navigate to `products/operator-portal/web-ui/app` directory
+   - Install dependencies: `npm ci`
+   - Start development server: `npm run dev`
+   - The Vite dev server runs on port 5173 and proxies API calls to localhost:8080
 
-7. Make your first API call
+7. Configure API proxy
+   - Port-forward the platform-gateway service to localhost:8080
+   - The Vite development server automatically proxies `/api` requests to the backend
+
+### Access and Testing
+8. Access the Operator Portal
+   - Open http://localhost:5173 in your browser for the React-based UI
+   - For production builds, access via the deployed service after port-forwarding
+
+9. Make your first API call
    - Use the tool-gateway endpoints to send a chat request and receive a response.
    - Validate health endpoints to ensure services are ready.
 
@@ -170,8 +198,11 @@ Key scripts and overlays:
 - Sync runtime secrets: shared/platform-ops/gitops/sync-runtime-secret.sh
 - Deploy overlay: shared/platform-ops/gitops/deploy-overlay.sh
 - Base Kustomization: shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml
+- Frontend dev server: `npm run dev` in products/operator-portal/web-ui/app
 
 **Section sources**
+- [products/operator-portal/web-ui/app/package.json:9-13](file://products/operator-portal/web-ui/app/package.json#L9-L13)
+- [products/operator-portal/web-ui/app/vite.config.ts:26-32](file://products/operator-portal/web-ui/app/vite.config.ts#L26-L32)
 - [shared/platform-ops/gitops/select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/platform-ops/gitops/deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
@@ -189,15 +220,19 @@ For production, use the same Kustomize overlays with appropriate overlays and se
    - Choose the desired runtime profile and populate secrets securely (e.g., via sealed secrets or external secret managers).
    - Use the sync script to apply secrets to the target namespace.
 
-3. Apply Kustomize overlays
+3. Build and deploy images
+   - Run `make build` to build all container images including the updated operator portal with compiled frontend assets
+   - The multi-stage Docker build compiles the React/Vite frontend and serves it via nginx
+
+4. Apply Kustomize overlays
    - Apply the base and production-specific overlays to deploy all services including the new audit and incident services.
    - Verify deployments, services, and policies are applied correctly.
 
-4. Configure observability and policies
+5. Configure observability and policies
    - Review observability configuration and enable metrics/logs/traces as needed.
    - Inspect and customize policy definitions for governance and compliance.
 
-5. Validate and monitor
+6. Validate and monitor
    - Check health endpoints and run smoke tests against the tool-gateway.
    - Monitor pod status, logs, and metrics dashboards.
 
@@ -205,8 +240,10 @@ Key files for production considerations:
 - Policy definition: shared/platform-ops/gitops/dev-k8s/base/tool-gateway/policy.yaml
 - RBAC rules: shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml
 - Observability env: shared/platform-ops/gitops/dev-k8s/base/shared/observability.env
+- **Updated**: Multi-stage Docker build: products/operator-portal/Dockerfile
 
 **Section sources**
+- [products/operator-portal/Dockerfile:1-29](file://products/operator-portal/Dockerfile#L1-L29)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/policy.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/shared/observability.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/observability.env)
@@ -225,6 +262,11 @@ Environment variables and secrets are managed through Kustomize overlays and scr
 - Observability configuration
   - Centralized observability environment variables control logging, metrics, and tracing.
 
+- **Updated**: Frontend build configuration
+  - Platform version is injected at build time from the root VERSION file
+  - Vite configuration handles content hashing for immutable caching
+  - Nginx serves the compiled React application with proper caching headers
+
 - Example references
   - OpenAI runtime configmap: shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml
   - OpenAI runtime secrets example: shared/platform-ops/gitops/runtime-profiles/openai/runtime-secrets.example.env
@@ -234,12 +276,15 @@ Best practices:
 - Rotate secrets regularly and audit access.
 - Validate configurations with the verification script before deploying.
 - **New**: Ensure version consistency across all components using the coordinated version validation system.
+- **Updated**: For frontend development, ensure Node.js 22+ is installed and dependencies are properly cached.
 
 **Section sources**
 - [shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/openai/runtime-secrets.example.env](file://shared/platform-ops/gitops/runtime-profiles/openai/runtime-secrets.example.env)
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/platform-ops/gitops/dev-k8s/base/shared/observability.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/observability.env)
+- [products/operator-portal/web-ui/app/vite.config.ts:6-18](file://products/operator-portal/web-ui/app/vite.config.ts#L6-L18)
+- [products/operator-portal/nginx.conf:19-30](file://products/operator-portal/nginx.conf#L19-L30)
 
 ## Coordinated Version Management
 Version 0.5.0 introduces a coordinated versioning system that ensures all platform components maintain synchronized versions:
@@ -247,6 +292,7 @@ Version 0.5.0 introduces a coordinated versioning system that ensures all platfo
 ### Single Source of Truth
 - The root `VERSION` file serves as the single source of truth for the platform semver
 - All seven platform components must maintain lockstep version alignment with the central VERSION file
+- **Updated**: The operator portal's React frontend also reads the VERSION file at build time for display purposes
 
 ### Components Covered
 The coordinated versioning applies to:
@@ -257,16 +303,19 @@ The coordinated versioning applies to:
 - platform-gateway (SERVICE_VERSION: 0.5.0)
 - skills-hub (SERVICE_VERSION: 0.5.0)
 - tool-gateway (SERVICE_VERSION: 0.5.0)
+- **Updated**: operator-portal (frontend version displayed in UI)
 
 ### Version Validation
 - Automated validation through `make validate-version` ensures version consistency
 - The validation script checks VERSION file, pyproject.toml files, and metadata.py files
 - Pre-commit/pre-push gates enforce version synchronization
+- **Updated**: Frontend build process injects platform version at compile time
 
 ### Release Process
 - Update the root VERSION file to coordinate releases across all components
 - Run `make validate-version` to verify all components are synchronized
 - Build and deploy using coordinated image tags generated from the VERSION file
+- **Updated**: Frontend assets are rebuilt with embedded version information
 
 **Section sources**
 - [VERSION](file://VERSION)
@@ -279,6 +328,7 @@ The coordinated versioning applies to:
 - [products/platform-gateway/src/platform_gateway/metadata.py:1-6](file://products/platform-gateway/src/platform_gateway/metadata.py#L1-L6)
 - [products/skills-hub/src/skills_hub/metadata.py:1-6](file://products/skills-hub/src/skills_hub/metadata.py#L1-L6)
 - [products/tool-gateway/src/tool_gateway/metadata.py:1-6](file://products/tool-gateway/src/tool_gateway/metadata.py#L1-L6)
+- [products/operator-portal/web-ui/app/vite.config.ts:6-18](file://products/operator-portal/web-ui/app/vite.config.ts#L6-L18)
 
 ## Initial Validation and First API Call
 After deployment, validate the platform and make your first API call:
@@ -289,6 +339,7 @@ After deployment, validate the platform and make your first API call:
 
 2. Operator Portal
    - Access the web UI via port-forwarding or ingress.
+   - **Updated**: The React-based portal displays the platform version in the sidebar and provides enhanced user experience with Ant Design components.
    - Confirm basic navigation and service status displays.
 
 3. First API call
@@ -309,6 +360,7 @@ Use curl or an HTTP client to test endpoints. Refer to service READMEs for endpo
 - [products/tool-gateway/README.md](file://products/tool-gateway/README.md)
 - [products/identity-broker/README.md](file://products/identity-broker/README.md)
 - [products/agent-platform/README.md](file://products/agent-platform/README.md)
+- [products/operator-portal/web-ui/app/src/App.tsx:150-154](file://products/operator-portal/web-ui/app/src/App.tsx#L150-L154)
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -344,12 +396,25 @@ Common issues and resolutions:
   - Verify database connections for stateful services
   - Validate inter-service communication through the platform gateway
 
+- **Updated**: Frontend development issues
+  - Ensure Node.js 22+ is installed and compatible with Vite
+  - Clear node_modules and reinstall dependencies if experiencing build errors
+  - Check that the Vite dev server can connect to the backend API proxy
+  - Verify CORS settings if running frontend and backend on different ports
+
+- **Updated**: Container build issues
+  - Multi-stage Docker builds require the root VERSION file to be accessible
+  - Ensure the build context includes both the frontend source and root VERSION file
+  - Check nginx configuration for proper static asset serving
+
 Useful commands:
 - kubectl get pods, svc, ing -n <namespace>
 - kubectl describe pod <pod-name> -n <namespace>
 - kubectl logs <pod-name> -n <namespace>
 - kubectl get configmaps, secrets -n <namespace>
 - **New**: make validate-version
+- **Updated**: npm run dev (for frontend development)
+- **Updated**: npm run build (for frontend production builds)
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
@@ -362,6 +427,8 @@ Useful commands:
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-service.yaml)
+- [products/operator-portal/web-ui/app/package.json:6-8](file://products/operator-portal/web-ui/app/package.json#L6-L8)
+- [products/operator-portal/Dockerfile:1-29](file://products/operator-portal/Dockerfile#L1-L29)
 
 ## Next Steps by Persona
 - Developers
@@ -369,37 +436,42 @@ Useful commands:
   - Run unit tests and integration tests locally.
   - Extend providers and tools as needed.
   - **New**: Understand the coordinated versioning system and contribute to version updates.
+  - **Updated**: Work with the modern React/TypeScript frontend stack using Vite for development and builds.
 
 - Operators
   - Manage Kustomize overlays and secrets lifecycle.
   - Implement CI/CD pipelines for automated deployments.
   - Configure monitoring, alerting, and log aggregation.
   - **New**: Monitor version consistency across all seven platform components.
+  - **Updated**: Handle multi-stage Docker builds that compile frontend assets alongside backend services.
 
 - Security Teams
   - Review RBAC rules and policy definitions.
   - Audit secrets management and rotation procedures.
   - Enforce compliance policies and conduct periodic assessments.
   - **New**: Validate audit-service and incident-service security configurations.
+  - **Updated**: Review frontend security headers and caching policies in nginx configuration.
 
 Additional resources:
 - Repository README for high-level overview and links
 - Product READMEs for detailed service documentation
 - GitOps scripts and overlays for deployment automation
 - **New**: Version validation scripts and coordinated release processes
+- **Updated**: Vite documentation and React/TypeScript best practices for frontend development
 
 **Section sources**
 - [README.md](file://README.md)
 - [products/agent-platform/README.md](file://products/agent-platform/README.md)
 - [products/identity-broker/README.md](file://products/identity-broker/README.md)
 - [products/tool-gateway/README.md](file://products/tool-gateway/README.md)
+- [products/operator-portal/web-ui/app/package.json:15-34](file://products/operator-portal/web-ui/app/package.json#L15-L34)
 
 ## Architecture Overview
 The platform consists of several microservices orchestrated via Kubernetes and exposed through an API gateway. Core components include:
 - Tool Gateway: Central API entry point with policy enforcement and tool orchestration
 - Identity Broker: Authentication, authorization, and token management
 - Agent Platform: Agent runtime and provider integrations
-- Operator Portal: Web UI for operational tasks
+- **Updated**: Operator Portal: Modern React/TypeScript web UI built with Vite, served by nginx with optimized caching
 - **New**: Audit Service: Durable audit trail with authenticated event ingestion and retention
 - **New**: Incident Service: Incident intake, triage, and collaboration dispatch
 - **Existing**: Skills Hub: Skills and grounded guidance federation
@@ -411,17 +483,20 @@ Client["Client"]
 GW["Tool Gateway"]
 IDB["Identity Broker"]
 AP["Agent Platform"]
-OP["Operator Portal"]
+OP["Operator Portal (React/Vite)"]
 AS["Audit Service"]
 IS["Incident Service"]
 RDS["Redis"]
 K8S["Kubernetes"]
+NGINX["Nginx (Static Assets)"]
 Client --> GW
+Client --> OP
 GW --> IDB
 GW --> AP
 GW --> AS
 GW --> IS
-OP --> K8S
+OP --> NGINX
+NGINX --> GW
 AP --> RDS
 IDB --> RDS
 AS --> RDS
@@ -431,6 +506,6 @@ IS --> RDS
 [No sources needed since this diagram shows conceptual architecture]
 
 ## Conclusion
-You now have the essential information to install, configure, and operate the Luban AIOps Platform for both local development and production. Version 0.5.0 introduces coordinated versioning across all seven platform components, ensuring consistent releases and simplified maintenance. Use the provided scripts and overlays to manage deployments, secrets, and runtime profiles. For deeper exploration, consult the product READMEs and GitOps assets. If you encounter issues, refer to the troubleshooting guide and leverage Kubernetes diagnostics.
+You now have the essential information to install, configure, and operate the Luban AIOps Platform for both local development and production. Version 0.5.0 introduces coordinated versioning across all seven platform components, ensuring consistent releases and simplified maintenance. The operator portal has been modernized with a Vite/React/TypeScript stack, providing an enhanced user experience with better performance and developer productivity. Use the provided scripts and overlays to manage deployments, secrets, and runtime profiles. For deeper exploration, consult the product READMEs and GitOps assets. If you encounter issues, refer to the troubleshooting guide and leverage Kubernetes diagnostics.
 
-**Updated** The coordinated version management system in version 0.5.0 provides enhanced reliability and simplifies multi-component releases across the entire platform ecosystem.
+**Updated** The coordinated version management system in version 0.5.0 provides enhanced reliability and simplifies multi-component releases across the entire platform ecosystem, while the modernized frontend stack offers improved performance and developer experience.

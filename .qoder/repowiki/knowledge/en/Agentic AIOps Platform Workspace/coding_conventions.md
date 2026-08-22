@@ -1,6 +1,6 @@
-- Each Python product follows a uniform internal layout with `src/<pkg>/api/routes`, `services`, `schemas`, `core/{config,metrics,observability,request_context,runtime,telemetry}`, and `__init__.py`/`app.py`/`main.py` entry points.
-- Inter-service contracts are declared as JSON Schema files under `shared/shared-contracts/schemas/` and consumed by products instead of being redefined locally.
-- Policy enforcement uses a canonical `policy-default.yaml` under `shared/shared-contracts/policies/` that is copied into each consuming product's `policies/` directory via `make sync-policy`.
-- Product versions are kept lockstep with the root `VERSION` file and validated by `make validate-version` using the script in `shared/shared-contracts/scripts/validate_version.py`.
-- Container images are built with a coordinated tag computed from `VERSION`, `IMAGE_TAG_PREFIX`, and `IMAGE_TAG_PROFILE`, then written to `.images.env` and referenced by the dev-k8s Kustomize overlay.
-- Tests mirror source structure under each product's `tests/` directory and cover routes, services, schemas, telemetry, and contract compliance.
+- Each product exposes a FastAPI app via `src/<pkg>/app.py` and a CLI entrypoint in `src/<pkg>/main.py`, both importing a shared `metadata.py` for version/service identification.
+- Cross-cutting infrastructure (config, metrics, observability, request context, telemetry, runtime) is provided by a `core/` subpackage duplicated across every service, keeping business logic in `services/` and routes in `api/routes/`.
+- API payloads are validated against JSON Schema files stored in `shared/shared-contracts/schemas/` rather than ad-hoc Pydantic models inside services.
+- Policy enforcement is decoupled into a `policies/policy-default.yaml` bundle per service, synchronized from a single canonical copy via `make sync-policy` and validated by `validate_policy.py`.
+- Services emit audit events through a pluggable `audit_emitter` service module so ingestion backends can be swapped without changing route code.
+- Product directories carry a `.python-version` file pinning the interpreter, and the root `.python-version` plus `mk/python.mk` standardize the toolchain across all Python products.

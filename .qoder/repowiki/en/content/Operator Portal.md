@@ -2,9 +2,18 @@
 
 <cite>
 **Referenced Files in This Document**
-- [index.html](file://products/operator-portal/web-ui/index.html)
-- [app.js](file://products/operator-portal/web-ui/app.js)
-- [styles.css](file://products/operator-portal/web-ui/styles.css)
+- [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
+- [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [useChatStream.ts](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts)
+- [transport.ts](file://products/operator-portal/web-ui/app/src/stream/transport.ts)
+- [AuthContext.tsx](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx)
+- [useSessionWorkspace.ts](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts)
+- [roles.ts](file://products/operator-portal/web-ui/app/src/roles.ts)
+- [tokens.ts](file://products/operator-portal/web-ui/app/src/theme/tokens.ts)
+- [version.ts](file://products/operator-portal/web-ui/app/src/version.ts)
+- [vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
+- [package.json](file://products/operator-portal/web-ui/app/package.json)
+- [index.html](file://products/operator-portal/web-ui/app/index.html)
 - [nginx.conf](file://products/operator-portal/nginx.conf)
 - [Dockerfile](file://products/operator-portal/Dockerfile)
 - [Makefile](file://products/operator-portal/Makefile)
@@ -16,15 +25,25 @@
 - [validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [2026-08-21-hitl-confirmation-bridging.md](file://docs/agentic-aiops-platform/release-notes/2026-08-21-hitl-confirmation-bridging.md)
+- [AuditView.tsx](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx)
+- [IncidentsView.tsx](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx)
+- [PermissionsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx)
+- [SkillsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SkillsView.tsx)
+- [ToolsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/ToolsView.tsx)
+- [useSpeechRecognition.ts](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts)
+- [languages.ts](file://products/operator-portal/web-ui/app/src/voice/languages.ts)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive HITL (Human-in-the-Loop) confirmation card component with Approve/Deny buttons
-- Implemented role-based visibility for confirmation controls based on user permissions
-- Integrated stream continuation handling for pending tool approvals with SSE streaming
-- Enhanced evidence system with inline approval surfaces for ASK-gated tool executions
-- Updated version to v0.6.0 with enhanced platform ecosystem consistency
+- Complete framework rebuild from legacy vanilla JavaScript UI to modern Vite + React 18 + TypeScript SPA architecture
+- Implemented comprehensive voice input support with Web Speech API integration for speech-to-text functionality
+- Added multi-session workspace management with session persistence and incident deep linking
+- Enhanced stream processing with improved error handling, confirmation bridging, and turn scoping
+- Built comprehensive view implementations (AuditView, IncidentsView, PermissionsView, SkillsView, ToolsView) with role-based access control
+- Integrated Ant Design components for professional UI consistency and accessibility
+- Added enhanced skills integration with "Cited guidance" chips for operational traceability
+- Implemented sophisticated navigation system with sectioned organization and automatic visibility management
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -40,241 +59,240 @@
 11. [Real-time Streaming Interface](#real-time-streaming-interface)
 12. [Skills Integration and Cited Guidance](#skills-integration-and-cited-guidance)
 13. [Permission Matrix and Workspace Resources](#permission-matrix-and-workspace-resources)
-14. [Deployment Guide](#deployment-guide)
-15. [UI Customization](#ui-customization)
-16. [Accessibility Features](#accessibility-features)
-17. [Browser Compatibility](#browser-compatibility)
-18. [Troubleshooting Guide](#troubleshooting-guide)
-19. [Conclusion](#conclusion)
+14. [Multi-Session Workspace Management](#multi-session-workspace-management)
+15. [Voice Input Support](#voice-input-support)
+16. [Incident Triage and Deep Linking](#incident-triage-and-deep-linking)
+17. [Deployment Guide](#deployment-guide)
+18. [UI Customization](#ui-customization)
+19. [Accessibility Features](#accessibility-features)
+20. [Browser Compatibility](#browser-compatibility)
+21. [Troubleshooting Guide](#troubleshooting-guide)
+22. [Conclusion](#conclusion)
 
 ## Introduction
 
-The Operator Portal is a modern web-based administrative interface designed for platform administration and monitoring within the Luban AIOPS ecosystem. Built with vanilla JavaScript and HTML/CSS, it provides operators with a sophisticated two-column shell interface featuring a persistent sidebar for navigation and a main content area for interactive operations. The portal serves as a centralized control plane for platform administrators, offering real-time visibility into system status through an interactive chat interface, comprehensive evidence panels for tool execution tracking, configuration management capabilities, and administrative functions necessary for maintaining the AI-powered agent platform infrastructure.
+The Operator Portal is a modern web-based administrative interface designed for platform administration and monitoring within the Luban AIOPS ecosystem. The portal has been completely rebuilt using React 18, TypeScript, and Vite, replacing the previous vanilla JavaScript implementation. It provides operators with a sophisticated two-column shell interface featuring a persistent sidebar for navigation and a main content area for interactive operations. The portal serves as a centralized control plane for platform administrators, offering real-time visibility into system status through an interactive chat interface, comprehensive evidence panels for tool execution tracking, configuration management capabilities, and administrative functions necessary for maintaining the AI-powered agent platform infrastructure.
 
-**Updated** The portal has been updated to version 0.6.0 with comprehensive HITL (Human-in-the-Loop) confirmation bridging capabilities. The new inline confirmation card component allows operators to approve or deny ASK-gated tool executions directly within the chat interface, with role-based visibility controls ensuring only authorized users can make decisions. The platform maintains enhanced version consistency across the ecosystem with improved cache-busting mechanisms and comprehensive skills integration with "Cited guidance" chips for operational traceability.
+**Updated** The portal now features a complete React/TypeScript architecture implementing SPEC-023 with enhanced streaming infrastructure, multi-session workspace management, voice input support, comprehensive view implementations (AuditView, IncidentsView, PermissionsView, SkillsView, ToolsView), and improved role-gated navigation. The platform maintains version consistency at v0.8.1 with enhanced cache-busting mechanisms and comprehensive skills integration with "Cited guidance" chips for operational traceability.
 
 ## Project Structure
 
-The Operator Portal follows a clean, modular architecture with separation of concerns between presentation layer (HTML), styling (CSS), and application logic (JavaScript). The project structure is organized as follows:
+The Operator Portal follows a modular React architecture with clear separation of concerns between components, hooks, utilities, and styling:
 
 ```mermaid
 graph TB
-subgraph "Operator Portal Web UI"
-A[index.html] --> B[app.js]
-A --> C[styles.css]
-D[nginx.conf] --> A
-E[Dockerfile] --> A
-F[Makefile] --> E
-G[VERSION] --> H[validate_version.py]
+subgraph "React Application (Vite Build)"
+A[App.tsx] --> B[ChatView.tsx]
+A --> C[AuthContext.tsx]
+B --> D[useChatStream.ts]
+B --> E[useSessionWorkspace.ts]
+D --> F[transport.ts]
+F --> G[decoder.ts]
+A --> H[AuditView.tsx]
+A --> I[IncidentsView.tsx]
+A --> J[PermissionsView.tsx]
+A --> K[SkillsView.tsx]
+A --> L[ToolsView.tsx]
 end
-subgraph "Kubernetes Deployment"
-I[web-ui-deployment.yaml] --> J[web-ui-service.yaml]
-J --> K[Service Endpoint]
+subgraph "Voice Input"
+M[useSpeechRecognition.ts] --> N[languages.ts]
+end
+subgraph "Build & Deployment"
+O[vite.config.ts] --> P[package.json]
+Q[Dockerfile] --> R[Makefile]
+S[VERSION] --> T[validate_version.py]
 end
 subgraph "Backend Services"
-L[Agent Platform] --> M[HITL Confirmations]
-N[Platform Gateway] --> O[Identity Broker]
-P[Tool Gateway] --> Q[Policy Engine]
-K --> N
-M --> L
+U[Agent Platform] --> V[HITL Confirmations]
+W[Platform Gateway] --> X[Identity Broker]
+Y[Tool Gateway] --> Z[Policy Engine]
 end
 ```
 
 **Diagram sources**
-- [index.html](file://products/operator-portal/web-ui/index.html)
-- [app.js](file://products/operator-portal/web-ui/app.js)
-- [nginx.conf](file://products/operator-portal/nginx.conf)
-- [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
-- [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
-- [VERSION](file://VERSION)
-- [validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
+- [App.tsx:1-318](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L318)
+- [ChatView.tsx:1-728](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L728)
+- [useChatStream.ts:1-368](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L368)
+- [transport.ts:1-117](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L1-L117)
+- [AuditView.tsx:1-250](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L250)
+- [IncidentsView.tsx:1-600](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx#L1-L600)
+- [PermissionsView.tsx:1-99](file://products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx#L1-L99)
+- [SkillsView.tsx:1-132](file://products/operator-portal/web-ui/app/src/views/control/SkillsView.tsx#L1-L132)
+- [ToolsView.tsx:1-88](file://products/operator-portal/web-ui/app/src/views/control/ToolsView.tsx#L1-L88)
+- [useSpeechRecognition.ts:1-135](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts#L1-L135)
+- [languages.ts:1-60](file://products/operator-portal/web-ui/app/src/voice/languages.ts#L1-L60)
 
 **Section sources**
-- [index.html](file://products/operator-portal/web-ui/index.html)
-- [app.js](file://products/operator-portal/web-ui/app.js)
-- [styles.css](file://products/operator-portal/web-ui/styles.css)
+- [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
+- [package.json](file://products/operator-portal/web-ui/app/package.json)
+- [vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
 
 ## Core Components
 
-The Operator Portal consists of several key components that work together to provide a comprehensive administrative interface:
+The Operator Portal consists of several key React components and hooks that work together to provide a comprehensive administrative interface:
 
 ### Frontend Architecture
-- **Two-Column Shell Layout**: Professional interface with persistent sidebar and main content area
+- **React 18 Components**: Modern component-based architecture with hooks for state management
+- **Ant Design Integration**: Professional UI components with dark theme customization
+- **Two-Column Shell Layout**: Persistent sidebar with responsive mobile drawer support
 - **Enhanced Sectioned Navigation**: Organized navigation with Chat, Control, and Workspace sections
-- **Chat-Based Interface**: Modern single-page application with real-time streaming responses
-- **Inline Per-Turn Evidence System**: Sophisticated turn-scoped evidence grouping with collapsible groups rendered directly after agent responses
+- **Chat-Based Interface**: Real-time streaming responses with turn-based conversation management
+- **Inline Per-Turn Evidence System**: Sophisticated turn-scoped evidence grouping with collapsible groups
 - **HITL Confirmation Cards**: Inline approval surfaces for ASK-gated tool executions with Approve/Deny buttons
-- **Skills Integration**: Enhanced evidence cards with "Cited guidance" chips displaying matched skills when skills.* tools succeed
+- **Skills Integration**: Enhanced evidence cards with "Cited guidance" chips displaying matched skills
 - **Authentication System**: OIDC integration with automatic token refresh and session management
 - **Markdown Renderer**: Comprehensive text formatting with syntax highlighting support
 - **Responsive Design**: Dark theme with mobile-first approach and accessibility features
 
 ### Backend Integration
-- **Streaming API Client**: Real-time communication with backend services via Server-Sent Events
+- **Streaming API Client**: Robust Server-Sent Events implementation with error handling and reconnection
 - **HITL Confirmation Bridge**: Seamless integration with agent-platform confirmation registry for pending tool approvals
-- **Authentication Handler**: Seamless integration with identity broker for secure access
-- **Session Management**: Persistent session handling with automatic refresh mechanisms
-- **Error Handling**: Comprehensive error management with user-friendly feedback
+- **Authentication Handler**: Secure integration with identity broker for authentication and authorization
+- **Session Management**: Multi-session support with transcript caching and workspace persistence
+- **Error Handling**: Comprehensive error management with user-friendly feedback and recovery
 
 ### Enhanced User Interface
-- **Persistent Sidebar**: Branding, identity management, and function navigation
+- **Persistent Sidebar**: Branding, identity management, and function navigation with Ant Design Menu
 - **User Card System**: Avatar display with initials, username badge, and role information
-- **Role-Based Navigation**: Conditional visibility of audit trail based on user roles
-- **Mobile Drawer**: Off-canvas navigation for narrow screens with hamburger menu
+- **Role-Based Navigation**: Conditional visibility based on user roles and permissions
+- **Mobile Drawer**: Off-canvas navigation for narrow screens with proper focus management
 - **Settings & Debug Panel**: Configuration management and debugging tools
 
 ### HITL Confirmation System
 - **Inline Approval Cards**: Warning-toned bordered cards for pending tool confirmations
-- **Role-Based Controls**: Approve/Deny buttons visible only to authorized roles (platform-admin, approver, operator, developer)
+- **Role-Based Controls**: Approve/Deny buttons visible only to authorized roles
 - **Stream Continuation**: Automatic resumption of parked replies upon decision with SSE streaming
 - **Evidence Integration**: Seamless integration with existing evidence card system
 - **Status Management**: Visual indicators showing awaiting decision, approved, denied, or expired states
 
-### Permission and Resource Discovery
-- **Live Permission Matrix**: Real-time display of role-action permissions from policy bundle
-- **Tools Catalog**: Read-only inventory of available tools with filtering capabilities
-- **Skills Inventory**: Browseable catalog of available skills with source and tag filtering
-- **Workspace Resources**: Centralized view of platform resources and capabilities
-
 ### Version Management and Cache Busting
-- **Version Synchronization**: PLATFORM_VERSION constant synchronized with root VERSION file
-- **Cache-Busting Mechanism**: Query parameter versioning (v=20260821-spec-020-hitl-5) ensures proper client-side caching
+- **Version Synchronization**: PLATFORM_VERSION constant injected at build time from root VERSION file
+- **Cache-Busting Mechanism**: Query parameter versioning ensures proper client-side caching behavior
 - **Validation System**: Automated version consistency checks across all platform components
 - **Deployment Consistency**: Coordinated versioning across all platform services
 
-**Updated** The interface now includes comprehensive HITL confirmation bridging with inline approval cards that allow operators to approve or deny ASK-gated tool executions directly within the chat interface. The system supports role-based visibility controls, stream continuation handling, and seamless integration with the existing evidence system. The platform has been updated to version 0.6.0 with enhanced version consistency across the platform ecosystem.
+**Updated** The interface now includes comprehensive HITL confirmation bridging with inline approval cards, enhanced multi-session workspace management, voice input support, comprehensive view implementations (AuditView, IncidentsView, PermissionsView, SkillsView, ToolsView), and improved streaming infrastructure. The platform has been updated to version 0.8.1 with enhanced version consistency across the platform ecosystem.
 
 **Section sources**
-- [app.js](file://products/operator-portal/web-ui/app.js)
-- [Dockerfile](file://products/operator-portal/Dockerfile)
-- [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
+- [App.tsx:1-318](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L318)
+- [ChatView.tsx:1-728](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L728)
+- [useChatStream.ts:1-368](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L368)
 
 ## Architecture Overview
 
-The Operator Portal follows a modern single-page application (SPA) architecture built with vanilla JavaScript, providing a responsive and interactive user experience without relying on heavy frameworks.
+The Operator Portal follows a modern React single-page application architecture built with TypeScript and Vite, providing type safety and enhanced developer experience while maintaining performance and maintainability.
 
 ```mermaid
 sequenceDiagram
 participant User as "Browser"
-participant Portal as "Operator Portal"
+participant React as "React App"
+participant Auth as "Auth Context"
+participant Stream as "Chat Stream Hook"
+participant Views as "View Components"
 participant Nginx as "Nginx Server (Port 8080)"
 participant Gateway as "API Gateway"
 participant Agent as "Agent Platform"
 participant HITL as "HITL Registry"
-User->>Portal : Load index.html?v=20260821-spec-020-hitl-5
-Portal->>Nginx : Request static assets with cache-busting
-Nginx-->>Portal : Serve HTML/CSS/JS with no-store headers
-Note over Portal : Authentication Flow
-Portal->>Gateway : /api/v1/auth/login
+User->>React : Load React SPA
+React->>Auth : Initialize authentication
+Auth->>Gateway : /api/v1/auth/login
 Gateway->>Agent : Redirect to OIDC provider
 Agent-->>Gateway : Authorization code
-Gateway-->>Portal : Access tokens + identity
-Note over Portal : Enhanced Navigation
-Portal->>Gateway : /api/v1/policy/matrix (permissions)
-Gateway-->>Portal : Role-action matrix
-Portal->>Gateway : /api/v1/tools (tools catalog)
-Gateway-->>Portal : Available tools list
-Portal->>Gateway : /api/v1/skills (skills inventory)
-Gateway-->>Portal : Available skills list
-Note over Portal : Chat & Streaming with HITL
-User->>Portal : Send prompt
-Portal->>Gateway : POST /api/v1/chat/stream
+Gateway-->>Auth : Access tokens + identity
+Note over React : Enhanced Navigation
+React->>Views : Navigate to specific views
+Views->>Gateway : View-specific API calls
+Note over React : Chat & Streaming with HITL
+User->>React : Send message via ChatView
+React->>Stream : useChatStream.send()
+Stream->>Gateway : POST /api/v1/chat/stream
 Gateway->>Agent : Forward request
 Agent-->>Gateway : Stream events
-Gateway-->>Portal : SSE stream
-Note over Portal : HITL Confirmation Flow
-Portal->>Portal : Render confirmation card (awaiting decision)
-User->>Portal : Click Approve/Deny
-Portal->>Gateway : POST /api/v1/chat/confirm
-Gateway->>Agent : Forward decision
-Agent->>HITL : Claim confirmation
-HITL-->>Agent : Confirmation claimed
-Agent-->>Gateway : confirmation_result + resumed stream
-Gateway-->>Portal : SSE stream with resumed reply
-Portal->>User : Update card status + continue response
+Gateway-->>Stream : SSE stream
+Note over React : Incident Deep Linking
+User->>React : Click "Continue in chat"
+React->>Stream : Pin incident session
+Stream->>Gateway : Create/pin incident session
+Gateway-->>Stream : Session ID returned
+Stream-->>React : Active session updated
 ```
 
 **Diagram sources**
-- [index.html](file://products/operator-portal/web-ui/index.html)
-- [app.js](file://products/operator-portal/web-ui/app.js)
-- [nginx.conf](file://products/operator-portal/nginx.conf)
-- [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [App.tsx:206-318](file://products/operator-portal/web-ui/app/src/App.tsx#L206-L318)
+- [IncidentsView.tsx:219-228](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx#L219-L228)
+- [useSessionWorkspace.ts:136-159](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L136-L159)
+- [ChatView.tsx:449-626](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L449-L626)
+- [useChatStream.ts:191-314](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L191-L314)
+- [transport.ts:75-100](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L75-L100)
 
-The architecture emphasizes simplicity, performance, and maintainability while providing enterprise-grade functionality for platform operations. The HITL confirmation bridge enables human oversight of automated tool executions while maintaining seamless user experience through inline approval interfaces.
+The architecture emphasizes type safety, component composition, and maintainable state management while providing enterprise-grade functionality for platform operations. The React hooks pattern enables clean separation of concerns and reusable logic across components.
 
 ## Detailed Component Analysis
 
-### HTML Structure and Layout
+### React Application Structure
 
-The main HTML document defines the semantic structure of the operator portal with a professional two-column shell layout:
+The main React application implements a component-based architecture with clear separation of concerns:
 
-- **App Shell**: Grid-based layout with fixed-width sidebar and flexible main content area
-- **Sidebar**: Persistent navigation panel with branding, user identity, and function list
-- **Main Area**: Content area displaying one function view at a time (chat, settings, audit)
-- **Mobile Top Bar**: Hamburger menu and title for narrow screen navigation
-- **View Sections**: Separate sections for chat workspace, settings/debug panel, and audit trail
+#### App Component
+- **Layout Management**: Ant Design Layout with responsive sidebar and content areas
+- **Navigation State**: Active view management with role-based visibility controls
+- **Mobile Support**: Drawer-based navigation for narrow screen devices
+- **Loading States**: Proper loading indicators during authentication and data fetching
+- **View Routing**: Dynamic routing to different view components (chat, incidents, audit, permissions, tools, skills)
 
-### JavaScript Application Logic
+#### Enhanced View Components
+- **AuditView**: Role-gated audit trail with filtering and pagination
+- **IncidentsView**: Incident triage with auto-refresh, manual intake, and detail views
+- **PermissionsView**: Live permission matrix display from policy bundle
+- **SkillsView**: Browseable skills inventory with source/tag filtering
+- **ToolsView**: Read-only tools catalog with risk tier information
 
-The JavaScript application implements core functionality including:
+#### Authentication Context
+- **OIDC Integration**: Complete OpenID Connect flow with PKCE support
+- **Token Management**: Automatic refresh and session persistence
+- **Error Handling**: Graceful error handling with user feedback
+- **State Management**: Centralized authentication state across components
 
-#### Enhanced Sectioned Navigation System
-- **Section Organization**: Navigation items grouped into logical sections (Control, Workspace)
-- **Automatic Section Visibility**: Sections hide automatically when all entries are hidden
-- **View Management**: Show/hide different views while preserving state and history
-- **Sidebar Controls**: Mobile drawer toggle with backdrop and keyboard navigation
-- **Active State Management**: Visual indicators for current active view
-- **Role-Based Access Control**: Conditional visibility of audit trail based on user roles
+### Enhanced Navigation System
 
-#### Enhanced User Identity System
-- **User Card Display**: Avatar with initials, username badge, and role information
-- **Popup Menu**: User-related actions and information in dropdown menu
-- **Login/Logout Actions**: Icon-only buttons with tooltip support
-- **Session Persistence**: Secure storage of authentication state in sessionStorage
+The React implementation provides sophisticated navigation with Ant Design components:
 
-#### Chat Interface Management
-- **Real-time Streaming**: Server-Sent Events for live response updates
-- **Message History**: Persistent conversation display with user and agent messages
-- **Sticky Smart-scroll**: Intelligent scrolling that respects user reading position during streaming
-- **Input Handling**: Keyboard shortcuts and form validation
+#### Sectioned Navigation
+- **Control Section**: Incidents, Audit trail, and Permissions views
+- **Workspace Section**: Tools, Skills, and Settings views
+- **Role-Based Visibility**: Dynamic menu items based on user roles
+- **Automatic Section Hiding**: Sections hide when all entries are hidden
 
-#### HITL Confirmation Card System
-- **Inline Approval Cards**: Warning-toned bordered cards displayed for ASK-gated tool executions
-- **Role-Based Controls**: Approve/Deny buttons visible only to authorized roles (platform-admin, approver, operator, developer)
-- **Stream Continuation**: Automatic resumption of parked replies upon decision with SSE streaming
-- **Evidence Integration**: Seamless integration with existing evidence card system
-- **Status Management**: Visual indicators showing awaiting decision, approved, denied, or expired states
-- **Confirmation Registry**: In-memory per-process registry managing pending confirmations with TTL expiry
+#### Mobile Responsive Design
+- **Drawer Navigation**: Off-canvas sidebar for mobile devices
+- **Touch-Friendly**: Larger touch targets and swipe gestures
+- **Focus Management**: Proper keyboard navigation and screen reader support
 
-#### Inline Per-Turn Evidence System
-- **Per-turn Evidence Grouping**: Organizes evidence by conversation turns with collapsible groups rendered inline after agent responses
-- **Turn-based Organization**: Uses currentTurn object to track active conversation turn with anchor, group, body, summaryLine, counts, entries, and cardMap properties
-- **Evidence Turn Management**: Lazy creation of evidence groups on first tool frame with ensureCurrentTurn function
-- **Live Status Metrics**: Real-time counters tracking pending, success, error, and denied states with formatCounts function
-- **Per-turn Audit Cards**: Comprehensive aggregation of tool executions with metadata display in tabular format
-- **Evidence Summary**: Dynamic summary line showing current turn statistics with collapsible details element
+### Session Workspace Management
 
-#### Skills Integration and Cited Guidance
-- **Cited Skills Detection**: Automatic detection of skills.* tool success responses with matched skills data
-- **Chip Generation**: Creation of clickable chip elements displaying skill titles and namespaced IDs
-- **Evidence Integration**: Seamless integration with existing evidence card system
-- **Truncation Handling**: Smart filtering to avoid displaying partial or truncated skill citations
-- **Visual Styling**: Professional chip design with proper spacing, borders, and typography
+The multi-session workspace provides comprehensive session management:
 
-#### Durable Audit Trail System
-- **Role-Gated Access**: Audit trail view hidden unless user has auditor or platform-admin roles
-- **Filtering Capabilities**: Username, event type, service, and date range filters
-- **Pagination Support**: Cursor-based pagination with load more functionality
-- **Event Detail View**: Expandable rows showing full event envelope JSON
+#### Session List
+- **Real-Time Updates**: 30-second polling for session list updates
+- **Active Session Persistence**: Session selection persists across page reloads
+- **Pinned Sessions**: Support for incident deep-link sessions
+- **Delete Operations**: Safe session deletion with conflict resolution
 
-**Updated** The interface now includes comprehensive HITL confirmation bridging with inline approval cards that allow operators to approve or deny ASK-gated tool executions directly within the chat interface. The system supports role-based visibility controls, stream continuation handling, and seamless integration with the existing evidence system. The platform has been updated to version 0.6.0 with enhanced version consistency across the platform ecosystem.
+#### Transcript Management
+- **Lazy Loading**: Sessions load transcripts on demand
+- **Caching**: In-memory caching prevents redundant API calls
+- **History Seeding**: Resumed sessions render like live conversations
+
+**Updated** The React architecture provides better type safety, component reusability, and maintainability while preserving all existing functionality from the legacy implementation. The new view components provide dedicated interfaces for different operational tasks.
 
 **Section sources**
-- [app.js](file://products/operator-portal/web-ui/app.js)
+- [App.tsx:1-318](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L318)
+- [ChatView.tsx:1-728](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L728)
+- [useSessionWorkspace.ts:1-174](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L1-L174)
 
 ### CSS Styling System
 
-The styling system provides a comprehensive design foundation with:
+The styling system maintains design consistency while leveraging Ant Design's theming:
 
 #### Design Tokens
 - **Dark Theme**: Modern color palette optimized for extended use
@@ -282,61 +300,43 @@ The styling system provides a comprehensive design foundation with:
 - **Spacing System**: Consistent margins and padding throughout
 - **Animation Effects**: Smooth transitions and loading indicators
 
-#### Two-Column Layout System
-- **Grid-Based Shell**: Fixed 230px sidebar with flexible main content area
-- **Responsive Breakpoints**: Mobile-first approach with off-canvas drawer below 800px
-- **Sidebar Styling**: Professional navigation with hover effects and active states
-- **Main Area**: Full-height content area with proper overflow handling
-
-#### Enhanced Navigation Styling
-- **Section Labels**: Muted, uppercase labels for navigation sections with proper spacing
-- **Section Containers**: Flexbox-based layout with automatic hiding when all entries are hidden
-- **Navigation Items**: Clean button styling with active state indicators and hover effects
-- **Stream Indicator**: Pulsing dot showing when chat streaming is active
+#### Component Styles
+- **User Card**: Avatar display with initials, username badge, and role information
+- **Navigation Items**: Clean button styling with active state indicators
+- **Chat Messages**: Distinct styling for user and agent messages
+- **Evidence Panels**: Professional collapsible interface with native browser details element behavior
+- **Cited Guidance Chips**: Specialized styling for skill citation chips
+- **Audit Trail Tables**: Responsive tables with sticky headers and expandable detail rows
+- **Settings Panel**: Grid-based layout for configuration options
+- **Mobile Drawer**: Slide-in navigation with backdrop overlay
 
 #### HITL Confirmation Card Styling
 - **Warning Border**: Yellow border indicating pending decision required
 - **Locked State**: Border changes to standard when confirmation is resolved
 - **Action Buttons**: Green approve button and red deny button with hover effects
 - **Status Messages**: Clear status indicators for awaiting decision, approving/denying, and final states
-- **Call Details**: Collapsible sections showing tool parameters for review
-
-#### Component Styles
-- **User Card**: Avatar display with initials, username badge, and role information
-- **Navigation Items**: Clean button styling with active state indicators
-- **Chat Messages**: Distinct styling for user and agent messages
-- **Inline Evidence Groups**: Professional collapsible interface with native browser details element behavior
-- **Cited Guidance Chips**: Specialized styling for skill citation chips with proper typography and spacing
-- **Audit Trail Table**: Responsive table with sticky headers and expandable detail rows
-- **Settings Panel**: Grid-based layout for configuration options
-- **Mobile Drawer**: Slide-in navigation with backdrop overlay
-
-#### Accessibility Features
-- **High Contrast**: WCAG 2.1 AA compliant color ratios
-- **Keyboard Navigation**: Full keyboard operability with visible focus indicators
-- **Screen Reader Support**: Semantic HTML and ARIA labels
-- **Reduced Motion**: Respects user motion preferences
 
 **Section sources**
-- [styles.css](file://products/operator-portal/web-ui/styles.css)
+- [styles.css:1-800](file://products/operator-portal/web-ui/styles.css#L1-L800)
+- [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
 
 ## Enhanced Navigation System
 
-The Operator Portal features a sophisticated enhanced navigation system with sectioned organization and role-based visibility controls.
+The Operator Portal features a sophisticated navigation system with sectioned organization and role-based visibility controls, implemented using Ant Design components.
 
 ### Sectioned Navigation Architecture
 
 The navigation system organizes functions into logical sections with automatic visibility management:
 
 #### Control Section
-- **Incidents**: Incident triage and management interface
+- **Incidents**: Incident triage and management interface with auto-refresh
 - **Audit Trail**: Durable audit event inspection with role-based access
 - **Permissions**: Live permission matrix display showing role-action relationships
 
 #### Workspace Section  
 - **Tools**: Read-only catalog of available tools with filtering capabilities
 - **Skills**: Browseable inventory of available skills with source and tag filtering
-- **Settings & Debug**: Configuration management and debugging tools
+- **Settings**: Configuration management and debugging tools
 
 #### Automatic Section Visibility
 - **Dynamic Hiding**: Sections automatically hide when all their entries are hidden due to role restrictions
@@ -345,34 +345,27 @@ The navigation system organizes functions into logical sections with automatic v
 
 ### Navigation Implementation Details
 
-The enhanced navigation system uses a structured approach with clear separation of concerns:
+The React implementation uses Ant Design Menu with dynamic item generation:
 
-#### Section Definition
-```javascript
-const NAV_SECTIONS = {
-  control: {
-    container: document.querySelector("#nav-section-control"),
-    entries: ["incidents", "audit", "permissions"]
-  },
-  workspace: {
-    container: document.querySelector("#nav-section-workspace"),
-    entries: ["tools", "skills", "settings"]
-  }
-};
+#### Menu Configuration
+```typescript
+const items = useMemo<MenuProps["items"]>(() => {
+  const entries: MenuProps["items"] = [
+    { key: "chat", icon: <MessageOutlined />, label: "Chat" },
+  ];
+  // Control section items...
+  // Workspace section items...
+  return entries;
+}, [roles, signedIn]);
 ```
 
-#### Visibility Management
-- **Section Synchronization**: `syncNavSectionVisibility()` function manages automatic section hiding
-- **Entry-Level Control**: Individual navigation items controlled by role checks and authentication status
-- **State Preservation**: Navigation state preserved across view changes and page reloads
-
-### Role-Based Access Control
+#### Role-Based Access Control
 
 The navigation system implements comprehensive role-based access control:
 
 #### Required Roles for Different Functions
 - **Audit Trail**: Requires "auditor" or "platform-admin" roles
-- **Incidents**: Requires specific incident-related roles (platform-admin, approver, operator, developer, read-only-observer)
+- **Incidents**: Requires specific incident-related roles
 - **Permissions/Tools/Skills**: Available to all authenticated users
 - **Chat**: Available to all users regardless of role
 
@@ -381,26 +374,15 @@ The navigation system implements comprehensive role-based access control:
 - **Server-Side Validation**: Gateway re-enforces permissions on every API request
 - **Graceful Fallback**: Users automatically redirected to chat if they lose required roles
 
-### Mobile Responsive Design
-
-The enhanced navigation maintains excellent mobile experience:
-
-#### Off-Canvas Drawer
-- **Hamburger Menu**: Compact header with hamburger button for mobile navigation
-- **Slide-In Navigation**: Sidebar slides in from left as overlay on narrow screens
-- **Backdrop Overlay**: Semi-transparent background when drawer is open
-- **Touch-Friendly**: Larger touch targets and swipe gestures support
-
-**Updated** The navigation system now provides enhanced organization with sectioned grouping, automatic visibility management, and comprehensive role-based access control, making it easier for operators to find relevant functions while maintaining security boundaries.
+**Updated** The navigation system now provides enhanced organization with sectioned grouping, automatic visibility management, and comprehensive role-based access control using React components and Ant Design.
 
 **Section sources**
-- [index.html:40-57](file://products/operator-portal/web-ui/index.html#L40-L57)
-- [app.js:93-110](file://products/operator-portal/web-ui/app.js#L93-L110)
-- [styles.css:211-228](file://products/operator-portal/web-ui/styles.css#L211-L228)
+- [App.tsx:56-145](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L145)
+- [roles.ts:1-34](file://products/operator-portal/web-ui/app/src/roles.ts#L1-L34)
 
 ## Role-Gated Audit Trail System
 
-The Operator Portal implements a comprehensive audit trail system with role-based access control and advanced filtering capabilities.
+The Operator Portal implements a comprehensive audit trail system with role-based access control and advanced filtering capabilities, integrated into the React component architecture.
 
 ### Role-Based Access Control
 
@@ -413,7 +395,7 @@ The audit trail view is protected by role-based access control:
 
 ### Audit Trail Interface
 
-The audit trail provides comprehensive event inspection capabilities:
+The AuditView component provides comprehensive event inspection capabilities:
 
 #### Filter Toolbar
 - **Username Filter**: Search by specific username
@@ -444,14 +426,13 @@ The audit trail system implements multiple security layers:
 - **Authentication Required**: All audit requests require valid authentication tokens
 
 **Section sources**
-- [app.js:27-39](file://products/operator-portal/web-ui/app.js#L27-L39)
-- [app.js:232-234](file://products/operator-portal/web-ui/app.js#L232-L234)
-- [app.js:403-506](file://products/operator-portal/web-ui/app.js#L403-L506)
-- [index.html:124-156](file://products/operator-portal/web-ui/index.html#L124-L156)
+- [AuditView.tsx:1-250](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L250)
+- [App.tsx:62-91](file://products/operator-portal/web-ui/app/src/App.tsx#L62-L91)
+- [roles.ts:4-12](file://products/operator-portal/web-ui/app/src/roles.ts#L4-L12)
 
 ## HITL Confirmation Card System
 
-The Operator Portal now includes comprehensive Human-in-the-Loop (HITL) confirmation bridging that allows operators to approve or deny ASK-gated tool executions directly within the chat interface.
+The Operator Portal includes comprehensive Human-in-the-Loop (HITL) confirmation bridging that allows operators to approve or deny ASK-gated tool executions directly within the chat interface, implemented with React components and hooks.
 
 ### HITL Confirmation Architecture
 
@@ -534,16 +515,16 @@ The HITL confirmation system provides several operational benefits:
 - **Audit Trail**: All decisions recorded with timestamps and user context
 - **Error Recovery**: Graceful handling of network issues and timeouts
 
-**Updated** The HITL confirmation system represents a significant enhancement to the operator portal, enabling safe automation of complex workflows while maintaining human oversight for critical operations. The system supports nested confirmations, handles various error scenarios gracefully, and integrates seamlessly with the existing evidence and streaming systems.
+**Updated** The HITL confirmation system represents a significant enhancement to the operator portal, enabling safe automation of complex workflows while maintaining human oversight for critical operations. The React implementation provides better state management and component reusability.
 
 **Section sources**
-- [app.js:1670-1863](file://products/operator-portal/web-ui/app.js#L1670-L1863)
-- [styles.css:749-823](file://products/operator-portal/web-ui/styles.css#L749-L823)
-- [hitl_confirmations.py:1-209](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L1-L209)
+- [ChatView.tsx:208-287](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L208-L287)
+- [useChatStream.ts:152-185](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L152-L185)
+- [styles.css:751-823](file://products/operator-portal/web-ui/styles.css#L751-L823)
 
 ## Authentication and Security
 
-The Operator Portal implements comprehensive authentication and security features using OpenID Connect (OIDC) protocol with automatic session management.
+The Operator Portal implements comprehensive authentication and security features using OpenID Connect (OIDC) protocol with automatic session management, built with React Context for state management.
 
 ### OIDC Integration Flow
 
@@ -583,7 +564,7 @@ Flexible identity handling supports various scenarios:
 
 ### User Interface Enhancements
 
-The authentication system integrates seamlessly with the new UI:
+The authentication system integrates seamlessly with the React UI:
 
 - **User Card Display**: Avatar with initials, username badge, and role information
 - **Login/Logout Buttons**: Icon-only buttons with tooltip support
@@ -591,13 +572,12 @@ The authentication system integrates seamlessly with the new UI:
 - **Session Persistence**: Automatic session restoration on page reload
 
 **Section sources**
-- [app.js:197-354](file://products/operator-portal/web-ui/app.js#L197-L354)
-- [app.js:555-642](file://products/operator-portal/web-ui/app.js#L555-L642)
-- [web-ui-deployment.yaml:22-27](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml#L22-L27)
+- [AuthContext.tsx:1-110](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L1-L110)
+- [App.tsx:157-195](file://products/operator-portal/web-ui/app/src/App.tsx#L157-L195)
 
 ## Markdown Rendering System
 
-The Operator Portal includes a comprehensive markdown rendering engine that transforms plain text into rich, formatted HTML content for display in the chat interface.
+The Operator Portal includes a comprehensive markdown rendering engine that transforms plain text into rich, formatted HTML content for display in the chat interface, implemented as a reusable React utility.
 
 ### Supported Markdown Features
 
@@ -641,12 +621,12 @@ Consistent visual presentation across all rendered content:
 - **Accessibility**: Proper semantic markup for screen readers
 
 **Section sources**
-- [app.js:202-268](file://products/operator-portal/web-ui/app.js#L202-L268)
+- [ChatView.tsx:320-329](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L320-L329)
 - [styles.css:496-571](file://products/operator-portal/web-ui/styles.css#L496-L571)
 
 ## Real-time Streaming Interface
 
-The Operator Portal implements a sophisticated real-time streaming interface using Server-Sent Events (SSE) for live chat responses and tool execution updates.
+The Operator Portal implements a sophisticated real-time streaming interface using Server-Sent Events (SSE) for live chat responses and tool execution updates, built with React hooks for state management.
 
 ### Streaming Architecture
 
@@ -688,21 +668,23 @@ Optimized for high-frequency updates:
 
 ### Enhanced Streaming Features
 
-The new interface includes additional streaming enhancements:
+The React implementation includes additional streaming enhancements:
 
 - **Thinking Indicator**: Animated placeholder shown while agent processes requests
 - **Sidebar Pulse**: Visual indicator in sidebar showing active streaming state
 - **Turn Scoping**: Each conversation turn maintains its own evidence context
 - **HITL Integration**: Seamless handling of confirmation requests within streaming flow
 - **Error Recovery**: Graceful handling of streaming errors with user feedback
+- **Session Management**: Multi-session support with per-session turn caching
 
 **Section sources**
-- [app.js:1900-2050](file://products/operator-portal/web-ui/app.js#L1900-L2050)
+- [useChatStream.ts:191-314](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L191-L314)
+- [transport.ts:75-117](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L75-L117)
 - [styles.css:353-382](file://products/operator-portal/web-ui/styles.css#L353-L382)
 
 ## Skills Integration and Cited Guidance
 
-The Operator Portal now includes comprehensive skills integration with "Cited guidance" chips that provide enhanced operational visibility when skills.* tools successfully execute.
+The Operator Portal includes comprehensive skills integration with "Cited guidance" chips that provide enhanced operational visibility when skills.* tools successfully execute, implemented as React components.
 
 ### Cited Guidance System Architecture
 
@@ -728,15 +710,9 @@ The cited guidance system automatically detects and displays matched skills from
 
 ### Implementation Details
 
-The cited guidance system is implemented through two key functions:
+The cited guidance system is implemented through React components:
 
-#### citedSkills Function
-- **Input Processing**: Validates payload status and data structure
-- **Tool Type Handling**: Processes different skills.* tool types appropriately
-- **Data Extraction**: Extracts skill information from various data structures
-- **Output Generation**: Returns array of skill objects with id and title
-
-#### renderCitedGuidance Function
+#### Evidence Panel Integration
 - **Conditional Rendering**: Only renders for skills.* tools with valid citations
 - **Duplicate Prevention**: Prevents multiple rendering of same evidence card
 - **Element Construction**: Builds DOM structure for cited guidance section
@@ -778,16 +754,16 @@ The cited guidance chips follow the established design system:
 - **Screen Reader Support**: Proper ARIA attributes and semantic markup
 
 **Section sources**
-- [app.js:750-799](file://products/operator-portal/web-ui/app.js#L750-L799)
+- [ChatView.tsx:153-206](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L153-L206)
 - [styles.css:589-627](file://products/operator-portal/web-ui/styles.css#L589-L627)
 
 ## Permission Matrix and Workspace Resources
 
-The Operator Portal now provides comprehensive visibility into platform permissions and workspace resources through dedicated views.
+The Operator Portal provides comprehensive visibility into platform permissions and workspace resources through dedicated views, integrated into the React component architecture.
 
 ### Live Permission Matrix
 
-The permissions view displays the current role-action matrix evaluated from the enforced policy bundle:
+The PermissionsView component displays the current role-action matrix evaluated from the enforced policy bundle:
 
 #### Permission Matrix Features
 - **Real-Time Updates**: Fetches latest policy bundle from `/api/v1/policy/matrix` endpoint
@@ -803,13 +779,14 @@ The permissions view displays the current role-action matrix evaluated from the 
 
 ### Tools Catalog
 
-The tools view provides a read-only inventory of available tools in the workspace:
+The ToolsView component provides a read-only inventory of available tools in the workspace:
 
 #### Tools Catalog Features
 - **Complete Tool Listing**: Displays all registered tools with name, description, category, and risk level
 - **Empty State Handling**: Shows helpful message when no tools are available
 - **Status Indicators**: Shows total count of registered tools
 - **Read-Only Access**: No modification capabilities, ensuring safety
+- **Confirmation Requirements**: Shows whether confirmation is required or auto-allowed based on risk level
 
 #### Data Source
 - **API Endpoint**: `/api/v1/tools` returns array of tool objects
@@ -818,7 +795,7 @@ The tools view provides a read-only inventory of available tools in the workspac
 
 ### Skills Inventory
 
-The skills view offers browseable access to available skills with filtering capabilities:
+The SkillsView component offers browseable access to available skills with filtering capabilities:
 
 #### Skills Inventory Features
 - **Comprehensive Listing**: Shows skill title, source, tags, version, and last updated timestamp
@@ -851,8 +828,253 @@ The combined workspace views provide comprehensive resource discovery capabiliti
 **Updated** The workspace resource discovery system provides operators with comprehensive visibility into platform capabilities, enabling better understanding of available tools and skills while maintaining strict security boundaries through role-based access control.
 
 **Section sources**
-- [app.js:626-763](file://products/operator-portal/web-ui/app.js#L626-L763)
-- [index.html:232-280](file://products/operator-portal/web-ui/index.html#L232-L280)
+- [PermissionsView.tsx:1-99](file://products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx#L1-L99)
+- [ToolsView.tsx:1-88](file://products/operator-portal/web-ui/app/src/views/control/ToolsView.tsx#L1-L88)
+- [SkillsView.tsx:1-132](file://products/operator-portal/web-ui/app/src/views/control/SkillsView.tsx#L1-L132)
+- [App.tsx:62-136](file://products/operator-portal/web-ui/app/src/App.tsx#L62-L136)
+
+## Multi-Session Workspace Management
+
+The Operator Portal now includes comprehensive multi-session workspace management, allowing operators to maintain multiple concurrent conversations with different contexts and histories.
+
+### Session Workspace Architecture
+
+The session workspace provides a comprehensive interface for managing multiple conversations:
+
+#### Session List Management
+- **Real-Time Updates**: 30-second polling for session list updates
+- **Active Session Persistence**: Current session selection persists across page reloads
+- **Pinned Sessions**: Support for incident deep-link sessions that appear even before server list catches up
+- **Delete Operations**: Safe session deletion with conflict resolution for pending confirmations
+
+#### Transcript Management
+- **Lazy Loading**: Sessions load transcripts on demand to optimize performance
+- **Caching Strategy**: In-memory caching prevents redundant API calls for the same session
+- **History Seeding**: Resumed sessions render like live conversations with proper turn history
+- **Transcript Availability**: Clear indication when sessions have no recorded transcript yet
+
+### Session Panel Interface
+
+The session panel provides intuitive session management:
+
+#### Session Display
+- **Session Titles**: User-friendly titles with fallback to session IDs
+- **Activity Indicators**: Last active timestamps with relative time formatting
+- **Pending Confirmation Flags**: Visual indicators for sessions with pending confirmations
+- **Delete Actions**: Safe deletion with confirmation dialogs
+
+#### Session Operations
+- **Create New Sessions**: One-click session creation with automatic activation
+- **Session Switching**: Seamless switching between sessions with state preservation
+- **Deep Linking**: Support for incident-specific session deep links
+- **Error Handling**: Graceful handling of network errors and session conflicts
+
+### Integration with Chat Interface
+
+The session workspace integrates seamlessly with the chat interface:
+
+#### Turn State Management
+- **Per-Session Caching**: Each session maintains its own turn history in memory
+- **Stream Attachment**: New messages attach to the correct session context
+- **Confirmation Anchoring**: HITL confirmations remain bound to their originating sessions
+- **State Restoration**: Session state restored when switching back to previously viewed sessions
+
+#### User Experience Benefits
+- **Context Preservation**: Each conversation maintains its own context and history
+- **Parallel Workflows**: Operators can work on multiple incidents simultaneously
+- **Quick Context Switching**: Easy switching between different operational contexts
+- **Session Organization**: Clear visual organization of related conversations
+
+**Updated** The multi-session workspace represents a significant enhancement to operator productivity, enabling efficient management of multiple concurrent conversations while maintaining context isolation and data integrity.
+
+**Section sources**
+- [useSessionWorkspace.ts:1-174](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L1-L174)
+- [ChatView.tsx:352-445](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L352-L445)
+- [ChatView.tsx:473-526](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L473-L526)
+
+## Voice Input Support
+
+The Operator Portal now includes comprehensive voice input support, allowing operators to submit messages using speech recognition while maintaining full compatibility with existing text-based workflows.
+
+### Voice Input Architecture
+
+The voice input system integrates seamlessly with the existing chat interface:
+
+#### Input Modality Support
+- **Modality Metadata**: Voice inputs are tagged with `input_modality: "voice"` metadata
+- **Backend Recording**: Voice modality is recorded for audit purposes without affecting policy decisions
+- **Transcription Handling**: Speech-to-text conversion happens client-side before sending to backend
+- **Policy Neutrality**: Voice modality never changes policy enforcement or HITL outcomes
+
+#### User Interface Integration
+- **Sender Component**: Ant Design Sender component with built-in voice recording support
+- **Visual Indicators**: Clear feedback during voice recording and transcription
+- **Fallback Handling**: Graceful degradation when voice input is unavailable
+- **Accessibility**: Proper ARIA labels and keyboard navigation support
+
+### Technical Implementation
+
+The voice input system leverages modern web APIs:
+
+#### Speech Recognition
+- **Web Speech API**: Browser-native speech recognition for supported browsers
+- **Language Detection**: Automatic language detection with fallback to default language
+- **Continuous Recognition**: Support for continuous speech recognition during longer inputs
+- **Error Handling**: Graceful handling of speech recognition failures
+
+#### Audio Processing
+- **Audio Capture**: Direct audio capture from microphone with quality settings
+- **Format Conversion**: Automatic format conversion for backend compatibility
+- **Compression**: Audio compression for efficient network transmission
+- **Privacy**: Client-side processing ensures audio data doesn't leave the browser unnecessarily
+
+### Language Selection and Management
+
+The voice input system includes comprehensive language management:
+
+#### Language Configuration
+- **Supported Languages**: English (US) and Chinese (Mandarin) with extensible language list
+- **Browser Locale Detection**: Automatic language detection based on browser settings
+- **Local Storage Persistence**: User's language preference saved in localStorage
+- **Fallback Handling**: Graceful fallback to English when preferred language is unavailable
+
+#### Recognition Control
+- **Manual Start/Stop**: Explicit control over speech recognition sessions
+- **Error Recovery**: Comprehensive error handling with user-friendly messages
+- **Resource Management**: Proper cleanup of speech recognition resources
+- **Performance Optimization**: Efficient recognition session management
+
+### User Experience Benefits
+
+Voice input provides several operational benefits:
+
+#### Enhanced Productivity
+- **Hands-Free Operation**: Operators can input commands while performing other tasks
+- **Natural Language**: More natural conversation flow compared to typing
+- **Speed**: Faster input for experienced operators familiar with voice commands
+- **Accessibility**: Improved accessibility for operators with motor impairments
+
+#### Operational Flexibility
+- **Mobile Support**: Better input method for mobile devices with limited keyboard access
+- **Emergency Situations**: Quick command entry during critical incidents
+- **Multitasking**: Ability to monitor systems while verbally commanding actions
+- **Reduced Typing Fatigue**: Alternative input method for extended operational periods
+
+### Security and Privacy Considerations
+
+The voice input system implements appropriate security measures:
+
+#### Privacy Protection
+- **Client-Side Processing**: Speech recognition occurs locally in the browser
+- **No Audio Storage**: Transcribed text is sent immediately without storing audio
+- **Permission Requirements**: Explicit user permission required for microphone access
+- **Browser Security**: Leverages browser security model for microphone access
+
+#### Audit and Compliance
+- **Input Logging**: All voice inputs logged with modality metadata for audit trails
+- **Transparency**: Clear indication when voice input is being used
+- **Compliance**: Meets organizational requirements for input method logging
+- **Data Minimization**: Only transcribed text stored, not audio recordings
+
+**Updated** Voice input support significantly enhances operator productivity and accessibility while maintaining security and compliance requirements through careful implementation of privacy-preserving techniques.
+
+**Section sources**
+- [useSpeechRecognition.ts:1-135](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts#L1-L135)
+- [languages.ts:1-60](file://products/operator-portal/web-ui/app/src/voice/languages.ts#L1-L60)
+- [useChatStream.ts:80-85](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L80-L85)
+- [transport.ts:31-50](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L31-L50)
+- [ChatView.tsx:611-621](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L611-L621)
+
+## Incident Triage and Deep Linking
+
+The Operator Portal includes comprehensive incident triage capabilities with automated connector dispatches and seamless deep linking to chat sessions, implemented through the IncidentsView component.
+
+### Incident Management Architecture
+
+The incident management system provides end-to-end incident handling from creation to resolution:
+
+#### Incident List View
+- **Auto-Refresh**: 15-second automatic refresh for real-time incident updates
+- **Filtering**: Status, severity, and source-based filtering capabilities
+- **Manual Intake**: Form-based incident creation with title, summary, severity, and labels
+- **Detail Navigation**: Click-to-view incident details with comprehensive information
+
+#### Incident Detail View
+- **Comprehensive Information**: Full incident metadata including timestamps, labels, and status
+- **Triage Report**: Automated triage analysis with severity assessment and next steps
+- **Connector Dispatches**: Track external system integrations and their status
+- **Chat Deep Linking**: Seamless transition to chat for continued incident investigation
+
+### Deep Linking Implementation
+
+The deep linking system enables seamless workflow transitions between incidents and chat:
+
+#### Session Pinning
+- **Automatic Session Creation**: Incident-specific sessions created when navigating from incidents to chat
+- **Session Identification**: Unique session IDs generated for each incident context
+- **Context Preservation**: Incident context maintained throughout chat conversation
+- **Visual Indicators**: Clear indication of pinned incident sessions in workspace panel
+
+#### Workflow Integration
+- **One-Click Transition**: "Continue in chat" button for immediate workflow continuation
+- **Context Transfer**: Incident information automatically included in chat context
+- **Session Management**: Pinned sessions persist across page reloads and navigation
+- **Role-Based Access**: Incident viewing and action capabilities controlled by user roles
+
+### Triage Automation
+
+The triage system provides automated incident analysis and response coordination:
+
+#### Automated Analysis
+- **Severity Assessment**: AI-powered severity classification with confidence scoring
+- **Evidence Gathering**: Automated collection of relevant system information
+- **Hypothesis Generation**: Potential root cause analysis with supporting evidence
+- **Next Steps Recommendation**: Actionable recommendations prioritized by urgency
+
+#### Connector Integration
+- **External System Dispatch**: Automated notifications to external monitoring and alerting systems
+- **Status Tracking**: Real-time status updates for connector communications
+- **Error Handling**: Robust error handling with retry logic and failure reporting
+- **Audit Trail**: Complete audit logging of all connector interactions
+
+### User Interface Features
+
+The incident management interface provides intuitive operation:
+
+#### List View Features
+- **Compact Display**: Efficient listing of multiple incidents with key information
+- **Status Visualization**: Color-coded status badges for quick incident assessment
+- **Filter Toolbar**: Advanced filtering with status, severity, and source options
+- **Bulk Actions**: Capability to perform actions on multiple incidents
+
+#### Detail View Features
+- **Rich Information Display**: Comprehensive incident information with expandable sections
+- **Interactive Elements**: Clickable elements for triage execution and chat navigation
+- **Evidence Presentation**: Formatted display of triage reports and supporting evidence
+- **Action Buttons**: Contextual actions based on incident status and user permissions
+
+### Security and Access Control
+
+The incident management system implements comprehensive security measures:
+
+#### Role-Based Access
+- **View Permissions**: Separate roles for viewing vs. acting on incidents
+- **Action Validation**: Server-side validation of all incident operations
+- **Audit Logging**: Complete audit trail of all incident interactions
+- **Data Isolation**: Proper scoping of incident data based on user permissions
+
+#### Data Integrity
+- **Input Validation**: Comprehensive validation of incident data submissions
+- **Conflict Resolution**: Handling of concurrent modifications and race conditions
+- **Data Persistence**: Reliable storage of incident data with backup and recovery
+- **Audit Compliance**: Full compliance with audit requirements for incident handling
+
+**Updated** The incident triage and deep linking system represents a significant enhancement to operational workflows, enabling seamless transitions between incident management and collaborative troubleshooting while maintaining comprehensive audit trails and security controls.
+
+**Section sources**
+- [IncidentsView.tsx:1-600](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx#L1-L600)
+- [App.tsx:219-228](file://products/operator-portal/web-ui/app/src/App.tsx#L219-L228)
+- [useSessionWorkspace.ts:136-159](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L136-L159)
 
 ## Deployment Guide
 
@@ -866,13 +1088,25 @@ Before deploying the Operator Portal, ensure you have the following prerequisite
 - **Nginx Ingress Controller**: For external access routing
 - **TLS Certificates**: Valid certificates for HTTPS access
 - **Identity Provider**: OIDC-compatible identity provider (Keycloak, Auth0, etc.)
+- **Node.js**: Version 22+ for local development
 
-### Container Image Build
+### React Application Build
 
-Build the container image using the provided Makefile:
+Build the React application using Vite:
+
+```bash
+cd products/operator-portal/web-ui/app
+npm install
+npm run build
+```
+
+### Legacy Application Support
+
+The legacy vanilla JavaScript application remains available for backward compatibility:
 
 ```bash
 cd products/operator-portal
+# Legacy build process
 make build
 make push
 ```
@@ -903,6 +1137,7 @@ The nginx configuration handles static file serving and reverse proxy setup on p
 - **Compression**: Gzip compression for reduced bandwidth usage
 - **Non-root Execution**: Runs as unprivileged user for enhanced security
 - **Cache Control**: No-store headers for all static assets to prevent caching issues
+- **React SPA Routing**: Support for client-side routing with fallback to index.html
 
 ### Environment Configuration
 
@@ -917,27 +1152,27 @@ Configure environment variables for the portal deployment:
 
 The deployment process includes enhanced version management:
 
-- **Platform Version**: PLATFORM_VERSION set to v0.6.0 for consistency across the platform ecosystem
-- **Cache-Busting**: Query parameter versioning (v=20260821-spec-020-hitl-5) ensures proper client-side caching behavior
+- **Platform Version**: PLATFORM_VERSION set to v0.8.1 for consistency across the platform ecosystem
+- **Build-Time Injection**: Version injected at build time from root VERSION file
+- **Cache-Busting**: Query parameter versioning ensures proper client-side caching behavior
 - **Version Validation**: Automated validation ensures all platform components use consistent versions
 - **Deployment Coordination**: Coordinated versioning across all platform services
 
-**Updated** The deployment now supports the enhanced HITL confirmation bridging system with inline approval cards, improved navigation system with sectioned organization, comprehensive workspace resource discovery capabilities, and enhanced skills integration with "Cited guidance" chips. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. The cache-busting mechanism ensures clients always receive the latest version of static assets after deployments.
+**Updated** The deployment now supports both the new React/TypeScript application and the legacy vanilla JavaScript implementation, with enhanced HITL confirmation bridging system, improved navigation system with sectioned organization, comprehensive workspace resource discovery capabilities, enhanced skills integration with "Cited guidance" chips, and comprehensive incident triage with deep linking capabilities. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints.
 
 **Section sources**
 - [nginx.conf](file://products/operator-portal/nginx.conf)
 - [Dockerfile](file://products/operator-portal/Dockerfile)
-- [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
-- [web-ui-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-service.yaml)
-- [image.mk](file://mk/image.mk)
+- [vite.config.ts:14-28](file://products/operator-portal/web-ui/app/vite.config.ts#L14-L28)
+- [package.json:9-13](file://products/operator-portal/web-ui/app/package.json#L9-L13)
 
 ## UI Customization
 
-The Operator Portal supports extensive UI customization to match organizational branding and preferences.
+The Operator Portal supports extensive UI customization to match organizational branding and preferences, with both legacy CSS and React component customization options.
 
 ### Theme Customization
 
-- **Color Schemes**: Primary, secondary, and accent colors via CSS custom properties
+- **Color Schemes**: Primary, secondary, and accent colors via CSS custom properties and Ant Design theme configuration
 - **Typography**: Font families, sizes, and line heights
 - **Layout Options**: Compact, standard, and spacious layouts
 - **Dark/Light Mode**: Automatic or manual theme switching
@@ -965,8 +1200,12 @@ The Operator Portal supports extensive UI customization to match organizational 
 
 ### Enhanced Customization Options
 
-The updated interface provides additional customization points:
+The React implementation provides additional customization points:
 
+- **Component Theming**: Ant Design theme configuration for consistent styling
+- **Custom Components**: Extensible component architecture for custom functionality
+- **CSS Modules**: Scoped styling for component-specific customization
+- **Design Tokens**: Centralized design token management for brand consistency
 - **Sidebar Width**: Adjustable sidebar width for different screen densities
 - **User Card Layout**: Customizable user card appearance and positioning
 - **Navigation Item Styling**: Custom styling for navigation items and active states
@@ -976,13 +1215,16 @@ The updated interface provides additional customization points:
 - **Cited Guidance Styling**: Customizable chip appearance and behavior for skills integration
 - **Permission Matrix Styling**: Customizable table styling for permission displays
 - **Workspace Resource Styling**: Customizable table layouts for tools and skills catalogs
+- **Incident View Styling**: Customizable appearance for incident triage interface with status badges and action buttons
+- **Voice Input Styling**: Customizable appearance for voice input controls and language selection
 
 **Section sources**
-- [styles.css](file://products/operator-portal/web-ui/styles.css)
+- [styles.css:1-800](file://products/operator-portal/web-ui/styles.css#L1-L800)
+- [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
 
 ## Accessibility Features
 
-The Operator Portal is designed with accessibility as a first-class concern, ensuring usability for users with disabilities.
+The Operator Portal is designed with accessibility as a first-class concern, ensuring usability for users with disabilities, with enhanced support in the React implementation.
 
 ### WCAG Compliance
 
@@ -1014,9 +1256,9 @@ The Operator Portal is designed with accessibility as a first-class concern, ens
 
 ### Enhanced Accessibility Features
 
-The new interface includes additional accessibility improvements:
+The React implementation includes additional accessibility improvements:
 
-- **Two-Column Layout**: Proper semantic structure with nav and main landmarks
+- **Component Structure**: Proper semantic structure with nav and main landmarks
 - **Sidebar Navigation**: Accessible navigation with proper ARIA attributes
 - **User Card**: Accessible user identity display with proper labeling
 - **Mobile Drawer**: Accessible off-canvas navigation with proper focus management
@@ -1025,14 +1267,17 @@ The new interface includes additional accessibility improvements:
 - **Cited Guidance Chips**: Accessible chip elements with proper labeling and keyboard navigation
 - **Permission Matrix**: Accessible table with proper headers and status badges
 - **Workspace Resources**: Accessible tables for tools and skills catalogs with proper headers
+- **Voice Input**: Accessible voice input with proper feedback and error handling
+- **Incident Views**: Accessible incident management interface with proper form labels and status announcements
+- **Deep Linking**: Accessible navigation between incidents and chat with proper focus management
 
 **Section sources**
-- [styles.css](file://products/operator-portal/web-ui/styles.css)
-- [index.html](file://products/operator-portal/web-ui/index.html)
+- [styles.css:1-800](file://products/operator-portal/web-ui/styles.css#L1-L800)
+- [index.html:1-291](file://products/operator-portal/web-ui/app/index.html#L1-L291)
 
 ## Browser Compatibility
 
-The Operator Portal supports modern web browsers with progressive enhancement for broader compatibility.
+The Operator Portal supports modern web browsers with progressive enhancement for broader compatibility, with the React implementation providing enhanced compatibility through transpilation.
 
 ### Supported Browsers
 
@@ -1060,8 +1305,11 @@ The Operator Portal supports modern web browsers with progressive enhancement fo
 
 ### Enhanced Feature Compatibility
 
-The updated interface maintains broad browser compatibility:
+The React implementation maintains broad browser compatibility:
 
+- **React 18**: Broad browser support with automatic polyfilling
+- **TypeScript**: Compiled to compatible JavaScript for target browsers
+- **Vite Build**: Optimized bundling with browser-specific optimizations
 - **CSS Grid**: Used for two-column layout with fallbacks for older browsers
 - **CSS Custom Properties**: Theme customization with fallback values
 - **Modern JavaScript**: ES6+ features with appropriate polyfills
@@ -1070,10 +1318,13 @@ The updated interface maintains broad browser compatibility:
 - **Skills Integration**: Cited guidance chips work across all supported browsers
 - **Permission Matrix**: Table-based displays compatible with all modern browsers
 - **Workspace Resources**: Standard HTML tables with broad browser support
+- **Voice Input**: Graceful degradation when Web Speech API is unavailable
+- **Incident Views**: Full browser compatibility for incident management interface
+- **Deep Linking**: Cross-browser support for session pinning and navigation
 
 **Section sources**
 - [Dockerfile](file://products/operator-portal/Dockerfile)
-- [app.js](file://products/operator-portal/web-ui/app.js)
+- [package.json:6-8](file://products/operator-portal/web-ui/app/package.json#L6-L8)
 
 ## Troubleshooting Guide
 
@@ -1135,12 +1386,43 @@ Common issues and their solutions when working with the Operator Portal.
 - Review browser console for JavaScript errors in streaming logic
 - Confirm nginx proxy configuration allows streaming responses
 
-### Enhanced Navigation Issues
+### React Application Issues
+
+**Problem**: React application fails to load or render incorrectly
+**Solution**:
+- Check browser console for JavaScript errors
+- Verify React dependencies are properly installed
+- Ensure Vite build completed successfully
+- Check for TypeScript compilation errors
+- Verify React component imports are correct
+
+### Session Management Issues
+
+**Problem**: Sessions not loading or switching incorrectly
+**Solution**:
+- Verify session API endpoints are accessible
+- Check browser console for session-related errors
+- Ensure session storage is properly configured
+- Verify session persistence across page reloads
+- Check for session conflict errors during deletion
+
+### Voice Input Issues
+
+**Problem**: Voice input not working or transcription failing
+**Solution**:
+- Verify browser supports Web Speech API
+- Check microphone permissions are granted
+- Ensure microphone is not blocked by browser security settings
+- Verify network connectivity for cloud-based speech recognition
+- Check for speech recognition service availability
+- Review language selection configuration in voice settings
+
+### Navigation Issues
 
 **Problem**: Navigation sections not displaying correctly or items hidden unexpectedly
 **Solution**:
 - Verify user has appropriate roles for accessing specific sections
-- Check client-side role detection in syncResolvedUser function
+- Check client-side role detection in React components
 - Ensure server-side permissions are properly configured
 - Review browser console for role detection errors
 - Confirm navigation section visibility logic is working correctly
@@ -1202,7 +1484,7 @@ Common issues and their solutions when working with the Operator Portal.
 **Problem**: Navigation items hidden despite having correct roles
 **Solution**:
 - Verify user has required roles in identity system
-- Check client-side role detection functions (canViewAudit, canViewIncidents, canConfirmTools)
+- Check client-side role detection functions in React components
 - Ensure server-side permissions are properly enforced
 - Review browser console for role detection errors
 - Confirm identity normalization is working correctly
@@ -1216,20 +1498,57 @@ Common issues and their solutions when working with the Operator Portal.
 - Clear browser cache and hard refresh the page
 - Verify VERSION file matches PLATFORM_VERSION in app.js
 - Ensure validate-version script passes during build process
+- Check React build output for proper asset hashing
 
-**Updated** Added troubleshooting guidance for the enhanced navigation system, permission matrix, workspace resources, skills integration, and HITL confirmation bridging features, including common issues with section visibility, permission displays, resource loading, cited guidance chip rendering, confirmation card functionality, and stream continuation handling. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism.
+### Incident Management Issues
+
+**Problem**: Incidents not loading or triage not working
+**Solution**:
+- Verify user has appropriate incident viewing roles
+- Check /api/v1/incidents endpoint is accessible
+- Review browser console for API call errors
+- Ensure incident service is properly configured
+- Verify connector dispatches are properly configured
+- Check for incident creation form validation errors
+
+### Deep Linking Issues
+
+**Problem**: Unable to navigate from incidents to chat or session pinning fails
+**Solution**:
+- Verify incident detail view has "Continue in chat" button
+- Check that incident session pinning function is called correctly
+- Ensure workspace session management is properly initialized
+- Verify incident session IDs are properly generated and managed
+- Check for JavaScript errors in incident-to-chat navigation flow
+- Verify session persistence across page reloads
+
+### Voice Input Language Issues
+
+**Problem**: Voice input language not working as expected
+**Solution**:
+- Verify selected language is supported by browser
+- Check language selection is properly persisted in localStorage
+- Ensure browser locale detection is working correctly
+- Verify language codes are properly formatted
+- Check for speech recognition service availability for selected language
+
+**Updated** Added troubleshooting guidance for the React/TypeScript implementation, including React-specific issues, session management problems, voice input troubleshooting, enhanced navigation and workspace resource issues, incident management problems, deep linking issues, and voice input language configuration problems. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism.
 
 **Section sources**
-- [app.js](file://products/operator-portal/web-ui/app.js)
+- [App.tsx:1-318](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L318)
+- [ChatView.tsx:1-728](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L728)
+- [useChatStream.ts:1-368](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L368)
+- [IncidentsView.tsx:1-600](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx#L1-L600)
+- [useSpeechRecognition.ts:1-135](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts#L1-L135)
 
 ## Conclusion
 
-The Operator Portal provides a comprehensive, accessible, and customizable web interface for platform administration and monitoring within the Luban AIOPS ecosystem. Built with vanilla JavaScript and modern web standards, it delivers enterprise-grade functionality while maintaining simplicity and performance.
+The Operator Portal provides a comprehensive, accessible, and customizable web interface for platform administration and monitoring within the Luban AIOPS ecosystem. The complete rebuild using React 18, TypeScript, and Vite delivers enterprise-grade functionality while maintaining simplicity and performance.
 
-**Updated** The recent enhancements include comprehensive HITL (Human-in-the-Loop) confirmation bridging with inline approval cards that allow operators to approve or deny ASK-gated tool executions directly within the chat interface, significantly improved navigation system with sectioned organization (Chat, Control, Workspace sections), live permission visibility through the permission matrix endpoint, comprehensive workspace resource discovery for tools and skills catalogs, and enhanced skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions. The platform has been updated to version 0.6.0 with enhanced version consistency across the platform ecosystem and improved cache-busting mechanisms for proper client-side caching behavior after deployment.
+**Updated** The recent enhancements include a complete React/TypeScript frontend architecture implementing SPEC-023 with enhanced streaming infrastructure, multi-session workspace management, voice input support, comprehensive view implementations (AuditView, IncidentsView, PermissionsView, SkillsView, ToolsView), and improved role-gated navigation. The platform now features comprehensive HITL (Human-in-the-Loop) confirmation bridging with inline approval cards, significantly improved navigation system with sectioned organization (Chat, Control, Workspace sections), live permission visibility through the permission matrix endpoint, comprehensive workspace resource discovery for tools and skills catalogs, enhanced skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions, and comprehensive incident triage capabilities with automated connector dispatches and seamless deep linking to chat sessions. The platform has been updated to version 0.8.1 with enhanced version consistency across the platform ecosystem and improved cache-busting mechanisms for proper client-side caching behavior after deployment.
 
-Key strengths of the enhanced portal include its modular architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities, enhanced skills integration capabilities, and improved navigation organization. The deployment process remains streamlined through containerization and Kubernetes-native configurations, making it suitable for both development and production environments.
+Key strengths of the enhanced portal include its modular React architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities, enhanced skills integration capabilities, improved navigation organization, robust multi-session workspace management, comprehensive incident triage with automated workflows, voice input support for hands-free operation, and seamless deep linking between incidents and collaborative chat sessions. The deployment process remains streamlined through containerization and Kubernetes-native configurations, making it suitable for both development and production environments.
 
-The HITL confirmation system represents a significant advancement in operator capabilities, enabling safe automation of complex workflows while maintaining human oversight for critical operations. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions.
+The React/TypeScript implementation represents a significant advancement in developer experience and code maintainability, while preserving all existing functionality from the legacy vanilla JavaScript implementation. The HITL confirmation system enables safe automation of complex workflows while maintaining human oversight for critical operations. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions. The new view components provide dedicated interfaces for different operational tasks, improving workflow efficiency and user experience.
 
-Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system, continued refinement of the navigation and resource discovery interfaces, and expanded support for more complex multi-step approval workflows to meet evolving operational requirements.
+Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system, continued refinement of the navigation and resource discovery interfaces, expanded support for more complex multi-step approval workflows, additional voice input capabilities to meet evolving operational requirements, enhanced incident triage automation, expanded connector integrations, and improved collaborative features for multi-operator incident response.

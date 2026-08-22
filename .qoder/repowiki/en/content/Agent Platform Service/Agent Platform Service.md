@@ -28,6 +28,8 @@
 - [runtime_service.py](file://products/agent-platform/src/agent_service/services/runtime_service.py)
 - [runtime_dependencies.py](file://products/agent-platform/src/agent_service/services/runtime_dependencies.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [test_chat_stream_modality.py](file://products/agent-platform/tests/test_chat_stream_modality.py)
 - [pyproject.toml](file://products/agent-platform/pyproject.toml)
 - [Dockerfile](file://products/agent-platform/Dockerfile)
 - [README.md](file://products/agent-platform/README.md)
@@ -35,11 +37,12 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced v2 session routes with multi-session operator workspace foundations including session listing, detail views with transcripts, and owner-only deletion
-- Added session store enhancements with last_active_at timestamps for workspace ordering and server-minted titles from first user turns
-- Implemented transcript extraction service for best-effort conversation history reconstruction from kernel state snapshots
-- Integrated HITL confirmation registry for human-in-the-loop workflow management with parked confirmation handling
-- Updated API endpoints to support session workspace operations with proper authorization and audit trails
+- Added input_modality parameter support to v2 streaming endpoint with Literal type validation for 'text' and 'voice' values
+- Implemented voice-readiness parity between POST /chat and GET /chat/stream endpoints
+- Enhanced API schema definitions to include input_modality field with proper validation
+- Updated streaming endpoint to accept query parameter for modality metadata
+- Added comprehensive test coverage for modality validation and default behavior
+- Maintained backward compatibility with existing clients by defaulting to 'text' modality
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -52,18 +55,19 @@
 8. [Transcript Extraction Service](#transcript-extraction-service)
 9. [HITL Confirmation Registry Integration](#hitl-confirmation-registry-integration)
 10. [Enhanced Streaming Architecture](#enhanced-streaming-architecture)
-11. [Per-Request Trace Queues](#per-request-trace-queues)
-12. [Delegated Token Management](#delegated-token-management)
-13. [Dependency Analysis](#dependency-analysis)
-14. [Performance Considerations](#performance-considerations)
-15. [Troubleshooting Guide](#troubleshooting-guide)
-16. [Conclusion](#conclusion)
-17. [Appendices](#appendices)
+11. [Voice Readiness Support](#voice-readiness-support)
+12. [Per-Request Trace Queues](#per-request-trace-queues)
+13. [Delegated Token Management](#delegated-token-management)
+14. [Dependency Analysis](#dependency-analysis)
+15. [Performance Considerations](#performance-considerations)
+16. [Troubleshooting Guide](#troubleshooting-guide)
+17. [Conclusion](#conclusion)
+18. [Appendices](#appendices)
 
 ## Introduction
 The Agent Platform Service is the core orchestration engine of the Luban AIOps Platform. It provides a runtime kernel for agent execution, a provider registry for multi-model backends (OpenAI, DashScope, DeepSeek), and robust session management with durable storage. The service exposes REST APIs for agent interactions, streaming responses, and configuration management, enabling scalable and observable AI operations across diverse model providers.
 
-**Updated** The service now includes comprehensive multi-session operator workspace foundations with v2 session routes, enhanced session stores supporting last_active_at timestamps and server-minted titles, transcript extraction capabilities for conversation history reconstruction, and integrated HITL confirmation registry for human-in-the-loop workflows. These enhancements enable operators to manage conversation state, resume sessions by ID, and maintain workspace organization while preserving security through anti-enumeration patterns and role-based access control.
+**Updated** The service now includes comprehensive voice-readiness support through the addition of input_modality parameters to both POST /chat and GET /chat/stream endpoints, ensuring parity between synchronous and asynchronous chat interfaces. This enhancement enables voice-based interactions while maintaining the same policy enforcement and HITL workflows as text-based inputs. The service also includes comprehensive multi-session operator workspace foundations with v2 session routes, enhanced session stores supporting last_active_at timestamps and server-minted titles, transcript extraction capabilities for conversation history reconstruction, and integrated HITL confirmation registry for human-in-the-loop workflows.
 
 ## Project Structure
 The Agent Platform Service is implemented as a Python FastAPI application organized by feature layers:
@@ -170,7 +174,7 @@ settings --> env
 - Runtime Kernel: Orchestrates agent lifecycle, conversation state, tool invocation, and provider dispatch with enhanced AgentScope 2.x toolkit registration and anti-hallucination guards.
 - Provider Registry: Discovers and manages model providers (OpenAI, DashScope, DeepSeek) with pluggable interfaces using new AgentScope 2.x model construction patterns.
 - Session Management: Persists and restores conversations with durable storage, multi-session workspace support, and concurrency-safe access.
-- API Layer: Exposes REST endpoints for chat, sessions, streaming events, and health checks with v3 streaming protocol support and session workspace operations.
+- API Layer: Exposes REST endpoints for chat, sessions, streaming events, and health checks with v3 streaming protocol support, session workspace operations, and voice-readiness parity.
 - Cross-Cutting: Configuration, environment, metrics, observability, telemetry, and request-scoped context.
 
 Key responsibilities:
@@ -180,12 +184,13 @@ Key responsibilities:
 - Security: Manage per-user toolkit closures bound to delegated tokens for secure tool execution.
 - Anti-Hallucination: Prevent model fabrication through systematic NO_TOOLS_NOTICE injection.
 - Auto-Approval: Pre-approve vetted read-only tools to prevent headless stream stalls while maintaining security.
+- Voice Readiness: Support both text and voice input modalities with consistent policy enforcement and HITL workflows.
 - Workspace Management: Provide multi-session operator workspace with session listing, detail views, and owner-only deletion.
 - Transcript Reconstruction: Extract conversation history from kernel state snapshots for workspace UIs.
 - HITL Integration: Support human-in-the-loop workflows with parked confirmation management.
 - Observability: Emit structured logs, metrics, and traces for each operation with per-request audit trails.
 
-**Updated** The service now includes comprehensive multi-session operator workspace foundations with session lifecycle management, transcript extraction capabilities, and integrated HITL confirmation registry for complete workspace operations.
+**Updated** The service now includes comprehensive voice-readiness support with input_modality parameters on both POST /chat and GET /chat/stream endpoints, ensuring consistent behavior across synchronous and asynchronous interfaces while maintaining full policy enforcement and HITL workflow compatibility.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -199,7 +204,7 @@ Key responsibilities:
 
 ## Architecture Overview
 The service follows a layered architecture with enhanced security and anti-hallucination features:
-- API layer receives requests, validates payloads, and delegates to the runtime kernel with v3 streaming support and session workspace operations.
+- API layer receives requests, validates payloads, and delegates to the runtime kernel with v3 streaming support, session workspace operations, and voice-readiness parity.
 - Runtime kernel coordinates sessions, tools, and provider selection via the registry with AgentScope 2.x toolkit registration.
 - Providers implement standardized interfaces to communicate with external model APIs using new model construction patterns.
 - Session service persists state using a configurable store with workspace bookkeeping and transcript extraction.
@@ -208,6 +213,7 @@ The service follows a layered architecture with enhanced security and anti-hallu
 ```mermaid
 sequenceDiagram
 participant Client as "Client"
+participant Gateway as "Platform Gateway"
 participant API as "FastAPI Routes"
 participant Kernel as "RuntimeKernel"
 participant Sess as "SessionService"
@@ -218,20 +224,14 @@ participant Tools as "GatewayTools"
 participant Transcript as "TranscriptExtractor"
 participant HITL as "ConfirmationRegistry"
 participant Trace as "TraceQueue"
-Note over Client,HITL : Multi-Session Workspace Operations
-Client->>API : GET /sessions (list workspace)
-API->>Sess : list_sessions(user_id)
-Sess->>Store : list_sessions_by_user(user_id)
-Store-->>Sess : sessions with last_active_at, title
-Sess-->>API : sorted sessions (most recent first)
-API-->>Client : session list with pending_confirmation flags
-Note over Client,HITL : Chat with Workspace Bookkeeping
-Client->>API : POST /chat {message, sessionId}
+Note over Client,HITL : Voice-Ready Chat with Workspace Operations
+Client->>Gateway : POST /api/v1/chat {message, input_modality}
+Gateway->>API : Forward with input_modality metadata
 API->>Sess : ensure_session(sessionId, user_id)
 API->>Sess : mark_session_turn(sessionId, message)
 Sess->>Store : set_session_title + touch_session
 Sess-->>API : session updated
-API->>Kernel : execute(message, sessionId, bearerToken)
+API->>Kernel : execute(message, sessionId, bearerToken, input_modality)
 Kernel->>HITL : check_parked(sessionId)
 alt Session has parked confirmation
 HITL-->>API : 409 Conflict
@@ -249,15 +249,16 @@ API-->>Client : SSE/Streaming Response with tool_call/tool_result
 Kernel->>Sess : save(sessionId, updatedState)
 Sess->>Store : set(sessionId, updatedState)
 end
-Note over Client,HITL : Session Detail with Transcript
-Client->>API : GET /sessions/{sessionId}
-API->>Sess : get_session(sessionId, user_id)
-API->>Transcript : extract_transcript(sessionId)
-Transcript-->>API : transcript_available, turns[]
-API-->>Client : session detail with title, last_active_at, transcript
+Note over Client,HITL : Voice-Ready Streaming
+Client->>API : GET /api/v2/chat/stream?message=...&input_modality=voice
+API->>Sess : ensure_session(sessionId, user_id)
+API->>Sess : mark_session_turn(sessionId, message)
+API->>Kernel : stream_events(message, sessionId, bearerToken, input_modality)
+Kernel-->>API : StreamEvent* with v3 frames
+API-->>Client : SSE/Streaming Response
 ```
 
-**Updated** The sequence diagram now shows the complete multi-session operator workspace flow, including session listing with workspace ordering, chat operations with HITL confirmation checking, and session detail retrieval with transcript extraction.
+**Updated** The sequence diagram now shows the complete voice-readiness flow, including both POST /chat and GET /chat/stream endpoints accepting input_modality parameters, while maintaining consistent policy enforcement and HITL workflows across both modalities.
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -269,6 +270,7 @@ API-->>Client : session detail with title, last_active_at, transcript
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 
 ## Detailed Component Analysis
 
@@ -280,6 +282,7 @@ The runtime kernel is the central orchestrator for agent execution with enhanced
 - Provider selection and streaming event handling with trace queue integration
 - Anti-hallucination guard system with NO_TOOLS_NOTICE injection
 - Auto-approval mechanism for vetted read-only tools to prevent headless stream stalls
+- Voice readiness support through input_modality parameter passthrough
 
 ```mermaid
 classDiagram
@@ -335,7 +338,7 @@ ProviderRegistry --> ModelProvider : "manages"
 GatewayTools --> ModelProvider : "secure invocation"
 ```
 
-**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, and enhanced session management methods for multi-session workspace operations.
+**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, enhanced session management methods for multi-session workspace operations, and voice readiness support through input_modality parameter passthrough.
 
 **Diagram sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -389,7 +392,7 @@ Configuration examples:
 - DashScope: Set endpoint URL, credentials, thinking budget, and parallel tool calls; select model variant.
 - DeepSeek: Provide authentication token, target model identifier, and reasoning effort level.
 
-**Updated** All provider implementations now use AgentScope 2.x model construction patterns with enhanced parameter support including reasoning effort, thinking enable flags, and parallel tool calls.
+**Updated** All provider implementations now use AgentScope 2.x model construction patterns with enhanced parameter support including reasoning effort, thinking enable flags, and parallel tool calls. Voice readiness is supported through consistent parameter passing across all modalities.
 
 **Section sources**
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
@@ -590,7 +593,7 @@ Typical endpoints:
 
 Request/response validation uses Pydantic models defined in schemas with enhanced v3 streaming event types.
 
-**Updated** Chat endpoints now accept delegated tokens for secure tool execution and support v3 streaming protocol with tool_call/tool_result frames for comprehensive audit trails. Session endpoints provide multi-session workspace operations with proper authorization and audit trails.
+**Updated** Chat endpoints now accept delegated tokens for secure tool execution and support v3 streaming protocol with tool_call/tool_result frames for comprehensive audit trails. Both POST /chat and GET /chat/stream endpoints accept input_modality parameters for voice-readiness parity. Session endpoints provide multi-session workspace operations with proper authorization and audit trails.
 
 **Section sources**
 - [routes.py:106-235](file://products/agent-platform/src/agent_service/api/v2/routes.py#L106-L235)
@@ -626,7 +629,7 @@ GatewayTools-->>Kernel : toolResult
 end
 ```
 
-**Updated** The tools integration now includes AgentScope 2.x toolkit registration pattern, per-request trace queues for audit trails, v3 streaming support with tool_call/tool_result frames, auto-approval mechanism for vetted read-only tools, and HITL confirmation registry integration for interactive workflows.
+**Updated** The tools integration now includes AgentScope 2.x toolkit registration pattern, per-request trace queues for audit trails, v3 streaming support with tool_call/tool_result frames, auto-approval mechanism for vetted read-only tools, and HITL confirmation registry integration for interactive workflows. Voice readiness is maintained throughout the tool execution pipeline.
 
 **Diagram sources**
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
@@ -915,6 +918,71 @@ The v3 protocol supports rich evidence data including:
 - [routes.py:105-150](file://products/agent-platform/src/agent_service/api/v2/routes.py#L105-L150)
 - [gateway_tools.py:212-251](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L212-L251)
 
+## Voice Readiness Support
+
+### Overview
+The Agent Platform Service now provides comprehensive voice-readiness support through the addition of input_modality parameters to both POST /chat and GET /chat/stream endpoints. This enhancement ensures parity between synchronous and asynchronous chat interfaces while maintaining consistent policy enforcement and HITL workflows.
+
+### Input Modality Implementation
+```mermaid
+sequenceDiagram
+participant Client as "Client"
+participant Gateway as "Platform Gateway"
+participant API as "Agent Platform API"
+participant Kernel as "RuntimeKernel"
+participant Policy as "Policy Engine"
+participant HITL as "ConfirmationRegistry"
+Note over Client,HITL : Voice-Ready Chat Flow
+Client->>Gateway : POST /api/v1/chat {message, input_modality="voice"}
+Gateway->>API : Forward with input_modality metadata
+API->>Policy : Enforce policy (modality ignored)
+Policy-->>API : Policy decision unchanged
+API->>HITL : Check parked confirmations
+HITL-->>API : No parked confirmations
+API->>Kernel : Execute with input_modality passthrough
+Kernel-->>API : Response with consistent behavior
+API-->>Client : Response (same as text modality)
+Note over Client,HITL : Voice-Ready Streaming
+Client->>API : GET /api/v2/chat/stream?message=...&input_modality=voice
+API->>Policy : Enforce policy (modality ignored)
+Policy-->>API : Policy decision unchanged
+API->>Kernel : Stream events with input_modality passthrough
+Kernel-->>API : StreamEvent* with v3 frames
+API-->>Client : SSE/Streaming Response
+```
+
+**Diagram sources**
+- [routes.py:135-165](file://products/agent-platform/src/agent_service/api/v2/routes.py#L135-L165)
+- [v2.py:31-48](file://products/agent-platform/src/agent_service/schemas/v2.py#L31-L48)
+- [chat.py:90-143](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L90-L143)
+
+### Key Features
+- **Literal Type Validation**: Strict validation of input_modality to 'text' or 'voice' values
+- **Default Behavior**: Defaults to 'text' modality for backward compatibility
+- **Metadata-Only**: Input modality is metadata only and never changes policy or HITL outcomes
+- **Consistent Enforcement**: Same policy enforcement regardless of input modality
+- **Audit Trail Integration**: Input modality is recorded in audit events for tracking
+- **Test Coverage**: Comprehensive tests validate acceptance, validation, and default behavior
+
+### API Changes
+- **POST /api/v2/chat**: Accepts input_modality in request body with Literal["text", "voice"] validation
+- **GET /api/v2/chat/stream**: Accepts input_modality as query parameter with Literal["text", "voice"] validation
+- **Schema Validation**: Pydantic models enforce strict type checking for input_modality
+- **Backward Compatibility**: Default value of 'text' ensures existing clients continue to work
+
+### Testing and Validation
+The implementation includes comprehensive test coverage:
+- **Acceptance Testing**: Validates that both 'text' and 'voice' modalities are accepted
+- **Validation Testing**: Ensures invalid modality values are rejected with 422 status
+- **Default Behavior Testing**: Confirms default 'text' modality when not specified
+- **Parity Testing**: Verifies consistent behavior across POST and GET endpoints
+
+**Section sources**
+- [routes.py:135-165](file://products/agent-platform/src/agent_service/api/v2/routes.py#L135-L165)
+- [v2.py:31-48](file://products/agent-platform/src/agent_service/schemas/v2.py#L31-L48)
+- [test_chat_stream_modality.py:1-63](file://products/agent-platform/tests/test_chat_stream_modality.py#L1-L63)
+- [chat.py:90-143](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L90-L143)
+
 ## Per-Request Trace Queues
 
 ### Overview
@@ -1042,7 +1110,7 @@ API --> Tel["Telemetry"]
 Closure --> Tools
 ```
 
-**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, and multi-session workspace foundations.
+**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, and voice-readiness support through input_modality parameter passthrough.
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -1079,8 +1147,9 @@ Closure --> Tools
 - **TTL-Aware Operations**: All workspace operations respect session TTL to prevent resource leaks
 - **Fail-Open Design**: Workspace bookkeeping failures don't impact core chat performance
 - **Transcript Extraction**: Best-effort design ensures degraded performance without errors
+- **Voice Readiness**: Input modality parameter adds minimal overhead as metadata-only processing
 
-**Updated** Performance considerations now include multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, and fail-open workspace bookkeeping that doesn't impact core chat performance.
+**Updated** Performance considerations now include multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, and voice-readiness support with minimal overhead through metadata-only processing.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -1100,6 +1169,9 @@ Common issues and resolutions:
 - **Transcript Problems**: Check kernel state snapshot availability and format compatibility
 - **HITL Issues**: Verify confirmation registry state and TTL configuration
 - **Session Listing**: Check user session filtering and workspace ordering logic
+- **Voice Readiness Issues**: Validate input_modality parameter acceptance and Literal type validation
+- **Modality Validation**: Ensure 'text' and 'voice' values are accepted, invalid values return 422
+- **Parity Issues**: Verify consistent behavior between POST /chat and GET /chat/stream endpoints
 
 Debugging utilities:
 - Health check endpoints for service status
@@ -1114,8 +1186,9 @@ Debugging utilities:
 - **Transcript Debugging**: Verify kernel state snapshot availability and transcript extraction logs
 - **HITL Debugging**: Monitor confirmation registry state and parked confirmation lifecycle
 - **Session Audit**: Review audit trail for session workspace operations
+- **Voice Readiness Debugging**: Validate input_modality parameter handling and modality-specific behaviors
 
-**Updated** Troubleshooting guide now includes multi-session workspace troubleshooting, transcript extraction debugging strategies, HITL confirmation registry diagnostics, and workspace operation monitoring.
+**Updated** Troubleshooting guide now includes multi-session workspace troubleshooting, transcript extraction debugging strategies, HITL confirmation registry diagnostics, workspace operation monitoring, and voice-readiness debugging with input_modality parameter validation and parity testing.
 
 **Section sources**
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -1126,7 +1199,7 @@ Debugging utilities:
 ## Conclusion
 The Agent Platform Service provides a robust foundation for AI agent orchestration with multi-provider support, durable session management, and comprehensive observability. Its modular architecture enables easy customization and scaling while maintaining high performance and reliability.
 
-**Updated** The service now includes comprehensive multi-session operator workspace foundations with v2 session routes, enhanced session stores supporting last_active_at timestamps and server-minted titles, transcript extraction capabilities for conversation history reconstruction, and integrated HITL confirmation registry for human-in-the-loop workflows. These enhancements enable operators to manage conversation state, resume sessions by ID, and maintain workspace organization while preserving security through anti-enumeration patterns and role-based access control. The service also includes enhanced security through delegated token management, AgentScope 2.x toolkit registration pattern, anti-hallucination guards, auto-approval mechanism for vetted tools, v3 streaming architecture with comprehensive audit trails, and per-request trace queues. These improvements strengthen the platform's security posture, prevent model hallucinations, eliminate headless stream stalls, and provide detailed operational visibility while maintaining the flexibility and performance characteristics that make it suitable for production AI operations.
+**Updated** The service now includes comprehensive voice-readiness support through input_modality parameters on both POST /chat and GET /chat/stream endpoints, ensuring parity between synchronous and asynchronous interfaces while maintaining consistent policy enforcement and HITL workflows. The service also includes comprehensive multi-session operator workspace foundations with v2 session routes, enhanced session stores supporting last_active_at timestamps and server-minted titles, transcript extraction capabilities for conversation history reconstruction, and integrated HITL confirmation registry for human-in-the-loop workflows. These enhancements enable operators to manage conversation state, resume sessions by ID, and maintain workspace organization while preserving security through anti-enumeration patterns and role-based access control. The service also includes enhanced security through delegated token management, AgentScope 2.x toolkit registration pattern, anti-hallucination guards, auto-approval mechanism for vetted tools, v3 streaming architecture with comprehensive audit trails, and per-request trace queues. These improvements strengthen the platform's security posture, prevent model hallucinations, eliminate headless stream stalls, and provide detailed operational visibility while maintaining the flexibility and performance characteristics that make it suitable for production AI operations.
 
 ## Appendices
 
@@ -1168,7 +1241,14 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - **HITL Integration**: Handle parked confirmations and interactive workflows
 - **Audit Compliance**: Monitor workspace operations through audit trails
 
-**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, and comprehensive multi-session workspace operations for complete operator workflow management.
+#### Voice Readiness Implementation
+- **Input Modality**: Use input_modality parameter for voice-based interactions
+- **Consistent Behavior**: Ensure same policy enforcement regardless of input modality
+- **Testing**: Validate both 'text' and 'voice' modalities work consistently
+- **Backward Compatibility**: Default to 'text' modality for existing clients
+- **Audit Trail**: Track input modality in audit events for monitoring and analysis
+
+**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, and voice-readiness support with input_modality parameters for complete operator workflow management.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -1181,3 +1261,4 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
+- [test_chat_stream_modality.py](file://products/agent-platform/tests/test_chat_stream_modality.py)

@@ -7,6 +7,12 @@
 - [identity-broker/README.md](file://products/identity-broker/README.md)
 - [tool-gateway/README.md](file://products/tool-gateway/README.md)
 - [operator-portal/README.md](file://products/operator-portal/README.md)
+- [operator-portal/nginx.conf](file://products/operator-portal/nginx.conf)
+- [operator-portal/Dockerfile](file://products/operator-portal/Dockerfile)
+- [operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
+- [operator-portal/web-ui/app/src/chat/ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts)
+- [operator-portal/web-ui/app/src/voice/languages.ts](file://products/operator-portal/web-ui/app/src/voice/languages.ts)
 - [agent-platform/src/agent_platform/app.py](file://products/agent-platform/src/agent_platform/app.py)
 - [agent-platform/src/agent_platform/main.py](file://products/agent-platform/src/agent_platform/main.py)
 - [agent-platform/src/agent_platform/core/config.py](file://products/agent-platform/src/agent_platform/core/config.py)
@@ -39,7 +45,7 @@
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/infra/redis-deployment.yaml)
+- [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml)
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
@@ -51,10 +57,10 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive transcript fallback troubleshooting section covering kernel state snapshot unavailability scenarios
-- Enhanced session delete conflict resolution documentation for sessions with parked HITL confirmations returning 409 status
-- Updated session enumeration prevention guidance with anti-enumeration 404 responses for unknown or foreign session IDs
-- Expanded diagnostic procedures for transcript reconstruction failures and confirmation parking issues
+- Added stale UI troubleshooting section covering cached assets, versioned builds, and redeployment refresh behavior
+- Expanded voice input microphone troubleshooting with browser compatibility, permission handling, and language selection guidance
+- Updated Operator Portal component analysis to include web speech API integration and cache control configuration
+- Enhanced deployment issues section with portal-specific caching and asset management considerations
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -69,14 +75,14 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides comprehensive troubleshooting guidance for the Luban AIOps Platform, focusing on deployment issues, service connectivity problems, performance bottlenecks, configuration mistakes, and integration failures. It includes step-by-step diagnostic procedures, log analysis techniques, metric interpretation, trace correlation, and platform-specific FAQs covering agent execution, policy enforcement, identity integration, OpenObserve telemetry pipeline issues, transcript fallback scenarios, session delete conflicts, and session enumeration prevention. Escalation procedures and community resources are also included to help you resolve issues efficiently.
+This document provides comprehensive troubleshooting guidance for the Luban AIOps Platform, focusing on deployment issues, service connectivity problems, performance bottlenecks, configuration mistakes, and integration failures. It includes step-by-step diagnostic procedures, log analysis techniques, metric interpretation, trace correlation, and platform-specific FAQs covering agent execution, policy enforcement, identity integration, OpenObserve telemetry pipeline issues, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, and voice input microphone issues. Escalation procedures and community resources are also included to help you resolve issues efficiently.
 
 ## Project Structure
 The platform is organized into multiple products:
 - Agent Platform: runtime kernel, session management, metrics, observability, and provider integrations
 - Identity Broker: authentication, token issuance, and identity services
 - Tool Gateway: API gateway, policy enforcement, tool invocation, and orchestration
-- Operator Portal: web UI for operators
+- Operator Portal: web UI for operators with voice input capabilities and cached asset management
 - Shared contracts and GitOps overlays for Kubernetes deployments
 
 ```mermaid
@@ -91,8 +97,11 @@ subgraph "Infrastructure"
 REDIS["Redis"]
 K8S["Kubernetes Cluster"]
 OO["OpenObserve"]
+NGINX["Nginx Cache Layer"]
 end
-CLIENT["Client / Operator"] --> GW
+CLIENT["Client / Operator"] --> NGINX
+NGINX --> OP
+OP --> GW
 GW --> AG
 GW --> IDB
 AG --> REDIS
@@ -100,7 +109,6 @@ GW --> K8S
 AG --> OO
 IDB --> OO
 GW --> OO
-OP --> GW
 ```
 
 [No sources needed since this diagram shows conceptual workflow, not actual code structure]
@@ -110,6 +118,7 @@ Key components and their responsibilities:
 - Agent Platform: manages runtime sessions, invokes providers, exposes APIs, and emits metrics/telemetry
 - Identity Broker: handles authentication flows, token validation, and identity context propagation
 - Tool Gateway: routes requests, enforces policies, verifies tokens, and orchestrates tool invocations
+- Operator Portal: serves cached SPA assets with content hashing, proxies API requests, and provides voice input via Web Speech API
 - Infrastructure: Redis for session storage; Kubernetes for deployment and scaling; OpenObserve for telemetry aggregation
 
 Common areas where issues occur:
@@ -123,6 +132,8 @@ Common areas where issues occur:
 - **Transcript fallback scenarios** when kernel state snapshots are unavailable
 - **Session delete conflicts** with parked HITL confirmations returning 409 status
 - **Session enumeration prevention** through anti-enumeration 404 responses
+- **Stale UI symptoms** from cached assets after redeployment
+- **Voice input microphone issues** due to browser compatibility or permission problems
 
 **Section sources**
 - [agent-platform/README.md](file://products/agent-platform/README.md)
@@ -136,6 +147,8 @@ End-to-end request flow from client to agent execution with identity and policy 
 ```mermaid
 sequenceDiagram
 participant Client as "Client"
+participant Nginx as "Nginx Cache"
+participant Portal as "Operator Portal"
 participant Gateway as "Tool Gateway"
 participant Auth as "Identity Broker"
 participant Agent as "Agent Platform"
@@ -143,7 +156,9 @@ participant Store as "Redis"
 participant K8S as "Kubernetes"
 participant Otel as "OTel Exporter"
 participant Observe as "OpenObserve"
-Client->>Gateway : "HTTP request"
+Client->>Nginx : "HTTP request"
+Nginx->>Portal : "Serve cached assets/index.html"
+Portal->>Gateway : "API proxy (/api/*)"
 Gateway->>Auth : "Verify token / obtain identity"
 Auth-->>Gateway : "Identity context"
 Gateway->>Gateway : "Policy decision"
@@ -153,10 +168,13 @@ Agent->>K8S : "Invoke tools/resources"
 Agent->>Otel : "Export traces/metrics/logs"
 Otel->>Observe : "OTLP HTTP/protobuf"
 Agent-->>Gateway : "Response"
-Gateway-->>Client : "Final response"
+Gateway-->>Portal : "API response"
+Portal-->>Client : "Final response"
 ```
 
 **Diagram sources**
+- [operator-portal/nginx.conf:8-17](file://products/operator-portal/nginx.conf#L8-L17)
+- [operator-portal/nginx.conf:19-30](file://products/operator-portal/nginx.conf#L19-L30)
 - [tool-gateway/src/api_gateway/app.py](file://products/tool-gateway/src/api_gateway/app.py)
 - [tool-gateway/src/api_gateway/api/routes/chat.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
 - [tool-gateway/src/api_gateway/services/gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
@@ -307,24 +325,42 @@ Resolution steps:
 Responsibilities:
 - Web UI for operators to manage platform resources
 - Integration with Tool Gateway APIs
+- **Content-hashed asset serving with immutable caching**
+- **Voice input via Web Speech API with browser compatibility handling**
+- **SPA shell with no-store caching for immediate redeployment**
 
 Common issues:
 - CORS or proxy misconfiguration
 - Incorrect base paths or headers
 - Authentication cookie/token handling
+- **Stale UI after redeployment due to cached assets**
+- **Voice input microphone button disabled or non-functional**
+- **Browser compatibility issues with Web Speech API**
 
 Diagnostics:
 - Check browser console and network tab
 - Validate Nginx configuration and reverse proxy settings
 - Confirm portal's API endpoints and auth headers
+- **Inspect asset caching headers and version changes**
+- **Test Web Speech API availability in different browsers**
+- **Verify microphone permissions and audio device access**
 
 Resolution steps:
 - Fix CORS and proxy headers
 - Ensure correct base path and API versioning
 - Align token handling with Identity Broker
+- **Force browser reload to fetch fresh index.html**
+- **Use Chrome/Edge for voice input functionality**
+- **Grant microphone permissions and verify audio device availability**
+
+**Updated** Added comprehensive voice input and caching troubleshooting based on SPEC-023 implementation
 
 **Section sources**
-- [operator-portal/README.md](file://products/operator-portal/README.md)
+- [operator-portal/README.md:37-113](file://products/operator-portal/README.md#L37-L113)
+- [operator-portal/nginx.conf:19-30](file://products/operator-portal/nginx.conf#L19-L30)
+- [operator-portal/web-ui/app/vite.config.ts:6-25](file://products/operator-portal/web-ui/app/vite.config.ts#L6-L25)
+- [operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts:38-56](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts#L38-L56)
+- [operator-portal/web-ui/app/src/chat/ChatView.tsx:487-721](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L487-L721)
 
 ## Dependency Analysis
 Service dependencies and deployment manifests:
@@ -339,6 +375,7 @@ AG --> OO["OpenObserve"]
 IDB --> OO
 GW --> OO
 OP["Operator Portal"] --> GW
+OP --> NGINX["Nginx Cache"]
 ```
 
 **Diagram sources**
@@ -346,6 +383,7 @@ OP["Operator Portal"] --> GW
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
+- [operator-portal/nginx.conf:8-17](file://products/operator-portal/nginx.conf#L8-L17)
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml)
@@ -364,6 +402,8 @@ OP["Operator Portal"] --> GW
 - **Track OpenObserve ingestion throughput and latency**
 - **Monitor transcript reconstruction performance and fallback frequency**
 - **Track parked confirmation resolution times and session operation delays**
+- **Analyze asset caching effectiveness and CDN performance for portal assets**
+- **Monitor voice recognition latency and browser compatibility metrics**
 
 ## Troubleshooting Guide
 
@@ -372,18 +412,23 @@ Symptoms:
 - Pods failing to start or crash-looping
 - Health checks failing
 - ConfigMap/Secret mount errors
+- **Stale UI content after redeployment**
 
 Diagnostic steps:
 - Inspect pod logs and events
 - Validate environment variables and secrets
 - Check readiness/liveness probes
 - Verify image tags and pull policies
+- **Check browser cache and asset versioning**
 
 Resolution:
 - Fix missing or invalid config values
 - Ensure secrets are present and correctly referenced
 - Adjust probe thresholds and timeouts
 - Confirm container images are accessible
+- **Force browser reload to clear cached assets**
+
+**Updated** Added stale UI troubleshooting for portal redeployment issues
 
 **Section sources**
 - [agent-platform/src/agent_platform/main.py](file://products/agent-platform/src/agent_platform/main.py)
@@ -392,6 +437,7 @@ Resolution:
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
+- [operator-portal/nginx.conf:19-30](file://products/operator-portal/nginx.conf#L19-L30)
 
 ### Service Connectivity Problems
 Symptoms:
@@ -742,6 +788,81 @@ curl -s -w "\nStatus: %{http_code}\n" -H "X-User-ID: alice" \
 - [platform-gateway/src/platform_gateway/services/gateway_service.py:305-327](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L305-L327)
 - [platform-gateway/tests/test_session_workspace.py:160-172](file://products/platform-gateway/tests/test_session_workspace.py#L160-L172)
 
+### Stale UI Symptoms After Redeployment
+
+#### Symptom: Portal UI appears outdated after redeployment
+**Most likely cause:** Browser caching of content-hashed assets combined with immutable cache headers. While `index.html` uses `no-store` caching for immediate redeployment, JavaScript bundles and CSS files may be cached with 1-year immutable headers.
+
+**Diagnostic:**
+
+```bash
+# Check asset caching headers in browser developer tools
+# Look for Cache-Control: public, max-age=31536000, immutable on /assets/* files
+
+# Verify current portal version is deployed
+kubectl -n dev-luban-aiops get deployment operator-portal -o jsonpath='{.spec.template.spec.containers[0].image}'
+
+# Check if new assets are available in the deployment
+kubectl -n dev-luban-aiops exec deployment/operator-portal -- ls -la /usr/share/nginx/html/assets/
+```
+
+**Resolution:**
+
+- **Hard refresh the browser** (Ctrl+Shift+R or Cmd+Shift+R) to bypass cached assets
+- **Clear browser cache** for the portal domain if hard refresh doesn't work
+- **Use incognito/private browsing mode** to avoid cached assets entirely
+- **Wait for the next build** which generates new content-hashed filenames
+- **Verify deployment completed successfully** before assuming stale UI
+
+**Updated** Added comprehensive stale UI troubleshooting based on SPEC-023 caching strategy
+
+**Section sources**
+- [operator-portal/nginx.conf:19-30](file://products/operator-portal/nginx.conf#L19-L30)
+- [operator-portal/web-ui/app/vite.config.ts:19-25](file://products/operator-portal/web-ui/app/vite.config.ts#L19-L25)
+- [operator-portal/Dockerfile:23-26](file://products/operator-portal/Dockerfile#L23-L26)
+
+### Voice Input Microphone Issues
+
+#### Symptom: Voice input microphone button is missing or does nothing
+**Most likely cause:** Voice composition uses the browser's Web Speech API (SPEC-023 R-4). Browsers without `SpeechRecognition`/`webkitSpeechRecognition` (e.g. Firefox) show a disabled microphone with a tooltip; nothing is sent to the backend. Recognition also requires microphone permission and a browser supporting the selected language.
+
+**Diagnostic:**
+
+```bash
+# Check browser console for Web Speech API availability
+# In Chrome DevTools Console:
+console.log(typeof window.SpeechRecognition !== 'undefined' ? 'Supported' : 'Not supported')
+console.log(typeof window.webkitSpeechRecognition !== 'undefined' ? 'Supported' : 'Not supported')
+
+# Test microphone permissions
+navigator.mediaDevices.getUserMedia({ audio: true })
+  .then(stream => {
+    console.log('Microphone access granted');
+    stream.getTracks().forEach(track => track.stop());
+  })
+  .catch(error => {
+    console.error('Microphone access denied:', error);
+  });
+```
+
+**Resolution:**
+
+- **Use Chrome or Edge** (desktop) for full voice input support
+- **Grant microphone permission** when prompted by the browser
+- **Check browser compatibility** - Firefox and Safari have limited Web Speech API support
+- **Verify audio device availability** and microphone hardware functionality
+- **Switch recognition language** in the composer selector (en-US / zh-CN)
+- **Check for recognition errors** displayed above the composer (not-allowed, no-speech, audio-capture, network)
+- **Voice turns are audited** with `details.input_modality: voice` on the `chat_started` event
+
+**Updated** Enhanced voice input troubleshooting with comprehensive browser compatibility and permission handling
+
+**Section sources**
+- [docs/guides/troubleshooting.md:748-765](file://docs/guides/troubleshooting.md#L748-L765)
+- [operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts:38-56](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts#L38-L56)
+- [operator-portal/web-ui/app/src/voice/languages.ts:1-60](file://products/operator-portal/web-ui/app/src/voice/languages.ts#L1-L60)
+- [operator-portal/web-ui/app/src/chat/ChatView.tsx:487-721](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L487-L721)
+
 ### Log Analysis Techniques
 - Centralize logs and use structured formats
 - Correlate logs by request IDs and trace spans
@@ -760,6 +881,8 @@ curl -s -w "\nStatus: %{http_code}\n" -H "X-User-ID: alice" \
 - **Monitor OTel exporter metrics and OpenObserve ingestion rates**
 - **Track transcript fallback frequency and kernel state snapshot success rates**
 - **Monitor parked confirmation resolution times and session operation delays**
+- **Analyze asset caching hit rates and portal performance metrics**
+- **Track voice recognition success rates and browser compatibility metrics**
 
 **Section sources**
 - [agent-platform/src/agent_platform/core/metrics.py](file://products/agent-platform/src/agent_platform/core/metrics.py)
@@ -841,6 +964,8 @@ Resolution:
 - Follow up with community channels for additional support
 - **For OpenObserve issues, include telemetry pipeline validation results and exporter logs**
 - **For session issues, include confirmation registry state and transcript fallback logs**
+- **For portal issues, include browser compatibility details and caching behavior**
+- **For voice input issues, include browser version, OS, and microphone permission status**
 
 ### Community Resources
 - Repository documentation and specs
@@ -852,7 +977,7 @@ Resolution:
 - [CONTRIBUTING.md](file://CONTRIBUTING.md)
 
 ## Conclusion
-This troubleshooting guide equips you with systematic approaches to diagnose and resolve common issues across the Luban AIOps Platform. By leveraging logs, metrics, and traces, and following the step-by-step resolutions provided, you can quickly address deployment, connectivity, performance, configuration, integration, OpenObserve telemetry challenges, transcript fallback scenarios, session delete conflicts, and session enumeration prevention. For further assistance, consult community resources and escalate with comprehensive diagnostics when necessary.
+This troubleshooting guide equips you with systematic approaches to diagnose and resolve common issues across the Luban AIOps Platform. By leveraging logs, metrics, and traces, and following the step-by-step resolutions provided, you can quickly address deployment, connectivity, performance, configuration, integration, OpenObserve telemetry challenges, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, and voice input microphone issues. For further assistance, consult community resources and escalate with comprehensive diagnostics when necessary.
 
 ## Appendices
 
@@ -879,6 +1004,12 @@ This troubleshooting guide equips you with systematic approaches to diagnose and
   - Check for parked HITL confirmations that must be resolved first; 409 status indicates unresolved confirmations.
 - **Why do I get 404 for session access attempts?**
   - Anti-enumeration protection treats unknown and foreign session IDs identically to prevent enumeration attacks.
+- **Why is my portal UI showing old content after redeployment?**
+  - Force browser reload (Ctrl+Shift+R) to bypass cached assets; content-hashed assets use immutable caching for performance.
+- **Why is the voice input microphone button disabled or not working?**
+  - Use Chrome or Edge browser, grant microphone permissions, and ensure Web Speech API support; Firefox has limited compatibility.
+- **How do I fix voice recognition errors?**
+  - Check browser microphone permissions, verify audio device availability, and switch recognition language in the composer selector.
 
 ### OpenObserve Configuration Reference
 **Environment Variables:**
@@ -903,3 +1034,46 @@ This troubleshooting guide equips you with systematic approaches to diagnose and
 - [.ooq.py:1-84](file://.ooq.py#L1-L84)
 - [.ooq2.py:1-69](file://.ooq2.py#L1-L69)
 - [shared/shared-contracts/observability-conventions.md:47-57](file://shared/shared-contracts/observability-conventions.md#L47-L57)
+
+### Portal Caching Strategy Reference
+**Asset Caching:**
+- Content-hashed bundle assets: `Cache-Control: public, max-age=31536000, immutable`
+- Index HTML: `Cache-Control: no-store` for immediate redeployment
+- Asset filenames change with every build to enable long-term caching
+
+**Build Process:**
+- Vite generates content-hashed filenames for static assets
+- PLATFORM_VERSION injected at build time from repository VERSION file
+- Multi-stage Docker build ensures clean separation of build and runtime environments
+
+**Deployment Behavior:**
+- Nginx serves hashed assets with immutable caching
+- SPA fallback maintains client routing integrity
+- Redeployments automatically roll over to new asset versions
+
+**Section sources**
+- [operator-portal/nginx.conf:19-30](file://products/operator-portal/nginx.conf#L19-L30)
+- [operator-portal/web-ui/app/vite.config.ts:6-25](file://products/operator-portal/web-ui/app/vite.config.ts#L6-L25)
+- [operator-portal/Dockerfile:1-29](file://products/operator-portal/Dockerfile#L1-L29)
+
+### Voice Input Configuration Reference
+**Browser Compatibility:**
+- Full support: Chrome, Edge (desktop)
+- Limited support: Firefox, Safari (may require workarounds)
+- Web Speech API detection and graceful degradation implemented
+
+**Language Support:**
+- English (US): `en-US`
+- Chinese (Mandarin): `zh-CN`
+- Default resolves from browser locale with fallback to `en-US`
+- Language selection persists in localStorage
+
+**Permission Handling:**
+- Microphone permission required for voice input
+- Error messages map to browser error codes (not-allowed, no-speech, audio-capture, network)
+- Graceful degradation when Web Speech API unavailable
+
+**Section sources**
+- [operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts:1-135](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts#L1-L135)
+- [operator-portal/web-ui/app/src/voice/languages.ts:1-60](file://products/operator-portal/web-ui/app/src/voice/languages.ts#L1-L60)
+- [operator-portal/web-ui/app/src/chat/ChatView.tsx:487-721](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L487-L721)

@@ -18,17 +18,23 @@
 - [agent-chat-request.schema.json](file://shared/shared-contracts/schemas/agent-chat-request.schema.json)
 - [test_redis_session_store.py](file://products/agent-platform/tests/test_redis_session_store.py)
 - [test_postgres_session_store.py](file://products/agent-platform/tests/test_postgres_session_store.py)
+- [useSessionWorkspace.ts](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts)
+- [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
+- [sessions.ts](file://products/operator-portal/web-ui/app/src/api/sessions.ts)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated to reflect delivered status of SPEC-022 with comprehensive implementation
+- Updated to reflect completion of multi-session workspace UI implementation through SPEC-023 portal framework rebuild
 - Enhanced session API endpoints documentation with v2 endpoints (GET/DELETE /api/v2/sessions)
-- Added voice-readiness contract details with input_modality field implementation
-- Documented mutating-dev kustomize profile for development environments
+- Added comprehensive portal UI integration details including session panel, switching, and incident deep links
+- Documented voice-readiness contract details with input_modality field implementation
+- Added voice input capabilities and browser speech recognition integration
 - Updated HITL confirmation integration and transcript reconstruction capabilities
 - Revised authorization matrix with new session actions (session:list, session:delete)
 - **Added comprehensive SPEC-022 R-1 contract requirements for set-once title semantics with atomic Redis operations and full test coverage**
+- **Integrated SPEC-023 delivered status showing complete multi-session workspace UI implementation**
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -43,27 +49,31 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document specifies and explains the implementation of SPEC-022: Multi-Session Operator Workspace. The specification has been **delivered** in version 0.8.0, providing framework-agnostic foundations for a multi-session operator workspace by exposing session lifecycle operations, adding voice-readiness contract discipline, and committing an environment-scoped mutating dev profile. The portal UI is intentionally deferred to a future rebuild spec; this release focuses on durable APIs, policy enforcement, schema discipline, and deployment posture.
+This document specifies and explains the implementation of SPEC-022: Multi-Session Operator Workspace. The specification has been **delivered** in version 0.8.0, providing framework-agnostic foundations for a multi-session operator workspace by exposing session lifecycle operations, adding voice-readiness contract discipline, and committing an environment-scoped mutating dev profile. 
+
+**Updated**: The multi-session workspace UI has now been fully implemented through SPEC-023 (delivered in 0.9.0), completing the handoff contract preserved in Appendix A. The rebuilt portal on React + Ant Design X delivers the complete multi-session experience including session management, switching, incident deep links, and voice input capabilities.
 
 Key outcomes delivered:
 - Session API surface under agent-platform v2 and platform-gateway proxies with deny-by-default policy actions.
 - Voice-readiness contract via optional modality metadata that never changes authorization or HITL behavior.
 - Environment-scoped mutating dev profile so dev deployments opt-in without changing base deny-by-default posture.
 - Authorization matrix updates and documentation reflecting new session actions.
-- **SPEC-022 R-1 contract requirements fully implemented with atomic set-once title semantics across all backends (Redis, Postgres, In-Memory) and comprehensive test coverage.**
+- **Complete multi-session workspace UI implementation through SPEC-023 portal framework rebuild**.
+- **Comprehensive SPEC-022 R-1 contract requirements for set-once title semantics with atomic Redis operations and full test coverage.**
 
 **Section sources**
 - [spec.md:5-13](file://docs/specs/SPEC-022-multi-session-operator-workspace/spec.md#L5-L13)
 - [spec.md:15-64](file://docs/specs/SPEC-022-multi-session-operator-workspace/spec.md#L15-L64)
 
 ## Project Structure
-SPEC-022 spans multiple layers with comprehensive implementation:
+SPEC-022 spans multiple layers with comprehensive implementation across backend APIs and frontend UI:
 - Agent-platform v2 routes expose session list, get-with-transcript, and delete endpoints with full functionality.
 - Platform-gateway adds proxy routes gated by new policy actions and emits audit events.
 - Shared contracts extend chat request schema with modality metadata.
 - Kustomize overlays commit the mutating dev posture into dev-k8s while keeping base deny-by-default.
 - Authorization matrix documents role grants for new session actions.
-- **Comprehensive test suite covering SPEC-022 R-1 contract requirements including atomic title semantics, concurrent access safety, and backend-specific behaviors.**
+- **Complete multi-session workspace UI built on React + Ant Design X with session panel, switching, and incident deep links**.
+- **Voice input integration with browser speech recognition and language selection**.
 
 ```mermaid
 graph TB
@@ -77,6 +87,10 @@ Store --> Memory["In-Memory Backend<br/>Title state check"]
 Agent --> State["Agent State Store<br/>Kernel snapshots"]
 Agent --> HITL["HITL Confirmation Registry<br/>In-memory"]
 Gateway --> Audit["Audit Emitter<br/>session_created/deleted"]
+Client --> Portal["Operator Portal<br/>React + Ant Design X"]
+Portal --> SessionPanel["Session Panel<br/>List, Switch, Delete"]
+Portal --> ChatView["Chat View<br/>Multi-session aware"]
+Portal --> VoiceInput["Voice Input<br/>Web Speech API"]
 ```
 
 **Diagram sources**
@@ -87,6 +101,8 @@ Gateway --> Audit["Audit Emitter<br/>session_created/deleted"]
 - [session_transcript.py:30-64](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L64)
 - [hitl_confirmations.py:93-223](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L93-L223)
 - [gateway_service.py:225-259](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L225-L259)
+- [ChatView.tsx:363-454](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L363-L454)
+- [useSessionWorkspace.ts:22-73](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L22-L73)
 
 **Section sources**
 - [plan.md:22-64](file://docs/specs/SPEC-022-multi-session-operator-workspace/plan.md#L22-L64)
@@ -100,6 +116,7 @@ Gateway --> Audit["Audit Emitter<br/>session_created/deleted"]
 - Platform-gateway proxies: enforce policy actions, log events, emit audit events for session lifecycle.
 - Schema extension: optional input_modality field in chat request across gateway and agent-platform schemas.
 - Mutating dev profile: committed kustomize overlay enabling mutating tools in dev only.
+- **Complete multi-session workspace UI with session panel, switching, incident deep links, and voice input**.
 - **SPEC-022 R-1 Contract: Atomic set-once title semantics ensuring first-turn titles are preserved across all backends with comprehensive test coverage.**
 
 **Section sources**
@@ -115,51 +132,37 @@ Gateway --> Audit["Audit Emitter<br/>session_created/deleted"]
 - [kustomization.yaml:1-21](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml#L1-L21)
 
 ## Architecture Overview
-The multi-session workspace flows through platform-gateway into agent-platform, which coordinates session storage, kernel state, and HITL parking. Policy enforcement is centralized at the gateway using deny-by-default actions.
+The multi-session workspace flows through platform-gateway into agent-platform, which coordinates session storage, kernel state, and HITL parking. Policy enforcement is centralized at the gateway using deny-by-default actions. The rebuilt portal provides a complete multi-session user interface.
 
 ```mermaid
 sequenceDiagram
 participant C as "Client"
+participant P as "Portal UI"
 participant G as "Platform Gateway"
-participant P as "Policy Engine"
 participant A as "Agent Platform v2"
 participant S as "Session Store"
 participant T as "Transcript Extractor"
 participant H as "HITL Registry"
-C->>G : GET /api/v1/sessions
-G->>P : enforce_policy(session : list)
-P-->>G : allow/deny
+C->>P : Navigate to Chat
+P->>G : GET /api/v1/sessions
 G->>A : GET /api/v2/sessions
 A->>S : list_sessions_by_user(user_id)
 S-->>A : session records
 A->>H : has_pending(session_id) x N
 H-->>A : bool flags
 A-->>G : sessions with pending_confirmation
-G-->>C : JSON response
-C->>G : GET /api/v1/sessions/{id}
-G->>P : enforce_policy(session : read)
+G-->>P : JSON response
+P->>P : Render session panel with badges
+C->>P : Select session
+P->>G : GET /api/v1/sessions/{id}
 G->>A : GET /api/v2/sessions/{id}
 A->>S : get_session(session_id)
 S-->>A : session record
 A->>T : extract_transcript(session_id)
 T-->>A : transcript_available, transcript
 A-->>G : session + transcript + pending_confirmation
-G-->>C : JSON response
-C->>G : DELETE /api/v1/sessions/{id}
-G->>P : enforce_policy(session : delete)
-G->>A : DELETE /api/v2/sessions/{id}
-A->>H : has_pending(session_id)
-H-->>A : bool
-alt parked
-A-->>G : 409 Conflict
-G-->>C : 409
-else not parked
-A->>S : delete_session(session_id)
-S-->>A : deleted?
-A-->>G : 200 {deleted : true}
-G->>G : emit_audit_event(session_deleted)
-G-->>C : 200
-end
+G-->>P : JSON response
+P->>P : Load transcript, show chat view
 ```
 
 **Diagram sources**
@@ -169,6 +172,7 @@ end
 - [session_store.py:519-561](file://products/agent-platform/src/agent_service/services/session_store.py#L519-L561)
 - [session_transcript.py:30-64](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L64)
 - [hitl_confirmations.py:215-223](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L215-L223)
+- [ChatView.tsx:515-555](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L515-L555)
 
 ## Detailed Component Analysis
 
@@ -350,12 +354,48 @@ Iterate --> Done["Return (true, turns)"]
 **Section sources**
 - [kustomization.yaml:1-21](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml#L1-L21)
 
+### Multi-Session Workspace UI (SPEC-023 Integration)
+**New** Complete multi-session workspace UI implementation delivered through SPEC-023 portal framework rebuild.
+
+- **Session Panel**: Displays operator's sessions with titles, relative last-active time, and amber "awaiting approval" badges for pending confirmations
+- **Switch/Resume**: Seamless session switching with transcript loading, stream repointing, and per-tab active session persistence
+- **Incident Deep Links**: Incident sessions appear as pinned entries in the session panel, opening alongside existing sessions
+- **Voice Input**: Browser-based speech recognition with language selection (en-US, zh-CN minimum), sending `input_modality: "voice"` 
+- **Delete Operations**: In-UI confirmation dialogs with proper 409 handling for parked confirmations and neutral 404 responses
+- **Polling**: 30-second polling interval with lifecycle event refreshes for real-time session status updates
+
+```mermaid
+flowchart TD
+User["User Interaction"] --> SessionPanel["Session Panel"]
+SessionPanel --> ListSessions["List Sessions<br/>30s polling"]
+SessionPanel --> CreateSession["Create New Session"]
+SessionPanel --> SwitchSession["Switch Session"]
+SwitchSession --> LoadTranscript["Load Transcript"]
+LoadTranscript --> ChatView["Chat View"]
+ChatView --> VoiceInput["Voice Input<br/>Web Speech API"]
+ChatView --> ConfirmActions["Confirmation Actions"]
+ConfirmActions --> ParkedCheck{"Parked Confirmation?"}
+ParkedCheck -- Yes --> BlockDelete["Block Delete<br/>409 Conflict"]
+ParkedCheck -- No --> AllowDelete["Allow Delete"]
+```
+
+**Diagram sources**
+- [ChatView.tsx:363-454](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L363-L454)
+- [useSessionWorkspace.ts:49-73](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L49-L73)
+- [ChatView.tsx:585-601](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L585-L601)
+
+**Section sources**
+- [ChatView.tsx:363-454](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L363-L454)
+- [useSessionWorkspace.ts:22-73](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L22-L73)
+- [App.tsx:219-228](file://products/operator-portal/web-ui/app/src/App.tsx#L219-L228)
+
 ## Dependency Analysis
 - Agent-platform v2 routes depend on session service, session store, agent state store, and HITL registry.
 - Platform-gateway depends on policy engine, audit emitter, and agent client for proxies.
 - Shared contracts define schemas validated by both services.
 - Kustomize overlays compose runtime profiles and config maps for environment-specific posture.
-- **Test dependencies include fakeredis for Redis backend testing and mock database connections for Postgres testing.**
+- **Portal UI depends on session workspace hook, API clients, and stream adapter**.
+- **Test dependencies include fakeredis for Redis backend testing and mock database connections for Postgres testing**.
 
 ```mermaid
 graph LR
@@ -371,6 +411,11 @@ Policy --> PolicyBundle["Policy Bundle"]
 Tests["Test Suite"] --> RedisStore["RedisSessionStore"]
 Tests --> PostgresStore["PostgresSessionStore"]
 Tests --> MemoryStore["InMemorySessionStore"]
+Portal["Portal UI"] --> SessionHook["useSessionWorkspace"]
+Portal --> APIClient["API Client"]
+Portal --> StreamAdapter["Stream Adapter"]
+SessionHook --> APIClient
+APIClient --> GWRoutes
 ```
 
 **Diagram sources**
@@ -380,6 +425,7 @@ Tests --> MemoryStore["InMemorySessionStore"]
 - [policy-default.yaml:19-44](file://shared/shared-contracts/policies/policy-default.yaml#L19-L44)
 - [test_redis_session_store.py:1-274](file://products/agent-platform/tests/test_redis_session_store.py#L1-L274)
 - [test_postgres_session_store.py:1-327](file://products/agent-platform/tests/test_postgres_session_store.py#L1-L327)
+- [useSessionWorkspace.ts:49-73](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L49-L73)
 
 **Section sources**
 - [policy-default.yaml:19-44](file://shared/shared-contracts/policies/policy-default.yaml#L19-L44)
@@ -395,6 +441,7 @@ Tests --> MemoryStore["InMemorySessionStore"]
   - Postgres: Server-side constraint evaluation minimizes application logic
   - In-Memory: Simple dictionary lookup for title state
   - All operations are O(1) and non-blocking
+- **Portal UI Performance**: 30-second polling with lifecycle event refreshes, per-session turn caches, and efficient session panel rendering
 
 ## Troubleshooting Guide
 - Unknown or foreign session IDs return 404 to prevent enumeration; verify caller owns the session.
@@ -406,6 +453,10 @@ Tests --> MemoryStore["InMemorySessionStore"]
   - Title not appearing: Verify session exists before setting title; check backend connectivity
   - Multiple title attempts: First-write-wins semantics apply; subsequent attempts are ignored
   - Title persistence: Ensure proper TTL configuration and backend health monitoring
+- **Portal UI Issues**:
+  - Session panel not updating: Check network connectivity and 30-second polling interval
+  - Voice input unavailable: Verify browser supports Web Speech API; check permissions
+  - Session switching issues: Clear browser cache and verify session ID persistence
 
 **Section sources**
 - [routes.py:398-419](file://products/agent-platform/src/agent_service/api/v2/routes.py#L398-L419)
@@ -414,14 +465,17 @@ Tests --> MemoryStore["InMemorySessionStore"]
 - [kustomization.yaml:1-21](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml#L1-L21)
 
 ## Conclusion
-SPEC-022 has been successfully delivered in version 0.8.0, establishing durable, auditable, and policy-gated session management foundations for the operator workspace. It introduces a robust session API, voice-readiness contract discipline, and a committed mutating dev profile while deferring portal UI work to a dedicated rebuild effort. The result is a safer, more observable, and deployable foundation for multi-session workflows.
+SPEC-022 has been successfully delivered in version 0.8.0, establishing durable, auditable, and policy-gated session management foundations for the operator workspace. It introduces a robust session API, voice-readiness contract discipline, and a committed mutating dev profile while deferring portal UI work to a dedicated rebuild effort.
 
-**Enhanced with SPEC-022 R-1 Contract Requirements**: The implementation now includes comprehensive atomic set-once title semantics across all backends (Redis, Postgres, In-Memory) with extensive test coverage ensuring data integrity and concurrent access safety. This provides a solid foundation for session identification and organization in multi-user environments.
+**Enhanced with SPEC-023 Integration**: The multi-session workspace UI has now been fully implemented through SPEC-023 (delivered in 0.9.0), completing the handoff contract preserved in Appendix A. The rebuilt portal on React + Ant Design X delivers the complete multi-session experience including session management, switching, incident deep links, and voice input capabilities. The result is a safer, more observable, and deployable foundation for multi-session workflows with a polished user interface.
+
+**Enhanced with SPEC-022 R-1 Contract Requirements**: The implementation includes comprehensive atomic set-once title semantics across all backends (Redis, Postgres, In-Memory) with extensive test coverage ensuring data integrity and concurrent access safety. This provides a solid foundation for session identification and organization in multi-user environments.
 
 ## Appendices
 - Deferred portal UI requirements are preserved verbatim in the spec's Appendix A for handoff to the rebuild spec.
 - Delivery tasks and version bump to 0.8.0 are tracked in the tasks file.
 - **SPEC-022 R-1 Contract Test Coverage**: Comprehensive test suite validates atomic title semantics, concurrent access safety, and backend-specific behaviors across Redis, Postgres, and In-Memory implementations.
+- **SPEC-023 Completion**: The multi-session workspace UI has been fully implemented and delivered, satisfying all requirements from Appendix A with additional voice input capabilities and incident deep link support.
 
 **Section sources**
 - [spec.md:159-199](file://docs/specs/SPEC-022-multi-session-operator-workspace/spec.md#L159-L199)

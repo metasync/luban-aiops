@@ -16,6 +16,9 @@
 - [redis-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml)
 - [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
 - [web-ui-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-service.yaml)
+- [nginx.conf](file://products/operator-portal/nginx.conf)
+- [Dockerfile](file://products/operator-portal/Dockerfile)
+- [vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
 - [api-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
 - [api-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/policy.yaml)
@@ -37,7 +40,6 @@
 - [python.mk](file://mk/python.mk)
 - [Dockerfile](file://products/agent-platform/Dockerfile)
 - [Dockerfile](file://products/identity-broker/Dockerfile)
-- [Dockerfile](file://products/operator-portal/Dockerfile)
 - [Dockerfile](file://products/tool-gateway/Dockerfile)
 - [pyproject.toml](file://products/agent-platform/pyproject.toml)
 - [pyproject.toml](file://products/identity-broker/pyproject.toml)
@@ -52,6 +54,13 @@
 - [config.py](file://products/tool-gateway/src/api_gateway/core/config.py)
 - [main.py](file://products/tool-gateway/src/api_gateway/main.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated Operator Portal section to reflect simplified nginx configuration for serving SPA at root path
+- Removed references to legacy coexistence routing logic
+- Added details about content-hashed asset caching strategy
+- Updated deployment architecture diagram to show simplified SPA serving pattern
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -129,7 +138,7 @@ The platform comprises four primary services and a shared Redis cache:
 - Agent Platform Service: orchestrates agent runtime sessions and provider integrations
 - Identity Broker: issues and validates tokens and manages identity context
 - Tool Gateway: API gateway enforcing policies and routing to agents
-- Operator Portal: web UI for operators
+- Operator Portal: web UI for operators serving a modern SPA via nginx
 - Redis: session/state store used by services
 
 Each service exposes a Kubernetes Service and Deployment defined in the base layer, with environment-specific overlays applied via Kustomize.
@@ -147,7 +156,7 @@ Each service exposes a Kubernetes Service and Deployment defined in the base lay
 - [redis-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml)
 
 ## Architecture Overview
-The runtime architecture uses an API Gateway that authenticates requests, enforces policies, and routes to the Agent Platform. The Identity Broker provides token issuance and validation. Redis stores sessions and state. The Operator Portal provides a management interface.
+The runtime architecture uses an API Gateway that authenticates requests, enforces policies, and routes to the Agent Platform. The Identity Broker provides token issuance and validation. Redis stores sessions and state. The Operator Portal serves a modern React SPA via nginx with simplified routing logic.
 
 ```mermaid
 graph TB
@@ -159,12 +168,14 @@ IDB["Identity Broker Service"]
 AGP["Agent Platform Service"]
 REDIS["Redis Service"]
 OPS["Operator Portal Web UI"]
+NGINX["Nginx SPA Server"]
 Client --> Ingress --> GW
 GW --> POL
 GW --> IDB
 GW --> AGP
 AGP --> REDIS
-OPS --> GW
+OPS --> NGINX
+NGINX --> GW
 ```
 
 **Diagram sources**
@@ -174,6 +185,7 @@ OPS --> GW
 - [agent-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-service.yaml)
 - [redis-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml)
 - [web-ui-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-service.yaml)
+- [nginx.conf](file://products/operator-portal/nginx.conf)
 
 ## Detailed Component Analysis
 
@@ -256,11 +268,13 @@ K8s-->>Dev : Deployment status
 - Each product has its own Dockerfile defining the runtime image.
 - Python dependencies are managed via pyproject.toml and lock files.
 - Shared build helpers standardize image tagging and multi-stage builds.
+- Operator Portal uses a multi-stage build with Vite compilation and nginx runtime.
 
 Best practices:
 - Pin base images and dependency versions.
 - Use non-root users in containers.
 - Minimize image size by multi-stage builds and pruning dev dependencies.
+- Content-hashed assets enable immutable caching for optimal performance.
 
 **Section sources**
 - [Dockerfile](file://products/agent-platform/Dockerfile)
@@ -314,13 +328,15 @@ Recommendations:
 
 ### Load Balancing and Networking
 - Services expose internal endpoints within the cluster.
-- An Ingress controller or external load balancer fronts the Tool Gateway.
+- An Ingress controller or external load balancer fronts the Tool Gateway and Operator Portal.
 - Health checks should be configured at both Service and Ingress levels.
+- Operator Portal uses nginx to serve SPA content with optimized caching strategies.
 
 Considerations:
 - Use sticky sessions only if required by application state.
 - Configure timeouts and rate limiting at the ingress layer.
 - Route traffic by path or host to isolate services.
+- SPA assets benefit from content hashing and immutable caching headers.
 
 **Section sources**
 - [api-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml)
@@ -328,6 +344,7 @@ Considerations:
 - [agent-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-service.yaml)
 - [identity-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml)
 - [redis-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml)
+- [nginx.conf](file://products/operator-portal/nginx.conf)
 
 ### Monitoring Infrastructure and Logging Aggregation
 - Observability env file centralizes metrics and tracing flags.
@@ -359,6 +376,28 @@ Operational steps:
 - [redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/policy.yaml)
 
+### Operator Portal SPA Serving Configuration
+**Updated** The Operator Portal now uses a simplified nginx configuration to serve a modern React SPA at the root path without legacy coexistence routing logic.
+
+Key features:
+- **Root Path Serving**: The SPA is served at `/` with proper client-side routing support via `try_files $uri $uri/ /index.html`
+- **Content-Hashed Assets**: Static assets under `/assets/` are served with immutable caching headers (`max-age=31536000, immutable`) for optimal performance
+- **API Proxying**: All `/api/` requests are proxied to the platform gateway with appropriate headers for authentication and request tracking
+- **Cache Control**: `index.html` is served with `no-store` headers to ensure immediate deployment rollouts while maintaining SPA routing integrity
+- **Multi-stage Build**: Vite compiles the React SPA during build time, producing content-hashed bundles for optimal caching
+
+Deployment characteristics:
+- Nginx runs as non-root user (UID 101) for security
+- Exposes port 8080 internally within the cluster
+- Serves built artifacts from `/usr/share/nginx/html`
+- Proxies API calls to `platform-gateway:8000` with streaming support for long-running operations
+
+**Section sources**
+- [nginx.conf](file://products/operator-portal/nginx.conf)
+- [Dockerfile](file://products/operator-portal/Dockerfile)
+- [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
+- [vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
+
 ## Dependency Analysis
 The following diagram shows how services depend on each other and shared infrastructure.
 
@@ -367,7 +406,8 @@ graph LR
 GW["Tool Gateway"] --> IDB["Identity Broker"]
 GW --> AGP["Agent Platform"]
 AGP --> REDIS["Redis"]
-OPS["Operator Portal"] --> GW
+OPS["Operator Portal"] --> NGINX["Nginx SPA"]
+NGINX --> GW
 ```
 
 **Diagram sources**
@@ -376,6 +416,7 @@ OPS["Operator Portal"] --> GW
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
 - [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
+- [nginx.conf](file://products/operator-portal/nginx.conf)
 
 **Section sources**
 - [base/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
@@ -387,8 +428,7 @@ OPS["Operator Portal"] --> GW
 - Use HTTP keep-alive and appropriate timeouts at the gateway.
 - Prefer async I/O patterns in services where applicable.
 - Cache responses judiciously and invalidate caches on updates.
-
-[No sources needed since this section provides general guidance]
+- **SPA Asset Caching**: Content-hashed assets enable browser caching for improved performance while ensuring fresh index.html loads for deployments.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -396,21 +436,22 @@ Common issues and resolutions:
 - Secret mounting errors: Ensure secrets exist and keys match expected names.
 - Policy enforcement blocks: Review policy rules and request payloads.
 - Redis connectivity: Check network policies, service endpoints, and credentials.
+- **SPA Routing Issues**: Verify nginx configuration for proper SPA fallback routing and check browser console for JavaScript errors.
 
 Debugging aids:
 - Use kubectl describe and logs commands.
 - Enable verbose logging temporarily in overlays.
 - Validate Kustomize overlays locally before applying.
+- **SPA Debugging**: Check nginx access/error logs and verify asset loading in browser developer tools.
 
 **Section sources**
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
 - [sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
+- [nginx.conf](file://products/operator-portal/nginx.conf)
 
 ## Conclusion
-The Luban AIOps Platform leverages a clear separation between base manifests and environment overlays, enabling consistent deployments across environments. By adopting robust container image strategies, centralized configuration and secret management, and scalable networking patterns, the platform supports production-grade reliability and performance. Continuous improvement of monitoring, logging, and backup processes ensures operational resilience.
-
-[No sources needed since this section summarizes without analyzing specific files]
+The Luban AIOps Platform leverages a clear separation between base manifests and environment overlays, enabling consistent deployments across environments. By adopting robust container image strategies, centralized configuration and secret management, scalable networking patterns, and optimized SPA serving with nginx, the platform supports production-grade reliability and performance. The simplified nginx configuration for the Operator Portal eliminates legacy routing complexity while providing optimal caching and performance characteristics. Continuous improvement of monitoring, logging, and backup processes ensures operational resilience.
 
 ## Appendices
 
@@ -418,6 +459,7 @@ The Luban AIOps Platform leverages a clear separation between base manifests and
 - Agent Platform: entrypoints and configuration modules initialize the service and read environment settings.
 - Identity Broker: app initialization and configuration loading for identity and token services.
 - Tool Gateway: app bootstrap, configuration, and policy engine integration.
+- Operator Portal: nginx configuration for SPA serving with optimized caching and API proxying.
 
 **Section sources**
 - [main.py](file://products/agent-platform/src/agent_platform/main.py)
@@ -429,3 +471,4 @@ The Luban AIOps Platform leverages a clear separation between base manifests and
 - [main.py](file://products/tool-gateway/src/api_gateway/main.py)
 - [app.py](file://products/tool-gateway/src/api_gateway/app.py)
 - [config.py](file://products/tool-gateway/src/api_gateway/core/config.py)
+- [nginx.conf](file://products/operator-portal/nginx.conf)

@@ -32,10 +32,10 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced Session Workspace Proxy Error Handling section with detailed HTTP status code passthrough behavior for list_sessions() function
-- Updated Session Listing functionality to document proper 4xx passthrough and 502 mapping patterns
-- Enhanced Troubleshooting Guide with specific guidance on session workspace error handling patterns
-- Updated Architecture Overview diagrams to reflect consistent error handling across all session operations
+- Updated Session Workspace Proxy Error Handling section to reflect improved list_sessions() error posture with proper 4xx passthrough behavior
+- Enhanced Session Listing functionality documentation to document consistent HTTP status code passthrough patterns across all session operations
+- Updated Troubleshooting Guide with specific guidance on session workspace error handling patterns including the improved list_sessions() behavior
+- Refined Architecture Overview diagrams to reflect consistent error handling across all session operations
 
 ## Table of Contents
 1. Introduction
@@ -431,7 +431,7 @@ end
 - Unknown or foreign sessions result in 404 responses passed through unchanged
 - Parked confirmation conflicts result in 409 responses preserved for better error visibility
 - Anti-enumeration posture maintained by not masking client errors as gateway errors
-- **Enhanced**: `list_sessions()` function specifically implements this pattern with proper status code detection
+- **Enhanced**: `list_sessions()` function specifically implements this pattern with proper status code detection, matching the behavior of get/delete proxies
 
 #### Transport Failure Mapping
 - Network connectivity issues and upstream service unavailability map to 502 status codes
@@ -1048,7 +1048,7 @@ Common issues and diagnostics:
 - **Enhanced**: Session workspace endpoint issues:
   - Upstream 4xx errors (unknown/foreign sessions, parked confirmations) pass through unchanged for better error visibility.
   - Transport failures and upstream 5xx errors map to 502 with appropriate detail messages.
-  - **Enhanced**: `list_sessions()` function specifically implements consistent error handling with "agent service session list failed" detail for 502 errors.
+  - **Enhanced**: `list_sessions()` function specifically implements consistent error handling with "agent service session list failed" detail for 502 errors, matching the behavior of get/delete proxies.
   - Server-side scoping ensures callers can only access their own sessions.
   - Consistent error handling across all session operations (create, list, read, delete).
 - **Enhanced**: Audit trail issues:
@@ -1077,7 +1077,7 @@ Operational tips:
 - **Enhanced**: Monitor session workspace endpoint performance and session lifecycle audit event volume.
 - **Enhanced**: Check session workspace error rates and upstream connectivity issues.
 - **Enhanced**: Validate session workspace policy rules and role assignments for session management workflows.
-- **Enhanced**: Monitor `list_sessions()` function error rates and verify proper 4xx passthrough behavior.
+- **Enhanced**: Monitor `list_sessions()` function error rates and verify proper 4xx passthrough behavior matching get/delete proxies.
 - **New**: Monitor chat confirm endpoint performance and confirmation_decided audit event volume.
 - **New**: Check audit service connectivity and event ingestion success rates.
 - **New**: Validate chat:confirm policy rules and role assignments for HITL workflows.
@@ -1098,6 +1098,6 @@ Operational tips:
 - [audit_emitter.py:68-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L68-L99)
 
 ## Conclusion
-The Platform Gateway Service cleanly separates portal-facing security and control-plane concerns from tool execution capabilities. It enforces strong authentication and authorization, proxies to agent-platform securely with least-privilege delegated tokens, provides unified API access to the incident service with comprehensive policy enforcement and credential management, and now offers transparency through live permission matrix evaluation, workspace inventory discovery, and Human-in-the-Loop confirmation bridging with durable audit trails. The addition of complete session workspace lifecycle management demonstrates the gateway's extensibility in supporting complex interactive workflows while maintaining consistent security patterns and operational visibility. The session workspace proxy routes implement deny-by-default policy enforcement with proper error handling, server-side scoping to caller's own sessions, and durable audit trail coverage for complete session lifecycle monitoring. These enhancements enable operators to manage sessions with full audit coverage, approve or deny pending tool executions with durable audit trails, and maintain comprehensive visibility into platform operations while ensuring strict security boundaries and least-privilege access controls. The enhanced error handling in `list_sessions()` and other session operations ensures consistent behavior across all session management endpoints, with proper distinction between client errors (4xx) and server errors (500+) for better debugging and operational clarity.
+The Platform Gateway Service cleanly separates portal-facing security and control-plane concerns from tool execution capabilities. It enforces strong authentication and authorization, proxies to agent-platform securely with least-privilege delegated tokens, provides unified API access to the incident service with comprehensive policy enforcement and credential management, and now offers transparency through live permission matrix evaluation, workspace inventory discovery, and Human-in-the-Loop confirmation bridging with durable audit trails. The addition of complete session workspace lifecycle management demonstrates the gateway's extensibility in supporting complex interactive workflows while maintaining consistent security patterns and operational visibility. The session workspace proxy routes implement deny-by-default policy enforcement with proper error handling, server-side scoping to caller's own sessions, and durable audit trail coverage for complete session lifecycle monitoring. These enhancements enable operators to manage sessions with full audit coverage, approve or deny pending tool executions with durable audit trails, and maintain comprehensive visibility into platform operations while ensuring strict security boundaries and least-privilege access controls. The enhanced error handling in `list_sessions()` and other session operations ensures consistent behavior across all session management endpoints, with proper distinction between client errors (4xx) and server errors (500+) for better debugging and operational clarity. The improved list_sessions() function now matches the error handling posture of get/delete proxies, passing through upstream 4xx errors unchanged instead of incorrectly surfacing them as 502 errors, providing consistent error handling across all session operations.
 
 [No sources needed since this section summarizes without analyzing specific files]

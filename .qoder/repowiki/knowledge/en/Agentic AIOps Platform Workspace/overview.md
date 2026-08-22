@@ -1,1 +1,1 @@
-Monorepo workspace for an enterprise agentic AIOps platform composed of independently deployable Python services, shared contracts, and GitOps overlays orchestrated through a root Makefile.
+Monorepo workspace for an enterprise agentic AIOps platform, orchestrating multiple Python microservices (agent runtime, gateways, identity, audit, incidents, skills) plus a web portal under unified GitOps and spec-driven development.
