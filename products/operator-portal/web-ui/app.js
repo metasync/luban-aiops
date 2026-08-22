@@ -4,7 +4,7 @@ const gatewayInput = document.querySelector("#gateway-url");
 // must match the root VERSION file (enforced by make validate-version). A
 // gateway-served /api/v1/version endpoint is the intended long-term source
 // of truth.
-const PLATFORM_VERSION = "v0.7.0";
+const PLATFORM_VERSION = "v0.8.0";
 document.querySelector("#version-output").textContent = PLATFORM_VERSION;
 const userInput = document.querySelector("#user-id");
 const promptInput = document.querySelector("#prompt-input");

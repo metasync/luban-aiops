@@ -16,6 +16,12 @@
       "type": "string",
       "description": "Optional session identifier to continue an existing conversation. Omit to start a new session."
     },
+    "input_modality": {
+      "type": "string",
+      "enum": ["text", "voice"],
+      "default": "text",
+      "description": "Voice-readiness contract (SPEC-022 R-2): modality is metadata only. It never changes policy, auto-allow, or HITL outcomes, and can never approve or deny a parked confirmation."
+    },
     "response_schema": {
       "type": "object",
       "description": "Optional JSON-schema dict for kernel-validated structured output (SPEC-017 R-2); passed through unchanged to the agent kernel."

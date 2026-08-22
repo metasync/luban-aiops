@@ -24,10 +24,17 @@ Luban AIOps platform.
 4. Govern tool auto-allow and approvals via the [Approval and HITL Governance Guide](approval-and-hitl.md)
 5. Consult [Troubleshooting](troubleshooting.md) when something breaks
 
+> **Session workspace status (SPEC-022).** The multi-session backend is
+> available now: `GET /api/v1/sessions` (list), `GET /api/v1/sessions/{id}`
+> (detail + transcript), and `DELETE /api/v1/sessions/{id}` are served by
+> platform-gateway under the `session:list` / `session:read` /
+> `session:delete` actions. The portal's multi-session UI ships with the
+> portal rebuild spec; until then the API is the integration surface.
+
 ## Related Documentation
 
 - [Delivery Roadmap](../agentic-aiops-platform/delivery-roadmap.md) — release sequence and themes
 - [Policy Specification](../agentic-aiops-platform/policy-specification.md) — full policy model
 - [Authorization Matrix](../agentic-aiops-platform/authorization-matrix.md) — role-to-action mapping
-- [Spec Index](../specs/README.md) — implementation specs (SPEC-001 through SPEC-021)
+- [Spec Index](../specs/README.md) — implementation specs (SPEC-001 through SPEC-022)
 - [Dev K8s Overlay](../../shared/platform-ops/gitops/dev-k8s/README.md) — deployer's reference

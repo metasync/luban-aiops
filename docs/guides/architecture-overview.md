@@ -251,8 +251,11 @@ The policy engine enforces deny-by-default authorization on named actions:
 | Action | Protected By | Description |
 |---|---|---|
 | `chat` | platform-gateway | Send a chat prompt to the agent |
+| `chat:confirm` | platform-gateway | Approve or deny a parked HITL tool confirmation (SPEC-020) |
 | `session:create` | platform-gateway | Create a new conversation session |
 | `session:read` | platform-gateway | Read session history |
+| `session:list` | platform-gateway | List the caller's own workspace sessions (SPEC-022) |
+| `session:delete` | platform-gateway | Delete one of the caller's own sessions (SPEC-022) |
 | `audit:read` | platform-gateway | Query the durable audit trail |
 | `incident:read` | platform-gateway | View incidents and triage reports |
 | `incident:create` | platform-gateway | Report a manual incident |
@@ -261,19 +264,22 @@ The policy engine enforces deny-by-default authorization on named actions:
 | `tools:list` | tool-gateway, platform-gateway | Discover available tools (platform-gateway gates the portal catalog proxy) |
 | `skills:read` | platform-gateway | View the federated skills inventory |
 | `tools:invoke` | tool-gateway | Execute a tool |
+| `tools:mutate` | tool-gateway | Execute mutating (write/admin risk) tools (SPEC-021) |
 
 Health, metrics, auth, and identity routes are explicitly exempt (platform plumbing, no
 business action).
 
 ### Default Policy Bundle
 
-The platform ships with ten allow rules at priority 100. Everything else is denied:
+The platform ships with twelve allow rules at priority 100. Everything else is denied:
 
 | Rule | Roles | Actions |
 |---|---|---|
-| `allow-operators-chat` | admin, approver, operator, developer | `chat`, `session:create`, `session:read` |
-| `allow-observer-read-and-chat` | read-only-observer | `chat`, `session:create`, `session:read` |
+| `allow-operators-chat` | admin, approver, operator, developer | `chat`, `session:create`, `session:read`, `session:list`, `session:delete` |
+| `allow-observer-read-and-chat` | read-only-observer | `chat`, `session:create`, `session:read`, `session:list`, `session:delete` |
+| `allow-chat-confirm` | admin, approver, operator, developer | `chat:confirm` |
 | `allow-operators-tools` | admin, operator, developer, read-only-observer | `tools:invoke` |
+| `allow-operators-tools-mutate` | admin, operator | `tools:mutate` |
 | `allow-operators-tools-list` | admin, operator, developer, read-only-observer | `tools:list` |
 | `allow-auditors-audit-read` | auditor, platform-admin | `audit:read` |
 | `allow-operators-incident-read` | admin, approver, operator, developer, read-only-observer | `incident:read` |

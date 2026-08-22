@@ -47,7 +47,13 @@ class PolicyEnforcementRouteTests(unittest.TestCase):
 
     def test_operator_allowed_chat(self) -> None:
         async def fake_chat(
-            settings, request_id, user_id, message, session_id, delegated_token=None
+            settings,
+            request_id,
+            user_id,
+            message,
+            session_id,
+            delegated_token=None,
+            input_modality="text",
         ):
             return {"session_id": "ses-1", "content": "ok", "status": "ok"}
 
@@ -63,7 +69,13 @@ class PolicyEnforcementRouteTests(unittest.TestCase):
 
     def test_observer_allowed_chat(self) -> None:
         async def fake_chat(
-            settings, request_id, user_id, message, session_id, delegated_token=None
+            settings,
+            request_id,
+            user_id,
+            message,
+            session_id,
+            delegated_token=None,
+            input_modality="text",
         ):
             return {"session_id": "ses-1", "content": "ok", "status": "ok"}
 
@@ -109,7 +121,13 @@ class PolicyEnforcementRouteTests(unittest.TestCase):
 
     def test_synthetic_developer_allowed_all_actions(self) -> None:
         async def fake_chat(
-            settings, request_id, user_id, message, session_id, delegated_token=None
+            settings,
+            request_id,
+            user_id,
+            message,
+            session_id,
+            delegated_token=None,
+            input_modality="text",
         ):
             return {"session_id": "ses-1", "content": "ok", "status": "ok"}
 

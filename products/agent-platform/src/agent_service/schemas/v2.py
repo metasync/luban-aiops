@@ -17,6 +17,8 @@ __all__ = [
     "AgentChatResponse",
     "AgentStreamEvent",
     "AgentSession",
+    "AgentSessionSummary",
+    "AgentSessionList",
     "AgentSessionCreateRequest",
     "AgentRuntimeMetadata",
     "AgentHealth",
@@ -29,6 +31,14 @@ __all__ = [
 class AgentChatRequest(BaseModel):
     message: str = Field(min_length=1)
     session_id: str | None = None
+    input_modality: Literal["text", "voice"] = Field(
+        default="text",
+        description=(
+            "Voice-readiness contract (SPEC-022 R-2): modality is metadata "
+            "only — it never changes policy, auto-allow, or HITL outcomes, "
+            "and it can never approve or deny a parked confirmation."
+        ),
+    )
     response_schema: dict[str, Any] | None = Field(
         default=None,
         description=(
@@ -116,6 +126,31 @@ class AgentSession(BaseModel):
     user_id: str
     created_at: datetime
     status: Literal["active", "expired"] = "active"
+    # SPEC-022 R-1 workspace fields: server-minted title (null for
+    # pre-existing sessions), last activity marker, parked-confirmation
+    # badge, and the best-effort transcript reconstructed from the kernel
+    # state snapshot (transcript_available=false when unrecoverable).
+    title: str | None = None
+    last_active_at: datetime | None = None
+    pending_confirmation: bool = False
+    transcript_available: bool = False
+    transcript: list[dict[str, str]] = Field(default_factory=list)
+
+
+class AgentSessionSummary(BaseModel):
+    """Compact list-view row for ``GET /api/v2/sessions`` (SPEC-022 R-1)."""
+
+    session_id: str
+    title: str | None = None
+    created_at: datetime
+    last_active_at: datetime | None = None
+    pending_confirmation: bool = False
+
+
+class AgentSessionList(BaseModel):
+    """Envelope for ``GET /api/v2/sessions`` (capped, most-recent first)."""
+
+    sessions: list[AgentSessionSummary]
 
 
 class AgentSessionCreateRequest(BaseModel):

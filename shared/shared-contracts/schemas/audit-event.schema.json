@@ -29,6 +29,7 @@
         "policy_decision",
         "token_exchange",
         "session_created",
+        "session_deleted",
         "chat_started",
         "chat_completed",
         "confirmation_decided",
@@ -72,7 +73,7 @@
     },
     "details": {
       "type": "object",
-      "description": "Per-event-type payload. tool_invoked: tool_name, status, duration_ms, redacted_spans. policy_decision: action, decision, reason. token_exchange: audience, reason (rejections). session_created / chat_started / chat_completed: session-scoped metadata. confirmation_decided: session_id, confirm_id, tool_names, decision. incident_triaged: incident envelope, severity_assessment, report_summary, next_steps titles, skills_cited.",
+      "description": "Per-event-type payload. tool_invoked: tool_name, status, duration_ms, redacted_spans. policy_decision: action, decision, reason. token_exchange: audience, reason (rejections). session_created / session_deleted / chat_started / chat_completed: session-scoped metadata. confirmation_decided: session_id, confirm_id, tool_names, decision. incident_triaged: incident envelope, severity_assessment, report_summary, next_steps titles, skills_cited.",
       "additionalProperties": true
     }
   },

@@ -127,7 +127,7 @@ class TestPostgresSessionStore:
 
     def test_get_session_refreshes_ttl_and_maps_row(self):
         calls: list[dict] = []
-        row = ("ses-1", "alice", NOW)
+        row = ("ses-1", "alice", NOW, "kill the web-ui pod", NOW)
         store = PostgresSessionStore(
             "postgresql://fake", ttl_seconds=600,
             connect=_fake_connect(calls, rows=[row]),
@@ -137,10 +137,16 @@ class TestPostgresSessionStore:
         assert fetched.session_id == "ses-1"
         assert fetched.user_id == "alice"
         assert fetched.created_at == NOW
+        # SPEC-022 R-1 workspace columns ride the read.
+        assert fetched.title == "kill the web-ui pod"
+        assert fetched.last_active_at == NOW
 
         sql = calls[0]["sql"]
         assert "UPDATE sessions" in sql
-        assert "RETURNING session_id, user_id, created_at" in sql
+        assert (
+            "RETURNING session_id, user_id, created_at, title, last_active_at"
+            in sql
+        )
         # Idle-TTL predicate folded into the read.
         assert "last_accessed_at > now() - make_interval" in sql
         assert calls[0]["params"]["ttl_seconds"] == 600
@@ -154,15 +160,24 @@ class TestPostgresSessionStore:
 
     def test_list_sessions_by_user(self):
         calls: list[dict] = []
-        rows = [("ses-1", "alice", NOW), ("ses-2", "alice", NOW)]
+        rows = [
+            ("ses-2", "alice", NOW, "second", NOW),
+            ("ses-1", "alice", NOW, None, None),
+        ]
         store = PostgresSessionStore(
             "postgresql://fake", connect=_fake_connect(calls, rows=rows)
         )
         sessions = store.list_sessions_by_user("alice")
-        assert [s.session_id for s in sessions] == ["ses-1", "ses-2"]
+        assert [s.session_id for s in sessions] == ["ses-2", "ses-1"]
+        assert sessions[0].title == "second"
+        assert sessions[1].title is None
         sql = calls[0]["sql"]
         assert "user_id = %(user_id)s" in sql
-        assert "ORDER BY created_at" in sql
+        # SPEC-022 R-1: workspace ordering is most-recently-active first,
+        # capped server-side.
+        assert "ORDER BY COALESCE(last_active_at, created_at) DESC" in sql
+        assert "LIMIT %(limit)s" in sql
+        assert calls[0]["params"]["limit"] == 50
 
     def test_delete_session_true_when_row_returned(self):
         calls: list[dict] = []

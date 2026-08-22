@@ -222,8 +222,8 @@ if [ "$RBAC_ALLOWED" = "yes" ]; then
   echo "pod-delete RBAC applied: the service account can delete pods"
 else
   echo "NOTE: pod-delete RBAC not applied; deletes will fail with K8S_PERMISSION_DENIED."
-  echo "Apply it with:"
-  echo "  kubectl apply -f shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-pod-delete.yaml"
+  echo "Apply it with (it rides the mutating-dev runtime profile, SPEC-022):"
+  echo "  kubectl apply -f shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml"
 fi
 
 if [ "${RUN_HITL_LEG:-}" = "true" ]; then

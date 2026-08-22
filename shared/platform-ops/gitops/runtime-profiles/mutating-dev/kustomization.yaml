@@ -1,0 +1,21 @@
+# Mutating tools dev posture (SPEC-022 R-3).
+#
+# This profile promotes the SPEC-021 opt-in to a committed, environment-
+# scoped dev overlay: it carries the pod-delete RBAC for the bounded
+# mutating tool k8s.delete_pod, and its mutating.env provides the
+# GATEWAY_MUTATING_TOOLS_ENABLED=true value that dev-k8s merges into the
+# platform-runtime-config ConfigMap. The merge is declared by the
+# dev-k8s overlay (where the ConfigMap is accumulated) because kustomize
+# `behavior: merge` generators need their merge target in scope.
+#
+# The base stays deny-by-default: base/tool-gateway/runtime-config.env
+# keeps GATEWAY_MUTATING_TOOLS_ENABLED=false, and any overlay that does
+# not include this profile renders byte-identical to the default posture.
+#
+# Mutating invokes remain triple-gated regardless of this profile:
+# risk-tier admission (this flag) -> tools:mutate policy grant -> SPEC-020
+# HITL confirmation. See docs/guides/approval-and-hitl.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - tool-gateway-pod-delete.yaml

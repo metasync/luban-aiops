@@ -13,6 +13,65 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.8.0 — 2026-08-22
+
+### Added — SPEC-022: Multi-session foundations (backend-first)
+
+- **Session workspace lifecycle API (R-1)**: agent-platform gains
+  `GET /api/v2/sessions` (caller's own sessions, most-recently-active
+  first, capped at 50, each with a `pending_confirmation` flag),
+  `GET /api/v2/sessions/{id}` now returns a server-minted title (first
+  user turn, 80 chars, set once) and a best-effort transcript
+  reconstructed from the kernel state snapshot
+  (`transcript_available` marks the explicit fallback), and
+  `DELETE /api/v2/sessions/{id}` removes the session plus its state
+  snapshot. Unknown or foreign ids answer `404` (anti-enumeration);
+  a parked HITL confirmation blocks delete with `409`. Session records
+  now carry `last_active_at` and titles in the store.
+- **Gateway session proxies**: platform-gateway serves
+  `GET /api/v1/sessions` (gated by the new deny-by-default
+  `session:list` action) and `DELETE /api/v1/sessions/{session_id}`
+  (gated by `session:delete`, emitting a durable `session_deleted`
+  audit event); both actions mirror the existing `session:create`
+  grants (all five chat-capable roles; `auditor` denied). Upstream
+  `4xx` passes through unchanged; transport/5xx map to `502`.
+- **Voice-readiness contract (R-2)**: `POST /api/v2/chat` and the
+  gateway proxy accept an optional `input_modality` (`text` | `voice`,
+  default `text`). It is metadata only — logged and audited, never
+  decision-bearing: authorization, tool policy, and HITL gating are
+  unchanged, and the confirm surface stays click-gated. Stream schema
+  stays at v6; invalid modalities fail with `422` before any upstream
+  call.
+- **Mutating-dev runtime profile (R-3)**: new
+  `shared/platform-ops/gitops/runtime-profiles/mutating-dev/` profile
+  promotes the SPEC-021 opt-in into the committed dev posture —
+  `GATEWAY_MUTATING_TOOLS_ENABLED=true` is merged into
+  `platform-runtime-config` by the dev-k8s overlay and the pod-delete
+  RBAC now rides the profile. The profile is wired into `dev-k8s` and
+  the root `OVERLAYS` gate; `select-runtime-profile.sh` preserves it
+  across LLM provider switches. Base and all LLM profiles stay
+  `false`.
+- **Docs and matrix (R-4)**: authorization matrix documents the live
+  matrix transparency for the session lifecycle actions;
+  architecture overview adds `session:list`/`session:delete` (plus the
+  previously missing `chat:confirm`/`tools:mutate`) to the Protected
+  Actions table and corrects the bundle rule count to twelve;
+  troubleshooting gains transcript-fallback and delete-409 symptom
+  sections; guides index notes the portal UI follows with the portal
+  rebuild spec.
+
+### Fixed — walkthrough findings closed in-release
+
+- **Session detail proxy error posture**: the pre-existing
+  `GET /api/v1/sessions/{id}` proxy leaked upstream errors as `500`;
+  it now passes upstream `4xx` (unknown/foreign session,
+  anti-enumeration 404) through unchanged and maps transport/5xx to
+  `502`, matching the new list/delete posture.
+- **Audit contract enum drift**: the audit-service `EventType`
+  vocabulary was missing `session_deleted` (present in the shared JSON
+  schema), so the ingest rejected the whole batch with `400`. The enum
+  is synced, and the contract test now pins model/contract enum parity.
+
 ## 0.7.0 — 2026-08-21
 
 ### Added — SPEC-021: Bounded mutating actions (first approval-gated write tool)

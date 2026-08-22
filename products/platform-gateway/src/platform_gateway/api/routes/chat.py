@@ -56,6 +56,7 @@ async def chat_route(
         body.message,
         body.session_id,
         delegated_token,
+        body.input_modality,
     )
     log_event(
         LOGGER,
@@ -63,6 +64,8 @@ async def chat_route(
         request_id=request_id,
         session_id=response.get("session_id"),
         user_id=user_id,
+        # SPEC-022 R-2: modality is recorded, never decision-bearing.
+        input_modality=body.input_modality,
         authenticated=identity.subject != "dev",  # type: ignore[union-attr]
         roles=identity.roles,  # type: ignore[union-attr]
     )
@@ -72,6 +75,7 @@ async def chat_route(
             "chat_completed",
             request_id,
             "success",
+            details={"input_modality": body.input_modality},
             subject=identity.subject,  # type: ignore[union-attr]
             username=user_id,
             actor=identity.actor,  # type: ignore[union-attr]

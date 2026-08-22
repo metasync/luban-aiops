@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import HTTPException
 
 from agent_service.core.metrics import record_session_created
 from agent_service.schemas.api import SessionRecord
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
 from agent_service.services.session_store import SESSION_STORE
+
+LOGGER = logging.getLogger(__name__)
+
+# SPEC-022 R-1: workspace list cap and title minting bounds.
+SESSION_LIST_CAP = 50
+SESSION_TITLE_MAX_LENGTH = 80
 
 
 def _assert_session_owner(session: SessionRecord, user_id: str | None) -> None:
@@ -59,6 +67,38 @@ def get_session(session_id: str, user_id: str | None = None) -> SessionRecord:
         raise HTTPException(status_code=404, detail="session not found")
     _assert_session_owner(session, user_id)
     return session
+
+
+def list_sessions(user_id: str) -> list[SessionRecord]:
+    """The caller's sessions, most-recently-active first (SPEC-022 R-1).
+
+    Backends that cannot order server-side (memory, Redis) are sorted here;
+    the Postgres backend already returns the capped, ordered window.
+    """
+    records = SESSION_STORE.list_sessions_by_user(user_id)
+    records.sort(
+        key=lambda record: record.last_active_at or record.created_at,
+        reverse=True,
+    )
+    return records[:SESSION_LIST_CAP]
+
+
+def mark_session_turn(session_id: str, message: str) -> None:
+    """Workspace bookkeeping at chat-turn start (SPEC-022 R-1).
+
+    Mints the title from the first user turn (80-char cap, never rewritten)
+    and refreshes ``last_active_at``. Both are fail-open: bookkeeping never
+    fails a turn.
+    """
+    title = " ".join(message.split())[:SESSION_TITLE_MAX_LENGTH]
+    try:
+        if title:
+            SESSION_STORE.set_session_title(session_id, title)
+        SESSION_STORE.touch_session(session_id)
+    except Exception as exc:
+        LOGGER.warning(
+            "session workspace bookkeeping failed for %s: %s", session_id, exc
+        )
 
 
 def delete_session(session_id: str, user_id: str | None = None) -> bool:

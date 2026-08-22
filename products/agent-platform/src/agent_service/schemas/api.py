@@ -10,6 +10,11 @@ class SessionRecord(BaseModel):
     user_id: str | None = None
     created_at: datetime
     status: str = "active"
+    # SPEC-022 R-1: server-minted title (first user turn, 80-char cap) and
+    # last activity marker for workspace ordering; both stay optional so
+    # pre-existing sessions and lightweight backends keep working.
+    title: str | None = None
+    last_active_at: datetime | None = None
 
 
 class CreateSessionRequest(BaseModel):

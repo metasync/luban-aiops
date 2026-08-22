@@ -14,7 +14,7 @@ from pathlib import Path
 import jsonschema
 from pydantic import ValidationError
 
-from audit_service.schemas.audit import AuditEvent, IngestRequest
+from audit_service.schemas.audit import AuditEvent, IngestRequest, EventType, Outcome
 
 SCHEMAS_DIR = (
     Path(__file__).resolve().parents[3] / "shared" / "shared-contracts" / "schemas"
@@ -83,6 +83,27 @@ class AuditEventContractTests(unittest.TestCase):
         self.assertNotIn("subject", dumped)
         self.assertNotIn("username", dumped)
         jsonschema.validate(dumped, _load_schema(self.schema_name))
+
+    def test_model_enum_values_match_contract(self) -> None:
+        # An emitter-side event type accepted by the contract but missing
+        # from the model gets the whole batch rejected with 400 at ingest,
+        # so the enum vocabulary must stay in lockstep with the schema.
+        contract = _load_schema(self.schema_name)
+        contract_types = set(contract["properties"]["event_type"]["enum"])
+        model_types = set(getattr(EventType, "__args__", EventType))
+        self.assertEqual(model_types, contract_types)
+        contract_outcomes = set(contract["properties"]["outcome"]["enum"])
+        model_outcomes = set(getattr(Outcome, "__args__", Outcome))
+        self.assertEqual(model_outcomes, contract_outcomes)
+
+    def test_session_deleted_event_validates(self) -> None:
+        # SPEC-022 R-1: the gateway emits session_deleted on workspace
+        # deletes; the model must accept it like the contract does.
+        event = _event(event_type="session_deleted", session_id="ses-1")
+        jsonschema.validate(
+            event.model_dump(mode="json", exclude_none=True),
+            _load_schema(self.schema_name),
+        )
 
     def test_model_rejects_unknown_event_type(self) -> None:
         with self.assertRaises(ValidationError):

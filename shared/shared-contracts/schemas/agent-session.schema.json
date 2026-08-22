@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/agent-session.schema.json",
   "title": "Agent Session (v2)",
-  "description": "Session record returned by POST /api/v2/sessions and GET /api/v2/sessions/{id}.",
+  "description": "Session record returned by POST /api/v2/sessions and GET /api/v2/sessions/{id}. SPEC-022 R-1 adds workspace fields: server-minted title, last_active_at, parked-confirmation flag, and a best-effort transcript reconstructed from the kernel state snapshot.",
   "type": "object",
   "additionalProperties": false,
   "required": ["session_id", "user_id", "created_at", "status"],
@@ -21,6 +21,44 @@
       "type": "string",
       "enum": ["active", "expired"],
       "default": "active"
+    },
+    "title": {
+      "type": ["string", "null"],
+      "description": "Server-minted title (first user turn, capped at 80 characters); null for sessions created before SPEC-022."
+    },
+    "last_active_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Last chat-turn activity marker used for workspace ordering."
+    },
+    "pending_confirmation": {
+      "type": "boolean",
+      "description": "True while the session holds an unresolved parked HITL confirmation (SPEC-020 registry state)."
+    },
+    "transcript_available": {
+      "type": "boolean",
+      "description": "False when no transcript could be recovered from the kernel state snapshot; the transcript array is then empty."
+    },
+    "transcript": {
+      "type": "array",
+      "description": "Ordered chat-text turns (tool/evidence frames excluded).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "content"],
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": ["user", "assistant"]
+          },
+          "content": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

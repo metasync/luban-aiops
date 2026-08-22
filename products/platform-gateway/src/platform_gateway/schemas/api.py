@@ -15,6 +15,8 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
     user_id: str | None = None
     request_id: str | None = None
+    # SPEC-022 R-2 voice-readiness: metadata only — never a privilege.
+    input_modality: Literal["text", "voice"] = "text"
 
 
 class ChatConfirmRequest(BaseModel):
@@ -69,6 +71,12 @@ class SessionRecord(BaseModel):
     user_id: str
     created_at: datetime
     status: Literal["active", "expired"] = "active"
+    # SPEC-022 R-1 workspace fields; null/empty for pre-SPEC-022 sessions.
+    title: str | None = None
+    last_active_at: datetime | None = None
+    pending_confirmation: bool = False
+    transcript_available: bool = False
+    transcript: list[dict[str, str]] = Field(default_factory=list)
 
 
 class IdentityContext(BaseModel):

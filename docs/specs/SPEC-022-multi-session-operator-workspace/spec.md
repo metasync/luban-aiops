@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: chi
 - created: 2026-08-22
 - approved: 2026-08-22
@@ -238,3 +238,11 @@ None blocking; transcript reconstruction strategy is decided in plan.md.
   framework rebuild spec; requirements renumbered, Appendix A added as the
   handoff contract
 - 2026-08-22: approved; implementation started (0.8.0 train)
+- 2026-08-22: delivered in 0.8.0 — all R-1…R-4 acceptance criteria
+  verified; `make build` + `make verify` green; live walkthrough on
+  dev-k8s covered create/chat(voice)/list/detail/delete, 404/403/409
+  posture, and the durable `session_deleted` audit chain. Two
+  walkthrough findings were fixed in-release: the session-detail proxy
+  now passes upstream 4xx instead of leaking 500, and the audit-service
+  `EventType` vocabulary was synced with the contract schema
+  (`session_deleted`) with an enum-parity test added.

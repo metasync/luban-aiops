@@ -578,46 +578,64 @@ tuning knobs (`AGENTSCOPE_MAX_ITERS`, `AGENTSCOPE_CONTEXT_TRIGGER_RATIO`,
 `AGENTSCOPE_MODEL_MAX_RETRIES`) are intentionally unset in dev so the
 agentscope defaults apply.
 
-## Bounded Mutating Actions (SPEC-021)
+## Bounded Mutating Actions (SPEC-021, dev posture via SPEC-022 R-3)
 
 The platform's first mutating capability is the bounded pod-delete primitive
 (`k8s.delete_pod`: delete one named pod; the owning controller recreates
-it). It is **disabled by default** and every gate fails closed independently:
+it). Every gate fails closed independently:
 
-- `GATEWAY_MUTATING_TOOLS_ENABLED=false` is committed in the tool-gateway
-  fragment of `runtime-config.env`; while false, mutating tools are absent
-  from discovery and invoke returns `TOOL_NOT_FOUND`
+- the **base** commits `GATEWAY_MUTATING_TOOLS_ENABLED=false` in the
+  tool-gateway fragment of `runtime-config.env`; while false, mutating
+  tools are absent from discovery and invoke returns `TOOL_NOT_FOUND`
 - the committed RBAC (`base/tool-gateway/rbac.yaml`) grants read-only verbs
-  only — the pod-delete Role/RoleBinding ships as a **separate, opt-in
-  manifest** that is not part of the kustomization:
-  `base/tool-gateway/tool-gateway-pod-delete.yaml`
+  only
 - the policy bundle grants the deny-by-default `tools:mutate` action to
   `platform-admin` and `operator` only
 - agent-platform never auto-approves mutating tools and, without HITL
   bridging (`AGENT_HITL_CONFIRM_TIMEOUT=0`), excludes them from the toolkit
   entirely
 
-To opt in (full checklist in `docs/guides/tool-configuration.md`):
+**Dev-k8s opts in through a committed runtime profile (SPEC-022 R-3).**
+The `runtime-profiles/mutating-dev/` profile is wired into this overlay
+permanently: the overlay merges the profile's
+`GATEWAY_MUTATING_TOOLS_ENABLED=true` into the `platform-runtime-config`
+ConfigMap and applies the pod-delete Role/RoleBinding that rides the
+profile (`mutating-dev/tool-gateway-pod-delete.yaml` — delete on pods,
+`dev-luban-aiops` only). A fresh clone deployed via `make deploy` yields
+the opted-in dev posture with no manual steps; any overlay without the
+profile stays byte-identical to the deny-by-default base.
 
 ```bash
-# 1. Set GATEWAY_MUTATING_TOOLS_ENABLED=true in
-#    base/tool-gateway/runtime-config.env, then redeploy
+# Deploy the opted-in dev posture (profile already wired into dev-k8s)
 make deploy
 
-# 2. Apply the opt-in pod-delete RBAC (delete on pods, dev-luban-aiops only)
-kubectl apply -f shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-pod-delete.yaml
-
-# 3. Verify the grant
+# Verify the grant
 kubectl auth can-i delete pods -n dev-luban-aiops \
   --as=system:serviceaccount:dev-luban-aiops:tool-gateway
 
-# 4. Run the deterministic smoke test (denied-by-default + opt-in chain)
+# Run the deterministic smoke test (denied-by-default + opt-in chain)
 shared/platform-ops/e2e/mutating-demo.sh
 ```
 
-Rollback: set `GATEWAY_MUTATING_TOOLS_ENABLED=false` and redeploy (or
-`kubectl delete -f .../tool-gateway-pod-delete.yaml`); the tool immediately
-disappears from discovery and invoke fails closed.
+Config-only changes (such as toggling this posture on an existing cluster
+without a new image build) do not need a full `make deploy`: regenerate
+just the ConfigMap and restart the affected deployment. The overlay pins
+image tags via `.images.env`, so never apply a raw `kustomize build` of
+the base for drills:
+
+```bash
+# Same-tag rollout: refresh the ConfigMap, restart only tool-gateway
+kubectl -n dev-luban-aiops rollout restart deployment/tool-gateway
+kubectl -n dev-luban-aiops rollout status deployment/tool-gateway
+```
+
+**Deactivation runbook.** To return this environment to the deny-by-default
+posture: remove `- ../runtime-profiles/mutating-dev` (and the merge
+`configMapGenerator` block) from `dev-k8s/kustomization.yaml`, then
+`make deploy` (or the targeted ConfigMap regeneration above) and delete the
+RBAC: `kubectl delete -f
+shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml`.
+The tool immediately disappears from discovery and invoke fails closed.
 
 The full approval model, including how to manage the auto-allow list and
 approval requirements, is covered by `docs/guides/approval-and-hitl.md`.

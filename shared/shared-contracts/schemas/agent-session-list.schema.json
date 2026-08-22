@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/agent-session-list.schema.json",
+  "title": "Agent Session List (v2)",
+  "description": "Envelope returned by GET /api/v2/sessions (SPEC-022 R-1): the caller's sessions, most-recently-active first, capped server-side.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sessions"],
+  "properties": {
+    "sessions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["session_id", "created_at", "pending_confirmation"],
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": ["string", "null"],
+            "description": "Server-minted title (first user turn, capped at 80 characters); null for sessions created before SPEC-022."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_active_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "pending_confirmation": {
+            "type": "boolean",
+            "description": "True while the session holds an unresolved parked HITL confirmation."
+          }
+        }
+      }
+    }
+  }
+}

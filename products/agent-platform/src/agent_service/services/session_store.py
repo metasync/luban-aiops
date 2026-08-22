@@ -60,6 +60,14 @@ class SessionStore(Protocol):
 
     def delete_session(self, session_id: str) -> bool: ...
 
+    def touch_session(self, session_id: str) -> None:
+        """Mark the session active now (SPEC-022 R-1 workspace ordering)."""
+        ...
+
+    def set_session_title(self, session_id: str, title: str) -> None:
+        """Record the session title once; an existing title is never rewritten."""
+        ...
+
     def is_ready(self) -> bool: ...
 
     def __len__(self) -> int: ...
@@ -114,6 +122,7 @@ class InMemorySessionStore:
             session_id=session_id or f"ses-{uuid4()}",
             user_id=user_id,
             created_at=datetime.now(timezone.utc),
+            last_active_at=datetime.now(timezone.utc),
         )
         self._sessions[record.session_id] = record
         self._last_accessed[record.session_id] = now
@@ -141,6 +150,16 @@ class InMemorySessionStore:
         record = self._sessions.pop(session_id, None)
         self._last_accessed.pop(session_id, None)
         return record is not None
+
+    def touch_session(self, session_id: str) -> None:
+        record = self._sessions.get(session_id)
+        if record is not None:
+            record.last_active_at = datetime.now(timezone.utc)
+
+    def set_session_title(self, session_id: str, title: str) -> None:
+        record = self._sessions.get(session_id)
+        if record is not None and record.title is None:
+            record.title = title
 
     def is_ready(self) -> bool:
         return True
@@ -194,6 +213,7 @@ class RedisSessionStore:
             session_id=session_id or f"ses-{uuid4()}",
             user_id=user_id,
             created_at=datetime.now(timezone.utc),
+            last_active_at=datetime.now(timezone.utc),
         )
         key = self._session_key(record.session_id)
         try:
@@ -254,6 +274,36 @@ class RedisSessionStore:
             record_session_store_error("delete")
             raise
 
+    def touch_session(self, session_id: str) -> None:
+        key = self._session_key(session_id)
+        try:
+            raw = self._client.get(key)
+            if raw is None:
+                return
+            record = self._deserialize(raw)
+            if record is None:
+                return
+            record.last_active_at = datetime.now(timezone.utc)
+            self._client.setex(key, self.ttl_seconds, self._serialize(record))
+        except Exception:
+            record_session_store_error("touch")
+            raise
+
+    def set_session_title(self, session_id: str, title: str) -> None:
+        key = self._session_key(session_id)
+        try:
+            raw = self._client.get(key)
+            if raw is None:
+                return
+            record = self._deserialize(raw)
+            if record is None or record.title is not None:
+                return
+            record.title = title
+            self._client.setex(key, self.ttl_seconds, self._serialize(record))
+        except Exception:
+            record_session_store_error("set_title")
+            raise
+
     def is_ready(self) -> bool:
         try:
             return bool(self._client.ping())
@@ -279,12 +329,18 @@ CREATE TABLE IF NOT EXISTS sessions (
     session_id       TEXT PRIMARY KEY,
     user_id          TEXT,
     created_at       TIMESTAMPTZ NOT NULL,
-    last_accessed_at TIMESTAMPTZ NOT NULL
+    last_accessed_at TIMESTAMPTZ NOT NULL,
+    title            TEXT,
+    last_active_at   TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user
     ON sessions (user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_accessed
     ON sessions (last_accessed_at);
+-- SPEC-022 R-1: deployments bootstrapped before the workspace columns
+-- existed gain them idempotently (fail-open semantics unchanged).
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ;
 """
 
 _NOT_EXPIRED = (
@@ -310,20 +366,35 @@ _GET_SESSION = f"""
 UPDATE sessions
    SET last_accessed_at = now()
  WHERE session_id = %(session_id)s AND {_NOT_EXPIRED}
-RETURNING session_id, user_id, created_at
+RETURNING session_id, user_id, created_at, title, last_active_at
 """
 
 _LIST_USER_SESSIONS = f"""
-SELECT session_id, user_id, created_at
+SELECT session_id, user_id, created_at, title, last_active_at
   FROM sessions
  WHERE user_id = %(user_id)s AND {_NOT_EXPIRED}
- ORDER BY created_at
+ ORDER BY COALESCE(last_active_at, created_at) DESC
+ LIMIT %(limit)s
 """
 
 _DELETE_SESSION = """
 DELETE FROM sessions
  WHERE session_id = %(session_id)s
 RETURNING session_id
+"""
+
+# SPEC-022 R-1: workspace bookkeeping. The title is minted once server-side
+# (first user turn) and never rewritten, hence the ``title IS NULL`` guard.
+_TOUCH_SESSION = f"""
+UPDATE sessions
+   SET last_active_at = now()
+ WHERE session_id = %(session_id)s AND {_NOT_EXPIRED}
+"""
+
+_SET_SESSION_TITLE = f"""
+UPDATE sessions
+   SET title = %(title)s
+ WHERE session_id = %(session_id)s AND {_NOT_EXPIRED} AND title IS NULL
 """
 
 _COUNT_SESSIONS = f"""
@@ -438,16 +509,26 @@ class PostgresSessionStore:
         if row is None:
             return None
         return SessionRecord(
-            session_id=row[0], user_id=row[1], created_at=row[2]
+            session_id=row[0],
+            user_id=row[1],
+            created_at=row[2],
+            title=row[3],
+            last_active_at=row[4],
         )
 
-    def list_sessions_by_user(self, user_id: str) -> list[SessionRecord]:
+    def list_sessions_by_user(
+        self, user_id: str, limit: int = 50
+    ) -> list[SessionRecord]:
         try:
             with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         _LIST_USER_SESSIONS,
-                        {"user_id": user_id, **self._ttl_params()},
+                        {
+                            "user_id": user_id,
+                            "limit": limit,
+                            **self._ttl_params(),
+                        },
                     )
                     rows = cur.fetchall()
                 conn.commit()
@@ -455,7 +536,13 @@ class PostgresSessionStore:
             record_session_store_error("list")
             raise
         return [
-            SessionRecord(session_id=row[0], user_id=row[1], created_at=row[2])
+            SessionRecord(
+                session_id=row[0],
+                user_id=row[1],
+                created_at=row[2],
+                title=row[3],
+                last_active_at=row[4],
+            )
             for row in rows
         ]
 
@@ -472,6 +559,36 @@ class PostgresSessionStore:
             record_session_store_error("delete")
             raise
         return row is not None
+
+    def touch_session(self, session_id: str) -> None:
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        _TOUCH_SESSION,
+                        {"session_id": session_id, **self._ttl_params()},
+                    )
+                conn.commit()
+        except Exception:
+            record_session_store_error("touch")
+            raise
+
+    def set_session_title(self, session_id: str, title: str) -> None:
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        _SET_SESSION_TITLE,
+                        {
+                            "session_id": session_id,
+                            "title": title,
+                            **self._ttl_params(),
+                        },
+                    )
+                conn.commit()
+        except Exception:
+            record_session_store_error("set_title")
+            raise
 
     def is_ready(self) -> bool:
         try:

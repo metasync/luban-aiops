@@ -28,6 +28,10 @@ DEFAULT_BUNDLE_RESOURCE = "policy-default.yaml"
 ACTION_CHAT = "chat"
 ACTION_SESSION_CREATE = "session:create"
 ACTION_SESSION_READ = "session:read"
+# Session workspace lifecycle (SPEC-022 R-1): list and delete are scoped
+# server-side to the caller's own sessions, mirroring session:create grants.
+ACTION_SESSION_LIST = "session:list"
+ACTION_SESSION_DELETE = "session:delete"
 ACTION_AUDIT_READ = "audit:read"
 ACTION_INCIDENT_READ = "incident:read"
 ACTION_INCIDENT_CREATE = "incident:create"
@@ -49,6 +53,8 @@ PROTECTED_ACTIONS = frozenset(
         ACTION_CHAT_CONFIRM,
         ACTION_SESSION_CREATE,
         ACTION_SESSION_READ,
+        ACTION_SESSION_LIST,
+        ACTION_SESSION_DELETE,
         ACTION_AUDIT_READ,
         ACTION_INCIDENT_READ,
         ACTION_INCIDENT_CREATE,

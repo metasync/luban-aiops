@@ -1,5 +1,5 @@
 SERVICE_NAME = "incident-service"
 SERVICE_TITLE = "incident-service"
-SERVICE_VERSION = "0.7.0"
+SERVICE_VERSION = "0.8.0"
 DEFAULT_HTTP_HOST = "0.0.0.0"
 DEFAULT_HTTP_PORT = 8000

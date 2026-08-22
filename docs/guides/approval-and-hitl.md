@@ -40,8 +40,9 @@ There is no configuration path that auto-runs a mutating tool.
 
 - **Enforcement point:** tool-gateway registry (startup) and invoke path
   (every call), SPEC-021 R-1.
-- **Configuration surface:** `GATEWAY_MUTATING_TOOLS_ENABLED` (default `false`)
-  plus the `tools:mutate` grants in the policy bundle.
+- **Configuration surface:** `GATEWAY_MUTATING_TOOLS_ENABLED` (default `false`;
+  dev-k8s opts in via the committed `runtime-profiles/mutating-dev` profile,
+  SPEC-022 R-3) plus the `tools:mutate` grants in the policy bundle.
 - **What it does:** every tool declares `risk_level` (`read` | `write` | `admin`).
   With the flag off, write/admin tools are never registered — they are absent from
   discovery and invoke answers `TOOL_NOT_FOUND`. With the flag on, invoking a
@@ -162,6 +163,22 @@ The shipped rule is `allow-operators-tools-mutate`:
 Note the deliberate asymmetry: `chat:confirm` gates the *decision*, while
 `tools:mutate` gates the *execution*. An `approver` can confirm a card but cannot
 execute the tool themselves; an `operator` can do both.
+
+### Voice-readiness: modality is never privilege (SPEC-022 R-2)
+
+Chat requests may carry an optional `input_modality` (`text` | `voice`,
+default `text`) in anticipation of voice input. The modality is **metadata
+only**:
+
+- It is forwarded to agent-platform, recorded in the chat log event, and
+  mirrored into the `chat_started` audit details.
+- It never influences policy evaluation, tool risk tiers, auto-allow
+  matching, or HITL confirmation — a voice-originated request passes through
+  exactly the same four layers as a typed one.
+- Confirmations stay click-gated: `POST /api/v1/chat/confirm` has no
+  modality field and its schema is unchanged.
+
+Invalid modalities are rejected with `422` before any upstream call.
 
 ## The Road Ahead
 

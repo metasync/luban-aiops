@@ -16,6 +16,8 @@ if [ ! -d "$PROFILE_DIR" ]; then
   exit 1
 fi
 
+# The LLM provider profile is switchable; the mutating-dev profile is the
+# committed dev posture (SPEC-022 R-3) and always stays wired in.
 cat <<EOF > "$SCRIPT_DIR/dev-k8s/kustomization.yaml"
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -23,6 +25,12 @@ namespace: dev-luban-aiops
 resources:
   - base
   - ../runtime-profiles/$PROFILE
+  - ../runtime-profiles/mutating-dev
+configMapGenerator:
+  - name: platform-runtime-config
+    behavior: merge
+    envs:
+      - ../runtime-profiles/mutating-dev/mutating.env
 EOF
 
 echo "Selected runtime profile '$PROFILE' for dev-k8s overlay."

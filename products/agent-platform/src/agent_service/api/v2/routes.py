@@ -24,6 +24,8 @@ from agent_service.schemas.v2 import (
     AgentRuntimeMetadata,
     AgentSession,
     AgentSessionCreateRequest,
+    AgentSessionList,
+    AgentSessionSummary,
     AgentStreamEvent,
 )
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
@@ -38,10 +40,14 @@ from agent_service.services.runtime_dependencies import (
 )
 from agent_service.services.session_service import (
     create_named_session,
+    delete_session,
     ensure_session,
     get_session,
+    list_sessions,
+    mark_session_turn,
 )
 from agent_service.services.session_store import SESSION_STORE
+from agent_service.services.session_transcript import extract_transcript
 
 router = APIRouter(prefix="/api/v2")
 
@@ -109,6 +115,7 @@ async def chat(
     record_chat_request()
     session = ensure_session(body.session_id, user_id)
     await _reject_if_parked(session.session_id)
+    mark_session_turn(session.session_id, body.message)
     content, structured_output = await get_runtime_kernel().reply_text(
         message=body.message,
         session_id=session.session_id,
@@ -137,6 +144,7 @@ async def chat_stream(
     record_chat_request()
     session = ensure_session(session_id, user_id)
     await _reject_if_parked(session.session_id)
+    mark_session_turn(session.session_id, message)
     bearer_token = _bearer_token(authorization)
 
     async def _events() -> AsyncIterator[str]:
@@ -343,6 +351,27 @@ async def create_session(
     )
 
 
+@router.get("/sessions", response_model=AgentSessionList)
+async def list_sessions_route(
+    x_user_id: str | None = Header(None),
+) -> AgentSessionList:
+    """The caller's sessions, most-recently-active first, capped (SPEC-022 R-1)."""
+    user_id = _user_id(x_user_id)
+    registry = get_confirmation_registry()
+    return AgentSessionList(
+        sessions=[
+            AgentSessionSummary(
+                session_id=record.session_id,
+                title=record.title,
+                created_at=record.created_at,
+                last_active_at=record.last_active_at,
+                pending_confirmation=registry.has_pending(record.session_id),
+            )
+            for record in list_sessions(user_id)
+        ]
+    )
+
+
 @router.get("/sessions/{session_id}", response_model=AgentSession)
 async def read_session(
     session_id: str,
@@ -350,12 +379,44 @@ async def read_session(
 ) -> AgentSession:
     user_id = _user_id(x_user_id)
     session = get_session(session_id, user_id)
+    transcript_available, transcript = extract_transcript(session.session_id)
     return AgentSession(
         session_id=session.session_id,
         user_id=session.user_id or user_id,
         created_at=session.created_at,
         status=session.status,  # type: ignore[arg-type]
+        title=session.title,
+        last_active_at=session.last_active_at,
+        pending_confirmation=get_confirmation_registry().has_pending(
+            session.session_id
+        ),
+        transcript_available=transcript_available,
+        transcript=transcript,
     )
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session_route(
+    session_id: str,
+    x_user_id: str | None = Header(None),
+) -> dict:
+    """Owner-only session delete (SPEC-022 R-1).
+
+    Foreign or unknown ids 404 per the anti-enumeration house convention;
+    a session holding a parked confirmation 409s so a delete can never
+    orphan an awaiting-approval workflow.
+    """
+    user_id = _user_id(x_user_id)
+    session = get_session(session_id, user_id)
+    if get_confirmation_registry().has_pending(session.session_id):
+        raise HTTPException(
+            status_code=409,
+            detail="session has a parked confirmation: resolve it before "
+            "deleting the session",
+        )
+    if not delete_session(session.session_id, user_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"session_id": session.session_id, "deleted": True}
 
 
 # --- Runtime metadata ---

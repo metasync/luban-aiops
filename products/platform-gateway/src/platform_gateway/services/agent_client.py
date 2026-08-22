@@ -58,6 +58,37 @@ async def get_session(
     return response.json()
 
 
+async def list_sessions(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+) -> dict:
+    """The caller's workspace session list (SPEC-022 R-1)."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            f"{settings.agent_service_url}/api/v2/sessions",
+            headers=_headers(request_id, user_id),
+        )
+    response.raise_for_status()
+    return response.json()
+
+
+async def delete_session(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    session_id: str,
+    user_id: str,
+) -> dict:
+    """Owner-only session delete; upstream 404/409 pass through (SPEC-022 R-1)."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.delete(
+            f"{settings.agent_service_url}/api/v2/sessions/{session_id}",
+            headers=_headers(request_id, user_id),
+        )
+    response.raise_for_status()
+    return response.json()
+
+
 async def chat(
     settings: PlatformGatewaySettings,
     request_id: str,
@@ -65,11 +96,14 @@ async def chat(
     message: str,
     session_id: str | None,
     delegated_token: str | None = None,
+    input_modality: str = "text",
 ) -> dict:
     timeout = httpx.Timeout(settings.chat_response_timeout_seconds, connect=5.0)
     payload: dict[str, str] = {"message": message}
     if session_id:
         payload["session_id"] = session_id
+    # SPEC-022 R-2: modality rides the payload as metadata only.
+    payload["input_modality"] = input_modality
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(
             f"{settings.agent_service_url}/api/v2/chat",

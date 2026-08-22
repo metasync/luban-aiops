@@ -143,7 +143,13 @@ class RolePropagationTests(unittest.TestCase):
             return identity
 
         async def fake_chat(
-            settings, request_id, user_id, message, session_id, delegated_token=None
+            settings,
+            request_id,
+            user_id,
+            message,
+            session_id,
+            delegated_token=None,
+            input_modality="text",
         ):
             return {
                 "session_id": "ses-1",

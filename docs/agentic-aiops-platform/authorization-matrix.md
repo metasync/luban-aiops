@@ -345,7 +345,13 @@ SPEC-021 adds `tools:mutate` (execute mutating — write/admin risk — tools at
 the tool-gateway), granted only to `platform-admin` and `operator`, matching
 this matrix's `restart-service` example; `developer`, `approver`, `auditor`,
 and `read-only-observer` are denied by default, and `approver` stays
-approve-only (`chat:confirm` without execution). The full approval model —
+approve-only (`chat:confirm` without execution). SPEC-022 completes the
+session workspace lifecycle with `session:list` and `session:delete`,
+granted exactly where `session:create` is granted: both operations are
+scoped server-side to the caller's own sessions (anti-enumeration 404 for
+foreign sessions, 409 while a session holds a parked HITL confirmation), so
+the lifecycle actions share one posture across all chat-capable roles and
+`auditor` holds none of them. The full approval model —
 policy actions, risk-tier admission, the agent auto-allow list, and HITL
 confirmation — is documented in the
 [Approval and HITL Governance Guide](../guides/approval-and-hitl.md).

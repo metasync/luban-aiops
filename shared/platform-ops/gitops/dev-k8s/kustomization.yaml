@@ -4,3 +4,9 @@ namespace: dev-luban-aiops
 resources:
   - base
   - ../runtime-profiles/deepseek
+  - ../runtime-profiles/mutating-dev
+configMapGenerator:
+  - name: platform-runtime-config
+    behavior: merge
+    envs:
+      - ../runtime-profiles/mutating-dev/mutating.env

@@ -112,6 +112,14 @@ class PolicyMatrixScopingTests(PolicyMatrixBase):
         self.assertTrue(matrix["operator"]["chat:confirm"])
         self.assertTrue(matrix["approver"]["chat:confirm"])
         self.assertFalse(matrix["read-only-observer"]["chat:confirm"])
+        # SPEC-022 R-1: session:list/session:delete mirror session:create —
+        # the API scopes both to the caller's own sessions server-side, so
+        # every chat-capable role keeps the full lifecycle; auditor holds none.
+        for role in ALL_ROLES:
+            self.assertTrue(matrix[role]["session:list"], role)
+            self.assertTrue(matrix[role]["session:delete"], role)
+        self.assertFalse(matrix["auditor"]["session:list"])
+        self.assertFalse(matrix["auditor"]["session:delete"])
         # SPEC-021: tools:mutate is the mutating-tool admission gate —
         # granted only to the execution roles; approver stays approve-only,
         # developer and observer are denied by default.

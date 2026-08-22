@@ -53,12 +53,14 @@ covered in the [Approval and HITL Governance Guide](approval-and-hitl.md).
 
 ### Mutating Tool Activation Checklist (`k8s.delete_pod`)
 
-- [ ] **`GATEWAY_MUTATING_TOOLS_ENABLED=true`** — set in `tool-gateway/runtime-config.env`
-      (default `false`; while false, mutating tools are absent from discovery and invoke)
+- [ ] **`GATEWAY_MUTATING_TOOLS_ENABLED=true`** — the base commits `false`
+      (while false, mutating tools are absent from discovery and invoke);
+      dev-k8s opts in through the `runtime-profiles/mutating-dev` profile,
+      which merges the flag into the runtime ConfigMap (SPEC-022 R-3)
 - [ ] **`GATEWAY_K8S_ENABLED=true`** — the Kubernetes connector must be active
-- [ ] **Opt-in pod-delete RBAC** — apply the separate pod-delete Role/RoleBinding from the
-      dev-k8s overlay (`tool-gateway-pod-delete.yaml`); it is never part of the default
-      read-only ClusterRole
+- [ ] **Pod-delete RBAC** — the Role/RoleBinding rides the `mutating-dev`
+      profile (`tool-gateway-pod-delete.yaml`); it is never part of the
+      default read-only ClusterRole
 - [ ] **HITL confirmation enabled** — `AGENT_HITL_CONFIRM_TIMEOUT > 0` on agent-platform;
       while bridging is disabled, agent-platform excludes mutating tools from the toolkit
       entirely

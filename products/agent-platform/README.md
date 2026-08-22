@@ -207,6 +207,8 @@ Session store (SPEC-006):
 - the in-memory backend (`SESSION_STORE_BACKEND=memory`) keeps sessions in process memory only, with TTL and max-entry eviction
 - sessions are scoped to the creating user (via `X-User-ID` header); unknown or foreign `session_id` values return `404`
 - `POST /api/v2/sessions` accepts an optional body `{"session_id": ...}` to create a caller-named dedicated session (SPEC-015 triage sessions); it is get-or-create and idempotent for the owning user, and a foreign owner still answers `404`
+- session workspace (SPEC-022 R-1): `GET /api/v2/sessions` lists the caller's own sessions (most-recently-active first, capped at 50, `pending_confirmation` flags), `GET /api/v2/sessions/{id}` additionally carries a server-minted title (first user turn, 80 chars, set once) and a best-effort transcript reconstructed from the kernel state snapshot (`transcript_available` marks the explicit fallback), and `DELETE /api/v2/sessions/{id}` removes the session plus its state snapshot — `404` for unknown/foreign ids (anti-enumeration) and `409` while a parked HITL confirmation is unresolved
+- `POST /api/v2/chat` accepts an optional `input_modality` (`text` | `voice`, default `text`, SPEC-022 R-2): metadata only — it never influences authorization, tool policy, or HITL gating, which stay click-gated
 - the native runtime path delegates session state to the AgentScope runtime services instead
 
 Agent state durability (SPEC-017):

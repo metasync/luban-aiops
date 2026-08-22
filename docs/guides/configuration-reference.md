@@ -320,6 +320,11 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runti
 | `PLATFORM_GATEWAY_SKILLS_CLIENT_ID` | Skills query client id | `platform-gateway` | runtime-config |
 | `PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET` | Skills query credential | *(none)* | **runtime-secrets** |
 
+Request field (SPEC-022 R-2): `POST /api/v1/chat` accepts an optional
+`input_modality` (`text` | `voice`, default `text`). It is metadata only —
+forwarded to agent-platform, recorded in the chat log event and audit
+details, and never influences authorization, tool policy, or HITL gating.
+
 ### tool-gateway
 
 Source: `products/tool-gateway/src/tool_gateway/core/config.py`

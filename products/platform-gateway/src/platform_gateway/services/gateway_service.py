@@ -300,7 +300,80 @@ async def get_session(
     session_id: str,
     user_id: str,
 ) -> dict:
-    return await agent_client.get_session(settings, request_id, session_id, user_id)
+    """Proxy a session detail fetch (SPEC-022 R-1).
+
+    Upstream 4xx (unknown/foreign session) passes through unchanged so
+    the anti-enumeration 404 reaches the caller; transport failures and
+    upstream 5xx map to 502 — the same posture as the delete proxy.
+    """
+    try:
+        return await agent_client.get_session(
+            settings, request_id, session_id, user_id
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail="agent service rejected the session fetch",
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail="agent service session fetch failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+
+async def list_sessions(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+) -> dict:
+    """Proxy the caller's workspace session list (SPEC-022 R-1)."""
+    try:
+        return await agent_client.list_sessions(settings, request_id, user_id)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service session list failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+
+async def delete_session(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    session_id: str,
+    user_id: str,
+) -> dict:
+    """Proxy an owner-only session delete (SPEC-022 R-1).
+
+    Upstream 4xx (unknown/foreign session, parked confirmation) passes
+    through unchanged; transport failures and upstream 5xx map to 502 —
+    the same posture as the confirm proxy.
+    """
+    try:
+        return await agent_client.delete_session(
+            settings, request_id, session_id, user_id
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail="agent service rejected the session delete",
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail="agent service session delete failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
 
 
 async def chat(
@@ -310,9 +383,16 @@ async def chat(
     message: str,
     session_id: str | None,
     delegated_token: str | None = None,
+    input_modality: str = "text",
 ) -> dict:
     return await agent_client.chat(
-        settings, request_id, user_id, message, session_id, delegated_token
+        settings,
+        request_id,
+        user_id,
+        message,
+        session_id,
+        delegated_token,
+        input_modality,
     )
 
 

@@ -666,7 +666,59 @@ kubectl -n dev-luban-aiops auth can-i delete pods \
 **Resolution:**
 
 - Apply the pod-delete Role/RoleBinding
-  (`shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-pod-delete.yaml`)
+  (`shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml`)
   and retry. The structured error, the `confirmation_decided` audit event, and
   the failed `tool_invoked` event all stay in the trail — nothing half-deleted:
   pod deletion is a single API call that either succeeded or did not.
+
+## Symptom: Session workspace shows no history (`transcript_available: false`)
+
+**Most likely cause:** The session API (SPEC-022 R-1) reconstructs transcripts
+best-effort from the kernel state snapshot. `transcript_available: false` with
+an empty `transcript` is an explicit fallback, not an error, and it is normal
+when no snapshot exists yet (a session created but never chatted, or the
+snapshot was dropped with the session's state store entry). It also covers a
+corrupted snapshot, which is logged as a warning by agent-platform.
+
+**Diagnostic:**
+
+```bash
+# Session detail carries the fallback flag explicitly
+curl -s -H "X-User-ID: $USER" \
+  http://localhost:8080/api/v1/sessions/<session_id> | jq '.transcript_available, .transcript'
+
+# agent-platform logs a warning when a snapshot cannot be parsed
+kubectl -n dev-luban-aiops logs deployment/agent-service | grep -i transcript
+```
+
+**Resolution:**
+
+- For a fresh session, send a chat turn first — the snapshot appears after the
+  first completed turn and the transcript follows.
+- For an older session with a warning in the logs, the snapshot is corrupt;
+  the session itself remains usable (chat continues), only its history view
+  falls back. Transcripts exclude system and tool frames by design, so a
+  transcript shorter than the raw stream is expected.
+
+## Symptom: Session delete returns 409 (cannot delete a session)
+
+**Most likely cause:** The session holds an unresolved parked HITL
+confirmation (SPEC-020). Deleting it would orphan the parked decision, so the
+API refuses the delete until the confirmation is resolved. A foreign or
+unknown session id returns `404` instead — both anti-enumeration by design.
+
+**Diagnostic:**
+
+```bash
+# The session detail flags the pending confirmation
+curl -s -H "X-User-ID: $USER" \
+  http://localhost:8080/api/v1/sessions/<session_id> | jq '.pending_confirmation'
+```
+
+**Resolution:**
+
+- Resolve the parked confirmation first — approve or deny it through the
+  portal's confirmation card (or `POST /api/v1/chat/confirm`) — then retry
+  the delete. Expired parks still block deletion until they are resolved:
+  the flag is TTL-agnostic on purpose, so a stale confirmation card is
+  closed deliberately rather than silently dropped.

@@ -27,6 +27,14 @@ combined api-gateway by SPEC-010, per ADR-0005).
   `read-only-observer` excluded); the confirm response is the resumed SSE
   stream, and a durable `confirmation_decided` audit event is emitted when
   the kernel-applied `confirmation_result` frame passes through (SPEC-020).
+- Proxies the session workspace lifecycle (SPEC-022 R-1):
+  `GET /api/v1/sessions` (gated by `session:list`) and
+  `DELETE /api/v1/sessions/{session_id}` (gated by `session:delete`,
+  emitting a durable `session_deleted` audit event); upstream `4xx`
+  (unknown/foreign session, parked confirmation) passes through unchanged.
+  Chat requests carry an optional `input_modality` (`text` | `voice`)
+  forwarded as metadata only — logged and audited, never decision-bearing
+  (SPEC-022 R-2).
 - Forwards policy decision, session, and chat lifecycle audit events to
   `audit-service` fire-and-forget when `PLATFORM_GATEWAY_AUDIT_SERVICE_URL`
   is set (log-only otherwise; SPEC-013).

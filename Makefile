@@ -24,7 +24,8 @@ E2E_DIR := shared/platform-ops/e2e
 OVERLAYS := dev-k8s \
 	runtime-profiles/dashscope \
 	runtime-profiles/deepseek \
-	runtime-profiles/openai
+	runtime-profiles/openai \
+	runtime-profiles/mutating-dev
 
 # Coordinated deploy build state (written by `make build`, read by `make deploy`).
 IMAGE_STATE := $(GITOPS_DIR)/dev-k8s/.images.env

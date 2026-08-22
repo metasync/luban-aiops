@@ -135,4 +135,4 @@ Mechanical enforcement:
 | `SPEC-019` | Portal transparency — permission matrix, workspace resource views, sectioned navigation | `delivered` |
 | `SPEC-020` | HITL confirmation bridging — kernel ASK to portal approve/deny, `chat:confirm` action, `confirmation_decided` audit | `delivered` |
 | `SPEC-021` | Bounded mutating actions — first approval-gated write tool (`k8s.delete_pod`), `tools:mutate` action, Approval and HITL Governance Guide | `delivered` |
-| `SPEC-022` | Multi-session foundations — session lifecycle API with transcripts and parked-confirmation flags, voice-readiness contract, `mutating-dev` deployment profile (portal UI deferred to the rebuild spec) | `approved` |
+| `SPEC-022` | Multi-session foundations — session lifecycle API with transcripts and parked-confirmation flags, voice-readiness contract, `mutating-dev` deployment profile (portal UI deferred to the rebuild spec) | `delivered` |

@@ -16,6 +16,7 @@ EventType = Literal[
     "policy_decision",
     "token_exchange",
     "session_created",
+    "session_deleted",
     "chat_started",
     "chat_completed",
     "confirmation_decided",

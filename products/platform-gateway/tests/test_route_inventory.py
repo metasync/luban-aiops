@@ -22,7 +22,11 @@ EXPECTED_ROUTES = {
     ("POST", "/api/v1/auth/refresh"),
     ("POST", "/api/v1/identity/normalize"),
     ("POST", "/api/v1/sessions"),
+    # Session workspace lifecycle (SPEC-022 R-1): caller-scoped list and
+    # owner-only delete ride the same session surface.
+    ("GET", "/api/v1/sessions"),
     ("GET", "/api/v1/sessions/{session_id}"),
+    ("DELETE", "/api/v1/sessions/{session_id}"),
     ("POST", "/api/v1/chat"),
     ("GET", "/api/v1/chat/stream"),
     # HITL confirmation bridging (SPEC-020): answers a parked kernel ASK.

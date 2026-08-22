@@ -7,6 +7,17 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-22-multi-session-operator-workspace.md`
+  - delivers SPEC-022 (v0.8.0), backend-first: session workspace
+    lifecycle API (list cap-50 / title + transcript detail /
+    owner-only delete with 404 anti-enumeration and 409 parked) under
+    the new deny-by-default `session:list` / `session:delete` actions
+    with a durable `session_deleted` audit event; voice-readiness
+    `input_modality` contract (metadata only, HITL stays click-gated);
+    the SPEC-021 dev opt-in promoted to the committed `mutating-dev`
+    kustomize profile; plus two walkthrough fixes closed in-release
+    (session-detail proxy 4xx passthrough, audit `EventType` enum
+    sync)
 - `2026-08-22-bounded-mutating-actions.md`
   - delivers SPEC-021 (v0.7.0): the platform's first write capability
     (`k8s.delete_pod`), triple-gated — tool-gateway risk-tier admission

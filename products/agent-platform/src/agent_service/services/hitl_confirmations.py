@@ -212,6 +212,16 @@ class ConfirmationRegistry:
         pending = self._by_session.get(session_id)
         return pending is not None and not pending.resolved
 
+    def has_pending(self, session_id: str) -> bool:
+        """True when the session holds an unresolved parked confirmation.
+
+        TTL-agnostic on purpose: an expired park still awaits closure via
+        the confirm endpoint, so the session API (SPEC-022 R-1) must keep
+        badging it until a decision or ``expire_confirmation`` resolves it.
+        """
+        pending = self._by_session.get(session_id)
+        return pending is not None and not pending.resolved
+
 
 # Process-wide singleton shared by the runtime kernel and the v2 routes.
 # Tests may clear it between cases; production code never replaces it.

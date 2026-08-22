@@ -22,6 +22,12 @@
     "request_id": {
       "type": "string",
       "description": "Correlation identifier shared across portal, gateway, and runtime."
+    },
+    "input_modality": {
+      "type": "string",
+      "enum": ["text", "voice"],
+      "default": "text",
+      "description": "Voice-readiness contract (SPEC-022 R-2): modality is metadata only. It never changes policy, auto-allow, or HITL outcomes, and can never approve or deny a parked confirmation."
     }
   }
 }

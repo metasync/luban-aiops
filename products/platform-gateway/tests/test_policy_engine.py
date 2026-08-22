@@ -236,11 +236,13 @@ class ContractAlignmentTests(unittest.TestCase):
         # Exempt routes (health, runtime, auth, identity) carry no action; this
         # set is the complete protected surface. tools:mutate is enforced by
         # the tool-gateway but listed here so the permission matrix always
-        # carries it (SPEC-021).
+        # carries it (SPEC-021). session:list/session:delete complete the
+        # session workspace lifecycle (SPEC-022 R-1).
         self.assertEqual(
             PROTECTED_ACTIONS,
             frozenset({
                 "chat", "chat:confirm", "session:create", "session:read",
+                "session:list", "session:delete",
                 "audit:read",
                 "incident:read", "incident:create", "incident:triage",
                 "policy:read", "tools:list", "tools:mutate", "skills:read",
