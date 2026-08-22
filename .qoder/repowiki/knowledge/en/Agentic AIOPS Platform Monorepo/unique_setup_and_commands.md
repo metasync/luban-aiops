@@ -1,0 +1,1 @@
+Top-level `make` targets in `mk/defaults.mk` and `mk/image.mk` are reused by every product's `Makefile`; `shared/platform-ops/gitops/dev-k8s/deploy.sh` and `sync-*.sh` scripts provision the full dev cluster and sync secrets for all services.

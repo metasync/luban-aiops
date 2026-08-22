@@ -1,0 +1,1 @@
+New specs are created by copying the templates under `docs/specs/templates/` into a new `SPEC-NNN-<slug>/` directory; existing specs are verified against the workspace via the root `make verify` command which runs all product test suites and renders every GitOps overlay.

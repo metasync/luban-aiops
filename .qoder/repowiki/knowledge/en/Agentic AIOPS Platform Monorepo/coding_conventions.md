@@ -1,0 +1,4 @@
+- Each product follows the same internal layout: `src/<service>/api/routes`, `core`, `schemas`, `services`, plus a `main.py`/`app.py` entrypoint and a per-product `Dockerfile` + `pyproject.toml`.
+- Inter-service contracts are declared once as JSON schemas under `shared/shared-contracts/schemas/` and referenced by both producers and consumers rather than duplicated inline.
+- Feature work is initiated by creating a new `docs/specs/SPEC-NNN-<name>/` directory with plan.md, spec.md, tasks.md before implementation begins.
+- Cross-cutting concerns (config, metrics, observability, request context, telemetry) are implemented as parallel modules under each service's `core/` package following the same naming convention.

@@ -9,23 +9,39 @@
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
+- [app.py](file://products/tool-gateway/src/tool_gateway/app.py)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [sync-skills-secrets.sh](file://shared/platform-ops/gitops/sync-skills-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 - [spec.md](file://docs/specs/SPEC-019-portal-transparency-navigation/spec.md)
+- [approval-and-hitl.md](file://docs/guides/approval-and-hitl.md)
+- [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
+- [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
+- [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
+- [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)
+- [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
+- [README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
+- [tool-configuration.md](file://docs/guides/tool-configuration.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced OpenTelemetry configuration with durable secret provisioning that maintains OTEL_EXPORTER_OTLP_HEADERS across deployment operations
-- Improved fallback mechanisms ensure telemetry continues functioning even when local environment files are regenerated
-- Updated synchronization scripts to preserve OTel headers during other secret provisioning operations
-- Added comprehensive documentation for the enhanced secret management system
-- Updated troubleshooting guidance for OTel authentication issues and secret provisioning failures
+- Added comprehensive documentation for the new mutating-dev kustomize profile that enables GATEWAY_MUTATING_TOOLS_ENABLED=true for development environments
+- Updated configuration reference to include the new runtime-profiles/mutating-dev overlay and its pod-delete Role/RoleBinding
+- Enhanced environment-specific settings section with detailed guidance for the mutating-dev profile integration
+- Added new section documenting the mutating-dev profile architecture and deployment considerations
+- Updated troubleshooting guide with profile-specific issues and resolution steps
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -42,10 +58,10 @@
 ## Introduction
 This document explains how the Platform Gateway Service manages configuration and environment setup across layers: environment variables, configuration files, and runtime overrides. It details available options, defaults, validation rules, and deployment-specific settings for development, staging, and production. It also provides examples for Docker and Kubernetes (ConfigMaps/Secrets), and outlines security best practices for secrets management and consistent configuration across environments.
 
-**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, along with durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations.
+**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations, risk-tier admission gates for mutating tools via GATEWAY_MUTATING_TOOLS_ENABLED, configurable HITL confirmation timeouts through AGENT_HITL_CONFIRM_TIMEOUT, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, and the new mutating-dev kustomize profile that provides a committed, environment-scoped development posture for enabling mutating tools safely.
 
 ## Project Structure
-The Platform Gateway Service is implemented under products/platform-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/platform-gateway. The service includes workspace resource integration features that proxy requests to tool-gateway and skills-hub services for read-only inventory access, plus enhanced OpenTelemetry configuration with durable secret management.
+The Platform Gateway Service is implemented under products/platform-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/platform-gateway. The service includes workspace resource integration features that proxy requests to tool-gateway and skills-hub services for read-only inventory access, plus enhanced OpenTelemetry configuration with durable secret management. The new mutating-dev profile provides a dedicated development posture for enabling mutating tools with appropriate RBAC controls.
 
 ```mermaid
 graph TB
@@ -58,40 +74,78 @@ E["src/platform_gateway/api/routes/skills.py"]
 F["src/platform_gateway/services/tool_gateway_client.py"]
 G["src/platform_gateway/services/skills_hub_client.py"]
 end
+subgraph "Agent Platform Integration"
+H["kernel_middleware.py"]
+I["runtime_settings.py"]
+J["gateway_tools.py"]
+K["AGENT_GATEWAY_TOOL_AUTO_ALLOW"]
+L["AGENT_HITL_CONFIRM_TIMEOUT"]
+M["Risk Tier Enforcement"]
+end
+subgraph "Tool Gateway Risk Control"
+N["tool-gateway config.py"]
+O["registry.py"]
+P["GATEWAY_MUTATING_TOOLS_ENABLED"]
+Q["Risk-Tier Admission Gate"]
+R["Policy Enforcement"]
+end
 subgraph "Workspace Resource Integration"
-H["tool_gateway_url"]
-I["skills_hub_url"]
-J["skills_client_id"]
-K["skills_client_secret"]
-L["Delegated Token Flow"]
-M["Basic Auth Flow"]
+S["tool_gateway_url"]
+T["skills_hub_url"]
+U["skills_client_id"]
+V["skills_client_secret"]
+W["Delegated Token Flow"]
+X["Basic Auth Flow"]
 end
 subgraph "Enhanced OTel Secret Management"
-N["sync-otel-secrets.sh"]
-O["OTEL_EXPORTER_OTLP_HEADERS"]
-P["Cluster Secret Merge"]
-Q["Local File Preservation"]
-R["Sibling Script Hooks"]
+Y["sync-otel-secrets.sh"]
+Z["OTEL_EXPORTER_OTLP_HEADERS"]
+AA["Cluster Secret Merge"]
+AB["Local File Preservation"]
+AC["Sibling Script Hooks"]
+end
+subgraph "Mutating Dev Profile"
+AD["dev-k8s/kustomization.yaml"]
+AE["runtime-profiles/mutating-dev/"]
+AF["mutating.env"]
+AG["tool-gateway-pod-delete.yaml"]
+AH["RBAC Role/RoleBinding"]
+AI["ConfigMap Merge"]
 end
 subgraph "Kubernetes Base (dev)"
-S["base/platform-gateway/runtime-config.env"]
-T["base/platform-gateway/platform-gateway-deployment.yaml"]
-U["base/platform-gateway/runtime-secrets.example.env"]
-V["base/shared/runtime.env"]
+AJ["base/platform-gateway/runtime-config.env"]
+AK["base/platform-gateway/platform-gateway-deployment.yaml"]
+AL["base/platform-gateway/runtime-secrets.example.env"]
+AM["base/shared/runtime.env"]
+AN["base/agent-platform/runtime-config.env"]
+AO["base/tool-gateway/runtime-config.env"]
+AP["base/tool-gateway/rbac.yaml"]
 end
-A --> S
-B --> T
-C --> N
+A --> AJ
+B --> AK
+C --> Y
 D --> F
 E --> G
-F --> H
-G --> I
-S --> T
-U --> T
-V --> T
+F --> S
+G --> T
+AJ --> AK
+AL --> AK
+AM --> AK
+H --> K
+I --> L
+J --> M
 N --> P
-N --> Q
-N --> R
+O --> Q
+P --> R
+Y --> AA
+Y --> AB
+Y --> AC
+AD --> AE
+AE --> AF
+AE --> AG
+AF --> AI
+AG --> AH
+AP --> AP
 ```
 
 **Diagram sources**
@@ -100,12 +154,24 @@ N --> R
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
+- [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
+- [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
+- [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
+- [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)
+- [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -113,12 +179,24 @@ N --> R
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
+- [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
+- [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
+- [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
+- [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)
+- [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
 
 ## Core Components
 - Configuration loader and model: centralizes environment variable parsing, file-based configuration, and runtime overrides; exposes validated configuration to the application.
@@ -127,6 +205,10 @@ N --> R
 - Workspace resource proxies: read-only proxy endpoints for tools catalog and skills inventory with appropriate authentication mechanisms.
 - Policy engine configuration: loads default policy definitions from YAML and supports environment-driven overrides.
 - Containerization and dependency management: Dockerfile defines runtime environment; pyproject.toml declares Python dependencies used by the gateway.
+- **New**: Risk-tier admission gate for mutating tools controlled by GATEWAY_MUTATING_TOOLS_ENABLED with policy enforcement.
+- **New**: Configurable HITL confirmation timeout via AGENT_HITL_CONFIRM_TIMEOUT for operator confirmation bridging.
+- **New**: Enhanced agent auto-allow list with read-only enforcement and misconfiguration logging.
+- **New**: Mutating-dev kustomize profile providing committed development posture for enabling mutating tools with appropriate RBAC controls.
 
 Key responsibilities:
 - Provide a single source of truth for configuration via typed models.
@@ -135,9 +217,12 @@ Key responsibilities:
 - Handle DNS-based service discovery with proper fallback mechanisms.
 - Ignore Kubernetes service-link environment variables to prevent conflicts.
 - Manage workspace resource integration with secure authentication and authorization.
+- **New**: Implement risk-tier admission gates to control access to mutating tools based on policy and RBAC.
+- **New**: Configure HITL confirmation timeouts to balance operational efficiency with safety requirements.
 - **New**: Maintain durable OpenTelemetry authentication headers across all deployment operations through cluster-side secret merging and local file preservation.
+- **New**: Provide committed development posture through mutating-dev profile that safely enables mutating tools with bounded RBAC permissions.
 
-**Updated** Enhanced core components to include comprehensive workspace resource integration capabilities with read-only proxies for tools catalog and skills inventory, supporting both delegated token flow for tools and Basic authentication for skills, plus durable OpenTelemetry secret provisioning that persists authentication headers across deployment operations.
+**Updated** Enhanced core components to include comprehensive workspace resource integration capabilities with read-only proxies for tools catalog and skills inventory, supporting both delegated token flow for tools and Basic authentication for skills, risk-tier admission gates for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus durable OpenTelemetry secret provisioning that persists authentication headers across deployment operations, and the new mutating-dev kustomize profile that provides a safe, committed development posture for enabling mutating tools with appropriate RBAC controls.
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -145,43 +230,55 @@ Key responsibilities:
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 
 ## Architecture Overview
-The configuration system follows a layered approach with enhanced workspace resource integration and durable secret management:
+The configuration system follows a layered approach with enhanced workspace resource integration, risk-tier admission gates, and durable secret management:
 - Defaults: defined in code or default YAML policies.
 - Config files: loaded from container filesystem or mounted volumes.
 - Environment variables: injected at runtime via platform orchestration (e.g., Kubernetes).
 - Runtime overrides: applied programmatically during startup or request processing.
 - DNS-based service discovery: services communicate via Kubernetes DNS names instead of injected environment variables.
 - Workspace resource proxies: read-only access to tools catalog and skills inventory with appropriate authentication.
+- **New**: Risk-tier admission gates: control access to mutating tools through policy enforcement and RBAC checks.
+- **New**: Configurable HITL confirmation timeouts: balance operational efficiency with safety requirements.
+- **New**: Enhanced agent auto-allow list: read-only enforcement with misconfiguration logging.
 - **New**: Durable OTel secret provisioning: cluster-side merging ensures authentication headers persist across all deployment operations.
+- **New**: Mutating-dev profile: committed development posture that safely enables mutating tools with bounded RBAC permissions.
 
 ```mermaid
 sequenceDiagram
 participant Portal as "Operator Portal"
+participant Agent as "Agent Platform"
 participant Gateway as "Platform Gateway"
+participant ToolGW as "Tool Gateway"
 participant Identity as "Identity Broker"
-participant Tools as "Tool Gateway"
 participant Skills as "Skills Hub"
 participant OTel as "OpenObserve"
 participant Policy as "Policy Engine"
 participant Secrets as "Secret Manager"
-Portal->>Gateway : GET /api/v1/tools
-Gateway->>Policy : enforce_policy(tools : list)
+participant MutDev as "Mutating Dev Profile"
+Note over Portal,Agent : Agent Auto-Allow List & HITL Timeout
+Portal->>Agent : Tool Call Request
+Agent->>Agent : Check Auto-Allow List
+Agent->>Agent : Apply HITL Timeout
+Agent->>Gateway : Forward Request
+Gateway->>Policy : enforce_policy(tools : invoke)
 Policy-->>Gateway : Allow/Deny
-Gateway->>Identity : obtain_delegated_token()
-Identity-->>Gateway : Delegated Token
-Gateway->>Tools : GET /api/v2/tools (Bearer token)
-Tools-->>Gateway : Tools List
-Gateway-->>Portal : Tools Catalog
-Portal->>Gateway : GET /api/v1/skills
-Gateway->>Policy : enforce_policy(skills : read)
-Policy-->>Gateway : Allow/Deny
-Gateway->>Skills : GET /skills (Basic auth)
-Skills-->>Gateway : Skills Inventory
-Gateway-->>Portal : Skills List
+Gateway->>ToolGW : Check Risk Tier
+ToolGW->>MutDev : Check GATEWAY_MUTATING_TOOLS_ENABLED
+MutDev-->>ToolGW : Enabled/Disabled
+ToolGW->>Policy : enforce_policy(tools : mutate)
+Policy-->>ToolGW : Allow/Deny
+ToolGW-->>Gateway : Tool Result
+Gateway-->>Agent : Response
+Agent-->>Portal : Result with Evidence
 Note over Gateway,OTel : Durable OTel Secret Provisioning
 Gateway->>Secrets : Read OTEL_EXPORTER_OTLP_HEADERS
 Secrets-->>Gateway : Authenticated Headers
@@ -192,6 +289,11 @@ OTel-->>Gateway : Success/Failure (fail-open)
 **Diagram sources**
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
@@ -207,7 +309,7 @@ OTel-->>Gateway : Success/Failure (fail-open)
 - Error handling: Aggregates validation errors and surfaces actionable messages.
 - Service discovery: Uses DNS-based resolution for inter-service communication.
 
-**Updated** Enhanced to support workspace resource integration with new configuration fields for tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret, enabling read-only proxies for tools catalog and skills inventory.
+**Updated** Enhanced to support workspace resource integration with new configuration fields for tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret, enabling read-only proxies for tools catalog and skills inventory, plus risk-tier admission gate configuration for mutating tools and integration with the mutating-dev profile.
 
 ```mermaid
 flowchart TD
@@ -228,6 +330,136 @@ Expose --> End
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+
+### Mutating Dev Profile Architecture
+- Purpose: Provides a committed, environment-scoped development posture for enabling mutating tools safely.
+- Integration: Wired permanently into dev-k8s overlay via kustomize configuration.
+- Configuration: Merges GATEWAY_MUTATING_TOOLS_ENABLED=true into platform-runtime-config ConfigMap.
+- RBAC: Carries bounded pod-delete Role/RoleBinding scoped to dev-luban-aiops namespace only.
+- Safety: Maintains deny-by-default base posture while providing explicit opt-in for development.
+- Triple-gate enforcement: Combines configuration flag, policy grants, and HITL confirmation requirements.
+
+**New Section** Comprehensive mutating-dev profile implementation that provides a safe, committed development posture for enabling mutating tools with bounded RBAC permissions and triple-gate security controls.
+
+```mermaid
+flowchart TD
+BasePosture["Default Deny-by-Default Posture"] --> DevOverlay["dev-k8s Overlay"]
+DevOverlay --> MutProfile["mutating-dev Profile"]
+MutProfile --> ConfigMerge["Merge GATEWAY_MUTATING_TOOLS_ENABLED=true"]
+MutProfile --> RBACApply["Apply Pod-Delete Role/RoleBinding"]
+ConfigMerge --> ToolDiscovery["Tool Discovery"]
+RBACApply --> RBACCheck["RBAC Permission Check"]
+ToolDiscovery --> PolicyCheck["Policy Grant Check"]
+RBACCheck --> PolicyCheck
+PolicyCheck --> HITLCheck["HITL Confirmation Required"]
+HITLCheck --> ExecuteTool["Execute Mutating Tool"]
+```
+
+**Diagram sources**
+- [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
+- [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
+- [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
+- [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)
+
+**Section sources**
+- [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
+- [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
+- [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
+- [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)
+
+### Risk-Tier Admission Gate for Mutating Tools
+- Purpose: Control access to mutating (write/admin) tools through policy enforcement and RBAC checks.
+- Configuration: Controlled by GATEWAY_MUTATING_TOOLS_ENABLED environment variable (default: false).
+- Enforcement: Mutating tools are not registered when disabled; require tools:mutate policy grant when enabled.
+- Security: Provides defense-in-depth by combining configuration flags with policy and RBAC checks.
+- Discovery: Mutating tools are absent from tool discovery when the gate is closed.
+- Invocation: Returns TOOL_NOT_FOUND for mutating tools when gate is closed.
+- **New**: Integrated with mutating-dev profile for safe development environment activation.
+
+**Updated** Comprehensive risk-tier admission gate implementation that controls access to mutating tools through configuration, policy enforcement, and RBAC checks, with integrated support for the mutating-dev profile that provides a committed development posture for enabling mutating tools safely.
+
+```mermaid
+flowchart TD
+ToolCall["Tool Invocation Request"] --> CheckGate{"GATEWAY_MUTATING_TOOLS_ENABLED?"}
+CheckGate --> |false| DenyRegistration["Deny registration of mutating tools"]
+CheckGate --> |true| RegisterTools["Register all tools including mutating"]
+DenyRegistration --> Discovery["Tool Discovery"]
+RegisterTools --> PolicyCheck["Check tools:mutate policy"]
+PolicyCheck --> PolicyAllowed{"Policy allows?"}
+PolicyAllowed --> |no| DenyInvoke["Deny invocation - TOOL_NOT_FOUND"]
+PolicyAllowed --> |yes| ExecuteTool["Execute mutating tool"]
+Discovery --> Client["Client receives limited tool list"]
+ExecuteTool --> Result["Return tool result"]
+DenyInvoke --> Result
+```
+
+**Diagram sources**
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
+- [app.py](file://products/tool-gateway/src/tool_gateway/app.py)
+
+**Section sources**
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
+- [app.py](file://products/tool-gateway/src/tool_gateway/app.py)
+
+### Enhanced Agent Auto-Allow List Functionality
+- Purpose: Provide read-only auto-approval for vetted tools while preventing accidental auto-execution of mutating tools.
+- Configuration: Controlled by AGENT_GATEWAY_TOOL_AUTO_ALLOW environment variable (comma-separated tool names).
+- Enforcement: Only tools marked as is_read_only=true AND in the allow list are auto-approved.
+- Logging: Logs warnings when mutating tools appear in the auto-allow list to indicate misconfiguration.
+- Safety: Maintains read-only invariant - mutating tools in the allow list still require HITL confirmation.
+- Default: Built-in vetted read-only tools are auto-approved when no custom list is configured.
+
+**New Section** Enhanced agent auto-allow list with read-only enforcement and comprehensive misconfiguration logging.
+
+```mermaid
+flowchart TD
+ToolCall["Tool Call Request"] --> CheckAllowList{"In Auto-Allow List?"}
+CheckAllowList --> |no| RequireHITL["Require HITL Confirmation"]
+CheckAllowList --> |yes| CheckReadOnly{"is_read_only?"}
+CheckReadOnly --> |no| LogWarning["Log Warning: Mutating tool in auto-allow"]
+CheckReadOnly --> |yes| AutoApprove["Auto-approve execution"]
+LogWarning --> RequireHITL
+AutoApprove --> Execute["Execute tool without confirmation"]
+RequireHITL --> Park["Park for operator confirmation"]
+```
+
+**Diagram sources**
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+
+**Section sources**
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+
+### HITL Confirmation Timeout Configuration
+- Purpose: Control how long parked kernel confirmations remain answerable before timing out.
+- Configuration: Controlled by AGENT_HITL_CONFIRM_TIMEOUT environment variable (default: 600 seconds).
+- Behavior: When set to 0, disables the confirmation bridge and restores pre-SPEC-020 silent-park posture.
+- Validation: Rejects negative values with clear error messages during startup.
+- Use Case: Balances operational efficiency with safety requirements for different environments.
+- Integration: Works with the confirmation bridge to park and resume tool calls requiring operator approval.
+
+**New Section** Configurable HITL confirmation timeout that balances operational efficiency with safety requirements.
+
+```mermaid
+flowchart TD
+ToolCall["Tool Call Requiring Approval"] --> ParkConfirmation["Park for Operator Confirmation"]
+ParkConfirmation --> StartTimer["Start Confirmation Timer"]
+StartTimer --> WaitTimeout{"Within Timeout?"}
+WaitTimeout --> |yes| AwaitApproval["Await Operator Approval"]
+WaitTimeout --> |no| TimeoutExpired["Timeout Expired - Discard Confirmation"]
+AwaitApproval --> ProcessApproval["Process Operator Decision"]
+ProcessApproval --> ResumeExecution["Resume Tool Execution"]
+TimeoutExpired --> ReturnError["Return Error to Caller"]
+```
+
+**Diagram sources**
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+
+**Section sources**
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 
 ### Enhanced Telemetry System
 - Purpose: Opt-in OpenTelemetry push pipeline with fail-open behavior and durable secret provisioning.
@@ -418,8 +650,9 @@ SkillsHubClient --> PlatformGatewaySettings
 - Environment injection: Maps ConfigMap entries to environment variables consumed by the configuration loader.
 - Secrets management: Handles sensitive data like workspace resource credentials separately from ConfigMaps.
 - **New**: Enhanced secret management with durable OTel header provisioning through cluster-side merging.
+- **New**: Mutating-dev profile integration that merges GATEWAY_MUTATING_TOOLS_ENABLED=true into the runtime configuration.
 
-**Updated** Enhanced deployment configuration with workspace resource integration, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, plus durable OpenTelemetry secret provisioning that maintains authentication headers across deployment operations.
+**Updated** Enhanced deployment configuration with workspace resource integration, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list settings, plus durable OpenTelemetry secret provisioning that maintains authentication headers across deployment operations, and the new mutating-dev profile that provides a committed development posture for enabling mutating tools safely.
 
 ```mermaid
 graph TB
@@ -440,23 +673,36 @@ ToolsProxy --> ToolsSvc["Tool Gateway Service"]
 SkillsProxy --> SkillsSvc["Skills Hub Service"]
 APP --> OTelExport["OTel Export Pipeline"]
 OTelExport --> Backend["OpenObserve Backend"]
+ToolGWEnv["GATEWAY_* Variables"] --> ToolGW["Tool Gateway"]
+ToolGW --> RiskGate["Risk-Tier Admission Gate"]
+AgentEnv["AGENT_* Variables"] --> Agent["Agent Platform"]
+Agent --> AutoAllow["Auto-Allow List"]
+Agent --> HITLTimeout["HITL Confirmation Timeout"]
+MutDev["Mutating Dev Profile"] --> ConfigMerge["ConfigMap Merge"]
+ConfigMerge --> ToolGWEnv
 ```
 
 **Diagram sources**
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
+- [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
 
 **Section sources**
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 
 ## Dependency Analysis
 Configuration components depend on environment variables and files, while the runtime settings handle DNS-based service discovery. The Docker image encapsulates runtime dependencies, and Kubernetes manifests inject configuration at deployment time. Workspace resource integration adds dependencies on tool-gateway and skills-hub services with appropriate authentication mechanisms.
 
-**Updated** Added dependencies for workspace resource integration including tool-gateway delegation flow and skills-hub Basic authentication, with proper error handling and service discovery, plus enhanced OpenTelemetry secret provisioning dependencies that ensure authentication headers persist across deployment operations.
+**Updated** Added dependencies for workspace resource integration including tool-gateway delegation flow and skills-hub Basic authentication, risk-tier admission gate enforcement, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus enhanced OpenTelemetry secret provisioning dependencies that ensure authentication headers persist across deployment operations, and the new mutating-dev profile dependencies that provide committed development posture for enabling mutating tools safely.
 
 ```mermaid
 graph TB
@@ -480,6 +726,14 @@ Skills["skills.py"] --> SkillsClient["skills_hub_client.py"]
 ToolsClient --> TOOLS
 SkillsClient --> SKILLS
 TELEMETRY --> BACKEND["OpenObserve Backend"]
+Agent["kernel_middleware.py"] --> AutoAllow["Auto-Allow List"]
+Agent --> HITL["HITL Timeout"]
+ToolGW["tool-gateway config.py"] --> RiskGate["Risk-Tier Gate"]
+RiskGate --> Policy["Policy Enforcement"]
+MutDev["mutating-dev profile"] --> ConfigMerge["ConfigMap Merge"]
+MutDev --> RBAC["RBAC Role/RoleBinding"]
+ConfigMerge --> ToolGW
+RBAC --> ToolGW
 ```
 
 **Diagram sources**
@@ -488,10 +742,16 @@ TELEMETRY --> BACKEND["OpenObserve Backend"]
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
+- [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -499,6 +759,10 @@ TELEMETRY --> BACKEND["OpenObserve Backend"]
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
@@ -515,9 +779,13 @@ TELEMETRY --> BACKEND["OpenObserve Backend"]
 - Delegated token acquisition is cached where possible to reduce identity broker load.
 - Skills hub requests use connection pooling for improved performance.
 - Monitor workspace resource proxy latency and error rates for capacity planning.
+- **New**: Risk-tier admission gates add minimal overhead through policy checks.
+- **New**: Auto-allow list lookups use frozenset for O(1) performance.
+- **New**: HITL confirmation timeouts prevent indefinite resource holding.
 - **New**: OTel export pipeline uses batch processors for efficient telemetry collection.
 - **New**: Secret provisioning operations are optimized to minimize cluster API calls.
 - **New**: Failed OTel exports fail open to avoid impacting service performance.
+- **New**: Mutating-dev profile integration is compile-time static, adding no runtime overhead.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -539,8 +807,17 @@ Common issues and resolutions:
 - **New**: OTel export failures: Verify OTEL_EXPORTER_OTLP_ENDPOINT is configured; check OpenObserve backend connectivity and authentication.
 - **New**: Secret provisioning issues: Ensure OO_ROOT_USER_EMAIL and OO_ROOT_USER_PASSWORD are exported before running sync-otel-secrets.sh.
 - **New**: Header persistence problems: Check that sibling sync scripts have preserved existing OTel headers during their operations.
+- **New**: Mutating tools not available: Verify GATEWAY_MUTATING_TOOLS_ENABLED is set to true; check tools:mutate policy grants and RBAC permissions.
+- **New**: Mutating tools still denied: Check policy bundle configuration; verify user roles have tools:mutate permission.
+- **New**: Auto-allow list not working: Verify AGENT_GATEWAY_TOOL_AUTO_ALLOW is properly formatted; check that tools are marked as read-only.
+- **New**: HITL confirmation timeout issues: Check AGENT_HITL_CONFIRM_TIMEOUT value; verify confirmation bridge is enabled.
+- **New**: Negative timeout values rejected: Ensure AGENT_HITL_CONFIRM_TIMEOUT is set to 0 or positive integer.
+- **New**: Mutating tools in auto-allow list: Review logs for warnings about mutating tools appearing in auto-allow list; remove them from configuration.
+- **New**: Mutating-dev profile not active: Verify dev-k8s overlay includes the mutating-dev profile; check kustomize build output for ConfigMap merge.
+- **New**: Pod-delete RBAC missing: Verify tool-gateway-pod-delete.yaml is applied; check namespace and service account configuration.
+- **New**: Mutating tools appear in discovery but fail: Check all three gates: GATEWAY_MUTATING_TOOLS_ENABLED, tools:mutate policy grants, and AGENT_HITL_CONFIRM_TIMEOUT > 0.
 
-**Updated** Added comprehensive troubleshooting guidance for workspace resource integration including proxy configuration, authentication issues, and downstream service connectivity problems, plus detailed guidance for OpenTelemetry secret provisioning and authentication issues.
+**Updated** Added comprehensive troubleshooting guidance for workspace resource integration including proxy configuration, authentication issues, and downstream service connectivity problems, risk-tier admission gate configuration issues, HITL confirmation timeout problems, enhanced agent auto-allow list misconfiguration detection, plus detailed guidance for OpenTelemetry secret provisioning and authentication issues, and new troubleshooting steps for the mutating-dev profile integration including profile activation, RBAC verification, and triple-gate enforcement issues.
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -548,6 +825,11 @@ Common issues and resolutions:
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
@@ -556,16 +838,16 @@ Common issues and resolutions:
 ## Conclusion
 The Platform Gateway Service employs a robust, layered configuration system that integrates environment variables, configuration files, and runtime overrides with strict validation. By following the outlined best practices for Docker and Kubernetes deployments, teams can maintain secure, consistent configurations across environments while ensuring reliability and performance. The architectural shift to DNS-based service discovery eliminates service-link conflicts and provides more reliable inter-service communication patterns. The addition of workspace resource integration enables operators to gain self-service visibility into their workspace resources through read-only proxies for tools catalog and skills inventory, enhancing operational transparency and reducing dependency on agent-mediated resource discovery.
 
-**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive workspace resource integration capabilities that provide operators with direct visibility into their workspace resources, plus durable OpenTelemetry secret provisioning that ensures authentication headers persist across all deployment operations, maintaining consistent telemetry collection regardless of deployment sequence or environment regeneration.
+**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive workspace resource integration capabilities that provide operators with direct visibility into their workspace resources, risk-tier admission gates that provide fine-grained control over mutating tool access, configurable HITL confirmation timeouts that balance operational efficiency with safety requirements, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, plus durable OpenTelemetry secret provisioning that ensures authentication headers persist across all deployment operations, maintaining consistent telemetry collection regardless of deployment sequence or environment regeneration, and the new mutating-dev kustomize profile that provides a committed, safe development posture for enabling mutating tools with appropriate RBAC controls and triple-gate security enforcement.
 
 ## Appendices
 
 ### Environment-Specific Settings
-- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable workspace resource proxies with local tool-gateway and skills-hub instances, configure OTel with dev OpenObserve credentials.
-- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure workspace resource proxies with staging backend services, provision OTel secrets with staging OpenObserve credentials.
-- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure workspace resource proxies with production backend services and proper authentication, ensure OTel secrets are provisioned with production OpenObserve credentials.
+- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable workspace resource proxies with local tool-gateway and skills-hub instances, configure OTel with dev OpenObserve credentials, set GATEWAY_MUTATING_TOOLS_ENABLED=false for safety, configure AGENT_HITL_CONFIRM_TIMEOUT=600 for reasonable confirmation windows, enable enhanced agent auto-allow list with vetted read-only tools, **new**: Include the mutating-dev profile permanently for safe development access to mutating tools with bounded RBAC permissions.
+- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure workspace resource proxies with staging backend services, provision OTel secrets with staging OpenObserve credentials, carefully evaluate GATEWAY_MUTATING_TOOLS_ENABLED for testing scenarios, tune AGENT_HITL_CONFIRM_TIMEOUT for staging workflows, monitor auto-allow list effectiveness, **new**: Consider including mutating-dev profile selectively for staging testing scenarios with appropriate RBAC scoping.
+- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure workspace resource proxies with production backend services and proper authentication, ensure OTel secrets are provisioned with production OpenObserve credentials, keep GATEWAY_MUTATING_TOOLS_ENABLED=false unless absolutely necessary, set AGENT_HITL_CONFIRM_TIMEOUT appropriately for production SLAs, audit auto-allow list regularly for security compliance, **new**: Never include mutating-dev profile in production deployments; use separate controlled overlays if mutating tools are absolutely required.
 
-**Updated** Added guidance for workspace resource proxy configuration across environments, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, plus comprehensive OTel secret provisioning requirements for each environment.
+**Updated** Added guidance for workspace resource proxy configuration across environments, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration recommendations, HITL confirmation timeout tuning guidelines, enhanced agent auto-allow list configuration, plus comprehensive OTel secret provisioning requirements for each environment, and new guidance for the mutating-dev profile usage patterns across different deployment environments.
 
 ### Security and Secrets Management
 - Store secrets in Kubernetes Secrets or external vaults; never hardcode.
@@ -585,11 +867,19 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - **New**: Restrict access to sync-otel-secrets.sh script to authorized personnel only.
 - **New**: Monitor OTel export success/failure rates for security and operational insights.
 - **New**: Implement alerting for OTel authentication failures and secret provisioning issues.
+- **New**: Keep GATEWAY_MUTATING_TOOLS_ENABLED=false in production unless explicitly required and approved.
+- **New**: Regularly audit tools:mutate policy grants and RBAC permissions for mutating tool access.
+- **New**: Monitor auto-allow list usage and log warnings for mutating tools appearing in the list.
+- **New**: Set AGENT_HITL_CONFIRM_TIMEOUT appropriately to balance security with operational needs.
+- **New**: Audit HITL confirmation patterns to identify potential security risks or operational inefficiencies.
+- **New**: Treat the mutating-dev profile as a security boundary; never modify it to bypass triple-gate enforcement.
+- **New**: Monitor pod-delete RBAC usage and audit logs for unauthorized deletion attempts.
+- **New**: Implement change management processes for any modifications to the mutating-dev profile.
 
-**Updated** Enhanced security guidance with workspace resource integration security considerations, including credential management, authentication monitoring, and access pattern auditing, plus comprehensive OpenTelemetry secret management security practices.
+**Updated** Enhanced security guidance with workspace resource integration security considerations, including credential management, authentication monitoring, and access pattern auditing, risk-tier admission gate security controls, HITL confirmation timeout security implications, enhanced agent auto-allow list security enforcement, plus comprehensive OpenTelemetry secret management security practices, and new security considerations for the mutating-dev profile including profile integrity, RBAC scoping, and triple-gate enforcement monitoring.
 
 ### Complete Environment Variables Reference
-**Updated** Comprehensive reference including workspace resource integration variables for tools catalog and skills inventory access, plus enhanced OpenTelemetry configuration variables.
+**Updated** Comprehensive reference including workspace resource integration variables for tools catalog and skills inventory access, risk-tier admission gate configuration, HITL confirmation timeout settings, enhanced agent auto-allow list configuration, plus enhanced OpenTelemetry configuration variables, and new variables related to the mutating-dev profile integration.
 
 #### Core Configuration
 - `AGENT_SERVICE_URL`: Agent service endpoint URL (DNS-based)
@@ -624,19 +914,38 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET`: Incident service client secret (stored in secrets)
 - `PLATFORM_GATEWAY_INCIDENT_TRIAGE_TIMEOUT_SECONDS`: Incident triage timeout (default: 120)
 
+#### Risk-Tier Admission Gate (Tool Gateway)
+- `GATEWAY_MUTATING_TOOLS_ENABLED`: Enable/disable mutating tools (default: false, overridden to true in mutating-dev profile)
+- `GATEWAY_K8S_ENABLED`: Enable Kubernetes connector (default: false)
+- `GATEWAY_K8S_NAMESPACE`: Default namespace for K8s operations
+
+#### Agent Platform Configuration
+- `AGENT_GATEWAY_TOOL_AUTO_ALLOW`: Comma-separated list of auto-allowed tools (default: built-in vetted read-only tools)
+- `AGENT_HITL_CONFIRM_TIMEOUT`: HITL confirmation timeout in seconds (default: 600, 0 to disable)
+
 #### Enhanced OpenTelemetry Configuration
 - `OTEL_ENABLED`: Enable/disable OTel push pipeline (default: false)
 - `OTEL_EXPORTER_OTLP_ENDPOINT`: OTLP endpoint for traces/metrics/logs (e.g., http://openobserve:5080)
 - `OTEL_EXPORTER_OTLP_HEADERS`: Authentication headers for OTLP endpoint (provisioned by sync-otel-secrets.sh)
 - `OTEL_SERVICE_NAME`: Service name for telemetry (default: derived from service)
 
+#### Mutating Dev Profile Configuration
+- **Note**: The mutating-dev profile automatically sets `GATEWAY_MUTATING_TOOLS_ENABLED=true` through kustomize ConfigMap merge in the dev-k8s overlay
+- **Note**: No additional environment variables needed; the profile handles configuration merge and RBAC application automatically
+
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
 - [runtime.py](file://products/platform-gateway/src/platform_gateway/core/runtime.py)
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
 
 ### Workspace Resource Integration Guide
 **New Section** Step-by-step guide for configuring workspace resource integration with tools catalog and skills inventory proxies.
@@ -724,6 +1033,152 @@ stringData:
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 
+### Mutating Dev Profile Configuration Guide
+**New Section** Comprehensive guide for understanding and managing the mutating-dev kustomize profile that provides a committed development posture for enabling mutating tools safely.
+
+#### Profile Architecture
+- **Location**: `shared/platform-ops/gitops/runtime-profiles/mutating-dev/`
+- **Integration**: Permanently wired into dev-k8s overlay via kustomize configuration
+- **Purpose**: Provides safe, committed development posture for enabling mutating tools with bounded RBAC permissions
+- **Safety**: Maintains deny-by-default base posture while providing explicit opt-in for development
+
+#### Configuration Components
+- **mutating.env**: Contains `GATEWAY_MUTATING_TOOLS_ENABLED=true` that gets merged into platform-runtime-config ConfigMap
+- **tool-gateway-pod-delete.yaml**: Provides bounded RBAC permissions (delete pods only in dev-luban-aiops namespace)
+- **kustomization.yaml**: Declares the profile as a kustomize resource with RBAC manifests
+
+#### Triple-Gate Security Model
+The mutating-dev profile enables the first gate (risk-tier admission), but all three gates must pass:
+1. **Risk-tier admission**: `GATEWAY_MUTATING_TOOLS_ENABLED=true` (provided by profile)
+2. **Policy grants**: `tools:mutate` action granted to appropriate roles
+3. **HITL confirmation**: `AGENT_HITL_CONFIRM_TIMEOUT > 0` for operator approval
+
+#### Deployment and Verification
+```bash
+# Deploy with mutating-dev profile (already included in dev-k8s)
+make deploy
+
+# Verify the profile is active
+kubectl get configmap platform-runtime-config -n dev-luban-aiops -o jsonpath='{.data.GATEWAY_MUTATING_TOOLS_ENABLED}'
+
+# Verify RBAC permissions
+kubectl auth can-i delete pods -n dev-luban-aiops \
+  --as=system:serviceaccount:dev-luban-aiops:tool-gateway
+
+# Verify tool discovery includes k8s.delete_pod
+kubectl exec deployment/tool-gateway -n dev-luban-aiops -- \
+  curl -s http://localhost:8000/api/v2/tools | jq '.[].name' | grep delete_pod
+```
+
+#### Security Considerations
+- **Never modify** the mutating-dev profile to bypass triple-gate enforcement
+- **Scope is bounded**: RBAC only allows delete on pods in dev-luban-aiops namespace
+- **Audit regularly**: Monitor pod-delete operations and policy decisions
+- **Change management**: Any modifications require security review and approval
+- **Production isolation**: Never include this profile in production deployments
+
+#### Deactivation Process
+To temporarily deactivate the mutating-dev profile:
+```bash
+# Remove profile from dev-k8s overlay
+sed -i '/mutating-dev/d' shared/platform-ops/gitops/dev-k8s/kustomization.yaml
+
+# Remove ConfigMap merge block
+sed -i '/configMapGenerator/,/mutating.env/d' shared/platform-ops/gitops/dev-k8s/kustomization.yaml
+
+# Redeploy and clean up RBAC
+make deploy
+kubectl delete -f shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml
+```
+
+**Section sources**
+- [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
+- [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
+- [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
+- [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)
+- [README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
+
+### Enhanced Agent Auto-Allow List Guide
+**New Section** Comprehensive guide for configuring and managing the enhanced agent auto-allow list functionality.
+
+#### Prerequisites
+- Agent platform service deployed and configured
+- Understanding of which tools are classified as read-only vs. mutating
+- Knowledge of AGENT_GATEWAY_TOOL_AUTO_ALLOW environment variable format
+
+#### Configuration Steps
+1. Set `AGENT_GATEWAY_TOOL_AUTO_ALLOW` with comma-separated tool names
+2. Verify tools are marked as read-only in their definitions
+3. Monitor logs for warnings about mutating tools in auto-allow list
+4. Test auto-approval behavior for configured tools
+5. Regularly review and update auto-allow list as needed
+
+#### Security Considerations
+- Only include vetted read-only tools in the auto-allow list
+- Monitor logs for warnings about mutating tools appearing in the list
+- Regularly audit auto-allow list usage and effectiveness
+- Remove tools from auto-allow list if they become unsafe or deprecated
+
+#### Example Configuration
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-runtime-config
+data:
+  AGENT_GATEWAY_TOOL_AUTO_ALLOW: "k8s.list_pods,k8s.get_pod,skills.search,skills.list"
+```
+
+#### Monitoring and Diagnostics
+- Check agent platform logs for auto-allow list warnings
+- Monitor tool execution patterns to verify auto-approval behavior
+- Review policy decisions for tools not in auto-allow list
+- Track HITL confirmation frequency for operational insights
+
+**Section sources**
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
+
+### HITL Confirmation Timeout Configuration Guide
+**New Section** Comprehensive guide for configuring HITL confirmation timeouts to balance operational efficiency with safety requirements.
+
+#### Prerequisites
+- Agent platform service deployed with SPEC-020 confirmation bridge
+- Understanding of confirmation workflow and timeout implications
+- Knowledge of different environment requirements (dev, staging, production)
+
+#### Configuration Options
+- `AGENT_HITL_CONFIRM_TIMEOUT=0`: Disables confirmation bridge (silent-park posture)
+- `AGENT_HITL_CONFIRM_TIMEOUT=600`: Default 10-minute timeout (recommended for most environments)
+- `AGENT_HITL_CONFIRM_TIMEOUT=300`: 5-minute timeout for faster-paced environments
+- `AGENT_HITL_CONFIRM_TIMEOUT=1800`: 30-minute timeout for complex approval workflows
+
+#### Environment Recommendations
+- **Development**: AGENT_HITL_CONFIRM_TIMEOUT=300 for rapid iteration
+- **Staging**: AGENT_HITL_CONFIRM_TIMEOUT=600 for realistic testing
+- **Production**: AGENT_HITL_CONFIRM_TIMEOUT=600-1800 based on operational requirements
+
+#### Monitoring and Diagnostics
+- Monitor confirmation timeout expiration events
+- Track HITL confirmation completion rates
+- Analyze timeout patterns to optimize configuration
+- Alert on excessive timeout expirations indicating operational issues
+
+#### Example Configuration
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-runtime-config
+data:
+  AGENT_HITL_CONFIRM_TIMEOUT: "600"
+```
+
+**Section sources**
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
+
 ### Workspace Resource Troubleshooting Guide
 **New Section** Comprehensive troubleshooting guide for workspace resource integration configuration and connectivity issues.
 
@@ -735,6 +1190,12 @@ stringData:
 - **High latency on workspace resource requests**: Monitor downstream service performance and consider increasing timeouts if needed
 - **OTel export failures**: Verify OTEL_EXPORTER_OTLP_HEADERS is present and valid; check OpenObserve backend connectivity
 - **Secret provisioning failures**: Ensure OO_ROOT_USER_EMAIL and OO_ROOT_USER_PASSWORD are exported; verify kubectl access to cluster
+- **Mutating tools not available**: Check GATEWAY_MUTATING_TOOLS_ENABLED setting and tools:mutate policy grants
+- **Auto-allow list warnings**: Review logs for warnings about mutating tools appearing in auto-allow list
+- **HITL confirmation timeouts**: Adjust AGENT_HITL_CONFIRM_TIMEOUT based on operational requirements
+- **Mutating-dev profile not active**: Verify dev-k8s overlay includes the mutating-dev profile; check kustomize build output
+- **Pod-delete RBAC missing**: Verify tool-gateway-pod-delete.yaml is applied; check namespace and service account configuration
+- **Triple-gate enforcement failures**: Ensure all three gates pass: GATEWAY_MUTATING_TOOLS_ENABLED, tools:mutate policy grants, and AGENT_HITL_CONFIRM_TIMEOUT > 0
 
 #### Monitoring and Diagnostics
 - Check platform-gateway logs for workspace resource proxy errors
@@ -743,10 +1204,20 @@ stringData:
 - Verify workspace resource proxy endpoint availability and response times
 - Monitor OTel export success/failure rates and authentication errors
 - Check secret provisioning logs for sync-otel-secrets.sh execution results
+- Monitor risk-tier admission gate policy decisions
+- Track auto-allow list usage and warning logs
+- Analyze HITL confirmation timeout patterns
+- Monitor mutating-dev profile activation status and RBAC permissions
 
 **Section sources**
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
+- [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)

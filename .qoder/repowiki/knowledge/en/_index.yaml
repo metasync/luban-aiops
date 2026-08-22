@@ -3,12 +3,22 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-08-21T12:26:21Z"
+exported_at: "2026-08-22T04:56:37Z"
 modules:
     "":
-        dir_name: Luban Agentic AIOps Platform Workspace
-        title: Luban Agentic AIOps Platform Workspace
+        dir_name: Agentic AIOPS Platform Monorepo
+        title: Agentic AIOPS Platform Monorepo
         scope: []
+        source_files: []
+        children:
+            - specs
+        depends_on: []
+        related_to: []
+    specs:
+        dir_name: Spec-Driven Development Specifications
+        title: Spec-Driven Development Specifications
+        scope:
+            - docs/specs/
         source_files: []
         children: []
         depends_on: []

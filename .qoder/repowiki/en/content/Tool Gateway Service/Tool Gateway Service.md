@@ -29,6 +29,8 @@
 - [tool-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-service.yaml)
 - [test_elastic_connector.py](file://products/tool-gateway/tests/test_elastic_connector.py)
 - [test_incidents_connector.py](file://products/tool-gateway/tests/test_incidents_connector.py)
+- [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
+- [mutating-demo.sh](file://shared/platform-ops/e2e/mutating-demo.sh)
 - [0005-platform-gateway-extraction.md](file://docs/adr/0005-platform-gateway-extraction.md)
 - [SPEC-010 spec.md](file://docs/specs/SPEC-010-platform-gateway-extraction/spec.md)
 - [2026-08-10-r1-hardening-grounded-responses-and-evidence-ux.md](file://docs/agentic-aiops-platform/release-notes/2026-08-10-r1-hardening-grounded-responses-and-evidence-ux.md)
@@ -36,12 +38,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new Incidents Connector tool enabling agents to query incidents through the tool gateway
-- Updated architecture diagrams to include the incidents connector alongside existing Kubernetes and Elastic connectors
-- Enhanced configuration section with incidents service integration settings
-- Added incidents connector implementation details, API endpoints, and security considerations
-- Updated troubleshooting guide with incidents-specific issues and resolution steps
-- Expanded policy engine documentation to include incidents tool permissions
+- Added risk-tier admission control with GATEWAY_MUTATING_TOOLS_ENABLED environment variable for controlling mutating tool registration
+- Implemented new k8s.delete_pod tool as a bounded mutating action with proper error handling and RBAC requirements
+- Enhanced registry with mutating tool discovery controls that refuse write/admin risk tools when GATEWAY_MUTATING_TOOLS_ENABLED is disabled
+- Updated policy engine to include tools:mutate action for additional authorization on write/admin tools
+- Added comprehensive testing for the delete pod functionality including parameter validation and error mapping
+- Updated configuration documentation with new mutating tools enabled setting
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -62,13 +64,15 @@ As an internal service, tool-gateway receives requests from agent-platform and p
 
 Key responsibilities (current):
 - Internal HTTP API surface for tool discovery and invocation (`/api/v2/tools`)
-- Policy evaluation for tool-specific actions using YAML-based definitions with enhanced `tools:list` and `tools:invoke` permissions
+- Policy evaluation for tool-specific actions using YAML-based definitions with enhanced `tools:list`, `tools:invoke`, and `tools:mutate` permissions
 - Secure token verification with audience validation for `tool-gateway` audience
-- Multi-source tool registry supporting Kubernetes, Elastic, and **Incidents connectors** with safe discovery and invocation
+- Multi-source tool registry supporting Kubernetes, Elastic, and Incidents connectors with safe discovery and invocation
+- **Risk-tier admission control** preventing unauthorized access to mutating tools through GATEWAY_MUTATING_TOOLS_ENABLED
 - Comprehensive output redaction system preventing credential leakage
 - **Enhanced Kubernetes integration via cluster-wide read-only ClusterRole enabling cross-namespace diagnostic capabilities**
+- **New bounded mutating tool support** with k8s.delete_pod for controlled pod restart operations
 - Elastic connector integration for observability data access including log search, service health metrics, and alert management
-- **Incidents connector integration for querying incident data through the new incident service**
+- Incidents connector integration for querying incident data through the new incident service
 - Observability, metrics, and telemetry for monitoring and debugging
 
 **Important Note**: The platform-gateway extraction is complete. Portal-facing responsibilities including chat/session proxying, authentication flows, and delegation client functionality have moved to the new `platform-gateway` service, leaving tool-gateway focused exclusively on tool execution and connector management.
@@ -77,10 +81,10 @@ Key responsibilities (current):
 The Tool Gateway is implemented as a Python service under products/tool-gateway. Core modules include:
 - API layer: FastAPI routers and route handlers for tools and health endpoints
 - Services: Gateway orchestration, policy engine, and token verifier
-- Tools: Base tool abstraction, registry, Kubernetes connector, Elastic connector, **Incidents connector**, and output redaction system
+- Tools: Base tool abstraction, registry, Kubernetes connector, Elastic connector, Incidents connector, and output redaction system
 - Core: Configuration, runtime, observability, metrics, telemetry, request context, dependencies
 - Schemas: Shared contract schemas for tool invocations and results
-- Policies: Default YAML policy definitions with enhanced tool permissions
+- Policies: Default YAML policy definitions with enhanced tool permissions including mutating actions
 
 ```mermaid
 graph TB
@@ -123,7 +127,7 @@ D --> P
 D --> Q
 ```
 
-**Updated** Architecture diagram reflects the current structure with all three connectors: Kubernetes, Elastic, and Incidents
+**Updated** Architecture diagram reflects the current structure with all three connectors and enhanced policy enforcement
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -154,17 +158,17 @@ D --> Q
 ## Core Components
 - HTTP Router and Routes: Define endpoints for tool discovery and invocation, parse requests, and delegate to services.
 - Gateway Service: Orchestrates request lifecycle, applies policy checks, invokes tools, and returns responses with automatic redaction.
-- Policy Engine: Loads YAML policies, evaluates rules against request context, and makes allow/deny decisions for tool actions with enhanced `tools:list` and `tools:invoke` permissions.
+- Policy Engine: Loads YAML policies, evaluates rules against request context, and makes allow/deny decisions for tool actions with enhanced `tools:list`, `tools:invoke`, and `tools:mutate` permissions.
 - Token Verifier: Validates authentication tokens with audience verification for `tool-gateway` audience and enriches request context with identity information.
-- Tool Registry: Discovers available tools from multiple connectors (Kubernetes, Elastic, **Incidents**), manages their metadata, and executes them safely with input validation and output redaction.
+- **Enhanced Tool Registry**: Discovers available tools from multiple connectors with risk-tier admission control, manages their metadata, and executes them safely with input validation and output redaction.
 - Output Redaction System: Automatically detects and redacts sensitive information from tool outputs using pattern matching and key-list filtering.
-- **Enhanced Kubernetes Connector**: Provides safe abstractions for interacting with Kubernetes clusters across all namespaces using cluster-wide read-only ClusterRole permissions, enabling comprehensive diagnostic capabilities while maintaining strict read-only access controls.
+- **Enhanced Kubernetes Connector**: Provides safe abstractions for interacting with Kubernetes clusters across all namespaces using cluster-wide read-only ClusterRole permissions, enabling comprehensive diagnostic capabilities while maintaining strict read-only access controls, plus bounded mutating operations through k8s.delete_pod.
 - Elastic Connector: Provides read-only access to Elasticsearch for observability data including log search, service health metrics, and active alerts.
-- **Incidents Connector**: Provides read-only access to the incident-service query API for listing and retrieving incident data with proper authentication and parameter validation.
+- Incidents Connector: Provides read-only access to the incident-service query API for listing and retrieving incident data with proper authentication and parameter validation.
 - Schemas and Contracts: Enforce consistent request/response shapes for tool invocations and results.
 - Core Utilities: Configuration, runtime settings, observability, metrics, telemetry, request context propagation, and dependency injection.
 
-**Updated** Component descriptions reflect the current implementation with all three connectors integrated
+**Updated** Component descriptions reflect the current implementation with risk-tier admission control and bounded mutating tool support
 
 **Section sources**
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
@@ -184,12 +188,12 @@ D --> Q
 - [dependencies.py](file://products/tool-gateway/src/tool_gateway/core/dependencies.py)
 
 ## Architecture Overview
-The Tool Gateway follows a streamlined architecture focused on multi-source tool execution with enhanced security features including automatic output redaction. As an internal service, it receives requests from other platform services through well-defined APIs.
+The Tool Gateway follows a streamlined architecture focused on multi-source tool execution with enhanced security features including automatic output redaction and risk-tier admission control. As an internal service, it receives requests from other platform services through well-defined APIs.
 
 **Current Architecture:**
 - API Layer: FastAPI routers expose endpoints for tool discovery and invocation only.
-- Service Layer: Gateway orchestrates tool invocation flows; policy engine enforces rules for tool actions with enhanced permissions; token verifier authenticates with audience validation for `tool-gateway`.
-- Tool Layer: Registry discovers and executes tools from multiple connectors; **enhanced Kubernetes connector provides cluster-wide read-only access**; Elastic connector provides observability data access; **incidents connector provides incident data access**; output redaction ensures sensitive data never leaves the service.
+- Service Layer: Gateway orchestrates tool invocation flows; policy engine enforces rules for tool actions with enhanced permissions including mutating actions; token verifier authenticates with audience validation for `tool-gateway`.
+- Tool Layer: Registry discovers and executes tools from multiple connectors with risk-tier admission control; **enhanced Kubernetes connector provides cluster-wide read-only access plus bounded mutating operations**; Elastic connector provides observability data access; incidents connector provides incident data access; output redaction ensures sensitive data never leaves the service.
 - Core Layer: Configuration, runtime, observability, metrics, telemetry, and request context support cross-cutting concerns.
 
 ```mermaid
@@ -210,14 +214,14 @@ Router->>ToolsRoute : "Handle tool invocation"
 ToolsRoute->>Gateway : "Invoke tool flow"
 Gateway->>Token : "Verify token with tool-gateway audience"
 Token-->>Gateway : "Identity context"
-Gateway->>Policy : "Evaluate tools : invoke/list policy"
+Gateway->>Policy : "Evaluate tools : invoke/list/mutate policy"
 Policy-->>Gateway : "Decision"
 alt "Allow"
 Gateway->>Registry : "Resolve tool by name"
 Registry-->>Gateway : "Tool instance"
 alt "Kubernetes Tool"
 Gateway->>Registry : "Execute k8s tool with validated inputs"
-Registry->>K8s : "Call k8s operations (cluster-wide read-only)"
+Registry->>K8s : "Call k8s operations (cluster-wide read-only or bounded mutate)"
 K8s-->>Registry : "Result"
 else "Elastic Tool"
 Gateway->>Registry : "Execute elastic tool with validated inputs"
@@ -239,7 +243,7 @@ ToolsRoute-->>Client : "403 Forbidden"
 end
 ```
 
-**Updated** Sequence diagram reflects the current architecture with all three connectors, highlighting cluster-wide read-only access and incidents integration
+**Updated** Sequence diagram reflects the current architecture with risk-tier admission control and bounded mutating tool support
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -284,10 +288,11 @@ Response --> End
 - [tools.py](file://products/tool-gateway/src/tool_gateway/api/routes/tools.py)
 - [health.py](file://products/tool-gateway/src/tool_gateway/api/routes/health.py)
 
-### Gateway Service with Output Redaction
+### Gateway Service with Risk-Tier Admission Control
 Orchestrates the full request lifecycle with enhanced security and automatic output sanitization:
 - Validates and enriches request context
 - Invokes token verification with audience validation and policy evaluation
+- **Implements risk-tier admission control** requiring separate authorization for mutating tools
 - Resolves and executes tools from multiple connectors via the registry
 - Applies comprehensive output redaction before returning responses
 - Handles errors and returns standardized responses with audit logging
@@ -352,7 +357,7 @@ BaseTool --> ElasticConnector : "may use"
 BaseTool --> IncidentsConnector : "may use"
 ```
 
-**Updated** Streamlined architecture with all three connectors integrated
+**Updated** Streamlined architecture with risk-tier admission control and all three connectors integrated
 
 **Diagram sources**
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
@@ -372,8 +377,9 @@ BaseTool --> IncidentsConnector : "may use"
 - Loads YAML policy definitions from configured paths
 - Evaluates rules against request context including identity, method, path, and parameters
 - Returns allow/deny decisions with optional conditions for tool actions
-- Supports enhanced `tools:list` and `tools:invoke` actions for observer roles
+- Supports enhanced `tools:list`, `tools:invoke`, and `tools:mutate` actions for different permission levels
 - Implements deny-by-default policy enforcement with explicit allow rules
+- **Added tools:mutate action** specifically for write/admin risk tools requiring additional authorization
 
 ```mermaid
 flowchart TD
@@ -458,8 +464,9 @@ FailClosed --> ReturnError["Return REDACTION_OVERFLOW Error"]
 **Section sources**
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 
-### Tool Registry and Base Tool
+### Enhanced Tool Registry with Risk-Tier Admission Control
 - Registry maintains a map of tool names to instances from multiple connectors
+- **Implements risk-tier admission control** refusing write/admin risk tools when GATEWAY_MUTATING_TOOLS_ENABLED is disabled
 - Supports dynamic registration and resolution across different tool providers
 - Executes tools with validated inputs and captures results/errors
 - Integrates with output redaction system for automatic sanitization
@@ -468,6 +475,7 @@ FailClosed --> ReturnError["Return REDACTION_OVERFLOW Error"]
 classDiagram
 class ToolRegistry {
 -tools dict
+-_allow_mutating bool
 +register(tool) void
 +get(name) Tool
 +list_definitions() list
@@ -500,7 +508,7 @@ ElasticTool --|> BaseTool : "extends"
 IncidentsTool --|> BaseTool : "extends"
 ```
 
-**Updated** Integrated with output redaction system and supports all three tool providers
+**Updated** Integrated with risk-tier admission control and output redaction system supporting all three tool providers
 
 **Diagram sources**
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
@@ -514,15 +522,16 @@ IncidentsTool --|> BaseTool : "extends"
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
 
-### Enhanced Kubernetes Connector with Cluster-Wide Read-Only Access
+### Enhanced Kubernetes Connector with Cluster-Wide Read-Only Access and Bounded Mutating Operations
 Provides safe abstractions for Kubernetes operations with **enhanced cluster-wide read-only access** enabled by the `luban-tool-gateway-readonly` ClusterRole:
 - Resource listing, retrieval, creation, update, deletion across all namespaces
 - **Cross-namespace operations for comprehensive diagnostic capabilities**
 - **Cluster-wide read-only permissions for health checks across all namespaces**
-- Strict read-only access controls with no mutating verbs granted
+- **New bounded mutating operation**: k8s.delete_pod for controlled pod restart primitive
+- Strict read-only access controls with no mutating verbs granted except through explicit opt-in
 - Error handling and logging for cluster interactions
 
-**Security Rationale**: The AIOps agent must be able to health-check and inspect workloads in ANY namespace (e.g., argocd, kube-system), not just the platform namespace. Every registered tool is read-only by contract (SPEC-007 risk_level=read) and invocations are additionally gated by the deny-by-default policy engine, so granting get/list/watch across the cluster is the intended blast radius. No mutating verbs are granted anywhere.
+**Security Rationale**: The AIOps agent must be able to health-check and inspect workloads in ANY namespace (e.g., argocd, kube-system), not just the platform namespace. Every registered tool is read-only by contract (SPEC-007 risk_level=read) and invocations are additionally gated by the deny-by-default policy engine, so granting get/list/watch across the cluster is the intended blast radius. No mutating verbs are granted anywhere except through the bounded k8s.delete_pod tool which requires explicit GATEWAY_MUTATING_TOOLS_ENABLED activation.
 
 ```mermaid
 flowchart TD
@@ -537,7 +546,7 @@ HandleError --> Return
 Deny --> Return
 ```
 
-**Updated** Enhanced RBAC permissions enabling cluster-wide diagnostic capabilities while maintaining strict read-only access
+**Updated** Enhanced RBAC permissions enabling cluster-wide diagnostic capabilities plus bounded mutating operations while maintaining strict access controls
 
 **Diagram sources**
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
@@ -627,12 +636,13 @@ BuildEvidence --> ReturnResult["Return Tool Result"]
 
 ### Core Configuration and Runtime
 - Configuration loads environment variables including audience validation settings and **incidents service configuration**
+- **Added GATEWAY_MUTATING_TOOLS_ENABLED** environment variable for controlling mutating tool registration
 - Runtime settings manage service lifecycle and dependencies
 - Observability, metrics, and telemetry provide monitoring and tracing
 - Redaction configuration with enable/disable switches and overflow thresholds
 - Dependency injection framework for service components
 
-**Updated** Added incidents service configuration options and enhanced dependency injection
+**Updated** Added incidents service configuration options and enhanced dependency injection with mutating tools control
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
@@ -669,7 +679,7 @@ Services --> Schemas["Schemas & Contracts"]
 Services --> Core["Core Config/Runtime/Observability"]
 ```
 
-**Updated** Simplified dependency graph reflecting all three connectors with enhanced Kubernetes permissions
+**Updated** Simplified dependency graph reflecting all three connectors with enhanced Kubernetes permissions and risk-tier admission control
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -713,6 +723,7 @@ Services --> Core["Core Config/Runtime/Observability"]
 - **Connection timeout configuration for incidents service calls (10 seconds)**
 - **Result limit enforcement for incidents queries (max 50 entries)**
 - **Efficient incident data projection to exclude unnecessary fields in list operations**
+- **Risk-tier admission control minimizes policy evaluation overhead for read-only tools**
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -723,6 +734,9 @@ Common issues and resolutions:
 - **Kubernetes connectivity**: Validate cluster configuration and **cluster-wide RBAC permissions**
 - **Cross-namespace access issues**: Verify `luban-tool-gateway-readonly` ClusterRole is properly bound
 - **Diagnostic scope limitations**: Ensure proper ClusterRoleBinding for the tool-gateway ServiceAccount
+- **Mutating tools disabled**: Check GATEWAY_MUTATING_TOOLS_ENABLED environment variable is set to true for write/admin tools
+- **k8s.delete_pod not found**: Verify GATEWAY_MUTATING_TOOLS_ENABLED is enabled and proper RBAC permissions are granted
+- **Permission denied for pod deletion**: Ensure tool-gateway service account has pod-delete RBAC permissions
 - Elastic connectivity: Check Elastic URL, authentication credentials, and network connectivity
 - Elastic configuration: Verify `GATEWAY_ELASTIC_ENABLED` and related environment variables
 - **Incidents connectivity**: Check incidents service URL, Basic authentication credentials, and network connectivity
@@ -733,7 +747,7 @@ Common issues and resolutions:
 - Dependency injection problems: Verify service initialization and configuration
 - Parameter validation errors: Review tool parameter schemas and constraints
 
-**Updated** Added troubleshooting guidance for incidents connector integration and common issues
+**Updated** Added troubleshooting guidance for risk-tier admission control, mutating tools, and common issues
 
 **Section sources**
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
@@ -750,9 +764,9 @@ Common issues and resolutions:
 ## Conclusion
 The Tool Gateway Service provides a focused, secure, and extensible platform for internal tool execution with policy enforcement, secure tool invocation, and comprehensive output redaction. Its streamlined architecture enables easy extension with new tools while maintaining strong security and observability standards. The service now operates exclusively as an internal component, receiving requests from other platform services through well-defined APIs with delegated token authentication.
 
-The platform-gateway extraction has successfully separated portal-facing responsibilities into the new `platform-gateway` service, allowing tool-gateway to focus solely on its core mandate of connector standardization and tool execution. Recent enhancements include the addition of Elastic connector for observability data access, **incidents connector for querying incident data through the new incident service**, **enhanced RBAC permissions with cluster-wide read-only access enabling comprehensive diagnostic capabilities across all namespaces**, and improved policy engine with `tools:list` and `tools:invoke` permissions for observer roles.
+The platform-gateway extraction has successfully separated portal-facing responsibilities into the new `platform-gateway` service, allowing tool-gateway to focus solely on its core mandate of connector standardization and tool execution. Recent enhancements include the addition of Elastic connector for observability data access, incidents connector for querying incident data through the new incident service, **enhanced RBAC permissions with cluster-wide read-only access enabling comprehensive diagnostic capabilities across all namespaces**, **risk-tier admission control with GATEWAY_MUTATING_TOOLS_ENABLED for secure mutating tool registration**, and **bounded mutating tool support with k8s.delete_pod for controlled pod restart operations**.
 
-This architectural change improves ownership alignment, security boundaries, and maintainability while preserving all external contracts and functionality. The transition from namespaced Role to cluster-wide ClusterRole significantly enhances operational capabilities while maintaining strict read-only access controls.
+This architectural change improves ownership alignment, security boundaries, and maintainability while preserving all external contracts and functionality. The transition from namespaced Role to cluster-wide ClusterRole significantly enhances operational capabilities while maintaining strict read-only access controls. The introduction of risk-tier admission control ensures that mutating operations require explicit authorization through both environment configuration and policy enforcement.
 
 ## Appendices
 
@@ -765,7 +779,7 @@ The platform-gateway extraction (ADR-0005, SPEC-010) has been completed successf
 
 **Component Separation:**
 - **Moved to platform-gateway**: Token verification, policy engine, chat routes, session routes, auth routes, identity routes, runtime routes, delegation client, agent client
-- **Remaining in tool-gateway**: Tool registry, base tool framework, k8s connector, elastic connector, **incidents connector**, output redaction, tools routes, health endpoints
+- **Remaining in tool-gateway**: Tool registry, base tool framework, k8s connector, elastic connector, incidents connector, output redaction, tools routes, health endpoints
 
 **Impact Assessment:**
 - External HTTP contracts remain unchanged for portal callers
@@ -777,18 +791,42 @@ The platform-gateway extraction (ADR-0005, SPEC-010) has been completed successf
 - [0005-platform-gateway-extraction.md](file://docs/adr/0005-platform-gateway-extraction.md)
 - [SPEC-010 spec.md](file://docs/specs/SPEC-010-platform-gateway-extraction/spec.md)
 
-### Enhanced Kubernetes Integration with Cluster-Wide RBAC
+### Enhanced Kubernetes Integration with Cluster-Wide RBAC and Bounded Mutating Operations
 - Deployment configuration for the Tool Gateway service
 - Service exposure and networking setup
 - **Cluster-wide RBAC policies enabling cross-namespace diagnostic capabilities**
+- **Bounded mutating operations through k8s.delete_pod tool**
 - Policy configuration for runtime enforcement
 
-**Security Model**: The `luban-tool-gateway-readonly` ClusterRole provides get/list/watch permissions across core, apps, batch, networking, and autoscaling API groups, enabling comprehensive cluster diagnostics while maintaining strict read-only access controls.
+**Security Model**: The `luban-tool-gateway-readonly` ClusterRole provides get/list/watch permissions across core, apps, batch, networking, and autoscaling API groups, enabling comprehensive cluster diagnostics while maintaining strict read-only access controls. Mutating operations are restricted to the bounded k8s.delete_pod tool which requires explicit GATEWAY_MUTATING_TOOLS_ENABLED activation.
 
 **Section sources**
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 - [tool-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-service.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
+
+### Risk-Tier Admission Control and Mutating Tools
+The risk-tier admission control system provides defense-in-depth for mutating operations:
+
+**Environment Configuration**:
+- `GATEWAY_MUTATING_TOOLS_ENABLED=false` (default): Write/admin tools are not registered and unavailable
+- `GATEWAY_MUTATING_TOOLS_ENABLED=true`: Write/admin tools can be registered but still require policy authorization
+
+**Policy Enforcement**:
+- Read tools require `tools:invoke` permission
+- Write/admin tools require both `tools:invoke` and `tools:mutate` permissions
+- Deny-by-default ensures only explicitly authorized roles can execute mutating operations
+
+**Implementation Details**:
+- Registry refuses registration of write/admin tools when GATEWAY_MUTATING_TOOLS_ENABLED is false
+- Gateway service performs additional policy check for tools with risk_level != "read"
+- Audit logging captures all mutating tool attempts with detailed context
+
+**Section sources**
+- [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
+- [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
+- [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 
 ### Policy Definition Examples
 YAML-based policy definitions control access to tools and operations with enhanced permissions:
@@ -796,7 +834,7 @@ YAML-based policy definitions control access to tools and operations with enhanc
 - Identity-based permissions and scopes
 - Method and path-based restrictions
 - Parameter validation and sanitization
-- Enhanced `tools:list` and `tools:invoke` permissions for observer roles
+- Enhanced `tools:list`, `tools:invoke`, and `tools:mutate` permissions for different role levels
 
 **Section sources**
 - [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
@@ -808,7 +846,8 @@ Tools are registered dynamically with metadata and schemas from multiple connect
 - Execution functions with error handling
 - Integration with Kubernetes connector for cluster-wide operations
 - Integration with Elastic connector for observability data access
-- **Integration with Incidents connector for incident data access**
+- Integration with Incidents connector for incident data access
+- **Risk-level classification** for admission control (read/write/admin)
 
 **Section sources**
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
@@ -822,13 +861,15 @@ When developing custom tools:
 - Extend the base tool class for consistency
 - Define input schemas for validation
 - Implement error handling and logging
+- **Set appropriate risk_level** (read/write/admin) for admission control
 - Integrate with Kubernetes connector for cluster-wide operations
 - Integrate with Elastic connector for observability data access
-- **Integrate with Incidents connector for incident data access**
+- Integrate with Incidents connector for incident data access
 - Register tools with the registry for discovery
 - Be aware that all tool outputs will be automatically redacted for security
+- **Understand that write/admin tools require GATEWAY_MUTATING_TOOLS_ENABLED and tools:mutate policy permission**
 
-**Updated** Added guidance for Incidents connector integration and automatic output redaction
+**Updated** Added guidance for risk-level classification and mutating tool requirements
 
 **Section sources**
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
@@ -841,18 +882,19 @@ When developing custom tools:
 ### Security Considerations
 - Token verification with audience validation for `tool-gateway` audience
 - **Enhanced RBAC enforcement with cluster-wide read-only access via `luban-tool-gateway-readonly` ClusterRole**
+- **Risk-tier admission control preventing unauthorized access to mutating tools**
 - Input validation and sanitization
-- Policy-based access control with enhanced tool permissions
+- Policy-based access control with enhanced tool permissions including tools:mutate
 - Secure configuration management
 - Automatic output redaction preventing credential leakage
 - Fail-closed overflow protection for excessive redaction scenarios
 - Elastic connector authentication with API key or basic auth
-- **Incidents connector authentication with Basic credentials (service-to-service only)**
+- Incidents connector authentication with Basic credentials (service-to-service only)
 - Parameter validation and clamping to prevent resource exhaustion
 - **Strict incident ID validation to prevent path injection attacks**
-- **Strict read-only access controls ensuring no mutating operations are permitted**
+- **Strict read-only access controls ensuring no mutating operations are permitted without explicit opt-in**
 
-**Updated** Enhanced security model with Elastic and Incidents connector considerations and improved cluster-wide RBAC permissions
+**Updated** Enhanced security model with risk-tier admission control and improved cluster-wide RBAC permissions
 
 **Section sources**
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
@@ -871,11 +913,12 @@ When developing custom tools:
 - Monitor Kubernetes API call rates and quotas across all namespaces
 - Track redaction statistics and overflow events
 - Monitor Elastic connector performance and query efficiency
-- **Monitor incidents connector performance and upstream service availability**
+- Monitor incidents connector performance and upstream service availability
 - Track tool execution times and success rates
 - **Monitor cluster-wide resource access patterns and API call volumes**
+- **Monitor risk-tier admission control effectiveness and mutating tool attempts**
 
-**Updated** Enhanced monitoring strategies with Elastic and Incidents connector metrics and cluster-wide access monitoring
+**Updated** Enhanced monitoring strategies with risk-tier admission control and cluster-wide access monitoring
 
 **Section sources**
 - [metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
@@ -943,3 +986,35 @@ The RBAC permissions have been significantly enhanced in Release 1:
 **Section sources**
 - [2026-08-10-r1-hardening-grounded-responses-and-evidence-ux.md](file://docs/agentic-aiops-platform/release-notes/2026-08-10-r1-hardening-grounded-responses-and-evidence-ux.md)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
+
+### New k8s.delete_pod Tool Implementation
+The bounded mutating tool provides controlled pod restart capability:
+
+**Tool Definition**:
+- Name: `k8s.delete_pod`
+- Risk Level: `write` (requires tools:mutate permission)
+- Description: Delete a single named Kubernetes pod for bounded restart operations
+- Parameters: Required `name` parameter, optional `namespace` parameter
+
+**Security Controls**:
+- Requires GATEWAY_MUTATING_TOOLS_ENABLED=true for registration
+- Requires tools:mutate policy permission for execution
+- Limited to single pod deletion (no wildcards or selectors)
+- Controller-managed pods are recreated automatically (bounded restart primitive)
+
+**Error Handling**:
+- POD_NOT_FOUND: When specified pod doesn't exist
+- K8S_PERMISSION_DENIED: When RBAC permissions are insufficient
+- K8S_API_ERROR: For general Kubernetes API failures
+- INVALID_PARAMETERS: When required parameters are missing
+
+**Testing Coverage**:
+- Parameter validation tests
+- Error mapping tests for different Kubernetes API responses
+- RBAC permission validation tests
+- Namespace resolution tests
+
+**Section sources**
+- [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+- [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
+- [mutating-demo.sh](file://shared/platform-ops/e2e/mutating-demo.sh)

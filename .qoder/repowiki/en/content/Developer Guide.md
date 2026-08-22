@@ -25,7 +25,20 @@
 - [shared contracts README](file://shared/shared-contracts/README.md)
 - [platform ops gitops](file://shared/platform-ops/gitops/)
 - [github pull request template](file://.github/pull_request_template.md)
+- [skills-demo.sh](file://shared/platform-ops/e2e/skills-demo.sh)
+- [incident-demo.sh](file://shared/platform-ops/e2e/incident-demo.sh)
+- [mutating-demo.sh](file://shared/platform-ops/e2e/mutating-demo.sh)
+- [agent-platform telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
+- [identity-broker telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
+- [tool-gateway telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive end-to-end testing section documenting the new `make e2e` target and demo scripts
+- Updated testing strategy to include OpenTelemetry exporter configuration for pytest execution
+- Enhanced debugging section with port-forwarding requirements for platform services
+- Added detailed documentation for e2e demo script prerequisites and execution flow
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -35,12 +48,13 @@
 5. [Backend Service Architecture](#backend-service-architecture)
 6. [Python Container Strategy](#python-container-strategy)
 7. [Testing Strategy](#testing-strategy)
-8. [Code Review and Pull Request Process](#code-review-and-pull-request-process)
-9. [Release Procedures](#release-procedures)
-10. [Debugging and Performance Optimization](#debugging-and-performance-optimization)
-11. [Extension Points and Plugin Development](#extension-points-and-plugin-development)
-12. [Troubleshooting Guide](#troubleshooting-guide)
-13. [Conclusion](#conclusion)
+8. [End-to-End Testing](#end-to-end-testing)
+9. [Code Review and Pull Request Process](#code-review-and-pull-request-process)
+10. [Release Procedures](#release-procedures)
+11. [Debugging and Performance Optimization](#debugging-and-performance-optimization)
+12. [Extension Points and Plugin Development](#extension-points-and-plugin-development)
+13. [Troubleshooting Guide](#troubleshooting-guide)
+14. [Conclusion](#conclusion)
 
 ## Introduction
 
@@ -66,6 +80,7 @@ subgraph "Shared Layer"
 SC["Shared Contracts"]
 SDK["Shared SDK"]
 OPS["Platform Ops"]
+E2E["E2E Demo Scripts"]
 end
 subgraph "Documentation"
 DOC["Architecture Docs"]
@@ -79,6 +94,7 @@ TG --> AP
 AP --> OPS
 IB --> OPS
 TG --> OPS
+E2E --> OPS
 DOC --> AP
 DOC --> IB
 DOC --> TG
@@ -105,6 +121,7 @@ SPEC --> TG
 - **Shared Contracts**: JSON schemas and API specifications
 - **Shared SDK**: Client libraries and utilities
 - **Platform Ops**: GitOps configurations and deployment scripts
+- **E2E Demo Scripts**: End-to-end testing automation for platform validation
 
 **Section sources**
 - [backend-service-layout-convention.md](file://docs/workspace/backend-service-layout-convention.md)
@@ -119,6 +136,7 @@ Before starting development, ensure you have the following installed:
 - **Python 3.11+** with pip package manager
 - **Docker** (latest stable version)
 - **Kubernetes** cluster (minikube or local dev cluster)
+- **kubectl** for cluster interaction
 - **Git** for version control
 - **Make** for build automation
 
@@ -342,14 +360,14 @@ Integration tests verify service communication:
 - **Message Queues**: Asynchronous message processing
 - **External Dependencies**: Mocked third-party services
 
-### End-to-End Testing
+### OpenTelemetry Configuration for Testing
 
-E2E tests validate complete user workflows:
+During pytest execution, OpenTelemetry exporters are configured as no-op to eliminate OTLP retry noise while maintaining tracing functionality:
 
-- **Deployment Pipeline**: Kubernetes deployment verification
-- **Service Mesh**: Inter-service communication
-- **Security Flows**: Authentication and authorization
-- **Performance Baselines**: Load testing and benchmarks
+- **OTEL_ENABLED=false**: Disables OTel push pipeline during tests
+- **No-op Exporters**: Prevents network calls to OTLP endpoints
+- **Tracing Preservation**: Maintains trace context for debugging
+- **Performance**: Eliminates test slowdown from network operations
 
 ### Test Execution
 
@@ -360,7 +378,6 @@ make test-all
 # Run specific test suite
 make test-unit
 make test-integration
-make test-e2e
 
 # Coverage reporting
 make test-coverage
@@ -370,6 +387,114 @@ make test-coverage
 - [agent-platform tests](file://products/agent-platform/tests/)
 - [identity-broker tests](file://products/identity-broker/tests/)
 - [tool-gateway tests](file://products/tool-gateway/tests/)
+- [agent-platform telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
+- [identity-broker telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
+- [tool-gateway telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
+
+## End-to-End Testing
+
+### E2E Test Suite Overview
+
+The platform provides comprehensive end-to-end testing capabilities through the `make e2e` target, which orchestrates three demo scripts that validate critical platform workflows against a deployed Kubernetes cluster.
+
+### Prerequisites for E2E Testing
+
+Before running E2E tests, ensure the following prerequisites are met:
+
+1. **Deployed Cluster**: Complete `make deploy` to deploy the platform to your Kubernetes cluster
+2. **Port Forwarding**: Establish port forwards for required services:
+   ```bash
+   kubectl -n dev-luban-aiops port-forward svc/platform-gateway 18083:8000
+   kubectl -n dev-luban-aiops port-forward svc/identity-service 18081:8000
+   ```
+3. **kubectl Access**: Ensure kubectl is configured to communicate with your cluster
+
+### E2E Demo Scripts
+
+The E2E suite consists of three specialized demo scripts, each validating different platform capabilities:
+
+#### Skills Demo (`skills-demo.sh`)
+Validates the skills and grounded guidance functionality:
+- **Skills Hub Status**: Verifies both sample sources (sre-alerting, platform-runbooks) are synced
+- **Deterministic Search Ranking**: Confirms alert-name search returns expected results
+- **Chat Integration**: Tests agent invocation of skills.search tool during chat sessions
+
+#### Incident Demo (`incident-demo.sh`)
+Validates incident triage and collaboration workflows:
+- **Webhook Security**: Verifies unauthenticated webhook requests are rejected
+- **Incident Lifecycle**: Tests create, dedupe, and resolve operations
+- **Query API Visibility**: Ensures incidents are accessible through query APIs
+- **Triage Workflow**: Validates operator-initiated triage processes
+- **Audit Trail**: Confirms durable trail events are properly recorded
+
+#### Mutating Demo (`mutating-demo.sh`)
+Validates bounded mutating actions and safety controls:
+- **Security Controls**: Verifies unauthenticated access is rejected
+- **Mutating Tools Control**: Tests enable/disable behavior for mutating tools
+- **Policy Enforcement**: Validates observer/operator role-based access
+- **HITL Integration**: Optional human-in-the-loop confirmation workflow
+- **RBAC Verification**: Confirms proper Kubernetes RBAC permissions
+
+### Running E2E Tests
+
+Execute the complete E2E test suite:
+
+```bash
+# Run all E2E demos
+make e2e
+
+# Run individual demo scripts
+cd shared/platform-ops/e2e
+./skills-demo.sh
+./incident-demo.sh
+./mutating-demo.sh
+```
+
+### E2E Test Flow
+
+```mermaid
+sequenceDiagram
+participant Dev as "Developer"
+participant Make as "Make Target"
+participant Script as "Demo Script"
+participant K8s as "Kubernetes Cluster"
+participant GW as "Platform Gateway"
+participant ID as "Identity Service"
+Dev->>Make : make e2e
+Make->>Script : Execute skills-demo.sh
+Script->>K8s : Verify skills-hub status
+Script->>GW : Test chat integration
+Script->>ID : Obtain platform token
+Script-->>Dev : Skills validation results
+Make->>Script : Execute incident-demo.sh
+Script->>K8s : Test webhook intake
+Script->>GW : Execute triage workflow
+Script->>K8s : Verify audit trail
+Script-->>Dev : Incident validation results
+Make->>Script : Execute mutating-demo.sh
+Script->>K8s : Test mutating controls
+Script->>GW : Validate policy enforcement
+Script->>K8s : Verify RBAC permissions
+Script-->>Dev : Mutating validation results
+```
+
+### Environment Configuration
+
+E2E scripts support environment variable overrides:
+
+- **NAMESPACE**: Kubernetes namespace (default: `dev-luban-aiops`)
+- **GATEWAY_URL**: Platform gateway URL (default: `http://localhost:18083`)
+- **IDENTITY_URL**: Identity service URL (default: `http://localhost:18081`)
+- **TEST_USER**: Test user identity (default: `luban-operator`)
+- **SKIP_CHAT_LEG**: Skip chat integration tests (optional)
+- **SKIP_TRIAGE_LEG**: Skip triage workflow tests (optional)
+- **RUN_HITL_LEG**: Enable HITL leg for mutating tests (optional)
+
+**Section sources**
+- [Makefile:159-170](file://Makefile#L159-L170)
+- [skills-demo.sh](file://shared/platform-ops/e2e/skills-demo.sh)
+- [incident-demo.sh](file://shared/platform-ops/e2e/incident-demo.sh)
+- [mutating-demo.sh](file://shared/platform-ops/e2e/mutating-demo.sh)
 
 ## Code Review and Pull Request Process
 
@@ -466,6 +591,15 @@ make deploy-production
 - **Metrics Collection**: Prometheus metrics and dashboards
 - **Error Tracking**: Centralized error monitoring
 - **Performance Profiling**: APM integration
+
+#### E2E Testing Debugging
+
+For E2E test failures, use these debugging approaches:
+
+- **Port Forward Verification**: Ensure services are accessible via port forwarding
+- **Cluster State Inspection**: Check pod status and logs for failing components
+- **Network Connectivity**: Verify inter-service communication paths
+- **Token Validation**: Confirm authentication tokens are properly issued and validated
 
 ### Performance Optimization
 
@@ -592,6 +726,13 @@ Customizable policy enforcement:
 - **SSL/TLS Issues**: Validate certificates and encryption settings
 - **Timeout Settings**: Adjust timeout configurations
 
+#### E2E Test Failures
+
+- **Port Forwarding**: Ensure correct port forwards are established for platform-gateway (18083) and identity-service (18081)
+- **Cluster Access**: Verify kubectl context and permissions
+- **Service Health**: Check that all platform services are running and healthy
+- **Token Issues**: Confirm identity service is properly issuing platform tokens
+
 #### Performance Issues
 
 - **Resource Constraints**: Monitor CPU and memory usage
@@ -613,6 +754,9 @@ kubectl exec -it <pod-name> -- curl http://<service>:<port>/health
 
 # Monitor resource usage
 kubectl top pods -n luban-platform
+
+# Verify port forwards
+kubectl get ports -n dev-luban-aiops
 ```
 
 ### Log Analysis
@@ -634,9 +778,11 @@ The Luban AIOps Platform provides a robust foundation for AI-powered operations 
 Key takeaways for contributors:
 
 - **Follow Established Patterns**: Adhere to backend service layout conventions
-- **Comprehensive Testing**: Implement thorough test coverage
+- **Comprehensive Testing**: Implement thorough test coverage including E2E scenarios
 - **Security First**: Prioritize security in all implementations
 - **Performance Conscious**: Design for scalability and efficiency
 - **Documentation Driven**: Maintain up-to-date documentation
 
 By following these guidelines and leveraging the platform's extensible architecture, developers can contribute effectively to the Luban AIOps Platform while maintaining code quality and system reliability.
+
+The addition of comprehensive E2E testing capabilities ensures that platform changes are thoroughly validated against real-world scenarios, providing confidence in deployments and maintaining platform stability as the system evolves.

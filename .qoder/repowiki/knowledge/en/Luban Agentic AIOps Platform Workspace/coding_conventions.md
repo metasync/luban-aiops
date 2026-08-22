@@ -1,6 +1,0 @@
-- Each product follows a uniform internal layout with `src/<package>/api/routes/`, `services/`, `schemas/`, `core/` (config, metrics, observability, request_context, telemetry), and a paired `tests/` directory mirroring source modules.
-- Every Python product pins its interpreter via a local `.python-version` file and uses `uv` for dependency management with a per-product `pyproject.toml` and `uv.lock`.
-- Services expose a consistent entrypoint pattern through `app.py` (FastAPI app factory) and `main.py` (CLI bootstrap), with metadata published via a `metadata.py` module.
-- Cross-product contracts are centralized in `shared/shared-contracts/schemas/*.schema.json` and referenced by products instead of redefining types locally.
-- Policy configuration is kept as YAML bundles (`policy-default.yaml`) under each product's `policies/` directory and synchronized from a single canonical copy via `make sync-policy`.
-- Build and CI gates are unified through the root `Makefile`, which delegates per-product work via `$(MAKE) -C products/$$p <target>` so `make test`, `make lint`, and `make build` operate uniformly across all products.
