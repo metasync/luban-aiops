@@ -1,7 +1,8 @@
 // Markdown rendering for agent replies. Direct port of the legacy
 // renderMarkdown: escape-first, regex-based block conversion. Output is
 // injected as HTML, so every source character passes through the escape
-// step before markup is introduced (legacy parity).
+// step (including quotes, which guard attribute contexts) before markup
+// is introduced, and links are restricted to http(s) targets.
 export function renderMarkdown(text: string): string {
   if (!text) return "";
   let html = text;
@@ -10,7 +11,9 @@ export function renderMarkdown(text: string): string {
   html = html
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 
   // Code blocks (``` ... ```).
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, lang: string, code: string) => {
@@ -41,10 +44,14 @@ export function renderMarkdown(text: string): string {
   // Strikethrough.
   html = html.replace(/~~(.+?)~~/g, "<del>$1</del>");
 
-  // Links.
-  html = html.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noreferrer">$1</a>',
+  // Links — http(s) targets only. Agent replies and incident summaries
+  // derive from attacker-influenceable input, so anything else
+  // (javascript:, data:, vbscript:, …) renders as plain text instead of
+  // a clickable URL.
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label: string, href: string) =>
+    /^https?:\/\//i.test(href)
+      ? `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`
+      : label,
   );
 
   // Blockquotes.

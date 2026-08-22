@@ -61,6 +61,15 @@ Release 1 entries are grouped retrospectively under 0.1.0.
   after the last delta with empty `message_delta` frames; parked
   confirmation turns keep their pending marker (fixture test pins the
   behavior).
+- **In-release review remediation** (pre-push code review): the markdown
+  renderer escapes quotes and restricts links to `http(s)` targets
+  (closes a `javascript:`-link XSS reachable from attacker-influenceable
+  replies/summaries; regression-tested); the agent-platform stream route
+  passes schema-conformant `risk_level` through on `pending_calls` so the
+  portal's mutating-batch badge and per-call risk tags work; stream
+  cleanup is ownership-checked (no superseded-stream state wipe on session
+  switch); transcript fetch failures are only treated as "empty session"
+  on a real 404; stored auth JSON parses defensively.
 
 ## 0.8.1 — 2026-08-22
 

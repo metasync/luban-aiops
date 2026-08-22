@@ -541,7 +541,8 @@ function TriageReportSection({ report }: { report: TriageReport }) {
       <div
         className="md-content"
         // Safe by construction: renderMarkdown escapes every source
-        // character before introducing markup (legacy parity).
+        // character (including quotes) before introducing markup and
+        // only renders http(s) links.
         dangerouslySetInnerHTML={{
           __html: renderMarkdown(report.summary),
         }}

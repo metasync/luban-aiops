@@ -115,7 +115,11 @@ export function useChatStream(): ChatStreamApi {
     streamingRef.current = true;
     setStreaming(true);
   };
-  const endStream = () => {
+  const endStream = (owner: AbortController) => {
+    // Ownership check: setSession() may supersede this stream while its
+    // rejection is still settling; a superseded cleanup must not wipe the
+    // replacement stream's controller and streaming flag.
+    if (controllerRef.current !== owner) return;
     streamingRef.current = false;
     controllerRef.current = null;
     setStreaming(false);
@@ -241,7 +245,7 @@ export function useChatStream(): ChatStreamApi {
                 : String(error);
         }
       } finally {
-        endStream();
+        endStream(controller);
       }
     },
     [handleEvent],
@@ -322,13 +326,16 @@ export function useChatStream(): ChatStreamApi {
           decided.note =
             error instanceof Error ? error.message : String(error);
         } else {
-          // Aborted by a session switch: settle the parked turn.
+          // Aborted by a session switch: settle the parked turn and drop
+          // the transient "Approving…/Denying…" note so the card renders
+          // as plain pending (retryable) when the session comes back.
+          decided.note = undefined;
           if (!turn.confirmationPending) {
             turn.completed = true;
           }
         }
       } finally {
-        endStream();
+        endStream(controller);
       }
     },
     [handleEvent],

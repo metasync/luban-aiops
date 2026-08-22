@@ -125,7 +125,7 @@ off it, keeping approval strictly click-gated.
 
 ## Validation
 
-- Frontend: 56 Vitest unit tests green (stream decoder/transport/hook,
+- Frontend: 60 Vitest unit tests green (stream decoder/transport/hook,
   transcript mapping, markdown escaping, voice language resolution, labels
   parsing), `tsc` strict green, production build green.
 - `make verify` green: all product suites, overlay rendering, policy
@@ -140,6 +140,19 @@ off it, keeping approval strictly click-gated.
   the turn on a natural (and abort-closed) stream end — parity with the
   legacy renderer, which never gated the final render on the terminal
   frame — pinned by a new fixture test.
+- In-release review remediation (pre-push code review):
+  - The markdown renderer now escapes quotes and restricts links to
+    `http(s)` targets, closing a `javascript:`-link XSS reachable from
+    attacker-influenceable agent replies and incident summaries (the
+    legacy renderer carried the same flaw); pinned by regression tests.
+  - The agent-platform stream route now passes schema-conformant
+    `risk_level` through on `pending_calls` (v6, SPEC-021 R-3) so the
+    portal's mutating-batch badge and per-call risk tags light up.
+  - Stream cleanup is ownership-checked, so a session switch can no
+    longer let a superseded stream's late cleanup wipe the replacement
+    stream's state; transcript fetch failures are no longer cached as
+    "empty session" (only a real 404 is), and stored auth JSON parses
+    defensively.
 
 ## Known Limitations
 

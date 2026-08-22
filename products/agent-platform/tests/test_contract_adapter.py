@@ -218,6 +218,38 @@ def test_pending_calls_coercion_drops_malformed_entries() -> None:
     jsonschema.validate(dumped, load_schema("agent-stream-event.schema.json"))
 
 
+def test_pending_calls_pass_through_schema_conformant_risk_level() -> None:
+    """v6 (SPEC-021 R-3): the portal flags mutating batches from the
+    per-call risk_level, so the route must not strip schema-conformant
+    values; non-enum values are omitted, keeping frames valid."""
+    raw = {
+        "type": "confirmation_request",
+        "confirm_id": "cf-3",
+        "pending_calls": [
+            {
+                "call_id": "call-1",
+                "tool_name": "k8s.restart_service",
+                "risk_level": "write",
+            },
+            {
+                "call_id": "call-2",
+                "tool_name": "k8s.get_pod_logs",
+                "risk_level": "read",
+            },
+            {"call_id": "call-3", "tool_name": "task.note", "risk_level": 7},
+            {"call_id": "call-4", "tool_name": "task.note"},
+        ],
+    }
+    event = _normalize_stream_event(raw, "ses-1", "req-1")
+    dumped = json.loads(event.model_dump_json(exclude_none=True))
+    jsonschema.validate(dumped, load_schema("agent-stream-event.schema.json"))
+    calls = dumped["pending_calls"]
+    assert calls[0]["risk_level"] == "write"
+    assert calls[1]["risk_level"] == "read"
+    assert "risk_level" not in calls[2]
+    assert "risk_level" not in calls[3]
+
+
 def test_chat_confirm_request_conforms_to_contract() -> None:
     schema = load_schema("chat-confirm.schema.json")
     jsonschema.validate(

@@ -24,6 +24,7 @@ import {
 import { Bubble, Sender } from "@ant-design/x";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
+import { ApiError } from "../api/client";
 import { getSession, type SessionSummary } from "../api/sessions";
 import { useAuth } from "../auth/AuthContext";
 import { CHAT_CONFIRM_ROLES, hasAnyRole } from "../roles";
@@ -328,7 +329,8 @@ function TurnGroup({
         content={reply}
         contentRender={(content) => (
           // Safe by construction: renderMarkdown escapes every source
-          // character before introducing markup (legacy parity).
+          // character (including quotes) before introducing markup and
+          // only renders http(s) links.
           <div
             className="md-content"
             dangerouslySetInnerHTML={{
@@ -539,12 +541,25 @@ export default function ChatView({
         }
         setSession(target, transcriptToTurns(detail.transcript ?? []));
       })
-      .catch(() => {
+      .catch((error) => {
         if (controller.signal.aborted) return;
-        // Unknown/expired session (e.g. a pinned incident session that the
-        // server has not created yet): open it empty — the first message
-        // creates the server-side state.
-        loadedRef.current.add(target);
+        if (error instanceof ApiError && error.status === 404) {
+          // Unknown/expired session (e.g. a pinned incident session that the
+          // server has not created yet): open it empty — the first message
+          // creates the server-side state.
+          loadedRef.current.add(target);
+          setSession(target, []);
+          return;
+        }
+        // Any other failure (transient gateway blip, expired token) must
+        // not be cached as "empty": leave the miss out of loadedRef so
+        // switching away and back retries the fetch, and tell the
+        // operator why the history is missing.
+        setTranscriptNote(
+          error instanceof ApiError && error.status === 401
+            ? "Session history is unavailable because your sign-in expired. Sign in again to restore it."
+            : "Session history could not be loaded right now. Switch to another session and back to retry.",
+        );
         setSession(target, []);
       })
       .finally(() => {

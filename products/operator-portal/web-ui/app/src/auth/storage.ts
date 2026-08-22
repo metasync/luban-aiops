@@ -25,9 +25,19 @@ export interface PendingAuthRequest {
   redirect_uri: string;
 }
 
+// Guarded parse: a corrupt or hand-edited stored value must degrade to
+// "absent", never throw mid-render or mid-login.
+function parseStored<T>(raw: string | null): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
 export function loadAuthSession(): AuthSession | null {
-  const raw = window.sessionStorage.getItem(AUTH_SESSION_KEY);
-  return raw ? (JSON.parse(raw) as AuthSession) : null;
+  return parseStored<AuthSession>(window.sessionStorage.getItem(AUTH_SESSION_KEY));
 }
 
 export function saveAuthSession(session: AuthSession): void {
@@ -39,8 +49,9 @@ export function clearAuthSession(): void {
 }
 
 export function loadPendingAuthRequest(): PendingAuthRequest | null {
-  const raw = window.sessionStorage.getItem(AUTH_REQUEST_KEY);
-  return raw ? (JSON.parse(raw) as PendingAuthRequest) : null;
+  return parseStored<PendingAuthRequest>(
+    window.sessionStorage.getItem(AUTH_REQUEST_KEY),
+  );
 }
 
 export function savePendingAuthRequest(payload: PendingAuthRequest): void {

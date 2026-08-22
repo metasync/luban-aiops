@@ -256,6 +256,9 @@ _TOOL_RESULT_STATUSES = frozenset(
     {"success", "error", "denied", "approved", "expired", "interrupted"}
 )
 
+# v6 stream schema allows these risk levels on pending_calls entries.
+_PENDING_CALL_RISK_LEVELS = frozenset({"read", "write", "admin"})
+
 
 def _normalize_stream_event(
     raw: dict[str, object], session_id: str, request_id: str
@@ -320,15 +323,20 @@ def _coerce_pending_calls(value: object) -> list[dict[str, object]] | None:
         call_id = item.get("call_id")
         tool_name = item.get("tool_name")
         parameters = item.get("parameters")
-        calls.append(
-            {
-                "call_id": call_id if isinstance(call_id, str) else "",
-                "tool_name": tool_name if isinstance(tool_name, str) else "",
-                "parameters": (
-                    parameters if isinstance(parameters, dict) else {}
-                ),
-            }
-        )
+        entry: dict[str, object] = {
+            "call_id": call_id if isinstance(call_id, str) else "",
+            "tool_name": tool_name if isinstance(tool_name, str) else "",
+            "parameters": (
+                parameters if isinstance(parameters, dict) else {}
+            ),
+        }
+        # v6 (SPEC-021 R-3): the portal flags mutating batches from this
+        # field, so pass through schema-conformant values and omit the
+        # optional field otherwise (task tools carry no risk level).
+        risk_level = item.get("risk_level")
+        if isinstance(risk_level, str) and risk_level in _PENDING_CALL_RISK_LEVELS:
+            entry["risk_level"] = risk_level
+        calls.append(entry)
     return calls or None
 
 
