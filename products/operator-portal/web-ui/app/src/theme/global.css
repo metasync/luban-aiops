@@ -63,6 +63,41 @@ body {
   gap: 8px;
 }
 
+/* Off-canvas sidebar trigger: the inline Sider auto-collapses below
+   antd's lg breakpoint (992px), so the hamburger only exists there.
+   Desktop hides it entirely — the persistent sidebar is the nav. */
+.mobile-menu-button {
+  display: none;
+}
+
+@media (max-width: 991px) {
+  .mobile-menu-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 100;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  }
+
+  /* Keep the pinned trigger clear of view content (flush views own
+     their own padding). */
+  .view-container:not(.view-container-flush) {
+    padding-left: 64px;
+  }
+
+  /* The chat view is flush: clear the trigger out of the session-panel
+     header instead. Scoped selector outranks the base padding rule that
+     appears later in this stylesheet. */
+  .chat-view .session-panel-header {
+    padding-left: 56px;
+  }
+}
+
 .view-container {
   height: 100%;
   overflow-y: auto;
