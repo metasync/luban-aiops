@@ -1,6 +1,6 @@
-- Each product exposes a FastAPI app via `src/<pkg>/app.py` and a CLI entrypoint in `src/<pkg>/main.py`, both importing a shared `metadata.py` for version/service identification.
-- Cross-cutting infrastructure (config, metrics, observability, request context, telemetry, runtime) is provided by a `core/` subpackage duplicated across every service, keeping business logic in `services/` and routes in `api/routes/`.
-- API payloads are validated against JSON Schema files stored in `shared/shared-contracts/schemas/` rather than ad-hoc Pydantic models inside services.
-- Policy enforcement is decoupled into a `policies/policy-default.yaml` bundle per service, synchronized from a single canonical copy via `make sync-policy` and validated by `validate_policy.py`.
-- Services emit audit events through a pluggable `audit_emitter` service module so ingestion backends can be swapped without changing route code.
-- Product directories carry a `.python-version` file pinning the interpreter, and the root `.python-version` plus `mk/python.mk` standardize the toolchain across all Python products.
+- Each product follows a uniform internal layout of `src/<service>/api/routes/`, `services/`, `schemas/`, `core/`, and `policies/`, with `app.py` and `main.py` as the FastAPI-style entry points.
+- Inter-service contracts are declared as JSON Schema files under `shared/shared-contracts/schemas/` and validated at build time rather than imported as shared Python code.
+- Policy decisions are centralized around a canonical `policy-default.yaml` in `shared/shared-contracts/policies/` and copied into each consuming product via the `sync-policy` target.
+- Every Python product pins its interpreter via a local `.python-version` file alongside a `pyproject.toml` and `uv.lock`, enabling reproducible per-product environments and container builds.
+- Cross-product orchestration is driven by explicit lists in the root `Makefile` (`PYTHON_PRODUCTS`, `IMAGE_PRODUCTS`, `OVERLAYS`) rather than filesystem discovery, keeping the build graph declarative.
+- Versioning is enforced centrally: a single root `VERSION` file is the source of truth, and `make validate-version` ensures all products and the portal stay in lockstep.
