@@ -38,11 +38,12 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced mobile navigation experience with improved hamburger menu button behavior and proper positioning
-- Implemented responsive styling for desktop/mobile views with correct 992px breakpoint handling
-- Fixed critical usability issues where hamburger menu was incorrectly visible on desktop screens
-- Ensured proper responsive behavior below 992px breakpoint with fixed positioning and z-index management
-- Updated mobile drawer integration with proper padding adjustments for view content
+- Enhanced navigation system with permanently visible hamburger menu button across all screen sizes
+- Implemented new useNarrowViewport() hook for responsive breakpoint detection at 992px
+- Improved sidebar collapsible behavior for desktop while maintaining drawer functionality below lg breakpoint
+- Enhanced accessibility with dynamic aria-labels based on viewport state and sidebar status
+- Restructured styling with .view-container-inset class for proper content spacing when sidebar is absent or folded
+- Updated mobile navigation with improved positioning and z-index management
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -72,7 +73,7 @@
 
 The Operator Portal is a modern web-based administrative interface designed for platform administration and monitoring within the Luban AIOPS ecosystem. The portal has been completely rebuilt using React 18, TypeScript, and Vite, replacing the previous vanilla JavaScript implementation. It provides operators with a sophisticated two-column shell interface featuring a persistent sidebar for navigation and a main content area for interactive operations. The portal serves as a centralized control plane for platform administrators, offering real-time visibility into system status through an interactive chat interface, comprehensive evidence panels for tool execution tracking, configuration management capabilities, and administrative functions necessary for maintaining the AI-powered agent platform infrastructure.
 
-**Updated** The portal now features enhanced mobile navigation with improved hamburger menu button behavior, proper responsive styling for desktop/mobile views, and correct positioning of mobile menu triggers. The fix addresses critical usability issues where the hamburger menu was incorrectly visible on desktop screens and ensures proper responsive behavior below 992px breakpoint. Enhanced security measures include improved XSS prevention in markdown rendering, robust session management with defensive parsing, and refined error handling across all components. The platform maintains version consistency at v0.8.1 with enhanced cache-busting mechanisms and comprehensive skills integration with "Cited guidance" chips for operational traceability. Recent updates include backend API v6 schema compliance for improved risk level handling in pending calls.
+**Updated** The portal now features an enhanced navigation system with a permanently visible hamburger menu button across all screen sizes, providing consistent access to navigation regardless of viewport size. The new useNarrowViewport() hook enables precise responsive breakpoint detection at 992px, ensuring optimal user experience across devices. Enhanced sidebar collapsible behavior maintains drawer functionality below the lg breakpoint while improving desktop interaction patterns. The navigation system includes improved accessibility with dynamic aria-labels that adapt based on viewport state and sidebar status. Recent updates also include restructured styling with .view-container-inset class for proper content spacing when sidebar is absent or folded, ensuring consistent visual presentation across different navigation states.
 
 ## Project Structure
 
@@ -94,32 +95,34 @@ A --> K[PermissionsView.tsx]
 A --> L[SkillsView.tsx]
 A --> M[ToolsView.tsx]
 end
-subgraph "Mobile Navigation"
-N[global.css] --> O[Drawer Component]
-P[Menu Button] --> Q[Responsive Breakpoints]
+subgraph "Enhanced Navigation System"
+N[useNarrowViewport Hook] --> O[Responsive Breakpoint Detection]
+P[Mobile Menu Button] --> Q[Dynamic ARIA Labels]
+R[Sidebar Collapsible] --> S[Drawer Integration]
+T[view-container-inset] --> U[Content Spacing]
 end
 subgraph "Voice Input"
-R[useSpeechRecognition.ts] --> S[languages.ts]
+V[useSpeechRecognition.ts] --> W[languages.ts]
 end
 subgraph "Build & Deployment"
-T[vite.config.ts] --> U[package.json]
-V[Dockerfile] --> W[Makefile]
-X[VERSION] --> Y[validate_version.py]
+X[vite.config.ts] --> Y[package.json]
+Z[Dockerfile] --> AA[Makefile]
+BB[VERSION] --> CC[validate_version.py]
 end
 subgraph "Backend Services"
-Z[Agent Platform] --> AA[HITL Confirmations]
-AB[Platform Gateway] --> AC[Identity Broker]
-AD[Tool Gateway] --> AE[Policy Engine]
+DD[Agent Platform] --> EE[HITL Confirmations]
+FF[Platform Gateway] --> GG[Identity Broker]
+HH[Tool Gateway] --> II[Policy Engine]
 end
 ```
 
 **Diagram sources**
-- [App.tsx:1-318](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L318)
-- [ChatView.tsx:1-728](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L728)
+- [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
+- [App.tsx:316-330](file://products/operator-portal/web-ui/app/src/App.tsx#L316-L330)
+- [global.css:66-100](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L100)
+- [ChatView.tsx:1-200](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L200)
 - [useChatStream.ts:1-368](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L368)
 - [transport.ts:1-117](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L1-L117)
-- [markdown.ts:1-35](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L35)
-- [global.css:66-99](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L99)
 - [AuditView.tsx:1-250](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L250)
 - [IncidentsView.tsx:1-600](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx#L1-L600)
 - [PermissionsView.tsx:1-99](file://products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx#L1-L99)
@@ -165,6 +168,14 @@ The Operator Portal consists of several key React components and hooks that work
 - **Mobile Drawer**: Off-canvas navigation for narrow screens with proper focus management
 - **Settings & Debug Panel**: Configuration management and debugging tools
 
+### Enhanced Navigation System
+- **Permanently Visible Hamburger Menu**: Fixed-position navigation trigger accessible across all screen sizes
+- **Responsive Breakpoint Detection**: useNarrowViewport() hook for precise 992px breakpoint handling
+- **Collapsible Sidebar**: Desktop sidebar with collapse/expand functionality
+- **Drawer Integration**: Mobile-specific off-canvas navigation below lg breakpoint
+- **Dynamic Accessibility**: Context-aware aria-labels that change based on viewport and sidebar state
+- **Content Spacing Management**: Automatic padding adjustments via .view-container-inset class
+
 ### HITL Confirmation System
 - **Inline Approval Cards**: Warning-toned bordered cards for pending tool confirmations
 - **Role-Based Controls**: Approve/Deny buttons visible only to authorized roles
@@ -178,10 +189,11 @@ The Operator Portal consists of several key React components and hooks that work
 - **Validation System**: Automated version consistency checks across all platform components
 - **Deployment Consistency**: Coordinated versioning across all platform services
 
-**Updated** The interface now includes enhanced mobile navigation with improved hamburger menu button behavior, proper responsive styling for desktop/mobile views, and correct positioning of mobile menu triggers below the 992px breakpoint. Enhanced security measures include comprehensive XSS prevention in markdown rendering, improved session management with defensive parsing, enhanced stream ownership handling during session switches, refined error handling for different failure types, and backend API v6 schema compliance for risk level handling in pending calls. The platform has been updated to version 0.8.1 with enhanced version consistency across the platform ecosystem.
+**Updated** The interface now includes an enhanced navigation system with a permanently visible hamburger menu button that provides consistent access to navigation across all screen sizes. The new useNarrowViewport() hook enables precise responsive breakpoint detection at 992px, while improved sidebar collapsible behavior enhances desktop interaction patterns. Enhanced accessibility features include dynamic aria-labels that adapt based on viewport state and sidebar status. The restructured styling with .view-container-inset class ensures proper content spacing when sidebar is absent or folded. Enhanced security measures include comprehensive XSS prevention in markdown rendering, improved session management with defensive parsing, enhanced stream ownership handling during session switches, refined error handling for different failure types, and backend API v6 schema compliance for risk level handling in pending calls. The platform has been updated to version 0.8.1 with enhanced version consistency across the platform ecosystem.
 
 **Section sources**
-- [App.tsx:1-318](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L318)
+- [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
+- [App.tsx:316-330](file://products/operator-portal/web-ui/app/src/App.tsx#L316-L330)
 - [ChatView.tsx:1-728](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L728)
 - [useChatStream.ts:1-368](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L368)
 
@@ -193,7 +205,7 @@ The Operator Portal follows a modern React single-page application architecture 
 sequenceDiagram
 participant User as "Browser"
 participant React as "React App"
-participant MobileNav as "Mobile Navigation"
+participant Nav as "Navigation System"
 participant Auth as "Auth Context"
 participant Stream as "Chat Stream Hook"
 participant Views as "View Components"
@@ -202,15 +214,17 @@ participant Gateway as "API Gateway"
 participant Agent as "Agent Platform"
 participant HITL as "HITL Registry"
 User->>React : Load React SPA
-Note over MobileNav : Responsive breakpoint check (992px)
-MobileNav->>React : Show/hide hamburger menu
+Note over Nav : useNarrowViewport() detects 992px breakpoint
+Nav->>React : Set narrow viewport state
+React->>Nav : Render hamburger menu with dynamic aria-labels
+Note over React : Enhanced Navigation with view-container-inset
 React->>Auth : Initialize authentication
 Auth->>Gateway : /api/v1/auth/login
 Gateway->>Agent : Redirect to OIDC provider
 Agent-->>Gateway : Authorization code
 Gateway-->>Auth : Access tokens + identity
-Note over React : Enhanced Navigation
-React->>Views : Navigate to specific views
+Note over React : Responsive Content Spacing
+React->>Views : Navigate to specific views with proper padding
 Views->>Gateway : View-specific API calls
 Note over React : Chat & Streaming with HITL
 User->>React : Send message via ChatView
@@ -228,8 +242,10 @@ Stream-->>React : Active session updated
 ```
 
 **Diagram sources**
-- [App.tsx:206-318](file://products/operator-portal/web-ui/app/src/App.tsx#L206-L318)
-- [global.css:66-99](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L99)
+- [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
+- [App.tsx:281-287](file://products/operator-portal/web-ui/app/src/App.tsx#L281-L287)
+- [App.tsx:316-330](file://products/operator-portal/web-ui/app/src/App.tsx#L316-L330)
+- [global.css:66-100](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L100)
 - [IncidentsView.tsx:219-228](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx#L219-L228)
 - [useSessionWorkspace.ts:136-159](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L136-L159)
 - [ChatView.tsx:449-626](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L449-L626)
@@ -247,9 +263,16 @@ The main React application implements a component-based architecture with clear 
 #### App Component
 - **Layout Management**: Ant Design Layout with responsive sidebar and content areas
 - **Navigation State**: Active view management with role-based visibility controls
-- **Mobile Support**: Drawer-based navigation for narrow screen devices with proper breakpoint handling
+- **Enhanced Mobile Support**: Permanently visible hamburger menu with responsive drawer integration
 - **Loading States**: Proper loading indicators during authentication and data fetching
 - **View Routing**: Dynamic routing to different view components (chat, incidents, audit, permissions, tools, skills)
+
+#### Enhanced Navigation Implementation
+- **useNarrowViewport Hook**: Custom hook for responsive breakpoint detection at 992px
+- **Collapsible Sidebar**: Desktop sidebar with collapse/expand functionality
+- **Drawer Integration**: Mobile-specific off-canvas navigation below lg breakpoint
+- **Dynamic ARIA Labels**: Context-aware accessibility labels that change based on viewport and sidebar state
+- **Content Spacing**: Automatic padding adjustments via .view-container-inset class
 
 #### Enhanced View Components
 - **AuditView**: Role-gated audit trail with filtering and pagination
@@ -266,7 +289,7 @@ The main React application implements a component-based architecture with clear 
 
 ### Enhanced Navigation System
 
-The React implementation provides sophisticated navigation with Ant Design components:
+The React implementation provides sophisticated navigation with Ant Design components and enhanced mobile responsiveness:
 
 #### Sectioned Navigation
 - **Control Section**: Incidents, Audit trail, and Permissions views
@@ -275,6 +298,8 @@ The React implementation provides sophisticated navigation with Ant Design compo
 - **Automatic Section Hiding**: Sections hide when all entries are hidden
 
 #### Mobile Responsive Design
+- **Permanently Visible Hamburger Menu**: Fixed-position navigation trigger accessible across all screen sizes
+- **Responsive Breakpoint Detection**: useNarrowViewport() hook for precise 992px breakpoint handling
 - **Drawer Navigation**: Off-canvas sidebar for mobile devices with proper positioning
 - **Touch-Friendly**: Larger touch targets and swipe gestures
 - **Focus Management**: Proper keyboard navigation and screen reader support
@@ -296,16 +321,17 @@ The multi-session workspace provides comprehensive session management with enhan
 - **History Seeding**: Resumed sessions render like live conversations
 - **Defensive Parsing**: Enhanced parseStored function handles malformed or corrupted session data
 
-**Updated** The React architecture provides better type safety, component reusability, and maintainability while preserving all existing functionality from the legacy implementation. The new view components provide dedicated interfaces for different operational tasks. Enhanced session management now includes defensive parsing to handle edge cases in stored session data. Enhanced mobile navigation now includes proper hamburger menu positioning and responsive behavior below 992px breakpoint.
+**Updated** The React architecture provides better type safety, component reusability, and maintainability while preserving all existing functionality from the legacy implementation. The new view components provide dedicated interfaces for different operational tasks. Enhanced session management now includes defensive parsing to handle edge cases in stored session data. The enhanced navigation system includes a permanently visible hamburger menu button, responsive breakpoint detection at 992px, improved sidebar collapsible behavior, dynamic accessibility labels, and proper content spacing management with .view-container-inset class.
 
 **Section sources**
-- [App.tsx:1-318](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L318)
+- [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
+- [App.tsx:222-333](file://products/operator-portal/web-ui/app/src/App.tsx#L222-L333)
 - [ChatView.tsx:1-728](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L728)
 - [useSessionWorkspace.ts:1-174](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L1-L174)
 
 ### CSS Styling System
 
-The styling system maintains design consistency while leveraging Ant Design's theming:
+The styling system maintains design consistency while leveraging Ant Design's theming with enhanced navigation support:
 
 #### Design Tokens
 - **Dark Theme**: Modern color palette optimized for extended use
@@ -323,11 +349,11 @@ The styling system maintains design consistency while leveraging Ant Design's th
 - **Settings Panel**: Grid-based layout for configuration options
 - **Mobile Drawer**: Slide-in navigation with backdrop overlay
 
-#### Mobile Navigation Styling
-- **Hamburger Menu Button**: Fixed positioning with proper z-index and shadow effects
+#### Enhanced Navigation Styling
+- **Permanently Visible Hamburger Menu**: Fixed positioning with proper z-index and shadow effects
 - **Responsive Breakpoints**: Correct 992px breakpoint for mobile/desktop switching
-- **Padding Adjustments**: Proper spacing to prevent content overlap with mobile menu trigger
-- **View Container Padding**: Automatic adjustment for non-flush views to accommodate mobile menu button
+- **Content Spacing Management**: Automatic adjustment via .view-container-inset class for non-flush views
+- **Sidebar Brand Padding**: Proper spacing to prevent content overlap with navigation trigger
 - **Chat View Padding**: Specific padding adjustments for flush chat views to avoid header overlap
 
 #### HITL Confirmation Card Styling
@@ -337,12 +363,14 @@ The styling system maintains design consistency while leveraging Ant Design's th
 - **Status Messages**: Clear status indicators for awaiting decision, approving/denying, and final states
 
 **Section sources**
-- [global.css:1-409](file://products/operator-portal/web-ui/app/src/theme/global.css#L1-L409)
+- [global.css:66-100](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L100)
+- [global.css:102-113](file://products/operator-portal/web-ui/app/src/theme/global.css#L102-L113)
+- [global.css:341-376](file://products/operator-portal/web-ui/app/src/theme/global.css#L341-L376)
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
 
 ## Enhanced Navigation System
 
-The Operator Portal features a sophisticated navigation system with sectioned organization and role-based visibility controls, implemented using Ant Design components with enhanced mobile responsiveness.
+The Operator Portal features a sophisticated navigation system with sectioned organization and role-based visibility controls, implemented using Ant Design components with enhanced mobile responsiveness and permanently visible navigation access.
 
 ### Sectioned Navigation Architecture
 
@@ -363,15 +391,22 @@ The navigation system organizes functions into logical sections with automatic v
 - **Role-Based Filtering**: Individual navigation items hidden based on user roles and authentication status
 - **Server-Side Enforcement**: All navigation items enforce server-side permissions on every request
 
-### Mobile Navigation Implementation
+### Enhanced Mobile Navigation Implementation
 
-The mobile navigation system provides seamless cross-device experience:
+The mobile navigation system provides seamless cross-device experience with permanently visible navigation access:
 
-#### Hamburger Menu Button
-- **Fixed Positioning**: Positioned at top-left corner with proper z-index layering
-- **Responsive Display**: Only visible below 992px breakpoint using CSS media queries
+#### Permanently Visible Hamburger Menu
+- **Fixed Positioning**: Positioned at top-left corner with proper z-index layering (z-index: 100)
+- **Always Visible**: Displayed across all screen sizes for consistent navigation access
 - **Visual Styling**: Dark background with border and shadow for clear visibility
-- **Accessibility**: Proper aria-label and keyboard navigation support
+- **Accessibility**: Dynamic aria-labels that change based on viewport state and sidebar status
+- **Responsive Behavior**: Opens drawer on narrow viewports (< 992px), toggles sidebar on desktop
+
+#### useNarrowViewport Hook
+- **Responsive Breakpoint Detection**: Custom hook that monitors viewport width changes at 992px breakpoint
+- **Media Query Integration**: Uses window.matchMedia for efficient breakpoint detection
+- **Event Listener Management**: Proper cleanup of media query event listeners
+- **State Management**: Maintains narrow viewport state for conditional rendering
 
 #### Drawer Integration
 - **Off-Canvas Navigation**: Slide-in sidebar from left side of screen
@@ -379,15 +414,15 @@ The mobile navigation system provides seamless cross-device experience:
 - **Close Behavior**: Automatic closing on navigation item selection
 - **Backdrop Support**: Semi-transparent backdrop for focus indication
 
-#### Responsive Breakpoint Handling
-- **Desktop Mode**: Persistent sidebar with full navigation
-- **Mobile Mode**: Collapsed sidebar with hamburger menu trigger
-- **Content Padding**: Automatic adjustment to prevent content overlap with mobile menu button
-- **View-Specific Adjustments**: Different padding strategies for flush vs. non-flush views
+#### Content Spacing Management
+- **.view-container-inset Class**: Applied when sidebar is absent or folded for proper content spacing
+- **Automatic Padding**: 64px left padding for non-flush views to accommodate navigation trigger
+- **Chat View Handling**: Special padding for session-panel-header in flush chat views
+- **Brand Block Adjustment**: Proper padding for sidebar brand block to avoid overlap
 
 ### Navigation Implementation Details
 
-The React implementation uses Ant Design Menu with dynamic item generation:
+The React implementation uses Ant Design Menu with dynamic item generation and enhanced accessibility:
 
 #### Menu Configuration
 ```typescript
@@ -400,6 +435,12 @@ const items = useMemo<MenuProps["items"]>(() => {
   return entries;
 }, [roles, signedIn]);
 ```
+
+#### Dynamic ARIA Labels
+- **Narrow Viewport**: "Open navigation" when drawer is closed
+- **Desktop Collapsed**: "Show navigation" when sidebar is collapsed
+- **Desktop Expanded**: "Hide navigation" when sidebar is expanded
+- **Context-Aware**: Labels automatically update based on current state
 
 #### Role-Based Access Control
 
@@ -416,12 +457,12 @@ The navigation system implements comprehensive role-based access control:
 - **Server-Side Validation**: Gateway re-enforces permissions on every API request
 - **Graceful Fallback**: Users automatically redirected to chat if they lose required roles
 
-**Updated** The navigation system now provides enhanced mobile experience with proper hamburger menu positioning, responsive breakpoint handling at 992px, and seamless drawer integration. The desktop navigation remains unchanged with persistent sidebar, while mobile devices get optimized touch-friendly navigation with proper spacing and positioning.
+**Updated** The navigation system now provides enhanced mobile experience with a permanently visible hamburger menu button that ensures consistent navigation access across all screen sizes. The new useNarrowViewport() hook enables precise responsive breakpoint detection at 992px, while improved sidebar collapsible behavior enhances desktop interaction patterns. Enhanced accessibility features include dynamic aria-labels that adapt based on viewport state and sidebar status. The restructured styling with .view-container-inset class ensures proper content spacing when sidebar is absent or folded.
 
 **Section sources**
-- [App.tsx:56-145](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L145)
-- [App.tsx:282-299](file://products/operator-portal/web-ui/app/src/App.tsx#L282-L299)
-- [global.css:66-99](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L99)
+- [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
+- [App.tsx:316-330](file://products/operator-portal/web-ui/app/src/App.tsx#L316-L330)
+- [global.css:66-100](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L100)
 - [roles.ts:1-34](file://products/operator-portal/web-ui/app/src/roles.ts#L1-L34)
 
 ## Role-Gated Audit Trail System
@@ -1217,7 +1258,7 @@ The deployment process includes enhanced version management:
 - **Version Validation**: Automated validation ensures all platform components use consistent versions
 - **Deployment Coordination**: Coordinated versioning across all platform services
 
-**Updated** The deployment now supports both the new React/TypeScript application and the legacy vanilla JavaScript implementation, with enhanced HITL confirmation bridging system, improved navigation system with sectioned organization, comprehensive workspace resource discovery capabilities, enhanced skills integration with "Cited guidance" chips, comprehensive incident triage with deep linking capabilities, and enhanced mobile navigation with proper hamburger menu positioning and responsive behavior below 992px breakpoint. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. Enhanced security measures include improved XSS prevention and defensive session parsing.
+**Updated** The deployment now supports both the new React/TypeScript application and the legacy vanilla JavaScript implementation, with enhanced HITL confirmation bridging system, improved navigation system with permanently visible hamburger menu button, enhanced responsive breakpoint detection at 992px, improved sidebar collapsible behavior, enhanced accessibility with dynamic aria-labels, and restructured styling with .view-container-inset class for proper content spacing. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. Enhanced security measures include improved XSS prevention and defensive session parsing.
 
 **Section sources**
 - [nginx.conf](file://products/operator-portal/nginx.conf)
@@ -1276,10 +1317,10 @@ The React implementation provides additional customization points:
 - **Workspace Resource Styling**: Customizable table layouts for tools and skills catalogs
 - **Incident View Styling**: Customizable appearance for incident triage interface with status badges and action buttons
 - **Voice Input Styling**: Customizable appearance for voice input controls and language selection
-- **Mobile Navigation Styling**: Customizable hamburger menu button appearance, positioning, and responsive behavior
+- **Enhanced Navigation Styling**: Customizable hamburger menu button appearance, positioning, and responsive behavior with permanently visible navigation access
 
 **Section sources**
-- [global.css:1-409](file://products/operator-portal/web-ui/app/src/theme/global.css#L1-L409)
+- [global.css:66-100](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L100)
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
 
 ## Accessibility Features
@@ -1322,6 +1363,7 @@ The React implementation includes additional accessibility improvements:
 - **Sidebar Navigation**: Accessible navigation with proper ARIA attributes
 - **User Card**: Accessible user identity display with proper labeling
 - **Mobile Drawer**: Accessible off-canvas navigation with proper focus management
+- **Enhanced Navigation**: Permanently visible hamburger menu with dynamic aria-labels that adapt based on viewport state and sidebar status
 - **HITL Confirmation Cards**: Accessible approval interfaces with proper ARIA labels and keyboard navigation
 - **Audit Trail**: Accessible table with proper headers and expandable details
 - **Cited Guidance Chips**: Accessible chip elements with proper labeling and keyboard navigation
@@ -1330,10 +1372,10 @@ The React implementation includes additional accessibility improvements:
 - **Voice Input**: Accessible voice input with proper feedback and error handling
 - **Incident Views**: Accessible incident management interface with proper form labels and status announcements
 - **Deep Linking**: Accessible navigation between incidents and chat with proper focus management
-- **Mobile Navigation**: Accessible hamburger menu with proper ARIA labels and keyboard navigation support
 
 **Section sources**
-- [global.css:1-409](file://products/operator-portal/web-ui/app/src/theme/global.css#L1-L409)
+- [global.css:66-100](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L100)
+- [App.tsx:316-330](file://products/operator-portal/web-ui/app/src/App.tsx#L316-L330)
 - [index.html:1-291](file://products/operator-portal/web-ui/app/index.html#L1-L291)
 
 ## Browser Compatibility
@@ -1375,6 +1417,7 @@ The React implementation maintains broad browser compatibility:
 - **CSS Custom Properties**: Theme customization with fallback values
 - **Modern JavaScript**: ES6+ features with appropriate polyfills
 - **Responsive Design**: Mobile-first approach with progressive enhancement
+- **Enhanced Navigation**: Cross-browser support for permanently visible hamburger menu, responsive breakpoints, and drawer functionality
 - **HITL Confirmation Cards**: Inline approval interfaces compatible with all modern browsers
 - **Skills Integration**: Cited guidance chips work across all supported browsers
 - **Permission Matrix**: Table-based displays compatible with all modern browsers
@@ -1382,7 +1425,6 @@ The React implementation maintains broad browser compatibility:
 - **Voice Input**: Graceful degradation when Web Speech API is unavailable
 - **Incident Views**: Full browser compatibility for incident management interface
 - **Deep Linking**: Cross-browser support for session pinning and navigation
-- **Mobile Navigation**: Cross-browser support for responsive breakpoints and drawer functionality
 
 **Section sources**
 - [Dockerfile](file://products/operator-portal/Dockerfile)
@@ -1490,17 +1532,17 @@ Common issues and their solutions when working with the Operator Portal.
 - Review browser console for role detection errors
 - Confirm navigation section visibility logic is working correctly
 
-### Mobile Navigation Issues
+### Enhanced Navigation Issues
 
-**Problem**: Hamburger menu not appearing or behaving incorrectly on mobile devices
+**Problem**: Hamburger menu not appearing or behaving incorrectly across screen sizes
 **Solution**:
-- Verify viewport width is below 992px breakpoint
-- Check CSS media queries are properly applied
-- Ensure .mobile-menu-button class has correct display property
-- Verify z-index values are not conflicting with other elements
-- Check that drawer component is properly initialized
-- Review browser console for JavaScript errors in mobile navigation logic
-- Test on actual mobile device or use browser developer tools device emulation
+- Verify useNarrowViewport() hook is properly detecting viewport changes at 992px breakpoint
+- Check that .mobile-menu-button class has correct display property and fixed positioning
+- Ensure z-index values (100) are not conflicting with other elements
+- Verify dynamic aria-labels are updating correctly based on viewport and sidebar state
+- Check that .view-container-inset class is properly applied when sidebar is absent or folded
+- Review browser console for JavaScript errors in navigation logic
+- Test on actual devices or use browser developer tools device emulation
 
 ### Responsive Layout Issues
 
@@ -1628,13 +1670,15 @@ Common issues and their solutions when working with the Operator Portal.
 - **Session Switching Errors**: Verify stream ownership handling during session transitions
 - **Malformed Data**: Check defensive parsing for corrupted session data
 - **Backend API Issues**: Verify API v6 schema compliance for risk level handling
-- **Mobile Navigation Errors**: Check responsive breakpoint handling and drawer initialization
+- **Navigation Errors**: Check responsive breakpoint handling and drawer initialization
+- **Content Spacing Issues**: Verify .view-container-inset class application and proper padding calculations
 
-**Updated** Added comprehensive troubleshooting guidance for the enhanced mobile navigation system, including hamburger menu positioning issues, responsive breakpoint problems, drawer integration issues, and proper handling of mobile-specific CSS styles. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism, and enhanced error handling for different failure types including network errors, authentication failures, and streaming interruptions.
+**Updated** Added comprehensive troubleshooting guidance for the enhanced navigation system, including permanently visible hamburger menu button issues, useNarrowViewport() hook problems, responsive breakpoint detection issues, drawer integration problems, dynamic aria-labels not updating correctly, and proper handling of .view-container-inset class for content spacing. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism, and enhanced error handling for different failure types including network errors, authentication failures, and streaming interruptions.
 
 **Section sources**
-- [App.tsx:1-318](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L318)
-- [global.css:66-99](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L99)
+- [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
+- [App.tsx:316-330](file://products/operator-portal/web-ui/app/src/App.tsx#L316-L330)
+- [global.css:66-100](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L100)
 - [ChatView.tsx:1-728](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L728)
 - [useChatStream.ts:1-368](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L368)
 - [IncidentsView.tsx:1-600](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx#L1-L600)
@@ -1644,10 +1688,10 @@ Common issues and their solutions when working with the Operator Portal.
 
 The Operator Portal provides a comprehensive, accessible, and customizable web interface for platform administration and monitoring within the Luban AIOPS ecosystem. The complete rebuild using React 18, TypeScript, and Vite delivers enterprise-grade functionality while maintaining simplicity and performance.
 
-**Updated** The recent enhancements include comprehensive mobile navigation improvements with proper hamburger menu positioning and responsive behavior below 992px breakpoint, enhanced security measures with improved XSS prevention in markdown rendering through comprehensive quote escaping and protocol filtering, improved session management with defensive parseStored function to handle malformed or corrupted session data, enhanced stream ownership handling during session switches to prevent cross-session data contamination, refined error handling for different failure types including network errors, authentication failures, and streaming interruptions, and backend API v6 schema compliance for risk level handling in pending calls. The platform now features a complete React/TypeScript frontend architecture implementing SPEC-023 with enhanced streaming infrastructure, multi-session workspace management, voice input support, comprehensive view implementations (AuditView, IncidentsView, PermissionsView, SkillsView, ToolsView), and improved role-gated navigation with enhanced mobile responsiveness.
+**Updated** The recent enhancements include an enhanced navigation system with a permanently visible hamburger menu button that ensures consistent navigation access across all screen sizes, new useNarrowViewport() hook for precise responsive breakpoint detection at 992px, improved sidebar collapsible behavior that enhances desktop interaction patterns while maintaining drawer functionality below lg breakpoint, enhanced accessibility with dynamic aria-labels that adapt based on viewport state and sidebar status, and restructured styling with .view-container-inset class for proper content spacing when sidebar is absent or folded. Additional improvements include comprehensive mobile navigation with proper positioning and z-index management, enhanced security measures with improved XSS prevention in markdown rendering through comprehensive quote escaping and protocol filtering, improved session management with defensive parseStored function to handle malformed or corrupted session data, enhanced stream ownership handling during session switches to prevent cross-session data contamination, refined error handling for different failure types including network errors, authentication failures, and streaming interruptions, and backend API v6 schema compliance for risk level handling in pending calls. The platform now features a complete React/TypeScript frontend architecture implementing SPEC-023 with enhanced streaming infrastructure, multi-session workspace management, voice input support, comprehensive view implementations (AuditView, IncidentsView, PermissionsView, SkillsView, ToolsView), and improved role-gated navigation with enhanced mobile responsiveness.
 
-Key strengths of the enhanced portal include its modular React architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities, enhanced skills integration capabilities, improved navigation organization with sectioned grouping, robust multi-session workspace management, comprehensive incident triage with automated workflows, voice input support for hands-free operation, seamless deep linking between incidents and collaborative chat sessions, and enhanced mobile navigation with proper responsive behavior. The enhanced security measures ensure protection against XSS attacks while maintaining full functionality.
+Key strengths of the enhanced portal include its modular React architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities, enhanced skills integration capabilities, improved navigation organization with sectioned grouping and permanently visible navigation access, robust multi-session workspace management, comprehensive incident triage with automated workflows, voice input support for hands-free operation, seamless deep linking between incidents and collaborative chat sessions, and enhanced mobile navigation with proper responsive behavior below 992px breakpoint. The enhanced security measures ensure protection against XSS attacks while maintaining full functionality.
 
-The React/TypeScript implementation represents a significant advancement in developer experience and code maintainability, while preserving all existing functionality from the legacy vanilla JavaScript implementation. The enhanced mobile navigation system provides seamless cross-device experience with proper hamburger menu positioning, responsive breakpoint handling, and drawer integration. The enhanced security measures, including comprehensive XSS prevention and defensive session parsing, ensure robust protection against common web vulnerabilities. The HITL confirmation system enables safe automation of complex workflows while maintaining human oversight for critical operations. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions. The new view components provide dedicated interfaces for different operational tasks, improving workflow efficiency and user experience.
+The React/TypeScript implementation represents a significant advancement in developer experience and code maintainability, while preserving all existing functionality from the legacy vanilla JavaScript implementation. The enhanced navigation system with permanently visible hamburger menu button provides consistent access to navigation across all screen sizes, while the useNarrowViewport() hook enables precise responsive breakpoint detection. The enhanced security measures, including comprehensive XSS prevention and defensive session parsing, ensure robust protection against common web vulnerabilities. The HITL confirmation system enables safe automation of complex workflows while maintaining human oversight for critical operations. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions. The new view components provide dedicated interfaces for different operational tasks, improving workflow efficiency and user experience.
 
 Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system, continued refinement of the navigation and resource discovery interfaces, expanded support for more complex multi-step approval workflows, additional voice input capabilities to meet evolving operational requirements, enhanced incident triage automation, expanded connector integrations, improved collaborative features for multi-operator incident response, and continued focus on mobile navigation optimization and responsive design improvements. Continued focus on security enhancements and user experience improvements will drive future development efforts.
