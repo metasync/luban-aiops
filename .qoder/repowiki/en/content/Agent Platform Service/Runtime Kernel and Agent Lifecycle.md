@@ -17,19 +17,18 @@
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [test_hitl_confirmations.py](file://products/agent-platform/tests/test_hitl_confirmations.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Integrated AgentScope 2.0.6 middleware system with TracingMiddleware for OpenTelemetry tracing support
-- Added ReplyBudgetControlMiddleware for reply token budget control and runaway turn prevention
-- Enhanced toolkit management with contextvar-based token delegation (DELEGATED_TOKEN)
-- Implemented kernel middleware stack with GatewayPermissionMiddleware and ToolEvidenceMiddleware
-- Added comprehensive middleware composition with settings-driven configuration
-- Enhanced structured output support through response_schema parameter in v2 chat endpoints
-- Improved state persistence via AgentStateStore protocol with TTL-based cleanup
-- **NEW**: Implemented HITL (Human-in-the-Loop) confirmation bridging with `_build_confirmation_frame()` method and `resume_confirmation()` functionality for handling RequireUserConfirmEvent from agentscope
-- **NEW**: Added ConfirmationRegistry for managing pending confirmations with TTL-based expiration and single-flight decision processing
+- Added comprehensive evidence capture and persistence functionality for tool call and result evidence during streaming
+- Implemented `_count_user_turns()` method for accurate turn index calculation based on user message count
+- Implemented `_persist_evidence()` method for best-effort evidence frame persistence with size caps and budget enforcement
+- Integrated evidence store with runtime kernel for capturing `tool_call` and `tool_result` frames during streaming
+- Added evidence persistence hooks in both normal streaming flow and HITL confirmation resume flow
+- Enhanced metrics tracking for evidence store operations including write success/failure rates
+- Updated configuration to support evidence entry size limits and session storage budgets
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -43,18 +42,19 @@
 9. [Conclusion](#conclusion)
 
 ## Introduction
-This document explains the runtime kernel and agent lifecycle management within the agent platform. It covers how the execution engine initializes, manages agent states, processes runtime settings and environment variables, supports dynamic configuration updates, and handles errors, resource cleanup, and graceful shutdown. The system now includes sophisticated AgentScope 2.0.6 middleware integration with OpenTelemetry tracing, reply token budget control, enhanced toolkit management with contextvar-based token delegation, per-user toolkit closures, graceful degradation mechanisms, comprehensive state persistence capabilities, and **newly added** Human-in-the-Loop (HITL) confirmation bridging that enables operator approval workflows for sensitive tool executions. **Updated**: The runtime kernel now integrates with AgentScope 2.0.6 middleware system, supporting OpenTelemetry tracing via TracingMiddleware, reply budget control, enhanced toolkit management with contextvar-based token delegation, HITL confirmation bridging for human approval workflows, ensuring conversation durability across service restarts while maintaining robust operation even when authentication tokens are unavailable or state persistence fails.
+This document explains the runtime kernel and agent lifecycle management within the agent platform. It covers how the execution engine initializes, manages agent states, processes runtime settings and environment variables, supports dynamic configuration updates, and handles errors, resource cleanup, and graceful shutdown. The system now includes sophisticated AgentScope 2.0.6 middleware integration with OpenTelemetry tracing, reply token budget control, enhanced toolkit management with contextvar-based token delegation, per-user toolkit closures, graceful degradation mechanisms, comprehensive state persistence capabilities, **newly added** Human-in-the-Loop (HITL) confirmation bridging that enables operator approval workflows for sensitive tool executions, and **newly added** comprehensive evidence capture and persistence functionality for tool call and result evidence during streaming operations. **Updated**: The runtime kernel now integrates with AgentScope 2.0.6 middleware system, supporting OpenTelemetry tracing via TracingMiddleware, reply budget control, enhanced toolkit management with contextvar-based token delegation, HITL confirmation bridging for human approval workflows, evidence capture and persistence for streaming tool calls, ensuring conversation durability across service restarts while maintaining robust operation even when authentication tokens are unavailable or state persistence fails.
 
 ## Project Structure
 The runtime kernel and lifecycle are implemented primarily under the agent platform product. Key modules include:
-- Runtime kernel: orchestrates agent lifecycle events and state transitions with enhanced token handling, state persistence, and HITL confirmation bridging
+- Runtime kernel: orchestrates agent lifecycle events and state transitions with enhanced token handling, state persistence, HITL confirmation bridging, and **newly added** evidence capture and persistence for streaming operations
 - Middleware system: AgentScope 2.0.6 middleware stack with permission control, evidence emission, tracing, and budget management
 - State persistence layer: pluggable AgentStateStore protocol with memory and Postgres backends supporting TTL-based cleanup
+- Evidence persistence layer: dedicated evidence store with in-memory and Postgres backends for capturing tool call and result evidence during streaming
 - HITL confirmation system: ConfirmationRegistry for managing pending confirmations with TTL expiration and single-flight decision processing
 - Tool gateway integration: provides token-aware tool discovery and execution with rotation support using contextvar-based delegation
-- Runtime settings: loads and validates configuration from files and environment variables, including HITL confirmation timeout settings
+- Runtime settings: loads and validates configuration from files and environment variables, including HITL confirmation timeout settings and **newly added** evidence persistence configuration
 - Services: runtime service for orchestration, session service for durable state, and session store for persistence
-- Metrics and observability: comprehensive monitoring for agent state operations, system health, and HITL confirmation metrics
+- Metrics and observability: comprehensive monitoring for agent state operations, system health, HITL confirmation metrics, and **newly added** evidence store performance metrics
 - V2 API endpoints: structured output support, enhanced health checks reporting state store status, and HITL confirmation endpoints
 
 ```mermaid
@@ -90,14 +90,20 @@ AA --> BB["ConfirmationRegistry"]
 BB --> CC["PendingConfirmation Management"]
 CC --> DD["TTL Expiration"]
 DD --> EE["Single-Flight Decisions"]
-D --> FF["Metrics Tracking"]
-FF --> GG["Error Counters"]
-FF --> HH["Backend Gauges"]
-FF --> II["HITL Metrics"]
-D --> JJ["V2 Chat Endpoints"]
-JJ --> KK["Structured Output"]
-JJ --> LL["Health Checks"]
-JJ --> MM["HITL Confirm Endpoint"]
+D --> FF["Evidence Persistence"]
+FF --> GG["Evidence Store"]
+GG --> HH["InMemory Evidence Store"]
+GG --> II["Postgres Evidence Store"]
+II --> JJ["Session Evidence Table"]
+D --> KK["Metrics Tracking"]
+KK --> LL["Error Counters"]
+KK --> MM["Backend Gauges"]
+KK --> NN["HITL Metrics"]
+KK --> OO["Evidence Metrics"]
+D --> PP["V2 Chat Endpoints"]
+PP --> QQ["Structured Output"]
+PP --> RR["Health Checks"]
+PP --> SS["HITL Confirm Endpoint"]
 end
 ```
 
@@ -106,6 +112,7 @@ end
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
@@ -115,42 +122,46 @@ end
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 
 ## Core Components
-- Runtime Kernel: Central coordinator for agent lifecycle events (start, execute, pause, resume, terminate), maintaining per-agent state, coordinating with services, managing delegated token handling for secure tool execution, implementing state persistence through the AgentStateStore protocol, and **newly added** HITL confirmation bridging for human approval workflows.
+- Runtime Kernel: Central coordinator for agent lifecycle events (start, execute, pause, resume, terminate), maintaining per-agent state, coordinating with services, managing delegated token handling for secure tool execution, implementing state persistence through the AgentStateStore protocol, **newly added** HITL confirmation bridging for human approval workflows, and **newly added** evidence capture and persistence for streaming tool calls.
 - AgentScope Middleware System: Sophisticated middleware stack including GatewayPermissionMiddleware for headless stream permission control, ToolEvidenceMiddleware for evidence frame emission, optional TracingMiddleware for OpenTelemetry tracing, and ReplyBudgetControlMiddleware for token budget management.
 - **NEW** HITL Confirmation System: Complete Human-in-the-Loop confirmation framework with ConfirmationRegistry for managing pending confirmations, TTL-based expiration, single-flight decision processing, and seamless integration with AgentScope's RequireUserConfirmEvent handling.
+- **NEW** Evidence Persistence System: Comprehensive evidence capture and persistence for tool call and result frames during streaming operations, with size caps, budget enforcement, and best-effort failure handling.
 - AgentStateStore Protocol: Pluggable state persistence interface supporting multiple backends (in-memory and Postgres) with TTL-based cleanup and graceful degradation when backends fail.
 - ContextVar-Based Token Delegation: Enhanced toolkit management using DELEGATED_TOKEN contextvar for per-request token scoping, enabling cached toolkits to work across portal token refresh.
 - Gateway Tools Integration: Provides token-aware tool discovery and execution with support for dynamic token rotation during long-running sessions.
-- Runtime Settings: Configuration loader that merges defaults, file-based settings, and environment variables; exposes typed accessors and supports reloads, including HITL confirmation timeout configuration.
+- Runtime Settings: Configuration loader that merges defaults, file-based settings, and environment variables; exposes typed accessors and supports reloads, including HITL confirmation timeout configuration and **newly added** evidence persistence settings.
 - Environment and Config Utilities: Provide strongly-typed access to runtime settings and environment variables, with validation and fallbacks.
 - Runtime Service: Orchestrates high-level operations such as creating sessions, invoking agents, and managing long-running tasks.
 - Session Service and Store: Manage durable session state, including persistence and retrieval, ensuring consistency across restarts and coordinating with agent state cleanup.
 - Token Handler: Manages delegated token lifecycle and validation for secure tool execution with rotation support.
 - Per-User Toolkits: Provides isolated tool execution contexts based on user identity and permissions with token rotation awareness.
 - Graceful Degradation: Ensures system continues operating with limited functionality when authentication tokens are unavailable or state persistence fails.
-- Metrics and Observability: Comprehensive monitoring for agent state operations, backend selection, error rates, system health indicators, and **newly added** HITL confirmation metrics.
+- Metrics and Observability: Comprehensive monitoring for agent state operations, backend selection, error rates, system health indicators, **newly added** HITL confirmation metrics, and **newly added** evidence store performance metrics.
 
 Key responsibilities:
-- Initialization: Load settings, validate environment, create dependencies, boot services, initialize token handlers, configure state persistence backends, set up middleware stack, and **newly added** initialize HITL confirmation registry.
-- Lifecycle Management: Handle agent state transitions and event-driven execution with token-aware tool execution, rotation support, persistent state management, middleware processing, and **newly added** HITL confirmation bridging for human approval workflows.
-- Configuration: Support dynamic updates without restarting the process where feasible, including middleware composition based on settings and HITL confirmation timeout configuration.
-- Error Handling: Robust error propagation, retries, safe cleanup, graceful degradation when tokens are missing, rotated, or state persistence fails, and **newly added** proper handling of expired confirmations and owner mismatches.
-- Performance: Concurrency control, resource pooling, efficient memory usage, optimized token validation with rotation handling, efficient state persistence with TTL cleanup, and **newly added** efficient confirmation registry operations with single-flight decision processing.
+- Initialization: Load settings, validate environment, create dependencies, boot services, initialize token handlers, configure state persistence backends, set up middleware stack, **newly added** initialize HITL confirmation registry, and **newly added** configure evidence persistence.
+- Lifecycle Management: Handle agent state transitions and event-driven execution with token-aware tool execution, rotation support, persistent state management, middleware processing, **newly added** HITL confirmation bridging for human approval workflows, and **newly added** evidence capture during streaming operations.
+- Configuration: Support dynamic updates without restarting the process where feasible, including middleware composition based on settings, HITL confirmation timeout configuration, and **newly added** evidence persistence settings.
+- Error Handling: Robust error propagation, retries, safe cleanup, graceful degradation when tokens are missing, rotated, or state persistence fails, **newly added** proper handling of expired confirmations and owner mismatches, and **newly added** best-effort evidence persistence failures.
+- Performance: Concurrency control, resource pooling, efficient memory usage, optimized token validation with rotation handling, efficient state persistence with TTL cleanup, **newly added** efficient evidence capture with minimal overhead, and **newly added** evidence size caps and budget enforcement.
 - State Persistence: Save and restore agent conversation state across service restarts using pluggable backends with automatic TTL-based cleanup.
 - **NEW** HITL Confirmation Processing: Detect RequireUserConfirmEvent from AgentScope, park active replies, emit confirmation_request frames, manage confirmation lifecycle with TTL expiration, and resume parked replies with operator decisions.
+- **NEW** Evidence Capture and Persistence: Capture tool_call and tool_result frames during streaming operations, apply size caps and budget enforcement, persist evidence best-effort without affecting turn completion, and provide replay capability for session evidence.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 
 ## Architecture Overview
-The runtime architecture centers around a kernel that coordinates lifecycle events through services and persists state via sessions with enhanced state persistence capabilities. Configuration is loaded at startup and can be refreshed dynamically. The enhanced architecture now includes AgentScope 2.0.6 middleware integration for OpenTelemetry tracing and reply budget control, contextvar-based token delegation for secure tool execution, comprehensive state persistence through the AgentStateStore protocol, TTL-based cleanup mechanisms, structured output support for v2 chat endpoints, and **newly added** complete HITL confirmation bridging that enables human approval workflows for sensitive tool executions.
+The runtime architecture centers around a kernel that coordinates lifecycle events through services and persists state via sessions with enhanced state persistence capabilities. Configuration is loaded at startup and can be refreshed dynamically. The enhanced architecture now includes AgentScope 2.0.6 middleware integration for OpenTelemetry tracing and reply budget control, contextvar-based token delegation for secure tool execution, comprehensive state persistence through the AgentStateStore protocol, TTL-based cleanup mechanisms, structured output support for v2 chat endpoints, **newly added** complete HITL confirmation bridging that enables human approval workflows for sensitive tool executions, and **newly added** comprehensive evidence capture and persistence for streaming tool calls.
 
 ```mermaid
 sequenceDiagram
@@ -158,6 +169,7 @@ participant Client as "Client"
 participant API as "API Layer"
 participant Kernel as "RuntimeKernel"
 participant Registry as "ConfirmationRegistry"
+participant EvidenceStore as "EvidenceStore"
 participant Agent as "Agent"
 participant StateStore as "AgentStateStore"
 participant TokenHandler as "Token Handler"
@@ -165,15 +177,13 @@ participant RSvc as "RuntimeService"
 participant SSvc as "SessionService"
 participant Store as "SessionStore"
 participant Gateway as "Tool Gateway"
-Note over Client,Store : Normal Flow
+Note over Client,Store : Normal Flow with Evidence Capture
 Client->>API : "POST /api/v2/chat"
-API->>Kernel : "reply_text(message, response_schema)"
-Kernel->>StateStore : "load_state(session_id)"
-StateStore-->>Kernel : "persisted_state or None"
-Kernel->>Kernel : "build_agent(state)"
+API->>Kernel : "reply_stream(message)"
+Kernel->>Kernel : "_count_user_turns(agent)"
 Kernel->>Agent : "reply_stream(user_message)"
 Agent-->>Kernel : "events (text, tool_calls, etc.)"
-Kernel->>Kernel : "normalize_event()"
+Kernel->>Kernel : "collect evidence_frames"
 Kernel->>Kernel : "_build_confirmation_frame()"
 alt RequireUserConfirmEvent detected
 Kernel->>Registry : "register(pending confirmation)"
@@ -190,17 +200,22 @@ SSvc->>Store : "persist(session)"
 Store-->>SSvc : "ok"
 RSvc-->>Kernel : "result + structured_output"
 end
+Kernel->>EvidenceStore : "_persist_evidence(frames)"
+EvidenceStore-->>Kernel : "best-effort persistence"
 Kernel->>StateStore : "save_state(session_id, state)"
 StateStore-->>Kernel : "ok"
 Kernel-->>API : "content + structured_output"
 API-->>Client : "response"
-Note over Client,Store : HITL Approval Flow
+Note over Client,Store : HITL Approval Flow with Evidence
 Client->>API : "POST /api/v2/chat/confirm"
 API->>Registry : "claim(confirm_id)"
 Registry-->>API : "pending confirmation"
 API->>Kernel : "resume_confirmation(pending, decision)"
+Kernel->>Kernel : "_count_user_turns(agent)"
 Kernel->>Agent : "reply_stream(UserConfirmResultEvent)"
 Agent-->>Kernel : "resumed events"
+Kernel->>EvidenceStore : "_persist_evidence(resumed_frames)"
+EvidenceStore-->>Kernel : "best-effort persistence"
 Kernel-->>API : "confirmation_result + resumed events"
 API-->>Client : "SSE : confirmation_result + events"
 ```
@@ -210,17 +225,18 @@ API-->>Client : "SSE : confirmation_result + events"
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 
 ## Detailed Component Analysis
 
-### Runtime Kernel with State Persistence, Middleware Integration, and HITL Confirmation Bridging
-The runtime kernel manages agent lifecycle events and enforces state transitions with comprehensive state persistence capabilities, AgentScope 2.0.6 middleware integration, and **newly added** complete HITL confirmation bridging for human approval workflows. It coordinates with the runtime service to perform work, uses the session service to persist state changes, integrates with the AgentStateStore protocol for conversation durability, includes enhanced delegated token handling for secure tool execution with rotation support, applies a sophisticated middleware stack for permission control, evidence emission, tracing, and budget management, and **newly added** seamlessly bridges AgentScope's RequireUserConfirmEvent into operator approval workflows.
+### Runtime Kernel with State Persistence, Middleware Integration, HITL Confirmation Bridging, and Evidence Capture
+The runtime kernel manages agent lifecycle events and enforces state transitions with comprehensive state persistence capabilities, AgentScope 2.0.6 middleware integration, **newly added** complete HITL confirmation bridging for human approval workflows, and **newly added** comprehensive evidence capture and persistence for streaming tool calls. It coordinates with the runtime service to perform work, uses the session service to persist state changes, integrates with the AgentStateStore protocol for conversation durability, includes enhanced delegated token handling for secure tool execution with rotation support, applies a sophisticated middleware stack for permission control, evidence emission, tracing, and budget management, **newly added** seamlessly bridges AgentScope's RequireUserConfirmEvent into operator approval workflows, and **newly added** captures and persists tool call and result evidence during streaming operations.
 
 Lifecycle events and typical transitions:
-- Start: Initialize resources, load settings, prepare context, set up token handlers, configure state persistence backends, build middleware stack, and **newly added** initialize HITL confirmation registry.
-- Execute: Transition to running, validate delegated tokens, restore persisted state, invoke agent logic with per-user toolkits, apply middleware chain, handle results or errors, save state after completion, and **newly added** detect and bridge RequireUserConfirmEvent for human approval.
+- Start: Initialize resources, load settings, prepare context, set up token handlers, configure state persistence backends, build middleware stack, **newly added** initialize HITL confirmation registry, and **newly added** configure evidence persistence.
+- Execute: Transition to running, validate delegated tokens, restore persisted state, invoke agent logic with per-user toolkits, apply middleware chain, handle results or errors, save state after completion, **newly added** capture evidence frames during streaming, and **newly added** detect and bridge RequireUserConfirmEvent for human approval.
 - Pause: Suspend execution, save checkpoint, transition to paused.
 - Resume: Restore checkpoint, re-validate tokens if needed, transition back to running.
 - Terminate: Clean up resources, finalize state, revoke tokens, delete persisted state, transition to terminated.
@@ -250,6 +266,15 @@ Enhanced state persistence features:
 - Seamless integration with existing streaming infrastructure, preserving all middleware benefits including evidence emission and tracing
 - Configurable via AGENT_HITL_CONFIRM_TIMEOUT environment variable (default 600 seconds)
 
+**NEW** Evidence Capture and Persistence:
+- **_count_user_turns()**: Calculates the current user message count in the agent context to determine the correct turn index for evidence persistence, ensuring stable indexing across HITL park/resume operations
+- **_persist_evidence()**: Best-effort persistence of evidence frames with size caps and budget enforcement, never raising exceptions to avoid affecting turn completion
+- Evidence frame collection during streaming: Captures `tool_call` and `tool_result` frames from the ToolEvidenceMiddleware sink during both normal streaming and HITL confirmation resume flows
+- Size cap enforcement: Applies per-entry character limits to prevent oversized payloads, with truncation markers for exceeded content
+- Budget enforcement: Enforces per-session storage budgets by evicting oldest result payloads when limits are exceeded
+- Best-effort failure handling: Evidence persistence failures are logged but never affect the main streaming flow
+- Metrics tracking: Records evidence store write success/failure rates and frame counts for operational visibility
+
 ```mermaid
 stateDiagram-v2
 [*] --> Idle
@@ -267,9 +292,9 @@ Completed --> Terminating : "terminate"
 Failed --> Terminating : "terminate"
 Paused --> Terminating : "terminate"
 Terminating --> [*]
-note right of Running : "Save state after each turn\nRestore state on next use\nApply middleware stack\nBridge HITL confirmations"
-note right of Parked : "Awaiting operator decision\nTTL-based expiration\nSingle-flight decisions"
-note right of Completed : "Persist final state\nClean up resources"
+note right of Running : "Save state after each turn\nRestore state on next use\nApply middleware stack\nBridge HITL confirmations\nCapture evidence frames"
+note right of Parked : "Awaiting operator decision\nTTL-based expiration\nSingle-flight decisions\nPersist pre-park evidence"
+note right of Completed : "Persist final state\nClean up resources\nPersist post-stream evidence"
 ```
 
 Key behaviors:
@@ -283,9 +308,12 @@ Key behaviors:
 - **Updated**: TTL-based cleanup preventing accumulation of stale agent states with automatic sweep operations.
 - **Updated**: Middleware stack application with permission control, evidence emission, optional tracing, and budget management.
 - **NEW**: HITL confirmation bridging that seamlessly integrates with existing streaming infrastructure, providing operator approval workflows for sensitive tool executions while maintaining all existing functionality.
+- **NEW**: Evidence capture and persistence that tracks tool call and result frames during streaming operations with size caps, budget enforcement, and best-effort failure handling.
 
 **Section sources**
-- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [runtime_kernel.py:422-472](file://products/agent-platform/src/agent_service/runtime_kernel.py#L422-L472)
+- [runtime_kernel.py:688-769](file://products/agent-platform/src/agent_service/runtime_kernel.py#L688-L769)
+- [runtime_kernel.py:889-953](file://products/agent-platform/src/agent_service/runtime_kernel.py#L889-L953)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [test_runtime_kernel.py](file://products/agent-platform/tests/test_runtime_kernel.py)
@@ -295,7 +323,7 @@ The AgentScope 2.0.6 middleware system provides a sophisticated stack of cross-c
 
 **Updated** Middleware components:
 - **GatewayPermissionMiddleware**: Pre-answers AgentScope's permission gate for headless streams by auto-approving vetted read-only tools and task tools, preventing stalls in SSE environments
-- **ToolEvidenceMiddleware**: Emits tool_call and tool_result evidence frames for streamed turns, capturing gateway results and metadata for audit trails
+- **ToolEvidenceMiddleware**: Emits tool_call and tool_result evidence frames for streamed turns, capturing gateway results and metadata for audit trails and evidence persistence
 - **TracingMiddleware**: Optional OpenTelemetry tracing middleware that creates spans for kernel operations when AGENTSCOPE_KERNEL_TRACING is enabled
 - **ReplyBudgetControlMiddleware**: Optional token budget control middleware that prevents runaway turns by enforcing weighted token budgets
 
@@ -347,6 +375,33 @@ Implementation details:
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [test_hitl_confirmations.py](file://products/agent-platform/tests/test_hitl_confirmations.py)
 
+### Evidence Capture and Persistence System
+The **newly added** evidence capture and persistence system provides comprehensive tracking of tool call and result frames during streaming operations. This system ensures that evidence is captured consistently across both normal streaming flows and HITL confirmation resume flows, with robust size management and best-effort persistence.
+
+Key features:
+- **NEW** Turn Index Calculation: `_count_user_turns()` method calculates the current user message count to determine the correct turn index for evidence persistence, ensuring stable indexing across HITL park/resume operations
+- **NEW** Evidence Frame Collection: Captures `tool_call` and `tool_result` frames from the ToolEvidenceMiddleware sink during streaming operations
+- **NEW** Best-Effort Persistence: `_persist_evidence()` method persists evidence frames with size caps and budget enforcement, never raising exceptions to avoid affecting turn completion
+- **NEW** Size Cap Enforcement: Applies per-entry character limits to prevent oversized payloads, with truncation markers for exceeded content
+- **NEW** Budget Enforcement: Enforces per-session storage budgets by evicting oldest result payloads when limits are exceeded
+- **NEW** Metrics Tracking: Records evidence store write success/failure rates and frame counts for operational visibility
+- **NEW** Integration Points: Evidence capture occurs in both normal streaming flow and HITL confirmation resume flow
+
+Implementation details:
+- `_count_user_turns()`: Counts user messages in agent context to determine stable turn index, with defensive fallback to zero on errors
+- `_persist_evidence()`: Prepares frames with size caps, persists via EVIDENCE_STORE.save_turn(), records metrics, and handles failures gracefully
+- Evidence frame collection: Uses asyncio.Queue to collect frames from TOOL_EVIDENCE_SINK during streaming, filtering for EVIDENCE_FRAME_TYPES
+- Size cap application: Uses `prepare_frames()` function to truncate oversized payloads and add truncation markers
+- Budget enforcement: Leverages evidence store's built-in budget enforcement to evict oldest payloads when session exceeds limits
+- Metrics recording: Uses `record_evidence_write()` for success/failure tracking and evidence store metrics for frame counts
+
+**Section sources**
+- [runtime_kernel.py:422-472](file://products/agent-platform/src/agent_service/runtime_kernel.py#L422-L472)
+- [runtime_kernel.py:688-769](file://products/agent-platform/src/agent_service/runtime_kernel.py#L688-L769)
+- [runtime_kernel.py:889-953](file://products/agent-platform/src/agent_service/runtime_kernel.py#L889-L953)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
+
 ### ContextVar-Based Token Delegation
 The enhanced toolkit management uses contextvars for per-request token scoping, enabling cached toolkits to work seamlessly across portal token refresh scenarios.
 
@@ -390,8 +445,8 @@ Implementation details:
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [test_agent_state_store.py](file://products/agent-platform/tests/test_agent_state_store.py)
 
-### V2 Chat Endpoints with Structured Output and HITL Confirmation
-The v2 chat endpoints provide enhanced functionality including structured output support, comprehensive health checks, improved error handling, and **newly added** HITL confirmation endpoints. These endpoints integrate with the state persistence layer and provide better observability into system health.
+### V2 Chat Endpoints with Structured Output, HITL Confirmation, and Evidence Access
+The v2 chat endpoints provide enhanced functionality including structured output support, comprehensive health checks, improved error handling, **newly added** HITL confirmation endpoints, and **newly added** evidence access capabilities. These endpoints integrate with the state persistence layer and provide better observability into system health.
 
 Key features:
 - **Updated**: Structured output support through response_schema parameter enabling validated structured responses
@@ -403,22 +458,24 @@ Key features:
 - **NEW**: Confirmation request/response frame types in streaming protocol
 - **NEW**: TTL-based expiration handling with proper HTTP status codes (410 Gone)
 - **NEW**: Owner validation ensuring only session owners can approve confirmations
+- **NEW**: Evidence access endpoint for retrieving persisted tool call and result evidence
 
 Implementation details:
 - `chat()`: Handles blocking chat requests with optional structured output validation
-- `chat_stream()`: Provides streaming responses with normalized event formats
+- `chat_stream()`: Provides streaming responses with normalized event formats and evidence capture
 - `health()`: Reports system health including agent state store backend status and readiness
 - `create_session()` and `read_session()`: Session management with state persistence integration
 - `chat_confirm()`: **NEW** Handles operator approval requests, validates ownership, resumes parked replies
 - Structured output: Validates and returns structured data when response_schema is provided
 - **NEW** Confirmation flow: Registers pending confirmations, handles TTL expiration, resumes with decisions
+- **NEW** Evidence flow: Loads persisted evidence groups for session replay and audit trails
 
 **Section sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
 
 ### Runtime Settings and Configuration
-The runtime settings system has been enhanced with new configuration options for AgentScope 2.0.6 middleware integration, reply budget control, and **newly added** HITL confirmation bridging.
+The runtime settings system has been enhanced with new configuration options for AgentScope 2.0.6 middleware integration, reply budget control, **newly added** HITL confirmation bridging, and **newly added** evidence persistence configuration.
 
 **Updated** Configuration options:
 - **AGENTSCOPE_KERNEL_TRACING**: Boolean flag to enable OpenTelemetry tracing via TracingMiddleware
@@ -427,6 +484,8 @@ The runtime settings system has been enhanced with new configuration options for
 - **AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT**: Float weight for output token cost calculation
 - **AGENTSCOPE_TASK_TOOLS_ENABLED**: Boolean flag to enable built-in task tools (TaskCreate, TaskGet, etc.)
 - **NEW** **AGENT_HITL_CONFIRM_TIMEOUT**: Integer seconds for HITL confirmation expiration timeout (default 600)
+- **NEW** **AGENT_EVIDENCE_ENTRY_MAX_CHARS**: Integer characters for per-entry evidence payload limit (default 131072)
+- **NEW** **AGENT_EVIDENCE_SESSION_MAX_BYTES**: Integer bytes for per-session evidence storage budget (default 4194304)
 
 Key features:
 - **Updated**: Settings-driven middleware composition with opt-in features
@@ -436,19 +495,22 @@ Key features:
 - **Updated**: Timezone validation with IANA timezone support
 - **NEW**: HITL confirmation timeout validation with negative value rejection
 - **NEW**: Environment variable parsing for AGENT_HITL_CONFIRM_TIMEOUT with default 600 seconds
+- **NEW**: Evidence persistence configuration with sensible defaults and validation
 
 Implementation details:
-- `__post_init__()`: Validates all settings including new middleware-related configurations and HITL timeout
+- `__post_init__()`: Validates all settings including new middleware-related configurations, HITL timeout, and evidence settings
 - `from_env()`: Parses environment variables with proper type conversion and defaults
 - Provider-specific options with validation and type safety
 - Graceful fallbacks for optional features when not configured
 - **NEW**: HITL confirmation timeout validation ensuring non-negative integer values
+- **NEW**: Evidence persistence settings with appropriate defaults for development and production environments
 
 **Section sources**
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [runtime_settings.py:145-150](file://products/agent-platform/src/agent_service/runtime_settings.py#L145-L150)
+- [runtime_settings.py:332-338](file://products/agent-platform/src/agent_service/runtime_settings.py#L332-L338)
 
 ### Metrics and Observability
-Comprehensive metrics tracking provides visibility into agent state operations, backend selection, error rates, system health, and **newly added** HITL confirmation metrics. The metrics system follows established conventions and provides both counters and gauges for different types of observations.
+Comprehensive metrics tracking provides visibility into agent state operations, backend selection, error rates, system health, **newly added** HITL confirmation metrics, and **newly added** evidence store performance metrics. The metrics system follows established conventions and provides both counters and gauges for different types of observations.
 
 Key features:
 - **Updated**: Agent state store metrics including backend selection, operation errors, and fallback counts
@@ -459,6 +521,7 @@ Key features:
 - **NEW**: HITL confirmation metrics including registration, resolution, expiration, and owner mismatch counts
 - **NEW**: Confirmation registry size monitoring for operational insights
 - **NEW**: Confirmation approval/denial rate tracking for workflow analysis
+- **NEW**: Evidence store metrics including write success/failure rates, frame counts, and truncation reasons
 
 Implementation details:
 - `record_agent_state_backend()`: Tracks active backend selection (memory vs postgres)
@@ -468,9 +531,10 @@ Implementation details:
 - `setup_metrics()`: Configures Prometheus middleware and /metrics endpoint
 - **NEW**: HITL confirmation metric recording for confirmation lifecycle events
 - **NEW**: Confirmation registry monitoring for operational visibility
+- **NEW**: Evidence store metrics including `record_evidence_write()`, `record_evidence_frames_persisted()`, and `record_evidence_frame_truncated()`
 
 **Section sources**
-- [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
+- [metrics.py:158-186](file://products/agent-platform/src/agent_service/core/metrics.py#L158-L186)
 
 ### Session Service Integration
 The session service coordinates between session management and agent state persistence, ensuring consistent cleanup when sessions are deleted and providing proper ownership validation.
@@ -482,6 +546,7 @@ Key features:
 - **Updated**: Idempotent session creation for dedicated sessions
 - **NEW**: Integration with HITL confirmation system for parked session detection and cleanup
 - **NEW**: Confirmation expiration handling during session operations
+- **NEW**: Integration with evidence store for session cleanup
 
 Implementation details:
 - `delete_session()`: Deletes both session and associated agent state with fail-open behavior
@@ -489,12 +554,13 @@ Implementation details:
 - `create_named_session()`: Supports dedicated sessions for incident triage scenarios
 - State cleanup: Automatically removes agent state when sessions are deleted
 - **NEW**: Confirmation registry integration for parked session management
+- **NEW**: Evidence store integration for deleting session evidence when sessions are removed
 
 **Section sources**
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 
 ## Dependency Analysis
-The runtime kernel depends on configuration, services, persistence layers, token handling components, and the new state persistence infrastructure. The following diagram shows key relationships including the enhanced state persistence architecture with TTL cleanup, metrics tracking, AgentScope 2.0.6 middleware integration, and **newly added** complete HITL confirmation bridging:
+The runtime kernel depends on configuration, services, persistence layers, token handling components, and the new state persistence infrastructure. The following diagram shows key relationships including the enhanced state persistence architecture with TTL cleanup, metrics tracking, AgentScope 2.0.6 middleware integration, **newly added** complete HITL confirmation bridging, and **newly added** comprehensive evidence capture and persistence:
 
 ```mermaid
 classDiagram
@@ -510,6 +576,8 @@ class RuntimeKernel {
 +_restore_state()
 -_snapshot_state()
 -_build_middlewares()
++_count_user_turns()
++_persist_evidence()
 +_build_confirmation_frame()
 +resume_confirmation()
 +expire_confirmation()
@@ -536,6 +604,30 @@ class PostgresAgentStateStore {
 +save_state()
 +load_state()
 +delete_state()
++is_ready()
+}
+class EvidenceStore {
+<<interface>>
++backend_name
++save_turn()
++load_turns()
++delete_session()
++is_ready()
+}
+class InMemoryEvidenceStore {
++backend_name = "memory"
++save_turn()
++load_turns()
++delete_session()
++is_ready()
+}
+class PostgresEvidenceStore {
++backend_name = "postgres"
++ttl_seconds
++initialize()
++save_turn()
++load_turns()
++delete_session()
 +is_ready()
 }
 class ConfirmationRegistry {
@@ -578,6 +670,9 @@ class Metrics {
 +record_agent_state_fallback()
 +record_chat_request()
 +record_confirmation_*()
++record_evidence_write()
++record_evidence_frames_persisted()
++record_evidence_frame_truncated()
 }
 class GatewayTools {
 +discover_tools()
@@ -614,8 +709,11 @@ class RuntimeSettings {
 +reply_token_budget
 +task_tools_enabled
 +hitl_confirm_timeout
++evidence_entry_max_chars
++evidence_session_max_bytes
 }
 RuntimeKernel --> AgentStateStore : "persists state"
+RuntimeKernel --> EvidenceStore : "persists evidence"
 RuntimeKernel --> Metrics : "tracks operations"
 RuntimeKernel --> GatewayTools : "uses"
 RuntimeKernel --> DelegationClient : "manages"
@@ -630,9 +728,13 @@ ConfirmationRegistry --> PendingConfirmation : "stores"
 RuntimeService --> SessionService : "uses"
 SessionService --> SessionStore : "persists"
 SessionService --> AgentStateStore : "cleans up state"
+SessionService --> EvidenceStore : "cleans up evidence"
 AgentStateStore <|-- InMemoryAgentStateStore
 AgentStateStore <|-- PostgresAgentStateStore
+EvidenceStore <|-- InMemoryEvidenceStore
+EvidenceStore <|-- PostgresEvidenceStore
 PostgresAgentStateStore --> Metrics : "records errors/fallbacks"
+PostgresEvidenceStore --> Metrics : "records truncations"
 ```
 
 **Diagram sources**
@@ -640,6 +742,7 @@ PostgresAgentStateStore --> Metrics : "records errors/fallbacks"
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 
@@ -648,6 +751,7 @@ PostgresAgentStateStore --> Metrics : "records errors/fallbacks"
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 
@@ -666,8 +770,11 @@ PostgresAgentStateStore --> Metrics : "records errors/fallbacks"
 - **NEW**: HITL Confirmation Performance: Efficient confirmation registry operations with O(1) lookups, single-flight decision processing to prevent race conditions, and minimal memory footprint for pending confirmations.
 - **NEW**: Confirmation TTL Management: Efficient TTL-based expiration checking with monotonic time comparisons and lazy cleanup.
 - **NEW**: Streaming Integration: Minimal overhead for confirmation bridging with early exit when no RequireUserConfirmEvent is detected.
+- **NEW**: Evidence Capture Performance: Efficient frame collection using asyncio.Queue with minimal overhead, selective filtering for evidence frame types, and best-effort persistence that doesn't block streaming.
+- **NEW**: Evidence Size Management: Intelligent truncation of oversized payloads with minimal processing overhead, and efficient budget enforcement through targeted eviction of oldest payloads.
+- **NEW**: Evidence Store Selection: Shared backend configuration with agent state store reduces database connections and improves resource utilization.
 - Graceful Degradation: Minimize performance impact when falling back to empty Toolkit or in-memory state storage by using lazy initialization and caching.
-- Observability: Emit metrics and traces for lifecycle events, latency, error rates, token validation performance, state persistence operations, and **newly added** HITL confirmation workflow performance.
+- Observability: Emit metrics and traces for lifecycle events, latency, error rates, token validation performance, state persistence operations, **newly added** HITL confirmation workflow performance, and **newly added** evidence store performance metrics.
 
 ## Troubleshooting Guide
 Common issues and strategies:
@@ -688,6 +795,9 @@ Common issues and strategies:
 - **NEW**: Confirmation Timeout Issues: Verify AGENT_HITL_CONFIRM_TIMEOUT is set appropriately for your workflow requirements.
 - **NEW**: Owner Mismatch Errors: Check that confirmation requests are made by the same user who owns the session.
 - **NEW**: Duplicate Confirmation Prevention: Ensure clients don't send duplicate confirmation requests due to network retries.
+- **NEW**: Evidence Capture Issues: Monitor evidence store write success rates and investigate any persistence failures that may affect replay capability.
+- **NEW**: Evidence Size Issues: Verify evidence_entry_max_chars and evidence_session_max_bytes settings are appropriate for your workload patterns.
+- **NEW**: Evidence Budget Exhaustion: Monitor evidence store truncation metrics and adjust session budgets if evidence is being evicted too aggressively.
 - Graceful Degradation Issues: Monitor system behavior when tokens are unavailable or state persistence fails and ensure limited functionality continues.
 
 Operational checks:
@@ -702,14 +812,18 @@ Operational checks:
 - **NEW**: HITL confirmation monitoring: Track confirmation registration, resolution, expiration, and owner mismatch rates.
 - **NEW**: Confirmation registry health: Monitor registry size and ensure timely cleanup of resolved confirmations.
 - **NEW**: Workflow analysis: Track approval/denial rates and average confirmation duration for operational insights.
+- **NEW**: Evidence store monitoring: Track evidence write success/failure rates, frame counts, and truncation events for operational visibility.
+- **NEW**: Evidence replay verification: Verify that persisted evidence matches live streaming output for session replay scenarios.
+- **NEW**: Storage growth monitoring: Monitor evidence store storage usage and adjust budgets as needed to prevent excessive growth.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 
 ## Conclusion
-The runtime kernel and agent lifecycle management provide a robust foundation for executing agents with durable state, configurable behavior, resilient operations, enhanced security through delegated token handling with rotation support, comprehensive state persistence capabilities, sophisticated AgentScope 2.0.6 middleware integration, and **newly added** complete Human-in-the-Loop (HITL) confirmation bridging for operator approval workflows. By combining clear state transitions, strong configuration management, careful resource handling, sophisticated token management with graceful degradation, advanced state persistence through the AgentStateStore protocol, comprehensive middleware stack with OpenTelemetry tracing and reply budget control, and **newly added** seamless HITL confirmation bridging that enables human approval workflows for sensitive tool executions, the system supports scalable and maintainable agent execution in production environments. **Updated**: The enhanced state persistence system ensures conversation continuity across service restarts through pluggable backends with TTL-based cleanup, while structured output support in v2 chat endpoints enables validated structured responses. The AgentScope 2.0.6 middleware integration provides OpenTelemetry tracing for comprehensive observability, reply budget control to prevent runaway turns, and sophisticated permission management for headless environments. The contextvar-based token delegation system enables seamless token rotation across cached toolkits, while the comprehensive metrics and observability framework provides deep insights into system health and performance. **NEW**: The complete HITL confirmation bridging system seamlessly integrates with existing streaming infrastructure, providing operator approval workflows for sensitive tool executions while maintaining all existing functionality, ensuring reliable operation even when authentication tokens are unavailable, rotated during long-running sessions, or when state persistence backends experience failures. The confirmation registry provides efficient management of pending confirmations with TTL expiration, single-flight decision processing, and ownership validation, enabling secure and reliable human approval workflows in production environments.
+The runtime kernel and agent lifecycle management provide a robust foundation for executing agents with durable state, configurable behavior, resilient operations, enhanced security through delegated token handling with rotation support, comprehensive state persistence capabilities, sophisticated AgentScope 2.0.6 middleware integration, **newly added** complete Human-in-the-Loop (HITL) confirmation bridging for operator approval workflows, and **newly added** comprehensive evidence capture and persistence for streaming tool calls. By combining clear state transitions, strong configuration management, careful resource handling, sophisticated token management with graceful degradation, advanced state persistence through the AgentStateStore protocol, comprehensive middleware stack with OpenTelemetry tracing and reply budget control, **newly added** seamless HITL confirmation bridging that enables human approval workflows for sensitive tool executions, and **newly added** evidence capture and persistence that ensures tool call and result evidence is reliably stored for replay and audit purposes, the system supports scalable and maintainable agent execution in production environments. **Updated**: The enhanced state persistence system ensures conversation continuity across service restarts through pluggable backends with TTL-based cleanup, while structured output support in v2 chat endpoints enables validated structured responses. The AgentScope 2.0.6 middleware integration provides OpenTelemetry tracing for comprehensive observability, reply budget control to prevent runaway turns, and sophisticated permission management for headless environments. The contextvar-based token delegation system enables seamless token rotation across cached toolkits, while the comprehensive metrics and observability framework provides deep insights into system health and performance. **NEW**: The complete HITL confirmation bridging system seamlessly integrates with existing streaming infrastructure, providing operator approval workflows for sensitive tool executions while maintaining all existing functionality. **NEW**: The comprehensive evidence capture and persistence system ensures that tool call and result evidence is reliably captured during streaming operations, with robust size management, budget enforcement, and best-effort failure handling that never affects the main streaming flow. The evidence store provides replay capability for session evidence, enabling operators to review the exact tool interactions that occurred during agent execution. Together, these enhancements provide a complete solution for reliable, auditable, and operator-controlled agent execution in production environments.

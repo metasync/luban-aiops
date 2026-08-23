@@ -3,27 +3,28 @@
 <cite>
 **Referenced Files in This Document**
 - [spec.md](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/spec.md)
-- [plan.md](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/plan.md)
-- [tasks.md](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/tasks.md)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
-- [test_session_workspace.py](file://products/agent-platform/tests/test_session_workspace.py)
-- [test_runtime_kernel.py](file://products/agent-platform/tests/test_runtime_kernel.py)
+- [test_evidence_store.py](file://products/agent-platform/tests/test_evidence_store.py)
+- [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [transcript.ts](file://products/operator-portal/web-ui/app/src/chat/transcript.ts)
+- [decoder.ts](file://products/operator-portal/web-ui/app/src/stream/decoder.ts)
+- [sessions.ts](file://products/operator-portal/web-ui/app/src/api/sessions.ts)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated Introduction to reflect approved status and completed implementation of dual-backend evidence persistence
-- Enhanced Requirements section with detailed acceptance criteria for evidence persistence based on actual implementation
-- Added comprehensive Architecture Overview showing the complete data flow with evidence store integration
-- Expanded Component Analysis with specific implementation details from evidence_store.py, routes.py, and schema files
+- Updated Introduction to reflect delivered status and completed implementation of dual-backend evidence persistence
+- Enhanced Requirements section with detailed acceptance criteria based on actual implementation verification
+- Added comprehensive Architecture Overview showing complete data flow with evidence store integration
+- Expanded Component Analysis with specific implementation details from evidence_store.py, routes.py, schema files, and portal components
 - Updated Performance Considerations with concrete storage backends, size management, and observability metrics
 - Enhanced Troubleshooting Guide with evidence-specific scenarios and monitoring guidance
-- Added Conclusion summarizing the completed implementation with dual-backend support
+- Added Conclusion summarizing the delivered implementation with dual-backend support and portal integration
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -37,7 +38,7 @@
 9. [Conclusion](#conclusion)
 
 ## Introduction
-This document specifies the implementation of evidence persistence for session transcripts under SPEC-025. The spec is now in `approved` status, created on 2026-08-23, and addresses a critical parity gap where evidence only existed during live streaming but disappeared when sessions were reopened. The implementation introduces dual-backend storage (in-memory/PostgreSQL) for tool call and result frames with comprehensive size management and observability metrics. It extends existing specifications including SPEC-022 R-1 (transcripts), SPEC-011 R-4 (evidence panels), and SPEC-017 (kernel state persistence).
+This document specifies the delivered implementation of evidence persistence for session transcripts under SPEC-025. The spec is now in `delivered` status, created on 2026-08-23, and addresses a critical parity gap where evidence only existed during live streaming but disappeared when sessions were reopened. The implementation introduces dual-backend storage (in-memory/PostgreSQL) for tool call and result frames with comprehensive size management and observability metrics. It extends existing specifications including SPEC-022 R-1 (transcripts), SPEC-011 R-4 (evidence panels), and SPEC-017 (kernel state persistence). All requirements R-1 through R-4 have been fully implemented and verified with comprehensive testing.
 
 **Section sources**
 - [spec.md:3-15](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/spec.md#L3-L15)
@@ -45,7 +46,7 @@ This document specifies the implementation of evidence persistence for session t
 ## Project Structure
 SPEC-025 touches three product areas with clear responsibilities:
 - Agent Platform: persists evidence frames alongside transcript extraction and enriches the session-detail response with dual-backend support
-- Operator Portal: renders evidence cards from persisted data with parity to live rendering
+- Operator Portal: renders evidence cards from persisted data with parity to live rendering using shared EvidenceCard component
 - Platform Gateway: passes through the additive evidence field without modification
 
 ```mermaid
@@ -63,6 +64,7 @@ end
 subgraph "Operator Portal"
 P["ChatView.tsx<br/>EvidencePanel"]
 S["decoder.ts<br/>tool_call/tool_result"]
+T["transcript.ts<br/>attachEvidence()"]
 end
 A --> B
 A --> C
@@ -71,6 +73,7 @@ A --> E
 G --> A
 P --> G
 S --> P
+T --> P
 ```
 
 **Diagram sources**
@@ -78,6 +81,8 @@ S --> P
 - [session_transcript.py:30-64](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L64)
 - [evidence_store.py:504-551](file://products/agent-platform/src/agent_service/services/evidence_store.py#L504-L551)
 - [metrics.py:156-186](file://products/agent-platform/src/agent_service/core/metrics.py#L156-L186)
+- [ChatView.tsx:134-165](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L134-L165)
+- [transcript.ts:55-70](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L55-L70)
 
 **Section sources**
 - [spec.md:17-44](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/spec.md#L17-L44)
@@ -250,6 +255,29 @@ Route --> Response["HTTP Response"]
 - [v2.py:125-158](file://products/agent-platform/src/agent_service/schemas/v2.py#L125-L158)
 - [session-evidence.schema.json:1-58](file://shared/shared-contracts/schemas/session-evidence.schema.json#L1-L58)
 
+### Operator Portal: Evidence Rendering Integration
+The operator portal seamlessly integrates persisted evidence with live stream rendering using shared components. The EvidencePanel component handles both live and replayed evidence identically, while the transcript converter maps evidence groups to chat turns.
+
+```mermaid
+flowchart TD
+SessionDetail["Session Detail API"] --> TranscriptConv["transcriptToTurns()"]
+TranscriptConv --> EvidenceAttach["attachEvidence()"]
+EvidenceAttach --> ChatTurns["ChatTurn[]"]
+ChatTurns --> EvidencePanel["EvidencePanel"]
+EvidencePanel --> EvidenceCard["EvidenceCard"]
+EvidenceCard --> TruncatedDisplay["Truncation Markers"]
+```
+
+**Diagram sources**
+- [ChatView.tsx:134-165](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L134-L165)
+- [transcript.ts:55-70](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L55-L70)
+- [sessions.ts:11-42](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L11-L42)
+
+**Section sources**
+- [ChatView.tsx:134-165](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L134-L165)
+- [transcript.ts:55-70](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L55-L70)
+- [sessions.ts:11-42](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L11-L42)
+
 ### Observability and Metrics
 The implementation includes comprehensive metrics for evidence persistence operations, frame truncation, and storage backend health monitoring.
 
@@ -316,7 +344,7 @@ Common troubleshooting scenarios for evidence persistence:
 
 **Section sources**
 - [spec.md:59-69](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/spec.md#L59-L69)
-- [test_session_workspace.py:230-261](file://products/agent-platform/tests/test_session_workspace.py#L230-L261)
+- [test_evidence_store.py:230-261](file://products/agent-platform/tests/test_evidence_store.py#L230-L261)
 
 ## Conclusion
-SPEC-025 successfully closes the parity gap between live and replayed evidence by implementing dual-backend evidence persistence with comprehensive size management and observability. The implementation persists tool_call and tool_result frames per turn using in-memory (development) and PostgreSQL (production) backends, exposing them via the session-detail API with graceful degradation. The portal renders evidence identically for live and reopened sessions using the existing EvidenceCard component. The implementation focuses on robust storage with bounded growth, best-effort persistence, strict redaction, and comprehensive metrics while maintaining backward compatibility. The approved specification provides clear acceptance criteria and architectural guidance that has been fully implemented with thorough testing and monitoring capabilities.
+SPEC-025 successfully closes the parity gap between live and replayed evidence by implementing dual-backend evidence persistence with comprehensive size management and observability. The implementation persists tool_call and tool_result frames per turn using in-memory (development) and PostgreSQL (production) backends, exposing them via the session-detail API with graceful degradation. The portal renders evidence identically for live and reopened sessions using the existing EvidenceCard component. The implementation focuses on robust storage with bounded growth, best-effort persistence, strict redaction, and comprehensive metrics while maintaining backward compatibility. All requirements R-1 through R-4 have been fully implemented and verified with comprehensive testing, delivering complete evidence parity between live streaming and session replay experiences.

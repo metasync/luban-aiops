@@ -36,16 +36,18 @@
 - [languages.ts](file://products/operator-portal/web-ui/app/src/voice/languages.ts)
 - [markdown.test.ts](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts)
 - [useChatStream.test.ts](file://products/operator-portal/web-ui/app/src/stream/__tests__/useChatStream.test.ts)
+- [transcript.ts](file://products/operator-portal/web-ui/app/src/chat/transcript.ts)
+- [sessions.ts](file://products/operator-portal/web-ui/app/src/api/sessions.ts)
+- [transcript.test.ts](file://products/operator-portal/web-ui/app/src/chat/__tests__/transcript.test.ts)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Transformed folded sidebar into navigable icon rail with consistent 64px width for persistent layout anchoring across all views
-- Enhanced navigation with Ant Design icon-only menu and tooltips for improved accessibility
-- Improved sticky request banners with accent borders and opaque backgrounds for better readability
-- Disabled pre-login session creation with appropriate tooltips explaining authentication requirements
-- Enhanced evidence cards with full-width stretching and bounded expanded tool results for better UX
-- Added inline version tag display in the brand section showing platform version information
+- Enhanced evidence persistence system to display persisted evidence alongside live conversation data with unified rendering
+- Added request ID display in evidence cards for both streamed and replayed evidence
+- Implemented truncation markers showing payload size limits and budget constraints
+- Unified handling of streamed and replayed evidence through consistent transcript-to-turn conversion
+- Added comprehensive test coverage for evidence persistence and replay functionality
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -59,23 +61,24 @@
 9. [Authentication and Security](#authentication-and-security)
 10. [Markdown Rendering System](#markdown-rendering-interface)
 11. [Real-time Streaming Interface](#real-time-streaming-interface)
-12. [Skills Integration and Cited Guidance](#skills-integration-and-cited-guidance)
-13. [Permission Matrix and Workspace Resources](#permission-matrix-and-workspace-resources)
-14. [Multi-Session Workspace Management](#multi-session-workspace-management)
-15. [Voice Input Support](#voice-input-support)
-16. [Incident Triage and Deep Linking](#incident-triage-and-deep-linking)
-17. [Deployment Guide](#deployment-guide)
-18. [UI Customization](#ui-customization)
-19. [Accessibility Features](#accessibility-features)
-20. [Browser Compatibility](#browser-compatibility)
-21. [Troubleshooting Guide](#troubleshooting-guide)
-22. [Conclusion](#conclusion)
+12. [Evidence Persistence and Replay System](#evidence-persistence-and-replay-system)
+13. [Skills Integration and Cited Guidance](#skills-integration-and-cited-guidance)
+14. [Permission Matrix and Workspace Resources](#permission-matrix-and-workspace-resources)
+15. [Multi-Session Workspace Management](#multi-session-workspace-management)
+16. [Voice Input Support](#voice-input-support)
+17. [Incident Triage and Deep Linking](#incident-triage-and-deep-linking)
+18. [Deployment Guide](#deployment-guide)
+19. [UI Customization](#ui-customization)
+20. [Accessibility Features](#accessibility-features)
+21. [Browser Compatibility](#browser-compatibility)
+22. [Troubleshooting Guide](#troubleshooting-guide)
+23. [Conclusion](#conclusion)
 
 ## Introduction
 
 The Operator Portal is a modern web-based administrative interface designed for platform administration and monitoring within the Luban AIOPS ecosystem. The portal has been completely rebuilt using React 18, TypeScript, and Vite, replacing the previous vanilla JavaScript implementation. It provides operators with a sophisticated two-column shell interface featuring a persistent sidebar for navigation and a main content area for interactive operations. The portal serves as a centralized control plane for platform administrators, offering real-time visibility into system status through an interactive chat interface, comprehensive evidence panels for tool execution tracking, configuration management capabilities, and administrative functions necessary for maintaining the AI-powered agent platform infrastructure.
 
-**Updated** The portal now features enhanced navigation with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, and enhanced mobile drawer navigation. The navigation system now maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management. **Critical Enhancement**: The streaming system includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions.
+**Updated** The portal now features enhanced evidence persistence capabilities that display persisted evidence alongside live conversation data, including request ID display, truncation markers, and unified handling of streamed and replayed evidence. The evidence system ensures consistency between live streaming and session replay, providing operators with complete traceability regardless of whether they observe tool executions in real-time or review them from stored transcripts. **Critical Enhancement**: The evidence persistence system includes comprehensive truncation markers that clearly indicate when payloads have been evicted due to storage budgets, ensuring operators always understand the completeness of displayed evidence.
 
 ## Project Structure
 
@@ -89,39 +92,42 @@ A --> C[AuthContext.tsx]
 B --> D[useChatStream.ts]
 B --> E[useSessionWorkspace.ts]
 B --> F[markdown.ts]
-D --> G[transport.ts]
-G --> H[decoder.ts]
-A --> I[AuditView.tsx]
-A --> J[IncidentsView.tsx]
-A --> K[PermissionsView.tsx]
-A --> L[SkillsView.tsx]
-A --> M[ToolsView.tsx]
+B --> G[transcript.ts]
+D --> H[transport.ts]
+H --> I[decoder.ts]
+A --> J[AuditView.tsx]
+A --> K[IncidentsView.tsx]
+A --> L[PermissionsView.tsx]
+A --> M[SkillsView.tsx]
+A --> N[ToolsView.tsx]
+end
+subgraph "Evidence Persistence System"
+O[transcriptToTurns] --> P[EvidenceFrame Mapping]
+Q[EvidenceTurn Groups] --> R[Request ID Attachment]
+S[Truncation Markers] --> T[Payload Budget Handling]
+U[Live Stream Frames] --> V[Unified Turn Model]
+W[Replayed Evidence] --> X[Consistent Rendering]
 end
 subgraph "Enhanced Navigation System"
-N[useNarrowViewport Hook] --> O[Responsive Breakpoint Detection at 992px]
-P[Mobile Menu Button] --> Q[Dynamic ARIA Labels]
-R[Sidebar Collapsible 64px Rail] --> S[Drawer Integration]
-T[Content Spacing Management] --> U[.view-container-inset Class]
+Y[useNarrowViewport Hook] --> Z[Responsive Breakpoint Detection at 992px]
+AA[Mobile Menu Button] --> BB[Dynamic ARIA Labels]
+CC[Sidebar Collapsible 64px Rail] --> DD[Drawer Integration]
+EE[Content Spacing Management] --> FF[.view-container-inset Class]
 end
 subgraph "Stale Session Handling"
-V[missingRef Tracking] --> W[404 Error Detection]
-X[Auto Retry Logic] --> Y[Server Auto-Creation]
-Z[Error Recovery] --> AA[Graceful Fallback]
-end
-subgraph "Enhanced Markdown Rendering"
-BB[renderMarkdown Function] --> CC[XSS Prevention]
-DD[Test Coverage] --> EE[Security Validation]
-FF[Table Rendering] --> GG[Header/Body Separation]
+GG[missingRef Tracking] --> HH[404 Error Detection]
+II[Auto Retry Logic] --> JJ[Server Auto-Creation]
+KK[Error Recovery] --> LL[Graceful Fallback]
 end
 subgraph "Build & Deployment"
-HH[vite.config.ts] --> II[package.json]
-JJ[Dockerfile] --> KK[Makefile]
-LL[VERSION] --> MM[validate_version.py]
+MM[vite.config.ts] --> NN[package.json]
+OO[Dockerfile] --> PP[Makefile]
+QQ[VERSION] --> RR[validate_version.py]
 end
 subgraph "Backend Services"
-NN[Agent Platform] --> OO[HITL Confirmations]
-PP[Platform Gateway] --> QQ[Identity Broker]
-RR[Tool Gateway] --> SS[Policy Engine]
+SS[Agent Platform] --> TT[HITL Confirmations]
+UU[Platform Gateway] --> VV[Identity Broker]
+WW[Tool Gateway] --> XX[Policy Engine]
 end
 ```
 
@@ -129,9 +135,10 @@ end
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
 - [App.tsx:288-307](file://products/operator-portal/web-ui/app/src/App.tsx#L288-L307)
 - [App.tsx:334-357](file://products/operator-portal/web-ui/app/src/App.tsx#L334-L357)
-- [global.css:66-119](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L119)
 - [ChatView.tsx:320-350](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L320-L350)
 - [ChatView.tsx:513-596](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L513-L596)
+- [transcript.ts:55-70](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L55-L70)
+- [sessions.ts:11-42](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L11-L42)
 - [useChatStream.ts:245-268](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L245-L268)
 - [markdown.ts:67-91](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L67-L91)
 - [markdown.test.ts:59-77](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L59-L77)
@@ -206,7 +213,7 @@ The Operator Portal consists of several key React components and hooks that work
 - **Validation System**: Automated version consistency checks across all platform components
 - **Deployment Consistency**: Coordinated versioning across all platform services
 
-**Updated** The interface now includes enhanced navigation with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, and enhanced mobile drawer navigation. The navigation system maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management. Recent improvements include enhanced authentication state management with proper disabled states for unauthenticated users, improved markdown table rendering with proper header/body separation, visual consistency improvements including inline brand display with platform version tags, and comprehensive test coverage for markdown rendering functionality ensuring robust XSS prevention and security measures. **Critical Enhancement**: The streaming system now includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions.
+**Updated** The interface now includes enhanced navigation with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, and enhanced mobile drawer navigation. The navigation system now maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management. **Critical Enhancement**: The evidence persistence system now provides unified rendering of both live streamed and replayed evidence, with request ID display, truncation markers, and consistent visual presentation regardless of evidence source. Recent improvements include enhanced authentication state management with proper disabled states for unauthenticated users, improved markdown table rendering with proper header/body separation, visual consistency improvements including inline brand display with platform version tags, and comprehensive test coverage for markdown rendering functionality ensuring robust XSS prevention and security measures. **Critical Enhancement**: The streaming system includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
@@ -226,6 +233,7 @@ participant React as "React App"
 participant Nav as "Enhanced Navigation"
 participant Auth as "Auth Context"
 participant Stream as "Chat Stream Hook"
+participant Transcript as "Transcript Converter"
 participant Views as "View Components"
 participant Nginx as "Nginx Server (Port 8080)"
 participant Gateway as "API Gateway"
@@ -243,7 +251,12 @@ Agent-->>Gateway : Authorization code
 Gateway-->>Auth : Access tokens + identity
 Note over React : Responsive Content Spacing
 React->>Views : Navigate to specific views with proper padding
-Views->>Gateway : View-specific API calls
+Note over React : Evidence Persistence and Replay
+User->>React : Open session with transcript
+React->>Transcript : transcriptToTurns(transcript, evidence_turns)
+Transcript->>Transcript : Map EvidenceFrames to ToolCall/Result frames
+Transcript->>Transcript : Attach request IDs and truncation markers
+Transcript-->>React : Unified ChatTurn[] with evidence
 Note over React : Chat & Streaming with Stale Session Handling
 User->>React : Send message via ChatView
 Note over React : Missing Ref Check & Stale Session Detection
@@ -269,13 +282,15 @@ Stream-->>React : Active session updated
 - [App.tsx:334-357](file://products/operator-portal/web-ui/app/src/App.tsx#L334-L357)
 - [ChatView.tsx:320-350](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L320-L350)
 - [ChatView.tsx:513-596](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L513-L596)
+- [transcript.ts:72-106](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L72-L106)
+- [sessions.ts:52-60](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L52-L60)
 - [useChatStream.ts:245-268](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L245-L268)
 - [IncidentsView.tsx:219-228](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx#L219-L228)
 - [useSessionWorkspace.ts:136-159](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L136-L159)
 - [useChatStream.ts:191-314](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L191-L314)
 - [transport.ts:75-100](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L75-L100)
 
-The architecture emphasizes type safety, component composition, and maintainable state management while providing enterprise-grade functionality for platform operations. The React hooks pattern enables clean separation of concerns and reusable logic across components. **Enhanced with stale session handling** that automatically detects and recovers from deleted or expired sessions, ensuring reliable chat functionality even when backend sessions become invalid.
+The architecture emphasizes type safety, component composition, and maintainable state management while providing enterprise-grade functionality for platform operations. The React hooks pattern enables clean separation of concerns and reusable logic across components. **Enhanced with evidence persistence** that provides unified rendering of both live streamed and replayed evidence, ensuring operators see consistent evidence cards regardless of whether they're observing tool executions in real-time or reviewing them from stored transcripts. **Critical Enhancement**: The streaming system includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions.
 
 ## Detailed Component Analysis
 
@@ -414,7 +429,7 @@ The inline confirmation card provides a focused interface for reviewing and deci
 - **Validation System**: Automated version consistency checks across all platform components
 - **Deployment Consistency**: Coordinated versioning across all platform services
 
-**Updated** The React architecture provides better type safety, component reusability, and maintainability while preserving all existing functionality from the legacy implementation. The new view components provide dedicated interfaces for different operational tasks. Enhanced session management now includes defensive parsing to handle edge cases in stored session data. The enhanced navigation system includes a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, and enhanced mobile drawer navigation with proper positioning and z-index management. The new sticky request banner system enhances conversation usability during long interactions. **Critical Enhancement**: The stale session handling system now includes comprehensive missing reference tracking and automatic retry logic to prevent errors from deleted or expired sessions, ensuring more reliable chat functionality.
+**Updated** The React architecture provides better type safety, component reusability, and maintainability while preserving all existing functionality from the legacy implementation. The new view components provide dedicated interfaces for different operational tasks. Enhanced session management now includes defensive parsing to handle edge cases in stored session data. The enhanced navigation system includes a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, and enhanced mobile drawer navigation with proper positioning and z-index management. The new sticky request banner system enhances conversation usability during long interactions. **Critical Enhancement**: The evidence persistence system provides unified rendering of both live streamed and replayed evidence, ensuring operators see consistent evidence cards with request ID display and truncation markers regardless of evidence source. The stale session handling system now includes comprehensive missing reference tracking and automatic retry logic to prevent errors from deleted or expired sessions, ensuring more reliable chat functionality.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
@@ -566,7 +581,7 @@ The navigation system implements comprehensive role-based access control:
 **Updated** The navigation system now provides enhanced mobile experience with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states with visual dividers instead of clipped text, and enhanced mobile drawer navigation with proper positioning and z-index management. The navigation system maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management.
 
 **Section sources**
-- [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
+- [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-70)
 - [App.tsx:288-307](file://products/operator-portal/web-ui/app/src/App.tsx#L288-L307)
 - [App.tsx:334-357](file://products/operator-portal/web-ui/app/src/App.tsx#L334-L357)
 - [global.css:66-119](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L119)
@@ -922,6 +937,119 @@ The React implementation includes additional streaming enhancements:
 - [useChatStream.ts:195-282](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L195-L282)
 - [transport.ts:75-117](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L75-L117)
 - [global.css:134-230](file://products/operator-portal/web-ui/app/src/theme/global.css#L134-L230)
+
+## Evidence Persistence and Replay System
+
+The Operator Portal now includes comprehensive evidence persistence capabilities that allow operators to view persisted tool execution evidence alongside live conversation data, ensuring complete traceability regardless of whether they observe tool executions in real-time or review them from stored transcripts.
+
+### Evidence Persistence Architecture
+
+The evidence persistence system provides unified rendering of both live streamed and replayed evidence through a consistent transcript-to-turn conversion pipeline:
+
+#### Transcript Conversion Pipeline
+- **EvidenceFrame Mapping**: Converts stored evidence frames to live stream frame shapes for consistent rendering
+- **Request ID Attachment**: Attaches request IDs from evidence groups to turns for traceability
+- **Truncation Marker Handling**: Preserves store-added truncation markers for budget-evicted payloads
+- **Turn Index Mapping**: Maps evidence groups to assistant turns using deterministic turn_index values
+
+#### Unified Evidence Rendering
+- **Consistent Component Path**: Both live stream and replayed evidence use the same EvidencePanel and EvidenceCard components
+- **Prop Parity**: Replayed evidence produces identical props to live stream evidence for consistent visual presentation
+- **Metadata Preservation**: Risk levels, execution times, and source systems are preserved in replayed evidence
+- **Data Handling**: Full data payloads, summaries, and error information are maintained in replayed evidence
+
+### Evidence Frame Structure
+
+The evidence persistence system uses a structured format for storing and retrieving tool execution evidence:
+
+#### EvidenceTurn Structure
+- **turn_index**: Deterministic mapping to assistant turn ordinal (0-based)
+- **request_id**: Unique identifier for traceability across the system
+- **created_at**: Timestamp for evidence group creation
+- **frames**: Array of EvidenceFrame objects containing tool_call and tool_result data
+
+#### EvidenceFrame Schema
+- **type**: "tool_call" or "tool_result" frame types
+- **call_id**: Unique identifier linking related tool calls and results
+- **tool_name**: Name of the executed tool
+- **parameters**: Tool invocation parameters
+- **status**: Execution status (success, error, denied)
+- **evidence**: Metadata including execution time, duration, risk level, and source system
+- **data**: Full payload data (may be null if evicted by budget)
+- **data_summary**: Summary data when full payload is not available
+- **error**: Error information with code and message
+- **truncated**: Store-added truncation marker with reason and original character count
+
+### Truncation Marker System
+
+The evidence persistence system includes comprehensive truncation markers that clearly indicate when payloads have been evicted due to storage budgets:
+
+#### Truncation Reasons
+- **entry_cap**: Individual entry size limits exceeded
+- **session_budget**: Total session evidence budget exceeded
+- **original_chars**: Character count of original payload before truncation
+
+#### Visual Indicators
+- **Always Visible**: Truncation markers are always displayed, never silently dropped
+- **Contextual Information**: Shows reason for truncation and original payload size when available
+- **Budget Eviction**: Clearly indicates when metadata is preserved but data payload was evicted
+- **Preview Indication**: Notes that displayed content is partial when truncation occurs
+
+### Evidence Replay Implementation
+
+The evidence replay system ensures consistency between live streaming and session replay:
+
+#### Transcript-to-Turn Conversion
+- **transcriptToTurns Function**: Converts SPEC-022 transcript shape into chat turn model
+- **Evidence Attachment**: Attaches persisted evidence groups to corresponding assistant turns
+- **Out-of-Range Handling**: Safely handles evidence groups that outlive truncated transcripts
+- **Frame Mapping**: Converts stored frames to exact live stream frame shapes for prop parity
+
+#### Test Coverage
+- **Frame Shape Validation**: Ensures replayed frames match live stream frame shapes exactly
+- **Truncation Marker Preservation**: Verifies truncation markers are preserved in replayed evidence
+- **Out-of-Range Handling**: Tests graceful handling of evidence groups beyond transcript bounds
+- **Null Evidence Handling**: Validates behavior when evidence store is unavailable or empty
+
+### User Experience Benefits
+
+The evidence persistence system provides several operational benefits:
+
+#### Complete Traceability
+- **Consistent Evidence**: Same evidence cards whether observed live or reviewed later
+- **Request ID Display**: Traceable request IDs for cross-referencing with audit logs
+- **Execution Metadata**: Full execution context including timing, risk levels, and source systems
+- **Budget Awareness**: Clear indication of payload limitations and truncation reasons
+
+#### Operational Efficiency
+- **Historical Review**: Ability to review past tool executions without relying on live observation
+- **Incident Investigation**: Complete evidence context for post-incident analysis
+- **Training and Onboarding**: Learning from historical tool execution patterns
+- **Compliance Auditing**: Complete audit trail of all tool executions with full context
+
+### Integration with Existing Features
+
+The evidence persistence system integrates seamlessly with existing portal features:
+
+#### Session Management
+- **Transcript Availability**: Clear indication when sessions have no recorded transcript yet
+- **Evidence Availability**: Separate handling for transcript vs. evidence availability
+- **Fallback Behavior**: Graceful degradation when evidence store is unavailable
+- **Error Handling**: Non-fatal evidence store failures don't prevent session viewing
+
+#### Chat Interface
+- **Unified Rendering**: Evidence panels appear identically for live and replayed evidence
+- **Interactive Elements**: Parameter expansion, result data viewing, and error display work consistently
+- **Status Indicators**: Success, error, and denied statuses are preserved in replayed evidence
+- **HITL Integration**: Confirmation cards work consistently for both live and replayed evidence
+
+**Updated** The evidence persistence system represents a significant enhancement to the operator portal, providing complete traceability of tool executions regardless of whether they were observed live or reviewed from stored transcripts. The system includes comprehensive truncation markers that clearly indicate payload limitations, request ID display for cross-referencing, and unified rendering that ensures consistent visual presentation. **Critical Enhancement**: The evidence persistence system ensures operators always understand the completeness of displayed evidence through clear truncation markers and budget eviction indicators.
+
+**Section sources**
+- [transcript.ts:1-107](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L1-L107)
+- [sessions.ts:11-42](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L11-L42)
+- [transcript.test.ts:71-184](file://products/operator-portal/web-ui/app/src/chat/__tests__/transcript.test.ts#L71-L184)
+- [ChatView.tsx:167-243](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L167-L243)
 
 ## Skills Integration and Cited Guidance
 
@@ -1413,7 +1541,7 @@ The deployment process includes enhanced version management:
 - **Version Validation**: Automated validation ensures all platform components use consistent versions
 - **Deployment Coordination**: Coordinated versioning across all platform services
 
-**Updated** The deployment now supports both the new React/TypeScript application and the legacy vanilla JavaScript implementation, with enhanced HITL confirmation bridging system, improved navigation system with persistent 64px icon rail that maintains consistent layout anchoring across all views, enhanced responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, enhanced mobile drawer navigation with proper positioning and z-index management, dynamic aria-labels that adapt based on viewport state and sidebar status, and restructured styling with .view-container-inset class for proper content spacing. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. Enhanced security measures include improved XSS prevention and defensive session parsing. The sticky request banner system and enhanced markdown rendering with proper table structure are also supported in the deployment. **Critical Enhancement**: The deployment now includes support for the enhanced stale session handling system that automatically detects and recovers from deleted or expired sessions, ensuring more reliable chat functionality.
+**Updated** The deployment now supports both the new React/TypeScript application and the legacy vanilla JavaScript implementation, with enhanced HITL confirmation bridging system, improved navigation system with persistent 64px icon rail that maintains consistent layout anchoring across all views, enhanced responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, enhanced mobile drawer navigation with proper positioning and z-index management, dynamic aria-labels that adapt based on viewport state and sidebar status, and restructured styling with .view-container-inset class for proper content spacing. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. Enhanced security measures include improved XSS prevention and defensive session parsing. The sticky request banner system and enhanced markdown rendering with proper table structure are also supported in the deployment. **Critical Enhancement**: The deployment now includes support for the enhanced stale session handling system that automatically detects and recovers from deleted or expired sessions, ensuring more reliable chat functionality, and the comprehensive evidence persistence system that provides unified rendering of both live streamed and replayed evidence with request ID display and truncation markers.
 
 **Section sources**
 - [nginx.conf](file://products/operator-portal/nginx.conf)
@@ -1476,6 +1604,7 @@ The React implementation provides additional customization points:
 - **Sticky Request Banner Styling**: Customizable appearance and behavior for conversation context banners
 - **Brand Display Styling**: Customizable inline brand display with platform version tags
 - **Stale Session Handling Styling**: Customizable appearance for stale session error messages and recovery indicators
+- **Evidence Persistence Styling**: Customizable appearance for evidence cards, truncation markers, and request ID display
 
 **Section sources**
 - [global.css:66-119](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L119)
@@ -1532,6 +1661,7 @@ The React implementation includes additional accessibility improvements:
 - **Deep Linking**: Accessible navigation between incidents and chat with proper focus management
 - **Sticky Request Banner**: Accessible conversation context maintenance with proper ARIA labels and keyboard navigation support
 - **Stale Session Handling**: Accessible error messages and recovery indicators for stale session detection and retry operations
+- **Evidence Persistence**: Accessible evidence cards with proper ARIA labels for truncation markers and request ID display
 
 **Section sources**
 - [global.css:66-119](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L119)
@@ -1587,6 +1717,7 @@ The React implementation maintains broad browser compatibility:
 - **Deep Linking**: Cross-browser support for session pinning and navigation
 - **Sticky Request Banner**: IntersectionObserver support with graceful fallbacks for older browsers
 - **Stale Session Handling**: Cross-browser support for 404 error detection and retry logic with graceful fallbacks
+- **Evidence Persistence**: Cross-browser support for evidence replay with proper fallbacks when evidence store is unavailable
 
 **Section sources**
 - [Dockerfile](file://products/operator-portal/Dockerfile)
@@ -1683,6 +1814,18 @@ Common issues and their solutions when working with the Operator Portal.
 - Verify that server-side session auto-creation is triggered when stale sessions are detected
 - Check browser console for JavaScript errors in stale session handling logic
 - Review network requests to confirm retry attempts are being made without session_id parameter
+
+### Evidence Persistence Issues
+
+**Problem**: Evidence not appearing in replayed sessions or inconsistent evidence display
+**Solution**:
+- Verify that evidence_turns are properly returned from session detail API
+- Check that transcriptToTurns function is correctly mapping EvidenceFrames to ToolCall/Result frames
+- Ensure request IDs are properly attached to turns from evidence groups
+- Verify truncation markers are preserved in replayed evidence
+- Check browser console for JavaScript errors in evidence attachment logic
+- Review network requests to confirm evidence data is being retrieved successfully
+- Verify that EvidenceTurn groups are properly mapped to assistant turns by turn_index
 
 ### Voice Input Issues
 
@@ -1846,6 +1989,7 @@ Common issues and their solutions when working with the Operator Portal.
 - **Navigation Errors**: Check responsive breakpoint handling and drawer initialization
 - **Content Spacing Issues**: Verify .view-container-inset class application and proper padding calculations
 - **Stale Session Errors**: Check 404 error detection and retry logic for deleted or expired sessions
+- **Evidence Persistence Errors**: Check evidence store availability and transcript-to-turn conversion logic
 
 ### Sticky Request Banner Issues
 
@@ -1879,7 +2023,7 @@ Common issues and their solutions when working with the Operator Portal.
 - Review browser console for JavaScript errors in authentication state management
 - Test session creation workflow with unauthenticated user to verify proper disabled behavior
 
-**Updated** Added comprehensive troubleshooting guidance for the enhanced navigation system, including persistent 64px icon rail issues, useNarrowViewport() hook problems, responsive breakpoint detection issues, drawer integration problems, dynamic aria-labels not updating correctly, and proper handling of .view-container-inset class for content spacing. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism, and enhanced error handling for different failure types including network errors, authentication failures, and streaming interruptions. New sections cover sticky request banner issues, markdown rendering problems with proper table structure, enhanced authentication state management for unauthenticated users, and comprehensive stale session handling troubleshooting for 404 errors and retry logic failures.
+**Updated** Added comprehensive troubleshooting guidance for the enhanced navigation system, including persistent 64px icon rail issues, useNarrowViewport() hook problems, responsive breakpoint detection issues, drawer integration problems, dynamic aria-labels not updating correctly, and proper handling of .view-container-inset class for content spacing. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism, and enhanced error handling for different failure types including network errors, authentication failures, and streaming interruptions. New sections cover sticky request banner issues, markdown rendering problems with proper table structure, enhanced authentication state management for unauthenticated users, comprehensive stale session handling troubleshooting for 404 errors and retry logic failures, and evidence persistence troubleshooting for transcript-to-turn conversion and evidence attachment issues.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
@@ -1893,16 +2037,18 @@ Common issues and their solutions when working with the Operator Portal.
 - [markdown.ts:67-91](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L67-L91)
 - [markdown.test.ts:59-77](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L59-L77)
 - [useChatStream.test.ts:380-432](file://products/operator-portal/web-ui/app/src/stream/__tests__/useChatStream.test.ts#L380-L432)
+- [transcript.ts:55-70](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L55-L70)
+- [transcript.test.ts:109-184](file://products/operator-portal/web-ui/app/src/chat/__tests__/transcript.test.ts#L109-L184)
 
 ## Conclusion
 
 The Operator Portal provides a comprehensive, accessible, and customizable web interface for platform administration and monitoring within the Luban AIOPS ecosystem. The complete rebuild using React 18, TypeScript, and Vite delivers enterprise-grade functionality while maintaining simplicity and performance.
 
-**Updated** The recent enhancements include an enhanced navigation system with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states with visual dividers instead of clipped text, and enhanced mobile drawer navigation with proper positioning and z-index management. The navigation system now maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management. Additional improvements include comprehensive mobile navigation with proper positioning and z-index management, enhanced security measures with improved XSS prevention in markdown rendering through comprehensive quote escaping and protocol filtering, improved session management with defensive parseStored function to handle malformed or corrupted session data, enhanced stream ownership handling during session switches to prevent cross-session data contamination, refined error handling for different failure types including network errors, authentication failures, and streaming interruptions, and backend API v6 schema compliance for risk level handling in pending calls. **Critical Enhancement**: The platform now includes comprehensive stale session handling with automatic 404 error detection, missing reference tracking, and retry logic that automatically drops stale session references and falls back to server-side session auto-creation, ensuring more reliable chat functionality even when backend sessions become invalid.
+**Updated** The recent enhancements include an enhanced navigation system with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states with visual dividers instead of clipped text, and enhanced mobile drawer navigation with proper positioning and z-index management. The navigation system now maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management. Additional improvements include comprehensive mobile navigation with proper positioning and z-index management, enhanced security measures with improved XSS prevention in markdown rendering through comprehensive quote escaping and protocol filtering, improved session management with defensive parseStored function to handle malformed or corrupted session data, enhanced stream ownership handling during session switches to prevent cross-session data contamination, refined error handling for different failure types including network errors, authentication failures, and streaming interruptions, and backend API v6 schema compliance for risk level handling in pending calls. **Critical Enhancement**: The platform now includes comprehensive stale session handling with automatic 404 error detection, missing reference tracking, and retry logic that automatically drops stale session references and falls back to server-side session auto-creation, ensuring more reliable chat functionality even when backend sessions become invalid. **Critical Enhancement**: The evidence persistence system provides unified rendering of both live streamed and replayed evidence, ensuring operators see consistent evidence cards with request ID display and truncation markers regardless of evidence source.
 
-Key strengths of the enhanced portal include its modular React architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities, enhanced skills integration capabilities, improved navigation organization with sectioned grouping and persistent 64px icon rail for consistent layout anchoring, robust multi-session workspace management, comprehensive incident triage with automated workflows, voice input support for hands-free operation, seamless deep linking between incidents and collaborative chat sessions, and enhanced mobile navigation with proper responsive behavior below 992px breakpoint. The enhanced security measures ensure protection against XSS attacks while maintaining full functionality. **Critical Enhancement**: The stale session handling system provides robust error recovery for deleted or expired sessions, ensuring reliable chat functionality even in challenging network conditions or backend service issues.
+Key strengths of the enhanced portal include its modular React architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities, enhanced skills integration capabilities, improved navigation organization with sectioned grouping and persistent 64px icon rail for consistent layout anchoring, robust multi-session workspace management, comprehensive incident triage with automated workflows, voice input support for hands-free operation, seamless deep linking between incidents and collaborative chat sessions, and enhanced mobile navigation with proper responsive behavior below 992px breakpoint. The enhanced security measures ensure protection against XSS attacks while maintaining full functionality. **Critical Enhancement**: The stale session handling system provides robust error recovery for deleted or expired sessions, ensuring reliable chat functionality even in challenging network conditions or backend service issues. **Critical Enhancement**: The evidence persistence system ensures complete traceability of tool executions regardless of whether they were observed live or reviewed from stored transcripts, with comprehensive truncation markers that clearly indicate payload limitations.
 
-The React/TypeScript implementation represents a significant advancement in developer experience and code maintainability, while preserving all existing functionality from the legacy vanilla JavaScript implementation. The enhanced navigation system with persistent 64px icon rail provides consistent layout anchoring across all views, while the useNarrowViewport() hook enables precise responsive breakpoint detection. The enhanced security measures, including comprehensive XSS prevention and defensive session parsing, ensure robust protection against common web vulnerabilities. The HITL confirmation system enables safe automation of complex workflows while maintaining human oversight for critical operations. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions. The new view components provide dedicated interfaces for different operational tasks, improving workflow efficiency and user experience. **Critical Enhancement**: The stale session handling system ensures reliable chat functionality by automatically detecting and recovering from deleted or expired sessions, preventing user-facing errors and maintaining conversation continuity.
+The React/TypeScript implementation represents a significant advancement in developer experience and code maintainability, while preserving all existing functionality from the legacy vanilla JavaScript implementation. The enhanced navigation system with persistent 64px icon rail provides consistent layout anchoring across all views, while the useNarrowViewport() hook enables precise responsive breakpoint detection. The enhanced security measures, including comprehensive XSS prevention and defensive session parsing, ensure robust protection against common web vulnerabilities. The HITL confirmation system enables safe automation of complex workflows while maintaining human oversight for critical operations. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions. The new view components provide dedicated interfaces for different operational tasks, improving workflow efficiency and user experience. **Critical Enhancement**: The stale session handling system ensures reliable chat functionality by automatically detecting and recovering from deleted or expired sessions, preventing user-facing errors and maintaining conversation continuity. **Critical Enhancement**: The evidence persistence system ensures operators always understand the completeness of displayed evidence through clear truncation markers and budget eviction indicators.
 
 **Additional Recent Enhancements:**
 - **Sticky Request Banner System**: IntersectionObserver-based conversation context maintenance that keeps user requests visible during long replies and expanded evidence panels
@@ -1911,5 +2057,7 @@ The React/TypeScript implementation represents a significant advancement in deve
 - **Improved Authentication State Management**: Proper disabled states for unauthenticated users in session creation controls with appropriate tooltips
 - **Visual Consistency Improvements**: Inline brand display with platform version tags and full-width evidence panels for better readability
 - **Critical Stale Session Handling**: Comprehensive missing reference tracking and automatic retry logic for 404 errors during stream opening, ensuring reliable chat functionality even when backend sessions become invalid
+- **Evidence Persistence and Replay**: Unified rendering of both live streamed and replayed evidence with request ID display, truncation markers, and consistent visual presentation
+- **Comprehensive Evidence Testing**: Test coverage for evidence frame mapping, truncation marker preservation, and out-of-range handling
 
-Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system, continued refinement of the navigation and resource discovery interfaces, expanded support for more complex multi-step approval workflows, additional voice input capabilities to meet evolving operational requirements, enhanced incident triage automation, expanded connector integrations, improved collaborative features for multi-operator incident response, and continued focus on mobile navigation optimization and responsive design improvements. Continued focus on security enhancements and user experience improvements will drive future development efforts. **Ongoing Enhancement**: Continued refinement of stale session handling and error recovery mechanisms to ensure maximum reliability in production environments.
+Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system, continued refinement of the navigation and resource discovery interfaces, expanded support for more complex multi-step approval workflows, additional voice input capabilities to meet evolving operational requirements, enhanced incident triage automation, expanded connector integrations, improved collaborative features for multi-operator incident response, and continued focus on mobile navigation optimization and responsive design improvements. Continued focus on security enhancements and user experience improvements will drive future development efforts. **Ongoing Enhancement**: Continued refinement of stale session handling and error recovery mechanisms to ensure maximum reliability in production environments. **Ongoing Enhancement**: Continued improvement of evidence persistence capabilities to provide even more comprehensive traceability and operational insights.

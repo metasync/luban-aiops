@@ -19,6 +19,7 @@
 - [shared/shared-contracts/schemas/policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
 - [agent-platform/src/agent_service/api/v2/routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [agent-platform/src/agent_service/schemas/v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
+- [agent-platform/src/agent_service/services/evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [identity-broker/src/identity_service/api/routes/auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
 - [identity-broker/src/identity_service/api/routes/identity.py](file://products/identity-broker/src/identity_service/api/routes/identity.py)
 - [identity-broker/src/identity_service/schemas/auth.py](file://products/identity-broker/src/identity_service/schemas/auth.py)
@@ -44,6 +45,7 @@
 - [shared-contracts/schemas/agent-stream-event.schema.json](file://shared-contracts/schemas/agent-stream-event.schema.json)
 - [shared-contracts/schemas/session.schema.json](file://shared-contracts/schemas/session.schema.json)
 - [shared-contracts/schemas/agent-session.schema.json](file://shared-contracts/schemas/agent-session.schema.json)
+- [shared/shared-contracts/schemas/session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [shared-contracts/schemas/identity-token.schema.json](file://shared-contracts/schemas/identity-token.schema.json)
 - [shared-contracts/schemas/identity-context.schema.json](file://shared-contracts/schemas/identity-context.schema.json)
 - [shared-contracts/schemas/tool-invocation.schema.json](file://shared-contracts/schemas/tool-invocation.schema.json)
@@ -58,11 +60,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added new Platform Gateway REST API section with permission matrix, tools catalog, and skills inventory endpoints
-- Updated architecture diagrams to include new transparency and discovery endpoints
-- Added policy matrix schema documentation and authorization requirements
-- Enhanced platform gateway proxy functionality for tools and skills discovery
-- Added comprehensive error handling and authentication patterns for new endpoints
+- Added comprehensive documentation for evidence persistence and session detail enhancements (SPEC-025)
+- Updated Agent Platform REST API section with evidence_turns field in session responses
+- Added new Session Evidence schema documentation with truncation markers and size caps
+- Enhanced session management endpoints with evidence retrieval capabilities
+- Updated architecture diagrams to reflect evidence store integration
+- Added troubleshooting guidance for evidence-related issues
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -77,10 +80,10 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides a comprehensive API reference for the Luban AIOps Platform, covering REST endpoints for agent interactions, identity management, audit trail management, platform administration, and workspace transparency, as well as WebSocket APIs for real-time streaming and long-running operations. It includes HTTP methods, URL patterns, request/response schemas, authentication requirements, error codes, retry strategies, client examples, versioning and deprecation policies, migration guidance, testing strategies, and debugging techniques.
+This document provides a comprehensive API reference for the Luban AIOps Platform, covering REST endpoints for agent interactions, identity management, audit trail management, platform administration, workspace transparency, and evidence persistence, as well as WebSocket APIs for real-time streaming and long-running operations. It includes HTTP methods, URL patterns, request/response schemas, authentication requirements, error codes, retry strategies, client examples, versioning and deprecation policies, migration guidance, testing strategies, and debugging techniques.
 
 The platform exposes:
-- Agent Platform REST APIs (v2) for chat, sessions, runtime metadata, and health.
+- Agent Platform REST APIs (v2) for chat, sessions, runtime metadata, health, and **evidence persistence**.
 - Identity Broker REST APIs for authentication, token issuance, and identity context.
 - Tool Gateway REST APIs for chat orchestration, session lifecycle, tool invocation, runtime configuration, and policy enforcement.
 - **Platform Gateway REST APIs for workspace transparency including permission matrix, tools catalog, and skills inventory.**
@@ -91,7 +94,7 @@ The platform exposes:
 
 ## Project Structure
 At a high level, the API surface is implemented across five services:
-- Agent Platform: v2 REST endpoints for agent chat, sessions, runtime metadata, and health.
+- Agent Platform: v2 REST endpoints for agent chat, sessions, runtime metadata, health, and **evidence persistence**.
 - Identity Broker: Authentication, token issuance, and identity context endpoints.
 - Tool Gateway: Orchestration layer that enforces policies, manages sessions, invokes tools, and proxies to agents.
 - **Platform Gateway: Transparency and discovery layer providing permission matrix, tools catalog, and skills inventory with proper authorization.**
@@ -111,6 +114,7 @@ PlatformGW --> ToolsCatalog["Tools Catalog"]
 PlatformGW --> SkillsInventory["Skills Inventory"]
 PlatformGW --> AuditService["Audit Service"]
 PlatformGW --> ToolGateway["Tool Gateway"]
+Agent --> EvidenceStore["Evidence Store"]
 ```
 
 **Diagram sources**
@@ -118,6 +122,7 @@ PlatformGW --> ToolGateway["Tool Gateway"]
 - [platform-gateway/src/platform_gateway/api/routes/tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [platform-gateway/src/platform_gateway/api/routes/skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [platform-gateway/src/platform_gateway/services/tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
+- [agent-platform/src/agent_service/services/evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 
 **Section sources**
 - [README.md](file://README.md)
@@ -127,7 +132,7 @@ PlatformGW --> ToolGateway["Tool Gateway"]
 - [audit-service/README.md](file://products/audit-service/README.md)
 
 ## Core Components
-- Agent Platform (v2): Provides chat, session, runtime metadata, and health endpoints with typed schemas.
+- Agent Platform (v2): Provides chat, session, runtime metadata, health, and **evidence persistence** endpoints with typed schemas.
 - Identity Broker: Issues tokens and resolves identity contexts; used by clients and gateway for authorization.
 - Tool Gateway: Central entrypoint for clients; enforces policies, manages sessions, invokes tools, and streams results.
 - **Platform Gateway: Workspace transparency service providing permission matrix, tools catalog, and skills inventory with role-based scoping and authorization.**
@@ -139,11 +144,13 @@ Key responsibilities:
 - Session persistence and lifecycle management.
 - Tool invocation through a registry and connectors.
 - **Workspace transparency with live permission matrix, tools discovery, and skills inventory access.**
+- **Evidence persistence with bounded storage, truncation markers, and session budget enforcement.**
 - Durable audit trail storage with filtering, pagination, and retention policies.
 
 **Section sources**
 - [agent-platform/src/agent_service/api/v2/routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [agent-platform/src/agent_service/schemas/v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
+- [agent-platform/src/agent_service/services/evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [identity-broker/src/identity_service/api/routes/auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
 - [identity-broker/src/identity_service/api/routes/identity.py](file://products/identity-broker/src/identity_service/api/routes/identity.py)
 - [tool-gateway/src/api_gateway/api/routes/chat.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
@@ -158,7 +165,7 @@ Key responsibilities:
 - [audit-service/src/audit_service/api/routes/query.py](file://products/audit-service/src/audit_service/api/routes/query.py)
 
 ## Architecture Overview
-The Tool Gateway acts as the primary API boundary for client operations. The Platform Gateway provides workspace transparency endpoints for administrative and portal use. Clients authenticate against the Identity Broker, then interact with the appropriate gateway based on their needs. The Gateways enforce policies, persist sessions, and delegate execution to the Agent Platform and tool connectors.
+The Tool Gateway acts as the primary API boundary for client operations. The Platform Gateway provides workspace transparency endpoints for administrative and portal use. Clients authenticate against the Identity Broker, then interact with the appropriate gateway based on their needs. The Gateways enforce policies, persist sessions, delegate execution to the Agent Platform and tool connectors, and **persist evidence frames for replay capability**.
 
 ```mermaid
 sequenceDiagram
@@ -167,6 +174,7 @@ participant PG as "Platform Gateway"
 participant TG as "Tool Gateway"
 participant I as "Identity Broker"
 participant A as "Agent Platform"
+participant ES as "Evidence Store"
 participant T as "Tools"
 participant P as "Policy Engine"
 participant AS as "Audit Service"
@@ -182,8 +190,14 @@ C->>TG : "POST /chat (Authorization : Bearer {token})"
 TG->>P : "Evaluate policy"
 P-->>TG : "Decision"
 TG->>A : "Forward chat request"
+A->>ES : "Persist evidence frames"
 A-->>TG : "Stream events"
 TG-->>C : "Stream events"
+Note over C,A : Session Detail with Evidence
+C->>A : "GET /api/v2/sessions/{id}"
+A->>ES : "Load evidence turns"
+ES-->>A : "Evidence groups"
+A-->>C : "Session + evidence_turns"
 ```
 
 **Diagram sources**
@@ -192,6 +206,7 @@ TG-->>C : "Stream events"
 - [platform-gateway/src/platform_gateway/api/routes/skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [tool-gateway/src/api_gateway/api/routes/chat.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
 - [identity-broker/src/identity_service/api/routes/auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
+- [agent-platform/src/agent_service/services/evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 
 ## Detailed Component Analysis
 
@@ -315,7 +330,7 @@ Retry Strategy
 - [shared-contracts/schemas/identity-token.schema.json](file://shared-contracts/schemas/identity-token.schema.json)
 
 ### Agent Platform REST API (v2)
-Endpoints for agent chat, sessions, runtime metadata, and health.
+Endpoints for agent chat, sessions, runtime metadata, health, and **evidence persistence**.
 
 - Chat
   - POST /api/v2/chat
@@ -341,6 +356,13 @@ Endpoints for agent chat, sessions, runtime metadata, and health.
   - Description: Readiness and liveness checks.
   - Response schema: See agent-health schema.
 
+**Updated** Session Detail Enhancement (SPEC-025 R-2)
+- GET /api/v2/sessions/{session_id} now includes `evidence_turns` field
+- Description: Returns persisted tool evidence grouped by assistant turn
+- Response enhancement: Adds `evidence_turns: list[EvidenceTurn] | None` field
+- Behavior: Empty list when no evidence stored, null when evidence store is unreadable (never 500)
+- Evidence Turn Schema: See session-evidence.schema.json for detailed structure
+
 Streaming and WebSockets
 - WS /api/v2/ws/chat?session_id={id}
 - Description: Real-time streaming of agent events.
@@ -355,10 +377,12 @@ Retry Strategy
 **Section sources**
 - [agent-platform/src/agent_service/api/v2/routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [agent-platform/src/agent_service/schemas/v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
+- [agent-platform/src/agent_service/services/evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [shared-contracts/schemas/agent-chat-request.schema.json](file://shared-contracts/schemas/agent-chat-request.schema.json)
 - [shared-contracts/schemas/agent-chat-response.schema.json](file://shared-contracts/schemas/agent-chat-response.schema.json)
 - [shared-contracts/schemas/agent-stream-event.schema.json](file://shared-contracts/schemas/agent-stream-event.schema.json)
 - [shared-contracts/schemas/agent-session.schema.json](file://shared-contracts/schemas/agent-session.schema.json)
+- [shared/shared-contracts/schemas/session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [shared-contracts/schemas/agent-runtime-metadata.schema.json](file://shared-contracts/schemas/agent-runtime-metadata.schema.json)
 - [shared-contracts/schemas/agent-health.schema.json](file://shared-contracts/schemas/agent-health.schema.json)
 
@@ -479,6 +503,7 @@ All schemas are defined under shared-contracts and referenced by services.
 - Sessions
   - session.schema.json
   - agent-session.schema.json
+  - **session-evidence.schema.json: New schema for persisted tool evidence with truncation markers and size caps**
 
 - Identity
   - identity-token.schema.json
@@ -501,6 +526,13 @@ All schemas are defined under shared-contracts and referenced by services.
 - Audit Trail
   - audit-event.schema.json: Canonical audit event envelope with event_id, occurred_at, event_type, service, request_id, outcome, and details fields.
 
+**Updated** Evidence Turn Schema Details
+- `turn_index`: Assistant turn ordinal (0-based) for replay attachment
+- `request_id`: Correlation with audit trail tool_invoked events  
+- `created_at`: Persistence timestamp assigned by evidence store
+- `frames`: Ordered tool_call/tool_result frames with optional truncation markers
+- Truncation reasons: `entry_cap` (per-entry size cap), `session_budget` (per-session budget eviction)
+
 **Section sources**
 - [shared-contracts/schemas/chat-request.schema.json](file://shared-contracts/schemas/chat-request.schema.json)
 - [shared-contracts/schemas/chat-response.schema.json](file://shared-contracts/schemas/chat-response.schema.json)
@@ -510,6 +542,7 @@ All schemas are defined under shared-contracts and referenced by services.
 - [shared-contracts/schemas/agent-stream-event.schema.json](file://shared-contracts/schemas/agent-stream-event.schema.json)
 - [shared-contracts/schemas/session.schema.json](file://shared-contracts/schemas/session.schema.json)
 - [shared-contracts/schemas/agent-session.schema.json](file://shared-contracts/schemas/agent-session.schema.json)
+- [shared/shared-contracts/schemas/session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [shared-contracts/schemas/identity-token.schema.json](file://shared-contracts/schemas/identity-token.schema.json)
 - [shared-contracts/schemas/identity-context.schema.json](file://shared-contracts/schemas/identity-context.schema.json)
 - [shared-contracts/schemas/tool-invocation.schema.json](file://shared-contracts/schemas/tool-invocation.schema.json)
@@ -523,7 +556,7 @@ All schemas are defined under shared-contracts and referenced by services.
 - [shared/shared-contracts/schemas/policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
 
 ## Dependency Analysis
-The Tool Gateway depends on Identity Broker for authentication and on Agent Platform for execution. Policy engine and session store are integral to the gateway's orchestration flow. **The Platform Gateway depends on the policy engine for authorization and provides transparency endpoints that may proxy to Tool Gateway and Skills Hub.**
+The Tool Gateway depends on Identity Broker for authentication and on Agent Platform for execution. Policy engine and session store are integral to the gateway's orchestration flow. **The Platform Gateway depends on the policy engine for authorization and provides transparency endpoints that may proxy to Tool Gateway and Skills Hub. The Agent Platform integrates with the Evidence Store for persistent tool evidence.**
 
 ```mermaid
 graph LR
@@ -536,6 +569,7 @@ PG --> AS["Audit Service"]
 PG --> TG
 PG --> SH["Skills Hub"]
 AP --> RT["Agent Runtime"]
+AP --> ES["Evidence Store"]
 IB -.-> AS
 ```
 
@@ -544,6 +578,7 @@ IB -.-> AS
 - [platform-gateway/src/platform_gateway/api/routes/tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [platform-gateway/src/platform_gateway/api/routes/skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [platform-gateway/src/platform_gateway/services/tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
+- [agent-platform/src/agent_service/services/evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 
 **Section sources**
 - [platform-gateway/src/platform_gateway/api/routes/policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
@@ -551,6 +586,7 @@ IB -.-> AS
 - [platform-gateway/src/platform_gateway/api/routes/skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [platform-gateway/src/platform_gateway/services/policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [platform-gateway/src/platform_gateway/services/tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
+- [agent-platform/src/agent_service/services/evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 
 ## Performance Considerations
 - Prefer streaming over polling for long-running operations to reduce latency and bandwidth.
@@ -563,6 +599,8 @@ IB -.-> AS
 - **Leverage Prometheus metrics for performance monitoring and alerting.**
 - **Cache permission matrix responses appropriately given their read-only nature.**
 - **Limit skills inventory queries to reasonable page sizes (default 100, max 100).**
+- **Monitor evidence store performance with dedicated metrics for frame persistence and truncation events.**
+- **Configure appropriate evidence store budgets to balance persistence depth with storage costs.**
 
 [No sources needed since this section provides general guidance]
 
@@ -575,6 +613,7 @@ Common issues and resolutions:
 - Streaming interruptions: Reconnect with last event ID; use idempotency keys.
 - **Audit Service Issues: Verify service credentials, check store backend connectivity, monitor retention policies.**
 - **Platform Gateway Issues: Check policy bundle loading, delegated token availability, and upstream service configuration.**
+- **Evidence Store Issues: Verify evidence store backend availability, check storage budgets, monitor truncation events.**
 
 Debugging techniques:
 - Enable request tracing and correlation IDs.
@@ -585,15 +624,18 @@ Debugging techniques:
 - **Use audit event filtering to isolate specific issues or users.**
 - **Check policy matrix endpoint to verify authorization configuration.**
 - **Validate tools catalog and skills inventory access patterns.**
+- **Inspect evidence_turns field in session responses to verify evidence persistence.**
+- **Monitor evidence store metrics for frame persistence success rates and truncation events.**
 
 **Section sources**
 - [shared-contracts/schemas/health-response.schema.json](file://shared-contracts/schemas/health-response.schema.json)
 - [shared-contracts/schemas/agent-health.schema.json](file://shared-contracts/schemas/agent-health.schema.json)
 - [audit-service/src/audit_service/core/metrics.py](file://products/audit-service/src/audit_service/core/metrics.py)
 - [platform-gateway/src/platform_gateway/api/routes/policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
+- [agent-platform/src/agent_service/services/evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 
 ## Conclusion
-The Luban AIOps Platform exposes a cohesive set of REST and WebSocket APIs across Tool Gateway, Agent Platform, Identity Broker, Platform Gateway, and Audit Service. The new transparency endpoints provide operators with visibility into permissions, tools, and skills while maintaining strict authorization controls. By adhering to shared schemas, implementing robust retry strategies, leveraging streaming, and utilizing the durable audit trail system, clients can build resilient integrations with comprehensive observability and compliance capabilities. Follow the versioning and migration guidelines to maintain compatibility during upgrades.
+The Luban AIOps Platform exposes a cohesive set of REST and WebSocket APIs across Tool Gateway, Agent Platform, Identity Broker, Platform Gateway, and Audit Service. The new transparency endpoints provide operators with visibility into permissions, tools, and skills while maintaining strict authorization controls. **The evidence persistence system (SPEC-025) adds powerful replay capabilities for tool executions with bounded storage, truncation markers, and graceful degradation when stores are unavailable.** By adhering to shared schemas, implementing robust retry strategies, leveraging streaming, and utilizing the durable audit trail system, clients can build resilient integrations with comprehensive observability and compliance capabilities. Follow the versioning and migration guidelines to maintain compatibility during upgrades.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -613,6 +655,7 @@ The Luban AIOps Platform exposes a cohesive set of REST and WebSocket APIs acros
 - Java: Use OkHttp and Spring WebSocket; manage connection pools and retries.
 - **Platform Gateway Clients: Use user bearer tokens with appropriate permissions for transparency endpoints; implement proper error handling for 401/403/503 responses.**
 - **Tool Gateway Clients: Use delegated token chains for tools catalog access; handle upstream service failures gracefully.**
+- **Evidence-Aware Clients: Handle evidence_turns field gracefully - treat empty arrays as no evidence, null values as degraded service, and validate frame structures for replay functionality.**
 
 [No sources needed since this section provides general guidance]
 
@@ -623,6 +666,7 @@ The Luban AIOps Platform exposes a cohesive set of REST and WebSocket APIs acros
 - Chaos tests for resilience and retry behavior.
 - **Audit Service Tests: Test ingestion batching, query filtering, pagination, and authentication flows.**
 - **Platform Gateway Tests: Test permission matrix generation, tools catalog proxying, skills inventory filtering, and authorization enforcement.**
+- **Evidence Store Tests: Test persistence round-trips, truncation markers, budget enforcement, and graceful degradation when stores are unavailable.**
 
 [No sources needed since this section provides general guidance]
 
@@ -646,3 +690,25 @@ The Luban AIOps Platform exposes a cohesive set of REST and WebSocket APIs acros
 - [platform-gateway/src/platform_gateway/api/routes/policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [platform-gateway/src/platform_gateway/api/routes/tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [platform-gateway/src/platform_gateway/api/routes/skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+
+### Evidence Store Configuration
+- Environment Variables:
+  - AGENT_STATE_STORE_BACKEND: Backend selection ("memory" or "postgres")
+  - AGENT_STATE_DB_URL: Database connection string for Postgres backend
+  - EVIDENCE_ENTRY_MAX_CHARS: Per-entry size cap (default: 131,072 characters)
+  - EVIDENCE_SESSION_MAX_BYTES: Per-session storage budget (default: 4,194,304 bytes)
+
+- Storage Backends:
+  - Memory: Default backend for development and CI environments
+  - Postgres: Production backend sharing database with SPEC-016/017 state store
+  - Automatic fallback to memory when Postgres is unavailable
+
+- Retention and Budget Management:
+  - Evidence follows session lifetime (cascade delete with sessions)
+  - Per-session budget enforcement with oldest-payload eviction
+  - TTL refresh on reads mirroring state store pattern
+  - Fail-open semantics - persistence failures never fail chat turns
+
+**Section sources**
+- [agent-platform/src/agent_service/services/evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [agent-platform/src/agent_service/core/metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)

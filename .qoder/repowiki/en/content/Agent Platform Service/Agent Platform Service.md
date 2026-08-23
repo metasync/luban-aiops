@@ -25,11 +25,14 @@
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [runtime_service.py](file://products/agent-platform/src/agent_service/services/runtime_service.py)
 - [runtime_dependencies.py](file://products/agent-platform/src/agent_service/services/runtime_dependencies.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [test_chat_stream_modality.py](file://products/agent-platform/tests/test_chat_stream_modality.py)
+- [test_evidence_store.py](file://products/agent-platform/tests/test_evidence_store.py)
+- [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [pyproject.toml](file://products/agent-platform/pyproject.toml)
 - [Dockerfile](file://products/agent-platform/Dockerfile)
 - [README.md](file://products/agent-platform/README.md)
@@ -37,12 +40,13 @@
 
 ## Update Summary
 **Changes Made**
-- Added input_modality parameter support to v2 streaming endpoint with Literal type validation for 'text' and 'voice' values
-- Implemented voice-readiness parity between POST /chat and GET /chat/stream endpoints
-- Enhanced API schema definitions to include input_modality field with proper validation
-- Updated streaming endpoint to accept query parameter for modality metadata
-- Added comprehensive test coverage for modality validation and default behavior
-- Maintained backward compatibility with existing clients by defaulting to 'text' modality
+- Added comprehensive evidence store service with dual backend support (in-memory and Postgres)
+- Integrated evidence capture into runtime kernel for tool_call/tool_result frame persistence
+- Enhanced session management with evidence store integration for complete session lifecycle
+- Added evidence store metrics and observability for monitoring evidence persistence operations
+- Implemented size-capped evidence storage with per-entry and per-session budget enforcement
+- Added evidence turn retrieval for session detail endpoints with structured evidence data
+- Updated configuration to support evidence store settings and environment variables
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -58,16 +62,17 @@
 11. [Voice Readiness Support](#voice-readiness-support)
 12. [Per-Request Trace Queues](#per-request-trace-queues)
 13. [Delegated Token Management](#delegated-token-management)
-14. [Dependency Analysis](#dependency-analysis)
-15. [Performance Considerations](#performance-considerations)
-16. [Troubleshooting Guide](#troubleshooting-guide)
-17. [Conclusion](#conclusion)
-18. [Appendices](#appendices)
+14. [Evidence Store Service](#evidence-store-service)
+15. [Dependency Analysis](#dependency-analysis)
+16. [Performance Considerations](#performance-considerations)
+17. [Troubleshooting Guide](#troubleshooting-guide)
+18. [Conclusion](#conclusion)
+19. [Appendices](#appendices)
 
 ## Introduction
 The Agent Platform Service is the core orchestration engine of the Luban AIOps Platform. It provides a runtime kernel for agent execution, a provider registry for multi-model backends (OpenAI, DashScope, DeepSeek), and robust session management with durable storage. The service exposes REST APIs for agent interactions, streaming responses, and configuration management, enabling scalable and observable AI operations across diverse model providers.
 
-**Updated** The service now includes comprehensive voice-readiness support through the addition of input_modality parameters to both POST /chat and GET /chat/stream endpoints, ensuring parity between synchronous and asynchronous chat interfaces. This enhancement enables voice-based interactions while maintaining the same policy enforcement and HITL workflows as text-based inputs. The service also includes comprehensive multi-session operator workspace foundations with v2 session routes, enhanced session stores supporting last_active_at timestamps and server-minted titles, transcript extraction capabilities for conversation history reconstruction, and integrated HITL confirmation registry for human-in-the-loop workflows.
+**Updated** The service now includes comprehensive evidence store capabilities with dual backend support for persistent tool execution evidence, enhanced runtime kernel integration for evidence capture during streaming operations, and improved session management that preserves complete audit trails of tool invocations. The evidence store service provides size-capped storage with automatic eviction policies, ensuring efficient memory usage while maintaining detailed operational visibility.
 
 ## Project Structure
 The Agent Platform Service is implemented as a Python FastAPI application organized by feature layers:
@@ -76,6 +81,7 @@ The Agent Platform Service is implemented as a Python FastAPI application organi
 - Runtime kernel and settings
 - Provider implementations and registry
 - Session services and stores
+- Evidence store service with dual backend support
 - Tools and integrations
 - Core cross-cutting concerns (configuration, observability, metrics, telemetry, request context)
 
@@ -110,6 +116,10 @@ sess_store["services/session_store.py"]
 sess_transcript["services/session_transcript.py"]
 hitl_reg["services/hitl_confirmations.py"]
 end
+subgraph "Evidence Store"
+ev_store["services/evidence_store.py"]
+ev_schema["schemas/session-evidence.schema.json"]
+end
 subgraph "Tools"
 gw_tools["tools/gateway_tools.py"]
 end
@@ -132,6 +142,8 @@ sess_svc --> sess_store
 sess_svc --> sess_transcript
 routes_v2 --> hitl_reg
 kernel --> gw_tools
+kernel --> ev_store
+ev_store --> metrics
 app --> metrics
 app --> obs
 app --> tel
@@ -159,6 +171,7 @@ settings --> env
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
@@ -174,12 +187,14 @@ settings --> env
 - Runtime Kernel: Orchestrates agent lifecycle, conversation state, tool invocation, and provider dispatch with enhanced AgentScope 2.x toolkit registration and anti-hallucination guards.
 - Provider Registry: Discovers and manages model providers (OpenAI, DashScope, DeepSeek) with pluggable interfaces using new AgentScope 2.x model construction patterns.
 - Session Management: Persists and restores conversations with durable storage, multi-session workspace support, and concurrency-safe access.
+- Evidence Store: Provides persistent storage for tool execution evidence with dual backend support and size-capped retention policies.
 - API Layer: Exposes REST endpoints for chat, sessions, streaming events, and health checks with v3 streaming protocol support, session workspace operations, and voice-readiness parity.
 - Cross-Cutting: Configuration, environment, metrics, observability, telemetry, and request-scoped context.
 
 Key responsibilities:
 - Lifecycle: Initialize, start, run, and shutdown agents safely with AgentScope 2.x compatibility.
 - Conversation: Maintain message history, context, and state per session with workspace organization.
+- Evidence Capture: Persist tool_call and tool_result frames with size caps and automatic eviction.
 - Streaming: Emit incremental events to clients over HTTP streaming with v3 tool_call/tool_result frames.
 - Security: Manage per-user toolkit closures bound to delegated tokens for secure tool execution.
 - Anti-Hallucination: Prevent model fabrication through systematic NO_TOOLS_NOTICE injection.
@@ -190,13 +205,14 @@ Key responsibilities:
 - HITL Integration: Support human-in-the-loop workflows with parked confirmation management.
 - Observability: Emit structured logs, metrics, and traces for each operation with per-request audit trails.
 
-**Updated** The service now includes comprehensive voice-readiness support with input_modality parameters on both POST /chat and GET /chat/stream endpoints, ensuring consistent behavior across synchronous and asynchronous interfaces while maintaining full policy enforcement and HITL workflow compatibility.
+**Updated** The service now includes comprehensive evidence store capabilities with dual backend support, runtime kernel integration for evidence capture during streaming operations, and enhanced session management that preserves complete audit trails of tool invocations with size-capped storage and automatic eviction policies.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
 - [telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
@@ -205,9 +221,10 @@ Key responsibilities:
 ## Architecture Overview
 The service follows a layered architecture with enhanced security and anti-hallucination features:
 - API layer receives requests, validates payloads, and delegates to the runtime kernel with v3 streaming support, session workspace operations, and voice-readiness parity.
-- Runtime kernel coordinates sessions, tools, and provider selection via the registry with AgentScope 2.x toolkit registration.
+- Runtime kernel coordinates sessions, tools, and provider selection via the registry with AgentScope 2.x toolkit registration and evidence capture.
 - Providers implement standardized interfaces to communicate with external model APIs using new model construction patterns.
 - Session service persists state using a configurable store with workspace bookkeeping and transcript extraction.
+- Evidence store provides persistent storage for tool execution evidence with dual backend support and size-capped retention.
 - Cross-cutting modules provide configuration, metrics, observability, and telemetry with per-request audit trails.
 
 ```mermaid
@@ -218,13 +235,14 @@ participant API as "FastAPI Routes"
 participant Kernel as "RuntimeKernel"
 participant Sess as "SessionService"
 participant Store as "SessionStore"
+participant EvStore as "EvidenceStore"
 participant Reg as "ProviderRegistry"
 participant Prov as "ModelProvider"
 participant Tools as "GatewayTools"
 participant Transcript as "TranscriptExtractor"
 participant HITL as "ConfirmationRegistry"
 participant Trace as "TraceQueue"
-Note over Client,HITL : Voice-Ready Chat with Workspace Operations
+Note over Client,HITL : Voice-Ready Chat with Evidence Capture
 Client->>Gateway : POST /api/v1/chat {message, input_modality}
 Gateway->>API : Forward with input_modality metadata
 API->>Sess : ensure_session(sessionId, user_id)
@@ -242,6 +260,8 @@ Kernel->>Tools : build_gateway_toolkit(definitions, bearerToken, traceQueue)
 Tools-->>Kernel : toolkit with v3 tool_call/tool_result support
 Kernel->>Prov : streamChat(messages, options, toolkit)
 Prov-->>Kernel : StreamEvent* + tool_call/tool_result frames
+Kernel->>EvStore : save_turn(frames, session_max_bytes)
+EvStore-->>Kernel : evidence persisted
 Kernel->>Trace : emit trace events
 Trace-->>Kernel : audit trail data
 Kernel-->>API : StreamEvent* with v3 frames
@@ -249,7 +269,7 @@ API-->>Client : SSE/Streaming Response with tool_call/tool_result
 Kernel->>Sess : save(sessionId, updatedState)
 Sess->>Store : set(sessionId, updatedState)
 end
-Note over Client,HITL : Voice-Ready Streaming
+Note over Client,HITL : Voice-Ready Streaming with Evidence
 Client->>API : GET /api/v2/chat/stream?message=...&input_modality=voice
 API->>Sess : ensure_session(sessionId, user_id)
 API->>Sess : mark_session_turn(sessionId, message)
@@ -258,7 +278,7 @@ Kernel-->>API : StreamEvent* with v3 frames
 API-->>Client : SSE/Streaming Response
 ```
 
-**Updated** The sequence diagram now shows the complete voice-readiness flow, including both POST /chat and GET /chat/stream endpoints accepting input_modality parameters, while maintaining consistent policy enforcement and HITL workflows across both modalities.
+**Updated** The sequence diagram now shows the complete voice-readiness flow with integrated evidence capture, including both POST /chat and GET /chat/stream endpoints accepting input_modality parameters, while maintaining consistent policy enforcement, HITL workflows, and evidence persistence across both modalities.
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -266,6 +286,7 @@ API-->>Client : SSE/Streaming Response
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
@@ -280,6 +301,7 @@ The runtime kernel is the central orchestrator for agent execution with enhanced
 - Conversation state transitions with per-request toolkit rebuilding
 - Tool invocation and result aggregation with v3 streaming support
 - Provider selection and streaming event handling with trace queue integration
+- Evidence capture and persistence for tool_call and tool_result frames
 - Anti-hallucination guard system with NO_TOOLS_NOTICE injection
 - Auto-approval mechanism for vetted read-only tools to prevent headless stream stalls
 - Voice readiness support through input_modality parameter passthrough
@@ -305,6 +327,7 @@ class AgentKernel {
 +provider_name()
 +is_configured()
 +runtime_state()
++_persist_evidence(session_id, request_id, turn_index, frames)
 }
 class SessionService {
 +load(sessionId)
@@ -315,6 +338,14 @@ class SessionService {
 +get_session(session_id, user_id)
 +list_sessions(user_id)
 +mark_session_turn(session_id, message)
+}
+class EvidenceStore {
+<<interface>>
++backend_name : str
++save_turn(session_id, request_id, turn_index, frames, session_max_bytes)
++load_turns(session_id)
++delete_session(session_id)
++is_ready()
 }
 class ProviderRegistry {
 +register(name, provider)
@@ -332,17 +363,19 @@ class GatewayTools {
 +invoke_gateway_tool(gateway_url, tool_name, parameters, bearer_token)
 }
 AgentKernel --> SessionService : "uses"
+AgentKernel --> EvidenceStore : "persists evidence"
 AgentKernel --> ProviderRegistry : "uses"
 AgentKernel --> GatewayTools : "manages"
 ProviderRegistry --> ModelProvider : "manages"
 GatewayTools --> ModelProvider : "secure invocation"
 ```
 
-**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, enhanced session management methods for multi-session workspace operations, and voice readiness support through input_modality parameter passthrough.
+**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, enhanced session management methods for multi-session workspace operations, evidence capture and persistence for tool execution frames, and voice readiness support through input_modality parameter passthrough.
 
 **Diagram sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
@@ -418,12 +451,14 @@ CheckHITL --> AddFlags["Add pending_confirmation flags"]
 AddFlags --> ReturnList["Return Session List"]
 Detail["GET /api/v2/sessions/{id}"] --> GetSession["Get Session Detail"]
 GetSession --> ExtractTranscript["Extract Transcript"]
-ExtractTranscript --> BuildResponse["Build Response with Title, Timestamps, Transcript"]
+GetSession --> LoadEvidence["Load Evidence Turns"]
+ExtractTranscript --> BuildResponse["Build Response with Title, Timestamps, Transcript, Evidence"]
+LoadEvidence --> BuildResponse
 BuildResponse --> ReturnDetail["Return Session Detail"]
 Delete["DELETE /api/v2/sessions/{id}"] --> ValidateOwner["Validate Session Owner"]
 ValidateOwner --> CheckParked["Check for Parked Confirmations"]
 CheckParked --> |Has Pending| Reject["409 Conflict - Resolve First"]
-CheckParked --> |No Pending| DeleteSession["Delete Session + State"]
+CheckParked --> |No Pending| DeleteSession["Delete Session + State + Evidence"]
 DeleteSession --> Audit["Emit session_deleted Audit Event"]
 Audit --> Success["200 Deleted"]
 ```
@@ -440,6 +475,7 @@ Key features:
 - **Owner-Only Access**: Foreign session IDs return 404 (anti-enumeration pattern)
 - **HITL Integration**: Sessions with parked confirmations block deletion with 409
 - **Transcript Extraction**: Best-effort conversation history from kernel state snapshots
+- **Evidence Retrieval**: Load persisted tool execution evidence for session details
 - **Audit Trail**: All delete operations emit durable `session_deleted` audit events
 
 **Section sources**
@@ -587,13 +623,13 @@ The API layer exposes REST endpoints for agent interactions, session management,
 
 Typical endpoints:
 - Chat: POST /chat with message, optional session ID, and delegated token
-- Sessions: GET/POST/DELETE /sessions for lifecycle management
+- Sessions: GET/POST/DELETE /sessions for lifecycle management with evidence retrieval
 - Health: GET /health for readiness and liveness probes
 - Streaming: Server-sent events for incremental responses with v3 tool_call/tool_result frames
 
 Request/response validation uses Pydantic models defined in schemas with enhanced v3 streaming event types.
 
-**Updated** Chat endpoints now accept delegated tokens for secure tool execution and support v3 streaming protocol with tool_call/tool_result frames for comprehensive audit trails. Both POST /chat and GET /chat/stream endpoints accept input_modality parameters for voice-readiness parity. Session endpoints provide multi-session workspace operations with proper authorization and audit trails.
+**Updated** Chat endpoints now accept delegated tokens for secure tool execution and support v3 streaming protocol with tool_call/tool_result frames for comprehensive audit trails. Both POST /chat and GET /chat/stream endpoints accept input_modality parameters for voice-readiness parity. Session endpoints provide multi-session workspace operations with proper authorization, audit trails, and evidence turn retrieval.
 
 **Section sources**
 - [routes.py:106-235](file://products/agent-platform/src/agent_service/api/v2/routes.py#L106-L235)
@@ -611,6 +647,7 @@ participant GatewayTools as "GatewayTools"
 participant External as "External Tool"
 participant Trace as "TraceQueue"
 participant HITL as "ConfirmationRegistry"
+participant EvStore as "EvidenceStore"
 Kernel->>GatewayTools : build_gateway_toolkit(definitions, bearerToken, traceQueue)
 GatewayTools->>External : discover_tools(bearerToken)
 External-->>GatewayTools : availableTools
@@ -625,16 +662,19 @@ GatewayTools->>External : invoke("k8s_connector", action, params, bearerToken)
 External-->>GatewayTools : result
 GatewayTools->>Trace : emit tool_result trace event
 Trace-->>Kernel : audit trail data
+Kernel->>EvStore : persist evidence frames
+EvStore-->>Kernel : evidence stored
 GatewayTools-->>Kernel : toolResult
 end
 ```
 
-**Updated** The tools integration now includes AgentScope 2.x toolkit registration pattern, per-request trace queues for audit trails, v3 streaming support with tool_call/tool_result frames, auto-approval mechanism for vetted read-only tools, and HITL confirmation registry integration for interactive workflows. Voice readiness is maintained throughout the tool execution pipeline.
+**Updated** The tools integration now includes AgentScope 2.x toolkit registration pattern, per-request trace queues for audit trails, v3 streaming support with tool_call/tool_result frames, auto-approval mechanism for vetted read-only tools, HITL confirmation registry integration for interactive workflows, and evidence store integration for persistent tool execution records. Voice readiness is maintained throughout the tool execution pipeline.
 
 **Diagram sources**
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 
 **Section sources**
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
@@ -651,6 +691,7 @@ The multi-session operator workspace provides comprehensive session lifecycle ma
 - **Owner-Only Access**: Anti-enumeration pattern prevents session enumeration attacks
 - **HITL Integration**: Sessions with pending confirmations are properly flagged and protected
 - **Transcript Access**: Best-effort conversation history reconstruction for workspace UIs
+- **Evidence Retrieval**: Load persisted tool execution evidence for session details
 - **Audit Trail**: All workspace operations are logged for compliance and debugging
 
 ### Implementation Details
@@ -669,13 +710,16 @@ J --> K["Return session list"]
 D --> L["Get session by ID"]
 L --> M["Validate owner"]
 M --> N["Extract transcript"]
-N --> O["Return with title, timestamps, transcript"]
-E --> P["Validate owner"]
-P --> Q["Check for parked confirmations"]
-Q --> |Has pending| R["409 Conflict"]
-Q --> |Clear| S["Delete session + state"]
-S --> T["Emit audit event"]
-T --> U["200 Deleted"]
+M --> O["Load evidence turns"]
+N --> P["Build response with transcript"]
+O --> P
+P --> Q["Return with title, timestamps, transcript, evidence"]
+E --> R["Validate owner"]
+R --> S["Check for parked confirmations"]
+S --> |Has pending| T["409 Conflict"]
+S --> |Clear| U["Delete session + state + evidence"]
+U --> V["Emit audit event"]
+V --> W["200 Deleted"]
 ```
 
 **Diagram sources**
@@ -812,7 +856,6 @@ S --> |No| T["Return transcript_available=true, turns[]"]
 
 **Section sources**
 - [session_transcript.py:1-83](file://products/agent-platform/src/agent_service/services/session_transcript.py#L1-L83)
-- [routes.py:375-395](file://products/agent-platform/src/agent_service/api/v2/routes.py#L375-L395)
 
 ## HITL Confirmation Registry Integration
 
@@ -876,6 +919,7 @@ The streaming architecture has been enhanced with v3 protocol support, including
 - **Tool Result Frames**: Record execution outcomes with evidence and data summaries
 - **Evidence Panel Support**: Structured data for UI components to display tool usage
 - **Audit Trail Integration**: Seamless integration with per-request trace queues
+- **Evidence Persistence**: Automatic persistence of tool execution evidence for session replay
 
 ### Stream Event Types
 ```mermaid
@@ -1060,7 +1104,7 @@ API-->>Client : Response with results
 ```
 
 **Diagram sources**
-- [runtime_kernel.py:178-223](file://products/agent-platform/src/agent_service/runtime_kernel.py#L178-L223)
+- [runtime_kernel.py:178-223](file://products/agent-platform/src/agent_service/runtime_kernel.py#L178-223)
 - [gateway_tools.py:99-126](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L99-L126)
 - [routes.py:40-47](file://products/agent-platform/src/agent_service/api/v2/routes.py#L40-L47)
 
@@ -1078,22 +1122,134 @@ API-->>Client : Response with results
 - Maintains separation of concerns between identity and execution contexts
 
 **Section sources**
-- [runtime_kernel.py:178-223](file://products/agent-platform/src/agent_service/runtime_kernel.py#L178-L223)
+- [runtime_kernel.py:178-223](file://products/agent-platform/src/agent_service/runtime_kernel.py#L178-223)
 - [gateway_tools.py:99-126](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L99-L126)
 - [routes.py:40-47](file://products/agent-platform/src/agent_service/api/v2/routes.py#L40-L47)
+
+## Evidence Store Service
+
+### Overview
+The evidence store service provides persistent storage for tool execution evidence with dual backend support (in-memory and Postgres). It captures tool_call and tool_result frames from streaming operations, applies size-capped retention policies, and provides evidence retrieval for session replay and audit purposes.
+
+### Architecture
+```mermaid
+classDiagram
+class EvidenceStore {
+<<interface>>
++backend_name : str
++save_turn(session_id, request_id, turn_index, frames, session_max_bytes)
++load_turns(session_id)
++delete_session(session_id)
++is_ready()
+}
+class _BaseEvidenceStore {
++save_turn(session_id, request_id, turn_index, frames, session_max_bytes)
++_enforce_budget(session_id, session_max_bytes)
++load_turns(session_id)
++_next_frame_index(session_id, turn_index)
++_insert_rows(rows)
++_session_bytes(session_id)
++_evict_oldest_result_payload(session_id)
++_load_rows(session_id)
++_delete_rows(session_id)
+}
+class InMemoryEvidenceStore {
++backend_name = "memory"
+-_rows : dict[str, list[dict]]
++_next_frame_index(session_id, turn_index)
++_insert_rows(rows)
++_session_bytes(session_id)
++_evict_oldest_result_payload(session_id)
++_load_rows(session_id)
++_delete_rows(session_id)
+}
+class PostgresEvidenceStore {
++backend_name = "postgres"
++_db_url : str
++ttl_seconds : float
++_connect : SyncConnectFactory
++initialize()
++_next_frame_index(session_id, turn_index)
++_insert_rows(rows)
++_session_bytes(session_id)
++_evict_oldest_result_payload(session_id)
++_load_rows(session_id)
++_delete_rows(session_id)
+}
+EvidenceStore <|.. _BaseEvidenceStore
+_BaseEvidenceStore <|.. InMemoryEvidenceStore
+_BaseEvidenceStore <|.. PostgresEvidenceStore
+```
+
+**Diagram sources**
+- [evidence_store.py:86-204](file://products/agent-platform/src/agent_service/services/evidence_store.py#L86-L204)
+- [evidence_store.py:211-273](file://products/agent-platform/src/agent_service/services/evidence_store.py#L211-L273)
+- [evidence_store.py:362-497](file://products/agent-platform/src/agent_service/services/evidence_store.py#L362-L497)
+
+### Key Features
+- **Dual Backend Support**: In-memory for development/testing, Postgres for production with failover
+- **Size-Capped Storage**: Per-entry character limits and per-session byte budgets with automatic eviction
+- **Evidence Grouping**: Frames grouped by turn index with request correlation and timestamps
+- **Automatic Eviction**: Oldest result payloads evicted when session exceeds budget, preserving metadata
+- **TTL Management**: Opportunistic sweep of expired evidence rows in Postgres backend
+- **Metrics Integration**: Comprehensive observability for evidence persistence operations
+- **Redaction Inheritance**: Inherits redaction from tool-gateway choke point for security
+
+### Evidence Persistence Flow
+```mermaid
+sequenceDiagram
+participant Kernel as "RuntimeKernel"
+participant Prepare as "prepare_frames"
+participant Store as "EvidenceStore"
+participant Budget as "_enforce_budget"
+participant Metrics as "Metrics"
+Kernel->>Prepare : prepare_frames(frames, entry_max_chars)
+Prepare-->>Kernel : prepared frames with truncation markers
+Kernel->>Store : save_turn(session_id, request_id, turn_index, prepared, session_max_bytes)
+Store->>Store : _insert_rows(rows)
+Store->>Budget : _enforce_budget(session_id, session_max_bytes)
+Budget->>Budget : _session_bytes(session_id)
+Budget->>Budget : _evict_oldest_result_payload(session_id)
+Budget-->>Store : freed bytes
+Store->>Metrics : record_evidence_frames_persisted(count)
+Store-->>Kernel : evidence persisted
+```
+
+**Diagram sources**
+- [evidence_store.py:118-164](file://products/agent-platform/src/agent_service/services/evidence_store.py#L118-L164)
+- [runtime_kernel.py:450-473](file://products/agent-platform/src/agent_service/runtime_kernel.py#L450-L473)
+
+### Configuration and Environment Variables
+- **AGENT_STATE_STORE_BACKEND**: Selects backend ("memory" or "postgres")
+- **AGENT_STATE_DB_URL**: Database connection string for Postgres backend
+- **AGENT_STATE_TTL_SECONDS**: Time-to-live for evidence rows (opportunistic sweep)
+- **AGENT_EVIDENCE_ENTRY_MAX_CHARS**: Per-entry data payload character limit (default: 131072)
+- **AGENT_EVIDENCE_SESSION_MAX_BYTES**: Per-session storage budget in bytes (default: 4194304)
+
+### Evidence Schema
+The evidence store follows the session-evidence schema with structured turn groups containing tool_call and tool_result frames, supporting truncation markers for size-capped storage.
+
+**Section sources**
+- [evidence_store.py:1-551](file://products/agent-platform/src/agent_service/services/evidence_store.py#L1-L551)
+- [session-evidence.schema.json:1-58](file://shared/shared-contracts/schemas/session-evidence.schema.json#L1-L58)
+- [runtime_kernel.py:450-473](file://products/agent-platform/src/agent_service/runtime_kernel.py#L450-L473)
+- [metrics.py:158-186](file://products/agent-platform/src/agent_service/core/metrics.py#L158-L186)
+- [runtime_settings.py:145-150](file://products/agent-platform/src/agent_service/runtime_settings.py#L145-L150)
 
 ## Dependency Analysis
 The service has clear separation of concerns with minimal coupling between layers:
 - API depends on schemas and kernel
-- Kernel depends on session service, provider registry, and tools
+- Kernel depends on session service, provider registry, evidence store, and tools
 - Providers are independent implementations registered at runtime
 - Session service abstracts storage backend
+- Evidence store provides independent persistence layer with dual backend support
 - Cross-cutting concerns are injected into the application lifecycle
 
 ```mermaid
 graph LR
 API["API Routes"] --> Kernel["RuntimeKernel"]
 Kernel --> Session["SessionService"]
+Kernel --> Evidence["EvidenceStore"]
 Kernel --> Registry["ProviderRegistry"]
 Kernel --> Tools["GatewayTools"]
 Kernel --> Closure["ToolkitClosure"]
@@ -1108,14 +1264,17 @@ API --> Metrics["Metrics"]
 API --> Obs["Observability"]
 API --> Tel["Telemetry"]
 Closure --> Tools
+Evidence --> Metrics
+Evidence --> Store
 ```
 
-**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, and voice-readiness support through input_modality parameter passthrough.
+**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, and voice-readiness support through input_modality parameter passthrough.
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
 - [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
@@ -1148,8 +1307,11 @@ Closure --> Tools
 - **Fail-Open Design**: Workspace bookkeeping failures don't impact core chat performance
 - **Transcript Extraction**: Best-effort design ensures degraded performance without errors
 - **Voice Readiness**: Input modality parameter adds minimal overhead as metadata-only processing
+- **Evidence Store Optimization**: Size-capped storage with automatic eviction prevents memory bloat
+- **Dual Backend Failover**: Postgres unavailability falls back to in-memory for resilience
+- **Evidence Metrics**: Comprehensive monitoring of evidence persistence operations and truncation events
 
-**Updated** Performance considerations now include multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, and voice-readiness support with minimal overhead through metadata-only processing.
+**Updated** Performance considerations now include multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, and voice-readiness support with minimal overhead through metadata-only processing.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -1166,12 +1328,16 @@ Common issues and resolutions:
 - Headless stream stalls: Verify auto-approval configuration for vetted read-only tools
 - Permission prompt issues: Check if tools are properly configured as read-only and on allow-list
 - **Workspace Issues**: Verify session store backend connectivity and workspace bookkeeping operations
-- **Transcript Problems**: Check kernel state snapshot availability and format compatibility
+- **Transcript Problems**: Check kernel state snapshot availability and transcript extraction logs
 - **HITL Issues**: Verify confirmation registry state and TTL configuration
 - **Session Listing**: Check user session filtering and workspace ordering logic
 - **Voice Readiness Issues**: Validate input_modality parameter acceptance and Literal type validation
 - **Modality Validation**: Ensure 'text' and 'voice' values are accepted, invalid values return 422
 - **Parity Issues**: Verify consistent behavior between POST /chat and GET /chat/stream endpoints
+- **Evidence Store Issues**: Check backend availability, size limits, and evidence persistence metrics
+- **Evidence Retrieval**: Verify evidence store connectivity and session evidence availability
+- **Evidence Eviction**: Monitor evidence truncation metrics and adjust size limits as needed
+- **Postgres Evidence**: Validate database connectivity and table schema for evidence storage
 
 Debugging utilities:
 - Health check endpoints for service status
@@ -1187,8 +1353,10 @@ Debugging utilities:
 - **HITL Debugging**: Monitor confirmation registry state and parked confirmation lifecycle
 - **Session Audit**: Review audit trail for session workspace operations
 - **Voice Readiness Debugging**: Validate input_modality parameter handling and modality-specific behaviors
+- **Evidence Store Debugging**: Check evidence store backend status, size limits, and persistence metrics
+- **Evidence Panel Debugging**: Verify evidence turn retrieval and evidence schema compliance
 
-**Updated** Troubleshooting guide now includes multi-session workspace troubleshooting, transcript extraction debugging strategies, HITL confirmation registry diagnostics, workspace operation monitoring, and voice-readiness debugging with input_modality parameter validation and parity testing.
+**Updated** Troubleshooting guide now includes multi-session workspace troubleshooting, transcript extraction debugging strategies, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, and comprehensive evidence persistence monitoring and debugging.
 
 **Section sources**
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -1199,7 +1367,7 @@ Debugging utilities:
 ## Conclusion
 The Agent Platform Service provides a robust foundation for AI agent orchestration with multi-provider support, durable session management, and comprehensive observability. Its modular architecture enables easy customization and scaling while maintaining high performance and reliability.
 
-**Updated** The service now includes comprehensive voice-readiness support through input_modality parameters on both POST /chat and GET /chat/stream endpoints, ensuring parity between synchronous and asynchronous interfaces while maintaining consistent policy enforcement and HITL workflows. The service also includes comprehensive multi-session operator workspace foundations with v2 session routes, enhanced session stores supporting last_active_at timestamps and server-minted titles, transcript extraction capabilities for conversation history reconstruction, and integrated HITL confirmation registry for human-in-the-loop workflows. These enhancements enable operators to manage conversation state, resume sessions by ID, and maintain workspace organization while preserving security through anti-enumeration patterns and role-based access control. The service also includes enhanced security through delegated token management, AgentScope 2.x toolkit registration pattern, anti-hallucination guards, auto-approval mechanism for vetted tools, v3 streaming architecture with comprehensive audit trails, and per-request trace queues. These improvements strengthen the platform's security posture, prevent model hallucinations, eliminate headless stream stalls, and provide detailed operational visibility while maintaining the flexibility and performance characteristics that make it suitable for production AI operations.
+**Updated** The service now includes comprehensive evidence store capabilities with dual backend support, runtime kernel integration for evidence capture during streaming operations, and enhanced session management that preserves complete audit trails of tool invocations with size-capped storage and automatic eviction policies. The evidence store service provides persistent storage for tool_call and tool_result frames, ensuring complete operational visibility and session replay capabilities. The service also includes comprehensive voice-readiness support through input_modality parameters on both POST /chat and GET /chat/stream endpoints, ensuring parity between synchronous and asynchronous interfaces while maintaining consistent policy enforcement and HITL workflows. These enhancements strengthen the platform's security posture, prevent model hallucinations, eliminate headless stream stalls, provide detailed operational visibility, and maintain the flexibility and performance characteristics that make it suitable for production AI operations.
 
 ## Appendices
 
@@ -1238,6 +1406,7 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - **Session Management**: Create, list, and delete sessions with proper authorization
 - **Workspace Organization**: Use server-minted titles and last_active_at timestamps for organization
 - **Transcript Access**: Retrieve conversation history from kernel state snapshots
+- **Evidence Retrieval**: Load persisted tool execution evidence for session details
 - **HITL Integration**: Handle parked confirmations and interactive workflows
 - **Audit Compliance**: Monitor workspace operations through audit trails
 
@@ -1248,7 +1417,15 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - **Backward Compatibility**: Default to 'text' modality for existing clients
 - **Audit Trail**: Track input modality in audit events for monitoring and analysis
 
-**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, and voice-readiness support with input_modality parameters for complete operator workflow management.
+#### Evidence Store Configuration
+- **Backend Selection**: Configure AGENT_STATE_STORE_BACKEND for memory or postgres
+- **Database Setup**: Set AGENT_STATE_DB_URL for Postgres evidence persistence
+- **Size Limits**: Adjust AGENT_EVIDENCE_ENTRY_MAX_CHARS and AGENT_EVIDENCE_SESSION_MAX_BYTES
+- **TTL Configuration**: Set AGENT_STATE_TTL_SECONDS for evidence row expiration
+- **Monitoring**: Track evidence persistence metrics and truncation events
+- **Failover**: Verify graceful fallback to in-memory when Postgres is unavailable
+
+**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, and voice-readiness support with input_modality parameters for complete operator workflow management.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -1259,6 +1436,9 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
 - [test_chat_stream_modality.py](file://products/agent-platform/tests/test_chat_stream_modality.py)
+- [test_evidence_store.py](file://products/agent-platform/tests/test_evidence_store.py)
+- [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
