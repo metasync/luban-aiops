@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Avatar,
@@ -51,6 +51,22 @@ export function userInitials(username: string): string {
   if (parts.length === 0) return "?";
   if (parts.length === 1) return parts[0].slice(0, 2);
   return parts[0][0] + parts[1][0];
+}
+
+// Tracks the antd Sider lg breakpoint (992px): below it the inline sidebar
+// auto-collapses and navigation moves into the drawer.
+function useNarrowViewport(): boolean {
+  const [narrow, setNarrow] = useState(
+    () => window.matchMedia("(max-width: 991px)").matches,
+  );
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 991px)");
+    const update = (event: MediaQueryListEvent) => setNarrow(event.matches);
+    setNarrow(query.matches);
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return narrow;
 }
 
 function SidebarContent({
@@ -146,7 +162,7 @@ function SidebarContent({
 
   return (
     <>
-      <div style={{ padding: "12px 16px" }}>
+      <div className="sidebar-brand" style={{ padding: "12px 16px" }}>
         <Typography.Title level={5} style={{ margin: 0 }}>
           Luban AIOps
         </Typography.Title>
@@ -206,6 +222,10 @@ function SidebarContent({
 export default function App() {
   const [active, setActive] = useState<ViewId>("chat");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Desktop sidebar fold state; below the lg breakpoint the Sider
+  // auto-collapses (onBreakpoint) and the drawer takes over.
+  const [siderCollapsed, setSiderCollapsed] = useState(false);
+  const narrow = useNarrowViewport();
   const { booting, username } = useAuth();
   // The session workspace lives here so the incidents view can pin
   // incident sessions into the chat panel (SPEC-023 R-3 deep links).
@@ -250,6 +270,9 @@ export default function App() {
         breakpoint="lg"
         collapsedWidth={0}
         trigger={null}
+        collapsible
+        collapsed={siderCollapsed}
+        onBreakpoint={(broken) => setSiderCollapsed(broken)}
         style={{ borderInlineEnd: "1px solid var(--border)" }}
       >
         <SidebarContent active={active} onNavigate={navigate} />
@@ -257,9 +280,10 @@ export default function App() {
       <Layout>
         <Layout.Content
           className={
-            active === "chat"
+            (active === "chat"
               ? "view-container view-container-flush"
-              : "view-container"
+              : "view-container") +
+            (narrow || siderCollapsed ? " view-container-inset" : "")
           }
         >
           {active === "chat" ? (
@@ -293,8 +317,16 @@ export default function App() {
         className="mobile-menu-button"
         type="text"
         icon={<MenuOutlined />}
-        aria-label="Open navigation"
-        onClick={() => setDrawerOpen(true)}
+        aria-label={
+          narrow
+            ? "Open navigation"
+            : siderCollapsed
+              ? "Show navigation"
+              : "Hide navigation"
+        }
+        onClick={() =>
+          narrow ? setDrawerOpen(true) : setSiderCollapsed(!siderCollapsed)
+        }
       />
     </Layout>
   );

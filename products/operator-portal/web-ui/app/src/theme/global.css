@@ -63,39 +63,40 @@ body {
   gap: 8px;
 }
 
-/* Off-canvas sidebar trigger: the inline Sider auto-collapses below
-   antd's lg breakpoint (992px), so the hamburger only exists there.
-   Desktop hides it entirely — the persistent sidebar is the nav. */
+/* Navigation trigger: always visible, pinned top-left next to the panel
+   it controls. On desktop it folds the inline sidebar; below antd's lg
+   breakpoint (992px, where the Sider auto-collapses) it opens the
+   off-canvas drawer instead. */
 .mobile-menu-button {
-  display: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 100;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
-@media (max-width: 991px) {
-  .mobile-menu-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    position: fixed;
-    top: 12px;
-    left: 12px;
-    z-index: 100;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-  }
+/* Clear the pinned trigger out of the inline sidebar's brand block
+   (drawer content keeps its own padding). */
+.ant-layout-sider .sidebar-brand {
+  padding-left: 56px !important;
+}
 
-  /* Keep the pinned trigger clear of view content (flush views own
-     their own padding). */
-  .view-container:not(.view-container-flush) {
-    padding-left: 64px;
-  }
+/* Applied when the inline sidebar is absent (narrow viewport or folded
+   on desktop): keep the trigger clear of view content. Scoped selectors
+   outrank the base rules defined further down this stylesheet. */
+.view-container-inset.view-container:not(.view-container-flush) {
+  padding-left: 64px;
+}
 
-  /* The chat view is flush: clear the trigger out of the session-panel
-     header instead. Scoped selector outranks the base padding rule that
-     appears later in this stylesheet. */
-  .chat-view .session-panel-header {
-    padding-left: 56px;
-  }
+/* The chat view is flush: clear the trigger out of the session-panel
+   header instead. */
+.view-container-inset .session-panel-header {
+  padding-left: 56px;
 }
 
 .view-container {
