@@ -35,15 +35,16 @@
 - [useSpeechRecognition.ts](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts)
 - [languages.ts](file://products/operator-portal/web-ui/app/src/voice/languages.ts)
 - [markdown.test.ts](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts)
+- [useChatStream.test.ts](file://products/operator-portal/web-ui/app/src/stream/__tests__/useChatStream.test.ts)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added sticky request banner system using IntersectionObserver for maintaining conversation context during long replies and expanded evidence panels
-- Enhanced authentication state management with proper disabled states for unauthenticated users in session creation controls
-- Improved markdown table rendering with proper header/body separation using thead/tbody structure instead of disconnected stacked tables
-- Visual consistency improvements including inline brand display with platform version tags and full-width evidence panels
-- Comprehensive test coverage for markdown rendering functionality including XSS prevention, quote escaping, and protocol filtering
+- Added comprehensive stale session handling with missingRef tracking mechanism in ChatView.tsx to remember sessions returning 404 errors
+- Enhanced useChatStream hook with automatic retry logic that drops stale session references when encountering 404 errors during stream opening
+- Implemented robust error recovery for deleted or expired sessions with graceful fallback to server-side auto-creation
+- Added test coverage for 404 retry scenarios and error propagation when retries fail
+- Improved session management resilience against network failures and backend service issues
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -73,7 +74,7 @@
 
 The Operator Portal is a modern web-based administrative interface designed for platform administration and monitoring within the Luban AIOPS ecosystem. The portal has been completely rebuilt using React 18, TypeScript, and Vite, replacing the previous vanilla JavaScript implementation. It provides operators with a sophisticated two-column shell interface featuring a persistent sidebar for navigation and a main content area for interactive operations. The portal serves as a centralized control plane for platform administrators, offering real-time visibility into system status through an interactive chat interface, comprehensive evidence panels for tool execution tracking, configuration management capabilities, and administrative functions necessary for maintaining the AI-powered agent platform infrastructure.
 
-**Updated** The portal now features enhanced conversation context maintenance through a sticky request banner system that uses IntersectionObserver to maintain correlation between user requests and their responses during long conversations. Recent improvements include enhanced authentication state management with proper disabled states for unauthenticated users, improved markdown table rendering with proper header/body separation, visual consistency improvements including inline brand display with platform version tags, and comprehensive test coverage for markdown rendering functionality ensuring robust XSS prevention and security measures.
+**Updated** The portal now features enhanced conversation context maintenance through a sticky request banner system that uses IntersectionObserver to maintain correlation between user requests and their responses during long conversations. Recent improvements include enhanced authentication state management with proper disabled states for unauthenticated users, improved markdown table rendering with proper header/body separation, visual consistency improvements including inline brand display with platform version tags, and comprehensive test coverage for markdown rendering functionality ensuring robust XSS prevention and security measures. **Critical Enhancement**: The streaming system now includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions.
 
 ## Project Structure
 
@@ -101,10 +102,10 @@ P[Mobile Menu Button] --> Q[Dynamic ARIA Labels]
 R[Sidebar Collapsible] --> S[Drawer Integration]
 T[view-container-inset] --> U[Content Spacing]
 end
-subgraph "Sticky Request Banner"
-V[IntersectionObserver] --> W[Request Context Maintenance]
-X[Turn Group] --> Y[Sticky Banner Display]
-Z[User Bubble Tracking] --> AA[Visibility State Management]
+subgraph "Stale Session Handling"
+V[missingRef Tracking] --> W[404 Error Detection]
+X[Auto Retry Logic] --> Y[Server Auto-Creation]
+Z[Error Recovery] --> AA[Graceful Fallback]
 end
 subgraph "Enhanced Markdown Rendering"
 BB[renderMarkdown Function] --> CC[XSS Prevention]
@@ -127,6 +128,8 @@ end
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
 - [App.tsx:316-330](file://products/operator-portal/web-ui/app/src/App.tsx#L316-L330)
 - [ChatView.tsx:320-350](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L320-L350)
+- [ChatView.tsx:513-596](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L513-L596)
+- [useChatStream.ts:245-268](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L245-L268)
 - [markdown.ts:67-91](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L67-L91)
 - [markdown.test.ts:59-77](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L59-L77)
 
@@ -188,19 +191,25 @@ The Operator Portal consists of several key React components and hooks that work
 - **Evidence Integration**: Seamless integration with existing evidence card system
 - **Status Management**: Visual indicators showing awaiting decision, approved, denied, or expired states
 
+### Stale Session Handling System
+- **Missing Reference Tracking**: Uses `missingRef` to track sessions that return 404 errors during history loading
+- **Automatic Retry Logic**: When stream opening encounters 404 errors, automatically drops stale session references and retries without session ID
+- **Graceful Fallback**: Falls back to server-side session auto-creation when stale sessions are detected
+- **Error Recovery**: Handles both successful retries and permanent failures with appropriate user feedback
+
 ### Version Management and Cache Busting
 - **Version Synchronization**: PLATFORM_VERSION constant injected at build time from root VERSION file
 - **Cache-Busting Mechanism**: Query parameter versioning ensures proper client-side caching behavior
 - **Validation System**: Automated version consistency checks across all platform components
 - **Deployment Consistency**: Coordinated versioning across all platform services
 
-**Updated** The interface now includes a sticky request banner system that maintains conversation context during long replies and expanded evidence panels using IntersectionObserver technology. Enhanced authentication state management provides proper disabled states for unauthenticated users in session creation controls. The markdown rendering system now includes comprehensive test coverage ensuring robust XSS prevention, proper quote escaping, and protocol filtering for malicious links. Visual consistency improvements include inline brand display with platform version tags and full-width evidence panels for better readability.
+**Updated** The interface now includes a sticky request banner system that maintains conversation context during long replies and expanded evidence panels using IntersectionObserver technology. Enhanced authentication state management provides proper disabled states for unauthenticated users in session creation controls. The markdown rendering system now includes comprehensive test coverage ensuring robust XSS prevention, proper quote escaping, and protocol filtering for malicious links. Visual consistency improvements include inline brand display with platform version tags and full-width evidence panels for better readability. **Critical Enhancement**: The streaming system now includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions, ensuring more reliable chat functionality.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
 - [App.tsx:316-330](file://products/operator-portal/web-ui/app/src/App.tsx#L316-L330)
-- [ChatView.tsx:1-728](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L728)
-- [useChatStream.ts:1-368](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L368)
+- [ChatView.tsx:1-790](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L790)
+- [useChatStream.ts:1-405](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L405)
 
 ## Architecture Overview
 
@@ -231,11 +240,14 @@ Gateway-->>Auth : Access tokens + identity
 Note over React : Responsive Content Spacing
 React->>Views : Navigate to specific views with proper padding
 Views->>Gateway : View-specific API calls
-Note over React : Chat & Streaming with HITL
+Note over React : Chat & Streaming with Stale Session Handling
 User->>React : Send message via ChatView
-Note over React : Sticky Request Banner Activation
+Note over React : Missing Ref Check & Stale Session Detection
 React->>Stream : useChatStream.send()
-Stream->>Gateway : POST /api/v1/chat/stream
+Stream->>Gateway : POST /api/v1/chat/stream (with session_id)
+Gateway-->>Stream : 404 Error (stale session)
+Stream->>Stream : Drop session_id & Retry
+Stream->>Gateway : POST /api/v1/chat/stream (auto-create)
 Gateway->>Agent : Forward request
 Agent-->>Gateway : Stream events
 Gateway-->>Stream : SSE stream
@@ -252,12 +264,14 @@ Stream-->>React : Active session updated
 - [App.tsx:281-287](file://products/operator-portal/web-ui/app/src/App.tsx#L281-L287)
 - [App.tsx:316-330](file://products/operator-portal/web-ui/app/src/App.tsx#L316-L330)
 - [ChatView.tsx:320-350](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L320-L350)
+- [ChatView.tsx:513-596](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L513-L596)
+- [useChatStream.ts:245-268](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L245-L268)
 - [IncidentsView.tsx:219-228](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx#L219-L228)
 - [useSessionWorkspace.ts:136-159](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L136-L159)
 - [useChatStream.ts:191-314](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L191-L314)
 - [transport.ts:75-100](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L75-L100)
 
-The architecture emphasizes type safety, component composition, and maintainable state management while providing enterprise-grade functionality for platform operations. The React hooks pattern enables clean separation of concerns and reusable logic across components.
+The architecture emphasizes type safety, component composition, and maintainable state management while providing enterprise-grade functionality for platform operations. The React hooks pattern enables clean separation of concerns and reusable logic across components. **Enhanced with stale session handling** that automatically detects and recovers from deleted or expired sessions, ensuring reliable chat functionality even when backend sessions become invalid.
 
 ## Detailed Component Analysis
 
@@ -326,9 +340,29 @@ The multi-session workspace provides comprehensive session management with enhan
 - **History Seeding**: Resumed sessions render like live conversations
 - **Defensive Parsing**: Enhanced parseStored function handles malformed or corrupted session data
 
+### Stale Session Handling Implementation
+
+The chat interface now includes comprehensive stale session handling to prevent errors from deleted or expired sessions:
+
+#### Missing Reference Tracking
+- **missingRef Usage**: Uses `useRef(new Set<string>())` to track sessions that return 404 errors during history loading
+- **Prevention Logic**: When a session is known to be missing, sets session to null to prevent stream pointer usage
+- **Auto-Creation Flow**: Next message automatically creates fresh session instead of failing
+
+#### Automatic Retry Logic
+- **404 Detection**: When stream opening encounters 404 errors, automatically drops stale session references
+- **Retry Mechanism**: Retries once without session ID to trigger server-side auto-creation
+- **Error Propagation**: If retry also fails, surfaces appropriate error to user
+- **Session State Management**: Clears sessionIdRef.current to prevent future attempts with stale session
+
+#### Error Recovery Strategies
+- **Graceful Degradation**: Falls back to empty session when history loading fails
+- **User Feedback**: Provides clear error messages for different failure scenarios
+- **Recovery Options**: Offers retry mechanisms and alternative actions for failed operations
+
 ### Sticky Request Banner System
 
-The chat interface now includes a sophisticated sticky request banner system that maintains conversation context during long interactions:
+The chat interface includes a sophisticated sticky request banner system that maintains conversation context during long interactions:
 
 #### IntersectionObserver Implementation
 - **User Message Tracking**: Monitors when user bubbles scroll out of the chat viewport
@@ -348,12 +382,41 @@ The chat interface now includes a sophisticated sticky request banner system tha
 - **Multi-turn Clarity**: Helps operators track conversation flow during complex interactions
 - **Accessibility**: Provides additional context for screen readers and keyboard navigation
 
-**Updated** The React architecture provides better type safety, component reusability, and maintainability while preserving all existing functionality from the legacy implementation. The new view components provide dedicated interfaces for different operational tasks. Enhanced session management now includes defensive parsing to handle edge cases in stored session data. The enhanced navigation system includes a permanently visible hamburger menu button, responsive breakpoint detection at 992px, improved sidebar collapsible behavior, dynamic accessibility labels, and proper content spacing management with .view-container-inset class. The new sticky request banner system enhances conversation usability during long interactions.
+### HITL Confirmation System
+
+The inline confirmation card provides a focused interface for reviewing and deciding on tool executions:
+
+#### Card Components
+- **Warning Header**: Yellow-bordered card with "Tool confirmation required" title and "awaiting decision" status badge
+- **Message Display**: Clear explanation of why confirmation is needed
+- **Tool Details**: Expandable sections showing tool name and parameters for review
+- **Action Buttons**: Prominent Approve (green) and Deny (red) buttons for authorized users
+- **Status Line**: Real-time status updates showing "Approving…"/"Denying…" during processing
+
+#### Role-Based Visibility
+- **Authorized Roles**: platform-admin, approver, operator, developer roles can see and interact with confirmation buttons
+- **Read-Only Access**: Other roles see a message indicating they cannot approve or deny tool confirmations
+- **Server-Side Enforcement**: Gateway validates chat:confirm permission on every confirmation request
+
+#### Visual Feedback
+- **Pending State**: Yellow border and pulsing status indicator while awaiting decision
+- **Processing State**: Disabled buttons with "Approving…"/"Denying…" status during decision processing
+- **Resolved State**: Border changes to standard gray, buttons disabled, final status displayed
+- **Error Handling**: Clear error messages for network failures, timeouts, and permission issues
+
+### Version Management and Cache Busting
+- **Version Synchronization**: PLATFORM_VERSION constant injected at build time from root VERSION file
+- **Cache-Busting Mechanism**: Query parameter versioning ensures proper client-side caching behavior
+- **Validation System**: Automated version consistency checks across all platform components
+- **Deployment Consistency**: Coordinated versioning across all platform services
+
+**Updated** The React architecture provides better type safety, component reusability, and maintainability while preserving all existing functionality from the legacy implementation. The new view components provide dedicated interfaces for different operational tasks. Enhanced session management now includes defensive parsing to handle edge cases in stored session data. The enhanced navigation system includes a permanently visible hamburger menu button, responsive breakpoint detection at 992px, improved sidebar collapsible behavior, dynamic accessibility labels, and proper content spacing management with .view-container-inset class. The new sticky request banner system enhances conversation usability during long interactions. **Critical Enhancement**: The stale session handling system now includes comprehensive missing reference tracking and automatic retry logic to prevent errors from deleted or expired sessions, ensuring more reliable chat functionality.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
 - [App.tsx:222-333](file://products/operator-portal/web-ui/app/src/App.tsx#L222-L333)
-- [ChatView.tsx:1-728](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L728)
+- [ChatView.tsx:1-790](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L790)
+- [useChatStream.ts:1-405](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L405)
 - [useSessionWorkspace.ts:1-174](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L1-L174)
 
 ### CSS Styling System
@@ -451,7 +514,7 @@ The mobile navigation system provides seamless cross-device experience with perm
 #### Content Spacing Management
 - **.view-container-inset Class**: Applied when sidebar is absent or folded for proper content spacing
 - **Automatic Padding**: 64px left padding for non-flush views to accommodate navigation trigger
-- **Chat View Handling**: Special padding for session-panel-header in flush chat views
+- **Chat View Handling**: Specific padding for session-panel-header in flush chat views
 - **Brand Block Adjustment**: Proper padding for sidebar brand block to avoid overlap
 
 ### Navigation Implementation Details
@@ -637,8 +700,8 @@ The HITL confirmation system provides several operational benefits:
 **Updated** The HITL confirmation system represents a significant enhancement to the operator portal, enabling safe automation of complex workflows while maintaining human oversight for critical operations. The React implementation provides better state management and component reusability. Backend API v6 schema compliance ensures proper risk level handling in pending calls.
 
 **Section sources**
-- [ChatView.tsx:208-287](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L208-L287)
-- [useChatStream.ts:152-185](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L152-L185)
+- [ChatView.tsx:218-297](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L218-L297)
+- [useChatStream.ts:284-372](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L284-L372)
 - [global.css:341-376](file://products/operator-portal/web-ui/app/src/theme/global.css#L341-L376)
 
 ## Authentication and Security
@@ -768,7 +831,7 @@ Consistent visual presentation across all rendered content:
 
 **Section sources**
 - [markdown.ts:1-104](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L104)
-- [ChatView.tsx:320-329](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L320-L329)
+- [ChatView.tsx:351-367](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L351-L367)
 - [markdown.test.ts:1-83](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L1-L83)
 - [global.css:218-293](file://products/operator-portal/web-ui/app/src/theme/global.css#L218-L293)
 
@@ -785,6 +848,22 @@ The streaming system handles real-time communication efficiently with improved e
 - **Buffer Management**: Efficient text buffer handling for large responses
 - **Connection Recovery**: Automatic reconnection on network interruptions
 - **Ownership Handling**: Enhanced stream ownership management during session switches to prevent data contamination
+
+### Stale Session Handling Implementation
+
+The streaming system now includes comprehensive stale session handling to prevent errors from deleted or expired sessions:
+
+#### 404 Error Detection and Recovery
+- **Automatic Detection**: When stream opening encounters 404 errors, recognizes stale session references
+- **Session Pointer Dropping**: Automatically clears `sessionIdRef.current` to prevent future attempts with stale session
+- **Retry Mechanism**: Retries once without session ID to trigger server-side auto-creation
+- **Error Propagation**: If retry also fails, surfaces appropriate error to user with detailed messaging
+
+#### Graceful Fallback Strategies
+- **Server Auto-Creation**: Falls back to creating new sessions when stale sessions are detected
+- **User Experience**: Maintains conversation flow without interrupting user workflow
+- **Error Messaging**: Provides clear feedback when operations fail after retry attempts
+- **State Management**: Properly manages session state during retry attempts
 
 ### Message Type Handling
 
@@ -827,10 +906,10 @@ The React implementation includes additional streaming enhancements:
 - **Error Recovery**: Graceful handling of streaming errors with user feedback
 - **Session Management**: Multi-session support with per-session turn caching and ownership validation
 
-**Updated** The streaming interface now includes enhanced error handling for different failure types and improved stream ownership handling during session switches to prevent cross-session data contamination. These improvements ensure more reliable streaming performance and better user experience during network interruptions.
+**Updated** The streaming interface now includes enhanced stale session handling with automatic 404 error detection, session pointer dropping, and retry logic that falls back to server-side session auto-creation. These improvements ensure more reliable streaming performance and better user experience when dealing with deleted or expired sessions.
 
 **Section sources**
-- [useChatStream.ts:191-314](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L191-L314)
+- [useChatStream.ts:195-282](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L195-L282)
 - [transport.ts:75-117](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L75-L117)
 - [global.css:114-210](file://products/operator-portal/web-ui/app/src/theme/global.css#L114-L210)
 
@@ -906,7 +985,7 @@ The cited guidance chips follow the established design system:
 - **Screen Reader Support**: Proper ARIA attributes and semantic markup
 
 **Section sources**
-- [ChatView.tsx:153-206](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L153-L206)
+- [ChatView.tsx:132-216](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L132-L216)
 - [global.css:295-340](file://products/operator-portal/web-ui/app/src/theme/global.css#L295-L340)
 
 ## Permission Matrix and Workspace Resources
@@ -987,7 +1066,7 @@ The combined workspace views provide comprehensive resource discovery capabiliti
 
 ## Multi-Session Workspace Management
 
-The Operator Portal now includes comprehensive multi-session workspace management, allowing operators to maintain multiple concurrent conversations with different contexts and histories, enhanced with defensive session parsing.
+The Operator Portal now includes comprehensive multi-session workspace management, allowing operators to maintain multiple concurrent conversations with different contexts and histories, enhanced with defensive session parsing and stale session handling.
 
 ### Enhanced Session Workspace Architecture
 
@@ -1005,6 +1084,22 @@ The session workspace provides a comprehensive interface for managing multiple c
 - **History Seeding**: Resumed sessions render like live conversations with proper turn history
 - **Transcript Availability**: Clear indication when sessions have no recorded transcript yet
 - **Defensive Parsing**: Enhanced parseStored function handles malformed or corrupted session data
+
+### Stale Session Handling Integration
+
+The session workspace now includes comprehensive stale session handling to prevent errors from deleted or expired sessions:
+
+#### Missing Reference Tracking
+- **missingRef Implementation**: Uses `useRef(new Set<string>())` to track sessions that return 404 errors
+- **Prevention Logic**: Known-missing sessions are set to null to prevent stream pointer usage
+- **Auto-Creation Flow**: Next message automatically creates fresh session instead of failing
+- **State Management**: Proper session state management during stale session detection
+
+#### Error Recovery Strategies
+- **Graceful Degradation**: Falls back to empty session when history loading fails
+- **User Feedback**: Provides clear error messages for different failure scenarios
+- **Recovery Options**: Offers retry mechanisms and alternative actions for failed operations
+- **Session Restoration**: Proper restoration of session state after error recovery
 
 ### Session Panel Interface
 
@@ -1039,12 +1134,12 @@ The session workspace integrates seamlessly with the chat interface:
 - **Quick Context Switching**: Easy switching between different operational contexts
 - **Session Organization**: Clear visual organization of related conversations
 
-**Updated** The multi-session workspace now includes enhanced defensive parsing in the parseStored function to handle edge cases in stored session data, and improved stream ownership handling during session switches to prevent cross-session data contamination. These improvements ensure more reliable session management and better data integrity.
+**Updated** The multi-session workspace now includes enhanced defensive parsing in the parseStored function to handle edge cases in stored session data, improved stream ownership handling during session switches to prevent cross-session data contamination, and comprehensive stale session handling with missing reference tracking to prevent errors from deleted or expired sessions. These improvements ensure more reliable session management and better data integrity.
 
 **Section sources**
 - [useSessionWorkspace.ts:1-174](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L1-L174)
-- [ChatView.tsx:352-445](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L352-L445)
-- [ChatView.tsx:473-526](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L473-L526)
+- [ChatView.tsx:389-490](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L389-L490)
+- [ChatView.tsx:496-790](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L496-L790)
 
 ## Voice Input Support
 
@@ -1135,7 +1230,7 @@ The voice input system implements appropriate security measures:
 - [languages.ts:1-60](file://products/operator-portal/web-ui/app/src/voice/languages.ts#L1-L60)
 - [useChatStream.ts:80-85](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L80-L85)
 - [transport.ts:31-50](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L31-L50)
-- [ChatView.tsx:611-621](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L611-L621)
+- [ChatView.tsx:725-784](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L725-L784)
 
 ## Incident Triage and Deep Linking
 
@@ -1308,7 +1403,7 @@ The deployment process includes enhanced version management:
 - **Version Validation**: Automated validation ensures all platform components use consistent versions
 - **Deployment Coordination**: Coordinated versioning across all platform services
 
-**Updated** The deployment now supports both the new React/TypeScript application and the legacy vanilla JavaScript implementation, with enhanced HITL confirmation bridging system, improved navigation system with permanently visible hamburger menu button, enhanced responsive breakpoint detection at 992px, improved sidebar collapsible behavior, enhanced accessibility with dynamic aria-labels, and restructured styling with .view-container-inset class for proper content spacing. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. Enhanced security measures include improved XSS prevention and defensive session parsing. The sticky request banner system and enhanced markdown rendering with proper table structure are also supported in the deployment.
+**Updated** The deployment now supports both the new React/TypeScript application and the legacy vanilla JavaScript implementation, with enhanced HITL confirmation bridging system, improved navigation system with permanently visible hamburger menu button, enhanced responsive breakpoint detection at 992px, improved sidebar collapsible behavior, enhanced accessibility with dynamic aria-labels, and restructured styling with .view-container-inset class for proper content spacing. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. Enhanced security measures include improved XSS prevention and defensive session parsing. The sticky request banner system and enhanced markdown rendering with proper table structure are also supported in the deployment. **Critical Enhancement**: The deployment now includes support for the enhanced stale session handling system that automatically detects and recovers from deleted or expired sessions, ensuring more reliable chat functionality.
 
 **Section sources**
 - [nginx.conf](file://products/operator-portal/nginx.conf)
@@ -1370,6 +1465,7 @@ The React implementation provides additional customization points:
 - **Enhanced Navigation Styling**: Customizable hamburger menu button appearance, positioning, and responsive behavior with permanently visible navigation access
 - **Sticky Request Banner Styling**: Customizable appearance and behavior for conversation context banners
 - **Brand Display Styling**: Customizable inline brand display with platform version tags
+- **Stale Session Handling Styling**: Customizable appearance for stale session error messages and recovery indicators
 
 **Section sources**
 - [global.css:66-100](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L100)
@@ -1425,6 +1521,7 @@ The React implementation includes additional accessibility improvements:
 - **Incident Views**: Accessible incident management interface with proper form labels and status announcements
 - **Deep Linking**: Accessible navigation between incidents and chat with proper focus management
 - **Sticky Request Banner**: Accessible conversation context maintenance with proper ARIA labels and keyboard navigation support
+- **Stale Session Handling**: Accessible error messages and recovery indicators for stale session detection and retry operations
 
 **Section sources**
 - [global.css:66-100](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L100)
@@ -1479,6 +1576,7 @@ The React implementation maintains broad browser compatibility:
 - **Incident Views**: Full browser compatibility for incident management interface
 - **Deep Linking**: Cross-browser support for session pinning and navigation
 - **Sticky Request Banner**: IntersectionObserver support with graceful fallbacks for older browsers
+- **Stale Session Handling**: Cross-browser support for 404 error detection and retry logic with graceful fallbacks
 
 **Section sources**
 - [Dockerfile](file://products/operator-portal/Dockerfile)
@@ -1564,6 +1662,17 @@ Common issues and their solutions when working with the Operator Portal.
 - Verify session persistence across page reloads
 - Check for session conflict errors during deletion
 - **Updated**: Check for malformed session data that may be handled by defensive parsing
+
+### Stale Session Handling Issues
+
+**Problem**: Sessions returning 404 errors or failing to establish streams
+**Solution**:
+- Verify that missingRef tracking is properly detecting 404 errors during history loading
+- Check that automatic retry logic is functioning when stream opening encounters 404 errors
+- Ensure session pointer dropping is working correctly to prevent future attempts with stale sessions
+- Verify that server-side session auto-creation is triggered when stale sessions are detected
+- Check browser console for JavaScript errors in stale session handling logic
+- Review network requests to confirm retry attempts are being made without session_id parameter
 
 ### Voice Input Issues
 
@@ -1726,6 +1835,7 @@ Common issues and their solutions when working with the Operator Portal.
 - **Backend API Issues**: Verify API v6 schema compliance for risk level handling
 - **Navigation Errors**: Check responsive breakpoint handling and drawer initialization
 - **Content Spacing Issues**: Verify .view-container-inset class application and proper padding calculations
+- **Stale Session Errors**: Check 404 error detection and retry logic for deleted or expired sessions
 
 ### Sticky Request Banner Issues
 
@@ -1759,28 +1869,29 @@ Common issues and their solutions when working with the Operator Portal.
 - Review browser console for JavaScript errors in authentication state management
 - Test session creation workflow with unauthenticated user to verify proper disabled behavior
 
-**Updated** Added comprehensive troubleshooting guidance for the enhanced navigation system, including permanently visible hamburger menu button issues, useNarrowViewport() hook problems, responsive breakpoint detection issues, drawer integration problems, dynamic aria-labels not updating correctly, and proper handling of .view-container-inset class for content spacing. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism, and enhanced error handling for different failure types including network errors, authentication failures, and streaming interruptions. New sections cover sticky request banner issues, markdown rendering problems with proper table structure, and enhanced authentication state management for unauthenticated users.
+**Updated** Added comprehensive troubleshooting guidance for the enhanced navigation system, including permanently visible hamburger menu button issues, useNarrowViewport() hook problems, responsive breakpoint detection issues, drawer integration problems, dynamic aria-labels not updating correctly, and proper handling of .view-container-inset class for content spacing. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism, and enhanced error handling for different failure types including network errors, authentication failures, and streaming interruptions. New sections cover sticky request banner issues, markdown rendering problems with proper table structure, enhanced authentication state management for unauthenticated users, and comprehensive stale session handling troubleshooting for 404 errors and retry logic failures.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
 - [App.tsx:316-330](file://products/operator-portal/web-ui/app/src/App.tsx#L316-L330)
 - [global.css:66-100](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L100)
-- [ChatView.tsx:1-728](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L728)
-- [useChatStream.ts:1-368](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L368)
+- [ChatView.tsx:1-790](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L790)
+- [useChatStream.ts:1-405](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L405)
 - [IncidentsView.tsx:1-600](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx#L1-L600)
 - [useSpeechRecognition.ts:1-135](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts#L1-L135)
 - [markdown.ts:67-91](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L67-L91)
 - [markdown.test.ts:59-77](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L59-L77)
+- [useChatStream.test.ts:380-432](file://products/operator-portal/web-ui/app/src/stream/__tests__/useChatStream.test.ts#L380-L432)
 
 ## Conclusion
 
 The Operator Portal provides a comprehensive, accessible, and customizable web interface for platform administration and monitoring within the Luban AIOPS ecosystem. The complete rebuild using React 18, TypeScript, and Vite delivers enterprise-grade functionality while maintaining simplicity and performance.
 
-**Updated** The recent enhancements include an enhanced navigation system with a permanently visible hamburger menu button that ensures consistent navigation access across all screen sizes, new useNarrowViewport() hook for precise responsive breakpoint detection at 992px, improved sidebar collapsible behavior that enhances desktop interaction patterns while maintaining drawer functionality below lg breakpoint, enhanced accessibility with dynamic aria-labels that adapt based on viewport state and sidebar status, and restructured styling with .view-container-inset class for proper content spacing when sidebar is absent or folded. Additional improvements include comprehensive mobile navigation with proper positioning and z-index management, enhanced security measures with improved XSS prevention in markdown rendering through comprehensive quote escaping and protocol filtering, improved session management with defensive parseStored function to handle malformed or corrupted session data, enhanced stream ownership handling during session switches to prevent cross-session data contamination, refined error handling for different failure types including network errors, authentication failures, and streaming interruptions, and backend API v6 schema compliance for risk level handling in pending calls. The platform now features a complete React/TypeScript frontend architecture implementing SPEC-023 with enhanced streaming infrastructure, multi-session workspace management, voice input support, comprehensive view implementations (AuditView, IncidentsView, PermissionsView, SkillsView, ToolsView), and improved role-gated navigation with enhanced mobile responsiveness.
+**Updated** The recent enhancements include an enhanced navigation system with a permanently visible hamburger menu button that ensures consistent navigation access across all screen sizes, new useNarrowViewport() hook for precise responsive breakpoint detection at 992px, improved sidebar collapsible behavior that enhances desktop interaction patterns while maintaining drawer functionality below lg breakpoint, enhanced accessibility with dynamic aria-labels that adapt based on viewport state and sidebar status, and restructured styling with .view-container-inset class for proper content spacing when sidebar is absent or folded. Additional improvements include comprehensive mobile navigation with proper positioning and z-index management, enhanced security measures with improved XSS prevention in markdown rendering through comprehensive quote escaping and protocol filtering, improved session management with defensive parseStored function to handle malformed or corrupted session data, enhanced stream ownership handling during session switches to prevent cross-session data contamination, refined error handling for different failure types including network errors, authentication failures, and streaming interruptions, and backend API v6 schema compliance for risk level handling in pending calls. **Critical Enhancement**: The platform now includes comprehensive stale session handling with automatic 404 error detection, missing reference tracking, and retry logic that automatically drops stale session references and falls back to server-side session auto-creation, ensuring more reliable chat functionality even when backend sessions become invalid.
 
-Key strengths of the enhanced portal include its modular React architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities, enhanced skills integration capabilities, improved navigation organization with sectioned grouping and permanently visible navigation access, robust multi-session workspace management, comprehensive incident triage with automated workflows, voice input support for hands-free operation, seamless deep linking between incidents and collaborative chat sessions, and enhanced mobile navigation with proper responsive behavior below 992px breakpoint. The enhanced security measures ensure protection against XSS attacks while maintaining full functionality.
+Key strengths of the enhanced portal include its modular React architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities, enhanced skills integration capabilities, improved navigation organization with sectioned grouping and permanently visible navigation access, robust multi-session workspace management, comprehensive incident triage with automated workflows, voice input support for hands-free operation, seamless deep linking between incidents and collaborative chat sessions, and enhanced mobile navigation with proper responsive behavior below 992px breakpoint. The enhanced security measures ensure protection against XSS attacks while maintaining full functionality. **Critical Enhancement**: The stale session handling system provides robust error recovery for deleted or expired sessions, ensuring reliable chat functionality even in challenging network conditions or backend service issues.
 
-The React/TypeScript implementation represents a significant advancement in developer experience and code maintainability, while preserving all existing functionality from the legacy vanilla JavaScript implementation. The enhanced navigation system with permanently visible hamburger menu button provides consistent access to navigation across all screen sizes, while the useNarrowViewport() hook enables precise responsive breakpoint detection. The enhanced security measures, including comprehensive XSS prevention and defensive session parsing, ensure robust protection against common web vulnerabilities. The HITL confirmation system enables safe automation of complex workflows while maintaining human oversight for critical operations. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions. The new view components provide dedicated interfaces for different operational tasks, improving workflow efficiency and user experience.
+The React/TypeScript implementation represents a significant advancement in developer experience and code maintainability, while preserving all existing functionality from the legacy vanilla JavaScript implementation. The enhanced navigation system with permanently visible hamburger menu button provides consistent access to navigation across all screen sizes, while the useNarrowViewport() hook enables precise responsive breakpoint detection. The enhanced security measures, including comprehensive XSS prevention and defensive session parsing, ensure robust protection against common web vulnerabilities. The HITL confirmation system enables safe automation of complex workflows while maintaining human oversight for critical operations. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions. The new view components provide dedicated interfaces for different operational tasks, improving workflow efficiency and user experience. **Critical Enhancement**: The stale session handling system ensures reliable chat functionality by automatically detecting and recovering from deleted or expired sessions, preventing user-facing errors and maintaining conversation continuity.
 
 **Additional Recent Enhancements:**
 - **Sticky Request Banner System**: IntersectionObserver-based conversation context maintenance that keeps user requests visible during long replies and expanded evidence panels
@@ -1788,5 +1899,6 @@ The React/TypeScript implementation represents a significant advancement in deve
 - **Comprehensive Test Coverage**: Robust XSS prevention testing including protocol filtering, quote escaping, and table structure validation
 - **Improved Authentication State Management**: Proper disabled states for unauthenticated users in session creation controls with appropriate tooltips
 - **Visual Consistency Improvements**: Inline brand display with platform version tags and full-width evidence panels for better readability
+- **Critical Stale Session Handling**: Comprehensive missing reference tracking and automatic retry logic for 404 errors during stream opening, ensuring reliable chat functionality even when backend sessions become invalid
 
-Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system, continued refinement of the navigation and resource discovery interfaces, expanded support for more complex multi-step approval workflows, additional voice input capabilities to meet evolving operational requirements, enhanced incident triage automation, expanded connector integrations, improved collaborative features for multi-operator incident response, and continued focus on mobile navigation optimization and responsive design improvements. Continued focus on security enhancements and user experience improvements will drive future development efforts.
+Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system, continued refinement of the navigation and resource discovery interfaces, expanded support for more complex multi-step approval workflows, additional voice input capabilities to meet evolving operational requirements, enhanced incident triage automation, expanded connector integrations, improved collaborative features for multi-operator incident response, and continued focus on mobile navigation optimization and responsive design improvements. Continued focus on security enhancements and user experience improvements will drive future development efforts. **Ongoing Enhancement**: Continued refinement of stale session handling and error recovery mechanisms to ensure maximum reliability in production environments.

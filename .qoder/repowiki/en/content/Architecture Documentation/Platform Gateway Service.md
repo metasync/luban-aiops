@@ -32,10 +32,10 @@
 
 ## Update Summary
 **Changes Made**
-- Updated Session Workspace Proxy Error Handling section to reflect improved list_sessions() error posture with proper 4xx passthrough behavior
-- Enhanced Session Listing functionality documentation to document consistent HTTP status code passthrough patterns across all session operations
-- Updated Troubleshooting Guide with specific guidance on session workspace error handling patterns including the improved list_sessions() behavior
-- Refined Architecture Overview diagrams to reflect consistent error handling across all session operations
+- Updated Enhanced Streaming Architecture section to reflect the renaming of `stream_chat` to `open_chat_stream` and improved error propagation
+- Enhanced Chat Stream Error Handling section with detailed coverage of eager upstream status checking and proper HTTP status mapping
+- Updated Agent Client section to document the new `open_chat_stream` method and its enhanced error handling capabilities
+- Refined Troubleshooting Guide with specific guidance on streaming error patterns and status code mapping
 
 ## Table of Contents
 1. Introduction
@@ -179,10 +179,12 @@ A --> RT
   - Identity resolution, policy enforcement, proxying to agent-platform, streaming chat support.
   - **Enhanced**: Session workspace proxy with proper error handling (upstream 4xx passthrough, transport failures map to 502).
   - **Enhanced**: Chat confirm handling with audit trail integration for confirmation_decided events.
+  - **Updated**: Enhanced streaming architecture with improved error propagation using `open_chat_stream` method.
 - External clients:
   - Agent client for agent-platform v2 endpoints.
   - **Enhanced**: New `open_chat_confirm_stream()` method for confirm stream handling with proper error mapping.
   - **Enhanced**: Session workspace methods (list_sessions, delete_session, get_session) with proper error handling.
+  - **Updated**: Renamed `stream_chat` to `open_chat_stream` with eager upstream status checking.
   - Incident client for incident-service with Basic credential authentication and error mapping.
   - Delegation client for broker-mediated token exchange with per-user cache and workload-token preference.
   - **New**: Tool gateway client for tool catalog discovery with delegated token forwarding.
@@ -462,8 +464,9 @@ Success --> Return
 - [gateway_service.py:297-387](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L297-L387)
 
 ### Enhanced Agent Client
-**Updated** - Added new `open_chat_confirm_stream()` method and enhanced session workspace methods for handling streams and proper error mapping.
+**Updated** - Added new `open_chat_confirm_stream()` method and enhanced session workspace methods for handling streams and proper error mapping. The `stream_chat` function has been renamed to `open_chat_stream` with improved error propagation.
 
+- **Renamed Method**: `stream_chat` → `open_chat_stream` with eager upstream status checking
 - **New Method**: `open_chat_confirm_stream()` opens SSE stream to agent-platform's `/api/v2/chat/confirm` endpoint
 - **Enhanced Methods**: `list_sessions()`, `delete_session()`, `get_session()` with proper error handling
 - **Error Handling**: Eager status checking prevents corrupt SSE streams by reading error responses before streaming
@@ -476,6 +479,7 @@ Key capabilities:
 - Connection cleanup in finally blocks to prevent resource leaks
 - SSE frame filtering to extract only relevant data frames
 - Session workspace methods with consistent error handling patterns
+- **Enhanced**: Improved error propagation with proper HTTP status mapping
 
 ```mermaid
 classDiagram
@@ -485,7 +489,7 @@ class AgentClient {
 +list_sessions(settings, request_id, user_id) dict
 +delete_session(settings, request_id, session_id, user_id) dict
 +chat(settings, request_id, user_id, message, session_id, delegated_token) dict
-+stream_chat(settings, request_id, user_id, message, session_id, delegated_token) AsyncIterator[str]
++open_chat_stream(settings, request_id, user_id, message, session_id, delegated_token) AsyncIterator[str]
 +open_chat_confirm_stream(settings, request_id, user_id, session_id, confirm_id, decision, delegated_token) AsyncIterator[str]
 +runtime_metadata(settings) dict
 +health(settings) dict
@@ -502,7 +506,55 @@ AgentClient --> ConfirmStream : "uses"
 - [agent_client.py:32-193](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L32-L193)
 
 **Section sources**
-- [agent_client.py:1-212](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L212)
+- [agent_client.py:1-242](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L242)
+
+### Chat Stream Error Handling
+**Enhanced** - Implements robust error handling for streaming chat with eager upstream status checking and proper HTTP status mapping.
+
+#### Eager Upstream Status Checking
+- The `open_chat_stream` method checks upstream status before any SSE frames are yielded
+- Prevents returning 200 responses with empty SSE streams for upstream errors
+- Immediately raises `httpx.HTTPStatusError` for 4xx/5xx responses before streaming begins
+- Ensures proper HTTP status codes reach the client instead of corrupted SSE streams
+
+#### Error Propagation Patterns
+- **4xx Errors**: Passed through unchanged (unknown sessions, parked conflicts) for better error visibility
+- **5xx Errors**: Mapped to 502 Bad Gateway with descriptive error messages
+- **Transport Errors**: Converted to 502 with connection failure details
+- **Connection Cleanup**: Proper resource cleanup in finally blocks to prevent memory leaks
+
+#### Streaming Response Handling
+- Gateway service wraps the stream iterator with proper exception handling
+- Converts agent client exceptions to FastAPI HTTPException with appropriate status codes
+- Maintains SSE format while ensuring error responses are properly formatted
+- Supports both successful streaming and immediate error responses
+
+```mermaid
+flowchart TD
+Start(["Open Chat Stream"]) --> BuildRequest["Build Request"]
+BuildRequest --> SendRequest["Send Request"]
+SendRequest --> CheckStatus{"Status Code?"}
+CheckStatus --> |4xx| Raise4xx["Raise HTTPStatusError"]
+CheckStatus --> |5xx| Raise5xx["Raise HTTPStatusError"]
+CheckStatus --> |200| StartStream["Start Streaming"]
+StartStream --> IterateLines["Iterate Lines"]
+IterateLines --> FilterData{"data: prefix?"}
+FilterData --> |Yes| YieldFrame["Yield Frame"]
+FilterData --> |No| NextLine["Next Line"]
+YieldFrame --> NextLine
+NextLine --> EndStream["End Stream"]
+Raise4xx --> Return4xx["Return 4xx to Client"]
+Raise5xx --> Return502["Return 502 to Client"]
+EndStream --> Cleanup["Cleanup Resources"]
+```
+
+**Diagram sources**
+- [agent_client.py:117-169](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L117-L169)
+- [gateway_service.py:409-454](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L409-L454)
+
+**Section sources**
+- [agent_client.py:117-169](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L117-L169)
+- [gateway_service.py:409-454](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L409-L454)
 
 ### Chat Confirm Endpoint
 **Existing** - Provides Human-in-the-Loop (HITL) confirmation bridging for parked kernel confirmations with identity delegation and SSE streaming.
@@ -753,6 +805,7 @@ IncidentClient --> ErrorMapping : "uses"
 - **Enhanced**: Session workspace proxy with proper error handling (upstream 4xx passthrough, transport failures map to 502).
 - **Enhanced**: Chat confirm handling with SSE streaming and confirmation_decided audit event emission.
 - **Enhanced**: `list_sessions()` function with consistent error handling pattern matching other session operations.
+- **Updated**: Enhanced streaming architecture with improved error propagation using `open_chat_stream`.
 
 ```mermaid
 flowchart TD
@@ -770,8 +823,11 @@ Allowed --> |Yes| CheckType{"Operation Type?"}
 CheckType --> |Chat/Session| Delegate["Obtain Delegated Token"]
 CheckType --> |Confirm| Delegate
 CheckType --> |Session Workspace| Proxy["Proxy to Agent Platform"]
+CheckType --> |Stream| OpenStream["Open Chat Stream"]
 Delegate --> Proxy
+OpenStream --> StreamProxy["Stream Proxy"]
 Proxy --> Return(["Return Response/Stream"])
+StreamProxy --> Return
 ```
 
 **Diagram sources**
@@ -780,16 +836,17 @@ Proxy --> Return(["Return Response/Stream"])
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
 
 **Section sources**
-- [gateway_service.py:1-536](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L536)
+- [gateway_service.py:1-567](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L567)
 
 ### Agent Client
-**Updated** - Enhanced with new confirm stream functionality and session workspace methods.
+**Updated** - Enhanced with new confirm stream functionality and session workspace methods. The `stream_chat` function has been renamed to `open_chat_stream` with improved error propagation.
 
 - Single HTTP client binding to agent-platform v2 endpoints (/api/v2/*).
 - Adds x-request-id and X-User-ID headers; forwards Authorization when delegated token present.
 - Supports both regular and streaming chat with appropriate timeouts.
 - **Enhanced**: New `open_chat_confirm_stream()` method for confirm stream handling with proper error mapping.
 - **Enhanced**: Session workspace methods (list_sessions, delete_session, get_session) with consistent error handling.
+- **Updated**: Renamed `stream_chat` to `open_chat_stream` with eager upstream status checking.
 
 ```mermaid
 classDiagram
@@ -799,7 +856,7 @@ class AgentClient {
 +list_sessions(settings, request_id, user_id) dict
 +delete_session(settings, request_id, session_id, user_id) dict
 +chat(settings, request_id, user_id, message, session_id, delegated_token) dict
-+stream_chat(settings, request_id, user_id, message, session_id, delegated_token) AsyncIterator[str]
++open_chat_stream(settings, request_id, user_id, message, session_id, delegated_token) AsyncIterator[str]
 +open_chat_confirm_stream(settings, request_id, user_id, session_id, confirm_id, decision, delegated_token) AsyncIterator[str]
 +runtime_metadata(settings) dict
 +health(settings) dict
@@ -807,10 +864,10 @@ class AgentClient {
 ```
 
 **Diagram sources**
-- [agent_client.py:1-212](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L212)
+- [agent_client.py:1-242](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L242)
 
 **Section sources**
-- [agent_client.py:1-212](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L212)
+- [agent_client.py:1-242](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L242)
 
 ### Delegation Client
 **Existing** - Per-replica, per-user cache for delegated tokens with refresh-before-expiry strategy.
@@ -1018,6 +1075,7 @@ App --> Runtime["core/runtime.py"]
 - **Enhanced**: Session listing and deletion operations benefit from server-side scoping, reducing unnecessary network overhead.
 - **Enhanced**: Session workspace error handling minimizes retry storms through consistent status code mapping.
 - **Enhanced**: `list_sessions()` function implements efficient error handling with immediate 4xx passthrough to avoid unnecessary processing.
+- **Enhanced**: `open_chat_stream` method implements eager status checking to prevent resource leaks and improve error response times.
 - **New**: Confirmation result parsing occurs only once per stream to minimize overhead.
 - **New**: Audit event emission is fire-and-forget to avoid blocking confirm stream processing.
 - **Existing**: Policy matrix endpoint builds matrix efficiently using cached bundle with minimal overhead.
@@ -1051,6 +1109,12 @@ Common issues and diagnostics:
   - **Enhanced**: `list_sessions()` function specifically implements consistent error handling with "agent service session list failed" detail for 502 errors, matching the behavior of get/delete proxies.
   - Server-side scoping ensures callers can only access their own sessions.
   - Consistent error handling across all session operations (create, list, read, delete).
+- **Enhanced**: Streaming chat error handling:
+  - **Updated**: `open_chat_stream` method performs eager upstream status checking before any SSE frames are yielded.
+  - Upstream 4xx errors (unknown sessions, parked conflicts) pass through unchanged with proper HTTP status codes.
+  - Upstream 5xx errors and transport failures map to 502 Bad Gateway with descriptive error messages.
+  - Connection cleanup occurs in finally blocks to prevent resource leaks.
+  - SSE stream filtering ensures only data frames are forwarded to clients.
 - **Enhanced**: Audit trail issues:
   - `session_created` and `session_deleted` events are emitted for session lifecycle operations.
   - `confirmation_decided` events are only emitted when confirmation_result frames are received from upstream.
@@ -1078,6 +1142,7 @@ Operational tips:
 - **Enhanced**: Check session workspace error rates and upstream connectivity issues.
 - **Enhanced**: Validate session workspace policy rules and role assignments for session management workflows.
 - **Enhanced**: Monitor `list_sessions()` function error rates and verify proper 4xx passthrough behavior matching get/delete proxies.
+- **Enhanced**: Monitor streaming chat error rates and verify proper status code mapping for upstream errors.
 - **New**: Monitor chat confirm endpoint performance and confirmation_decided audit event volume.
 - **New**: Check audit service connectivity and event ingestion success rates.
 - **New**: Validate chat:confirm policy rules and role assignments for HITL workflows.
@@ -1096,8 +1161,11 @@ Operational tips:
 - [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
 - [gateway_service.py:426-487](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L426-L487)
 - [audit_emitter.py:68-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L68-L99)
+- [agent_client.py:117-169](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L117-L169)
 
 ## Conclusion
 The Platform Gateway Service cleanly separates portal-facing security and control-plane concerns from tool execution capabilities. It enforces strong authentication and authorization, proxies to agent-platform securely with least-privilege delegated tokens, provides unified API access to the incident service with comprehensive policy enforcement and credential management, and now offers transparency through live permission matrix evaluation, workspace inventory discovery, and Human-in-the-Loop confirmation bridging with durable audit trails. The addition of complete session workspace lifecycle management demonstrates the gateway's extensibility in supporting complex interactive workflows while maintaining consistent security patterns and operational visibility. The session workspace proxy routes implement deny-by-default policy enforcement with proper error handling, server-side scoping to caller's own sessions, and durable audit trail coverage for complete session lifecycle monitoring. These enhancements enable operators to manage sessions with full audit coverage, approve or deny pending tool executions with durable audit trails, and maintain comprehensive visibility into platform operations while ensuring strict security boundaries and least-privilege access controls. The enhanced error handling in `list_sessions()` and other session operations ensures consistent behavior across all session management endpoints, with proper distinction between client errors (4xx) and server errors (500+) for better debugging and operational clarity. The improved list_sessions() function now matches the error handling posture of get/delete proxies, passing through upstream 4xx errors unchanged instead of incorrectly surfacing them as 502 errors, providing consistent error handling across all session operations.
+
+The enhanced streaming architecture represents a significant improvement in error handling and reliability. The renaming of `stream_chat` to `open_chat_stream` reflects the more explicit nature of the function's purpose and its enhanced error propagation capabilities. By eagerly checking upstream status before any SSE frames are yielded, the gateway now properly distinguishes between client errors (4xx) and server errors (5xx), mapping them appropriately to HTTP status codes rather than returning empty streams. This change eliminates the previous issue where upstream errors would only be detected after the response had already been committed, resulting in confusing 200 responses with no content. The improved error handling ensures that clients receive meaningful HTTP status codes that accurately reflect the underlying conditions, making debugging and troubleshooting significantly more straightforward.
 
 [No sources needed since this section summarizes without analyzing specific files]
