@@ -4,6 +4,8 @@
 **Referenced Files in This Document**
 - [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
 - [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [markdown.ts](file://products/operator-portal/web-ui/app/src/chat/markdown.ts)
+- [markdown.test.ts](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts)
 - [useChatStream.ts](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts)
 - [transport.ts](file://products/operator-portal/web-ui/app/src/stream/transport.ts)
 - [AuthContext.tsx](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx)
@@ -36,14 +38,11 @@
 
 ## Update Summary
 **Changes Made**
-- Complete framework rebuild from legacy vanilla JavaScript UI to modern Vite + React 18 + TypeScript SPA architecture
-- Implemented comprehensive voice input support with Web Speech API integration for speech-to-text functionality
-- Added multi-session workspace management with session persistence and incident deep linking
-- Enhanced stream processing with improved error handling, confirmation bridging, and turn scoping
-- Built comprehensive view implementations (AuditView, IncidentsView, PermissionsView, SkillsView, ToolsView) with role-based access control
-- Integrated Ant Design components for professional UI consistency and accessibility
-- Added enhanced skills integration with "Cited guidance" chips for operational traceability
-- Implemented sophisticated navigation system with sectioned organization and automatic visibility management
+- Enhanced XSS prevention in markdown rendering with comprehensive quote escaping and protocol filtering for javascript: and data: URLs
+- Improved session management with defensive parseStored function to handle malformed or corrupted session data
+- Enhanced stream ownership handling during session switches to prevent cross-session data contamination
+- Refined error handling for different failure types including network errors, authentication failures, and streaming interruptions
+- Backend API v6 schema compliance for risk level handling in pending calls with improved type safety
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -73,7 +72,7 @@
 
 The Operator Portal is a modern web-based administrative interface designed for platform administration and monitoring within the Luban AIOPS ecosystem. The portal has been completely rebuilt using React 18, TypeScript, and Vite, replacing the previous vanilla JavaScript implementation. It provides operators with a sophisticated two-column shell interface featuring a persistent sidebar for navigation and a main content area for interactive operations. The portal serves as a centralized control plane for platform administrators, offering real-time visibility into system status through an interactive chat interface, comprehensive evidence panels for tool execution tracking, configuration management capabilities, and administrative functions necessary for maintaining the AI-powered agent platform infrastructure.
 
-**Updated** The portal now features a complete React/TypeScript architecture implementing SPEC-023 with enhanced streaming infrastructure, multi-session workspace management, voice input support, comprehensive view implementations (AuditView, IncidentsView, PermissionsView, SkillsView, ToolsView), and improved role-gated navigation. The platform maintains version consistency at v0.8.1 with enhanced cache-busting mechanisms and comprehensive skills integration with "Cited guidance" chips for operational traceability.
+**Updated** The portal now features enhanced security measures with improved XSS prevention in markdown rendering, robust session management with defensive parsing, and refined error handling across all components. The platform maintains version consistency at v0.8.1 with enhanced cache-busting mechanisms and comprehensive skills integration with "Cited guidance" chips for operational traceability. Recent updates include backend API v6 schema compliance for improved risk level handling in pending calls.
 
 ## Project Structure
 
@@ -86,26 +85,27 @@ A[App.tsx] --> B[ChatView.tsx]
 A --> C[AuthContext.tsx]
 B --> D[useChatStream.ts]
 B --> E[useSessionWorkspace.ts]
-D --> F[transport.ts]
-F --> G[decoder.ts]
-A --> H[AuditView.tsx]
-A --> I[IncidentsView.tsx]
-A --> J[PermissionsView.tsx]
-A --> K[SkillsView.tsx]
-A --> L[ToolsView.tsx]
+B --> F[markdown.ts]
+D --> G[transport.ts]
+G --> H[decoder.ts]
+A --> I[AuditView.tsx]
+A --> J[IncidentsView.tsx]
+A --> K[PermissionsView.tsx]
+A --> L[SkillsView.tsx]
+A --> M[ToolsView.tsx]
 end
 subgraph "Voice Input"
-M[useSpeechRecognition.ts] --> N[languages.ts]
+N[useSpeechRecognition.ts] --> O[languages.ts]
 end
 subgraph "Build & Deployment"
-O[vite.config.ts] --> P[package.json]
-Q[Dockerfile] --> R[Makefile]
-S[VERSION] --> T[validate_version.py]
+P[vite.config.ts] --> Q[package.json]
+R[Dockerfile] --> S[Makefile]
+T[VERSION] --> U[validate_version.py]
 end
 subgraph "Backend Services"
-U[Agent Platform] --> V[HITL Confirmations]
-W[Platform Gateway] --> X[Identity Broker]
-Y[Tool Gateway] --> Z[Policy Engine]
+V[Agent Platform] --> W[HITL Confirmations]
+X[Platform Gateway] --> Y[Identity Broker]
+Z[Tool Gateway] --> AA[Policy Engine]
 end
 ```
 
@@ -114,6 +114,7 @@ end
 - [ChatView.tsx:1-728](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L728)
 - [useChatStream.ts:1-368](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L368)
 - [transport.ts:1-117](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L1-L117)
+- [markdown.ts:1-35](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L35)
 - [AuditView.tsx:1-250](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L250)
 - [IncidentsView.tsx:1-600](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx#L1-L600)
 - [PermissionsView.tsx:1-99](file://products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx#L1-L99)
@@ -141,15 +142,16 @@ The Operator Portal consists of several key React components and hooks that work
 - **HITL Confirmation Cards**: Inline approval surfaces for ASK-gated tool executions with Approve/Deny buttons
 - **Skills Integration**: Enhanced evidence cards with "Cited guidance" chips displaying matched skills
 - **Authentication System**: OIDC integration with automatic token refresh and session management
-- **Markdown Renderer**: Comprehensive text formatting with syntax highlighting support
+- **Enhanced Markdown Renderer**: Comprehensive text formatting with XSS prevention and syntax highlighting support
 - **Responsive Design**: Dark theme with mobile-first approach and accessibility features
 
 ### Backend Integration
 - **Streaming API Client**: Robust Server-Sent Events implementation with error handling and reconnection
 - **HITL Confirmation Bridge**: Seamless integration with agent-platform confirmation registry for pending tool approvals
 - **Authentication Handler**: Secure integration with identity broker for authentication and authorization
-- **Session Management**: Multi-session support with transcript caching and workspace persistence
-- **Error Handling**: Comprehensive error management with user-friendly feedback and recovery
+- **Enhanced Session Management**: Multi-session support with transcript caching, workspace persistence, and defensive parsing
+- **Error Handling**: Comprehensive error management with user-friendly feedback and recovery for multiple failure types
+- **API v6 Compliance**: Backend schema compliance for risk level handling in pending calls
 
 ### Enhanced User Interface
 - **Persistent Sidebar**: Branding, identity management, and function navigation with Ant Design Menu
@@ -171,7 +173,7 @@ The Operator Portal consists of several key React components and hooks that work
 - **Validation System**: Automated version consistency checks across all platform components
 - **Deployment Consistency**: Coordinated versioning across all platform services
 
-**Updated** The interface now includes comprehensive HITL confirmation bridging with inline approval cards, enhanced multi-session workspace management, voice input support, comprehensive view implementations (AuditView, IncidentsView, PermissionsView, SkillsView, ToolsView), and improved streaming infrastructure. The platform has been updated to version 0.8.1 with enhanced version consistency across the platform ecosystem.
+**Updated** The interface now includes enhanced security measures with comprehensive XSS prevention in markdown rendering, improved session management with defensive parsing, enhanced stream ownership handling during session switches, refined error handling for different failure types, and backend API v6 schema compliance for risk level handling in pending calls. The platform has been updated to version 0.8.1 with enhanced version consistency across the platform ecosystem.
 
 **Section sources**
 - [App.tsx:1-318](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L318)
@@ -270,7 +272,7 @@ The React implementation provides sophisticated navigation with Ant Design compo
 
 ### Session Workspace Management
 
-The multi-session workspace provides comprehensive session management:
+The multi-session workspace provides comprehensive session management with enhanced defensive parsing:
 
 #### Session List
 - **Real-Time Updates**: 30-second polling for session list updates
@@ -282,8 +284,9 @@ The multi-session workspace provides comprehensive session management:
 - **Lazy Loading**: Sessions load transcripts on demand
 - **Caching**: In-memory caching prevents redundant API calls
 - **History Seeding**: Resumed sessions render like live conversations
+- **Defensive Parsing**: Enhanced parseStored function handles malformed or corrupted session data
 
-**Updated** The React architecture provides better type safety, component reusability, and maintainability while preserving all existing functionality from the legacy implementation. The new view components provide dedicated interfaces for different operational tasks.
+**Updated** The React architecture provides better type safety, component reusability, and maintainability while preserving all existing functionality from the legacy implementation. The new view components provide dedicated interfaces for different operational tasks. Enhanced session management now includes defensive parsing to handle edge cases in stored session data.
 
 **Section sources**
 - [App.tsx:1-318](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L318)
@@ -515,7 +518,7 @@ The HITL confirmation system provides several operational benefits:
 - **Audit Trail**: All decisions recorded with timestamps and user context
 - **Error Recovery**: Graceful handling of network issues and timeouts
 
-**Updated** The HITL confirmation system represents a significant enhancement to the operator portal, enabling safe automation of complex workflows while maintaining human oversight for critical operations. The React implementation provides better state management and component reusability.
+**Updated** The HITL confirmation system represents a significant enhancement to the operator portal, enabling safe automation of complex workflows while maintaining human oversight for critical operations. The React implementation provides better state management and component reusability. Backend API v6 schema compliance ensures proper risk level handling in pending calls.
 
 **Section sources**
 - [ChatView.tsx:208-287](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L208-L287)
@@ -577,7 +580,17 @@ The authentication system integrates seamlessly with the React UI:
 
 ## Markdown Rendering System
 
-The Operator Portal includes a comprehensive markdown rendering engine that transforms plain text into rich, formatted HTML content for display in the chat interface, implemented as a reusable React utility.
+The Operator Portal includes a comprehensive markdown rendering engine that transforms plain text into rich, formatted HTML content for display in the chat interface, implemented as a reusable React utility with enhanced XSS prevention.
+
+### Enhanced Security Measures
+
+The renderer now implements comprehensive XSS prevention measures:
+
+- **Comprehensive HTML Escaping**: All user input is escaped before processing using escapeHtml function with proper quote escaping
+- **Protocol Filtering**: JavaScript and data protocols are blocked to prevent malicious link injection
+- **Safe Link Handling**: External links open in new tabs with security attributes
+- **XSS Prevention**: No raw HTML injection or script execution
+- **Content Sanitization**: Removal of potentially dangerous elements
 
 ### Supported Markdown Features
 
@@ -588,19 +601,19 @@ The renderer supports extensive markdown syntax:
 - **Lists**: Ordered and unordered lists with nested support
 - **Code Blocks**: Syntax-highlighted code with language specification
 - **Inline Code**: Monospace formatting for inline code snippets
-- **Links**: Hyperlinks with external target support
+- **Links**: Hyperlinks with external target support (restricted to http(s))
 - **Blockquotes**: Nested quote blocks with visual styling
 - **Tables**: Structured data presentation with headers and alignment
 - **Horizontal Rules**: Visual separators for content organization
 
-### Security Considerations
+### Security Test Coverage
 
-The markdown renderer implements multiple security measures:
+Comprehensive test coverage ensures XSS prevention effectiveness:
 
-- **HTML Escaping**: All user input is escaped before processing using escapeHtml function
-- **Safe Link Handling**: External links open in new tabs with security attributes
-- **XSS Prevention**: No raw HTML injection or script execution
-- **Content Sanitization**: Removal of potentially dangerous elements
+- **JavaScript Protocol Blocking**: Tests verify javascript: URLs are refused and rendered as plain text
+- **Data Protocol Blocking**: Tests ensure data: URLs are blocked to prevent HTML injection
+- **Quote Escape Testing**: Tests validate quote-based attribute breakout prevention
+- **Empty Input Handling**: Tests confirm proper handling of empty input strings
 
 ### Performance Optimization
 
@@ -620,26 +633,31 @@ Consistent visual presentation across all rendered content:
 - **Responsive Design**: Adapts to different screen sizes and orientations
 - **Accessibility**: Proper semantic markup for screen readers
 
+**Updated** The markdown rendering system now includes enhanced XSS prevention with comprehensive quote escaping and protocol filtering for javascript: and data: URLs. The security improvements ensure that malicious link attempts are properly blocked while maintaining full functionality for legitimate content.
+
 **Section sources**
+- [markdown.ts:1-35](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L35)
+- [markdown.test.ts:37-62](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L37-L62)
 - [ChatView.tsx:320-329](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L320-L329)
 - [styles.css:496-571](file://products/operator-portal/web-ui/styles.css#L496-L571)
 
 ## Real-time Streaming Interface
 
-The Operator Portal implements a sophisticated real-time streaming interface using Server-Sent Events (SSE) for live chat responses and tool execution updates, built with React hooks for state management.
+The Operator Portal implements a sophisticated real-time streaming interface using Server-Sent Events (SSE) for live chat responses and tool execution updates, built with React hooks for state management with enhanced error handling.
 
-### Streaming Architecture
+### Enhanced Streaming Architecture
 
-The streaming system handles real-time communication efficiently:
+The streaming system handles real-time communication efficiently with improved error handling:
 
 - **Server-Sent Events**: Native browser API for server-to-client updates
-- **Event Parsing**: Robust JSON event parsing with error handling
+- **Event Parsing**: Robust JSON event parsing with comprehensive error handling
 - **Buffer Management**: Efficient text buffer handling for large responses
 - **Connection Recovery**: Automatic reconnection on network interruptions
+- **Ownership Handling**: Enhanced stream ownership management during session switches to prevent data contamination
 
 ### Message Type Handling
 
-Different event types are processed appropriately:
+Different event types are processed appropriately with refined error handling:
 
 - **Message Delta**: Incremental text updates for streaming responses
 - **Tool Calls**: Evidence drawer updates for tool execution via renderToolCall function
@@ -647,6 +665,7 @@ Different event types are processed appropriately:
 - **Stream Completion**: Finalization signals for response ending
 - **Confirmation Requests**: HITL approval cards for ASK-gated tool executions
 - **Confirmation Results**: Status updates for confirmation decisions
+- **Error Types**: Specific handling for network errors, authentication failures, and streaming interruptions
 
 ### User Experience Features
 
@@ -675,12 +694,14 @@ The React implementation includes additional streaming enhancements:
 - **Turn Scoping**: Each conversation turn maintains its own evidence context
 - **HITL Integration**: Seamless handling of confirmation requests within streaming flow
 - **Error Recovery**: Graceful handling of streaming errors with user feedback
-- **Session Management**: Multi-session support with per-session turn caching
+- **Session Management**: Multi-session support with per-session turn caching and ownership validation
+
+**Updated** The streaming interface now includes enhanced error handling for different failure types and improved stream ownership handling during session switches to prevent cross-session data contamination. These improvements ensure more reliable streaming performance and better user experience during network interruptions.
 
 **Section sources**
 - [useChatStream.ts:191-314](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L191-L314)
 - [transport.ts:75-117](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L75-L117)
-- [styles.css:353-382](file://products/operator-portal/web-ui/styles.css#L353-L382)
+- [styles.css:353-382](file://products/operator-portal/web-ui/styles.css#L353-382)
 
 ## Skills Integration and Cited Guidance
 
@@ -825,7 +846,7 @@ The combined workspace views provide comprehensive resource discovery capabiliti
 - **Read-Only Operations**: All workspace views are read-only for safety
 - **Policy Compliance**: Views respect current policy bundle and role assignments
 
-**Updated** The workspace resource discovery system provides operators with comprehensive visibility into platform capabilities, enabling better understanding of available tools and skills while maintaining strict security boundaries through role-based access control.
+**Updated** The workspace resource discovery system provides operators with comprehensive visibility into platform capabilities, enabling better understanding of available tools and skills while maintaining strict security boundaries through role-based access control. Backend API v6 schema compliance ensures proper risk level handling in pending calls.
 
 **Section sources**
 - [PermissionsView.tsx:1-99](file://products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx#L1-L99)
@@ -835,11 +856,11 @@ The combined workspace views provide comprehensive resource discovery capabiliti
 
 ## Multi-Session Workspace Management
 
-The Operator Portal now includes comprehensive multi-session workspace management, allowing operators to maintain multiple concurrent conversations with different contexts and histories.
+The Operator Portal now includes comprehensive multi-session workspace management, allowing operators to maintain multiple concurrent conversations with different contexts and histories, enhanced with defensive session parsing.
 
-### Session Workspace Architecture
+### Enhanced Session Workspace Architecture
 
-The session workspace provides a comprehensive interface for managing multiple conversations:
+The session workspace provides a comprehensive interface for managing multiple conversations with improved data integrity:
 
 #### Session List Management
 - **Real-Time Updates**: 30-second polling for session list updates
@@ -852,6 +873,7 @@ The session workspace provides a comprehensive interface for managing multiple c
 - **Caching Strategy**: In-memory caching prevents redundant API calls for the same session
 - **History Seeding**: Resumed sessions render like live conversations with proper turn history
 - **Transcript Availability**: Clear indication when sessions have no recorded transcript yet
+- **Defensive Parsing**: Enhanced parseStored function handles malformed or corrupted session data
 
 ### Session Panel Interface
 
@@ -878,6 +900,7 @@ The session workspace integrates seamlessly with the chat interface:
 - **Stream Attachment**: New messages attach to the correct session context
 - **Confirmation Anchoring**: HITL confirmations remain bound to their originating sessions
 - **State Restoration**: Session state restored when switching back to previously viewed sessions
+- **Ownership Validation**: Enhanced stream ownership handling during session switches to prevent data contamination
 
 #### User Experience Benefits
 - **Context Preservation**: Each conversation maintains its own context and history
@@ -885,7 +908,7 @@ The session workspace integrates seamlessly with the chat interface:
 - **Quick Context Switching**: Easy switching between different operational contexts
 - **Session Organization**: Clear visual organization of related conversations
 
-**Updated** The multi-session workspace represents a significant enhancement to operator productivity, enabling efficient management of multiple concurrent conversations while maintaining context isolation and data integrity.
+**Updated** The multi-session workspace now includes enhanced defensive parsing in the parseStored function to handle edge cases in stored session data, and improved stream ownership handling during session switches to prevent cross-session data contamination. These improvements ensure more reliable session management and better data integrity.
 
 **Section sources**
 - [useSessionWorkspace.ts:1-174](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L1-L174)
@@ -975,8 +998,6 @@ The voice input system implements appropriate security measures:
 - **Transparency**: Clear indication when voice input is being used
 - **Compliance**: Meets organizational requirements for input method logging
 - **Data Minimization**: Only transcribed text stored, not audio recordings
-
-**Updated** Voice input support significantly enhances operator productivity and accessibility while maintaining security and compliance requirements through careful implementation of privacy-preserving techniques.
 
 **Section sources**
 - [useSpeechRecognition.ts:1-135](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts#L1-L135)
@@ -1069,8 +1090,6 @@ The incident management system implements comprehensive security measures:
 - **Data Persistence**: Reliable storage of incident data with backup and recovery
 - **Audit Compliance**: Full compliance with audit requirements for incident handling
 
-**Updated** The incident triage and deep linking system represents a significant enhancement to operational workflows, enabling seamless transitions between incident management and collaborative troubleshooting while maintaining comprehensive audit trails and security controls.
-
 **Section sources**
 - [IncidentsView.tsx:1-600](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx#L1-L600)
 - [App.tsx:219-228](file://products/operator-portal/web-ui/app/src/App.tsx#L219-L228)
@@ -1158,7 +1177,7 @@ The deployment process includes enhanced version management:
 - **Version Validation**: Automated validation ensures all platform components use consistent versions
 - **Deployment Coordination**: Coordinated versioning across all platform services
 
-**Updated** The deployment now supports both the new React/TypeScript application and the legacy vanilla JavaScript implementation, with enhanced HITL confirmation bridging system, improved navigation system with sectioned organization, comprehensive workspace resource discovery capabilities, enhanced skills integration with "Cited guidance" chips, and comprehensive incident triage with deep linking capabilities. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints.
+**Updated** The deployment now supports both the new React/TypeScript application and the legacy vanilla JavaScript implementation, with enhanced HITL confirmation bridging system, improved navigation system with sectioned organization, comprehensive workspace resource discovery capabilities, enhanced skills integration with "Cited guidance" chips, and comprehensive incident triage with deep linking capabilities. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. Enhanced security measures include improved XSS prevention and defensive session parsing.
 
 **Section sources**
 - [nginx.conf](file://products/operator-portal/nginx.conf)
@@ -1405,6 +1424,7 @@ Common issues and their solutions when working with the Operator Portal.
 - Ensure session storage is properly configured
 - Verify session persistence across page reloads
 - Check for session conflict errors during deletion
+- **Updated**: Check for malformed session data that may be handled by defensive parsing
 
 ### Voice Input Issues
 
@@ -1532,7 +1552,18 @@ Common issues and their solutions when working with the Operator Portal.
 - Verify language codes are properly formatted
 - Check for speech recognition service availability for selected language
 
-**Updated** Added troubleshooting guidance for the React/TypeScript implementation, including React-specific issues, session management problems, voice input troubleshooting, enhanced navigation and workspace resource issues, incident management problems, deep linking issues, and voice input language configuration problems. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism.
+### Enhanced Error Handling Issues
+
+**Problem**: Various error types not handled properly
+**Solution**:
+- **Network Errors**: Check network connectivity and API endpoint availability
+- **Authentication Failures**: Verify token validity and refresh mechanisms
+- **Streaming Interruptions**: Check SSE connection stability and reconnection logic
+- **Session Switching Errors**: Verify stream ownership handling during session transitions
+- **Malformed Data**: Check defensive parsing for corrupted session data
+- **Backend API Issues**: Verify API v6 schema compliance for risk level handling
+
+**Updated** Added comprehensive troubleshooting guidance for the enhanced security measures, including XSS prevention issues, defensive session parsing problems, stream ownership handling during session switches, refined error handling for different failure types, and backend API v6 schema compliance issues. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism.
 
 **Section sources**
 - [App.tsx:1-318](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L318)
@@ -1545,10 +1576,10 @@ Common issues and their solutions when working with the Operator Portal.
 
 The Operator Portal provides a comprehensive, accessible, and customizable web interface for platform administration and monitoring within the Luban AIOPS ecosystem. The complete rebuild using React 18, TypeScript, and Vite delivers enterprise-grade functionality while maintaining simplicity and performance.
 
-**Updated** The recent enhancements include a complete React/TypeScript frontend architecture implementing SPEC-023 with enhanced streaming infrastructure, multi-session workspace management, voice input support, comprehensive view implementations (AuditView, IncidentsView, PermissionsView, SkillsView, ToolsView), and improved role-gated navigation. The platform now features comprehensive HITL (Human-in-the-Loop) confirmation bridging with inline approval cards, significantly improved navigation system with sectioned organization (Chat, Control, Workspace sections), live permission visibility through the permission matrix endpoint, comprehensive workspace resource discovery for tools and skills catalogs, enhanced skills integration with "Cited guidance" chips that automatically detect and display matched skills from successful skills.* tool executions, and comprehensive incident triage capabilities with automated connector dispatches and seamless deep linking to chat sessions. The platform has been updated to version 0.8.1 with enhanced version consistency across the platform ecosystem and improved cache-busting mechanisms for proper client-side caching behavior after deployment.
+**Updated** The recent enhancements include comprehensive security improvements with enhanced XSS prevention in markdown rendering through comprehensive quote escaping and protocol filtering, improved session management with defensive parseStored function to handle malformed or corrupted session data, enhanced stream ownership handling during session switches to prevent cross-session data contamination, refined error handling for different failure types including network errors, authentication failures, and streaming interruptions, and backend API v6 schema compliance for risk level handling in pending calls. The platform now features a complete React/TypeScript frontend architecture implementing SPEC-023 with enhanced streaming infrastructure, multi-session workspace management, voice input support, comprehensive view implementations (AuditView, IncidentsView, PermissionsView, SkillsView, ToolsView), and improved role-gated navigation.
 
-Key strengths of the enhanced portal include its modular React architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities, enhanced skills integration capabilities, improved navigation organization, robust multi-session workspace management, comprehensive incident triage with automated workflows, voice input support for hands-free operation, and seamless deep linking between incidents and collaborative chat sessions. The deployment process remains streamlined through containerization and Kubernetes-native configurations, making it suitable for both development and production environments.
+Key strengths of the enhanced portal include its modular React architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities, enhanced skills integration capabilities, improved navigation organization, robust multi-session workspace management, comprehensive incident triage with automated workflows, voice input support for hands-free operation, and seamless deep linking between incidents and collaborative chat sessions. The enhanced security measures ensure protection against XSS attacks while maintaining full functionality.
 
-The React/TypeScript implementation represents a significant advancement in developer experience and code maintainability, while preserving all existing functionality from the legacy vanilla JavaScript implementation. The HITL confirmation system enables safe automation of complex workflows while maintaining human oversight for critical operations. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions. The new view components provide dedicated interfaces for different operational tasks, improving workflow efficiency and user experience.
+The React/TypeScript implementation represents a significant advancement in developer experience and code maintainability, while preserving all existing functionality from the legacy vanilla JavaScript implementation. The enhanced security measures, including comprehensive XSS prevention and defensive session parsing, ensure robust protection against common web vulnerabilities. The HITL confirmation system enables safe automation of complex workflows while maintaining human oversight for critical operations. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions. The new view components provide dedicated interfaces for different operational tasks, improving workflow efficiency and user experience.
 
-Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system, continued refinement of the navigation and resource discovery interfaces, expanded support for more complex multi-step approval workflows, additional voice input capabilities to meet evolving operational requirements, enhanced incident triage automation, expanded connector integrations, and improved collaborative features for multi-operator incident response.
+Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system, continued refinement of the navigation and resource discovery interfaces, expanded support for more complex multi-step approval workflows, additional voice input capabilities to meet evolving operational requirements, enhanced incident triage automation, expanded connector integrations, and improved collaborative features for multi-operator incident response. Continued focus on security enhancements and user experience improvements will drive future development efforts.

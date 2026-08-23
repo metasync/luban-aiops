@@ -2,46 +2,24 @@
 
 <cite>
 **Referenced Files in This Document**
-- [agent_app.py](file://products/agent-platform/src/agent_platform/agent_app.py)
-- [app.py](file://products/agent-platform/src/agent_platform/app.py)
-- [main.py](file://products/agent-platform/src/agent_platform/main.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
-- [api.py](file://products/agent-platform/src/agent_platform/schemas/api.py)
-- [v2.py](file://products/agent-platform/src/agent_platform/schemas/v2.py)
-- [session_service.py](file://products/agent-platform/src/agent_platform/services/session_service.py)
-- [session_store.py](file://products/agent-platform/src/agent_platform/services/session_store.py)
-- [runtime_service.py](file://products/agent-platform/src/agent_platform/services/runtime_service.py)
-- [base.py](file://products/agent-platform/src/agent_platform/providers/base.py)
-- [openai.py](file://products/agent-platform/src/agent_platform/providers/openai.py)
-- [dashscope.py](file://products/agent-platform/src/agent_platform/providers/dashscope.py)
-- [deepseek.py](file://products/agent-platform/src/agent_platform/providers/deepseek.py)
-- [gateway_tools.py](file://products/agent-platform/src/agent_platform/tools/gateway_tools.py)
-- [config.py](file://products/agent-platform/src/agent_platform/core/config.py)
-- [env.py](file://products/agent-platform/src/agent_platform/core/env.py)
-- [metrics.py](file://products/agent-platform/src/agent_platform/core/metrics.py)
-- [observability.py](file://products/agent-platform/src/agent_platform/core/observability.py)
-- [telemetry.py](file://products/agent-platform/src/agent_platform/core/telemetry.py)
-- [request_context.py](file://products/agent-platform/src/agent_platform/core/request_context.py)
-- [chat.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
-- [sessions.py](file://products/tool-gateway/src/api_gateway/api/routes/sessions.py)
-- [auth.py](file://products/tool-gateway/src/api_gateway/api/routes/auth.py)
-- [identity.py](file://products/tool-gateway/src/api_gateway/api/routes/identity.py)
-- [health.py](file://products/tool-gateway/src/api_gateway/api/routes/health.py)
-- [router.py](file://products/tool-gateway/src/api_gateway/api/router.py)
-- [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [agent_client.py](file://products/tool-gateway/src/api_gateway/services/agent_client.py)
-- [token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
-- [policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [chat-request.schema.json](file://shared/shared-contracts/schemas/chat-request.schema.json)
-- [chat-response.schema.json](file://shared/shared-contracts/schemas/chat-response.schema.json)
-- [stream-event.schema.json](file://shared/shared-contracts/schemas/stream-event.schema.json)
-- [agent-chat-request.schema.json](file://shared/shared-contracts/schemas/agent-chat-request.schema.json)
-- [agent-chat-response.schema.json](file://shared/shared-contracts/schemas/agent-chat-response.schema.json)
-- [agent-session.schema.json](file://shared/shared-contracts/schemas/agent-session.schema.json)
-- [session.schema.json](file://shared/shared-contracts/schemas/session.schema.json)
-- [identity-token.schema.json](file://shared/shared-contracts/schemas/identity-token.schema.json)
-- [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [agent-stream-event.schema.json](file://shared/shared-contracts/schemas/agent-stream-event.schema.json)
+- [tool-result.schema.json](file://shared/shared-contracts/schemas/tool-result.schema.json)
+- [test_contract_adapter.py](file://products/agent-platform/tests/test_contract_adapter.py)
+- [test_gateway_tools.py](file://products/agent-platform/tests/test_gateway_tools.py)
+- [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
+- [test_tool_invoke.py](file://products/tool-gateway/tests/test_tool_invoke.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated v6 schema compliance section to document risk level handling in pending calls
+- Enhanced confirmation request documentation with per-call risk_level support
+- Added details about mutate badge functionality for different tool call types
+- Updated streaming event schema documentation to reflect v6 changes
+- Added examples of risk level validation and coercion behavior
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -57,6 +35,8 @@
 
 ## Introduction
 This document provides comprehensive API documentation for the Agent Platform service endpoints, focusing on agent orchestration, session management, and provider interactions. It covers REST APIs exposed via the tool gateway and internal services within the agent platform, including authentication using JWT tokens, rate limiting policies, WebSocket streaming for real-time responses, and long-running operations. Practical examples are included to demonstrate agent creation, chat interactions, session handling, and provider configuration. Error codes, retry strategies, and client implementation guidelines across multiple programming languages are also provided.
+
+**Updated** Enhanced with v6 schema compliance features for risk level handling in pending calls, enabling proper risk tagging and mutate badges for different tool call types through improved `_coerce_pending_calls` function.
 
 ## Project Structure
 The Agent Platform is composed of several key modules:
@@ -78,14 +58,12 @@ Providers --> DeepSeek["DeepSeek Provider"]
 ```
 
 **Diagram sources**
-- [router.py](file://products/tool-gateway/src/api_gateway/api/router.py)
-- [agent_app.py](file://products/agent-platform/src/agent_platform/agent_app.py)
-- [base.py](file://products/agent-platform/src/agent_platform/providers/base.py)
+- [routes.py:53-165](file://products/agent-platform/src/agent_service/api/v2/routes.py#L53-L165)
+- [gateway_tools.py:165-213](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L165-L213)
 
 **Section sources**
-- [main.py](file://products/agent-platform/src/agent_platform/main.py)
-- [app.py](file://products/agent-platform/src/agent_platform/app.py)
-- [router.py](file://products/tool-gateway/src/api_gateway/api/router.py)
+- [routes.py:1-53](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1-L53)
+- [gateway_tools.py:1-45](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L1-L45)
 
 ## Core Components
 - Agent Orchestration: Manages agent lifecycle, tool execution, and provider selection.
@@ -93,12 +71,13 @@ Providers --> DeepSeek["DeepSeek Provider"]
 - Provider Integration: Abstracts LLM providers with a common interface.
 - Authentication & Authorization: Validates JWT tokens and enforces policies.
 - Streaming & WebSockets: Supports real-time event streaming for long-running operations.
+- Risk Level Handling: v6 schema compliance for per-call risk levels in pending confirmations.
+
+**Updated** Enhanced with v6 schema compliance for risk level handling in pending calls, supporting read/write/admin risk tiers for better mutation detection in the portal UI.
 
 **Section sources**
-- [session_service.py](file://products/agent-platform/src/agent_platform/services/session_service.py)
-- [runtime_service.py](file://products/agent-platform/src/agent_platform/services/runtime_service.py)
-- [base.py](file://products/agent-platform/src/agent_platform/providers/base.py)
-- [token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
+- [routes.py:259-340](file://products/agent-platform/src/agent_service/api/v2/routes.py#L259-L340)
+- [gateway_tools.py:200-208](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L200-L208)
 
 ## Architecture Overview
 The system follows a layered architecture:
@@ -120,123 +99,140 @@ Gateway->>Gateway : Validate JWT & Policy
 Gateway->>AgentSvc : Forward Chat Request
 AgentSvc->>Session : Load/Create Session
 AgentSvc->>Provider : Invoke Model
-Provider-->>AgentSvc : Stream Events
+Provider-->>AgentSvc : Stream Events with Risk Levels
 AgentSvc-->>Gateway : Final Response + Events
 Gateway-->>Client : HTTP 200 + SSE/WebSocket
 ```
 
 **Diagram sources**
-- [chat.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
-- [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [session_service.py](file://products/agent-platform/src/agent_platform/services/session_service.py)
-- [openai.py](file://products/agent-platform/src/agent_platform/providers/openai.py)
+- [routes.py:107-165](file://products/agent-platform/src/agent_service/api/v2/routes.py#L107-L165)
+- [gateway_tools.py:76-109](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L76-L109)
 
 ## Detailed Component Analysis
 
 ### REST API Endpoints
-All public endpoints are exposed through the tool gateway under `/api/v1`.
+All public endpoints are exposed through the tool gateway under `/api/v2`.
 
 #### Authentication
-- Endpoint: `POST /api/v1/auth/token`
+- Endpoint: `POST /api/v2/auth/token`
 - Method: POST
 - Description: Issues JWT tokens for clients.
-- Request Schema: See [identity-token.schema.json](file://shared/shared-contracts/schemas/identity-token.schema.json)
-- Response Schema: See [identity-token.schema.json](file://shared/shared-contracts/schemas/identity-token.schema.json)
 - Authentication: None (public endpoint)
 - Rate Limiting: Configurable via policy engine.
 
-**Section sources**
-- [auth.py](file://products/tool-gateway/src/api_gateway/api/routes/auth.py)
-- [identity-token.schema.json](file://shared/shared-contracts/schemas/identity-token.schema.json)
-
 #### Chat Interaction
-- Endpoint: `POST /api/v1/chat`
+- Endpoint: `POST /api/v2/chat`
 - Method: POST
 - Description: Initiates a chat interaction with an agent.
-- Request Schema: See [chat-request.schema.json](file://shared/shared-contracts/schemas/chat-request.schema.json)
-- Response Schema: See [chat-response.schema.json](file://shared/shared-contracts/schemas/chat-response.schema.json)
 - Authentication: Requires valid JWT in `Authorization: Bearer <token>` header.
 - Rate Limiting: Enforced by policy engine based on user identity.
 
-**Section sources**
-- [chat.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
-- [chat-request.schema.json](file://shared/shared-contracts/schemas/chat-request.schema.json)
-- [chat-response.schema.json](file://shared/shared-contracts/schemas/chat-response.schema.json)
-
 #### Session Management
-- Endpoint: `GET /api/v1/sessions/{session_id}`
+- Endpoint: `GET /api/v2/sessions/{session_id}`
 - Method: GET
 - Description: Retrieves session details.
-- Response Schema: See [session.schema.json](file://shared/shared-contracts/schemas/session.schema.json)
 - Authentication: Requires JWT.
 
-- Endpoint: `POST /api/v1/sessions`
+- Endpoint: `POST /api/v2/sessions`
 - Method: POST
 - Description: Creates a new session.
-- Request Schema: See [agent-session.schema.json](file://shared/shared-contracts/schemas/agent-session.schema.json)
-- Response Schema: See [agent-session.schema.json](file://shared/shared-contracts/schemas/agent-session.schema.json)
 - Authentication: Requires JWT.
 
-**Section sources**
-- [sessions.py](file://products/tool-gateway/src/api_gateway/api/routes/sessions.py)
-- [session.schema.json](file://shared/shared-contracts/schemas/session.schema.json)
-- [agent-session.schema.json](file://shared/shared-contracts/schemas/agent-session.schema.json)
+- Endpoint: `DELETE /api/v2/sessions/{session_id}`
+- Method: DELETE
+- Description: Deletes a session (owner-only, prevents deletion if pending confirmation exists).
+- Authentication: Requires JWT.
 
 #### Health Check
-- Endpoint: `GET /api/v1/health`
+- Endpoint: `GET /api/v2/health`
 - Method: GET
 - Description: Returns service health status.
-- Response Schema: See [health-response.schema.json](file://shared/shared-contracts/schemas/health-response.schema.json)
 - Authentication: None.
 
 **Section sources**
-- [health.py](file://products/tool-gateway/src/api_gateway/api/routes/health.py)
-- [health-response.schema.json](file://shared/shared-contracts/schemas/health-response.schema.json)
+- [routes.py:107-165](file://products/agent-platform/src/agent_service/api/v2/routes.py#L107-L165)
+- [routes.py:346-438](file://products/agent-platform/src/agent_service/api/v2/routes.py#L346-L438)
+- [routes.py:461-475](file://products/agent-platform/src/agent_service/api/v2/routes.py#L461-L475)
 
 ### WebSocket API
-- Endpoint: `ws://<host>/api/v1/stream/{session_id}`
-- Protocol: WebSocket
+- Endpoint: `GET /api/v2/chat/stream`
+- Protocol: Server-Sent Events (SSE)
 - Description: Establishes a real-time streaming connection for long-running operations.
-- Message Schema: See [stream-event.schema.json](file://shared/shared-contracts/schemas/stream-event.schema.json)
-- Authentication: Requires JWT in query parameter or initial handshake message.
+- Message Schema: See [agent-stream-event.schema.json](file://shared/shared-contracts/schemas/agent-stream-event.schema.json)
+- Authentication: Requires JWT in headers.
+
+**Updated** Enhanced with v6 schema compliance supporting per-call risk levels in confirmation_request events for better mutation detection.
 
 **Section sources**
-- [stream-event.schema.json](file://shared/shared-contracts/schemas/stream-event.schema.json)
+- [routes.py:135-165](file://products/agent-platform/src/agent_service/api/v2/routes.py#L135-L165)
+- [agent-stream-event.schema.json:1-101](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L1-L101)
+
+### Confirmation Requests and Risk Level Handling
+The system now supports v6 schema compliance for risk level handling in pending calls, enabling proper risk tagging and mutate badges for different tool call types.
+
+#### Pending Calls with Risk Levels
+- **Risk Level Values**: `read`, `write`, `admin`
+- **Schema Compliance**: Per-call risk_level field in pending_calls array
+- **Portal Integration**: Mutate badges displayed for write/admin risk levels
+- **Validation**: Only schema-conformant risk levels are passed through; invalid values are omitted
+
+```mermaid
+flowchart TD
+RawEvent["Raw Kernel Event"] --> CoerceFunction["_coerce_pending_calls()"]
+CoerceFunction --> ValidateRisk{"Valid Risk Level?"}
+ValidateRisk --> |Yes| IncludeRisk["Include risk_level in entry"]
+ValidateRisk --> |No| OmitRisk["Omit risk_level from entry"]
+IncludeRisk --> BuildEntry["Build pending call entry"]
+OmitRisk --> BuildEntry
+BuildEntry --> SchemaCompliant["Schema-compliant event"]
+```
+
+**Diagram sources**
+- [routes.py:315-340](file://products/agent-platform/src/agent_service/api/v2/routes.py#L315-L340)
+- [agent-stream-event.schema.json:32-49](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L32-L49)
+
+**Section sources**
+- [routes.py:259-340](file://products/agent-platform/src/agent_service/api/v2/routes.py#L259-L340)
+- [test_contract_adapter.py:221-250](file://products/agent-platform/tests/test_contract_adapter.py#L221-L250)
 
 ### Provider Interactions
-Providers implement a common interface for LLM interactions.
+Providers implement a common interface for LLM interactions with enhanced risk level support.
 
 ```mermaid
 classDiagram
 class BaseProvider {
 +invoke(request) Response
 +stream_events(session_id) EventStream
++gateway_risk_level string
 }
 class OpenAIProvider {
 +invoke(request) Response
 +stream_events(session_id) EventStream
++gateway_risk_level "read"
 }
 class DashScopeProvider {
 +invoke(request) Response
 +stream_events(session_id) EventStream
++gateway_risk_level "read"
 }
 class DeepSeekProvider {
 +invoke(request) Response
 +stream_events(session_id) EventStream
++gateway_risk_level "read"
 }
 BaseProvider <|-- OpenAIProvider
 BaseProvider <|-- DashScopeProvider
 BaseProvider <|-- DeepSeekProvider
 ```
 
+**Updated** Enhanced with gateway risk level support for proper mutation detection and confirmation workflows.
+
 **Diagram sources**
-- [base.py](file://products/agent-platform/src/agent_platform/providers/base.py)
-- [openai.py](file://products/agent-platform/src/agent_platform/providers/openai.py)
-- [dashscope.py](file://products/agent-platform/src/agent_platform/providers/dashscope.py)
-- [deepseek.py](file://products/agent-platform/src/agent_platform/providers/deepseek.py)
+- [gateway_tools.py:165-213](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L165-L213)
+- [test_gateway_tools.py:324-343](file://products/agent-platform/tests/test_gateway_tools.py#L324-L343)
 
 **Section sources**
-- [base.py](file://products/agent-platform/src/agent_platform/providers/base.py)
+- [gateway_tools.py:165-213](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L165-L213)
 
 ### Authentication Flow
 JWT tokens are validated at the gateway layer before requests are forwarded to internal services.
@@ -259,16 +255,12 @@ Gateway-->>Client : 401 Unauthorized
 end
 ```
 
-**Diagram sources**
-- [token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
-- [policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-
 **Section sources**
-- [token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
-- [policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
+- [gateway_service.py:250-263](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L250-L263)
+- [test_tool_invoke.py:307-340](file://products/tool-gateway/tests/test_tool_invoke.py#L307-L340)
 
 ## Dependency Analysis
-The tool gateway depends on internal services and external providers.
+The tool gateway depends on internal services and external providers with enhanced risk level tracking.
 
 ```mermaid
 graph LR
@@ -278,24 +270,27 @@ Gateway --> PolicyEngine["Policy Engine"]
 AgentClient --> AgentService["Agent Platform Service"]
 AgentService --> SessionStore["Session Store"]
 AgentService --> Providers["LLM Providers"]
+Providers --> RiskLevels["Risk Level Tracking"]
 ```
 
+**Updated** Enhanced dependency chain includes risk level tracking for proper mutation detection in confirmation workflows.
+
 **Diagram sources**
-- [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [agent_client.py](file://products/tool-gateway/src/api_gateway/services/agent_client.py)
-- [session_store.py](file://products/agent-platform/src/agent_platform/services/session_store.py)
+- [gateway_tools.py:200-208](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L200-L208)
+- [routes.py:315-340](file://products/agent-platform/src/agent_service/api/v2/routes.py#L315-L340)
 
 **Section sources**
-- [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [agent_client.py](file://products/tool-gateway/src/api_gateway/services/agent_client.py)
+- [gateway_tools.py:165-213](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L165-L213)
+- [routes.py:259-340](file://products/agent-platform/src/agent_service/api/v2/routes.py#L259-L340)
 
 ## Performance Considerations
 - Use connection pooling for LLM provider calls.
 - Implement caching for frequently accessed session data.
 - Monitor metrics and telemetry for bottleneck identification.
 - Configure rate limiting to prevent abuse.
+- Optimize risk level validation for high-throughput scenarios.
 
-[No sources needed since this section provides general guidance]
+**Updated** Added performance considerations for risk level validation in pending calls processing.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -303,15 +298,17 @@ Common issues and resolutions:
 - Rate Limiting Errors: Check policy configurations and adjust limits if necessary.
 - Provider Timeouts: Verify provider credentials and network connectivity.
 - Session Loss: Confirm session store availability and persistence settings.
+- Risk Level Validation Errors: Ensure risk_level values conform to schema (read/write/admin).
+
+**Updated** Added troubleshooting guidance for risk level validation issues in pending calls.
 
 **Section sources**
-- [observability.py](file://products/agent-platform/src/agent_platform/core/observability.py)
-- [metrics.py](file://products/agent-platform/src/agent_platform/core/metrics.py)
+- [test_contract_adapter.py:202-250](file://products/agent-platform/tests/test_contract_adapter.py#L202-L250)
 
 ## Conclusion
-The Agent Platform API provides a robust framework for agent orchestration, session management, and provider interactions. With strong authentication, policy enforcement, and real-time streaming capabilities, it supports scalable and secure AI-driven applications.
+The Agent Platform API provides a robust framework for agent orchestration, session management, and provider interactions. With strong authentication, policy enforcement, real-time streaming capabilities, and enhanced v6 schema compliance for risk level handling, it supports scalable and secure AI-driven applications with proper mutation detection and confirmation workflows.
 
-[No sources needed since this section summarizes without analyzing specific files]
+**Updated** Enhanced conclusion reflecting v6 schema compliance improvements for risk level handling in pending calls.
 
 ## Appendices
 
@@ -319,34 +316,35 @@ The Agent Platform API provides a robust framework for agent orchestration, sess
 
 #### Create a Session
 - Method: POST
-- URL: `/api/v1/sessions`
+- URL: `/api/v2/sessions`
 - Headers: `Authorization: Bearer <jwt>`
-- Body: See [agent-session.schema.json](file://shared/shared-contracts/schemas/agent-session.schema.json)
-- Response: See [agent-session.schema.json](file://shared/shared-contracts/schemas/agent-session.schema.json)
-
-**Section sources**
-- [sessions.py](file://products/tool-gateway/src/api_gateway/api/routes/sessions.py)
-- [agent-session.schema.json](file://shared/shared-contracts/schemas/agent-session.schema.json)
+- Response: Session object with metadata
 
 #### Send a Chat Message
 - Method: POST
-- URL: `/api/v1/chat`
+- URL: `/api/v2/chat`
 - Headers: `Authorization: Bearer <jwt>`
-- Body: See [chat-request.schema.json](file://shared/shared-contracts/schemas/chat-request.schema.json)
-- Response: See [chat-response.schema.json](file://shared/shared-contracts/schemas/chat-response.schema.json)
+- Response: Chat response with structured output
+
+#### Handle Confirmation Request with Risk Levels
+- Event Type: `confirmation_request`
+- Payload includes pending_calls with per-call risk_level fields
+- Portal displays mutate badges for write/admin risk levels
+
+**Updated** Added example for handling confirmation requests with v6 risk level support.
 
 **Section sources**
-- [chat.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
-- [chat-request.schema.json](file://shared/shared-contracts/schemas/chat-request.schema.json)
-- [chat-response.schema.json](file://shared/shared-contracts/schemas/chat-response.schema.json)
+- [routes.py:346-438](file://products/agent-platform/src/agent_service/api/v2/routes.py#L346-L438)
+- [agent-stream-event.schema.json:32-49](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L32-L49)
 
 ### Error Codes and Retry Strategies
 - 401 Unauthorized: Invalid or missing JWT. Retry after refreshing token.
 - 403 Forbidden: Policy denied. Review access controls.
+- 409 Conflict: Session has pending confirmation. Resolve before retry.
 - 429 Too Many Requests: Rate limit exceeded. Implement exponential backoff.
 - 500 Internal Server Error: Unexpected failure. Log and retry with backoff.
 
-[No sources needed since this section provides general guidance]
+**Updated** Added 409 conflict error code for pending confirmation scenarios.
 
 ### Client Implementation Guidelines
 - Python: Use `requests` for REST and `websockets` for streaming.
@@ -354,4 +352,36 @@ The Agent Platform API provides a robust framework for agent orchestration, sess
 - Go: Use `net/http` for REST and `gorilla/websocket` for streaming.
 - Java: Use `OkHttp` for REST and `Java WebSocket API` for streaming.
 
-[No sources needed since this section provides general guidance]
+**Updated** Enhanced guidelines for handling v6 schema compliance in client implementations.
+
+### Risk Level Handling Examples
+
+#### Schema-Compliant Risk Levels
+```json
+{
+  "pending_calls": [
+    {
+      "call_id": "call-1",
+      "tool_name": "k8s.restart_service",
+      "risk_level": "write"
+    },
+    {
+      "call_id": "call-2", 
+      "tool_name": "k8s.get_pod_logs",
+      "risk_level": "read"
+    }
+  ]
+}
+```
+
+#### Portal Mutation Detection
+The portal uses risk_level to display mutate badges:
+- `read`: No badge (safe operations)
+- `write`: Orange "mutating" badge (requires confirmation)
+- `admin`: Orange "mutating" badge (requires confirmation)
+
+**Updated** Added detailed examples of risk level handling and portal integration.
+
+**Section sources**
+- [test_contract_adapter.py:221-250](file://products/agent-platform/tests/test_contract_adapter.py#L221-L250)
+- [ChatView.tsx:253-265](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L253-L265)
