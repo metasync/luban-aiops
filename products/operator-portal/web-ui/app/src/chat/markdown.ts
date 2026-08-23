@@ -64,15 +64,31 @@ export function renderMarkdown(text: string): string {
   // Ordered lists.
   html = html.replace(/^\d+\.\s+(.+)$/gm, "<li>$1</li>");
 
-  // Tables.
-  html = html.replace(/^\|(.+)\|$/gm, (_match, content: string) => {
-    const cells = content.split("|").map((cell) => cell.trim());
-    if (cells.every((cell) => /^[-:]+$/.test(cell))) return ""; // separator
-    return (
-      "<tr>" + cells.map((cell) => `<td>${cell}</td>`).join("") + "</tr>"
-    );
+  // Tables. A block of consecutive `| … |` lines becomes one <table>: the
+  // first non-separator row is the header (<th>, inside <thead>), the rest
+  // form the body. Emitting the whole block in one pass keeps header and
+  // body in a single table even though the `---` separator line is
+  // dropped (an earlier line-by-line port split them into two stacked
+  // tables, which rendered as a disconnected header).
+  html = html.replace(/(?:^\|.+\|\n?)+/gm, (block) => {
+    const rows = block.split("\n").filter((line) => line.trim() !== "");
+    const parseCells = (line: string) =>
+      line.replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+    const isSeparator = (cells: string[]) =>
+      cells.length > 0 && cells.every((cell) => /^:?-+:?$/.test(cell));
+    const renderRow = (cells: string[], tag: "th" | "td") =>
+      "<tr>" + cells.map((cell) => `<${tag}>${cell}</${tag}>`).join("") + "</tr>";
+    let head = "";
+    const body: string[] = [];
+    for (const row of rows) {
+      const cells = parseCells(row);
+      if (isSeparator(cells)) continue;
+      if (!head) head = renderRow(cells, "th");
+      else body.push(renderRow(cells, "td"));
+    }
+    if (!head) return "";
+    return `<table><thead>${head}</thead><tbody>${body.join("")}</tbody></table>`;
   });
-  html = html.replace(/((?:<tr>.*<\/tr>\n?)+)/g, "<table>$1</table>");
 
   // Paragraphs: wrap remaining lines not already in block elements.
   html = html.replace(

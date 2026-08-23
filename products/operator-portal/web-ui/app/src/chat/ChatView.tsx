@@ -317,10 +317,36 @@ function TurnGroup({
       ? "(no response received)"
       : "");
   const loading = !turn.completed && !turn.confirmationPending && !turn.error;
+  // Sticky request banner: while this turn's user bubble has scrolled out
+  // of the transcript viewport, a pinned one-liner restates the request so
+  // long replies (and expanded evidence) stay correlated with it.
+  const userBubbleRef = useRef<HTMLDivElement>(null);
+  const [requestOutOfView, setRequestOutOfView] = useState(false);
+  useEffect(() => {
+    const target = userBubbleRef.current;
+    if (!target || !turn.userMessage) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setRequestOutOfView(!entry.isIntersecting),
+      { root: target.closest(".chat-messages") },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [turn.userMessage]);
   return (
     <div className="turn-group">
       {turn.userMessage ? (
-        <Bubble placement="end" variant="filled" content={turn.userMessage} />
+        <div ref={userBubbleRef}>
+          <Bubble placement="end" variant="filled" content={turn.userMessage} />
+        </div>
+      ) : null}
+      {turn.userMessage ? (
+        <div
+          className={`turn-request-banner${requestOutOfView ? " visible" : ""}`}
+          title={turn.userMessage}
+        >
+          <span className="turn-request-banner-label">Request</span>
+          <span className="turn-request-banner-text">{turn.userMessage}</span>
+        </div>
       ) : null}
       <Bubble
         placement="start"
@@ -367,6 +393,7 @@ function SessionPanel({
   activeSessionId,
   loading,
   error,
+  authenticated,
   onSelect,
   onCreate,
   onDelete,
@@ -375,6 +402,7 @@ function SessionPanel({
   activeSessionId: string | null;
   loading: boolean;
   error: string | null;
+  authenticated: boolean;
   onSelect: (sessionId: string) => void;
   onCreate: () => void;
   onDelete: (session: SessionSummary) => void;
@@ -383,14 +411,20 @@ function SessionPanel({
     <aside className="session-panel">
       <div className="session-panel-header">
         <Typography.Text strong>Sessions</Typography.Text>
-        <Button
-          size="small"
-          icon={<PlusOutlined />}
-          onClick={onCreate}
-          aria-label="New session"
-        >
-          New
-        </Button>
+        {/* Pre-login the workspace API cannot be called (401), so the
+            affordance is disabled like the composer; the server-side 401
+            path stays as the defence for mid-session token expiry. */}
+        <Tooltip title={authenticated ? "" : "Sign in to create a session"}>
+          <Button
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={onCreate}
+            disabled={!authenticated}
+            aria-label="New session"
+          >
+            New
+          </Button>
+        </Tooltip>
       </div>
       {error ? (
         <Alert
@@ -632,6 +666,7 @@ export default function ChatView({
         activeSessionId={workspace.activeSessionId}
         loading={workspace.loading}
         error={workspace.error}
+        authenticated={authenticated}
         onSelect={setActiveSessionId}
         onCreate={() => void workspace.createAndOpen()}
         onDelete={confirmDelete}

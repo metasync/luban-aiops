@@ -163,10 +163,14 @@ function SidebarContent({
   return (
     <>
       <div className="sidebar-brand" style={{ padding: "12px 16px" }}>
-        <Typography.Title level={5} style={{ margin: 0 }}>
-          Luban AIOps
-        </Typography.Title>
-        <Tag style={{ marginTop: 8 }}>{PLATFORM_VERSION}</Tag>
+        {/* Title and version share one line so the brand block stays as
+            compact as the session-panel header it visually parallels. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Typography.Title level={5} style={{ margin: 0, whiteSpace: "nowrap" }}>
+            Luban AIOps
+          </Typography.Title>
+          <Tag style={{ margin: 0 }}>{PLATFORM_VERSION}</Tag>
+        </div>
       </div>
       <Menu
         mode="inline"

@@ -56,6 +56,26 @@ describe("renderMarkdown", () => {
     expect(html).toContain("https://a&quot;");
   });
 
+  it("renders a GFM table as one table with a thead header row", () => {
+    // Walkthrough finding: the line-by-line port dropped the separator but
+    // left a blank line, splitting header and body into two stacked tables
+    // that rendered disconnected. One block must yield one <table>.
+    const html = renderMarkdown(
+      "| POD | STATUS |\n| --- | --- |\n| web-ui | Running |",
+    );
+    expect(html.match(/<table>/g)?.length).toBe(1);
+    expect(html).toContain("<thead><tr><th>POD</th><th>STATUS</th></tr></thead>");
+    expect(html).toContain("<tbody><tr><td>web-ui</td><td>Running</td></tr></tbody>");
+    expect(html).not.toContain("---");
+  });
+
+  it("supports alignment markers in table separators", () => {
+    const html = renderMarkdown("| a | b |\n|:---|---:|\n| 1 | 2 |");
+    expect(html.match(/<table>/g)?.length).toBe(1);
+    expect(html).toContain("<th>a</th>");
+    expect(html).toContain("<td>1</td>");
+  });
+
   it("returns empty string for empty input", () => {
     expect(renderMarkdown("")).toBe("");
   });

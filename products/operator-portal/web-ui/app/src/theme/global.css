@@ -295,10 +295,10 @@ body {
 
 /* --- Tool evidence groups (SPEC-011 R-4 parity) ---
    Collapsed by default; the summary line carries the trust signal without
-   crowding the answer. */
+   crowding the answer. The group spans the same width as the reply
+   bubbles above it so the transcript reads as one aligned column. */
 .evidence-turn {
-  max-width: 640px;
-  align-self: flex-start;
+  align-self: stretch;
 }
 
 .evidence-summary {
@@ -335,8 +335,52 @@ body {
   border-radius: var(--radius);
   padding: 8px 12px;
   overflow-x: auto;
+  /* Bounded height with its own scrollbar: expanding a large tool result
+     must not push the whole transcript away. */
+  max-height: 280px;
+  overflow-y: auto;
   font-size: 0.8rem;
   margin: 6px 0 0;
+}
+
+/* --- Sticky request banner ------------------------------------------------
+   While a turn's user bubble has scrolled out of the transcript viewport,
+   this banner restates the request at the top so long replies and expanded
+   evidence stay correlated with what was asked. Hidden while the bubble
+   itself is on screen. */
+.turn-request-banner {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.turn-request-banner.visible {
+  display: flex;
+}
+
+.turn-request-banner-label {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.turn-request-banner-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* --- HITL confirmation cards (SPEC-020 R-4) --- */
