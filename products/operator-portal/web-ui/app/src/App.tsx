@@ -330,7 +330,9 @@ export default function App() {
           )}
         </Layout.Content>
       </Layout>
-      {/* Off-canvas sidebar for narrow viewports (legacy drawer parity). */}
+      {/* Off-canvas sidebar for narrow viewports: the folded 64px icon
+          rail stays visible at every width for one-tap navigation, and
+          the drawer adds the full labeled menu on demand. */}
       <Drawer
         placement="left"
         width={260}

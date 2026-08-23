@@ -152,9 +152,13 @@ async def open_chat_stream(
         raise
     if response.status_code >= 400:
         # Read the body to release the connection, then surface the status.
-        await response.aread()
-        await response.aclose()
-        await client.aclose()
+        # Cleanup is finally-guarded so a failed error-body read cannot leak
+        # the response or client.
+        try:
+            await response.aread()
+        finally:
+            await response.aclose()
+            await client.aclose()
         response.raise_for_status()
 
     async def _iter() -> AsyncIterator[str]:
@@ -206,9 +210,13 @@ async def open_chat_confirm_stream(
         raise
     if response.status_code >= 400:
         # Read the body to release the connection, then surface the status.
-        await response.aread()
-        await response.aclose()
-        await client.aclose()
+        # Cleanup is finally-guarded so a failed error-body read cannot leak
+        # the response or client.
+        try:
+            await response.aread()
+        finally:
+            await response.aclose()
+            await client.aclose()
         response.raise_for_status()
 
     async def _iter() -> AsyncIterator[str]:
