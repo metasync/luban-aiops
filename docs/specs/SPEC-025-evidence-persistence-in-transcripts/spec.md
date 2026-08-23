@@ -142,17 +142,23 @@ Acceptance criteria:
 
 ## Open Questions
 
-- Storage home for evidence frames: extend the SPEC-017 kernel state
-  snapshot (single read path, grows snapshot size) versus a dedicated
-  per-session evidence table in the SPEC-016 Postgres store (bounded
-  growth, second read path). To be resolved in `plan.md`.
-- Evidence retention policy: follow session lifetime exactly, or cap
-  evidence rows independently for very long-lived sessions.
-- Per-entry and per-session size caps (concrete numbers) — pending a
-  measurement pass over live dev-k8s tool outputs.
+All three open questions are resolved in `plan.md` (measurement pass of
+2026-08-23); the resolutions below are pending spec approval.
+
+- Storage home: dedicated `session_evidence` table with the same dual
+  backend as the SPEC-017 state store (plan §Q1) — the snapshot-embedding
+  alternative is rejected there.
+- Retention: evidence follows session lifetime (cascade delete, no
+  independent TTL), bounded by a per-session storage budget with
+  oldest-payload eviction (plan §Q2).
+- Size caps: per-entry 131,072 chars, per-session 4,194,304 bytes, both
+  measured-derived and env-tunable (plan §Q3).
 
 ## Changelog
 
 - 2026-08-23: created as `draft` from the SPEC-023 walkthrough parity
   finding (evidence lost on session reload); numbering skips SPEC-024,
   which the delivery roadmap reserves for runtime LLM model switching.
+- 2026-08-23: `plan.md` + `tasks.md` drafted; live dev-k8s measurement
+  pass (n=9 read-only tools, max payload 80.9k chars on `k8s.get_events`)
+  resolved the storage-home, retention, and size-cap open questions.
