@@ -210,11 +210,13 @@ export function useChatStream(): ChatStreamApi {
       turnsRef.current.push(turn);
       beginStream();
       bump();
-      try {
+      const userId =
+        options.userId || currentAuthenticatedUser() || "operator";
+      const attempt = async (sessionId: string | null) => {
         const path = chatStreamPath({
           message,
-          userId: options.userId || currentAuthenticatedUser() || "operator",
-          sessionId: sessionIdRef.current,
+          userId,
+          sessionId,
           inputModality: options.inputModality,
         });
         const opened = await openStream(path, { signal: controller.signal });
@@ -222,6 +224,8 @@ export function useChatStream(): ChatStreamApi {
         await consumeStream(opened.chunks, (event) =>
           handleEvent(turn, event),
         );
+      };
+      const settle = () => {
         // Natural stream end completes the turn even when no terminal
         // frame arrives (legacy parity: the kernel may close the stream
         // after its last delta without a message_end). Parked
@@ -229,12 +233,38 @@ export function useChatStream(): ChatStreamApi {
         if (!turn.confirmationPending) {
           turn.completed = true;
         }
+      };
+      try {
+        await attempt(sessionIdRef.current);
+        settle();
       } catch (error) {
         if (isAbortError(error)) {
           // A session switch closed this stream: keep the partial reply
           // visible instead of leaving the bubble loading forever.
-          if (!turn.confirmationPending) {
-            turn.completed = true;
+          settle();
+        } else if (
+          error instanceof StreamOpenError &&
+          error.status === 404 &&
+          sessionIdRef.current
+        ) {
+          // Stale session pointer (deleted elsewhere, expired, or a
+          // never-created pinned id): the gateway now answers 404 before
+          // the SSE stream opens. Drop the pointer and retry once with
+          // server-side auto-creation — the legacy first-message flow.
+          sessionIdRef.current = null;
+          bump();
+          try {
+            await attempt(null);
+            settle();
+          } catch (retryError) {
+            if (isAbortError(retryError)) {
+              settle();
+            } else {
+              turn.error =
+                retryError instanceof Error
+                  ? retryError.message
+                  : String(retryError);
+            }
           }
         } else {
           turn.error =

@@ -510,6 +510,10 @@ export default function ChatView({
   // Sessions whose transcript was already loaded this tab; switching back
   // restores the in-memory cache without another fetch.
   const loadedRef = useRef(new Set<string>());
+  // Sessions the server reported as unknown (404). Their ids must never
+  // prime the stream pointer: sending against them would fail, so the
+  // next message auto-creates a fresh session instead (legacy flow).
+  const missingRef = useRef(new Set<string>());
   // Set while the workspace pointer is catching up to a session id learned
   // from the stream; prevents the switch effect from treating the pointer
   // move as a user-initiated session change.
@@ -559,6 +563,12 @@ export default function ChatView({
       setSession(null);
       return;
     }
+    if (missingRef.current.has(activeSessionId)) {
+      // Known-missing session: show the empty transcript but leave the
+      // stream pointer null so the next send auto-creates a session.
+      setSession(null);
+      return;
+    }
     if (loadedRef.current.has(activeSessionId)) {
       setSession(activeSessionId);
       return;
@@ -578,11 +588,13 @@ export default function ChatView({
       .catch((error) => {
         if (controller.signal.aborted) return;
         if (error instanceof ApiError && error.status === 404) {
-          // Unknown/expired session (e.g. a pinned incident session that the
-          // server has not created yet): open it empty — the first message
-          // creates the server-side state.
-          loadedRef.current.add(target);
-          setSession(target, []);
+          // Unknown/expired session (e.g. a stale per-tab pointer or a
+          // pinned incident session the server has not created yet):
+          // open it empty. The id is remembered as missing so it never
+          // rides along on the stream request — the first message
+          // auto-creates the server-side session.
+          missingRef.current.add(target);
+          setSession(null);
           return;
         }
         // Any other failure (transient gateway blip, expired token) must

@@ -132,7 +132,7 @@ async def chat_stream_route(
             session_id=session_id,
         ),
     )
-    return chat_stream(
+    return await chat_stream(
         settings=settings,
         request_id=request_id,
         user_id=user_id,

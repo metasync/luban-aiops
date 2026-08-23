@@ -114,7 +114,7 @@ async def chat(
     return response.json()
 
 
-async def stream_chat(
+async def open_chat_stream(
     settings: PlatformGatewaySettings,
     request_id: str,
     user_id: str,
@@ -123,6 +123,14 @@ async def stream_chat(
     delegated_token: str | None = None,
     input_modality: str = "text",
 ) -> AsyncIterator[str]:
+    """Open the chat stream and return an SSE line iterator.
+
+    The upstream status is checked eagerly, before any frame is yielded, so
+    the caller can map 4xx (unknown session, parked conflict) and outages
+    to HTTP responses instead of answering 200 with an empty SSE stream.
+    Raises ``httpx.HTTPStatusError`` on upstream 4xx/5xx and
+    ``httpx.HTTPError`` on transport failure.
+    """
     timeout = httpx.Timeout(connect=5.0, read=None, write=None, pool=None)
     params: dict[str, str] = {"message": message}
     if session_id:
@@ -130,17 +138,35 @@ async def stream_chat(
     # SPEC-023 R-4: modality rides the query as metadata only, matching
     # the POST /api/v2/chat payload convention (SPEC-022 R-2).
     params["input_modality"] = input_modality
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream(
+    client = httpx.AsyncClient(timeout=timeout)
+    try:
+        request = client.build_request(
             "GET",
             f"{settings.agent_service_url}/api/v2/chat/stream",
             params=params,
             headers=_headers(request_id, user_id, delegated_token),
-        ) as response:
-            response.raise_for_status()
+        )
+        response = await client.send(request, stream=True)
+    except httpx.HTTPError:
+        await client.aclose()
+        raise
+    if response.status_code >= 400:
+        # Read the body to release the connection, then surface the status.
+        await response.aread()
+        await response.aclose()
+        await client.aclose()
+        response.raise_for_status()
+
+    async def _iter() -> AsyncIterator[str]:
+        try:
             async for line in response.aiter_lines():
                 if line.startswith("data: "):
                     yield line + "\n\n"
+        finally:
+            await response.aclose()
+            await client.aclose()
+
+    return _iter()
 
 
 async def open_chat_confirm_stream(

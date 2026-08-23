@@ -347,7 +347,8 @@ body {
    While a turn's user bubble has scrolled out of the transcript viewport,
    this banner restates the request at the top so long replies and expanded
    evidence stay correlated with what was asked. Hidden while the bubble
-   itself is on screen. */
+   itself is on screen. Accent-tinted so it reads as a pinned context
+   marker, not as another message. */
 .turn-request-banner {
   position: sticky;
   top: 0;
@@ -355,13 +356,17 @@ body {
   display: none;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
+  padding: 7px 12px;
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  border-left: 3px solid var(--accent);
   border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  background: linear-gradient(
+    90deg,
+    rgba(56, 189, 248, 0.16),
+    var(--surface) 55%
+  );
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
   font-size: 0.8rem;
-  color: var(--text-muted);
 }
 
 .turn-request-banner.visible {
@@ -371,8 +376,8 @@ body {
 .turn-request-banner-label {
   flex-shrink: 0;
   font-size: 0.65rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--accent);
 }
@@ -381,6 +386,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text);
 }
 
 /* --- HITL confirmation cards (SPEC-020 R-4) --- */

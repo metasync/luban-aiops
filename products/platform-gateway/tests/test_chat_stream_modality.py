@@ -9,6 +9,7 @@ audit/log surface and forwarded upstream as metadata only.
 import unittest
 from unittest.mock import patch
 
+import httpx
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
@@ -33,7 +34,7 @@ class ChatStreamModalityTests(unittest.TestCase):
     def _run(self, params: dict) -> tuple:
         captured: dict = {}
 
-        def fake_chat_stream(
+        async def fake_chat_stream(
             settings,
             request_id,
             user_id,
@@ -115,10 +116,32 @@ class ChatStreamModalityTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
 
 
-class StreamChatClientTests(unittest.IsolatedAsyncioTestCase):
+class OpenChatStreamClientTests(unittest.IsolatedAsyncioTestCase):
     """The agent client forwards modality as query metadata (SPEC-022 R-2)."""
 
-    async def test_stream_chat_sends_modality_param(self) -> None:
+    def _fake_httpx(self, recorded: dict, response):
+        from platform_gateway.services import agent_client
+
+        class FakeRequest:
+            pass
+
+        class FakeClient:
+            def __init__(self, timeout=None) -> None:
+                self.timeout = timeout
+
+            def build_request(self, method, url, params=None, headers=None):
+                recorded["params"] = params
+                return FakeRequest()
+
+            async def send(self, request, stream=False):
+                return response
+
+            async def aclose(self) -> None:
+                return None
+
+        return patch.object(agent_client.httpx, "AsyncClient", FakeClient)
+
+    async def test_open_chat_stream_sends_modality_param(self) -> None:
         from platform_gateway.services import agent_client
 
         recorded: dict = {}
@@ -135,34 +158,13 @@ class StreamChatClientTests(unittest.IsolatedAsyncioTestCase):
             async def aclose(self) -> None:
                 return None
 
-        class FakeClient:
-            def __init__(self, timeout=None) -> None:
-                self.timeout = timeout
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args) -> None:
-                return None
-
-            def stream(self, method, url, params=None, headers=None):
-                recorded["params"] = params
-                return _FakeStreamContext()
-
-        class _FakeStreamContext:
-            async def __aenter__(self):
-                return FakeStreamResponse()
-
-            async def __aexit__(self, *args) -> None:
-                return None
-
         settings = PlatformGatewaySettings(
             require_auth=True, agent_service_url="http://agent:8000"
         )
-        with patch.object(agent_client.httpx, "AsyncClient", FakeClient):
+        with self._fake_httpx(recorded, FakeStreamResponse()):
             frames = [
                 frame
-                async for frame in agent_client.stream_chat(
+                async for frame in await agent_client.open_chat_stream(
                     settings,
                     "req-1",
                     "alice",
@@ -174,3 +176,105 @@ class StreamChatClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(frames, ['data: {"type": "message_end"}\n\n'])
         self.assertEqual(recorded["params"]["input_modality"], "voice")
+
+    async def test_open_chat_stream_raises_upstream_404_eagerly(self) -> None:
+        # Regression: an unknown session must surface as an HTTP error
+        # before any frame is yielded, never as 200 + empty SSE stream.
+        import httpx
+
+        from platform_gateway.services import agent_client
+
+        recorded: dict = {}
+
+        class FakeErrorResponse:
+            status_code = 404
+
+            def raise_for_status(self) -> None:
+                raise httpx.HTTPStatusError(
+                    "404 Not Found",
+                    request=httpx.Request("GET", "http://agent:8000"),
+                    response=httpx.Response(404),
+                )
+
+            async def aread(self) -> None:
+                return None
+
+            async def aclose(self) -> None:
+                return None
+
+        settings = PlatformGatewaySettings(
+            require_auth=True, agent_service_url="http://agent:8000"
+        )
+        with self._fake_httpx(recorded, FakeErrorResponse()):
+            with self.assertRaises(httpx.HTTPStatusError):
+                await agent_client.open_chat_stream(
+                    settings, "req-1", "alice", "hi", "ses-gone"
+                )
+
+
+class ChatStreamErrorPropagationTests(unittest.TestCase):
+    """Upstream failures must surface as HTTP errors, never as 200 + empty SSE.
+
+    Regression: a stale session pointer (deleted session) used to make the
+    gateway answer 200 with a zero-frame stream because the upstream 404
+    only fired inside the generator after the response had been committed.
+    """
+
+    def _run_with_open(self, fake_open):
+        app = create_app()
+        app.dependency_overrides[get_settings] = (
+            lambda: PlatformGatewaySettings(require_auth=True)
+        )
+        with (
+            patch(
+                "platform_gateway.api.routes.chat.resolve_request_identity",
+                _fake_identity,
+            ),
+            patch(
+                "platform_gateway.api.routes.chat.obtain_delegated_token",
+                _fake_delegation,
+            ),
+            patch(
+                "platform_gateway.services.agent_client.open_chat_stream",
+                fake_open,
+            ),
+        ):
+            return TestClient(app).get(
+                "/api/v1/chat/stream", params={"message": "hi"}
+            )
+
+    @staticmethod
+    def _status_error(status_code: int) -> httpx.HTTPStatusError:
+        request = httpx.Request("GET", "http://agent:8000/api/v2/chat/stream")
+        response = httpx.Response(status_code, request=request)
+        return httpx.HTTPStatusError(
+            f"{status_code}", request=request, response=response
+        )
+
+    def test_upstream_404_unknown_session_passes_through(self) -> None:
+        async def fake_open(*args, **kwargs):
+            raise self._status_error(404)
+
+        response = self._run_with_open(fake_open)
+        self.assertEqual(response.status_code, 404)
+
+    def test_upstream_409_parked_conflict_passes_through(self) -> None:
+        async def fake_open(*args, **kwargs):
+            raise self._status_error(409)
+
+        response = self._run_with_open(fake_open)
+        self.assertEqual(response.status_code, 409)
+
+    def test_upstream_500_maps_to_502(self) -> None:
+        async def fake_open(*args, **kwargs):
+            raise self._status_error(500)
+
+        response = self._run_with_open(fake_open)
+        self.assertEqual(response.status_code, 502)
+
+    def test_transport_failure_maps_to_502(self) -> None:
+        async def fake_open(*args, **kwargs):
+            raise httpx.ConnectError("connection refused")
+
+        response = self._run_with_open(fake_open)
+        self.assertEqual(response.status_code, 502)

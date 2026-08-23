@@ -374,4 +374,58 @@ describe("useChatStream", () => {
       decision: "approve",
     });
   });
+
+  // Live-walkthrough defect: a stale workspace pointer (deleted session)
+  // rode along on the stream request and the gateway answered with an
+  // empty stream, rendering "(no response received)". With the gateway
+  // now answering 404 eagerly, send must self-heal: drop the pointer and
+  // retry once with server-side auto-creation.
+  it("retries without the session id after a 404 stale-session open", async () => {
+    const calls = queueFetch(
+      { ok: false, status: 404, body: null },
+      okStream(
+        sse(
+          { type: "message_start", session_id: "s-new" },
+          { type: "message_delta", delta: "recovered", session_id: "s-new" },
+          { type: "message_end", session_id: "s-new" },
+        ),
+      ),
+    );
+
+    const { result } = renderHook(() => useChatStream());
+    act(() => {
+      result.current.setSession("s-deleted", []);
+    });
+    await act(async () => {
+      await result.current.send("list pods running", { userId: "amy" });
+    });
+
+    expect(calls[0]?.url).toContain("session_id=s-deleted");
+    expect(calls[1]?.url).not.toContain("session_id=");
+    expect(result.current.sessionId).toBe("s-new");
+    const turn = result.current.turns[0];
+    expect(turn?.replyText).toBe("recovered");
+    expect(turn?.completed).toBe(true);
+    expect(turn?.error).toBeUndefined();
+  });
+
+  it("surfaces the error when the retry after a 404 also fails", async () => {
+    queueFetch(
+      { ok: false, status: 404, body: null },
+      { ok: false, status: 502, body: null },
+    );
+
+    const { result } = renderHook(() => useChatStream());
+    act(() => {
+      result.current.setSession("s-deleted", []);
+    });
+    await act(async () => {
+      await result.current.send("hi", { userId: "amy" });
+    });
+
+    expect(result.current.sessionId).toBeNull();
+    const turn = result.current.turns[0];
+    expect(turn?.error).toContain("502");
+    expect(turn?.completed).toBe(false);
+  });
 });

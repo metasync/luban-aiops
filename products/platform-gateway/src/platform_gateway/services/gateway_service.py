@@ -406,7 +406,7 @@ async def chat(
     )
 
 
-def chat_stream(
+async def chat_stream(
     settings: PlatformGatewaySettings,
     request_id: str,
     user_id: str,
@@ -415,8 +415,15 @@ def chat_stream(
     delegated_token: str | None = None,
     input_modality: str = "text",
 ) -> StreamingResponse:
-    async def _stream() -> AsyncIterator[str]:
-        async for chunk in agent_client.stream_chat(
+    """Proxy the chat stream to agent-service.
+
+    The upstream status is checked before the SSE response opens: 4xx
+    (unknown session, parked conflict) passes through unchanged and
+    transport failures or upstream 5xx map to 502, so failures surface as
+    HTTP statuses instead of a 200 with an empty stream.
+    """
+    try:
+        upstream = await agent_client.open_chat_stream(
             settings,
             request_id,
             user_id,
@@ -424,7 +431,24 @@ def chat_stream(
             session_id,
             delegated_token,
             input_modality,
-        ):
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail="agent service rejected the chat stream",
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail="agent service chat stream failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+    async def _stream() -> AsyncIterator[str]:
+        async for chunk in upstream:
             yield chunk
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
