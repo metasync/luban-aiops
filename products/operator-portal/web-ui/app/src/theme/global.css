@@ -63,6 +63,17 @@ body {
   gap: 8px;
 }
 
+/* Folded icon rail: the user card shrinks to avatar + auth button,
+   centered in the 64px rail. */
+.sidebar-footer-collapsed {
+  align-items: center;
+  padding: 12px 8px;
+}
+
+.sidebar-footer-collapsed > div {
+  flex-direction: column;
+}
+
 /* Navigation trigger: always visible, pinned top-left next to the panel
    it controls. On desktop it folds the inline sidebar; below antd's lg
    breakpoint (992px, where the Sider auto-collapses) it opens the
@@ -86,17 +97,11 @@ body {
   padding-left: 56px !important;
 }
 
-/* Applied when the inline sidebar is absent (narrow viewport or folded
-   on desktop): keep the trigger clear of view content. Scoped selectors
-   outrank the base rules defined further down this stylesheet. */
-.view-container-inset.view-container:not(.view-container-flush) {
-  padding-left: 64px;
-}
-
-/* The chat view is flush: clear the trigger out of the session-panel
-   header instead. */
-.view-container-inset .session-panel-header {
-  padding-left: 56px;
+/* Folded rail: the brand collapses to a spacer that keeps the menu
+   icons clear of the pinned trigger. */
+.sidebar-brand-spacer {
+  height: 56px;
+  flex-shrink: 0;
 }
 
 .view-container {
@@ -357,14 +362,12 @@ body {
   align-items: center;
   gap: 8px;
   padding: 7px 12px;
-  border: 1px solid rgba(56, 189, 248, 0.45);
+  border: 1px solid rgba(56, 189, 248, 0.55);
   border-left: 3px solid var(--accent);
   border-radius: var(--radius);
-  background: linear-gradient(
-    90deg,
-    rgba(56, 189, 248, 0.16),
-    var(--surface) 55%
-  );
+  /* Fully opaque: the banner floats over scrolling transcript content,
+     so any translucency bleeds text through and hurts readability. */
+  background: linear-gradient(90deg, #2a4d68 0%, var(--surface) 60%);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
   font-size: 0.8rem;
 }

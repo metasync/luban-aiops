@@ -72,9 +72,11 @@ function useNarrowViewport(): boolean {
 function SidebarContent({
   active,
   onNavigate,
+  collapsed,
 }: {
   active: ViewId;
   onNavigate: (view: ViewId) => void;
+  collapsed: boolean;
 }) {
   const { username, roles, session, login, logout, authError } = useAuth();
   const signedIn = Boolean(username);
@@ -162,16 +164,23 @@ function SidebarContent({
 
   return (
     <>
-      <div className="sidebar-brand" style={{ padding: "12px 16px" }}>
-        {/* Title and version share one line so the brand block stays as
-            compact as the session-panel header it visually parallels. */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Typography.Title level={5} style={{ margin: 0, whiteSpace: "nowrap" }}>
-            Luban AIOps
-          </Typography.Title>
-          <Tag style={{ margin: 0 }}>{PLATFORM_VERSION}</Tag>
+      {collapsed ? (
+        // Folded rail: the brand shrinks to a spacer keeping the icon
+        // menu clear of the pinned trigger; the version tag returns
+        // with the expanded brand below.
+        <div className="sidebar-brand-spacer" aria-hidden="true" />
+      ) : (
+        <div className="sidebar-brand" style={{ padding: "12px 16px" }}>
+          {/* Title and version share one line so the brand block stays as
+              compact as the session-panel header it visually parallels. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Typography.Title level={5} style={{ margin: 0, whiteSpace: "nowrap" }}>
+              Luban AIOps
+            </Typography.Title>
+            <Tag style={{ margin: 0 }}>{PLATFORM_VERSION}</Tag>
+          </div>
         </div>
-      </div>
+      )}
       <Menu
         mode="inline"
         theme="dark"
@@ -180,23 +189,31 @@ function SidebarContent({
         onClick={({ key }) => onNavigate(key as ViewId)}
         style={{ flex: 1, borderInlineEnd: "none" }}
       />
-      <div className="sidebar-footer">
+      <div
+        className={
+          collapsed
+            ? "sidebar-footer sidebar-footer-collapsed"
+            : "sidebar-footer"
+        }
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Avatar size="small">
             {username ? userInitials(username) : "?"}
           </Avatar>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <Typography.Text ellipsis style={{ display: "block" }}>
-              {username || "Not signed in"}
-            </Typography.Text>
-            <Typography.Text
-              type="secondary"
-              ellipsis
-              style={{ display: "block", fontSize: 12 }}
-            >
-              {roles.length > 0 ? roles.join(", ") : "no role"}
-            </Typography.Text>
-          </div>
+          {!collapsed && (
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <Typography.Text ellipsis style={{ display: "block" }}>
+                {username || "Not signed in"}
+              </Typography.Text>
+              <Typography.Text
+                type="secondary"
+                ellipsis
+                style={{ display: "block", fontSize: 12 }}
+              >
+                {roles.length > 0 ? roles.join(", ") : "no role"}
+              </Typography.Text>
+            </div>
+          )}
           {session ? (
             <Button
               type="text"
@@ -215,7 +232,7 @@ function SidebarContent({
             />
           )}
         </div>
-        {authError ? (
+        {authError && !collapsed ? (
           <Alert type="error" showIcon message={authError} />
         ) : null}
       </div>
@@ -272,22 +289,28 @@ export default function App() {
         theme="dark"
         width={230}
         breakpoint="lg"
-        collapsedWidth={0}
+        // Folded keeps a 64px icon rail (antd renders the inline menu
+        // icon-only with tooltips) so navigation stays reachable and every
+        // view aligns uniformly to the right of the rail.
+        collapsedWidth={64}
         trigger={null}
         collapsible
         collapsed={siderCollapsed}
         onBreakpoint={(broken) => setSiderCollapsed(broken)}
         style={{ borderInlineEnd: "1px solid var(--border)" }}
       >
-        <SidebarContent active={active} onNavigate={navigate} />
+        <SidebarContent
+          active={active}
+          onNavigate={navigate}
+          collapsed={siderCollapsed}
+        />
       </Layout.Sider>
       <Layout>
         <Layout.Content
           className={
-            (active === "chat"
+            active === "chat"
               ? "view-container view-container-flush"
-              : "view-container") +
-            (narrow || siderCollapsed ? " view-container-inset" : "")
+              : "view-container"
           }
         >
           {active === "chat" ? (
@@ -315,7 +338,7 @@ export default function App() {
         onClose={() => setDrawerOpen(false)}
         styles={{ body: { padding: 0 } }}
       >
-        <SidebarContent active={active} onNavigate={navigate} />
+        <SidebarContent active={active} onNavigate={navigate} collapsed={false} />
       </Drawer>
       <Button
         className="mobile-menu-button"
