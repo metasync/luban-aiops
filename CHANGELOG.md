@@ -13,6 +13,53 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.9.1 — 2026-08-23
+
+### Fixed
+
+- **Chat stream stale-session empty reply**: the gateway answered 200 with
+  a zero-frame SSE stream when the agent service rejected an unknown
+  session (a stale portal pointer at a deleted session), and the portal
+  rendered "(no response received)". The gateway now opens the upstream
+  stream eagerly and passes 4xx through (5xx/transport → 502); the portal
+  retries once without the session id so the server auto-creates a fresh
+  session (legacy first-message flow) and never primes the stream pointer
+  with a 404'd session. Regression-tested on both sides.
+- **Markdown table header/body disconnect**: the ported renderer split the
+  header row and body rows into two stacked tables; a single-pass block
+  parser now emits one table with `thead`/`tbody`.
+
+### Changed
+
+- **Folded sidebar is a navigable icon rail**: the portal sidebar folds to
+  a 64px icon rail (antd icon-only menu with tooltips) instead of
+  disappearing, keeping navigation reachable while folded. Because the
+  rail owns its layout space, every view — chat included — aligns
+  uniformly to its right and the per-view inset hacks are removed. Rail
+  sections render as hairline dividers instead of clipped group titles;
+  the expanded sidebar and drawer keep the full Control/Workspace labels
+  (SPEC-019 R-1).
+- **Sticky request banner**: restyled for prominence and readability —
+  accent border and left bar, fully opaque gradient background (no
+  transcript bleed-through), bold uppercase label.
+- **Pre-login session creation disabled**: the New-session button is
+  disabled before sign-in like the composer (the 401 fallback message is
+  kept).
+- **Evidence card parity**: cards match the chat message width and
+  expanded tool results are bounded to a fixed height with a vertical
+  scrollbar.
+- **Version tag inline** beside the sidebar logo instead of a large chip.
+- **Gateway eager-open cleanup hardening**: the chat/confirm stream
+  proxies finally-guard the error-body read so a failed read cannot leak
+  the httpx response or client.
+
+### Documented
+
+- **SPEC-025 draft**: evidence persistence in session transcripts —
+  durable tool-evidence frames with traceability and metrics, and
+  replayed evidence cards on reopened sessions. Numbering skips SPEC-024,
+  reserved on the delivery roadmap for runtime LLM model switching.
+
 ## 0.9.0 — 2026-08-22
 
 ### Added — SPEC-023: Portal framework rebuild (multi-session workspace UI on Ant Design X)
