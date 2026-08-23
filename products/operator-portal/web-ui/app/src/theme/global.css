@@ -104,6 +104,20 @@ body {
   flex-shrink: 0;
 }
 
+/* Folded rail sections: antd clips group titles to the rail width
+   ("Cont…"), which reads as a rendering bug. Express the Control /
+   Workspace grouping with hairline dividers instead; the expanded
+   sidebar and drawer keep the full text labels (SPEC-019 R-1). */
+.ant-layout-sider-collapsed .ant-menu-item-group-title {
+  display: none;
+}
+
+.ant-layout-sider-collapsed .ant-menu-item-group {
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
 .view-container {
   height: 100%;
   overflow-y: auto;
