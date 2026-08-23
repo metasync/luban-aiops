@@ -40,12 +40,12 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced sidebar navigation with persistent 64px icon rail for consistent layout anchoring across all views
-- Improved responsive behavior with useNarrowViewport() hook for precise 992px breakpoint detection
-- Better menu group title handling in collapsed states with visual dividers instead of clipped text
-- Enhanced mobile drawer navigation with proper positioning and z-index management
-- Dynamic aria-labels that adapt based on viewport state and sidebar status for improved accessibility
-- Content spacing management with .view-container-inset class for proper padding when sidebar is absent or folded
+- Transformed folded sidebar into navigable icon rail with consistent 64px width for persistent layout anchoring across all views
+- Enhanced navigation with Ant Design icon-only menu and tooltips for improved accessibility
+- Improved sticky request banners with accent borders and opaque backgrounds for better readability
+- Disabled pre-login session creation with appropriate tooltips explaining authentication requirements
+- Enhanced evidence cards with full-width stretching and bounded expanded tool results for better UX
+- Added inline version tag display in the brand section showing platform version information
 
 ## Table of Contents
 1. [Introduction](#introduction)

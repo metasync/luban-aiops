@@ -13,17 +13,18 @@
 - [stream-event.schema.json](file://shared/shared-contracts/schemas/stream-event.schema.json)
 - [chat-request.schema.json](file://shared/shared-contracts/schemas/chat-request.schema.json)
 - [policy-default.yaml](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml)
+- [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [useChatStream.ts](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new POST /api/v1/chat/confirm endpoint on platform-gateway
-- Added detailed documentation for the POST /api/v2/chat/confirm endpoint on agent-platform
-- Enhanced streaming response documentation to include confirmation events (confirmation_request, confirmation_result)
-- Updated authentication and authorization sections to cover the new chat:confirm action
-- Added HITL (Human-in-the-Loop) confirmation workflow documentation
-- Updated error handling patterns to include confirmation-specific errors (409, 410)
-- **Updated**: Added documentation for input_modality parameter in streaming endpoints, enabling voice-readiness parity between POST /api/v1/chat and GET /api/v1/chat/stream endpoints
+- Enhanced chat streaming with self-healing logic that retries once without session ID on 404 errors to handle stale session references
+- Added missing session reference tracking via `missingRef` set to prevent stream pointer priming for deleted or expired sessions
+- Improved markdown table rendering with single-pass block parser fixing header/body disconnect issues
+- Updated streaming response documentation to reflect eager-open error propagation and improved error handling patterns
+- Enhanced troubleshooting guide with guidance on handling stale session scenarios and self-healing behavior
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -278,6 +279,12 @@ Error patterns:
 - **confirmation_result**: Indicates the result of a confirmation decision
 - **Event Flow**: When an agent encounters a tool call requiring confirmation, it parks the call and sends a confirmation_request event. The client can then call POST /api/v1/chat/confirm to approve or deny, which resumes the stream with confirmation_result events.
 
+#### Self-Healing Stream Logic *(Updated)*
+- **Eager Stream Opening**: The gateway now opens upstream streams eagerly before committing HTTP responses, preventing empty SSE streams on 404 errors
+- **Stale Session Handling**: When receiving 404 errors for deleted or expired sessions, the system automatically retries once without the session ID to trigger server-side auto-creation
+- **Missing Reference Tracking**: The portal tracks sessions reported as unknown (404) in a `missingRef` set to prevent stream pointer priming for deleted sessions
+- **Improved Error Propagation**: Transport failures and upstream 5xx errors are mapped to 502 status codes, while 4xx errors pass through unchanged
+
 Best practices:
 - Implement retry logic for transient network issues
 - Buffer and render incremental content appropriately
@@ -285,12 +292,15 @@ Best practices:
 - Handle confirmation events specially to provide UI feedback
 - Manage confirmation timeouts and expired confirmations
 - Treat input_modality as metadata only - it never changes policy or HITL outcomes
+- Handle stale session scenarios with automatic retry logic
 
 **Section sources**
 - [v2 routes.py:198-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L198-L227)
 - [agent_client.py:108-159](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L108-L159)
 - [gateway_service.py:381-409](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L381-L409)
 - [routes.py:90-143](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L90-L143)
+- [useChatStream.ts:230-266](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L230-L266)
+- [ChatView.tsx:510-596](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L510-L596)
 
 ### Error Handling Patterns
 
@@ -319,9 +329,16 @@ Voice-readiness validation errors:
 - **422 Unprocessable Entity**: Invalid input_modality value (must be "text" or "voice")
 - **Validation occurs at route level**: FastAPI rejects invalid literal types before route logic executes
 
+#### Stale Session Error Handling *(Updated)*
+- **404 Not Found**: For deleted or expired sessions, the system now triggers automatic retry without session ID
+- **Self-Healing Behavior**: On 404 errors, the portal drops the session pointer and retries once with server-side auto-creation
+- **Missing Reference Tracking**: Sessions reported as unknown are tracked to prevent future stream pointer priming
+- **Improved User Experience**: Eliminates "(no response received)" errors for stale session scenarios
+
 **Section sources**
 - [v2 routes.py:176-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L176-L227)
 - [gateway_service.py:381-409](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L381-L409)
+- [useChatStream.ts:245-266](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L245-L266)
 
 ## Dependency Analysis
 The chat endpoints depend on several internal services and shared schemas:
@@ -385,6 +402,7 @@ ChatRoutes --> Schemas : "uses for validation"
 - **Confirmation handling**: Optimize confirmation registry lookups and avoid blocking operations
 - **Memory management**: Properly close streaming connections and release resources
 - **Input modality processing**: Treat modality as lightweight metadata to minimize overhead
+- **Self-healing optimization**: Minimize retry attempts and optimize stale session detection
 
 ## Troubleshooting Guide
 
@@ -400,6 +418,16 @@ Common issues and resolutions:
   - 404 Not Found: Verify session_id and confirm_id are correct
   - Permission denied: Ensure user has chat:confirm action permission
 
+#### Stale Session Issues *(Updated)*
+- **404 Not Found on Stream**: Indicates stale session reference; system automatically retries without session ID
+- **"(No Response Received)" Errors**: Now resolved through self-healing logic that drops stale pointers and retries
+- **Missing Session References**: Track sessions reported as unknown to prevent future stream pointer priming
+- **Auto-Creation Behavior**: First message to deleted/expired sessions triggers server-side session creation
+
+#### Markdown Rendering Issues *(Updated)*
+- **Table Header/Body Disconnect**: Fixed with single-pass block parser that properly renders tables with `<thead>` and `<tbody>`
+- **Rendering Problems**: Ensure markdown tables have proper separator lines between headers and body content
+
 Voice-readiness troubleshooting:
 - **422 Validation errors**: Ensure input_modality is either "text" or "voice"
 - **Modality not affecting behavior**: Remember that input_modality is metadata only and doesn't change policy or HITL outcomes
@@ -412,13 +440,17 @@ Debugging tips:
 - Monitor confirmation registry state for stuck confirmations
 - Check upstream agent platform connectivity
 - Verify input_modality values in audit logs for voice-readiness tracking
+- Monitor `missingRef` set for stale session tracking
+- Check for proper self-healing retry behavior on 404 errors
 
 **Section sources**
 - [v2 routes.py:176-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L176-L227)
 - [policy_engine.py:158-189](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L158-L189)
+- [ChatView.tsx:510-596](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L510-L596)
+- [useChatStream.ts:245-266](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L245-L266)
 
 ## Conclusion
-The chat endpoints provide a robust interface for interacting with AI agents through secure, scalable, and observable APIs with comprehensive Human-in-the-Loop support. By adhering to the documented schemas, authentication requirements, and best practices, clients can build reliable integrations that leverage both synchronous and streaming capabilities, including sophisticated confirmation workflows for sensitive operations. The addition of voice-readiness parity through the input_modality parameter ensures consistent behavior across different input types while maintaining clear separation between metadata and decision-making logic. Proper error handling and monitoring ensure resilience and maintainability in production environments.
+The chat endpoints provide a robust interface for interacting with AI agents through secure, scalable, and observable APIs with comprehensive Human-in-the-Loop support. By adhering to the documented schemas, authentication requirements, and best practices, clients can build reliable integrations that leverage both synchronous and streaming capabilities, including sophisticated confirmation workflows for sensitive operations. The addition of voice-readiness parity through the input_modality parameter ensures consistent behavior across different input types while maintaining clear separation between metadata and decision-making logic. Recent enhancements include self-healing stream logic that automatically handles stale session references, improved error propagation, and better markdown table rendering. These improvements ensure resilience and maintainability in production environments while providing a seamless user experience even in edge cases like deleted or expired sessions.
 
 ## Appendices
 
@@ -512,6 +544,19 @@ async function streamWithVoice(message) {
     
     // Handle SSE stream...
 }
+
+// Handle stale session self-healing
+async function streamWithSelfHealing(message, sessionId) {
+    try {
+        return await streamWithVoice(message);
+    } catch (error) {
+        if (error.status === 404 && sessionId) {
+            // Retry without session ID for auto-creation
+            return await streamWithVoice(message);
+        }
+        throw error;
+    }
+}
 ```
 
 #### Go Example - Concurrent Streaming
@@ -554,6 +599,21 @@ func streamWithVoice(message string) {
     resp, err := client.Do(req)
     // Handle response...
 }
+
+// Handle stale session self-healing
+func streamWithSelfHealing(message, sessionId string) (*http.Response, error) {
+    resp, err := streamWithVoice(message)
+    if err != nil {
+        return nil, err
+    }
+    
+    if resp.StatusCode == 404 && sessionId != "" {
+        // Retry without session ID
+        return streamWithVoice(message)
+    }
+    
+    return resp, nil
+}
 ```
 
 ### Confirmation Workflow Diagram
@@ -579,9 +639,21 @@ Agent->>Kernel : resume_confirmation(decision)
 Kernel-->>Agent : Resumed stream with confirmation_result
 Agent-->>Gateway : SSE stream with confirmation_result
 Gateway-->>Client : Stream event with confirmation_result
+Note over Client,Kernel : Stale Session Self-Healing
+Client->>Gateway : POST /api/v1/chat/stream (stale session)
+Gateway->>Agent : POST /api/v2/chat/stream (404)
+Agent-->>Gateway : 404 Not Found
+Gateway-->>Client : 404 Not Found
+Client->>Gateway : POST /api/v1/chat/stream (no session)
+Gateway->>Agent : POST /api/v2/chat/stream
+Agent->>Kernel : Auto-create session
+Kernel-->>Agent : New session created
+Agent-->>Gateway : Stream with new session
+Gateway-->>Client : Success with auto-created session
 ```
 
 **Diagram sources**
 - [routes.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
 - [v2 routes.py:156-228](file://products/agent-platform/src/agent_service/api/v2/routes.py#L156-L228)
 - [agent_client.py:108-159](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L108-L159)
+- [useChatStream.ts:245-266](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L245-L266)

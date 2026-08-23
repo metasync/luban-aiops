@@ -32,10 +32,10 @@
 
 ## Update Summary
 **Changes Made**
-- Updated Enhanced Streaming Architecture section to reflect the renaming of `stream_chat` to `open_chat_stream` and improved error propagation
-- Enhanced Chat Stream Error Handling section with detailed coverage of eager upstream status checking and proper HTTP status mapping
-- Updated Agent Client section to document the new `open_chat_stream` method and its enhanced error handling capabilities
-- Refined Troubleshooting Guide with specific guidance on streaming error patterns and status code mapping
+- Enhanced Agent Client section to document the new `open_chat_stream` and `open_chat_confirm_stream` methods with eager-open streaming pattern
+- Updated Chat Stream Error Handling section with detailed coverage of eager upstream status checking and proper HTTP status mapping
+- Refined Streaming Architecture section to reflect improved resource cleanup with finally-block guards for httpx responses and clients
+- Enhanced Troubleshooting Guide with specific guidance on streaming error patterns and status code mapping improvements
 
 ## Table of Contents
 1. Introduction
@@ -139,14 +139,14 @@ A --> RT
 - [main.py:1-9](file://products/platform-gateway/src/platform_gateway/main.py#L1-L9)
 - [app.py:1-44](file://products/platform-gateway/src/platform_gateway/app.py#L1-L44)
 - [router.py:1-23](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L23)
-- [chat.py:1-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L175)
+- [chat.py:1-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L187)
 - [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
 - [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
-- [gateway_service.py:1-536](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L536)
-- [agent_client.py:1-212](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L212)
+- [gateway_service.py:1-567](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L567)
+- [agent_client.py:1-250](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L250)
 - [incident_client.py:1-193](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L1-L193)
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
 - [token_verifier.py:1-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L1-L99)
@@ -204,14 +204,14 @@ A --> RT
 - [config.py:1-117](file://products/platform-gateway/src/platform_gateway/core/config.py#L1-L117)
 - [runtime.py:1-30](file://products/platform-gateway/src/platform_gateway/core/runtime.py#L1-L30)
 - [router.py:1-23](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L23)
-- [chat.py:1-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L175)
+- [chat.py:1-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L187)
 - [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
 - [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
-- [gateway_service.py:1-536](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L536)
-- [agent_client.py:1-212](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L212)
+- [gateway_service.py:1-567](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L567)
+- [agent_client.py:1-250](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L250)
 - [incident_client.py:1-193](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L1-L193)
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
 - [token_verifier.py:1-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L1-L99)
@@ -328,7 +328,7 @@ Router --> SkillsRoutes : "includes"
 
 **Diagram sources**
 - [router.py:1-23](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L23)
-- [chat.py:1-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L175)
+- [chat.py:1-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L187)
 - [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
@@ -337,7 +337,7 @@ Router --> SkillsRoutes : "includes"
 
 **Section sources**
 - [router.py:1-23](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L23)
-- [chat.py:1-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L175)
+- [chat.py:1-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L187)
 - [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
@@ -503,10 +503,10 @@ AgentClient --> ConfirmStream : "uses"
 ```
 
 **Diagram sources**
-- [agent_client.py:32-193](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L32-L193)
+- [agent_client.py:32-231](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L32-L231)
 
 **Section sources**
-- [agent_client.py:1-242](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L242)
+- [agent_client.py:1-250](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L250)
 
 ### Chat Stream Error Handling
 **Enhanced** - Implements robust error handling for streaming chat with eager upstream status checking and proper HTTP status mapping.
@@ -549,11 +549,11 @@ EndStream --> Cleanup["Cleanup Resources"]
 ```
 
 **Diagram sources**
-- [agent_client.py:117-169](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L117-L169)
+- [agent_client.py:117-173](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L117-L173)
 - [gateway_service.py:409-454](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L409-L454)
 
 **Section sources**
-- [agent_client.py:117-169](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L117-L169)
+- [agent_client.py:117-173](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L117-L173)
 - [gateway_service.py:409-454](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L409-L454)
 
 ### Chat Confirm Endpoint
@@ -595,13 +595,13 @@ PassThrough --> Return
 ```
 
 **Diagram sources**
-- [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
-- [gateway_service.py:426-487](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L426-L487)
-- [agent_client.py:142-193](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L142-L193)
+- [chat.py:146-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L146-L187)
+- [gateway_service.py:457-517](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L457-L517)
+- [agent_client.py:176-231](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L176-L231)
 
 **Section sources**
-- [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
-- [gateway_service.py:426-487](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L426-L487)
+- [chat.py:146-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L146-L187)
+- [gateway_service.py:457-517](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L457-L517)
 
 ### Policy Matrix Endpoint
 **Existing** - Provides live permission matrix evaluation derived from the currently enforced policy bundle with role-scoped visibility.
@@ -831,7 +831,7 @@ StreamProxy --> Return
 ```
 
 **Diagram sources**
-- [gateway_service.py:1-536](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L536)
+- [gateway_service.py:1-567](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L567)
 - [token_verifier.py:1-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L1-L99)
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
 
@@ -864,10 +864,10 @@ class AgentClient {
 ```
 
 **Diagram sources**
-- [agent_client.py:1-242](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L242)
+- [agent_client.py:1-250](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L250)
 
 **Section sources**
-- [agent_client.py:1-242](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L242)
+- [agent_client.py:1-250](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L250)
 
 ### Delegation Client
 **Existing** - Per-replica, per-user cache for delegated tokens with refresh-before-expiry strategy.
@@ -1041,15 +1041,15 @@ App --> Runtime["core/runtime.py"]
 - [main.py:1-9](file://products/platform-gateway/src/platform_gateway/main.py#L1-L9)
 - [app.py:1-44](file://products/platform-gateway/src/platform_gateway/app.py#L1-L44)
 - [router.py:1-23](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L23)
-- [chat.py:1-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L175)
+- [chat.py:1-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L187)
 - [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
 - [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
-- [gateway_service.py:1-536](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L536)
+- [gateway_service.py:1-567](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L567)
 - [incident_client.py:1-193](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L1-L193)
-- [agent_client.py:1-212](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L212)
+- [agent_client.py:1-250](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L250)
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
 - [token_verifier.py:1-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L1-L99)
 - [policy_engine.py:1-258](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L258)
@@ -1158,14 +1158,16 @@ Operational tips:
 - [skills.py:30-31](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L30-L31)
 - [sessions.py:29-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L29-L154)
 - [gateway_service.py:289-387](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L387)
-- [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
-- [gateway_service.py:426-487](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L426-L487)
+- [chat.py:146-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L146-L187)
+- [gateway_service.py:457-517](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L457-L517)
 - [audit_emitter.py:68-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L68-L99)
-- [agent_client.py:117-169](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L117-L169)
+- [agent_client.py:117-173](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L117-L173)
 
 ## Conclusion
 The Platform Gateway Service cleanly separates portal-facing security and control-plane concerns from tool execution capabilities. It enforces strong authentication and authorization, proxies to agent-platform securely with least-privilege delegated tokens, provides unified API access to the incident service with comprehensive policy enforcement and credential management, and now offers transparency through live permission matrix evaluation, workspace inventory discovery, and Human-in-the-Loop confirmation bridging with durable audit trails. The addition of complete session workspace lifecycle management demonstrates the gateway's extensibility in supporting complex interactive workflows while maintaining consistent security patterns and operational visibility. The session workspace proxy routes implement deny-by-default policy enforcement with proper error handling, server-side scoping to caller's own sessions, and durable audit trail coverage for complete session lifecycle monitoring. These enhancements enable operators to manage sessions with full audit coverage, approve or deny pending tool executions with durable audit trails, and maintain comprehensive visibility into platform operations while ensuring strict security boundaries and least-privilege access controls. The enhanced error handling in `list_sessions()` and other session operations ensures consistent behavior across all session management endpoints, with proper distinction between client errors (4xx) and server errors (500+) for better debugging and operational clarity. The improved list_sessions() function now matches the error handling posture of get/delete proxies, passing through upstream 4xx errors unchanged instead of incorrectly surfacing them as 502 errors, providing consistent error handling across all session operations.
 
 The enhanced streaming architecture represents a significant improvement in error handling and reliability. The renaming of `stream_chat` to `open_chat_stream` reflects the more explicit nature of the function's purpose and its enhanced error propagation capabilities. By eagerly checking upstream status before any SSE frames are yielded, the gateway now properly distinguishes between client errors (4xx) and server errors (5xx), mapping them appropriately to HTTP status codes rather than returning empty streams. This change eliminates the previous issue where upstream errors would only be detected after the response had already been committed, resulting in confusing 200 responses with no content. The improved error handling ensures that clients receive meaningful HTTP status codes that accurately reflect the underlying conditions, making debugging and troubleshooting significantly more straightforward.
+
+The new `open_chat_confirm_stream()` method extends this pattern to confirmation handling, providing consistent error handling and resource cleanup across all streaming operations. Both streaming methods now implement proper finally-block guards for httpx responses and clients, preventing resource leaks and ensuring clean connection termination even when errors occur during streaming. This hardened approach to resource management improves the overall reliability and stability of the gateway service under various failure scenarios.
 
 [No sources needed since this section summarizes without analyzing specific files]

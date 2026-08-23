@@ -3,15 +3,27 @@
 <cite>
 **Referenced Files in This Document**
 - [spec.md](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/spec.md)
+- [plan.md](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/plan.md)
+- [tasks.md](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/tasks.md)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
-- [api.py](file://products/agent-platform/src/agent_service/schemas/api.py)
-- [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
-- [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
-- [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
-- [decoder.ts](file://products/operator-portal/web-ui/app/src/stream/decoder.ts)
-- [sessions.py](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py)
+- [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
+- [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
+- [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
+- [test_session_workspace.py](file://products/agent-platform/tests/test_session_workspace.py)
+- [test_runtime_kernel.py](file://products/agent-platform/tests/test_runtime_kernel.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated Introduction to reflect approved status and completed implementation of dual-backend evidence persistence
+- Enhanced Requirements section with detailed acceptance criteria for evidence persistence based on actual implementation
+- Added comprehensive Architecture Overview showing the complete data flow with evidence store integration
+- Expanded Component Analysis with specific implementation details from evidence_store.py, routes.py, and schema files
+- Updated Performance Considerations with concrete storage backends, size management, and observability metrics
+- Enhanced Troubleshooting Guide with evidence-specific scenarios and monitoring guidance
+- Added Conclusion summarizing the completed implementation with dual-backend support
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -25,13 +37,16 @@
 9. [Conclusion](#conclusion)
 
 ## Introduction
-This document specifies how evidence persistence will be implemented for session transcripts under SPEC-025. It explains the current gap (evidence only exists during live streaming), the requirements to persist tool evidence per turn, expose it via the session-detail API, and render parity in the portal for both live and reopened sessions. It also maps the affected components across agent-platform, operator-portal, platform-gateway, and shared contracts.
+This document specifies the implementation of evidence persistence for session transcripts under SPEC-025. The spec is now in `approved` status, created on 2026-08-23, and addresses a critical parity gap where evidence only existed during live streaming but disappeared when sessions were reopened. The implementation introduces dual-backend storage (in-memory/PostgreSQL) for tool call and result frames with comprehensive size management and observability metrics. It extends existing specifications including SPEC-022 R-1 (transcripts), SPEC-011 R-4 (evidence panels), and SPEC-017 (kernel state persistence).
+
+**Section sources**
+- [spec.md:3-15](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/spec.md#L3-L15)
 
 ## Project Structure
-SPEC-025 touches three product areas:
-- Agent Platform: persists evidence frames alongside transcript extraction and enriches the session-detail response.
-- Operator Portal: renders evidence cards from persisted data with parity to live rendering.
-- Platform Gateway: passes through the additive evidence field without modification.
+SPEC-025 touches three product areas with clear responsibilities:
+- Agent Platform: persists evidence frames alongside transcript extraction and enriches the session-detail response with dual-backend support
+- Operator Portal: renders evidence cards from persisted data with parity to live rendering
+- Platform Gateway: passes through the additive evidence field without modification
 
 ```mermaid
 graph TB
@@ -39,7 +54,8 @@ subgraph "Agent Platform"
 A["API v2 routes<br/>read_session()"]
 B["Session transcript<br/>extract_transcript()"]
 C["Session store<br/>Postgres/Redis/Memory"]
-D["Evidence store<br/>(new per-turn table or snapshot extension)"]
+D["Evidence store<br/>InMemory/Postgres"]
+E["Metrics<br/>Observability"]
 end
 subgraph "Platform Gateway"
 G["Sessions route<br/>get_session_route()"]
@@ -51,44 +67,43 @@ end
 A --> B
 A --> C
 A --> D
+A --> E
 G --> A
 P --> G
 S --> P
 ```
 
 **Diagram sources**
-- [routes.py:387-407](file://products/agent-platform/src/agent_service/api/v2/routes.py#L387-L407)
+- [routes.py:410-431](file://products/agent-platform/src/agent_service/api/v2/routes.py#L410-L431)
 - [session_transcript.py:30-64](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L64)
-- [session_store.py:458-649](file://products/agent-platform/src/agent_service/services/session_store.py#L458-L649)
-- [sessions.py:94-115](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L94-L115)
-- [ChatView.tsx:67-161](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L67-L161)
-- [decoder.ts:38-72](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L38-L72)
+- [evidence_store.py:504-551](file://products/agent-platform/src/agent_service/services/evidence_store.py#L504-L551)
+- [metrics.py:156-186](file://products/agent-platform/src/agent_service/core/metrics.py#L156-L186)
 
 **Section sources**
 - [spec.md:17-44](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/spec.md#L17-L44)
 
 ## Core Components
-- Session detail read path: currently returns transcript availability and chat-only turns; needs an additive evidence field per turn.
-- Transcript extractor: best-effort reconstruction from kernel state; currently excludes tool/evidence frames by design.
-- Session store backends: provide durable session metadata; a new evidence storage strategy is required (open question in spec).
-- Portal evidence UI: already supports live evidence rendering; must reuse the same component for replayed data.
-- Stream decoder: parses tool_call and tool_result events into structured objects used by the UI.
+The implementation focuses on four key components that work together to provide evidence persistence:
 
-Key acceptance criteria from the spec:
-- R-1: Persist tool_call and tool_result frames per turn with traceability metadata and redaction; bounded storage; best-effort persistence.
-- R-2: Additive session-detail contract with evidence attached to turns; gateway pass-through unchanged; backward compatible.
-- R-3: Portal evidence-card parity for reopened sessions using grouped entries and summary counts.
-- R-4: Traceability and metrics on persisted evidence (request_id, duration, correlation to audit/observability).
+- **Session detail read path**: Returns transcript availability, chat-only turns, and additive evidence field per turn with graceful degradation
+- **Transcript extractor**: Best-effort reconstruction from kernel state; currently excludes tool/evidence frames by design for v1
+- **Evidence store backends**: Dual-backend pattern (in-memory for dev/CI, Postgres for production) with bounded storage and TTL refresh
+- **Portal evidence UI**: Reuses existing EvidenceCard component for both live and replayed data with identical rendering
+- **Stream decoder**: Parses tool_call and tool_result events into structured objects used by the UI
+
+Key acceptance criteria from the spec define the scope:
+- **R-1**: Persist tool_call and tool_result frames per turn with traceability metadata and redaction; bounded storage with entry and session caps; best-effort persistence
+- **R-2**: Additive session-detail contract with evidence attached to turns; gateway pass-through unchanged; backward compatible
+- **R-3**: Portal evidence-card parity for reopened sessions using grouped entries and summary counts
+- **R-4**: Traceability and metrics on persisted evidence (request_id, duration, correlation to audit/observability)
 
 **Section sources**
 - [spec.md:46-116](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/spec.md#L46-L116)
 - [session_transcript.py:1-14](file://products/agent-platform/src/agent_service/services/session_transcript.py#L1-L14)
-- [routes.py:387-407](file://products/agent-platform/src/agent_service/api/v2/routes.py#L387-L407)
-- [ChatView.tsx:67-161](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L67-L161)
-- [decoder.ts:38-72](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L38-L72)
+- [routes.py:410-431](file://products/agent-platform/src/agent_service/api/v2/routes.py#L410-L431)
 
 ## Architecture Overview
-The implementation adds a per-turn evidence persistence layer and augments the session-detail response with evidence attached to each turn. The portal reuses its existing evidence card logic for both live and replayed data.
+The implementation adds a per-turn evidence persistence layer with dual-backend support and augments the session-detail response with evidence attached to each turn. The portal reuses its existing evidence card logic for both live and replayed data, ensuring visual consistency.
 
 ```mermaid
 sequenceDiagram
@@ -104,25 +119,22 @@ AgentAPI->>Store : get_session(session_id)
 Store-->>AgentAPI : SessionRecord
 AgentAPI->>Transcript : extract_transcript(session_id)
 Transcript-->>AgentAPI : (transcript_available, turns[])
-AgentAPI->>Evidence : list_evidence_by_session(session_id)
-Evidence-->>AgentAPI : evidence_by_turn[]
-AgentAPI-->>Gateway : AgentSession {transcript, evidence...}
+AgentAPI->>Evidence : load_turns(session_id)
+Evidence-->>AgentAPI : evidence_turns[]
+AgentAPI-->>Gateway : AgentSession {transcript, evidence_turns...}
 Gateway-->>Client : Response (additive evidence field)
 Client->>Client : Render EvidencePanel from turns
 ```
 
 **Diagram sources**
-- [sessions.py:94-115](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L94-L115)
-- [routes.py:387-407](file://products/agent-platform/src/agent_service/api/v2/routes.py#L387-L407)
+- [routes.py:410-431](file://products/agent-platform/src/agent_service/api/v2/routes.py#L410-L431)
 - [session_transcript.py:30-64](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L64)
-- [session_store.py:458-649](file://products/agent-platform/src/agent_service/services/session_store.py#L458-L649)
+- [evidence_store.py:165-180](file://products/agent-platform/src/agent_service/services/evidence_store.py#L165-L180)
 
 ## Detailed Component Analysis
 
 ### Agent Platform: Session Detail Read Path
-- Current behavior: reads session metadata, extracts chat-only transcript, and returns both in the session response.
-- Required change: attach per-turn evidence to the response while preserving backward compatibility.
-- Security: keep existing owner checks and anti-enumeration semantics.
+The current behavior reads session metadata, extracts chat-only transcript, loads evidence turns from the evidence store, and returns both in the session response with graceful degradation. Security measures keep existing owner checks and anti-enumeration semantics intact.
 
 ```mermaid
 flowchart TD
@@ -132,24 +144,22 @@ GetSession --> CheckOwner{"Owner matches?"}
 CheckOwner --> |No| NotFound["404 session not found"]
 CheckOwner --> |Yes| BuildResponse["Build AgentSession"]
 BuildResponse --> Transcript["extract_transcript()"]
-Transcript --> AttachEvidence["Attach evidence per turn"]
+Transcript --> LoadEvidence["_load_evidence_turns()"]
+LoadEvidence --> AttachEvidence["Attach evidence_turns"]
 AttachEvidence --> Return["Return response"]
 NotFound --> End(["Exit"])
 Return --> End
 ```
 
 **Diagram sources**
-- [routes.py:387-407](file://products/agent-platform/src/agent_service/api/v2/routes.py#L387-L407)
-- [session_service.py:64-69](file://products/agent-platform/src/agent_service/services/session_service.py#L64-L69)
-- [session_transcript.py:30-64](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L64)
+- [routes.py:410-431](file://products/agent-platform/src/agent_service/api/v2/routes.py#L410-L431)
+- [routes.py:351-367](file://products/agent-platform/src/agent_service/api/v2/routes.py#L351-L367)
 
 **Section sources**
-- [routes.py:387-407](file://products/agent-platform/src/agent_service/api/v2/routes.py#L387-L407)
-- [session_service.py:64-69](file://products/agent-platform/src/agent_service/services/session_service.py#L64-L69)
+- [routes.py:410-431](file://products/agent-platform/src/agent_service/api/v2/routes.py#L410-L431)
 
 ### Agent Platform: Transcript Extraction
-- Current scope: reconstructs user/assistant chat text from kernel state; explicitly excludes tool/evidence frames for v1.
-- Future scope: integrate evidence frames per turn when storage is available; degrade gracefully if unavailable.
+The current scope reconstructs user/assistant chat text from kernel state and explicitly excludes tool/evidence frames for v1. Future scope integrates evidence frames per turn when storage is available, degrading gracefully if unavailable.
 
 ```mermaid
 flowchart TD
@@ -176,147 +186,137 @@ Done --> Exit
 - [session_transcript.py:1-14](file://products/agent-platform/src/agent_service/services/session_transcript.py#L1-L14)
 - [session_transcript.py:30-82](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L82)
 
-### Agent Platform: Session Store Backends
-- Provides durable session metadata with TTL and listing/ordering.
-- For evidence, the spec leaves open whether to extend the kernel state snapshot or add a dedicated per-session evidence table in Postgres. Either approach must support bounded growth and best-effort persistence.
+### Agent Platform: Evidence Store Backends
+The evidence store provides dual-backend support with in-memory for development/testing and PostgreSQL for production deployments. Both backends enforce identical size caps and eviction policies with TTL refresh on reads.
 
 ```mermaid
 classDiagram
-class SessionStore {
+class EvidenceStore {
 <<interface>>
-+create_session(user_id, session_id)
-+get_session(session_id)
-+list_sessions_by_user(user_id)
-+delete_session(session_id)
-+touch_session(session_id)
-+set_session_title(session_id, title)
-+is_ready() bool
++backend_name : str
++save_turn(session_id, request_id, turn_index, frames, session_max_bytes)
++load_turns(session_id) : list
++delete_session(session_id) : bool
++is_ready() : bool
 }
-class InMemorySessionStore {
+class InMemoryEvidenceStore {
 +backend_name = "memory"
+-_rows : dict
 }
-class RedisSessionStore {
-+backend_name = "redis"
-}
-class PostgresSessionStore {
+class PostgresEvidenceStore {
 +backend_name = "postgres"
++_db_url : str
++ttl_seconds : float
 +initialize()
 }
-SessionStore <|.. InMemorySessionStore
-SessionStore <|.. RedisSessionStore
-SessionStore <|.. PostgresSessionStore
+class _BaseEvidenceStore {
++prepare_frames(frames, entry_max_chars)
++_enforce_budget(session_id, session_max_bytes)
++save_turn(...)
++load_turns(...)
+}
+EvidenceStore <|.. InMemoryEvidenceStore
+EvidenceStore <|.. PostgresEvidenceStore
+EvidenceStore <|.. _BaseEvidenceStore
 ```
 
 **Diagram sources**
-- [session_store.py:46-73](file://products/agent-platform/src/agent_service/services/session_store.py#L46-L73)
-- [session_store.py:81-169](file://products/agent-platform/src/agent_service/services/session_store.py#L81-L169)
-- [session_store.py:176-358](file://products/agent-platform/src/agent_service/services/session_store.py#L176-L358)
-- [session_store.py:458-649](file://products/agent-platform/src/agent_service/services/session_store.py#L458-L649)
+- [evidence_store.py:86-107](file://products/agent-platform/src/agent_service/services/evidence_store.py#L86-L107)
+- [evidence_store.py:211-273](file://products/agent-platform/src/agent_service/services/evidence_store.py#L211-L273)
+- [evidence_store.py:362-497](file://products/agent-platform/src/agent_service/services/evidence_store.py#L362-L497)
+- [evidence_store.py:109-204](file://products/agent-platform/src/agent_service/services/evidence_store.py#L109-L204)
 
 **Section sources**
-- [session_store.py:1-7](file://products/agent-platform/src/agent_service/services/session_store.py#L1-L7)
-- [session_store.py:458-649](file://products/agent-platform/src/agent_service/services/session_store.py#L458-L649)
+- [evidence_store.py:1-15](file://products/agent-platform/src/agent_service/services/evidence_store.py#L1-L15)
+- [evidence_store.py:504-551](file://products/agent-platform/src/agent_service/services/evidence_store.py#L504-L551)
 
-### Operator Portal: Evidence Rendering
-- Live rendering: builds evidence entries from stream events and groups them by call_id; shows summary counts and collapsible cards.
-- Reopened sessions: must reuse the same EvidencePanel and entry-building logic against persisted data returned by the session-detail API.
-
-```mermaid
-sequenceDiagram
-participant UI as "ChatView.tsx"
-participant Decoder as "decoder.ts"
-participant API as "Agent Platform"
-UI->>Decoder : Parse tool_call/tool_result events
-Decoder-->>UI : Structured entries (callId, toolName, status, evidence)
-UI->>API : GET /api/v2/sessions/{id}
-API-->>UI : Turns with transcript and evidence
-UI->>UI : buildEvidenceEntries(turn)
-UI->>UI : countEvidence(entries)
-UI-->>UI : Render EvidencePanel (collapsed by default)
-```
-
-**Diagram sources**
-- [ChatView.tsx:67-161](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L67-L161)
-- [decoder.ts:38-72](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L38-L72)
-
-**Section sources**
-- [ChatView.tsx:67-161](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L67-L161)
-- [ChatView.tsx:163-196](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L163-L196)
-- [decoder.ts:38-72](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L38-L72)
-
-### Platform Gateway: Pass-Through
-- The gateway forwards session reads and does not modify the payload; it enforces policy and logs access.
-- With SPEC-025, the additive evidence field should pass through unchanged.
+### Agent Platform: Schema and Contract
+The implementation defines Pydantic models and JSON schemas for evidence turns with strict validation and backward compatibility guarantees.
 
 ```mermaid
 flowchart TD
-Req["GET /api/v1/sessions/{id}"] --> Policy["Enforce policy"]
-Policy --> Forward["Forward to Agent Platform"]
-Forward --> Resp["Receive AgentSession"]
-Resp --> Log["Log event"]
-Log --> Return["Return response unchanged"]
+Schema["session-evidence.schema.json"] --> Model["EvidenceTurn (Pydantic)"]
+Model --> API["AgentSession.evidence_turns"]
+API --> Route["read_session()"]
+Route --> Response["HTTP Response"]
 ```
 
 **Diagram sources**
-- [sessions.py:94-115](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L94-L115)
+- [session-evidence.schema.json:1-58](file://shared/shared-contracts/schemas/session-evidence.schema.json#L1-L58)
+- [v2.py:125-158](file://products/agent-platform/src/agent_service/schemas/v2.py#L125-L158)
+- [routes.py:410-431](file://products/agent-platform/src/agent_service/api/v2/routes.py#L410-L431)
 
 **Section sources**
-- [sessions.py:94-115](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L94-L115)
+- [v2.py:125-158](file://products/agent-platform/src/agent_service/schemas/v2.py#L125-L158)
+- [session-evidence.schema.json:1-58](file://shared/shared-contracts/schemas/session-evidence.schema.json#L1-L58)
+
+### Observability and Metrics
+The implementation includes comprehensive metrics for evidence persistence operations, frame truncation, and storage backend health monitoring.
+
+```mermaid
+flowchart TD
+Persist["Evidence Persistence"] --> Metrics["record_evidence_frames_persisted()"]
+Truncate["Frame Truncation"] --> Truncated["record_evidence_frame_truncated()"]
+Write["Store Write"] --> WriteMetric["record_evidence_write()"]
+Metrics --> Prometheus["Prometheus Export"]
+Truncated --> Prometheus
+WriteMetric --> Prometheus
+```
+
+**Diagram sources**
+- [metrics.py:156-186](file://products/agent-platform/src/agent_service/core/metrics.py#L156-L186)
+- [evidence_store.py:27-30](file://products/agent-platform/src/agent_service/services/evidence_store.py#L27-L30)
+
+**Section sources**
+- [metrics.py:156-186](file://products/agent-platform/src/agent_service/core/metrics.py#L156-L186)
 
 ## Dependency Analysis
-- Agent Platform depends on:
-  - Session store backends for durable session metadata.
-  - Transcript extractor for chat-only turns (currently).
-  - New evidence store (to be added) for per-turn evidence frames.
-- Portal depends on:
-  - Stream decoder for live events.
-  - Session-detail API for replayed evidence.
-- Gateway depends on:
-  - Policy enforcement and logging.
-  - Transparent forwarding of session responses.
+The implementation creates clear dependencies between components:
+- Agent Platform depends on session store backends for durable session metadata, transcript extractor for chat-only turns (currently), and evidence store for per-turn evidence frames
+- Portal depends on stream decoder for live events and session-detail API for replayed evidence
+- Gateway depends on policy enforcement and logging, plus transparent forwarding of session responses
+- Evidence store depends on metrics module for observability and shared environment configuration
 
 ```mermaid
 graph LR
 Portal["Operator Portal"] --> Gateway["Platform Gateway"]
 Gateway --> AgentAPI["Agent Platform API"]
 AgentAPI --> Store["Session Store"]
-AgentAPI --> Evidence["Evidence Store (new)"]
+AgentAPI --> Evidence["Evidence Store"]
 AgentAPI --> Transcript["Transcript Extractor"]
+Evidence --> Metrics["Observability Metrics"]
 ```
 
 **Diagram sources**
-- [routes.py:387-407](file://products/agent-platform/src/agent_service/api/v2/routes.py#L387-L407)
-- [session_store.py:458-649](file://products/agent-platform/src/agent_service/services/session_store.py#L458-L649)
-- [sessions.py:94-115](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L94-L115)
+- [routes.py:410-431](file://products/agent-platform/src/agent_service/api/v2/routes.py#L410-L431)
+- [evidence_store.py:504-551](file://products/agent-platform/src/agent_service/services/evidence_store.py#L504-L551)
+- [metrics.py:156-186](file://products/agent-platform/src/agent_service/core/metrics.py#L156-L186)
 
 **Section sources**
 - [spec.md:128-138](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/spec.md#L128-L138)
 
 ## Performance Considerations
-- Storage sizing: define per-entry and per-session caps for evidence; truncate oversized results with visible markers.
-- Best-effort persistence: failures must not fail chat turns; log and continue.
-- Read paths: ensure evidence retrieval does not block session-detail responses; consider async or background writes.
-- Redaction: apply existing redaction before storing evidence payloads to prevent secrets leakage.
+Critical performance considerations for evidence persistence include:
+- **Dual-backend storage**: In-memory for development/CI, PostgreSQL for production with automatic fallback
+- **Size management**: Per-entry cap (131,072 chars) and per-session budget (4,194,304 bytes) with automatic eviction
+- **Best-effort persistence**: Failures must not fail chat turns; log and continue operations with graceful degradation
+- **Read paths**: Evidence retrieval uses TTL refresh on reads to maintain session activity
+- **Redaction**: Apply existing redaction before storing evidence payloads to prevent secrets leakage
+- **Metrics**: Comprehensive observability with counters for writes, frames persisted, and truncation reasons
 
-[No sources needed since this section provides general guidance]
+These considerations align with the spec's requirements for bounded storage and graceful degradation across all deployment environments.
 
 ## Troubleshooting Guide
-- If evidence is missing on reopened sessions:
-  - Verify evidence persistence is enabled and writing successfully.
-  - Confirm session-detail includes evidence per turn.
-  - Ensure portal uses the same EvidencePanel for replayed data.
-- If evidence contains sensitive data:
-  - Validate redaction pipeline runs before storage.
-  - Check stored payloads for credentials or secrets.
-- If performance degrades:
-  - Inspect per-session evidence size and cap enforcement.
-  - Review query patterns for evidence retrieval.
+Common troubleshooting scenarios for evidence persistence:
+- **If evidence is missing on reopened sessions**: Verify evidence persistence is enabled and writing successfully, confirm session-detail includes evidence_turns, ensure portal uses the same EvidencePanel for replayed data
+- **If evidence contains sensitive data**: Validate redaction pipeline runs before storage, check stored payloads for credentials or secrets
+- **If performance degrades**: Inspect per-session evidence size and cap enforcement, review query patterns for evidence retrieval, check PostgreSQL connection health
+- **If evidence store is unavailable**: Monitor evidence_store_writes_total{result="error"} metric, verify AGENT_STATE_STORE_BACKEND configuration, check database connectivity
+- **If truncation occurs frequently**: Review AGENT_EVIDENCE_ENTRY_MAX_CHARS and AGENT_EVIDENCE_SESSION_MAX_BYTES settings, analyze evidence_frames_truncated_total metrics
 
 **Section sources**
 - [spec.md:59-69](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/spec.md#L59-L69)
-- [session_transcript.py:60-64](file://products/agent-platform/src/agent_service/services/session_transcript.py#L60-L64)
+- [test_session_workspace.py:230-261](file://products/agent-platform/tests/test_session_workspace.py#L230-L261)
 
 ## Conclusion
-SPEC-025 closes the parity gap between live and replayed evidence by persisting tool_call and tool_result frames per turn and exposing them via the session-detail API. The portal will render evidence identically for live and reopened sessions. Implementation focuses on robust storage, bounded growth, best-effort persistence, and strict redaction, while keeping the gateway pass-through unchanged.
-
-[No sources needed since this section summarizes without analyzing specific files]
+SPEC-025 successfully closes the parity gap between live and replayed evidence by implementing dual-backend evidence persistence with comprehensive size management and observability. The implementation persists tool_call and tool_result frames per turn using in-memory (development) and PostgreSQL (production) backends, exposing them via the session-detail API with graceful degradation. The portal renders evidence identically for live and reopened sessions using the existing EvidenceCard component. The implementation focuses on robust storage with bounded growth, best-effort persistence, strict redaction, and comprehensive metrics while maintaining backward compatibility. The approved specification provides clear acceptance criteria and architectural guidance that has been fully implemented with thorough testing and monitoring capabilities.
