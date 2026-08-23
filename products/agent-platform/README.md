@@ -173,6 +173,10 @@ Current runtime environment knobs:
   - Postgres DSN for agent state; required when the backend is `postgres` (shares the `sessions` database); the table DDL is applied idempotently on startup; unreachable databases fail open to the in-memory backend (`agent_state_fallbacks_total`)
 - `AGENT_STATE_TTL_SECONDS`
   - sweep TTL for stale agent state rows; defaults to `3600`
+- `AGENT_EVIDENCE_ENTRY_MAX_CHARS`
+  - serialized-size cap for one persisted evidence frame payload; oversized `tool_result.data` is replaced by a prefix plus a `{"truncated": {"reason": "entry_cap", "original_chars": n}}` marker; defaults to `131072` (SPEC-025)
+- `AGENT_EVIDENCE_SESSION_MAX_BYTES`
+  - per-session budget for persisted evidence; when exceeded, the oldest `tool_result` data payloads are evicted (data dropped, metadata kept, `{"truncated": {"reason": "session_budget"}}` marker); defaults to `4194304` (SPEC-025)
 - `TOOL_GATEWAY_URL`
   - base URL of the tool-gateway for tool discovery and invocation (SPEC-007); when set, the AgentScope kernel registers gateway tools into a per-token cached Toolkit; when unset, the agent builds with an empty Toolkit
   - tool calls relay the gateway-forwarded delegated token (SPEC-008) as `Authorization: Bearer`; the token is exposed per-turn through a request-scoped contextvar and read by the tool closures at call time (toolkits stay per-token and are never shared across users), so portal token refresh works without rebuilding the agent; identity is never carried in the request body; without a token, discovery degrades to an empty Toolkit and invocation returns a structured error
@@ -219,6 +223,14 @@ Agent state durability (SPEC-017):
 - a corrupt persisted snapshot is discarded (fresh agent) instead of wedging the session
 - session deletion also removes the session's persisted state (best-effort)
 - `POST /api/v2/chat` accepts an optional `response_schema` (JSON-schema dict) and returns the kernel-validated `structured_output` alongside the text reply (null when no schema was requested or the turn produced none)
+
+Evidence persistence (SPEC-025):
+
+- the kernel persists `tool_call`/`tool_result` frames per assistant turn into a dedicated `session_evidence` store (`evidence_store.py`) behind the same `AGENT_STATE_STORE_BACKEND` / `AGENT_STATE_DB_URL` knobs as agent state; persistence is best-effort next to the state snapshot and never fails a turn
+- caps are enforced identically in both backends: an entry cap (`AGENT_EVIDENCE_ENTRY_MAX_CHARS`) truncates oversized payloads with an `entry_cap` marker, and a per-session budget (`AGENT_EVIDENCE_SESSION_MAX_BYTES`) evicts oldest `tool_result` data payloads with a `session_budget` marker while keeping metadata
+- `GET /api/v2/sessions/{id}` assembles `evidence_turns` (turn-grouped frames with `turn_index`/`request_id`): empty list when the session stored none, `null` when the evidence store is unreadable — never a 500; session delete cascades evidence cleanup (fail-open)
+- redaction is inherited by construction: frames arrive already redacted at the tool-gateway `invoke_tool` choke point (SPEC-009) and the store round-trips them byte-identical
+- counters: `evidence_store_writes_total{result}`, `evidence_frames_persisted_total`, `evidence_frames_truncated_total{reason}`
 
 HITL confirmation bridging (SPEC-020):
 

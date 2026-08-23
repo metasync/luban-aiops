@@ -807,3 +807,124 @@ def test_task_state_round_trips_through_state_store(monkeypatch):
     assert restored is not None
     subjects = [task.subject for task in restored.tasks_context.tasks]
     assert subjects == ["diagnose crashloop"]
+
+
+# ---------------------------------------------------------------------------
+# SPEC-025 R-1: evidence persistence hook
+# ---------------------------------------------------------------------------
+
+
+class FakeEvidenceStore:
+    def __init__(self, fail: bool = False):
+        self.fail = fail
+        self.saved: list[tuple] = []
+
+    def save_turn(self, session_id, request_id, turn_index, frames, budget):
+        if self.fail:
+            raise RuntimeError("evidence store down")
+        self.saved.append((session_id, request_id, turn_index, frames, budget))
+
+
+def _evidence_frames():
+    return [
+        {
+            "type": "tool_call",
+            "tool_name": "k8s.list_pods",
+            "call_id": "call-1",
+            "parameters": {"namespace": "ops"},
+        },
+        {
+            "type": "tool_result",
+            "tool_name": "k8s.list_pods",
+            "call_id": "call-1",
+            "status": "success",
+            "data": {"pods": []},
+        },
+    ]
+
+
+class TestEvidencePersistenceHook:
+    def test_count_user_turns_counts_user_messages(self):
+        kernel = AgentKernel(settings=RuntimeSettings(api_key=None))
+        agent = SimpleNamespace(
+            state=SimpleNamespace(
+                context=[
+                    SimpleNamespace(role="system"),
+                    SimpleNamespace(role="user"),
+                    SimpleNamespace(role="assistant"),
+                    SimpleNamespace(role="user"),
+                ]
+            )
+        )
+        assert kernel._count_user_turns(agent) == 2
+
+    def test_count_user_turns_degrades_to_zero(self):
+        kernel = AgentKernel(settings=RuntimeSettings(api_key=None))
+        assert kernel._count_user_turns(SimpleNamespace()) == 0
+
+    def test_persist_evidence_saves_prepared_frames(self, monkeypatch):
+        import agent_service.runtime_kernel as rk
+
+        store = FakeEvidenceStore()
+        monkeypatch.setattr(rk, "EVIDENCE_STORE", store)
+        kernel = AgentKernel(settings=RuntimeSettings(api_key=None))
+
+        kernel._persist_evidence("ses-1", "req-1", 3, _evidence_frames())
+
+        assert len(store.saved) == 1
+        session_id, request_id, turn_index, frames, budget = store.saved[0]
+        assert (session_id, request_id, turn_index) == ("ses-1", "req-1", 3)
+        assert [frame["type"] for frame in frames] == [
+            "tool_call",
+            "tool_result",
+        ]
+        assert budget == kernel.settings.evidence_session_max_bytes
+
+    def test_persist_evidence_applies_entry_cap(self, monkeypatch):
+        import agent_service.runtime_kernel as rk
+
+        store = FakeEvidenceStore()
+        monkeypatch.setattr(rk, "EVIDENCE_STORE", store)
+        kernel = AgentKernel(
+            settings=RuntimeSettings(api_key=None, evidence_entry_max_chars=10)
+        )
+        frames = _evidence_frames()
+        frames[1]["data"] = {"blob": "x" * 100}
+
+        kernel._persist_evidence("ses-1", "req-1", 0, frames)
+
+        saved_frame = store.saved[0][3][1]
+        assert isinstance(saved_frame["data"], str)
+        assert len(saved_frame["data"]) == 10
+        assert saved_frame["truncated"]["reason"] == "entry_cap"
+
+    def test_persist_evidence_failure_never_raises(self, monkeypatch):
+        import agent_service.runtime_kernel as rk
+        from prometheus_client import REGISTRY
+
+        monkeypatch.setattr(rk, "EVIDENCE_STORE", FakeEvidenceStore(fail=True))
+        kernel = AgentKernel(settings=RuntimeSettings(api_key=None))
+
+        before = (
+            REGISTRY.get_sample_value(
+                "evidence_store_writes_total", {"result": "error"}
+            )
+            or 0.0
+        )
+        kernel._persist_evidence("ses-1", "req-1", 0, _evidence_frames())
+        assert (
+            REGISTRY.get_sample_value(
+                "evidence_store_writes_total", {"result": "error"}
+            )
+            == before + 1
+        )
+
+    def test_persist_evidence_skips_empty_frame_list(self, monkeypatch):
+        import agent_service.runtime_kernel as rk
+
+        store = FakeEvidenceStore()
+        monkeypatch.setattr(rk, "EVIDENCE_STORE", store)
+        kernel = AgentKernel(settings=RuntimeSettings(api_key=None))
+
+        kernel._persist_evidence("ses-1", "req-1", 0, [])
+        assert store.saved == []

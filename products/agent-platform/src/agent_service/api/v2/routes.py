@@ -10,6 +10,7 @@ never inspects or signs it.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from typing import Literal
 
@@ -28,8 +29,10 @@ from agent_service.schemas.v2 import (
     AgentSessionList,
     AgentSessionSummary,
     AgentStreamEvent,
+    EvidenceTurn,
 )
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
+from agent_service.services.evidence_store import EVIDENCE_STORE
 from agent_service.services.hitl_confirmations import (
     ConfirmationExpired,
     ConfirmationNotFound,
@@ -51,6 +54,8 @@ from agent_service.services.session_store import SESSION_STORE
 from agent_service.services.session_transcript import extract_transcript
 
 router = APIRouter(prefix="/api/v2")
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _user_id(x_user_id: str | None) -> str:
@@ -343,6 +348,24 @@ def _coerce_pending_calls(value: object) -> list[dict[str, object]] | None:
 # --- Sessions ---
 
 
+def _load_evidence_turns(session_id: str) -> list[EvidenceTurn] | None:
+    """Persisted evidence groups for the session-detail surface (SPEC-025 R-2).
+
+    Empty list when the session stored none; ``None`` when the evidence
+    store is unreadable — degrades like ``transcript_available=false``,
+    never a 500.
+    """
+    try:
+        return [
+            EvidenceTurn(**turn) for turn in EVIDENCE_STORE.load_turns(session_id)
+        ]
+    except Exception as exc:
+        LOGGER.warning(
+            "evidence store unreadable for session %s: %s", session_id, exc
+        )
+        return None
+
+
 @router.post("/sessions", response_model=AgentSession, status_code=201)
 async def create_session(
     body: AgentSessionCreateRequest | None = None,
@@ -404,6 +427,7 @@ async def read_session(
         ),
         transcript_available=transcript_available,
         transcript=transcript,
+        evidence_turns=_load_evidence_turns(session.session_id),
     )
 
 

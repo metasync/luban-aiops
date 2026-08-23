@@ -150,7 +150,11 @@ function EvidencePanel({ turn }: { turn: ChatTurn }) {
           children: (
             <div>
               {entries.map((entry) => (
-                <EvidenceCard key={entry.callId} entry={entry} />
+                <EvidenceCard
+                  key={entry.callId}
+                  entry={entry}
+                  requestId={turn.requestId}
+                />
               ))}
             </div>
           ),
@@ -160,7 +164,13 @@ function EvidencePanel({ turn }: { turn: ChatTurn }) {
   );
 }
 
-function EvidenceCard({ entry }: { entry: EvidenceEntry }) {
+function EvidenceCard({
+  entry,
+  requestId,
+}: {
+  entry: EvidenceEntry;
+  requestId?: string;
+}) {
   const result = entry.result;
   const status = result?.status ?? "pending";
   const evidence = result?.evidence;
@@ -178,19 +188,36 @@ function EvidenceCard({ entry }: { entry: EvidenceEntry }) {
           </pre>
         </details>
       ) : null}
-      {evidence ? (
+      {evidence || requestId ? (
         <div className="evidence-meta">
-          {evidence.executedAt ? <span>{evidence.executedAt}</span> : null}
-          {typeof evidence.durationMs === "number" ? (
+          {requestId ? <span>request: {requestId}</span> : null}
+          {evidence?.executedAt ? <span>{evidence.executedAt}</span> : null}
+          {typeof evidence?.durationMs === "number" ? (
             <span>{evidence.durationMs} ms</span>
           ) : null}
-          {evidence.riskLevel ? <span>risk: {evidence.riskLevel}</span> : null}
-          {evidence.sourceSystem ? <span>{evidence.sourceSystem}</span> : null}
+          {evidence?.riskLevel ? <span>risk: {evidence.riskLevel}</span> : null}
+          {evidence?.sourceSystem ? <span>{evidence.sourceSystem}</span> : null}
+        </div>
+      ) : null}
+      {/* Store-added size marker (SPEC-025 R-1): always visible, never a
+          silently dropped payload. */}
+      {result?.truncated ? (
+        <div className="confirm-note">
+          {result.truncated.reason === "entry_cap"
+            ? `Payload truncated at the entry cap${
+                typeof result.truncated.originalChars === "number"
+                  ? ` (original ${result.truncated.originalChars} chars)`
+                  : ""
+              }; the preview below is partial.`
+            : "Payload evicted by the session evidence budget; metadata is preserved."}
         </div>
       ) : null}
       {/* Presence of `data` (even null) drives the expander; data_summary
-          renders only when data is absent (legacy parity). */}
-      {result && result.data !== undefined ? (
+          renders only when data is absent (legacy parity). Budget-evicted
+          payloads (data=null + marker) show the note above instead. */}
+      {result &&
+      result.data !== undefined &&
+      !(result.data === null && result.truncated) ? (
         <details>
           <summary>Result data</summary>
           <pre className="evidence-pre">
@@ -368,9 +395,9 @@ function TurnGroup({
       {turn.error ? (
         <Alert type="error" showIcon message={turn.error} />
       ) : null}
-      {/* Transcript-seeded turns carry chat text only — no evidence panel. */}
-      {!turn.history &&
-      (turn.toolCalls.length > 0 || turn.toolResults.length > 0) ? (
+      {/* Evidence panel renders whenever a turn carries tool frames —
+          live streams and replayed (SPEC-025) evidence share this path. */}
+      {turn.toolCalls.length > 0 || turn.toolResults.length > 0 ? (
         <EvidencePanel turn={turn} />
       ) : null}
       {turn.confirmations.map((card) => (
@@ -583,7 +610,10 @@ export default function ChatView({
         if (!detail.transcript_available && (detail.transcript ?? []).length === 0) {
           setTranscriptNote("This session has no recorded transcript yet.");
         }
-        setSession(target, transcriptToTurns(detail.transcript ?? []));
+        setSession(
+          target,
+          transcriptToTurns(detail.transcript ?? [], detail.evidence_turns),
+        );
       })
       .catch((error) => {
         if (controller.signal.aborted) return;

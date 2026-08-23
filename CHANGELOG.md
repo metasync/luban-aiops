@@ -13,6 +13,26 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+### Added
+
+- **Evidence persistence in session transcripts (SPEC-025)**: agent-service
+  now persists `tool_call`/`tool_result` frames per assistant turn into a
+  dedicated `session_evidence` store behind the existing
+  `AGENT_STATE_STORE_BACKEND` / `AGENT_STATE_DB_URL` knobs. An entry cap
+  (`AGENT_EVIDENCE_ENTRY_MAX_CHARS`, default 131,072) truncates oversized
+  payloads with an `entry_cap` marker, and a per-session budget
+  (`AGENT_EVIDENCE_SESSION_MAX_BYTES`, default 4 MiB) evicts oldest
+  `tool_result` data payloads with a `session_budget` marker while keeping
+  metadata. `GET /api/v1/sessions/{id}` gains an additive `evidence_turns`
+  field (empty list when none stored, `null` when the store is unreadable —
+  never a 500); session delete cascades evidence cleanup. The portal
+  re-attaches persisted evidence to the matching assistant turns on reload,
+  so replayed evidence cards are prop-identical to the live ones and show
+  truncation/eviction notes plus the persisted `request_id`. Redaction is
+  inherited from the tool-gateway choke point by construction. New counters:
+  `evidence_store_writes_total{result}`, `evidence_frames_persisted_total`,
+  `evidence_frames_truncated_total{reason}`.
+
 ## 0.9.1 — 2026-08-23
 
 ### Fixed

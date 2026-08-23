@@ -189,6 +189,99 @@ def test_get_session_corrupt_snapshot_falls_back(workspace):
     assert body["transcript"] == []
 
 
+# --- Persisted evidence (SPEC-025 R-2) ---
+
+
+def _evidence_frames(session_id: str) -> list[dict]:
+    return [
+        {
+            "type": "tool_call",
+            "session_id": session_id,
+            "request_id": "req-1",
+            "tool_name": "k8s.list_pods",
+            "call_id": "call-1",
+            "parameters": {"namespace": "dev-luban-aiops"},
+        },
+        {
+            "type": "tool_result",
+            "session_id": session_id,
+            "request_id": "req-1",
+            "tool_name": "k8s.list_pods",
+            "call_id": "call-1",
+            "status": "success",
+            "evidence": {"duration_ms": 42, "risk_level": "read"},
+            "data": {"count": 3},
+        },
+    ]
+
+
+def test_get_session_returns_persisted_evidence_turns(workspace, monkeypatch):
+    from agent_service.api.v2 import routes
+    from agent_service.services.evidence_store import InMemoryEvidenceStore
+
+    session_store, _ = workspace
+    evidence_store = InMemoryEvidenceStore()
+    monkeypatch.setattr(routes, "EVIDENCE_STORE", evidence_store)
+    record = session_store.create_session("alice")
+    evidence_store.save_turn(
+        record.session_id, "req-1", 0, _evidence_frames(record.session_id), 1 << 30
+    )
+
+    response = _client().get(
+        f"/api/v2/sessions/{record.session_id}", headers={"X-User-ID": "alice"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    turns = body["evidence_turns"]
+    assert len(turns) == 1
+    assert turns[0]["turn_index"] == 0
+    assert turns[0]["request_id"] == "req-1"
+    assert turns[0]["created_at"]
+    # Frame order and metadata survive the round trip untouched.
+    assert [f["type"] for f in turns[0]["frames"]] == ["tool_call", "tool_result"]
+    assert turns[0]["frames"][1]["data"] == {"count": 3}
+    jsonschema.validate(body, load_schema("agent-session.schema.json"))
+    for turn in turns:
+        jsonschema.validate(turn, load_schema("session-evidence.schema.json"))
+
+
+def test_get_session_evidence_turns_empty_when_none_stored(workspace, monkeypatch):
+    from agent_service.api.v2 import routes
+    from agent_service.services.evidence_store import InMemoryEvidenceStore
+
+    session_store, _ = workspace
+    monkeypatch.setattr(routes, "EVIDENCE_STORE", InMemoryEvidenceStore())
+    record = session_store.create_session("alice")
+
+    response = _client().get(
+        f"/api/v2/sessions/{record.session_id}", headers={"X-User-ID": "alice"}
+    )
+    assert response.status_code == 200
+    # No stored evidence: explicit empty list, never null, never a failure.
+    assert response.json()["evidence_turns"] == []
+
+
+def test_get_session_degrades_to_null_when_evidence_store_unreadable(
+    workspace, monkeypatch
+):
+    from agent_service.api.v2 import routes
+
+    class BrokenEvidenceStore:
+        def load_turns(self, session_id):
+            raise RuntimeError("evidence store down")
+
+    session_store, _ = workspace
+    monkeypatch.setattr(routes, "EVIDENCE_STORE", BrokenEvidenceStore())
+    record = session_store.create_session("alice")
+
+    response = _client().get(
+        f"/api/v2/sessions/{record.session_id}", headers={"X-User-ID": "alice"}
+    )
+    # Degrades like transcript_available=false: null field, never a 500.
+    assert response.status_code == 200
+    assert response.json()["evidence_turns"] is None
+
+
 # --- Delete ---
 
 

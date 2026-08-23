@@ -43,9 +43,11 @@ export interface ChatTurn {
   toolCalls: ToolCallFrame[];
   toolResults: ToolResultFrame[];
   confirmations: ConfirmationCard[];
-  // Transcript-seeded turns carry chat text only (SPEC-022 R-1 keeps tool
-  // frames out of v1 transcripts); views skip the evidence panel for them.
+  // Transcript-seeded turns carry chat text only unless persisted tool
+  // evidence is attached (SPEC-025 R-3); the request id correlates the
+  // replayed evidence with the audit trail.
   history?: boolean;
+  requestId?: string;
 }
 
 export type ConfirmationDecision = "approve" | "deny";

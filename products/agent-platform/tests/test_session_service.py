@@ -274,3 +274,42 @@ def test_delete_session_survives_state_store_failure(monkeypatch):
     created = session_service.create_session("alice")
     # Fail-open: the session delete succeeds even if state cleanup fails.
     assert session_service.delete_session(created.session_id, "alice") is True
+
+
+def test_delete_session_cascades_stored_evidence(monkeypatch):
+    from agent_service.services.evidence_store import InMemoryEvidenceStore
+
+    monkeypatch.setattr(session_service, "SESSION_STORE", InMemorySessionStore())
+    monkeypatch.setattr(
+        session_service, "AGENT_STATE_STORE", InMemoryAgentStateStore()
+    )
+    evidence_store = InMemoryEvidenceStore()
+    monkeypatch.setattr(session_service, "EVIDENCE_STORE", evidence_store)
+
+    created = session_service.create_session("alice")
+    evidence_store.save_turn(
+        created.session_id,
+        "req-1",
+        0,
+        [{"type": "tool_call", "call_id": "call-1", "tool_name": "k8s.list_pods"}],
+        1 << 30,
+    )
+    assert evidence_store.load_turns(created.session_id) != []
+
+    # SPEC-025 R-2: stored evidence follows the session into deletion.
+    assert session_service.delete_session(created.session_id, "alice") is True
+    assert evidence_store.load_turns(created.session_id) == []
+
+
+def test_delete_session_survives_evidence_store_failure(monkeypatch):
+    monkeypatch.setattr(session_service, "SESSION_STORE", InMemorySessionStore())
+
+    class BrokenEvidenceStore:
+        def delete_session(self, session_id):
+            raise RuntimeError("evidence store down")
+
+    monkeypatch.setattr(session_service, "EVIDENCE_STORE", BrokenEvidenceStore())
+
+    created = session_service.create_session("alice")
+    # Fail-open: evidence cleanup never fails the session delete.
+    assert session_service.delete_session(created.session_id, "alice") is True

@@ -47,7 +47,9 @@ Current browser baseline capabilities:
   switching sessions aborts/repoints the stream, loads the transcript, and
   keeps confirmation cards anchored to the parking session; sessions can be
   deleted with an in-UI confirm (parked sessions refuse with 409) (SPEC-022,
-  SPEC-023)
+  SPEC-023); reloading a session re-attaches its persisted tool evidence
+  (`evidence_turns`) to the matching assistant turns, so the replayed
+  evidence cards are prop-identical to the live ones (SPEC-025)
 - voice input: a composer microphone button performs browser speech-to-text
   (Web Speech API, no audio stored) and submits turns with
   `input_modality=voice`; a language selector (en-US / zh-CN, defaulting from
@@ -82,7 +84,10 @@ Current browser baseline capabilities:
   payload (stream schema v5), the card offers a "Show full output" expander
   with the complete tool result — multi-line text fields (such as pod logs)
   render as raw log-style blocks rather than escaped JSON; visible when the
-  agent invokes tools, hidden otherwise (SPEC-011)
+  agent invokes tools, hidden otherwise (SPEC-011); store-added truncation
+  markers render as notes — an entry-cap-truncated payload flags its
+  original size and partial preview, a session-budget-evicted payload hides
+  the data expander and keeps its metadata (SPEC-025)
 - inline HITL confirmation card: when the agent parks a tool batch awaiting
   approval, the chat renders a warning-toned card listing the pending tools
   with collapsible parameters plus Approve/Deny buttons; the decision posts

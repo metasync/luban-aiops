@@ -272,6 +272,8 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime
 | `AGENT_STATE_STORE_BACKEND` | Agent state persistence backend (`memory` \| `postgres`; unknown values fail startup, unreachable Postgres fails open to memory) | `postgres` | runtime-config |
 | `AGENT_STATE_DB_URL` | Postgres DSN for agent state (required for `postgres`; shares the `sessions` database) | `postgresql://audit:audit-dev-local@postgres:5432/sessions` | runtime-config |
 | `AGENT_STATE_TTL_SECONDS` | Sweep TTL for stale agent state rows | `3600` | code default |
+| `AGENT_EVIDENCE_ENTRY_MAX_CHARS` | Serialized-size cap for one persisted evidence frame payload (SPEC-025); oversized `tool_result.data` is truncated with an `entry_cap` marker | `131072` | code default |
+| `AGENT_EVIDENCE_SESSION_MAX_BYTES` | Per-session budget for persisted evidence (SPEC-025); when exceeded, oldest `tool_result` data payloads are evicted with a `session_budget` marker (metadata kept) | `4194304` | code default |
 | `AGENTSCOPE_MAX_ITERS` | ReAct loop iteration cap (`ReActConfig.max_iters`; must be >= 1) | `20` | code default |
 | `AGENTSCOPE_CONTEXT_TRIGGER_RATIO` | Long-term memory trigger ratio (`ContextConfig.trigger_ratio`; must be in open interval (0, 0.9)) | `0.8` | code default |
 | `AGENTSCOPE_TOOL_RESULT_LIMIT` | Tool result character limit (`ContextConfig.tool_result_limit`; must be >= 1) | `50000` | code default |

@@ -32,6 +32,10 @@ class MetricsEndpointTests(unittest.TestCase):
             "http_request_duration_seconds",
             "agent_sessions_created_total",
             "agent_chat_requests_total",
+            # SPEC-025 R-1 evidence counters.
+            "evidence_store_writes_total",
+            "evidence_frames_persisted_total",
+            "evidence_frames_truncated_total",
         ):
             self.assertIn(expected, body)
 

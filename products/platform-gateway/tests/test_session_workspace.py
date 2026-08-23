@@ -41,6 +41,7 @@ LIST_PAYLOAD = {
 DELETE_PAYLOAD = {"session_id": "ses-1", "deleted": True}
 GET_PAYLOAD = {
     "session_id": "ses-1",
+    "user_id": "operator.user",
     "title": "check the pods",
     "created_at": "2026-08-22T10:00:00Z",
     "last_active_at": "2026-08-22T10:05:00Z",
@@ -49,6 +50,30 @@ GET_PAYLOAD = {
     "transcript": [
         {"role": "user", "content": "check the pods"},
         {"role": "assistant", "content": "all pods running."},
+    ],
+    # SPEC-025 R-2: persisted tool evidence rides the detail payload.
+    "evidence_turns": [
+        {
+            "turn_index": 0,
+            "request_id": "req-1",
+            "created_at": "2026-08-22T10:00:01Z",
+            "frames": [
+                {
+                    "type": "tool_call",
+                    "tool_name": "k8s.list_pods",
+                    "call_id": "call-1",
+                    "parameters": {"namespace": "dev-luban-aiops"},
+                },
+                {
+                    "type": "tool_result",
+                    "tool_name": "k8s.list_pods",
+                    "call_id": "call-1",
+                    "status": "success",
+                    "evidence": {"duration_ms": 42, "risk_level": "read"},
+                    "data": {"count": 3},
+                },
+            ],
+        }
     ],
 }
 
@@ -170,6 +195,25 @@ class GetSessionProxyTests(SessionWorkspaceProxyBase):
             response = self.client.get(f"{SESSIONS_PATH}/ses-1")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), GET_PAYLOAD)
+
+    def test_evidence_turns_pass_through_verbatim(self) -> None:
+        # SPEC-025 R-2: the gateway relays persisted evidence untouched —
+        # frames, markers, and request ids survive byte-for-byte.
+        upstream = AsyncMock(return_value=GET_PAYLOAD)
+        with (
+            self._patch_identity("operator"),
+            patch(GET_PATCH, upstream),
+        ):
+            response = self.client.get(f"{SESSIONS_PATH}/ses-1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["evidence_turns"], GET_PAYLOAD["evidence_turns"]
+        )
+        # The mirror model accepts the upstream shape (extra="forbid").
+        from platform_gateway.schemas.api import SessionRecord
+
+        record = SessionRecord(**response.json())
+        self.assertEqual(len(record.evidence_turns or []), 1)
 
     def test_upstream_404_passes_through(self) -> None:
         # The anti-enumeration 404 for unknown/foreign sessions must reach

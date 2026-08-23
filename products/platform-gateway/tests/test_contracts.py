@@ -78,6 +78,24 @@ class ContractAlignmentTests(unittest.TestCase):
                     session_id="ses-1",
                     user_id="alice",
                     created_at="2026-07-28T00:00:00Z",
+                    evidence_turns=[
+                        {
+                            "turn_index": 0,
+                            "request_id": "req-1",
+                            "created_at": "2026-07-28T00:00:01Z",
+                            "frames": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_name": "k8s.list_pods",
+                                    "call_id": "call-1",
+                                    "status": "success",
+                                    "truncated": {
+                                        "reason": "session_budget"
+                                    },
+                                }
+                            ],
+                        }
+                    ],
                 ),
                 "agent-session.schema.json",
             ),

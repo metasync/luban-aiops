@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `delivered`
 - owner: chi
 - created: 2026-08-23
 - release slice: post-0.9.0 train (candidate alongside the SPEC-024 model
@@ -143,7 +143,7 @@ Acceptance criteria:
 ## Open Questions
 
 All three open questions are resolved in `plan.md` (measurement pass of
-2026-08-23); the resolutions below are pending spec approval.
+2026-08-23) and approved with the spec.
 
 - Storage home: dedicated `session_evidence` table with the same dual
   backend as the SPEC-017 state store (plan §Q1) — the snapshot-embedding
@@ -162,3 +162,7 @@ All three open questions are resolved in `plan.md` (measurement pass of
 - 2026-08-23: `plan.md` + `tasks.md` drafted; live dev-k8s measurement
   pass (n=9 read-only tools, max payload 80.9k chars on `k8s.get_events`)
   resolved the storage-home, retention, and size-cap open questions.
+- 2026-08-23: approved by owner; implementation proceeds per `tasks.md`.
+- 2026-08-23: delivered — all R-1…R-4 tasks complete and `make verify`
+  green; open questions closed in `plan.md` (measurement-derived caps ship
+  as code defaults with `AGENT_EVIDENCE_*` overrides).

@@ -17,6 +17,7 @@ __all__ = [
     "AgentChatResponse",
     "AgentStreamEvent",
     "AgentSession",
+    "EvidenceTurn",
     "AgentSessionSummary",
     "AgentSessionList",
     "AgentSessionCreateRequest",
@@ -121,6 +122,21 @@ class AgentStreamEvent(BaseModel):
 # --- Sessions ---
 
 
+class EvidenceTurn(BaseModel):
+    """Persisted tool-evidence group for one assistant turn (SPEC-025 R-2).
+
+    Frames follow the tool_call/tool_result shapes of
+    agent-stream-event.schema.json; the evidence store may add a
+    ``truncated`` marker where a size cap replaced a payload (SPEC-025
+    R-1), never silently drop a frame.
+    """
+
+    turn_index: int = Field(ge=0)
+    request_id: str
+    created_at: str | None = None
+    frames: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class AgentSession(BaseModel):
     session_id: str
     user_id: str
@@ -135,6 +151,10 @@ class AgentSession(BaseModel):
     pending_confirmation: bool = False
     transcript_available: bool = False
     transcript: list[dict[str, str]] = Field(default_factory=list)
+    # SPEC-025 R-2: persisted tool evidence grouped by assistant turn.
+    # Empty list when the session stored none; null when the evidence
+    # store is unreadable (degrades like transcript_available=false).
+    evidence_turns: list[EvidenceTurn] | None = None
 
 
 class AgentSessionSummary(BaseModel):

@@ -77,6 +77,9 @@ class SessionRecord(BaseModel):
     pending_confirmation: bool = False
     transcript_available: bool = False
     transcript: list[dict[str, str]] = Field(default_factory=list)
+    # SPEC-025 R-2: persisted tool evidence grouped by assistant turn;
+    # relayed verbatim (empty list = none stored, null = store unreadable).
+    evidence_turns: list[dict[str, Any]] | None = None
 
 
 class IdentityContext(BaseModel):

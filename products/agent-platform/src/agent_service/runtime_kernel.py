@@ -4,10 +4,18 @@ import logging
 from collections import OrderedDict
 from collections.abc import AsyncIterator
 
-from agent_service.core.metrics import record_agent_state_error
+from agent_service.core.metrics import (
+    record_agent_state_error,
+    record_evidence_write,
+)
 from agent_service.providers import get_provider
 from agent_service.runtime_settings import RuntimeSettings
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
+from agent_service.services.evidence_store import (
+    EVIDENCE_FRAME_TYPES,
+    EVIDENCE_STORE,
+    prepare_frames,
+)
 from agent_service.services.hitl_confirmations import (
     CONFIRMATION_REGISTRY,
     ConfirmationOwnerMismatch,
@@ -410,6 +418,59 @@ class AgentKernel:
                 "agent state snapshot failed for session %s: %s", session_id, exc
             )
 
+    @staticmethod
+    def _count_user_turns(agent) -> int:
+        """User-message count in the agent context (SPEC-025 turn index).
+
+        The replay path attaches persisted evidence groups to the assistant
+        turn at this ordinal, so the index is captured from the context
+        before the streamed turn appends to it. Counting user messages (not
+        assistant) keeps the index stable across HITL park/resume: parking
+        may add a partial assistant message but never a user one.
+        """
+        try:
+            context = getattr(agent.state, "context", None) or []
+            return sum(
+                1 for msg in context if getattr(msg, "role", None) == "user"
+            )
+        except Exception:  # pragma: no cover - defensive index fallback
+            return 0
+
+    def _persist_evidence(
+        self,
+        session_id: str,
+        request_id: str,
+        turn_index: int,
+        frames: list[dict[str, object]],
+    ) -> None:
+        """Persist a turn's evidence frames best-effort (SPEC-025 R-1).
+
+        Never raises: a failed write degrades replay parity, not the turn.
+        Entry caps apply before insert; the session budget is enforced by
+        the store itself.
+        """
+        if not frames:
+            return
+        try:
+            prepared = prepare_frames(
+                frames, self.settings.evidence_entry_max_chars
+            )
+            EVIDENCE_STORE.save_turn(
+                session_id,
+                request_id,
+                turn_index,
+                prepared,
+                self.settings.evidence_session_max_bytes,
+            )
+            record_evidence_write("ok")
+        except Exception as exc:
+            record_evidence_write("error")
+            LOGGER.warning(
+                "evidence persistence failed for session %s: %s",
+                session_id,
+                exc,
+            )
+
     async def _build_agent(self, session_id: str, bearer_token: str | None = None):
         from agentscope.agent import Agent
         from agentscope.message import UserMsg
@@ -622,6 +683,11 @@ class AgentKernel:
             # Ensure the agent (with the token-cached toolkit) exists.
             agent, user_msg_cls = await self.ensure_agent(session_id, bearer_token)
 
+            # SPEC-025 R-1: the replay turn ordinal for this stream's
+            # evidence, captured before the turn mutates the context.
+            turn_index = self._count_user_turns(agent)
+            evidence_frames: list[dict[str, object]] = []
+
             # Deterministic anti-hallucination guard: with a gateway
             # configured but zero gateway tools registered the model has no
             # real data to ground in, so inject an explicit notice for this
@@ -657,11 +723,14 @@ class AgentKernel:
                     # Drain any accumulated trace events before yielding text.
                     while not trace_queue.empty():
                         trace = trace_queue.get_nowait()
-                        yield {
+                        decorated = {
                             **trace,
                             "request_id": request_id,
                             "session_id": session_id,
                         }
+                        if decorated.get("type") in EVIDENCE_FRAME_TYPES:
+                            evidence_frames.append(decorated)
+                        yield decorated
                     # SPEC-020 R-2: a kernel ASK park surfaces as a
                     # confirmation_request frame and ends the stream without
                     # message_end; the confirm endpoint resumes it.
@@ -680,14 +749,24 @@ class AgentKernel:
                 # Drain any remaining trace events after the stream completes.
                 while not trace_queue.empty():
                     trace = trace_queue.get_nowait()
-                    yield {
+                    decorated = {
                         **trace,
                         "request_id": request_id,
                         "session_id": session_id,
                     }
+                    if decorated.get("type") in EVIDENCE_FRAME_TYPES:
+                        evidence_frames.append(decorated)
+                    yield decorated
             finally:
                 DELEGATED_TOKEN.reset(token_var)
                 TOOL_EVIDENCE_SINK.reset(sink_var)
+
+            # Persist the turn's evidence frames best-effort (SPEC-025 R-1)
+            # alongside the conversation snapshot; also covers the park
+            # path, which breaks out of the loop above.
+            self._persist_evidence(
+                session_id, request_id, turn_index, evidence_frames
+            )
 
             # Persist conversation state after the completed turn so it
             # survives restarts (SPEC-017 R-3). Fail-open by design.
@@ -804,6 +883,11 @@ class AgentKernel:
             raise ConfirmationOwnerMismatch(user_name)
 
         agent, _user_msg_cls = await self.ensure_agent(session_id, bearer_token)
+        # SPEC-025 R-1: resumed frames belong to the same assistant turn as
+        # the pre-park frames — no user message was added by the park, so
+        # the count reproduces the original turn ordinal.
+        turn_index = self._count_user_turns(agent)
+        evidence_frames: list[dict[str, object]] = []
         confirmed = decision == "approve"
         confirm_event = UserConfirmResultEvent(
             reply_id=pending.reply_id,
@@ -831,11 +915,14 @@ class AgentKernel:
                 self.clear_error()
                 while not trace_queue.empty():
                     trace = trace_queue.get_nowait()
-                    yield {
+                    decorated = {
                         **trace,
                         "request_id": request_id,
                         "session_id": session_id,
                     }
+                    if decorated.get("type") in EVIDENCE_FRAME_TYPES:
+                        evidence_frames.append(decorated)
+                    yield decorated
                 # A resumed turn can park again on another ASK-gated tool.
                 frame = self._build_confirmation_frame(
                     event, session_id, user_name, agent.toolkit
@@ -850,12 +937,20 @@ class AgentKernel:
                 yield self.normalize_event(event, request_id, session_id)
             while not trace_queue.empty():
                 trace = trace_queue.get_nowait()
-                yield {
+                decorated = {
                     **trace,
                     "request_id": request_id,
                     "session_id": session_id,
                 }
+                if decorated.get("type") in EVIDENCE_FRAME_TYPES:
+                    evidence_frames.append(decorated)
+                yield decorated
         finally:
+            # Covers both completion and re-park (the early return above):
+            # either way the frames drained so far belong to this turn.
+            self._persist_evidence(
+                session_id, request_id, turn_index, evidence_frames
+            )
             DELEGATED_TOKEN.reset(token_var)
             TOOL_EVIDENCE_SINK.reset(sink_var)
             CONFIRMATION_REGISTRY.resolve(session_id, pending.confirm_id)

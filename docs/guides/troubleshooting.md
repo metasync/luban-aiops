@@ -700,6 +700,41 @@ kubectl -n dev-luban-aiops logs deployment/agent-service | grep -i transcript
   falls back. Transcripts exclude system and tool frames by design, so a
   transcript shorter than the raw stream is expected.
 
+## Symptom: Session detail returns `evidence_turns: null`
+
+**Most likely cause:** The evidence store (SPEC-025) is unreadable for that
+request — for example, the Postgres backend dropped. `null` is an explicit
+degradation (like `transcript_available: false`), never a 500: the session,
+its transcript, and chat all keep working, only replayed evidence cards are
+absent. An empty list (`[]`) instead means the session simply stored no tool
+evidence (no tool calls ran in it). Evidence persistence itself is
+best-effort, so a failed write never fails a turn — it logs and increments
+`evidence_store_writes_total{result="error"}`.
+
+**Diagnostic:**
+
+```bash
+# null = store unreadable, [] = nothing stored
+curl -s -H "X-User-ID: $USER" \
+  http://localhost:8080/api/v1/sessions/<session_id> | jq '.evidence_turns'
+
+# agent-platform logs a warning per unreadable read and failed write
+kubectl -n dev-luban-aiops logs deployment/agent-service | grep -i evidence
+
+# write failures and truncation are observable via metrics
+curl -s http://localhost:8000/metrics | grep evidence_
+```
+
+**Resolution:**
+
+- Check the agent state database health (`AGENT_STATE_DB_URL`); the evidence
+  store shares the backend knob and fails open to memory when Postgres is
+  unreachable at startup.
+- Truncation notes are not faults: an `entry_cap` marker means one payload
+  exceeded `AGENT_EVIDENCE_ENTRY_MAX_CHARS`, and a `session_budget` marker
+  means the oldest payloads of that session were evicted to fit
+  `AGENT_EVIDENCE_SESSION_MAX_BYTES` (metadata survives both).
+
 ## Symptom: Session delete returns 409 (cannot delete a session)
 
 **Most likely cause:** The session holds an unresolved parked HITL

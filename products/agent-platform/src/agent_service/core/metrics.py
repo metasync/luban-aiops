@@ -151,3 +151,35 @@ def record_agent_state_error(operation: str) -> None:
 
 def record_agent_state_fallback() -> None:
     AGENT_STATE_FALLBACKS.inc()
+
+
+# --- Evidence store observability (SPEC-025 R-4) ---
+
+EVIDENCE_STORE_WRITES = Counter(
+    "evidence_store_writes_total",
+    "Evidence turn persistence attempts.",
+    ["result"],
+)
+
+EVIDENCE_FRAMES_PERSISTED = Counter(
+    "evidence_frames_persisted_total",
+    "Evidence frames persisted for session replay.",
+)
+
+EVIDENCE_FRAMES_TRUNCATED = Counter(
+    "evidence_frames_truncated_total",
+    "Evidence frames truncated by size caps.",
+    ["reason"],
+)
+
+
+def record_evidence_write(result: str) -> None:
+    EVIDENCE_STORE_WRITES.labels(result=result).inc()
+
+
+def record_evidence_frames_persisted(count: int) -> None:
+    EVIDENCE_FRAMES_PERSISTED.inc(count)
+
+
+def record_evidence_frame_truncated(reason: str) -> None:
+    EVIDENCE_FRAMES_TRUNCATED.labels(reason=reason).inc()

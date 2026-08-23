@@ -142,6 +142,12 @@ class RuntimeSettings:
     # confirmation stays answerable. 0 disables the bridge and restores the
     # pre-SPEC-020 silent-park posture.
     hitl_confirm_timeout: int = 600
+    # Evidence persistence caps (SPEC-025 R-1): per-entry data cap in chars
+    # and per-session storage budget in bytes. Defaults are measured-derived
+    # (dev-k8s pass, SPEC-025 plan §Q3) and deliberately decoupled from the
+    # SSE data cap, which protects live bandwidth rather than storage.
+    evidence_entry_max_chars: int = 131072
+    evidence_session_max_bytes: int = 4194304
 
     @staticmethod
     def default_provider_options(provider: RuntimeProvider) -> RuntimeProviderOptions:
@@ -324,6 +330,12 @@ class RuntimeSettings:
                 _optional_bool("AGENTSCOPE_TASK_TOOLS_ENABLED") or False
             ),
             hitl_confirm_timeout=int(os.getenv("AGENT_HITL_CONFIRM_TIMEOUT", "600")),
+            evidence_entry_max_chars=int(
+                os.getenv("AGENT_EVIDENCE_ENTRY_MAX_CHARS", "131072")
+            ),
+            evidence_session_max_bytes=int(
+                os.getenv("AGENT_EVIDENCE_SESSION_MAX_BYTES", "4194304")
+            ),
         )
 
     def is_configured(self) -> bool:

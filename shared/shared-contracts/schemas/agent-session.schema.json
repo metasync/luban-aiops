@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/agent-session.schema.json",
   "title": "Agent Session (v2)",
-  "description": "Session record returned by POST /api/v2/sessions and GET /api/v2/sessions/{id}. SPEC-022 R-1 adds workspace fields: server-minted title, last_active_at, parked-confirmation flag, and a best-effort transcript reconstructed from the kernel state snapshot.",
+  "description": "Session record returned by POST /api/v2/sessions and GET /api/v2/sessions/{id}. SPEC-022 R-1 adds workspace fields: server-minted title, last_active_at, parked-confirmation flag, and a best-effort transcript reconstructed from the kernel state snapshot. SPEC-025 R-2 adds the additive evidence_turns field carrying persisted tool evidence grouped by assistant turn.",
   "type": "object",
   "additionalProperties": false,
   "required": ["session_id", "user_id", "created_at", "status"],
@@ -56,6 +56,33 @@
           },
           "created_at": {
             "type": "string"
+          }
+        }
+      }
+    },
+    "evidence_turns": {
+      "type": ["array", "null"],
+      "description": "Persisted tool evidence grouped by assistant turn (SPEC-025 R-2); empty array when the session stored none, null when the evidence store is unreadable (degrades like transcript_available=false, never 500). Turn shape per session-evidence.schema.json; frames follow the tool_call/tool_result shapes of agent-stream-event.schema.json.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["turn_index", "request_id", "frames"],
+        "properties": {
+          "turn_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "frames": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
           }
         }
       }

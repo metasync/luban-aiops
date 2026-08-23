@@ -8,6 +8,39 @@ export interface TranscriptTurn {
   created_at?: string;
 }
 
+// Persisted tool evidence (SPEC-025 R-2): one group per assistant turn.
+// Frames keep the wire shape of the stream contract's tool_call/tool_result
+// frames, plus an optional store-added truncation marker (SPEC-025 R-1).
+export interface EvidenceTruncated {
+  reason: "entry_cap" | "session_budget" | (string & {});
+  original_chars?: number;
+}
+
+export interface EvidenceFrame {
+  type: "tool_call" | "tool_result" | (string & {});
+  call_id?: string;
+  tool_name?: string;
+  parameters?: Record<string, unknown>;
+  status?: string;
+  evidence?: {
+    executed_at?: string;
+    duration_ms?: number;
+    risk_level?: string;
+    source_system?: string;
+  };
+  data?: unknown;
+  data_summary?: unknown;
+  error?: { code?: string; message?: string } | null;
+  truncated?: EvidenceTruncated;
+}
+
+export interface EvidenceTurn {
+  turn_index: number;
+  request_id: string;
+  created_at?: string;
+  frames: EvidenceFrame[];
+}
+
 export interface SessionSummary {
   session_id: string;
   title: string | null;
@@ -21,6 +54,9 @@ export interface SessionDetail extends SessionSummary {
   status: "active" | "expired";
   transcript_available: boolean;
   transcript: TranscriptTurn[];
+  // SPEC-025 R-2: empty array when the session stored no evidence,
+  // null when the evidence store is unreadable (degraded, never a failure).
+  evidence_turns?: EvidenceTurn[] | null;
 }
 
 export interface SessionListResponse {

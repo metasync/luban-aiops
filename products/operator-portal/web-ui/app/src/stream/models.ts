@@ -32,6 +32,13 @@ export interface ToolCallFrame {
 
 export type ToolResultStatus = "success" | "error" | "denied" | (string & {});
 
+// Store-added size marker on persisted evidence (SPEC-025 R-1); never
+// present on live-stream frames, always visible in the replay card.
+export interface ToolTruncated {
+  reason: "entry_cap" | "session_budget" | (string & {});
+  originalChars?: number;
+}
+
 export interface ToolResultFrame {
   kind: "tool_result";
   callId?: string;
@@ -43,6 +50,7 @@ export interface ToolResultFrame {
   data?: unknown;
   dataSummary?: unknown;
   error?: ToolError;
+  truncated?: ToolTruncated;
 }
 
 export interface PendingCall {

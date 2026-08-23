@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/session-evidence.schema.json",
+  "title": "Session Evidence Turn (v1)",
+  "description": "Persisted tool-evidence group for one assistant turn, returned in the additive evidence_turns field of GET /api/v2/sessions/{id} (SPEC-025 R-2). Frames follow the tool_call/tool_result shapes of agent-stream-event.schema.json; the evidence store may add a truncation marker where a size cap replaced a payload (SPEC-025 R-1), never silently drop a frame.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["turn_index", "request_id", "frames"],
+  "properties": {
+    "turn_index": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Assistant turn ordinal the evidence belongs to (0-based); replay attaches the group to that transcript turn."
+    },
+    "request_id": {
+      "type": "string",
+      "description": "Request that produced the evidence; correlates with the audit trail tool_invoked events."
+    },
+    "created_at": {
+      "type": "string",
+      "description": "Persistence timestamp assigned by the evidence store."
+    },
+    "frames": {
+      "type": "array",
+      "description": "Ordered tool_call/tool_result frames as they appeared on the live stream, persisted within the entry and session size caps.",
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["tool_call", "tool_result"]
+          },
+          "truncated": {
+            "type": "object",
+            "description": "Store-added size marker; absent on frames stored whole.",
+            "required": ["reason"],
+            "properties": {
+              "reason": {
+                "type": "string",
+                "enum": ["entry_cap", "session_budget"],
+                "description": "entry_cap: the per-entry cap replaced an oversized data payload with a truncated preview. session_budget: the per-session budget evicted the oldest result payload; metadata is preserved and data is null."
+              },
+              "original_chars": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Serialized size of the original data payload; present for entry_cap truncation."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  }
+}

@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from agent_service.core.metrics import record_session_created
 from agent_service.schemas.api import SessionRecord
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
+from agent_service.services.evidence_store import EVIDENCE_STORE
 from agent_service.services.session_store import SESSION_STORE
 
 LOGGER = logging.getLogger(__name__)
@@ -106,7 +107,8 @@ def delete_session(session_id: str, user_id: str | None = None) -> bool:
 
     State cleanup follows session deletion so a deleted session never
     leaves a durable conversation snapshot behind; a state-store failure
-    does not fail the session delete (fail-open).
+    does not fail the session delete (fail-open). Stored tool evidence
+    cascades with the session for the same reason (SPEC-025 R-2).
     """
     session = SESSION_STORE.get_session(session_id)
     if session is None:
@@ -118,5 +120,10 @@ def delete_session(session_id: str, user_id: str | None = None) -> bool:
             AGENT_STATE_STORE.delete_state(session_id)
         except Exception:
             # Durability cleanup is best-effort; the session is gone.
+            pass
+        try:
+            EVIDENCE_STORE.delete_session(session_id)
+        except Exception:
+            # Evidence cleanup is best-effort; the session is gone.
             pass
     return deleted
