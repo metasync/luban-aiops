@@ -159,8 +159,8 @@ def test_build_agent_app_streams_messages_when_configured(monkeypatch):
         def is_configured(self) -> bool:
             return True
 
-        def ensure_agent(self, session_id):
-            return fake_agent, None
+        async def ensure_agent(self, session_id):
+            return fake_agent, None, None
 
         def clear_error(self) -> None:
             self.cleared += 1
@@ -245,8 +245,8 @@ def test_build_agent_app_preserves_multiple_reply_blocks(monkeypatch):
         def is_configured(self) -> bool:
             return True
 
-        def ensure_agent(self, session_id):
-            return FakeAgent(), None
+        async def ensure_agent(self, session_id):
+            return FakeAgent(), None, None
 
         def clear_error(self) -> None:
             return None
@@ -332,8 +332,8 @@ def test_build_agent_app_returns_provider_fallback_when_streaming_fails(monkeypa
         def is_configured(self) -> bool:
             return True
 
-        def ensure_agent(self, session_id):
-            return FakeAgent(), None
+        async def ensure_agent(self, session_id):
+            return FakeAgent(), None, None
 
         def clear_error(self) -> None:
             return None

@@ -7,6 +7,7 @@ from platform_gateway.api.routes import (
     health,
     identity,
     incidents,
+    models,
     policy,
     runtime,
     sessions,
@@ -26,3 +27,4 @@ router.include_router(incidents.router)
 router.include_router(policy.router)
 router.include_router(tools.router)
 router.include_router(skills.router)
+router.include_router(models.router)

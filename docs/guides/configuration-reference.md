@@ -261,6 +261,7 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime
 | `AGENTSCOPE_MODEL_NAME` | Model identifier | *(from profile)* | profile ConfigMap |
 | `AGENTSCOPE_BASE_URL` | Provider API endpoint | *(from profile)* | profile ConfigMap |
 | `AGENTSCOPE_API_KEY` | Provider API key | *(none)* | **runtime-secrets** |
+| `<PROVIDER>_API_KEY` / `<PROVIDER>_MODEL_NAME` / `<PROVIDER>_BASE_URL` | Additional model-catalog entries (SPEC-024); `PROVIDER` ∈ `DASHSCOPE`, `DEEPSEEK`, `OPENAI`. Each provider with a resolvable key contributes one selectable model (id = provider name); the active profile's provider falls back to the `AGENTSCOPE_*` knobs, so single-provider deployments need no new config | *(none)* | **runtime-secrets** |
 | `AGENTSCOPE_AGENT_NAME` | Agent identifier | `LubanOpsRuntime` | runtime-config |
 | `AGENTSCOPE_REDIS_HOST` | Redis host for AgentScope coordination | `redis` | runtime-config |
 | `AGENTSCOPE_REDIS_PORT` | Redis port | `6379` | runtime-config |

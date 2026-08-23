@@ -15,6 +15,10 @@ class SessionRecord(BaseModel):
     # pre-existing sessions and lightweight backends keep working.
     title: str | None = None
     last_active_at: datetime | None = None
+    # SPEC-024 R-3: model id pinned on the session by the most recent
+    # turn; null when the session never selected a model. Lives on the
+    # session record so affinity survives restarts (Q-4).
+    model: str | None = None
 
 
 class CreateSessionRequest(BaseModel):

@@ -35,6 +35,15 @@ combined api-gateway by SPEC-010, per ADR-0005).
   Chat requests carry an optional `input_modality` (`text` | `voice`)
   forwarded as metadata only — logged and audited, never decision-bearing
   (SPEC-022 R-2).
+- Relays model discovery and per-turn model selection to `agent-platform`
+  (SPEC-024): `GET /api/v1/models` is gated by the `models:list` action
+  (mirroring the chat scope) and returns the discovery-safe catalog
+  (id/label/provider/default — never credentials); chat requests carry an
+  optional `model` (POST body / stream query parameter) relayed verbatim
+  with upstream 4xx pass-through — validation is fail-closed runtime-side.
+  Audit enrichment records the requested model on `chat_started` and the
+  serving model (teed from the `message_end` frame) on `chat_completed`
+  for both chat surfaces.
 - Forwards policy decision, session, and chat lifecycle audit events to
   `audit-service` fire-and-forget when `PLATFORM_GATEWAY_AUDIT_SERVICE_URL`
   is set (log-only otherwise; SPEC-013).

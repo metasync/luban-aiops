@@ -9,10 +9,13 @@ and upstream error mapping (502 on transport/5xx, 4xx passthrough).
 
 from __future__ import annotations
 
+import json
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import jsonschema
 from fastapi.testclient import TestClient
 
 from platform_gateway.app import create_app
@@ -327,6 +330,126 @@ class SkillsProxyTests(WorkspaceProxyBase):
             response = self.client.get("/api/v1/skills")
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()["detail"], "bad credential")
+
+
+MODELS_PAYLOAD = {
+    "models": [
+        {
+            "id": "deepseek",
+            "label": "deepseek-v4-flash",
+            "provider": "deepseek",
+            "default": True,
+        },
+        {
+            "id": "openai",
+            "label": "gpt-4o-mini",
+            "provider": "openai",
+            "default": False,
+        },
+    ],
+    "default": "deepseek",
+}
+
+MODELS_CLIENT = "platform_gateway.services.gateway_service.agent_client.list_models"
+
+
+def _models_status_error(status_code: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("GET", "http://agent-service/api/v2/models")
+    return httpx.HTTPStatusError(
+        "upstream error", request=request, response=httpx.Response(status_code)
+    )
+
+
+class ModelsProxyTests(WorkspaceProxyBase):
+    """Model catalog discovery pass-through (SPEC-024 R-2)."""
+
+    def test_operator_allowed_and_payload_proxied_verbatim(self) -> None:
+        upstream = AsyncMock(return_value=MODELS_PAYLOAD)
+        with (
+            self._patch_identity("operator", "models"),
+            patch(MODELS_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/models")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), MODELS_PAYLOAD)
+        upstream.assert_awaited_once()
+
+    def test_observer_allowed(self) -> None:
+        upstream = AsyncMock(return_value=MODELS_PAYLOAD)
+        with (
+            self._patch_identity("read-only-observer", "models"),
+            patch(MODELS_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/models")
+        self.assertEqual(response.status_code, 200)
+
+    def test_ungranted_role_denied_before_upstream(self) -> None:
+        upstream = AsyncMock(return_value=MODELS_PAYLOAD)
+        with (
+            self._patch_identity("auditor", "models"),
+            patch(MODELS_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/models")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"]["action"], "models:list")
+        upstream.assert_not_awaited()
+
+    def test_upstream_4xx_passed_through(self) -> None:
+        upstream = AsyncMock(side_effect=_models_status_error(401))
+        with (
+            self._patch_identity("operator", "models"),
+            patch(MODELS_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/models")
+        self.assertEqual(response.status_code, 401)
+
+    def test_upstream_5xx_mapped_to_502(self) -> None:
+        upstream = AsyncMock(side_effect=_models_status_error(500))
+        with (
+            self._patch_identity("operator", "models"),
+            patch(MODELS_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/models")
+        self.assertEqual(response.status_code, 502)
+
+    def test_transport_failure_returns_502(self) -> None:
+        upstream = AsyncMock(side_effect=httpx.ConnectError("boom"))
+        with (
+            self._patch_identity("operator", "models"),
+            patch(MODELS_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/models")
+        self.assertEqual(response.status_code, 502)
+
+    def test_payload_validates_against_model_catalog_contract(self) -> None:
+        """Lockstep: the proxied shape must satisfy model-catalog.schema.json."""
+        schema = json.loads(
+            (
+                Path(__file__).resolve().parents[3]
+                / "shared"
+                / "shared-contracts"
+                / "schemas"
+                / "model-catalog.schema.json"
+            ).read_text()
+        )
+        jsonschema.validate(MODELS_PAYLOAD, schema)
+        # Credentials or base URLs must never be part of the contract shape.
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(
+                {
+                    "models": [
+                        {
+                            "id": "deepseek",
+                            "label": "deepseek-v4-flash",
+                            "provider": "deepseek",
+                            "default": True,
+                            "api_key": "sk-secret",
+                        }
+                    ],
+                    "default": "deepseek",
+                },
+                schema,
+            )
 
 
 if __name__ == "__main__":

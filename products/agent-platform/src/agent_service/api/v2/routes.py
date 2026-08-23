@@ -23,6 +23,7 @@ from agent_service.schemas.v2 import (
     AgentChatRequest,
     AgentChatResponse,
     AgentHealth,
+    AgentModelCatalog,
     AgentRuntimeMetadata,
     AgentSession,
     AgentSessionCreateRequest,
@@ -38,6 +39,7 @@ from agent_service.services.hitl_confirmations import (
     ConfirmationNotFound,
     ConfirmationOwnerMismatch,
 )
+from agent_service.services.model_catalog import MODEL_CATALOG
 from agent_service.services.runtime_dependencies import (
     get_confirmation_registry,
     get_runtime_kernel,
@@ -49,6 +51,7 @@ from agent_service.services.session_service import (
     get_session,
     list_sessions,
     mark_session_turn,
+    pin_session_model,
 )
 from agent_service.services.session_store import SESSION_STORE
 from agent_service.services.session_transcript import extract_transcript
@@ -106,6 +109,27 @@ async def _reject_if_parked(session_id: str) -> None:
     )
 
 
+def _resolve_model(requested: str | None, pinned: str | None) -> str | None:
+    """Resolve the model id for a turn (SPEC-024 R-3): request > pinned > default.
+
+    An explicitly requested id must exist in the credential-gated
+    catalog — unknown ids fail closed with 422, never a silent default.
+    A pinned id is honored only while it still exists in the catalog
+    (a key revocation degrades the session back to the default).
+    """
+    if requested:
+        if MODEL_CATALOG.get(requested) is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"unknown model id: {requested}",
+            )
+        return requested
+    if pinned and MODEL_CATALOG.get(pinned) is not None:
+        return pinned
+    default = MODEL_CATALOG.default_entry()
+    return default.id if default is not None else None
+
+
 # --- Chat ---
 
 
@@ -121,6 +145,19 @@ async def chat(
     record_chat_request()
     session = ensure_session(body.session_id, user_id)
     await _reject_if_parked(session.session_id)
+    resolved_model = _resolve_model(body.model, session.model)
+    pin_session_model(session.session_id, resolved_model)
+    # SPEC-024 R-4: the serving model rides the audit trail via the
+    # response; the structured log keeps the runtime-side view.
+    LOGGER.info(
+        "chat turn model resolved",
+        extra={
+            "request_id": request_id,
+            "session_id": session.session_id,
+            "model": resolved_model,
+            "requested_model": body.model,
+        },
+    )
     mark_session_turn(session.session_id, body.message)
     content, structured_output = await get_runtime_kernel().reply_text(
         message=body.message,
@@ -128,12 +165,14 @@ async def chat(
         user_name=user_id,
         bearer_token=_bearer_token(authorization),
         response_schema=body.response_schema,
+        model_id=resolved_model,
     )
     return AgentChatResponse(
         session_id=session.session_id,
         request_id=request_id,
         content=content,
         structured_output=structured_output,
+        model=resolved_model,
     )
 
 
@@ -141,6 +180,9 @@ async def chat(
 async def chat_stream(
     message: str,
     session_id: str | None = None,
+    # SPEC-024 R-3: per-turn model selection, resolved request > pinned >
+    # default; unknown ids fail closed with 422 before headers go out.
+    model: str | None = None,
     # SPEC-023 R-4: voice-readiness parity with POST /chat's body field —
     # modality is metadata only and never changes policy or HITL outcomes.
     input_modality: Literal["text", "voice"] = "text",
@@ -153,6 +195,17 @@ async def chat_stream(
     record_chat_request()
     session = ensure_session(session_id, user_id)
     await _reject_if_parked(session.session_id)
+    resolved_model = _resolve_model(model, session.model)
+    pin_session_model(session.session_id, resolved_model)
+    LOGGER.info(
+        "chat stream model resolved",
+        extra={
+            "request_id": request_id,
+            "session_id": session.session_id,
+            "model": resolved_model,
+            "requested_model": model,
+        },
+    )
     mark_session_turn(session.session_id, message)
     bearer_token = _bearer_token(authorization)
 
@@ -163,6 +216,7 @@ async def chat_stream(
             session_id=session.session_id,
             user_name=user_id,
             bearer_token=bearer_token,
+            model_id=resolved_model,
         ):
             event = _normalize_stream_event(chunk, session.session_id, request_id)
             yield f"data: {event.model_dump_json(exclude_none=True)}\n\n"
@@ -221,6 +275,9 @@ async def chat_confirm(
                 user_name=user_id,
                 request_id=request_id,
                 bearer_token=_bearer_token(authorization),
+                # SPEC-024 R-3: the resumed stream stays on the model that
+                # parked it, so a rebuild restores against the same entry.
+                model_id=session.model,
             ):
                 event = _normalize_stream_event(
                     chunk, session.session_id, request_id
@@ -301,6 +358,8 @@ def _normalize_stream_event(
         ),
         evidence=raw.get("evidence") if isinstance(raw.get("evidence"), dict) else None,
         data_summary=_coerce_data_summary(raw.get("data_summary")),
+        # SPEC-024 R-3: message_end frames carry the serving model id.
+        model=raw.get("model") if isinstance(raw.get("model"), str) else None,
         # Full tool payload (v5): already size-capped by the evidence
         # middleware, so pass it through untouched.
         data=raw.get("data"),
@@ -422,6 +481,7 @@ async def read_session(
         status=session.status,  # type: ignore[arg-type]
         title=session.title,
         last_active_at=session.last_active_at,
+        model=session.model,
         pending_confirmation=get_confirmation_registry().has_pending(
             session.session_id
         ),
@@ -460,6 +520,22 @@ async def delete_session_route(
     if not delete_session(session.session_id, user_id):
         raise HTTPException(status_code=404, detail="session not found")
     return {"session_id": session.session_id, "deleted": True}
+
+
+# --- Model discovery (SPEC-024 R-2) ---
+
+
+@router.get("/models", response_model=AgentModelCatalog)
+async def list_models(x_user_id: str | None = Header(None)) -> AgentModelCatalog:
+    """Credential-gated model catalog, discovery-safe by construction.
+
+    Returns only id/label/provider/default — never credentials or base
+    URLs (SPEC-024 R-2). Always 200; an empty list when no model is
+    configured, mirroring the ``not_configured`` runtime posture.
+    """
+    _user_id(x_user_id)
+    payload = MODEL_CATALOG.public_models()
+    return AgentModelCatalog.model_validate(payload)
 
 
 # --- Runtime metadata ---

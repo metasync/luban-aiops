@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/model-catalog.schema.json",
+  "title": "Model Catalog (v2)",
+  "description": "Envelope returned by GET /api/v2/models (agent) and GET /api/v1/models (gateway pass-through) per SPEC-024 R-2: the credential-gated catalog of selectable models. Discovery-safe by construction — no credentials, no base URLs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["models", "default"],
+  "properties": {
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "provider", "default"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Selectable model id (the provider name); sent as the chat request 'model' field."
+          },
+          "label": {
+            "type": "string",
+            "description": "Display label: the configured model name (e.g. 'deepseek-v4-flash')."
+          },
+          "provider": {
+            "type": "string",
+            "enum": ["dashscope", "deepseek", "openai"],
+            "description": "Provider backing this model."
+          },
+          "default": {
+            "type": "boolean",
+            "description": "True for the deploy-time active profile's model."
+          }
+        }
+      }
+    },
+    "default": {
+      "type": ["string", "null"],
+      "description": "Id of the default model, or null when no model is configured."
+    }
+  }
+}

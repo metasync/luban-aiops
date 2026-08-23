@@ -25,6 +25,7 @@ import { Bubble, Sender } from "@ant-design/x";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { ApiError } from "../api/client";
+import { getModelCatalog, type ModelCatalogResponse } from "../api/models";
 import { getSession, type SessionSummary } from "../api/sessions";
 import { useAuth } from "../auth/AuthContext";
 import { CHAT_CONFIRM_ROLES, hasAnyRole } from "../roles";
@@ -37,6 +38,7 @@ import {
   type ConfirmationDecision,
 } from "../stream/useChatStream";
 import { renderMarkdown } from "./markdown";
+import { ModelSelect } from "./ModelSelect";
 import { transcriptToTurns } from "./transcript";
 import {
   VOICE_LANGUAGES,
@@ -577,6 +579,34 @@ export default function ChatView({
     speech.start(voiceLanguage, appendVoiceText);
   };
 
+  // Model catalog (SPEC-024 R-4): fetched once per sign-in; any failure
+  // hides the selector and turns resolve the deploy-time default
+  // server-side — chat keeps working either way.
+  const [modelCatalog, setModelCatalog] =
+    useState<ModelCatalogResponse | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  // Session-switch seeding runs inside a fetch callback whose closure must
+  // see the latest catalog without re-running the transcript effect.
+  const catalogRef = useRef<ModelCatalogResponse | null>(null);
+  catalogRef.current = modelCatalog;
+
+  useEffect(() => {
+    if (!authenticated) return;
+    const controller = new AbortController();
+    getModelCatalog(controller.signal)
+      .then((catalog) => {
+        if (controller.signal.aborted) return;
+        setModelCatalog(catalog);
+        setSelectedModel(
+          catalog.default ?? catalog.models[0]?.id ?? null,
+        );
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setModelCatalog(null);
+      });
+    return () => controller.abort();
+  }, [authenticated]);
+
   // Session switch: load the transcript once per tab, then let the stream
   // hook's per-session cache take over on subsequent switches.
   useEffect(() => {
@@ -609,6 +639,17 @@ export default function ChatView({
         loadedRef.current.add(target);
         if (!detail.transcript_available && (detail.transcript ?? []).length === 0) {
           setTranscriptNote("This session has no recorded transcript yet.");
+        }
+        // SPEC-024 R-3: the selector follows the session's pinned model;
+        // a session without a pin falls back to the catalog default.
+        const catalog = catalogRef.current;
+        if (
+          detail.model &&
+          catalog?.models.some((entry) => entry.id === detail.model)
+        ) {
+          setSelectedModel(detail.model);
+        } else {
+          setSelectedModel(catalog?.default ?? null);
         }
         setSession(
           target,
@@ -698,7 +739,11 @@ export default function ChatView({
     setDraft("");
     const inputModality = voiceUsedRef.current ? "voice" : undefined;
     voiceUsedRef.current = false;
-    void chat.send(text, { userId: username ?? undefined, inputModality });
+    void chat.send(text, {
+      userId: username ?? undefined,
+      inputModality,
+      model: selectedModel ?? undefined,
+    });
   };
 
   return (
@@ -765,51 +810,59 @@ export default function ChatView({
             }
             autoSize={{ minRows: 1, maxRows: 6 }}
             prefix={
-              speech.supported ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  <Select
-                    size="small"
-                    variant="borderless"
-                    aria-label="Recognition language"
-                    value={voiceLanguage}
-                    onChange={changeVoiceLanguage}
-                    options={VOICE_LANGUAGES.map((lang) => ({
-                      value: lang.code,
-                      label: lang.label,
-                    }))}
-                    popupMatchSelectWidth={false}
-                  />
-                  <Tooltip
-                    title={
-                      speech.listening
-                        ? "Stop listening"
-                        : "Dictate with the microphone"
-                    }
-                  >
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <ModelSelect
+                  catalog={modelCatalog}
+                  value={selectedModel}
+                  onChange={setSelectedModel}
+                  disabled={chat.streaming || !authenticated}
+                />
+                {speech.supported ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <Select
+                      size="small"
+                      variant="borderless"
+                      aria-label="Recognition language"
+                      value={voiceLanguage}
+                      onChange={changeVoiceLanguage}
+                      options={VOICE_LANGUAGES.map((lang) => ({
+                        value: lang.code,
+                        label: lang.label,
+                      }))}
+                      popupMatchSelectWidth={false}
+                    />
+                    <Tooltip
+                      title={
+                        speech.listening
+                          ? "Stop listening"
+                          : "Dictate with the microphone"
+                      }
+                    >
+                      <Button
+                        type="text"
+                        size="small"
+                        danger={speech.listening}
+                        icon={<AudioOutlined />}
+                        aria-label="Voice input"
+                        aria-pressed={speech.listening}
+                        onClick={toggleVoice}
+                      />
+                    </Tooltip>
+                  </div>
+                ) : (
+                  // Graceful degradation: affordance disabled with an
+                  // explanation when the browser lacks the Web Speech API.
+                  <Tooltip title="Voice input is unavailable in this browser (no Web Speech API).">
                     <Button
                       type="text"
                       size="small"
-                      danger={speech.listening}
+                      disabled
                       icon={<AudioOutlined />}
-                      aria-label="Voice input"
-                      aria-pressed={speech.listening}
-                      onClick={toggleVoice}
+                      aria-label="Voice input unavailable"
                     />
                   </Tooltip>
-                </div>
-              ) : (
-                // Graceful degradation: affordance disabled with an
-                // explanation when the browser lacks the Web Speech API.
-                <Tooltip title="Voice input is unavailable in this browser (no Web Speech API).">
-                  <Button
-                    type="text"
-                    size="small"
-                    disabled
-                    icon={<AudioOutlined />}
-                    aria-label="Voice input unavailable"
-                  />
-                </Tooltip>
-              )
+                )}
+              </div>
             }
           />
         </div>

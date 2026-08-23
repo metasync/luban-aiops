@@ -84,6 +84,9 @@ export interface SendOptions {
   // SPEC-023 R-4: voice turns arrive as transcribed text; the modality is
   // metadata only and never changes policy or HITL outcomes.
   inputModality?: "text" | "voice";
+  // SPEC-024 R-3: the composer's model selection for this turn; omitted
+  // when no catalog is available so the runtime resolves its default.
+  model?: string | null;
 }
 
 export interface ChatStreamApi {
@@ -220,6 +223,7 @@ export function useChatStream(): ChatStreamApi {
           userId,
           sessionId,
           inputModality: options.inputModality,
+          model: options.model,
         });
         const opened = await openStream(path, { signal: controller.signal });
         requestIdRef.current = opened.requestId;

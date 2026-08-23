@@ -102,6 +102,23 @@ def mark_session_turn(session_id: str, message: str) -> None:
         )
 
 
+def pin_session_model(session_id: str, model: str | None) -> None:
+    """Pin the model that resolved for a turn (SPEC-024 R-3, Q-4).
+
+    The newest resolved selection wins (unlike the set-once title). Like
+    all workspace bookkeeping this is fail-open: a store failure degrades
+    affinity, never the turn.
+    """
+    if not model:
+        return
+    try:
+        SESSION_STORE.set_session_model(session_id, model)
+    except Exception as exc:
+        LOGGER.warning(
+            "session model pinning failed for %s: %s", session_id, exc
+        )
+
+
 def delete_session(session_id: str, user_id: str | None = None) -> bool:
     """Delete a session and its persisted agent state (SPEC-017 R-3).
 

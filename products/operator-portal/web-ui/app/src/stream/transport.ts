@@ -35,6 +35,9 @@ export function chatStreamPath(options: {
   // SPEC-023 R-4: modality rides as metadata only (voice turns are
   // transcribed text before send; the backend records it for audit).
   inputModality?: "text" | "voice";
+  // SPEC-024 R-3: per-turn model selection; the runtime validates it
+  // fail-closed against the credential-gated catalog.
+  model?: string | null;
 }): string {
   const params = new URLSearchParams({
     message: options.message,
@@ -45,6 +48,9 @@ export function chatStreamPath(options: {
   }
   if (options.inputModality && options.inputModality !== "text") {
     params.set("input_modality", options.inputModality);
+  }
+  if (options.model) {
+    params.set("model", options.model);
   }
   return `/api/v1/chat/stream?${params.toString()}`;
 }

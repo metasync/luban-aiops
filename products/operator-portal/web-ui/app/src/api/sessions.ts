@@ -57,6 +57,9 @@ export interface SessionDetail extends SessionSummary {
   // SPEC-025 R-2: empty array when the session stored no evidence,
   // null when the evidence store is unreadable (degraded, never a failure).
   evidence_turns?: EvidenceTurn[] | null;
+  // SPEC-024 R-3: model id pinned by the session's most recent turn; the
+  // composer seeds its selector from it on session switch.
+  model?: string | null;
 }
 
 export interface SessionListResponse {

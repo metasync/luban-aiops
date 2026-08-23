@@ -196,8 +196,8 @@ class FakeMemoryAgent:
 def test_agent_conversation_state_never_crosses_sessions(monkeypatch):
     kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
 
-    async def fake_build_agent(session_id, bearer_token=None):
-        return (FakeMemoryAgent(), FakeUserMsg)
+    async def fake_build_agent(session_id, bearer_token=None, model_id=None):
+        return (FakeMemoryAgent(), FakeUserMsg, model_id or kernel.settings.provider)
 
     monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
 
@@ -214,13 +214,13 @@ def test_agent_conversation_state_never_crosses_sessions(monkeypatch):
 def test_ensure_agent_reuses_instance_per_session(monkeypatch):
     kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
 
-    async def fake_build_agent(session_id, bearer_token=None):
-        return (FakeMemoryAgent(), FakeUserMsg)
+    async def fake_build_agent(session_id, bearer_token=None, model_id=None):
+        return (FakeMemoryAgent(), FakeUserMsg, model_id or kernel.settings.provider)
 
     monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
 
-    agent_a, _ = asyncio.run(kernel.ensure_agent("ses-a"))
-    agent_b, _ = asyncio.run(kernel.ensure_agent("ses-b"))
+    agent_a, _, _ = asyncio.run(kernel.ensure_agent("ses-a"))
+    agent_b, _, _ = asyncio.run(kernel.ensure_agent("ses-b"))
 
     assert agent_a is not agent_b
     assert asyncio.run(kernel.ensure_agent("ses-a"))[0] is agent_a
@@ -232,12 +232,12 @@ def test_ensure_agent_cache_is_bounded(monkeypatch):
         max_cached_agents=1,
     )
 
-    async def fake_build_agent(session_id, bearer_token=None):
-        return (FakeMemoryAgent(), FakeUserMsg)
+    async def fake_build_agent(session_id, bearer_token=None, model_id=None):
+        return (FakeMemoryAgent(), FakeUserMsg, model_id or kernel.settings.provider)
 
     monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
 
-    agent_a, _ = asyncio.run(kernel.ensure_agent("ses-a"))
+    agent_a, _, _ = asyncio.run(kernel.ensure_agent("ses-a"))
     asyncio.run(kernel.ensure_agent("ses-b"))
 
     assert asyncio.run(kernel.ensure_agent("ses-a"))[0] is not agent_a
@@ -252,12 +252,12 @@ def test_concurrent_ensure_agent_builds_one_agent_per_session(monkeypatch):
     kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
     build_calls = 0
 
-    async def fake_build_agent(session_id, bearer_token=None):
+    async def fake_build_agent(session_id, bearer_token=None, model_id=None):
         nonlocal build_calls
         build_calls += 1
         # Yield control so a concurrent caller can interleave here.
         await asyncio.sleep(0)
-        return (FakeMemoryAgent(), FakeUserMsg)
+        return (FakeMemoryAgent(), FakeUserMsg, model_id or kernel.settings.provider)
 
     monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
 
@@ -272,7 +272,7 @@ def test_concurrent_ensure_agent_builds_one_agent_per_session(monkeypatch):
 
     assert build_calls == 1
     first_agent = results[0][0]
-    assert all(agent is first_agent for agent, _ in results)
+    assert all(agent is first_agent for agent, _, _ in results)
 
 
 class TestPerTokenToolkitCache:
@@ -525,28 +525,28 @@ class TestAgentRebuildOnToolRecovery:
 
         builds = 0
 
-        async def fake_build_agent(session_id, bearer_token=None):
+        async def fake_build_agent(session_id, bearer_token=None, model_id=None):
             nonlocal builds
             builds += 1
             agent = FakeMemoryAgent()
             # Reflect the toolkit the real Agent would have received.
             agent.toolkit = await kernel._ensure_toolkit(bearer_token)
-            return (agent, FakeUserMsg)
+            return (agent, FakeUserMsg, model_id or kernel.settings.provider)
 
         monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
 
-        agent_1, _ = asyncio.run(kernel.ensure_agent("ses-r", "token-a"))
+        agent_1, _, _ = asyncio.run(kernel.ensure_agent("ses-r", "token-a"))
         assert builds == 1
         assert kernel._count_gateway_tools(agent_1.toolkit) == 0
 
         # Discovery recovers: the stale agent is replaced, not reused.
-        agent_2, _ = asyncio.run(kernel.ensure_agent("ses-r", "token-a"))
+        agent_2, _, _ = asyncio.run(kernel.ensure_agent("ses-r", "token-a"))
         assert builds == 2
         assert agent_2 is not agent_1
         assert kernel._count_gateway_tools(agent_2.toolkit) == 1
 
         # Steady state afterwards: no further rebuilds.
-        agent_3, _ = asyncio.run(kernel.ensure_agent("ses-r", "token-a"))
+        agent_3, _, _ = asyncio.run(kernel.ensure_agent("ses-r", "token-a"))
         assert builds == 2
         assert agent_3 is agent_2
 
@@ -558,10 +558,10 @@ class TestAgentRebuildOnToolRecovery:
         kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
         builds = 0
 
-        async def fake_build_agent(session_id, bearer_token=None):
+        async def fake_build_agent(session_id, bearer_token=None, model_id=None):
             nonlocal builds
             builds += 1
-            return (FakeMemoryAgent(), FakeUserMsg)
+            return (FakeMemoryAgent(), FakeUserMsg, model_id or kernel.settings.provider)
 
         monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
 
@@ -577,7 +577,7 @@ class TestAgentRebuildOnToolRecovery:
 
         monkeypatch.setattr(kernel, "_ensure_toolkit", evicting_ensure_toolkit)
 
-        agent, _ = asyncio.run(kernel.ensure_agent("ses-e"))
+        agent, _, _ = asyncio.run(kernel.ensure_agent("ses-e"))
 
         assert builds == 2
         assert agent is not None
@@ -653,8 +653,8 @@ def test_reply_text_passes_schema_and_returns_structured_output(monkeypatch):
     kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
     agent = FakeStructuredAgent()
 
-    async def fake_build_agent(session_id, bearer_token=None):
-        return (agent, FakeUserMsg)
+    async def fake_build_agent(session_id, bearer_token=None, model_id=None):
+        return (agent, FakeUserMsg, model_id or kernel.settings.provider)
 
     monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
 
@@ -674,8 +674,8 @@ def test_reply_text_without_schema_returns_none_structured(monkeypatch):
     kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
     agent = FakeStructuredAgent()
 
-    async def fake_build_agent(session_id, bearer_token=None):
-        return (agent, FakeUserMsg)
+    async def fake_build_agent(session_id, bearer_token=None, model_id=None):
+        return (agent, FakeUserMsg, model_id or kernel.settings.provider)
 
     monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
 
@@ -702,8 +702,8 @@ def test_reply_text_snapshots_state_after_turn(monkeypatch):
     )
     kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
 
-    async def fake_build_agent(session_id, bearer_token=None):
-        return (FakeMemoryAgent(), FakeUserMsg)
+    async def fake_build_agent(session_id, bearer_token=None, model_id=None):
+        return (FakeMemoryAgent(), FakeUserMsg, model_id or kernel.settings.provider)
 
     monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
 
@@ -722,8 +722,8 @@ def test_snapshot_failure_never_fails_the_turn(monkeypatch):
     )
     kernel = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
 
-    async def fake_build_agent(session_id, bearer_token=None):
-        return (FakeMemoryAgent(), FakeUserMsg)
+    async def fake_build_agent(session_id, bearer_token=None, model_id=None):
+        return (FakeMemoryAgent(), FakeUserMsg, model_id or kernel.settings.provider)
 
     monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
 

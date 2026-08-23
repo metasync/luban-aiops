@@ -64,6 +64,7 @@ Current implementation status:
 - carries the triage-report output discipline in the default system prompt so incident triage turns end with a schema-conformant fenced `triage-report` JSON block; `incidents.list` / `incidents.get` join the default auto-allowed tool set alongside the `skills.*` tools, so the agent can ground answers in live incidents without configuration changes (SPEC-015)
 - implements all cross-cutting kernel behavior on agentscope's supported `MiddlewareBase` hooks: a permission middleware that owns the gate for a headless runtime — vetted read-only gateway tools and state-local task tools are ALLOWed, every other tool is answered with an explicit ASK rather than delegated to agentscope's `PermissionEngine` (whose read-only fast path auto-allows read-only invocations in every mode, bypassing the platform allow-list) — an evidence middleware emits the `tool_call`/`tool_result` frames, and the out-of-box `TracingMiddleware` and `ReplyBudgetControlMiddleware` are opt-in via settings; toolkits are cached per delegated token (tokens are read from a contextvar at call time, so portal token refresh never requires an agent rebuild) (SPEC-018)
 - bridges kernel ASKs to the portal: a permission-middleware ASK parks the active reply on `RequireUserConfirmEvent`, emits a `confirmation_request` SSE frame (stream schema v6, carrying the optional per-call `risk_level`), and holds the batch in an in-memory confirmation registry; `POST /api/v2/chat/confirm` resumes the parked reply with the operator's decision; expired entries abort the reply via `UserInterruptEvent`; `AGENT_HITL_CONFIRM_TIMEOUT=0` disables bridging (SPEC-020)
+- switches the serving LLM per chat turn from a credential-gated model catalog derived at startup from per-provider env knobs (`<PROVIDER>_API_KEY` / `_MODEL_NAME` / `_BASE_URL`, with `AGENTSCOPE_*` fallback for the active profile's provider): selection resolves request > session pin > deploy-time default and fails closed on unknown ids (422 / `unknown_model` stream frame), pins onto the session store, rebuilds the cached kernel agent with state restore, and is exposed for discovery via `GET /api/v2/models` (id/label/provider/default only — no credentials leave the runtime); `message_end` frames carry the serving model (SPEC-024)
 
 Service layout:
 
@@ -78,7 +79,7 @@ Service layout:
 - `src/agent_service/schemas/`
   - `v2.py`: pydantic models bound to the platform-owned contract; `api.py`: internal session models
 - `src/agent_service/services/`
-  - session store, session service, runtime dependencies, kernel middleware stack (permission + evidence; SPEC-018), HITL confirmation registry (SPEC-020)
+  - session store, session service, runtime dependencies, kernel middleware stack (permission + evidence; SPEC-018), HITL confirmation registry (SPEC-020), credential-gated model catalog (`model_catalog.py`; SPEC-024)
 - `src/agent_service/runtime_*.py`, `providers/`, `agent_app.py`, `native_service.py`
   - runtime-focused modules that configure and expose AgentScope-backed execution paths
 
@@ -129,6 +130,8 @@ Current runtime environment knobs:
   - optional provider-specific model override; when omitted, the selected provider supplies its default model
 - `AGENTSCOPE_BASE_URL`
   - optional override for provider endpoints
+- `<PROVIDER>_API_KEY`, `<PROVIDER>_MODEL_NAME`, `<PROVIDER>_BASE_URL` (SPEC-024)
+  - per-provider model-catalog knobs (`PROVIDER` is one of `DASHSCOPE`, `DEEPSEEK`, `OPENAI`): each supported provider contributes one selectable catalog entry — id is the provider name, label the resolved model — when an API key resolves; the active profile's provider additionally falls back to the `AGENTSCOPE_*` knobs above, so a single-provider deployment needs zero new configuration. Providers without a resolvable key are dropped; a zero-entry catalog degrades to the existing unconfigured-runtime behavior.
 - `AGENTSCOPE_ORGANIZATION`
   - optional organization identifier for `openai`
 - `AGENTSCOPE_MAX_TOKENS`, `AGENTSCOPE_TEMPERATURE`, `AGENTSCOPE_TOP_P`

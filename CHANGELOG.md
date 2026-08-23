@@ -32,6 +32,30 @@ Release 1 entries are grouped retrospectively under 0.1.0.
   inherited from the tool-gateway choke point by construction. New counters:
   `evidence_store_writes_total{result}`, `evidence_frames_persisted_total`,
   `evidence_frames_truncated_total{reason}`.
+- **Runtime LLM model switching (SPEC-024)**: agent-service derives a
+  credential-gated model catalog at startup from per-provider env knobs
+  (`<PROVIDER>_API_KEY` / `<PROVIDER>_MODEL_NAME` / `<PROVIDER>_BASE_URL`;
+  the active profile's provider additionally falls back to the existing
+  `AGENTSCOPE_*` knobs), so a single-provider deployment needs zero new
+  configuration and providers without an API key are dropped. Operators
+  select a model per chat turn (`"model": "<provider>"` on POST chat,
+  `?model=` on the stream); resolution is request > session pin >
+  deploy-time default, and unknown ids fail closed (HTTP 422 / an
+  `unknown_model` stream error frame — no silent fallback). Selection
+  pins onto the session (additive `model` column across the
+  memory/Redis/Postgres session stores, exposed additively on
+  `GET /api/v1/sessions/{id}`), and switching rebuilds the cached kernel
+  agent with full state restore. Discovery rides a new
+  `GET /api/v1/models` route (gateway policy action `models:list`,
+  mirroring the chat scope) that is discovery-safe by construction —
+  no credentials or base URLs leave the runtime. The `message_end` stream
+  frame carries the serving model; audit gains the requested model on
+  `chat_started` and the serving model on `chat_completed` on both chat
+  surfaces. The portal composer gains a model selector pre-seeded with
+  the catalog default, a fixed label when exactly one model is
+  configured, and fail-open hiding when discovery is unavailable;
+  switching sessions re-seeds the selector from the session's pinned
+  model.
 
 ## 0.9.1 — 2026-08-23
 

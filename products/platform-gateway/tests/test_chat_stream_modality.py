@@ -37,13 +37,15 @@ class ChatStreamModalityTests(unittest.TestCase):
         async def fake_chat_stream(
             settings,
             request_id,
-            user_id,
+            identity,
             message,
             session_id,
             delegated_token=None,
             input_modality="text",
+            model=None,
         ):
             captured["input_modality"] = input_modality
+            captured["model"] = model
 
             async def _events():
                 yield 'data: {"type": "message_end"}\n\n'

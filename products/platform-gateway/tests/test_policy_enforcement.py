@@ -54,6 +54,7 @@ class PolicyEnforcementRouteTests(unittest.TestCase):
             session_id,
             delegated_token=None,
             input_modality="text",
+            model=None,
         ):
             return {"session_id": "ses-1", "content": "ok", "status": "ok"}
 
@@ -76,6 +77,7 @@ class PolicyEnforcementRouteTests(unittest.TestCase):
             session_id,
             delegated_token=None,
             input_modality="text",
+            model=None,
         ):
             return {"session_id": "ses-1", "content": "ok", "status": "ok"}
 
@@ -128,6 +130,7 @@ class PolicyEnforcementRouteTests(unittest.TestCase):
             session_id,
             delegated_token=None,
             input_modality="text",
+            model=None,
         ):
             return {"session_id": "ses-1", "content": "ok", "status": "ok"}
 

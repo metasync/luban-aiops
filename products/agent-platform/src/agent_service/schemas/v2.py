@@ -21,6 +21,8 @@ __all__ = [
     "AgentSessionSummary",
     "AgentSessionList",
     "AgentSessionCreateRequest",
+    "AgentModelInfo",
+    "AgentModelCatalog",
     "AgentRuntimeMetadata",
     "AgentHealth",
 ]
@@ -47,6 +49,16 @@ class AgentChatRequest(BaseModel):
             "output (SPEC-017 R-2); passed through unchanged."
         ),
     )
+    model: str | None = Field(
+        default=None,
+        description=(
+            "Optional model selection (SPEC-024 R-3): a model id from "
+            "GET /api/v2/models. Resolution order is request model > "
+            "session-pinned model > deploy-time default; an unknown id is "
+            "refused with 4xx (fail-closed). Metadata only — it never "
+            "changes policy or HITL outcomes."
+        ),
+    )
 
 
 class AgentChatResponse(BaseModel):
@@ -59,6 +71,13 @@ class AgentChatResponse(BaseModel):
         description=(
             "Validated structured output when response_schema was supplied "
             "(SPEC-017 R-2); null when the turn produced none."
+        ),
+    )
+    model: str | None = Field(
+        default=None,
+        description=(
+            "Model id that resolved for this turn (SPEC-024 R-3/R-4); "
+            "null when no model is configured."
         ),
     )
 
@@ -117,6 +136,10 @@ class AgentStreamEvent(BaseModel):
     data_summary: dict[str, Any] | None = None
     data: Any = None
     error: dict[str, Any] | None = None
+    # SPEC-024 R-3/R-4: model id that resolved for the turn; present on
+    # message_end frames (stream schema v7) so downstream tees can attribute
+    # the turn.
+    model: str | None = None
 
 
 # --- Sessions ---
@@ -151,6 +174,9 @@ class AgentSession(BaseModel):
     pending_confirmation: bool = False
     transcript_available: bool = False
     transcript: list[dict[str, str]] = Field(default_factory=list)
+    # SPEC-024 R-3: model id pinned on the session by the most recent turn;
+    # null when the session never selected a model.
+    model: str | None = None
     # SPEC-025 R-2: persisted tool evidence grouped by assistant turn.
     # Empty list when the session stored none; null when the evidence
     # store is unreadable (degrades like transcript_available=false).
@@ -182,6 +208,25 @@ class AgentSessionCreateRequest(BaseModel):
     """
 
     session_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+# --- Model discovery (SPEC-024 R-2) ---
+
+
+class AgentModelInfo(BaseModel):
+    """Discovery-safe model entry: no credentials, no base URLs."""
+
+    id: str
+    label: str
+    provider: Literal["dashscope", "deepseek", "openai"]
+    default: bool
+
+
+class AgentModelCatalog(BaseModel):
+    """Envelope for ``GET /api/v2/models`` (credential-gated catalog)."""
+
+    models: list[AgentModelInfo]
+    default: str | None = None
 
 
 # --- Runtime metadata ---

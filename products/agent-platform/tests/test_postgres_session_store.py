@@ -127,7 +127,7 @@ class TestPostgresSessionStore:
 
     def test_get_session_refreshes_ttl_and_maps_row(self):
         calls: list[dict] = []
-        row = ("ses-1", "alice", NOW, "kill the web-ui pod", NOW)
+        row = ("ses-1", "alice", NOW, "kill the web-ui pod", NOW, "deepseek")
         store = PostgresSessionStore(
             "postgresql://fake", ttl_seconds=600,
             connect=_fake_connect(calls, rows=[row]),
@@ -140,6 +140,8 @@ class TestPostgresSessionStore:
         # SPEC-022 R-1 workspace columns ride the read.
         assert fetched.title == "kill the web-ui pod"
         assert fetched.last_active_at == NOW
+        # SPEC-024 R-3: the pinned model rides the same read.
+        assert fetched.model == "deepseek"
 
         sql = calls[0]["sql"]
         assert "UPDATE sessions" in sql
@@ -161,8 +163,8 @@ class TestPostgresSessionStore:
     def test_list_sessions_by_user(self):
         calls: list[dict] = []
         rows = [
-            ("ses-2", "alice", NOW, "second", NOW),
-            ("ses-1", "alice", NOW, None, None),
+            ("ses-2", "alice", NOW, "second", NOW, None),
+            ("ses-1", "alice", NOW, None, None, None),
         ]
         store = PostgresSessionStore(
             "postgresql://fake", connect=_fake_connect(calls, rows=rows)

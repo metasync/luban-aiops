@@ -17,6 +17,9 @@ class ChatRequest(BaseModel):
     request_id: str | None = None
     # SPEC-022 R-2 voice-readiness: metadata only — never a privilege.
     input_modality: Literal["text", "voice"] = "text"
+    # SPEC-024 R-3 model selection: relayed verbatim to agent-service;
+    # metadata only — never changes policy or HITL outcomes.
+    model: str | None = None
 
 
 class ChatConfirmRequest(BaseModel):
@@ -41,6 +44,9 @@ class ChatResponse(BaseModel):
     # Kernel-validated structured output (SPEC-017 R-2); null when the turn
     # requested no response schema. Relayed verbatim from agent-service.
     structured_output: dict[str, Any] | None = None
+    # Model id that resolved for the turn (SPEC-024 R-3/R-4); null when no
+    # model is configured. Relayed verbatim from agent-service.
+    model: str | None = None
 
 
 class CreateSessionRequest(BaseModel):
@@ -80,6 +86,9 @@ class SessionRecord(BaseModel):
     # SPEC-025 R-2: persisted tool evidence grouped by assistant turn;
     # relayed verbatim (empty list = none stored, null = store unreadable).
     evidence_turns: list[dict[str, Any]] | None = None
+    # SPEC-024 R-3: model id pinned on the session by the most recent turn;
+    # null when the session never selected a model.
+    model: str | None = None
 
 
 class IdentityContext(BaseModel):

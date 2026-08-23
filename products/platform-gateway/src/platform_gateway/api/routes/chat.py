@@ -58,6 +58,7 @@ async def chat_route(
         body.session_id,
         delegated_token,
         body.input_modality,
+        body.model,
     )
     log_event(
         LOGGER,
@@ -67,6 +68,8 @@ async def chat_route(
         user_id=user_id,
         # SPEC-022 R-2: modality is recorded, never decision-bearing.
         input_modality=body.input_modality,
+        # SPEC-024 R-4: the resolved model the runtime reported back.
+        model=response.get("model"),
         authenticated=identity.subject != "dev",  # type: ignore[union-attr]
         roles=identity.roles,  # type: ignore[union-attr]
     )
@@ -76,7 +79,10 @@ async def chat_route(
             "chat_completed",
             request_id,
             "success",
-            details={"input_modality": body.input_modality},
+            details={
+                "input_modality": body.input_modality,
+                "model": response.get("model"),
+            },
             subject=identity.subject,  # type: ignore[union-attr]
             username=user_id,
             actor=identity.actor,  # type: ignore[union-attr]
@@ -92,6 +98,9 @@ async def chat_stream_route(
     request: Request,
     message: str,
     session_id: str | None = None,
+    # SPEC-024 R-3: per-turn model selection relays verbatim to the
+    # runtime, which validates it fail-closed against the catalog.
+    model: str | None = None,
     # SPEC-023 R-4: voice-readiness parity for the streaming surface —
     # modality rides as metadata only, mirroring POST /api/v1/chat.
     input_modality: Literal["text", "voice"] = "text",
@@ -115,6 +124,8 @@ async def chat_stream_route(
         user_id=user_id,
         # SPEC-022 R-2: modality is recorded, never decision-bearing.
         input_modality=input_modality,
+        # SPEC-024 R-4: the requested model, when the client pinned one.
+        model=model,
         authenticated=identity.subject != "dev",  # type: ignore[union-attr]
         roles=identity.roles,  # type: ignore[union-attr]
     )
@@ -124,7 +135,7 @@ async def chat_stream_route(
             "chat_started",
             request_id,
             "success",
-            details={"input_modality": input_modality},
+            details={"input_modality": input_modality, "model": model},
             subject=identity.subject,  # type: ignore[union-attr]
             username=user_id,
             actor=identity.actor,  # type: ignore[union-attr]
@@ -135,11 +146,12 @@ async def chat_stream_route(
     return await chat_stream(
         settings=settings,
         request_id=request_id,
-        user_id=user_id,
+        identity=identity,  # type: ignore[arg-type]
         message=message,
         session_id=session_id,
         delegated_token=delegated_token,
         input_modality=input_modality,
+        model=model,
     )
 
 

@@ -73,6 +73,21 @@ async def list_sessions(
     return response.json()
 
 
+async def list_models(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+) -> dict:
+    """Credential-gated model catalog discovery (SPEC-024 R-2)."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            f"{settings.agent_service_url}/api/v2/models",
+            headers=_headers(request_id, user_id),
+        )
+    response.raise_for_status()
+    return response.json()
+
+
 async def delete_session(
     settings: PlatformGatewaySettings,
     request_id: str,
@@ -97,6 +112,7 @@ async def chat(
     session_id: str | None,
     delegated_token: str | None = None,
     input_modality: str = "text",
+    model: str | None = None,
 ) -> dict:
     timeout = httpx.Timeout(settings.chat_response_timeout_seconds, connect=5.0)
     payload: dict[str, str] = {"message": message}
@@ -104,6 +120,10 @@ async def chat(
         payload["session_id"] = session_id
     # SPEC-022 R-2: modality rides the payload as metadata only.
     payload["input_modality"] = input_modality
+    # SPEC-024 R-3: per-turn model selection relays verbatim; the runtime
+    # validates it against the credential-gated catalog (fail-closed 422).
+    if model:
+        payload["model"] = model
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(
             f"{settings.agent_service_url}/api/v2/chat",
@@ -122,6 +142,7 @@ async def open_chat_stream(
     session_id: str | None,
     delegated_token: str | None = None,
     input_modality: str = "text",
+    model: str | None = None,
 ) -> AsyncIterator[str]:
     """Open the chat stream and return an SSE line iterator.
 
@@ -138,6 +159,10 @@ async def open_chat_stream(
     # SPEC-023 R-4: modality rides the query as metadata only, matching
     # the POST /api/v2/chat payload convention (SPEC-022 R-2).
     params["input_modality"] = input_modality
+    # SPEC-024 R-3: model selection rides the query, mirroring the POST
+    # payload convention; upstream fail-closed 422 passes through.
+    if model:
+        params["model"] = model
     client = httpx.AsyncClient(timeout=timeout)
     try:
         request = client.build_request(

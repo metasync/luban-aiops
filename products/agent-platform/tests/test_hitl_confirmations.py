@@ -80,8 +80,8 @@ class FakeAgent:
 
 
 def _patch_agent(monkeypatch, kernel: AgentKernel, agent: FakeAgent) -> None:
-    async def fake_ensure_agent(session_id, bearer_token=None):
-        return agent, FakeUserMsg
+    async def fake_ensure_agent(session_id, bearer_token=None, model_id=None):
+        return agent, FakeUserMsg, model_id or kernel.settings.provider
 
     monkeypatch.setattr(kernel, "ensure_agent", fake_ensure_agent)
     monkeypatch.setattr(kernel, "_snapshot_state", lambda session_id, agent: None)

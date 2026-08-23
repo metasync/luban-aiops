@@ -45,6 +45,25 @@ describe("chatStreamPath", () => {
     });
     expect(path).toContain("input_modality=voice");
   });
+
+  it("carries the selected model and omits it when absent (SPEC-024)", () => {
+    const withModel = chatStreamPath({
+      message: "hi",
+      userId: "amy",
+      model: "deepseek-chat",
+    });
+    expect(withModel).toContain("model=deepseek-chat");
+
+    const withoutModel = chatStreamPath({ message: "hi", userId: "amy" });
+    expect(withoutModel).not.toContain("model=");
+
+    const nullModel = chatStreamPath({
+      message: "hi",
+      userId: "amy",
+      model: null,
+    });
+    expect(nullModel).not.toContain("model=");
+  });
 });
 
 describe("consumeStream", () => {

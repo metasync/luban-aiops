@@ -237,7 +237,8 @@ class ContractAlignmentTests(unittest.TestCase):
         # set is the complete protected surface. tools:mutate is enforced by
         # the tool-gateway but listed here so the permission matrix always
         # carries it (SPEC-021). session:list/session:delete complete the
-        # session workspace lifecycle (SPEC-022 R-1).
+        # session workspace lifecycle (SPEC-022 R-1). models:list guards
+        # model catalog discovery (SPEC-024 R-2).
         self.assertEqual(
             PROTECTED_ACTIONS,
             frozenset({
@@ -246,6 +247,7 @@ class ContractAlignmentTests(unittest.TestCase):
                 "audit:read",
                 "incident:read", "incident:create", "incident:triage",
                 "policy:read", "tools:list", "tools:mutate", "skills:read",
+                "models:list",
             }),
         )
 

@@ -28,6 +28,10 @@
       "enum": ["text", "voice"],
       "default": "text",
       "description": "Voice-readiness contract (SPEC-022 R-2): modality is metadata only. It never changes policy, auto-allow, or HITL outcomes, and can never approve or deny a parked confirmation."
+    },
+    "model": {
+      "type": ["string", "null"],
+      "description": "Optional model selection (SPEC-024 R-3): a model id from GET /api/v1/models, relayed verbatim to agent-service. Metadata only — it never changes policy or HITL outcomes."
     }
   }
 }

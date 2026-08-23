@@ -136,7 +136,7 @@ def build_agent_app():
             ), True
             return
 
-        agent, _ = kernel.ensure_agent(
+        agent, _, _ = await kernel.ensure_agent(
             request.session_id if request else "adhoc-session"
         )
         if hasattr(agent, "set_console_output_enabled"):

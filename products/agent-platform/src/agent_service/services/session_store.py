@@ -68,6 +68,14 @@ class SessionStore(Protocol):
         """Record the session title once; an existing title is never rewritten."""
         ...
 
+    def set_session_model(self, session_id: str, model: str) -> None:
+        """Pin the model that resolved for the turn (SPEC-024 R-3, Q-4).
+
+        Overwrites on every resolved turn so the newest selection wins;
+        best-effort bookkeeping — a store failure never fails the turn.
+        """
+        ...
+
     def is_ready(self) -> bool: ...
 
     def __len__(self) -> int: ...
@@ -160,6 +168,11 @@ class InMemorySessionStore:
         record = self._sessions.get(session_id)
         if record is not None and record.title is None:
             record.title = title
+
+    def set_session_model(self, session_id: str, model: str) -> None:
+        record = self._sessions.get(session_id)
+        if record is not None:
+            record.model = model
 
     def is_ready(self) -> bool:
         return True
@@ -333,6 +346,23 @@ class RedisSessionStore:
             record_session_store_error("set_title")
             raise
 
+    def set_session_model(self, session_id: str, model: str) -> None:
+        # The pinned model rides the serialized blob (pydantic default
+        # keeps legacy blobs readable); newest resolved selection wins.
+        key = self._session_key(session_id)
+        try:
+            raw = self._client.get(key)
+            if raw is None:
+                return
+            record = self._deserialize(raw)
+            if record is None:
+                return
+            record.model = model
+            self._client.setex(key, self.ttl_seconds, self._serialize(record))
+        except Exception:
+            record_session_store_error("set_model")
+            raise
+
     def is_ready(self) -> bool:
         try:
             return bool(self._client.ping())
@@ -369,7 +399,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at       TIMESTAMPTZ NOT NULL,
     last_accessed_at TIMESTAMPTZ NOT NULL,
     title            TEXT,
-    last_active_at   TIMESTAMPTZ
+    last_active_at   TIMESTAMPTZ,
+    model            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user
     ON sessions (user_id);
@@ -379,6 +410,8 @@ CREATE INDEX IF NOT EXISTS idx_sessions_accessed
 -- existed gain them idempotently (fail-open semantics unchanged).
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS title TEXT;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ;
+-- SPEC-024 R-3: pinned model id per session (Q-4 affinity home).
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS model TEXT;
 """
 
 _NOT_EXPIRED = (
@@ -404,11 +437,11 @@ _GET_SESSION = f"""
 UPDATE sessions
    SET last_accessed_at = now()
  WHERE session_id = %(session_id)s AND {_NOT_EXPIRED}
-RETURNING session_id, user_id, created_at, title, last_active_at
+RETURNING session_id, user_id, created_at, title, last_active_at, model
 """
 
 _LIST_USER_SESSIONS = f"""
-SELECT session_id, user_id, created_at, title, last_active_at
+SELECT session_id, user_id, created_at, title, last_active_at, model
   FROM sessions
  WHERE user_id = %(user_id)s AND {_NOT_EXPIRED}
  ORDER BY COALESCE(last_active_at, created_at) DESC
@@ -433,6 +466,14 @@ _SET_SESSION_TITLE = f"""
 UPDATE sessions
    SET title = %(title)s
  WHERE session_id = %(session_id)s AND {_NOT_EXPIRED} AND title IS NULL
+"""
+
+# SPEC-024 R-3: the pinned model follows the newest resolved selection
+# (unlike the set-once title), so no IS NULL guard.
+_SET_SESSION_MODEL = f"""
+UPDATE sessions
+   SET model = %(model)s
+ WHERE session_id = %(session_id)s AND {_NOT_EXPIRED}
 """
 
 _COUNT_SESSIONS = f"""
@@ -552,6 +593,7 @@ class PostgresSessionStore:
             created_at=row[2],
             title=row[3],
             last_active_at=row[4],
+            model=row[5],
         )
 
     def list_sessions_by_user(
@@ -580,6 +622,7 @@ class PostgresSessionStore:
                 created_at=row[2],
                 title=row[3],
                 last_active_at=row[4],
+                model=row[5],
             )
             for row in rows
         ]
@@ -626,6 +669,23 @@ class PostgresSessionStore:
                 conn.commit()
         except Exception:
             record_session_store_error("set_title")
+            raise
+
+    def set_session_model(self, session_id: str, model: str) -> None:
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        _SET_SESSION_MODEL,
+                        {
+                            "session_id": session_id,
+                            "model": model,
+                            **self._ttl_params(),
+                        },
+                    )
+                conn.commit()
+        except Exception:
+            record_session_store_error("set_model")
             raise
 
     def is_ready(self) -> bool:

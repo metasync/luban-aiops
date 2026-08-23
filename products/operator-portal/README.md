@@ -55,6 +55,12 @@ Current browser baseline capabilities:
   `input_modality=voice`; a language selector (en-US / zh-CN, defaulting from
   the browser locale and persisted locally) drives the recognizer only
   (SPEC-023)
+- model selector: the composer shows the credential-gated model catalog
+  (`GET /api/v1/models`) with the deploy-time default pre-selected; exactly
+  one configured model renders as a fixed label, and any discovery failure
+  hides the selector without affecting chat. The selection rides the stream
+  request and switching sessions re-seeds the selector from the session's
+  pinned model (SPEC-024)
 - two-column app shell: a left sidebar carries the logo and the function
   list; the main column shows one function view at a time (Chat, Settings &
   Debug, Audit trail) with state preserved across switches; narrow

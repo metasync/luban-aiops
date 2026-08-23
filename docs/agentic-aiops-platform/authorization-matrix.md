@@ -351,7 +351,11 @@ granted exactly where `session:create` is granted: both operations are
 scoped server-side to the caller's own sessions (anti-enumeration 404 for
 foreign sessions, 409 while a session holds a parked HITL confirmation), so
 the lifecycle actions share one posture across all chat-capable roles and
-`auditor` holds none of them. The full approval model —
+`auditor` holds none of them. SPEC-024 adds `models:list` (discover the
+credential-gated LLM model catalog), granted exactly where `chat` is
+granted — including `read-only-observer` — because discovery is safe by
+construction: the payload carries only id/label/provider/default and never
+credentials or base URLs. The full approval model —
 policy actions, risk-tier admission, the agent auto-allow list, and HITL
 confirmation — is documented in the
 [Approval and HITL Governance Guide](../guides/approval-and-hitl.md).

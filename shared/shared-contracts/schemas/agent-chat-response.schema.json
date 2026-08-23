@@ -25,6 +25,10 @@
     "structured_output": {
       "type": ["object", "null"],
       "description": "Validated structured output when the request carried a response_schema (SPEC-017 R-2); null when the turn produced none."
+    },
+    "model": {
+      "type": ["string", "null"],
+      "description": "Model id that resolved for this turn (SPEC-024 R-3/R-4); null when no model is configured."
     }
   }
 }

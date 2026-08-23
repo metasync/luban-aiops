@@ -375,6 +375,38 @@ describe("useChatStream", () => {
     });
   });
 
+  // SPEC-024 R-4: the composer's model selection rides the stream open
+  // as a query parameter; the runtime validates it fail-closed.
+  it("propagates the selected model onto the stream request", async () => {
+    const calls = queueFetch(
+      okStream(
+        sse(
+          { type: "message_start", session_id: "s-m" },
+          { type: "message_end", session_id: "s-m" },
+        ),
+      ),
+    );
+
+    const { result } = renderHook(() => useChatStream());
+    await act(async () => {
+      await result.current.send("hi", { userId: "amy", model: "deepseek-chat" });
+    });
+    expect(calls[0]?.url).toContain("model=deepseek-chat");
+    expect(result.current.turns[0]?.completed).toBe(true);
+  });
+
+  it("omits the model parameter when no selection is made", async () => {
+    const calls = queueFetch(
+      okStream(sse({ type: "message_end", session_id: "s-m" })),
+    );
+
+    const { result } = renderHook(() => useChatStream());
+    await act(async () => {
+      await result.current.send("hi", { userId: "amy" });
+    });
+    expect(calls[0]?.url).not.toContain("model=");
+  });
+
   // Live-walkthrough defect: a stale workspace pointer (deleted session)
   // rode along on the stream request and the gateway answered with an
   // empty stream, rendering "(no response received)". With the gateway

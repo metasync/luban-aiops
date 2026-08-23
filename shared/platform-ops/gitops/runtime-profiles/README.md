@@ -18,6 +18,17 @@ Current profiles:
 - `dashscope`
 - `openai`
 
+## Additional selectable models (SPEC-024)
+
+The committed overlays are unchanged by model switching: the active
+profile's provider feeds the default catalog entry through the existing
+`AGENTSCOPE_*` knobs. To enable extra models, add another provider's
+`<PROVIDER>_API_KEY` (plus optional `<PROVIDER>_MODEL_NAME` /
+`<PROVIDER>_BASE_URL`) to the local, git-ignored `runtime-secrets.env` —
+each `runtime-secrets.example.env` documents the knobs. Providers without
+a resolvable key stay dropped, and the profile's provider remains the
+deploy-time default entry.
+
 ## Mutating tools dev posture
 
 `mutating-dev` is **not** an LLM provider profile: it is the committed

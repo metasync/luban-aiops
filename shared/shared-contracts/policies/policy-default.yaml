@@ -28,7 +28,7 @@ rules:
     enabled: true
     match:
       roles_any: ["platform-admin", "approver", "operator", "developer"]
-      actions_any: ["chat", "session:create", "session:read", "session:list", "session:delete"]
+      actions_any: ["chat", "session:create", "session:read", "session:list", "session:delete", "models:list"]
     decision:
       outcome: allow
 
@@ -39,7 +39,7 @@ rules:
     enabled: true
     match:
       roles_any: ["read-only-observer"]
-      actions_any: ["chat", "session:create", "session:read", "session:list", "session:delete"]
+      actions_any: ["chat", "session:create", "session:read", "session:list", "session:delete", "models:list"]
     decision:
       outcome: allow
 

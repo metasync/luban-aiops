@@ -3,6 +3,7 @@ import json
 import logging
 from collections import OrderedDict
 from collections.abc import AsyncIterator
+from dataclasses import replace
 
 from agent_service.core.metrics import (
     record_agent_state_error,
@@ -21,9 +22,20 @@ from agent_service.services.hitl_confirmations import (
     ConfirmationOwnerMismatch,
     PendingConfirmation,
 )
+from agent_service.services.model_catalog import MODEL_CATALOG
 
 LOGGER = logging.getLogger(__name__)
 MAX_CACHED_AGENTS = 1000
+
+
+class UnknownModelError(ValueError):
+    """A requested model id is absent from the credential-gated catalog.
+
+    Selection fails closed (SPEC-024 R-1): routes map this to 4xx; the
+    kernel never silently falls back to the default model.
+    """
+
+
 TEXT_DELTA_EVENTS = {
     "message_delta",
     "text_block_start",
@@ -201,8 +213,33 @@ class AgentKernel:
     def clear_error(self) -> None:
         self._last_error = None
 
-    def _build_model(self):
-        return self._provider.build_model(self.settings)
+    def _build_model(self, model_id: str | None = None):
+        """Build the AgentScope model for a turn (SPEC-024 R-3).
+
+        ``model_id=None`` keeps the deploy-time settings path untouched.
+        A concrete id derives a replaced RuntimeSettings from the catalog
+        entry and reuses the existing provider adapters; an unknown id
+        raises ``UnknownModelError`` (fail-closed).
+        """
+        if model_id is None:
+            return self._provider.build_model(self.settings)
+        entry = MODEL_CATALOG.get(model_id)
+        if entry is None:
+            raise UnknownModelError(f"Unknown model id: {model_id!r}.")
+        if entry.provider == self.settings.provider:
+            settings = self.settings
+        else:
+            settings = replace(
+                self.settings,
+                provider=entry.provider,
+                api_key=entry.api_key,
+                model_name=entry.model_name,
+                base_url=entry.base_url,
+                provider_options=RuntimeSettings.default_provider_options(
+                    entry.provider
+                ),
+            )
+        return get_provider(entry.provider).build_model(settings)
 
     async def _ensure_toolkit(self, bearer_token: str | None = None):
         """Build (once per token) and return the Toolkit with gateway tools.
@@ -471,7 +508,12 @@ class AgentKernel:
                 exc,
             )
 
-    async def _build_agent(self, session_id: str, bearer_token: str | None = None):
+    async def _build_agent(
+        self,
+        session_id: str,
+        bearer_token: str | None = None,
+        model_id: str | None = None,
+    ):
         from agentscope.agent import Agent
         from agentscope.message import UserMsg
 
@@ -481,7 +523,7 @@ class AgentKernel:
         agent = Agent(
             name=self.settings.agent_name,
             system_prompt=self.settings.system_prompt,
-            model=self._build_model(),
+            model=self._build_model(model_id),
             toolkit=toolkit,
             middlewares=self._build_middlewares(),
             state=state,
@@ -491,6 +533,7 @@ class AgentKernel:
             "kernel agent constructed",
             extra={
                 "session_id": session_id,
+                "model_id": model_id or self.settings.provider,
                 "max_iters": self.settings.max_iters,
                 "context_trigger_ratio": self.settings.context_trigger_ratio,
                 "tool_result_limit": self.settings.tool_result_limit,
@@ -499,9 +542,14 @@ class AgentKernel:
                 "state_restored": state is not None,
             },
         )
-        return agent, UserMsg
+        return agent, UserMsg, model_id or self.settings.provider
 
-    async def ensure_agent(self, session_id: str, bearer_token: str | None = None):
+    async def ensure_agent(
+        self,
+        session_id: str,
+        bearer_token: str | None = None,
+        model_id: str | None = None,
+    ):
         """Return the agent bound to `session_id`, creating it on first use.
 
         Agents are keyed by session so conversation memory never crosses
@@ -509,43 +557,61 @@ class AgentKernel:
         Creation is serialised because it awaits: without the lock two
         concurrent turns on the same session would each build an agent and
         one would be discarded along with its memory.
+
+        Model switching (SPEC-024 R-3): the cache tracks the bound model
+        id; a turn whose resolved model differs evicts and rebuilds, and
+        ``_restore_state`` rebuilds memory — the same path as a pod
+        restart, so the switch never loses conversation history.
         """
+        bound_id = model_id or self.settings.provider
         cached = self._agents.get(session_id)
         if cached is not None:
             # Gateway tools recovered after this agent was built with an
             # empty toolkit (discovery failure): rebuild so the turn can see
             # them. Persisted state (SPEC-017 R-3) restores the memory.
-            agent, _user_msg_cls = cached
-            current_toolkit = await self._ensure_toolkit(bearer_token)
-            if (
-                self._count_gateway_tools(getattr(agent, "toolkit", None)) == 0
-                and self._count_gateway_tools(current_toolkit) > 0
-            ):
+            agent, _user_msg_cls, cached_model_id = cached
+            if cached_model_id != bound_id:
                 LOGGER.info(
-                    "gateway tools recovered; rebuilding kernel agent for "
-                    "session %s",
+                    "model switch for session %s: %s -> %s; rebuilding "
+                    "agent with restored state",
                     session_id,
+                    cached_model_id,
+                    bound_id,
                 )
                 self._agents.pop(session_id, None)
             else:
-                # Re-check membership: the await above opens a preemption
-                # window where a concurrent turn's recovery branch may pop
-                # this entry, or LRU eviction may remove it. A vanished
-                # entry falls through to the locked path, which re-checks
-                # the cache before building.
-                if session_id in self._agents:
-                    self._agents.move_to_end(session_id)
-                    return cached
+                current_toolkit = await self._ensure_toolkit(bearer_token)
+                if (
+                    self._count_gateway_tools(getattr(agent, "toolkit", None)) == 0
+                    and self._count_gateway_tools(current_toolkit) > 0
+                ):
+                    LOGGER.info(
+                        "gateway tools recovered; rebuilding kernel agent for "
+                        "session %s",
+                        session_id,
+                    )
+                    self._agents.pop(session_id, None)
+                else:
+                    # Re-check membership: the await above opens a preemption
+                    # window where a concurrent turn's recovery branch may pop
+                    # this entry, or LRU eviction may remove it. A vanished
+                    # entry falls through to the locked path, which re-checks
+                    # the cache before building.
+                    if session_id in self._agents:
+                        self._agents.move_to_end(session_id)
+                        return cached
         async with self._agent_lock:
             cached = self._agents.get(session_id)
-            if cached is not None:
+            if cached is not None and cached[2] == bound_id:
                 self._agents.move_to_end(session_id)
                 return cached
-            agent, user_msg_cls = await self._build_agent(session_id, bearer_token)
-            self._agents[session_id] = (agent, user_msg_cls)
+            agent, user_msg_cls, cached_model_id = await self._build_agent(
+                session_id, bearer_token, model_id
+            )
+            self._agents[session_id] = (agent, user_msg_cls, cached_model_id)
             while len(self._agents) > self._max_cached_agents:
                 self._agents.popitem(last=False)
-            return agent, user_msg_cls
+            return agent, user_msg_cls, cached_model_id
 
     def build_unconfigured_message(self, message: str, session_id: str) -> str:
         return (
@@ -593,12 +659,17 @@ class AgentKernel:
         user_name: str,
         bearer_token: str | None = None,
         response_schema: dict | None = None,
+        model_id: str | None = None,
     ) -> tuple[str, dict | None]:
         """Run one blocking turn.
 
         Returns the reply text and, when ``response_schema`` was supplied,
         the kernel-validated structured output carried on the final message
         (SPEC-017 R-2) — ``None`` when the turn ended without producing one.
+
+        ``model_id`` selects the catalog entry for this turn (SPEC-024 R-3);
+        callers validate it against the catalog first, so an unknown id
+        never reaches ``_build_model`` here.
         """
         if not self.is_configured():
             return self.build_unconfigured_message(message, session_id), None
@@ -606,7 +677,9 @@ class AgentKernel:
         from agent_service.tools.gateway_tools import DELEGATED_TOKEN
 
         try:
-            agent, user_msg_cls = await self.ensure_agent(session_id, bearer_token)
+            agent, user_msg_cls, _bound_model_id = await self.ensure_agent(
+                session_id, bearer_token, model_id
+            )
             # Expose the turn's delegated token to the cached tool closures
             # (SPEC-018 R-2). No evidence sink is set: blocking turns emit
             # no trace frames.
@@ -666,7 +739,27 @@ class AgentKernel:
         session_id: str,
         user_name: str,
         bearer_token: str | None = None,
+        model_id: str | None = None,
     ) -> AsyncIterator[dict[str, object]]:
+        # SPEC-024 R-3: an unknown model id fails closed before any agent
+        # work — a deterministic error frame, never a silent default.
+        if model_id is not None and MODEL_CATALOG.get(model_id) is None:
+            LOGGER.warning(
+                "stream rejected unknown model %r for session %s",
+                model_id,
+                session_id,
+            )
+            yield {
+                "event": "error",
+                "request_id": request_id,
+                "session_id": session_id,
+                "error": {
+                    "code": "unknown_model",
+                    "message": f"unknown model id: {model_id}",
+                },
+            }
+            return
+
         if not self.is_configured():
             async for event in self.fallback_stream(
                 request_id=request_id,
@@ -681,7 +774,9 @@ class AgentKernel:
 
         try:
             # Ensure the agent (with the token-cached toolkit) exists.
-            agent, user_msg_cls = await self.ensure_agent(session_id, bearer_token)
+            agent, user_msg_cls, bound_model_id = await self.ensure_agent(
+                session_id, bearer_token, model_id
+            )
 
             # SPEC-025 R-1: the replay turn ordinal for this stream's
             # evidence, captured before the turn mutates the context.
@@ -744,7 +839,12 @@ class AgentKernel:
                             "session_id": session_id,
                         }
                         break
-                    yield self.normalize_event(event, request_id, session_id)
+                    frame = self.normalize_event(event, request_id, session_id)
+                    if frame.get("event") == "message_end":
+                        # SPEC-024 R-3: attribute the turn to the model that
+                        # actually served it (resolved or session default).
+                        frame["model"] = bound_model_id
+                    yield frame
 
                 # Drain any remaining trace events after the stream completes.
                 while not trace_queue.empty():
@@ -861,6 +961,7 @@ class AgentKernel:
         user_name: str,
         request_id: str,
         bearer_token: str | None = None,
+        model_id: str | None = None,
     ) -> AsyncIterator[dict[str, object]]:
         """Resume a parked reply with the operator's decision (SPEC-020 R-2).
 
@@ -882,7 +983,11 @@ class AgentKernel:
         if pending.user_id != user_name:
             raise ConfirmationOwnerMismatch(user_name)
 
-        agent, _user_msg_cls = await self.ensure_agent(session_id, bearer_token)
+        # Pass the session's pinned model (SPEC-024 R-3) so the resumed
+        # stream rebuilds against the same model that parked it.
+        agent, _user_msg_cls, _bound_model_id = await self.ensure_agent(
+            session_id, bearer_token, model_id
+        )
         # SPEC-025 R-1: resumed frames belong to the same assistant turn as
         # the pre-park frames — no user message was added by the park, so
         # the count reproduces the original turn ordinal.
@@ -979,7 +1084,9 @@ class AgentKernel:
         # interrupt single-flight against confirms and concurrent expiries.
         pending = CONFIRMATION_REGISTRY.take_for_expiry(session_id, confirm_id)
         try:
-            agent, _user_msg_cls = await self.ensure_agent(session_id, None)
+            agent, _user_msg_cls, _bound_model_id = await self.ensure_agent(
+                session_id, None
+            )
             interrupt = UserInterruptEvent(reply_id=pending.reply_id)
             async for _event in agent.reply_stream(interrupt):
                 pass

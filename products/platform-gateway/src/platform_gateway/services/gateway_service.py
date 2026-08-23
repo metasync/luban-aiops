@@ -354,6 +354,34 @@ async def list_sessions(
         ) from exc
 
 
+async def list_models(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+) -> dict:
+    """Proxy model catalog discovery (SPEC-024 R-2).
+
+    Same posture as the session-list proxy: upstream 4xx passes through
+    unchanged; transport failures and upstream 5xx map to 502.
+    """
+    try:
+        return await agent_client.list_models(settings, request_id, user_id)
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail="agent service rejected the model list",
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail="agent service model list failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+
 async def delete_session(
     settings: PlatformGatewaySettings,
     request_id: str,
@@ -394,6 +422,7 @@ async def chat(
     session_id: str | None,
     delegated_token: str | None = None,
     input_modality: str = "text",
+    model: str | None = None,
 ) -> dict:
     return await agent_client.chat(
         settings,
@@ -403,34 +432,40 @@ async def chat(
         session_id,
         delegated_token,
         input_modality,
+        model,
     )
 
 
 async def chat_stream(
     settings: PlatformGatewaySettings,
     request_id: str,
-    user_id: str,
+    identity: IdentityContext,
     message: str,
     session_id: str | None,
     delegated_token: str | None = None,
     input_modality: str = "text",
+    model: str | None = None,
 ) -> StreamingResponse:
     """Proxy the chat stream to agent-service.
 
     The upstream status is checked before the SSE response opens: 4xx
-    (unknown session, parked conflict) passes through unchanged and
-    transport failures or upstream 5xx map to 502, so failures surface as
-    HTTP statuses instead of a 200 with an empty stream.
+    (unknown session, parked conflict, unknown model) passes through
+    unchanged and transport failures or upstream 5xx map to 502, so
+    failures surface as HTTP statuses instead of a 200 with an empty
+    stream. The tee audits ``chat_completed`` — enriched with the serving
+    model from the ``message_end`` frame — only once the turn actually
+    completes (SPEC-024 R-4).
     """
     try:
         upstream = await agent_client.open_chat_stream(
             settings,
             request_id,
-            user_id,
+            identity.username,
             message,
             session_id,
             delegated_token,
             input_modality,
+            model,
         )
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
@@ -447,8 +482,19 @@ async def chat_stream(
             status_code=502, detail="agent service unavailable"
         ) from exc
 
+    audited = False
+
     async def _stream() -> AsyncIterator[str]:
+        nonlocal audited
         async for chunk in upstream:
+            if not audited:
+                frame = _extract_message_end(chunk)
+                if frame is not None:
+                    audited = True
+                    _emit_stream_chat_completed(
+                        settings, request_id, identity,
+                        session_id, input_modality, frame,
+                    )
             yield chunk
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
@@ -528,6 +574,54 @@ def _extract_confirmation_result(chunk: str) -> dict | None:
     if isinstance(frame, dict) and frame.get("type") == "confirmation_result":
         return frame
     return None
+
+
+def _extract_message_end(chunk: str) -> dict | None:
+    """Parse an SSE chunk into a message_end frame, or None (SPEC-024 R-4)."""
+    if not chunk.startswith("data: "):
+        return None
+    try:
+        frame = json.loads(chunk.removeprefix("data: ").strip())
+    except ValueError:
+        return None
+    if isinstance(frame, dict) and frame.get("type") == "message_end":
+        return frame
+    return None
+
+
+def _emit_stream_chat_completed(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    identity: IdentityContext,
+    session_id: str | None,
+    input_modality: str,
+    frame: dict,
+) -> None:
+    """Audit the completed streamed turn with its serving model (SPEC-024 R-4).
+
+    Emitted from the tee when the ``message_end`` frame flows through, so
+    only turns the runtime actually completed reach the durable trail.
+    """
+    serving_model = frame.get("model")
+    emit_audit_event(
+        settings,
+        build_audit_event(
+            "chat_completed",
+            request_id,
+            "success",
+            details={
+                "input_modality": input_modality,
+                "model": (
+                    serving_model if isinstance(serving_model, str) else None
+                ),
+            },
+            subject=identity.subject,
+            username=identity.username,
+            actor=identity.actor,
+            roles=identity.roles,
+            session_id=str(frame.get("session_id") or session_id or ""),
+        ),
+    )
 
 
 def _emit_confirmation_decided(

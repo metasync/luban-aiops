@@ -25,6 +25,10 @@
     "response_schema": {
       "type": "object",
       "description": "Optional JSON-schema dict for kernel-validated structured output (SPEC-017 R-2); passed through unchanged to the agent kernel."
+    },
+    "model": {
+      "type": ["string", "null"],
+      "description": "Optional model selection (SPEC-024 R-3): a model id from GET /api/v2/models. Resolution order is request model > session-pinned model > deploy-time default; an unknown id is refused with 4xx (fail-closed)."
     }
   }
 }
