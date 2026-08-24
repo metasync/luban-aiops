@@ -28,7 +28,6 @@
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
-- [shared/platform-ops/gitops/sync-skills-secrets.sh](file://shared/platform-ops/gitops/sync-skills-secrets.sh)
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 - [shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env](file://shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env)
@@ -56,12 +55,19 @@
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-service.yaml)
 - [shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
+- [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
+- [shared/platform-ops/gitops/llm-hosting/ollama/deployment.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/deployment.yaml)
+- [shared/platform-ops/gitops/llm-hosting/ollama/service.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/service.yaml)
+- [shared/platform-ops/gitops/llm-hosting/ollama/pvc.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/pvc.yaml)
+- [shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml)
+- [docs/guides/luban-llm-guide.md](file://docs/guides/luban-llm-guide.md)
 - [products/agent-platform/src/agent_service/core/metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [products/agent-platform/src/agent_service/core/observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
 - [products/agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
 - [products/agent-platform/src/agent_service/services/model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [products/agent-platform/src/agent_service/providers/deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
 - [products/agent-platform/src/agent_service/providers/dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
+- [products/agent-platform/src/agent_service/providers/luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
 - [products/identity-broker/src/identity_service/core/metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
 - [products/identity-broker/src/identity_service/core/observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
 - [products/identity-broker/src/identity_service/core/telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
@@ -79,11 +85,12 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced model pinning best practices in runtime secrets configuration example, recommending fixed-point model IDs over rolling tier aliases for better audit attribution and traceability
-- Updated multi-model catalog implementation with SPEC-026 and SPEC-027 specifications for improved model discovery and management
-- Added comprehensive documentation for live model discovery with fail-soft fallback mechanisms
-- Enhanced provider-specific model series management with curated lists and override capabilities
-- Improved model resolution logic with request > pinned > default precedence and credential-gated catalog validation
+- Added comprehensive documentation for team-hosted LLM model hosting capabilities with Ollama deployment configurations
+- Included reference Kubernetes manifests for self-hosted model servers (Ollama, vLLM, llama.cpp)
+- Documented bearer-token authentication and secret management for local/on-prem model servers
+- Added operational guidance for model weight management, scaling considerations, and GPU node support
+- Integrated luban provider configuration into the multi-model catalog system
+- Enhanced troubleshooting procedures for self-hosted model scenarios
 
 ## Table of Contents
 1. Introduction
@@ -98,7 +105,7 @@
 10. Appendices
 
 ## Introduction
-This document provides comprehensive deployment and operations guidance for the Luban AIOps Platform. It focuses on Kubernetes deployment using GitOps with Kustomize overlays, container build processes, image management, automation scripts, environment configuration, secrets management (including enhanced delegation secret auto-provisioning, audit secrets synchronization, and OpenTelemetry credential provisioning), scaling strategies, monitoring setup (Prometheus metrics, structured logging, health checks, and OpenTelemetry push pipeline), operational procedures (updates, rollbacks, disaster recovery, capacity planning), performance tuning, resource optimization, and troubleshooting common issues. The platform now operates at version 0.5.0 with synchronized service versions across all components. Enhanced model pinning best practices ensure better audit attribution and traceability through fixed-point model IDs rather than rolling tier aliases.
+This document provides comprehensive deployment and operations guidance for the Luban AIOps Platform. It focuses on Kubernetes deployment using GitOps with Kustomize overlays, container build processes, image management, automation scripts, environment configuration, secrets management (including enhanced delegation secret auto-provisioning, audit secrets synchronization, OpenTelemetry credential provisioning, and team-hosted LLM model server management), scaling strategies, monitoring setup (Prometheus metrics, structured logging, health checks, and OpenTelemetry push pipeline), operational procedures (updates, rollbacks, disaster recovery, capacity planning), performance tuning, resource optimization, and troubleshooting common issues. The platform now operates at version 0.5.0 with synchronized service versions across all components. Enhanced model pinning best practices ensure better audit attribution and traceability through fixed-point model IDs rather than rolling tier aliases. **New**: Team-hosted LLM model hosting capabilities enable running small models locally or on-premises with full platform integration.
 
 ## Project Structure
 The platform is organized into multiple products and shared operational assets:
@@ -106,7 +113,8 @@ The platform is organized into multiple products and shared operational assets:
 - Shared ops: GitOps manifests under shared/platform-ops/gitops with base and runtime profiles
 - Build system: Makefiles per product and shared mk rules for images and Python packaging
 - Version management: Centralized version control with validation across all services
-- Model catalog: Multi-provider model management with live discovery and curated series
+- Model catalog: Multi-provider model management with live discovery, curated series, and team-hosted model support
+- **Team-hosted LLM hosting**: Reference manifests for self-hosted model servers (Ollama, vLLM, llama.cpp) with bearer-token authentication
 
 ```mermaid
 graph TB
@@ -129,11 +137,13 @@ ASecrets["Audit Secrets"]
 OTEL["OpenTelemetry Secrets"]
 VM["Version Management"]
 MC["Model Catalog"]
+LH["LLM Hosting"]
 end
 subgraph "Infrastructure"
 Redis["Redis"]
 Postgres["PostgreSQL"]
 OO["OpenObserve"]
+Ollama["Ollama Server"]
 end
 subgraph "Build System"
 MK["mk/image.mk<br/>mk/python.mk"]
@@ -154,6 +164,7 @@ ASecrets --> OVL
 OTEL --> OVL
 VM --> BASE
 MC --> AP
+LH --> MC
 Redis --> AS
 Postgres --> AS
 PMK --> MK
@@ -165,12 +176,14 @@ PMK --> PG
 PMK --> AS
 PMK --> IS
 PMK --> SH
+Ollama --> AP
 ```
 
 **Diagram sources**
 - [shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
 - [shared/platform-ops/gitops/dev-k8s/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml)
+- [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
 - [mk/image.mk](file://mk/image.mk)
 - [mk/python.mk](file://mk/python.mk)
 - [products/agent-platform/Makefile](file://products/agent-platform/Makefile)
@@ -189,7 +202,7 @@ PMK --> SH
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 
 ## Core Components
-- Agent Platform: Provides agent runtime services, session management, and provider integrations. Exposes metrics and observability hooks with enhanced model catalog support.
+- Agent Platform: Provides agent runtime services, session management, and provider integrations. Exposes metrics and observability hooks with enhanced model catalog support including team-hosted model providers.
 - Identity Broker: Handles authentication, token issuance, and identity context propagation. Supports token delegation and exchange operations.
 - Tool Gateway: API gateway enforcing policies, routing to agents/tools, and exposing metrics and observability hooks.
 - Operator Portal: Web UI for operators to manage platform resources and configurations with OIDC authentication.
@@ -197,15 +210,16 @@ PMK --> SH
 - **Audit Service**: Durable audit trail service that ingests, stores, and queries audit events from all platform components with PostgreSQL persistence.
 - **Incident Service**: Incident management service providing intake, triage, and collaboration capabilities with version 0.5.0 synchronization.
 - **Skills Hub**: Skills management service providing reusable capabilities across the platform.
+- **Team-Hosted LLM Provider**: Self-hosted model server support via the `luban` provider, enabling local/on-premises model execution with bearer-token authentication.
 
 Key operational artifacts:
 - Dockerfiles per product define container images.
 - Product Makefiles orchestrate builds and pushes.
 - mk/image.mk and mk/python.mk provide reusable build targets.
 - Kustomize base defines Kubernetes resources; overlays select runtime profiles and apply environment-specific patches.
-- Shell scripts automate deployment, secret synchronization, profile selection, verification, delegation secret provisioning, audit secret management, and OpenTelemetry credential provisioning.
+- Shell scripts automate deployment, secret synchronization, profile selection, verification, delegation secret provisioning, audit secret management, OpenTelemetry credential provisioning, and team-hosted model server management.
 - **Version Management**: Centralized version validation ensuring all services maintain consistent version 0.5.0.
-- **Model Catalog**: Multi-provider model management with live discovery, curated series, and credential-gated access.
+- **Model Catalog**: Multi-provider model management with live discovery, curated series, credential gating, and team-hosted model support.
 
 **Section sources**
 - [products/agent-platform/Dockerfile](file://products/agent-platform/Dockerfile)
@@ -219,9 +233,10 @@ Key operational artifacts:
 - [mk/python.mk](file://mk/python.mk)
 - [products/audit-service/src/audit_service/metadata.py](file://products/audit-service/src/audit_service/metadata.py)
 - [products/incident-service/src/incident_service/metadata.py](file://products/incident-service/src/incident_service/metadata.py)
+- [products/agent-platform/src/agent_service/providers/luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
 
 ## Architecture Overview
-The platform deploys as a set of Kubernetes workloads orchestrated via Kustomize. The GitOps workflow uses overlays to compose base manifests with environment-specific settings and runtime profiles. Enhanced with automated delegation secret provisioning for secure cross-service communication, durable audit trail storage, OpenTelemetry credential provisioning for centralized observability, centralized version management ensuring all services operate at version 0.5.0, and advanced model catalog management with live discovery capabilities.
+The platform deploys as a set of Kubernetes workloads orchestrated via Kustomize. The GitOps workflow uses overlays to compose base manifests with environment-specific settings and runtime profiles. Enhanced with automated delegation secret provisioning for secure cross-service communication, durable audit trail storage, OpenTelemetry credential provisioning for centralized observability, centralized version management ensuring all services operate at version 0.5.0, advanced model catalog management with live discovery capabilities, and team-hosted model server support for local/on-premises model execution.
 
 ```mermaid
 graph TB
@@ -231,6 +246,7 @@ Kustomize["Kustomize Overlay"]
 Secrets["Delegation & Audit & OTel Secrets"]
 VersionMgr["Version Manager"]
 ModelCatalog["Model Catalog"]
+LLMHosting["Team-Hosted LLM"]
 K8s["Kubernetes Cluster"]
 subgraph "Base Manifests"
 BaseNS["Namespace"]
@@ -252,11 +268,17 @@ subgraph "Observability"
 OpenObserve["OpenObserve Backend"]
 OTLP["OTLP Exporters"]
 end
+subgraph "Team-Hosted Models"
+Ollama["Ollama Server"]
+vLLM["vLLM Server"]
+Llama["Llama.cpp Server"]
+end
 DevOps --> Git
 Git --> Kustomize
 Git --> Secrets
 Git --> VersionMgr
 Git --> ModelCatalog
+Git --> LLMHosting
 Kustomize --> BaseNS
 Kustomize --> BaseInfra
 Kustomize --> BaseAP
@@ -272,6 +294,12 @@ Kustomize --> ProfileSecrets
 Secrets --> K8s
 VersionMgr --> K8s
 ModelCatalog --> BaseAP
+LLMHosting --> Ollama
+LLMHosting --> vLLM
+LLMHosting --> Llama
+Ollama --> BaseAP
+vLLM --> BaseAP
+Llama --> BaseAP
 Kustomize --> K8s
 BaseAP --> OTLP
 BaseIB --> OTLP
@@ -294,6 +322,7 @@ OTLP --> OpenObserve
 - [shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml)
+- [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 
 ## Detailed Component Analysis
@@ -339,7 +368,7 @@ Commit --> End(["End"])
 - Base manifests define core resources (namespaces, services, deployments, RBAC, policies).
 - Runtime profiles inject model provider configurations via ConfigMaps and secrets.
 - Overlays select profiles and apply environment-specific patches.
-- Scripts automate deploy, profile selection, secret sync, verification, delegation secret provisioning, audit secret management, and OpenTelemetry credential provisioning.
+- Scripts automate deploy, profile selection, secret sync, verification, delegation secret provisioning, audit secret management, OpenTelemetry credential provisioning, and team-hosted model server management.
 - **Version Validation**: Pre-deployment validation ensures all services maintain version 0.5.0 consistency.
 
 Operational steps:
@@ -406,6 +435,7 @@ K8s-->>Dev : Resources created/updated
 - **Enhanced**: Delegation secrets are automatically provisioned for secure cross-service authentication.
 - **New**: Audit secrets are automatically provisioned for audit event ingestion across all platform components.
 - **Updated**: OpenTelemetry credentials are automatically provisioned for centralized observability via OpenObserve with enhanced CI/CD support and durable cluster-side merging.
+- **New**: Team-hosted LLM model server secrets are managed through dedicated configuration for bearer-token authentication.
 - **Version Management**: All services configured with version 0.5.0 metadata and consistent versioning.
 - **Model Pinning Best Practices**: Enhanced runtime secrets configuration recommends fixed-point model IDs over rolling tier aliases for better audit attribution and traceability.
 
@@ -416,6 +446,7 @@ Best practices:
 - Use delegation secret provisioning to ensure consistent service-to-service authentication.
 - Use audit secret provisioning to ensure consistent audit event ingestion credentials.
 - Use OpenTelemetry secret provisioning to ensure consistent telemetry authentication headers with durable cluster-side merging.
+- Configure team-hosted model server secrets with proper bearer-token authentication.
 - **CI/CD Integration**: Set `SKIP_OTEL_SECRETS=true` in CI environments where secrets are injected externally.
 - **Version Validation**: Ensure all services maintain version 0.5.0 consistency during deployment.
 - **Model Pinning**: Prefer fixed-point generation IDs (e.g., `qwen3.8-max`) over rolling tier aliases (e.g., `qwen-plus`) for precise audit attribution and traceability.
@@ -427,11 +458,13 @@ Secrets["Runtime Secrets"] --> SecretSync["sync-runtime-secret.sh"]
 DelegationSecrets["Delegation Secrets"] --> DelegationSync["sync-delegation-secrets.sh"]
 AuditSecrets["Audit Secrets"] --> AuditSync["sync-audit-secrets.sh"]
 OTELSecrets["OpenTelemetry Credentials"] --> OTESync["sync-otel-secrets.sh"]
+LLMSecrets["LLM Server Secrets"] --> LLMSync["Manual Configuration"]
 VersionCheck["Version Validation"] --> Overlay
 ModelPinning["Model Pinning Config"] --> Overlay
 DelegationSync --> K8sSecrets["Cluster Secrets"]
 AuditSync --> K8sSecrets
 OTESync --> K8sSecrets
+LLMSync --> K8sSecrets
 SecretSync --> K8sSecrets
 Overlay --> K8sApply["kubectl apply"]
 K8sApply --> Pods["Pod Environments"]
@@ -589,29 +622,32 @@ Note over OTel : On failure : drop telemetry, continue app
 - [products/tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 
 ### Multi-Model Catalog and Live Discovery
-**New Section** Advanced model catalog management with live discovery capabilities and enhanced model pinning best practices.
+**Updated Section** Advanced model catalog management with live discovery capabilities, enhanced model pinning best practices, and team-hosted model server support.
 
-The platform implements a sophisticated model catalog system that manages LLM models across multiple providers with live discovery and credential gating:
+The platform implements a sophisticated model catalog system that manages LLM models across multiple providers with live discovery, credential gating, and team-hosted model support:
 
-- **Credential-Gated Access**: Only providers with resolvable API keys contribute to the catalog
+- **Credential-Gated Access**: Only providers with resolvable API keys contribute to the catalog, including team-hosted model servers
 - **Live Model Discovery**: Periodic queries to provider `/models` endpoints with fail-soft fallback ladder
 - **Curated Series**: Provider-specific curated model lists with override capabilities
 - **Model Resolution**: Request > pinned > default precedence with strict validation
 - **Fixed-Point Model IDs**: Recommendation to use specific model IDs (e.g., `qwen3.8-max`) over rolling tier aliases (e.g., `qwen-plus`) for better audit attribution
 - **Provider-Specific Filtering**: Intelligent filtering of non-chat modalities and dated snapshots
 - **Atomic Catalog Swaps**: Thread-safe catalog updates without disrupting active sessions
+- **Team-Hosted Support**: Full integration of self-hosted model servers via the `luban` provider with bearer-token authentication
 
 Key features:
 - **SPEC-026 Compliance**: Multi-model runtime catalog with credential gating and curated series
 - **SPEC-027 Implementation**: Live model discovery with cached fallback mechanisms
+- **SPEC-028 Integration**: Team-hosted model server support with Ollama, vLLM, and llama.cpp compatibility
 - **Enhanced Model Pinning**: Fixed-point model IDs recommended for precise audit attribution and traceability
-- **Provider Integration**: DeepSeek, DashScope, and OpenAI provider support with tailored model series
+- **Provider Integration**: DeepSeek, DashScope, OpenAI, and team-hosted model server support with tailored model series
 
 ```mermaid
 sequenceDiagram
 participant Client as "Client Request"
 participant Catalog as "Model Catalog"
-participant Provider as "Provider API"
+participant Cloud as "Cloud Providers"
+participant Local as "Team-Hosted Server"
 participant Cache as "Cache Layer"
 Note over Client,Catalog : Model Resolution Flow
 Client->>Catalog : Request with model_id
@@ -623,8 +659,10 @@ Catalog->>Catalog : Check pinned model
 alt Pinned model exists
 Catalog-->>Client : Use pinned model
 else No pinned model
-Catalog->>Provider : GET /models (if discovery enabled)
-Provider-->>Catalog : Model list
+Catalog->>Cloud : GET /models (if discovery enabled)
+Cloud-->>Catalog : Model list
+Catalog->>Local : GET /v1/models (if luban configured)
+Local-->>Catalog : Model list
 Catalog->>Cache : Fallback to last-good
 Cache-->>Catalog : Cached models
 Catalog-->>Client : Use default model
@@ -636,14 +674,71 @@ end
 - [products/agent-platform/src/agent_service/services/model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [products/agent-platform/src/agent_service/providers/deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
 - [products/agent-platform/src/agent_service/providers/dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
+- [products/agent-platform/src/agent_service/providers/luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
 
 **Section sources**
 - [products/agent-platform/src/agent_service/services/model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [products/agent-platform/src/agent_service/providers/deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
 - [products/agent-platform/src/agent_service/providers/dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
+- [products/agent-platform/src/agent_service/providers/luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
 - [shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env](file://shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env)
 - [shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
+
+### Team-Hosted LLM Model Hosting
+**New Section** Comprehensive support for team-hosted small language models with reference Kubernetes manifests and operational guidance.
+
+The platform now supports team-hosted model servers through the `luban` provider, enabling local/on-premises model execution with full platform integration:
+
+- **Multi-Stack Support**: Compatible with Ollama, vLLM, and llama.cpp serving backends
+- **Bearer-Token Authentication**: Secure authentication via `OLLAMA_API_KEY`, `--api-key`, or equivalent server-side token configuration
+- **Reference Manifests**: Complete Kubernetes Deployment, Service, PVC, and Secret templates for Ollama deployment
+- **Model Weight Management**: Persistent volume-backed model inventory with configurable storage sizing
+- **GPU Node Support**: Optimized configurations for GPU-enabled nodes with NVIDIA device plugin integration
+- **Security Posture**: ClusterIP-only service exposure with mandatory bearer-token authentication
+- **Integration**: Seamless integration with the multi-model catalog, live discovery, and model pinning systems
+
+Key capabilities:
+- **Free-Standing Deployment**: Reference manifests are not part of the main overlay — explicit operator choice required
+- **Single Replica Design**: Model weights are per-pod; scale by replicating the stack rather than increasing replicas
+- **Resource Optimization**: CPU-only quantizations (qwen3-8b-class) with appropriate memory requests and limits
+- **Network Security**: Internal cluster networking only; no external exposure
+- **Verification Tools**: Built-in health checks and endpoint probing capabilities
+
+```mermaid
+sequenceDiagram
+participant Platform as "Platform Services"
+participant Catalog as "Model Catalog"
+participant Ollama as "Ollama Server"
+participant PVC as "Model Weights"
+Note over Platform,Ollama : Team-Hosted Model Flow
+Platform->>Catalog : Request model availability
+Catalog->>Ollama : GET /v1/models (with Bearer token)
+Ollama->>PVC : Load model weights
+PVC-->>Ollama : Model data
+Ollama-->>Catalog : Available models
+Catalog-->>Platform : Model listing
+Platform->>Ollama : Chat completion request (with Bearer token)
+Ollama->>PVC : Load model for inference
+PVC-->>Ollama : Model data
+Ollama-->>Platform : Response
+```
+
+**Diagram sources**
+- [shared/platform-ops/gitops/llm-hosting/ollama/deployment.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/deployment.yaml)
+- [shared/platform-ops/gitops/llm-hosting/ollama/service.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/service.yaml)
+- [shared/platform-ops/gitops/llm-hosting/ollama/pvc.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/pvc.yaml)
+- [shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml)
+- [products/agent-platform/src/agent_service/providers/luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
+
+**Section sources**
+- [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
+- [shared/platform-ops/gitops/llm-hosting/ollama/deployment.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/deployment.yaml)
+- [shared/platform-ops/gitops/llm-hosting/ollama/service.yaml](file://shared/platform-ops/gitops/llama/service.yaml)
+- [shared/platform-ops/gitops/llm-hosting/ollama/pvc.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/pvc.yaml)
+- [shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml)
+- [docs/guides/luban-llm-guide.md](file://docs/guides/luban-llm-guide.md)
+- [products/agent-platform/src/agent_service/providers/luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
 
 ### Scaling Strategies
 - Horizontal Pod Autoscaler (HPA): Configure based on CPU/memory utilization or custom metrics exposed by services.
@@ -653,6 +748,7 @@ end
 - **Database Scaling**: Monitor PostgreSQL StatefulSet performance and consider read replicas for high-volume audit scenarios.
 - **Observability Scaling**: Scale OpenObserve instances based on telemetry volume and query patterns.
 - **Model Catalog Scaling**: Monitor model discovery refresh rates and cache hit ratios for optimal performance.
+- **Team-Hosted Model Scaling**: Scale model servers by replicating stacks rather than increasing replicas; consider GPU node pools for high-throughput scenarios.
 - **Version 0.5.0 Considerations**: All services optimized for consistent scaling behavior across the platform.
 
 Guidelines:
@@ -662,6 +758,7 @@ Guidelines:
 - Size PostgreSQL volumes appropriately for audit data retention requirements.
 - Plan OpenObserve capacity based on telemetry ingestion rates and retention policies.
 - Configure model discovery refresh intervals based on provider API rate limits and change frequency.
+- For team-hosted models, plan GPU node capacity and model weight storage sizing based on model sizes and concurrent usage patterns.
 - Ensure consistent scaling across all version 0.5.0 services for optimal performance.
 
 **Section sources**
@@ -671,6 +768,7 @@ Guidelines:
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml)
+- [shared/platform-ops/gitops/llm-hosting/ollama/deployment.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/deployment.yaml)
 
 ### Monitoring Setup: Prometheus Metrics, Structured Logging, Health Checks, OpenTelemetry
 - Each service exposes metrics and observability hooks through dedicated modules.
@@ -679,6 +777,7 @@ Guidelines:
 - **Audit Service Monitoring**: Prometheus scraping configured with specific metrics endpoint and port configuration.
 - **OpenTelemetry Integration**: Unified telemetry pipeline with automated credential provisioning and centralized collection.
 - **Model Catalog Monitoring**: Metrics for model discovery refresh rates, cache hit ratios, and model counts per provider.
+- **Team-Hosted Model Monitoring**: Health checks for Ollama endpoints, model loading status, and inference performance metrics.
 - **Version 0.5.0 Monitoring**: All services emit consistent version metadata for accurate monitoring and alerting.
 
 Implementation notes:
@@ -691,6 +790,8 @@ Implementation notes:
 - Track version consistency across all monitored services.
 - Monitor model discovery performance and provider API response times.
 - Track model selection patterns and pinning effectiveness.
+- Monitor team-hosted model server health, model loading times, and inference latency.
+- Track GPU utilization and memory usage for GPU-enabled model servers.
 
 ```mermaid
 graph TB
@@ -700,6 +801,7 @@ Logs["Structured Logs"]
 Health["Health Endpoints"]
 OTel["OpenTelemetry Exporters"]
 ModelMetrics["Model Catalog Metrics"]
+LLMMetrics["Team-Hosted Model Metrics"]
 Prometheus["Prometheus"]
 Grafana["Grafana Dashboards"]
 OpenObserve["OpenObserve Backend"]
@@ -709,8 +811,10 @@ Services --> Logs
 Services --> Health
 Services --> OTel
 Services --> ModelMetrics
+Services --> LLMMetrics
 Prometheus --> Metrics
 Prometheus --> ModelMetrics
+Prometheus --> LLMMetrics
 Grafana --> Prometheus
 OTel --> OpenObserve
 VersionMonitor --> Services
@@ -739,6 +843,7 @@ VersionMonitor --> Services
   - Re-provision OpenTelemetry credentials if OpenObserve authentication changes.
   - **Version Validation**: Ensure all services maintain version 0.5.0 consistency.
   - **Model Catalog Updates**: Refresh model discovery if provider model lineups change significantly.
+  - **Team-Hosted Model Updates**: Update model weights, rotate bearer tokens, or upgrade model server software as needed.
 - Rollbacks:
   - Revert overlay commits to previous known-good tags.
   - Apply reverted overlay; confirm rollback success.
@@ -747,15 +852,18 @@ VersionMonitor --> Services
   - Restore OpenTelemetry credentials if needed.
   - **Version Rollback**: Ensure all services revert to consistent previous version.
   - **Model Catalog Rollback**: Revert to curated series if live discovery causes issues.
+  - **Team-Hosted Model Rollback**: Revert to previous model versions or server configurations.
 - Disaster Recovery:
-  - Back up persistent data (e.g., Redis volumes, PostgreSQL data).
+  - Back up persistent data (e.g., Redis volumes, PostgreSQL data, model weight PVCs).
   - Restore from backups and reapply overlays.
   - Re-provision delegation secrets and validate service connectivity.
   - Re-provision audit secrets and validate audit ingestion.
   - Re-provision OpenTelemetry credentials and validate telemetry flow.
+  - Restore team-hosted model weights and validate model availability.
   - Confirm data integrity and service functionality.
   - **Version Verification**: Validate all services restored to consistent version 0.5.0.
   - **Model Catalog Recovery**: Rebuild model catalog from curated series if discovery cache is corrupted.
+  - **Team-Hosted Model Recovery**: Restore model weights from PVC backups and restart model servers.
 - Capacity Planning:
   - Analyze metrics trends and resource utilization.
   - Scale horizontally or vertically based on observed demand.
@@ -764,6 +872,7 @@ VersionMonitor --> Services
   - Monitor OpenObserve storage and query performance for telemetry data.
   - **Version 0.5.0 Optimization**: Leverage consistent service versions for predictable scaling behavior.
   - **Model Catalog Capacity**: Plan for increased model discovery traffic and provider API rate limits.
+  - **Team-Hosted Model Capacity**: Plan GPU node capacity, model weight storage, and concurrent inference capacity based on usage patterns.
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
@@ -773,9 +882,10 @@ VersionMonitor --> Services
 - [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
+- [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
 
 ## Dependency Analysis
-The platform's dependencies span build tools, container images, Kubernetes resources, runtime profiles, delegation secret management, audit secret management, OpenTelemetry credential provisioning, centralized version management, and advanced model catalog management.
+The platform's dependencies span build tools, container images, Kubernetes resources, runtime profiles, delegation secret management, audit secret management, OpenTelemetry credential provisioning, centralized version management, advanced model catalog management, and team-hosted model server support.
 
 ```mermaid
 graph LR
@@ -802,8 +912,11 @@ OverlayKust --> AuditSecrets["sync-audit-secrets.sh"]
 OverlayKust --> OTelSecrets["sync-otel-secrets.sh"]
 OverlayKust --> VersionValidation["validate_version.py"]
 OverlayKust --> ModelCatalog["model_catalog.py"]
+OverlayKust --> LLMHosting["llm-hosting/*"]
 VersionValidation --> VERSION["VERSION"]
 ModelCatalog --> Providers["provider adapters"]
+LLMHosting --> OllamaManifests["Ollama manifests"]
+OllamaManifests --> Platform["Platform Integration"]
 ```
 
 **Diagram sources**
@@ -821,6 +934,7 @@ ModelCatalog --> Providers["provider adapters"]
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 - [products/agent-platform/src/agent_service/services/model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [VERSION](file://VERSION)
+- [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
 
 **Section sources**
 - [Makefile](file://Makefile)
@@ -841,6 +955,7 @@ ModelCatalog --> Providers["provider adapters"]
   - Leverage Redis for session/state caching where applicable.
   - Utilize delegated token caching in platform-gateway to reduce identity broker calls.
   - **Model Catalog Caching**: Enable model discovery caching to reduce provider API calls and improve response times.
+  - **Team-Hosted Model Caching**: Model weights are cached in PVC-backed storage for fast loading.
 - Garbage Collection:
   - For Python-based services, configure GC flags if needed to reduce latency spikes.
 - Network Policies:
@@ -862,6 +977,11 @@ ModelCatalog --> Providers["provider adapters"]
   - Configure appropriate discovery refresh intervals to balance freshness with API rate limits.
   - Monitor cache hit ratios and fallback chain effectiveness.
   - Consider disabling discovery for stable model lineups to reduce overhead.
+- **Team-Hosted Model Performance**:
+  - Monitor model loading times and inference latency for team-hosted models.
+  - Optimize GPU utilization and memory usage for GPU-enabled model servers.
+  - Monitor PVC storage performance and model weight access patterns.
+  - Consider model quantization levels based on hardware capabilities.
 - **Version 0.5.0 Optimizations**:
   - All services benefit from consistent version optimizations and performance improvements.
   - Leverage synchronized service versions for predictable performance characteristics.
@@ -877,6 +997,7 @@ Common issues and resolutions:
   - Verify delegation secrets are properly provisioned for cross-service authentication.
   - Verify audit secrets are properly provisioned for audit event ingestion.
   - Verify OpenTelemetry credentials are properly provisioned for telemetry authentication.
+  - Verify team-hosted model server bearer tokens are correctly configured.
 - Health checks failing:
   - Confirm health endpoints are reachable and returning expected responses.
 - Metrics not scraped:
@@ -909,6 +1030,14 @@ Common issues and resolutions:
   - Verify fixed-point model IDs are used for better audit attribution.
   - Check curated series alignment with provider current offerings.
   - Validate model resolution precedence (request > pinned > default).
+- **Team-Hosted Model Issues**:
+  - Verify bearer token configuration matches between platform and model server.
+  - Check model server health endpoints and model loading status.
+  - Monitor PVC storage availability and model weight integrity.
+  - Verify network connectivity between platform pods and model server.
+  - Check GPU resource allocation and driver availability for GPU-enabled deployments.
+  - Validate model names match between platform configuration and server model listings.
+  - Monitor inference latency and throughput for performance issues.
 - **Version Consistency Issues**:
   - Use `validate_version.py` to check version drift across all services.
   - Ensure all services maintain version 0.5.0 consistency.
@@ -924,6 +1053,7 @@ Operational commands:
 - Use OpenTelemetry secret provisioning script to ensure consistent telemetry authentication.
 - Use version validation script to ensure consistent service versions.
 - Use model catalog metrics to monitor discovery performance and cache effectiveness.
+- Use team-hosted model health checks to verify model server availability and model loading status.
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
@@ -934,9 +1064,11 @@ Operational commands:
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
+- [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
+- [docs/guides/luban-llm-guide.md](file://docs/guides/luban-llm-guide.md)
 
 ## Conclusion
-This guide outlines the end-to-end deployment and operations for the Luban AIOps Platform using GitOps and Kustomize. By following the documented processes for building images, managing overlays, configuring environments, provisioning delegation secrets, synchronizing audit secrets, provisioning OpenTelemetry credentials, and setting up monitoring, teams can reliably operate the platform at scale. The enhanced delegation secret auto-provisioning ensures secure cross-service authentication while maintaining operational simplicity. The new audit service provides durable audit trail storage with PostgreSQL persistence, enabling comprehensive compliance and security monitoring. The integrated OpenTelemetry pipeline with automated credential provisioning delivers centralized observability with fail-safe design and enhanced CI/CD support. The centralized version management system ensures all services operate at version 0.5.0 with consistent behavior across the platform. The advanced model catalog system with live discovery and enhanced model pinning best practices provides robust LLM model management with fixed-point model IDs for better audit attribution and traceability. Continuous validation, robust secret management, proactive capacity planning, careful monitoring of token delegation flows, audit ingestion, telemetry export, model catalog performance, and version consistency are essential for maintaining stability and performance.
+This guide outlines the end-to-end deployment and operations for the Luban AIOps Platform using GitOps and Kustomize. By following the documented processes for building images, managing overlays, configuring environments, provisioning delegation secrets, synchronizing audit secrets, provisioning OpenTelemetry credentials, and setting up monitoring, teams can reliably operate the platform at scale. The enhanced delegation secret auto-provisioning ensures secure cross-service authentication while maintaining operational simplicity. The new audit service provides durable audit trail storage with PostgreSQL persistence, enabling comprehensive compliance and security monitoring. The integrated OpenTelemetry pipeline with automated credential provisioning delivers centralized observability with fail-safe design and enhanced CI/CD support. The centralized version management system ensures all services operate at version 0.5.0 with consistent behavior across the platform. The advanced model catalog system with live discovery and enhanced model pinning best practices provides robust LLM model management with fixed-point model IDs for better audit attribution and traceability. **New**: Team-hosted LLM model hosting capabilities enable running small models locally or on-premises with full platform integration, supporting Ollama, vLLM, and llama.cpp backends with bearer-token authentication and reference Kubernetes manifests. Continuous validation, robust secret management, proactive capacity planning, careful monitoring of token delegation flows, audit ingestion, telemetry export, model catalog performance, team-hosted model server health, and version consistency are essential for maintaining stability and performance.
 
 ## Appendices
 
@@ -950,6 +1082,7 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - verify-runtime-profile.sh: Validates that the active runtime profile matches expectations.
 - reconcile-portal-oidc-client.sh: Ensures OIDC client configuration remains consistent with Keycloak.
 - **validate_version.py**: Validates version consistency across all platform services and ensures version 0.5.0 synchronization.
+- **llm-hosting manifests**: Reference Kubernetes manifests for team-hosted model server deployment (free-standing, not part of main overlay).
 
 **Section sources**
 - [shared/platform-ops/gitops/deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
@@ -961,6 +1094,7 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 - [shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
+- [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
 
 ### Appendix B: Environment Variables and Configurations
 - Observability settings centralized in a shared env file.
@@ -972,6 +1106,7 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - **CI/CD Integration**: SKIP_OTEL_SECRETS=true to skip OpenTelemetry secret provisioning in environments where secrets are injected externally.
 - **Version Management**: All services configured with version 0.5.0 metadata and consistent versioning enforced by validate_version.py.
 - **Model Catalog Configuration**: AGENT_MODEL_DISCOVERY_ENABLED for live discovery, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS for refresh intervals, AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS for API timeouts.
+- **Team-Hosted Model Configuration**: LUBAN_API_KEY for bearer-token authentication, LUBAN_BASE_URL for model server endpoint, LUBAN_MODEL_NAME for default model, LUBAN_MODELS for model pinning.
 - **Model Pinning Best Practices**: Use fixed-point model IDs (e.g., qwen3.8-max) over rolling tier aliases (e.g., qwen-plus) for better audit attribution and traceability.
 - Ensure consistency across environments by pinning versions and tags.
 
@@ -983,6 +1118,7 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env)
+- [shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env](file://shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env)
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 
@@ -1159,15 +1295,16 @@ Benefits:
 - [products/incident-service/src/incident_service/__init__.py](file://products/incident-service/src/incident_service/__init__.py)
 
 ### Appendix H: Model Catalog Configuration and Best Practices
-**New Section** Comprehensive model catalog configuration with enhanced model pinning best practices.
+**Updated Section** Comprehensive model catalog configuration with enhanced model pinning best practices and team-hosted model server support.
 
-The model catalog system provides advanced LLM model management with live discovery and credential gating:
+The model catalog system provides advanced LLM model management with live discovery, credential gating, and team-hosted model server integration:
 
-- **Multi-Provider Support**: DeepSeek, DashScope, and OpenAI provider integration with curated model series
+- **Multi-Provider Support**: DeepSeek, DashScope, OpenAI, and team-hosted model servers (via `luban` provider) with curated model series
 - **Live Model Discovery**: Periodic queries to provider `/models` endpoints with fail-soft fallback mechanisms
-- **Credential Gating**: Only providers with resolvable API keys contribute to the catalog
+- **Credential Gating**: Only providers with resolvable API keys contribute to the catalog, including team-hosted model servers
 - **Model Resolution**: Request > pinned > default precedence with strict validation
 - **Enhanced Model Pinning**: Fixed-point model IDs recommended over rolling tier aliases for better audit attribution
+- **Team-Hosted Integration**: Full support for Ollama, vLLM, and llama.cpp backends with bearer-token authentication
 
 Key configuration options:
 - **AGENT_MODEL_DISCOVERY_ENABLED**: Enable/disable live model discovery (default: true)
@@ -1176,6 +1313,7 @@ Key configuration options:
 - **<PROVIDER>_MODELS**: Override curated series with specific model list
 - **<PROVIDER>_MODEL_NAME**: Set default model for provider
 - **<PROVIDER>_API_KEY**: Provider API key for authentication
+- **LUBAN_* Configuration**: Team-hosted model server configuration (API key, base URL, model names)
 
 Best practices:
 - **Use Fixed-Point Model IDs**: Prefer specific model IDs like `qwen3.8-max` over rolling aliases like `qwen-plus` for precise audit attribution
@@ -1183,6 +1321,7 @@ Best practices:
 - **Enable Discovery for Flexibility**: Allow live discovery to automatically pick up new provider models
 - **Monitor Discovery Performance**: Track refresh rates and cache hit ratios for optimal performance
 - **Validate Model Selection**: Ensure model resolution follows expected precedence rules
+- **Team-Hosted Best Practices**: Use bearer-token authentication, configure proper network policies, and monitor model server health
 
 Usage examples:
 ```bash
@@ -1191,10 +1330,16 @@ export AGENT_MODEL_DISCOVERY_ENABLED=true
 export AGENT_MODEL_DISCOVERY_REFRESH_SECONDS=3600
 
 # Restrict DashScope to specific models
-export DASHSCOPE_MODELS=qwen3.8-max,qwen3.7-plus,qwen-turbo
+export DASHSCOPE_MODELS=qwen3.8-max,qwen3-30b-a3b,qwen3-8b
 
 # Set default model for provider
 export DASHSCOPE_MODEL_NAME=qwen3.8-max
+
+# Configure team-hosted model server
+export LUBAN_API_KEY=<bearer-token-from-server>
+export LUBAN_BASE_URL=http://ollama.llm-hosting.svc:11434/v1
+export LUBAN_MODEL_NAME=qwen3:8b
+export LUBAN_MODELS=qwen3:8b,qwen3:1.7b
 
 # Disable discovery for stable model lineup
 export AGENT_MODEL_DISCOVERY_ENABLED=false
@@ -1204,6 +1349,68 @@ export AGENT_MODEL_DISCOVERY_ENABLED=false
 - [products/agent-platform/src/agent_service/services/model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [products/agent-platform/src/agent_service/providers/deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
 - [products/agent-platform/src/agent_service/providers/dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
+- [products/agent-platform/src/agent_service/providers/luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
 - [shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env](file://shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env)
 - [shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
+
+### Appendix I: Team-Hosted Model Server Deployment
+**New Section** Complete guide for deploying team-hosted model servers with reference Kubernetes manifests.
+
+The platform provides reference Kubernetes manifests for deploying team-hosted model servers, primarily focused on Ollama but compatible with other OpenAI-compatible backends:
+
+- **Reference Stack**: Complete Ollama deployment with Deployment, Service, PVC, and Secret templates
+- **Bearer-Token Authentication**: Secure authentication via `OLLAMA_API_KEY` environment variable
+- **Persistent Model Storage**: PVC-backed model weight inventory with configurable storage sizing
+- **Health Checks**: Readiness and liveness probes for reliable operation
+- **Resource Optimization**: CPU-only quantizations with appropriate memory requests and limits
+- **Network Security**: ClusterIP-only service exposure with no external access
+
+Deployment steps:
+```bash
+# Create dedicated namespace
+kubectl create namespace llm-hosting
+
+# Edit the Secret template with a real token
+$EDITOR shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml
+
+# Apply the complete stack
+kubectl -n llm-hosting apply -f shared/platform-ops/gitops/llm-hosting/ollama/
+
+# Pull a model into the PVC-backed inventory
+kubectl -n llm-hosting exec deploy/ollama -- ollama pull qwen3:8b
+
+# Verify endpoint accessibility
+kubectl -n llm-hosting run curl-probe --rm -it --image=curlimages/curl -- \
+  curl -sS -H "Authorization: Bearer <token>" \
+  http://ollama.llm-hosting.svc:11434/v1/models
+```
+
+Configuration for platform integration:
+```bash
+# Add to agent-platform runtime secrets
+export LUBAN_API_KEY=<same token as OLLAMA_API_KEY>
+export LUBAN_BASE_URL=http://ollama.llm-hosting.svc:11434/v1
+export LUBAN_MODEL_NAME=qwen3:8b
+export LUBAN_MODELS=qwen3:8b,qwen3:1.7b
+```
+
+Sizing considerations:
+- **CPU-only qwen3-8b-class quant**: 2 CPU requests, 8Gi RAM requests, 12Gi memory limits
+- **Model weights**: 50Gi PVC for model inventory (resize before pulling larger models)
+- **GPU nodes**: Add NVIDIA device plugin tolerations and GPU limits for GPU-enabled deployments
+- **Scaling**: Single replica by design; scale by replicating the entire stack rather than increasing replicas
+
+Security posture:
+- **Bearer-token authentication**: Required for all API calls once `OLLAMA_API_KEY` is set
+- **ClusterIP service**: No external exposure; internal cluster networking only
+- **Secret management**: Token stored in Kubernetes Secret, never committed to version control
+- **Platform integration**: Platform fails closed without proper `LUBAN_BASE_URL` and `LUBAN_API_KEY` configuration
+
+**Section sources**
+- [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
+- [shared/platform-ops/gitops/llm-hosting/ollama/deployment.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/deployment.yaml)
+- [shared/platform-ops/gitops/llm-hosting/ollama/service.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/service.yaml)
+- [shared/platform-ops/gitops/llm-hosting/ollama/pvc.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/pvc.yaml)
+- [shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml)
+- [docs/guides/luban-llm-guide.md](file://docs/guides/luban-llm-guide.md)

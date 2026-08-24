@@ -1,6 +1,6 @@
-- Each product follows a uniform internal layout: `src/<package>/api/{routes,router.py}`, `core/{config,metrics,observability,request_context,runtime,telemetry}.py`, `schemas/`, `services/`, plus `app.py`, `main.py`, and `metadata.py` at the package root.
-- Cross-service data exchange is enforced via JSON Schema files in `shared/shared-contracts/schemas/`, validated by scripts under `shared/shared-contracts/scripts/` during CI.
-- Policy enforcement uses a single canonical YAML bundle in `shared/shared-contracts/policies/policy-default.yaml` that is copied into each consuming product's `policies/` directory via `make sync-policy`.
-- Container images are built with a coordinated tag derived from the root `VERSION` file plus git SHA and optional profile, written into a shared `.images.env` so all overlays reference one consistent image set.
-- Product test suites live alongside sources under `tests/` and are invoked uniformly through each product's `Makefile`, which the root `make test` and `make verify` targets orchestrate across all Python products.
-- Per-product environment configuration is pinned via a local `.python-version` file mirroring the workspace root, enabling reproducible interpreter selection for both local dev and container builds.
+- Each product under `products/` is self-contained with a `src/<service>/` package exposing `app.py`, `main.py`, and `metadata.py`, plus a sibling `tests/` directory and a `Dockerfile`/`Makefile`/`pyproject.toml`.
+- Services follow a consistent internal layout with `api/` (routes + router), `core/` (config, metrics, observability, request_context, telemetry, runtime), `schemas/`, `services/`, and optional `policies/` or `tools/` subpackages.
+- Cross-product API contracts are defined as JSON Schema files under `shared/shared-contracts/schemas/` and consumed by multiple services rather than duplicated inline.
+- Policy configuration is centralized in `shared/shared-contracts/policies/policy-default.yaml` and synchronized to consumers via the `make sync-policy` target, which copies it into each product's `policies/policy-default.yaml` and the Kustomize base.
+- Versioning is single-sourced from the root `VERSION` file and enforced at build time by `make validate-version`, which checks that every product's declared version matches the platform version.
+- Container images use a coordinated tag scheme computed from `PLATFORM_VERSION`, `IMAGE_TAG_PREFIX`, and `IMAGE_TAG_PROFILE`, written once to `.images.env` and reused by both `build` and `deploy`.

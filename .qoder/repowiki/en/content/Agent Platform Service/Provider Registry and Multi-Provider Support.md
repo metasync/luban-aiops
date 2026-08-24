@@ -7,6 +7,7 @@
 - [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
 - [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
 - [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
+- [luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [config.py](file://products/agent-platform/src/agent_service/core/config.py)
 - [env.py](file://products/agent-platform/src/agent_service/core/env.py)
@@ -18,16 +19,16 @@
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [test_model_switching.py](file://products/agent-platform/tests/test_model_switching.py)
 - [test_runtime_providers.py](file://products/agent-platform/tests/test_runtime_providers.py)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated model catalog system to support multiple models per provider instead of one entry per provider
-- Enhanced provider adapters with `model_series` property exposing complete model lineup
-- Added credential-based gating and model override capabilities via environment variables
-- Implemented per-session model pinning with fail-open degradation
-- Enhanced runtime model switching with request-time resolution and kernel rebuilding
-- Updated architecture diagrams to reflect new multi-model provider support
+- Added comprehensive support for the new Luban provider alongside existing providers (DashScope, DeepSeek, OpenAI)
+- Updated provider registry to include Luban provider with bearer-token authentication and mandatory base URL configuration
+- Enhanced multi-model catalog system to support team-hosted OpenAI-compatible servers
+- Updated environment variable documentation to include LUBAN_* configuration options
+- Added testing coverage for Luban provider integration and validation
 
 ## Table of Contents
 1. Introduction
@@ -42,12 +43,12 @@
 10. Conclusion
 
 ## Introduction
-This document explains the provider registry and multi-provider support system used by the agent platform to abstract and orchestrate calls to multiple LLM backends. The system has been significantly enhanced with a comprehensive model catalog system that supports multiple models per provider, credential-gated discovery, per-session model pinning, and dynamic provider selection without service restarts. It covers the abstract base provider interface, the registration mechanism, dynamic loading strategies, built-in providers (OpenAI, DashScope, DeepSeek), configuration and authentication differences, custom provider implementation patterns, selection and fallback strategies, rate limiting and retry policies, error handling, health monitoring, circuit breaker patterns, and performance benchmarking guidance.
+This document explains the provider registry and multi-provider support system used by the agent platform to abstract and orchestrate calls to multiple LLM backends. The system has been significantly enhanced with a comprehensive model catalog system that supports multiple models per provider, credential-gated discovery, per-session model pinning, and dynamic provider selection without service restarts. It covers the abstract base provider interface, the registration mechanism, dynamic loading strategies, built-in providers (OpenAI, DashScope, DeepSeek, **Luban**), configuration and authentication differences, custom provider implementation patterns, selection and fallback strategies, rate limiting and retry policies, error handling, health monitoring, circuit breaker patterns, and performance benchmarking guidance.
 
 ## Project Structure
 The provider subsystem lives under the agent platform service with enhanced runtime model switching capabilities:
 - Abstract base and registry: products/agent-platform/src/agent_service/providers/base.py, registry.py
-- Built-in providers: openai.py, dashscope.py, deepseek.py
+- Built-in providers: openai.py, dashscope.py, deepseek.py, **luban.py**
 - Runtime model switching: services/model_catalog.py, services/session_service.py
 - Configuration and environment: core/config.py, core/env.py, runtime_settings.py
 - API routes with model switching: api/v2/routes.py
@@ -63,6 +64,7 @@ Reg["Provider Registry"]
 OAI["OpenAI Provider<br/>Model Series: gpt-4o-mini, gpt-4o, o3-mini"]
 DS["DashScope Provider<br/>Model Series: qwen-plus, qwen-max, qwen3-max, qwen-turbo"]
 DK["DeepSeek Provider<br/>Model Series: deepseek-v4-flash, deepseek-chat, deepseek-reasoner"]
+LB["Luban Provider<br/>Team-hosted OpenAI-compatible<br/>Default: qwen3-8b"]
 end
 subgraph "Runtime Model Switching"
 Catalog["Model Catalog<br/>Multi-Model Discovery"]
@@ -80,6 +82,7 @@ Base --> Reg
 OAI --> Reg
 DS --> Reg
 DK --> Reg
+LB --> Reg
 Catalog --> Routes
 SessionSvc --> Kernel
 Routes --> Kernel
@@ -109,7 +112,7 @@ Met --> Reg
 ## Core Components
 - Abstract base provider: Defines the contract all providers must implement, including chat completion, streaming, model listing, and health checks. It also centralizes common behaviors like retries, timeouts, and telemetry hooks.
 - Provider registry: A centralized lookup that registers available providers, resolves them by name or priority, and supports dynamic loading based on runtime settings.
-- **Enhanced**: Built-in providers with model series: Concrete implementations for OpenAI, DashScope, and DeepSeek, each exposing their complete model lineup through the `model_series` property.
+- **Enhanced**: Built-in providers with model series: Concrete implementations for OpenAI, DashScope, DeepSeek, and **Luban**, each exposing their complete model lineup through the `model_series` property.
 - **Enhanced**: Runtime model catalog: Credential-gated discovery of available models at startup, providing safe model enumeration without exposing credentials. Supports multiple models per provider with unique model IDs across the entire catalog.
 - **Enhanced**: Per-session model pinning: Sessions can be pinned to specific models, enabling dynamic provider switching without service restarts with fail-open degradation.
 - **Enhanced**: Dynamic model resolution: Request-time model selection with fallback mechanisms and fail-closed validation.
@@ -125,6 +128,7 @@ Key responsibilities:
 - **New**: Multi-model provider support with credential safety
 - **New**: Session-based model affinity and persistence
 - **New**: Request-time model switching with kernel rebuilding
+- **New**: Team-hosted OpenAI-compatible server support via Luban provider
 
 **Section sources**
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
@@ -162,8 +166,16 @@ class DashScopeProvider {
 class DeepSeekProvider {
 +provider_name = "deepseek"
 +default_model = "deepseek-v4-flash"
-+model_series = ("deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner")
++model_series = ("deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp")
 +build_model(settings) DeepSeekChatModel
+}
+class LubanProvider {
++provider_name = "luban"
++default_model = "qwen3-8b"
++model_series = ()
++default_base_url = None
++build_model(settings) OpenAIChatModel
++validate(settings) void
 }
 class ModelCatalogEntry {
 +id string
@@ -189,6 +201,7 @@ class AgentKernel {
 BaseProvider <|-- OpenAIProvider
 BaseProvider <|-- DashScopeProvider
 BaseProvider <|-- DeepSeekProvider
+BaseProvider <|-- LubanProvider
 ModelCatalog --> ModelCatalogEntry : "contains"
 AgentKernel --> ModelCatalog : "validates"
 ```
@@ -200,6 +213,7 @@ AgentKernel --> ModelCatalog : "validates"
 - [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
 - [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
 - [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
+- [luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
 
 ## Detailed Component Analysis
 
@@ -234,6 +248,8 @@ Resolution strategy:
 - If a specific provider name is configured, resolve directly
 - Otherwise, iterate registered providers by priority and pick the first healthy one
 - Fallback chain can be enforced via ordered lists in runtime settings
+
+**Updated** Now includes Luban provider alongside existing providers (DashScope, DeepSeek, OpenAI)
 
 **Section sources**
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
@@ -280,7 +296,7 @@ Configuration highlights:
 - Authentication: API key via environment or config; uses compatible client library
 - Endpoint: DeepSeek API endpoint; supports custom base URL if needed
 - Features: Chat completions, streaming, model listing; aligns closely with OpenAI-like contracts
-- **Enhanced**: Model series: `("deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner")` - default model first
+- **Enhanced**: Model series: `("deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp")` - default model first
 - Differences: Minor variations in response fields and error codes; normalized by provider layer
 
 Configuration highlights:
@@ -293,10 +309,30 @@ Configuration highlights:
 - [config.py](file://products/agent-platform/src/agent_service/core/config.py)
 - [env.py](file://products/agent-platform/src/agent_service/core/env.py)
 
+#### **New** Luban Provider
+- Authentication: Bearer-token based via `LUBAN_API_KEY`; requires mandatory `LUBAN_BASE_URL`
+- Endpoint: Self-hosted OpenAI-compatible servers (Ollama, vLLM, llama.cpp); no default endpoint
+- Features: Chat completions, streaming, model listing using OpenAI-compatible protocol
+- **Enhanced**: Default model: `qwen3-8b` (reference model for Ollama hosting guide)
+- **Enhanced**: Empty curated series (`model_series = ()`) - only force-included default model served
+- **Enhanced**: Permissive discovery filter - no family prefixes for self-hosted model names
+- Security: Fail-closed design - never dials outside operator-declared endpoint without bearer token
+
+Configuration highlights:
+- `LUBAN_API_KEY`: Required bearer token for authentication
+- `LUBAN_BASE_URL`: Mandatory base URL for self-hosted endpoint
+- `LUBAN_MODEL_NAME`: Optional model name override (defaults to `qwen3-8b`)
+- `LUBAN_MODELS`: Optional comma-separated model list for fixed-point pinning
+- `LUBAN_THINKING_ENABLE`: Optional thinking mode enablement (defaults to false for small models)
+
+**Section sources**
+- [luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+
 ### Runtime Model Switching System
 
 #### Enhanced Multi-Model Catalog Discovery
-The model catalog provides secure discovery of available models at runtime without exposing credentials, now supporting multiple models per provider:
+The model catalog provides secure discovery of available models at runtime without exposing credentials, now supporting multiple models per provider including the new Luban provider:
 
 - **Startup Discovery**: Models are discovered at service startup based on environment variables and provider `model_series` properties
 - **Credential Safety**: Only safe metadata (id, label, provider, default) is exposed via API
@@ -304,6 +340,7 @@ The model catalog provides secure discovery of available models at runtime witho
 - **Public API**: `/api/v2/models` endpoint returns discovery-safe model information
 - **Multi-Model Support**: Each provider contributes its complete model lineup through the `model_series` property
 - **Unique Model IDs**: Model names must be unique across the entire catalog to prevent conflicts
+- **Luban Integration**: Team-hosted providers require both API key and base URL to be configured
 
 ```mermaid
 sequenceDiagram
@@ -316,10 +353,10 @@ Client->>Gateway : GET /api/v2/models
 Gateway->>Catalog : public_models()
 Catalog-->>Gateway : {models : [...], default : "gpt-4o-mini"}
 Gateway-->>Client : Discovery-safe model list
-Client->>Gateway : POST /api/v2/chat (model : "qwen-plus")
-Gateway->>Catalog : get("qwen-plus")
-Catalog-->>Gateway : ModelCatalogEntry(provider="dashscope")
-Gateway->>Kernel : stream_events(..., model_id="qwen-plus")
+Client->>Gateway : POST /api/v2/chat (model : "qwen3-8b")
+Gateway->>Catalog : get("qwen3-8b")
+Catalog-->>Gateway : ModelCatalogEntry(provider="luban")
+Gateway->>Kernel : stream_events(..., model_id="qwen3-8b")
 Kernel->>Catalog : validate model exists
 Catalog-->>Kernel : Valid ✓
 Kernel->>Provider : Build model with credentials
@@ -351,7 +388,7 @@ The system enables runtime model switching through several mechanisms:
 - **Validation**: All model IDs validated against credential-gated catalog
 - **Model Attribution**: Serving model tracked through message_end events for audit trails
 
-**Updated** Enhanced with comprehensive multi-model support including credential-gated model catalog discovery, per-session model pinning, and dynamic provider selection without service restarts
+**Updated** Enhanced with comprehensive multi-model support including credential-gated model catalog discovery, per-session model pinning, dynamic provider selection without service restarts, and **new Luban provider integration for team-hosted OpenAI-compatible servers**.
 
 **Section sources**
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
@@ -410,6 +447,7 @@ Best practices:
 - Emit metrics and traces consistently
 - Implement robust health checks
 - **Enhanced**: Ensure `model_series` contains unique model names across all providers
+- **Enhanced**: Consider security implications for team-hosted providers (like Luban) requiring mandatory base URLs
 
 Example steps:
 - Create a new file under providers directory
@@ -433,12 +471,14 @@ Fallback mechanisms:
 - Circuit breaker to temporarily exclude failing providers
 - Graceful degradation by switching to a cheaper or more reliable provider
 - **Enhanced**: Model-level fallback within provider when specific models become unavailable
+- **Enhanced**: Special handling for team-hosted providers requiring mandatory configuration
 
 Operational considerations:
 - Monitor health and error rates to adjust priorities dynamically
 - Use feature flags to enable/disable providers per tenant or region
 - Ensure idempotency and consistent retries across providers
 - **Enhanced**: Monitor model-specific performance for optimal routing decisions
+- **Enhanced**: Validate team-hosted provider configurations at startup
 
 **Section sources**
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
@@ -460,6 +500,7 @@ Error handling:
 - Distinguish between client errors (bad input) and server errors (transient)
 - Surface actionable diagnostics for debugging
 - **Enhanced**: Model-specific error handling with appropriate fallback strategies
+- **Enhanced**: Specific error handling for team-hosted provider configuration issues
 
 ```mermaid
 flowchart TD
@@ -503,6 +544,7 @@ Integration points:
 - Registry consults circuit breaker state before selecting a provider
 - Observability emits events for state transitions and failures
 - **Enhanced**: Model-specific circuit breaking for fine-grained control
+- **Enhanced**: Special health validation for team-hosted providers requiring mandatory configuration
 
 **Section sources**
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
@@ -515,6 +557,7 @@ Benchmarking guidelines:
 - Compare cost-per-token and success rates across models
 - Validate streaming vs non-streaming performance
 - **Enhanced**: Model-specific performance profiling for optimal selection
+- **Enhanced**: Performance comparison between cloud providers and team-hosted solutions
 
 Recommended approach:
 - Use synthetic workloads mimicking real traffic patterns
@@ -522,6 +565,7 @@ Recommended approach:
 - Run benchmarks in isolated environments to avoid noise
 - Report results in a standardized format for comparison
 - **Enhanced**: Track model switching overhead and cache effectiveness
+- **Enhanced**: Monitor network latency impact for team-hosted providers
 
 [No sources needed since this section provides general guidance]
 
@@ -540,6 +584,7 @@ Base["Base Provider"]
 OAI["OpenAI Provider<br/>model_series: 3 models"]
 DS["DashScope Provider<br/>model_series: 4 models"]
 DK["DeepSeek Provider<br/>model_series: 3 models"]
+LB["Luban Provider<br/>Team-hosted OpenAI-compatible"]
 Reg["Provider Registry"]
 Cfg["Config & Env"]
 RS["Runtime Settings"]
@@ -551,21 +596,25 @@ Kernel["Agent Kernel<br/>Dynamic Rebuilding"]
 OAI --> Base
 DS --> Base
 DK --> Base
+LB --> Base
 Reg --> Base
 Reg --> RS
 Reg --> Cfg
 OAI --> Obs
 DS --> Obs
 DK --> Obs
+LB --> Obs
 Reg --> Obs
 OAI --> Met
 DS --> Met
 DK --> Met
+LB --> Met
 Reg --> Met
 Catalog --> RS
 Catalog --> OAI
 Catalog --> DS
 Catalog --> DK
+Catalog --> LB
 SessionSvc --> Catalog
 Kernel --> Catalog
 Kernel --> SessionSvc
@@ -580,6 +629,7 @@ Kernel --> SessionSvc
 - [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
 - [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
 - [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
+- [luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
 
 **Section sources**
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
@@ -597,6 +647,7 @@ Kernel --> SessionSvc
 - **Enhanced**: Minimize agent rebuilds by caching sessions effectively and optimizing model switching
 - **Enhanced**: Optimize model catalog lookups for high-throughput scenarios with proper indexing
 - **Enhanced**: Monitor model-specific performance to inform routing decisions
+- **Enhanced**: Consider network latency implications for team-hosted providers vs cloud providers
 
 [No sources needed since this section provides general guidance]
 
@@ -610,6 +661,7 @@ Common issues and resolutions:
 - **Enhanced**: Model switching failures: Check credential-gated catalog validity and session pinning
 - **Enhanced**: Session affinity issues: Verify store backend connectivity and model persistence
 - **Enhanced**: Model conflicts: Resolve duplicate model IDs across different providers
+- **New**: Luban provider issues: Verify both `LUBAN_API_KEY` and `LUBAN_BASE_URL` are configured; self-hosted endpoints require mandatory base URL
 
 Debugging tips:
 - Enable detailed logging for provider interactions
@@ -618,10 +670,11 @@ Debugging tips:
 - **Enhanced**: Monitor model catalog discovery logs for credential issues and model series validation
 - **Enhanced**: Track session model pinning operations for debugging affinity problems
 - **Enhanced**: Use model attribution in message_end events to verify serving model selection
+- **New**: For Luban provider, validate team-hosted endpoint accessibility and bearer token authentication
 
 **Section sources**
 - [test_runtime_providers.py](file://products/agent-platform/tests/test_runtime_providers.py)
 - [test_model_switching.py](file://products/agent-platform/tests/test_model_switching.py)
 
 ## Conclusion
-The provider registry and multi-provider support system provide a robust, extensible foundation for integrating multiple LLM backends. The enhanced runtime model switching capabilities with multi-model support add significant flexibility, allowing dynamic provider selection without service restarts while maintaining security through credential-gated discovery and session-based model affinity. Each provider now exposes its complete model lineup through the `model_series` property, enabling fine-grained model selection and optimization. By standardizing interfaces, centralizing configuration, enforcing health-aware selection, and implementing comprehensive runtime model switching with multi-model support, the system ensures reliability, flexibility, and observability across diverse providers. Following the guidance in this document will help you implement custom providers, optimize performance, and maintain high availability in production environments.
+The provider registry and multi-provider support system provide a robust, extensible foundation for integrating multiple LLM backends. The enhanced runtime model switching capabilities with multi-model support add significant flexibility, allowing dynamic provider selection without service restarts while maintaining security through credential-gated discovery and session-based model affinity. Each provider now exposes its complete model lineup through the `model_series` property, enabling fine-grained model selection and optimization. **The addition of the Luban provider extends the system's capabilities to support team-hosted OpenAI-compatible servers**, providing operators with the ability to deploy local or on-premises LLM solutions alongside cloud providers. By standardizing interfaces, centralizing configuration, enforcing health-aware selection, and implementing comprehensive runtime model switching with multi-model support, the system ensures reliability, flexibility, and observability across diverse providers. Following the guidance in this document will help you implement custom providers, optimize performance, and maintain high availability in production environments.
