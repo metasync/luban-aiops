@@ -30,7 +30,7 @@
 ## Delivery
 
 - [x] T-8: `make verify`; commit; `make build`; `make deploy`
-- [ ] T-9: live verification — apply Ollama manifests to dev-k8s, wire
+- [x] T-9: live verification — apply Ollama manifests to dev-k8s, wire
       `LUBAN_*` secrets, confirm `/api/v2/models` grouping, portal turn
       on a luban model, audit attribution, discovery metrics; L3 gate;
       push
