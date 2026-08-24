@@ -5,10 +5,11 @@
 - [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
 - [global.css](file://products/operator-portal/web-ui/app/src/theme/global.css)
 - [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [ComposerSelectionBar.tsx](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx)
 - [ModelSelect.tsx](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx)
 - [markdown.ts](file://products/operator-portal/web-ui/app/src/chat/markdown.ts)
 - [useChatStream.ts](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts)
-- [models.ts](file://products/operator-portal/web-ui/app/src/stream/models.ts)
+- [models.ts](file://products/operator-portal/web-ui/app/src/api/models.ts)
 - [transport.ts](file://products/operator-portal/web-ui/app/src/stream/transport.ts)
 - [AuthContext.tsx](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx)
 - [useSessionWorkspace.ts](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts)
@@ -36,22 +37,24 @@
 - [ToolsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/ToolsView.tsx)
 - [useSpeechRecognition.ts](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts)
 - [languages.ts](file://products/operator-portal/web-ui/app/src/voice/languages.ts)
-- [models.ts](file://products/operator-portal/web-ui/app/src/api/models.ts)
 - [models.test.ts](file://products/operator-portal/web-ui/app/src/api/__tests__/models.test.ts)
 - [markdown.test.ts](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts)
 - [useChatStream.test.ts](file://products/operator-portal/web-ui/app/src/stream/__tests__/useChatStream.test.ts)
 - [transcript.ts](file://products/operator-portal/web-ui/app/src/chat/transcript.ts)
 - [sessions.ts](file://products/operator-portal/web-ui/app/src/api/sessions.ts)
 - [transcript.test.ts](file://products/operator-portal/web-ui/app/src/chat/__tests__/transcript.test.ts)
+- [ComposerSelectionBar.test.tsx](file://products/operator-portal/web-ui/app/src/chat/__tests__/ComposerSelectionBar.test.tsx)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added model selector UI component with dynamic rendering based on catalog availability
-- Integrated API client for model catalog discovery via GET /api/v1/models endpoint
-- Implemented session model persistence that follows session's pinned model or falls back to catalog default
-- Enhanced chat composer with model selection dropdown and single-model fixed label display
-- Added comprehensive test coverage for model catalog API client with fail-open UX behavior
+- Added new ComposerSelectionBar component that restructures the chat interface's model selection functionality
+- Replaced inline ModelSelect component from composer prefix with extensible control strip under message input area
+- Implemented comprehensive TypeScript interfaces for ComposerSelectionBarProps with catalog, model, and event handling
+- Added intelligent collapse behavior when no models are available to maintain compact composer layout
+- Integrated seamless integration with existing ModelSelect component while providing designated mount point for future per-turn selections
+- Enhanced CSS styling for composer selection bar with proper flexbox layout and responsive design
+- Added comprehensive test coverage for ComposerSelectionBar component including collapse scenarios and model selection propagation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -67,23 +70,24 @@
 11. [Real-time Streaming Interface](#real-time-streaming-interface)
 12. [Evidence Persistence and Replay System](#evidence-persistence-and-replay-system)
 13. [Model Selection and Catalog Integration](#model-selection-and-catalog-integration)
-14. [Skills Integration and Cited Guidance](#skills-integration-and-cited-guidance)
-15. [Permission Matrix and Workspace Resources](#permission-matrix-and-workspace-resources)
-16. [Multi-Session Workspace Management](#multi-session-workspace-management)
-17. [Voice Input Support](#voice-input-support)
-18. [Incident Triage and Deep Linking](#incident-triage-and-deep-linking)
-19. [Deployment Guide](#deployment-guide)
-20. [UI Customization](#ui-customization)
-21. [Accessibility Features](#accessibility-features)
-22. [Browser Compatibility](#browser-compatibility)
-23. [Troubleshooting Guide](#troubleshooting-guide)
-24. [Conclusion](#conclusion)
+14. [Composer Selection Bar Architecture](#composer-selection-bar-architecture)
+15. [Skills Integration and Cited Guidance](#skills-integration-and-cited-guidance)
+16. [Permission Matrix and Workspace Resources](#permission-matrix-and-workspace-resources)
+17. [Multi-Session Workspace Management](#multi-session-workspace-management)
+18. [Voice Input Support](#voice-input-support)
+19. [Incident Triage and Deep Linking](#incident-triage-and-deep-linking)
+20. [Deployment Guide](#deployment-guide)
+21. [UI Customization](#ui-customization)
+22. [Accessibility Features](#accessibility-features)
+23. [Browser Compatibility](#browser-compatibility)
+24. [Troubleshooting Guide](#troubleshooting-guide)
+25. [Conclusion](#conclusion)
 
 ## Introduction
 
 The Operator Portal is a modern web-based administrative interface designed for platform administration and monitoring within the Luban AIOPS ecosystem. The portal has been completely rebuilt using React 18, TypeScript, and Vite, replacing the previous vanilla JavaScript implementation. It provides operators with a sophisticated two-column shell interface featuring a persistent sidebar for navigation and a main content area for interactive operations. The portal serves as a centralized control plane for platform administrators, offering real-time visibility into system status through an interactive chat interface, comprehensive evidence panels for tool execution tracking, configuration management capabilities, and administrative functions necessary for maintaining the AI-powered agent platform infrastructure.
 
-**Updated** The portal now features enhanced model selection capabilities with dynamic catalog integration, allowing operators to choose between different AI models for their conversations. The model selector automatically adapts its presentation based on available models - showing a dropdown when multiple models are configured, a fixed label when only one model is available, or hiding entirely when no models are configured. **Critical Enhancement**: The model selection system includes session persistence that remembers the selected model per session, ensuring consistent model usage throughout conversation workflows while maintaining fail-open behavior when catalog services are unavailable.
+**Updated** The portal now features enhanced model selection capabilities with dynamic catalog integration, allowing operators to choose between different AI models for their conversations. The model selector automatically adapts its presentation based on available models - showing a dropdown when multiple models are configured, a fixed label when only one model is available, or hiding entirely when no models are configured. **Critical Enhancement**: The model selection system includes session persistence that remembers the selected model per session, ensuring consistent model usage throughout conversation workflows while maintaining fail-open behavior when catalog services are unavailable. **New Feature**: The introduction of the ComposerSelectionBar component provides an extensible control strip architecture that replaces the inline ModelSelect component, offering better modularity and a designated mount point for future per-turn selections as referenced in SPEC-024.
 
 ## Project Structure
 
@@ -98,43 +102,45 @@ B --> D[useChatStream.ts]
 B --> E[useSessionWorkspace.ts]
 B --> F[markdown.ts]
 B --> G[transcript.ts]
-B --> H[ModelSelect.tsx]
-D --> I[transport.ts]
-I --> J[decoder.ts]
-A --> K[AuditView.tsx]
-A --> L[IncidentsView.tsx]
-A --> M[PermissionsView.tsx]
-A --> N[SkillsView.tsx]
-A --> O[ToolsView.tsx]
+B --> H[ComposerSelectionBar.tsx]
+H --> I[ModelSelect.tsx]
+D --> J[transport.ts]
+I --> K[decoder.ts]
+A --> L[AuditView.tsx]
+A --> M[IncidentsView.tsx]
+A --> N[PermissionsView.tsx]
+A --> O[SkillsView.tsx]
+A --> P[ToolsView.tsx]
 end
 subgraph "Model Selection System"
-P[ModelCatalog API] --> Q[getModelCatalog Function]
-R[ModelSelect Component] --> S[Dynamic Rendering Logic]
-T[Session Model State] --> U[Pinned Model Persistence]
-V[Fail-Open UX] --> W[Graceful Degradation]
+Q[ModelCatalog API] --> R[getModelCatalog Function]
+S[ComposerSelectionBar] --> T[Extensible Control Strip]
+U[ModelSelect Component] --> V[Dynamic Rendering Logic]
+W[Session Model State] --> X[Pinned Model Persistence]
+Y[Fail-Open UX] --> Z[Graceful Degradation]
 end
 subgraph "Evidence Persistence System"
-X[transcriptToTurns] --> Y[EvidenceFrame Mapping]
-Z[EvidenceTurn Groups] --> AA[Request ID Attachment]
-BB[Truncation Markers] --> CC[Payload Budget Handling]
-DD[Live Stream Frames] --> EE[Unified Turn Model]
-FF[Replayed Evidence] --> GG[Consistent Rendering]
+AA[transcriptToTurns] --> BB[EvidenceFrame Mapping]
+CC[EvidenceTurn Groups] --> DD[Request ID Attachment]
+EE[Truncation Markers] --> FF[Payload Budget Handling]
+GG[Live Stream Frames] --> HH[Unified Turn Model]
+II[Replayed Evidence] --> JJ[Consistent Rendering]
 end
 subgraph "Enhanced Navigation System"
-HH[useNarrowViewport Hook] --> II[Responsive Breakpoint Detection at 992px]
-JJ[Mobile Menu Button] --> KK[Dynamic ARIA Labels]
-LL[Sidebar Collapsible 64px Rail] --> MM[Drawer Integration]
-NN[Content Spacing Management] --> OO[.view-container-inset Class]
+KK[useNarrowViewport Hook] --> LL[Responsive Breakpoint Detection at 992px]
+MM[Mobile Menu Button] --> NN[Dynamic ARIA Labels]
+OO[Sidebar Collapsible 64px Rail] --> PP[Drawer Integration]
+QQ[Content Spacing Management] --> RR[.view-container-inset Class]
 end
 subgraph "Build & Deployment"
-PP[vite.config.ts] --> QQ[package.json]
-RR[Dockerfile] --> SS[Makefile]
-TT[VERSION] --> UU[validate_version.py]
+SS[vite.config.ts] --> TT[package.json]
+UU[Dockerfile] --> VV[Makefile]
+WW[VERSION] --> XX[validate_version.py]
 end
 subgraph "Backend Services"
-VV[Agent Platform] --> WW[HITL Confirmations]
-XX[Platform Gateway] --> YY[Identity Broker]
-ZZ[Tool Gateway] --> AA[Policy Engine]
+YY[Agent Platform] --> ZZ[HITL Confirmations]
+AA[Platform Gateway] --> BB[Identity Broker]
+CC[Tool Gateway] --> DD[Policy Engine]
 end
 ```
 
@@ -142,7 +148,8 @@ end
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
 - [App.tsx:288-307](file://products/operator-portal/web-ui/app/src/App.tsx#L288-L307)
 - [App.tsx:334-357](file://products/operator-portal/web-ui/app/src/App.tsx#L334-L357)
-- [ChatView.tsx:582-599](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L582-L599)
+- [ChatView.tsx:860-877](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L860-L877)
+- [ComposerSelectionBar.tsx:16-47](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx#L16-L47)
 - [ModelSelect.tsx:18-57](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L18-L57)
 - [models.ts:20-30](file://products/operator-portal/web-ui/app/src/api/models.ts#L20-L30)
 - [transcript.ts:55-70](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L55-L70)
@@ -168,7 +175,8 @@ The Operator Portal consists of several key React components and hooks that work
 - **Chat-Based Interface**: Real-time streaming responses with turn-based conversation management
 - **Inline Per-Turn Evidence System**: Sophisticated turn-scoped evidence grouping with collapsible groups
 - **HITL Confirmation Cards**: Inline approval surfaces for ASK-gated tool executions with Approve/Deny buttons
-- **Model Selector Component**: Dynamic model selection with catalog-driven rendering and session persistence
+- **Composer Selection Bar**: Extensible control strip rendered under message input for model selection and future per-turn controls
+- **Model Select Component**: Dynamic model selection with catalog-driven rendering and session persistence
 - **Skills Integration**: Enhanced evidence cards with "Cited guidance" chips displaying matched skills
 - **Authentication System**: OIDC integration with automatic token refresh and session management
 - **Enhanced Markdown Renderer**: Comprehensive text formatting with XSS prevention and syntax highlighting support
@@ -189,7 +197,7 @@ The Operator Portal consists of several key React components and hooks that work
 - **Role-Based Navigation**: Conditional visibility based on user roles and permissions
 - **Mobile Drawer**: Off-canvas navigation for narrow screens with proper focus management
 - **Settings & Debug Panel**: Configuration management and debugging tools
-- **Model Selection Dropdown**: Context-aware model picker integrated into chat composer
+- **Composer Selection Bar**: Extensible control strip with model selector and future per-turn selection capabilities
 
 ### Enhanced Navigation System
 - **Persistent 64px Icon Rail**: Fixed-width collapsed sidebar that maintains navigation access across all views
@@ -224,13 +232,14 @@ The Operator Portal consists of several key React components and hooks that work
 - **Validation System**: Automated version consistency checks across all platform components
 - **Deployment Consistency**: Coordinated versioning across all platform services
 
-**Updated** The interface now includes enhanced model selection capabilities with dynamic catalog integration, providing operators with flexible AI model choices while maintaining robust fail-open behavior. The model selector automatically adapts its presentation based on catalog availability and session context. Recent improvements include enhanced authentication state management with proper disabled states for unauthenticated users, improved markdown table rendering with proper header/body separation, visual consistency improvements including inline brand display with platform version tags, and comprehensive test coverage for markdown rendering functionality ensuring robust XSS prevention and security measures. **Critical Enhancement**: The streaming system includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions.
+**Updated** The interface now includes enhanced model selection capabilities with dynamic catalog integration, providing operators with flexible AI model choices while maintaining robust fail-open behavior. The model selector automatically adapts its presentation based on catalog availability and session context. Recent improvements include the introduction of the ComposerSelectionBar component which provides an extensible control strip architecture for model selection and future per-turn controls, enhanced authentication state management with proper disabled states for unauthenticated users, improved markdown table rendering with proper header/body separation, visual consistency improvements including inline brand display with platform version tags, and comprehensive test coverage for markdown rendering functionality ensuring robust XSS prevention and security measures. **Critical Enhancement**: The streaming system includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
 - [App.tsx:288-307](file://products/operator-portal/web-ui/app/src/App.tsx#L288-L307)
 - [App.tsx:334-357](file://products/operator-portal/web-ui/app/src/App.tsx#L334-L357)
 - [ChatView.tsx:1-790](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L790)
+- [ComposerSelectionBar.tsx:1-48](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx#L1-L48)
 - [ModelSelect.tsx:1-58](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L1-L58)
 - [useChatStream.ts:1-405](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L405)
 
@@ -244,6 +253,7 @@ participant User as "Browser"
 participant React as "React App"
 participant Nav as "Enhanced Navigation"
 participant Auth as "Auth Context"
+participant CompSel as "ComposerSelectionBar"
 participant ModelCat as "Model Catalog API"
 participant Stream as "Chat Stream Hook"
 participant Transcript as "Transcript Converter"
@@ -267,7 +277,9 @@ React->>Views : Navigate to specific views with proper padding
 Note over React : Model Catalog Discovery
 React->>ModelCat : GET /api/v1/models
 ModelCat-->>React : Model catalog with id/label/provider/default
-React->>React : Render ModelSelect based on catalog size
+React->>CompSel : Render ComposerSelectionBar with catalog
+CompSel->>CompSel : Collapse if no models available
+CompSel->>ModelCat : Mount ModelSelect component
 Note over React : Evidence Persistence and Replay
 User->>React : Open session with transcript
 React->>Transcript : transcriptToTurns(transcript, evidence_turns)
@@ -297,9 +309,8 @@ Stream-->>React : Active session updated
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
 - [App.tsx:288-307](file://products/operator-portal/web-ui/app/src/App.tsx#L288-L307)
 - [App.tsx:334-357](file://products/operator-portal/web-ui/app/src/App.tsx#L334-L357)
-- [ChatView.tsx:582-599](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L582-L599)
-- [ChatView.tsx:643-653](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L643-L653)
-- [ChatView.tsx:742-746](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L742-L746)
+- [ChatView.tsx:860-877](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L860-L877)
+- [ComposerSelectionBar.tsx:16-47](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx#L16-L47)
 - [ModelSelect.tsx:18-57](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L18-L57)
 - [models.ts:20-30](file://products/operator-portal/web-ui/app/src/api/models.ts#L20-L30)
 - [transcript.ts:72-106](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L72-L106)
@@ -310,7 +321,7 @@ Stream-->>React : Active session updated
 - [useChatStream.ts:191-314](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L191-L314)
 - [transport.ts:75-100](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L75-L100)
 
-The architecture emphasizes type safety, component composition, and maintainable state management while providing enterprise-grade functionality for platform operations. The React hooks pattern enables clean separation of concerns and reusable logic across components. **Enhanced with model selection capabilities** that provide dynamic catalog integration and session-based model persistence, ensuring operators can consistently use their preferred AI models throughout conversations. **Critical Enhancement**: The streaming system includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions.
+The architecture emphasizes type safety, component composition, and maintainable state management while providing enterprise-grade functionality for platform operations. The React hooks pattern enables clean separation of concerns and reusable logic across components. **Enhanced with model selection capabilities** that provide dynamic catalog integration and session-based model persistence, ensuring operators can consistently use their preferred AI models throughout conversations. **Critical Enhancement**: The streaming system includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions. **New Feature**: The ComposerSelectionBar component provides an extensible architecture for model selection and future per-turn controls, improving modularity and maintainability.
 
 ## Detailed Component Analysis
 
@@ -449,13 +460,14 @@ The inline confirmation card provides a focused interface for reviewing and deci
 - **Validation System**: Automated version consistency checks across all platform components
 - **Deployment Consistency**: Coordinated versioning across all platform services
 
-**Updated** The React architecture provides better type safety, component reusability, and maintainability while preserving all existing functionality from the legacy implementation. The new view components provide dedicated interfaces for different operational tasks. Enhanced session management now includes defensive parsing to handle edge cases in stored session data. The enhanced navigation system includes a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, and enhanced mobile drawer navigation with proper positioning and z-index management. The new sticky request banner system enhances conversation usability during long interactions. **Critical Enhancement**: The evidence persistence system provides unified rendering of both live streamed and replayed evidence, ensuring operators see consistent evidence cards with request ID display and truncation markers regardless of evidence source. The stale session handling system now includes comprehensive missing reference tracking and automatic retry logic to prevent errors from deleted or expired sessions, ensuring more reliable chat functionality.
+**Updated** The React architecture provides better type safety, component reusability, and maintainability while preserving all existing functionality from the legacy implementation. The new view components provide dedicated interfaces for different operational tasks. Enhanced session management now includes defensive parsing to handle edge cases in stored session data. The enhanced navigation system includes a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, and enhanced mobile drawer navigation with proper positioning and z-index management. The new sticky request banner system enhances conversation usability during long interactions. **Critical Enhancement**: The evidence persistence system provides unified rendering of both live streamed and replayed evidence, ensuring operators see consistent evidence cards with request ID display and truncation markers regardless of evidence source. The stale session handling system now includes comprehensive missing reference tracking and automatic retry logic to prevent errors from deleted or expired sessions, ensuring more reliable chat functionality. **New Feature**: The ComposerSelectionBar component provides an extensible architecture for model selection and future per-turn controls, improving modularity and maintainability.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
 - [App.tsx:288-307](file://products/operator-portal/web-ui/app/src/App.tsx#L288-L307)
 - [App.tsx:334-357](file://products/operator-portal/web-ui/app/src/App.tsx#L334-L357)
 - [ChatView.tsx:1-790](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L790)
+- [ComposerSelectionBar.tsx:1-48](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx#L1-L48)
 - [ModelSelect.tsx:1-58](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L1-L58)
 - [useChatStream.ts:1-405](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L405)
 - [useSessionWorkspace.ts:1-174](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L1-L174)
@@ -499,6 +511,13 @@ The styling system maintains design consistency while leveraging Ant Design's th
 - **Action Buttons**: Green approve button and red deny button with hover effects
 - **Status Messages**: Clear status indicators for awaiting decision, approving/denying, and final states
 
+#### Composer Selection Bar Styling
+- **Flexbox Layout**: Responsive flexbox layout with proper spacing and alignment
+- **Item Organization**: Individual selection items with consistent gap and alignment
+- **Label Typography**: Secondary typography styling for selection labels
+- **Collapse Behavior**: Intelligent collapse when no models are available
+- **Future Extensibility**: Design supports additional per-turn selection controls
+
 #### Model Selector Styling
 - **Dropdown Styling**: Compact Ant Design Select with borderless variant for seamless integration
 - **Fixed Label**: Secondary typography styling for single-model scenarios
@@ -508,6 +527,7 @@ The styling system maintains design consistency while leveraging Ant Design's th
 **Section sources**
 - [global.css:66-119](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L119)
 - [global.css:121-132](file://products/operator-portal/web-ui/app/src/theme/global.css#L121-L132)
+- [global.css:234-250](file://products/operator-portal/web-ui/app/src/theme/global.css#L234-L250)
 - [global.css:365-407](file://products/operator-portal/web-ui/app/src/theme/global.css#L365-L407)
 - [global.css:409-444](file://products/operator-portal/web-ui/app/src/theme/global.css#L409-L444)
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
@@ -1173,6 +1193,103 @@ The model selection system provides several operational advantages:
 - [ChatView.tsx:742-746](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L742-L746)
 - [ChatView.tsx:814-819](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L814-L819)
 
+## Composer Selection Bar Architecture
+
+The ComposerSelectionBar component represents a significant architectural improvement to the model selection system, providing an extensible control strip architecture that replaces the inline ModelSelect component from the composer prefix.
+
+### Component Architecture
+
+The ComposerSelectionBar serves as a dedicated mount point for model selection and future per-turn controls:
+
+#### Extensible Control Strip Design
+- **Modular Architecture**: Provides a flexible container for multiple selection controls
+- **SPEC-024 Compliance**: Implements the architectural requirements for runtime model switching
+- **Future-Proof Design**: Designed to accommodate additional per-turn selections as specified in the spec
+- **Clean Separation**: Separates selection logic from composer layout concerns
+
+#### TypeScript Interfaces
+- **ComposerSelectionBarProps**: Comprehensive interface defining catalog, model, onChange handler, and disabled state
+- **Type Safety**: Full TypeScript support with proper prop validation
+- **Event Handling**: Well-defined callback interface for model change events
+- **Optional Properties**: Flexible disabled property for streaming state management
+
+#### Intelligent Collapse Behavior
+- **Catalog Validation**: Automatically collapses when no models are available
+- **Fail-Open UX**: Maintains compact composer layout when catalog is unavailable
+- **Server-Side Resolution**: Turns resolve to deploy-time default when no selection is presented
+- **Graceful Degradation**: Ensures chat functionality remains available regardless of catalog status
+
+### Integration with Chat Interface
+
+The ComposerSelectionBar integrates seamlessly with the existing chat architecture:
+
+#### Sender Footer Slot Integration
+- **Footer Placement**: Rendered in the Sender component's footer slot for optimal placement
+- **Layout Preservation**: Maintains compact composer height when collapsed
+- **Responsive Behavior**: Adapts to different screen sizes and composer configurations
+- **State Management**: Proper integration with chat streaming and authentication states
+
+#### Model Selection Flow
+- **Catalog Propagation**: Receives model catalog data from parent ChatView component
+- **Model State Binding**: Maintains bidirectional binding with selected model state
+- **Change Event Handling**: Propagates model selection changes up to parent component
+- **Disabled State Management**: Respects streaming and authentication states
+
+### CSS Styling and Layout
+
+The component includes comprehensive styling for consistent visual presentation:
+
+#### Flexbox Layout System
+- **Responsive Design**: Uses flexbox for flexible layout with proper wrapping
+- **Consistent Spacing**: Standardized gaps and padding for visual harmony
+- **Alignment Control**: Proper vertical and horizontal alignment of selection items
+- **Scalable Architecture**: Supports addition of multiple selection controls
+
+#### Styling Classes
+- **composer-selection-bar**: Main container with flexbox layout and padding
+- **composer-selection-item**: Individual selection item wrapper with alignment
+- **composer-selection-label**: Typography styling for selection labels
+- **Future Extensibility**: Design accommodates additional selection types
+
+### Testing and Quality Assurance
+
+The component includes comprehensive test coverage ensuring reliability:
+
+#### Test Scenarios
+- **Collapse Behavior**: Tests for catalog unavailability and empty catalog scenarios
+- **Single Model Display**: Tests for fixed label rendering when only one model exists
+- **Multi-Model Selection**: Tests for dropdown rendering and selection propagation
+- **Event Handling**: Tests for proper onChange callback invocation
+
+#### Mock Environment Setup
+- **Browser API Shims**: Proper mocking of matchMedia and ResizeObserver for testing
+- **Component Isolation**: Tests focus on component behavior without external dependencies
+- **State Validation**: Comprehensive validation of component state and props
+
+### Architectural Benefits
+
+The ComposerSelectionBar provides several architectural advantages:
+
+#### Modularity Improvements
+- **Separation of Concerns**: Isolates selection logic from composer layout concerns
+- **Reusability**: Component can be reused across different composer implementations
+- **Testability**: Isolated component structure enables comprehensive unit testing
+- **Maintainability**: Clear boundaries make the code easier to understand and modify
+
+#### Future Extensibility
+- **Per-Turn Selections**: Designed to accommodate additional selection controls as specified in SPEC-024
+- **Plugin Architecture**: Extensible design allows for third-party selection controls
+- **Configuration Driven**: Can be configured for different selection scenarios
+- **Backward Compatibility**: Maintains compatibility with existing chat interface
+
+**Updated** The ComposerSelectionBar component represents a significant architectural improvement that enhances modularity and provides a foundation for future per-turn selection capabilities. The component's intelligent collapse behavior ensures optimal user experience while maintaining the compact composer layout. **Critical Enhancement**: The component's extensible design provides a designated mount point for future per-turn selections as referenced in SPEC-024, ensuring the architecture can evolve with changing requirements.
+
+**Section sources**
+- [ComposerSelectionBar.tsx:1-48](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx#L1-L48)
+- [ChatView.tsx:860-877](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L860-L877)
+- [ComposerSelectionBar.test.tsx:1-115](file://products/operator-portal/web-ui/app/src/chat/__tests__/ComposerSelectionBar.test.tsx#L1-L115)
+- [global.css:234-250](file://products/operator-portal/web-ui/app/src/theme/global.css#L234-L250)
+
 ## Skills Integration and Cited Guidance
 
 The Operator Portal includes comprehensive skills integration with "Cited guidance" chips that provide enhanced operational visibility when skills.* tools successfully execute, implemented as React components.
@@ -1663,7 +1780,7 @@ The deployment process includes enhanced version management:
 - **Version Validation**: Automated validation ensures all platform components use consistent versions
 - **Deployment Coordination**: Coordinated versioning across all platform services
 
-**Updated** The deployment now supports both the new React/TypeScript application and the legacy vanilla JavaScript implementation, with enhanced HITL confirmation bridging system, improved navigation system with persistent 64px icon rail that maintains consistent layout anchoring across all views, enhanced responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, enhanced mobile drawer navigation with proper positioning and z-index management, dynamic aria-labels that adapt based on viewport state and sidebar status, and restructured styling with .view-container-inset class for proper content spacing. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. Enhanced security measures include improved XSS prevention and defensive session parsing. The sticky request banner system and enhanced markdown rendering with proper table structure are also supported in the deployment. **Critical Enhancement**: The deployment now includes support for the enhanced stale session handling system that automatically detects and recovers from deleted or expired sessions, ensuring more reliable chat functionality, and the comprehensive evidence persistence system that provides unified rendering of both live streamed and replayed evidence with request ID display and truncation markers. **Critical Enhancement**: The deployment now includes support for the model selection system with catalog integration, providing operators with flexible AI model choices while maintaining fail-open behavior when catalog services are unavailable.
+**Updated** The deployment now supports both the new React/TypeScript application and the legacy vanilla JavaScript implementation, with enhanced HITL confirmation bridging system, improved navigation system with persistent 64px icon rail that maintains consistent layout anchoring across all views, enhanced responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, enhanced mobile drawer navigation with proper positioning and z-index management, dynamic aria-labels that adapt based on viewport state and sidebar status, and restructured styling with .view-container-inset class for proper content spacing. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. Enhanced security measures include improved XSS prevention and defensive session parsing. The sticky request banner system and enhanced markdown rendering with proper table structure are also supported in the deployment. **Critical Enhancement**: The deployment now includes support for the enhanced stale session handling system that automatically detects and recovers from deleted or expired sessions, ensuring more reliable chat functionality, and the comprehensive evidence persistence system that provides unified rendering of both live streamed and replayed evidence with request ID display and truncation markers. **Critical Enhancement**: The deployment now includes support for the model selection system with catalog integration, providing operators with flexible AI model choices while maintaining fail-open behavior when catalog services are unavailable. **New Feature**: The deployment now includes support for the ComposerSelectionBar component which provides an extensible control strip architecture for model selection and future per-turn controls.
 
 **Section sources**
 - [nginx.conf](file://products/operator-portal/nginx.conf)
@@ -1728,6 +1845,7 @@ The React implementation provides additional customization points:
 - **Stale Session Handling Styling**: Customizable appearance for stale session error messages and recovery indicators
 - **Evidence Persistence Styling**: Customizable appearance for evidence cards, truncation markers, and request ID display
 - **Model Selection Styling**: Customizable appearance for model selector dropdown, fixed labels, and catalog integration
+- **Composer Selection Bar Styling**: Customizable appearance for the extensible control strip with proper flexbox layout and item organization
 
 **Section sources**
 - [global.css:66-119](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L119)
@@ -1786,6 +1904,7 @@ The React implementation includes additional accessibility improvements:
 - **Stale Session Handling**: Accessible error messages and recovery indicators for stale session detection and retry operations
 - **Evidence Persistence**: Accessible evidence cards with proper ARIA labels for truncation markers and request ID display
 - **Model Selection**: Accessible model selector with proper ARIA labels and keyboard navigation support
+- **Composer Selection Bar**: Accessible control strip with proper ARIA labels and keyboard navigation for model selection
 
 **Section sources**
 - [global.css:66-119](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L119)
@@ -1843,6 +1962,7 @@ The React implementation maintains broad browser compatibility:
 - **Stale Session Handling**: Cross-browser support for 404 error detection and retry logic with graceful fallbacks
 - **Evidence Persistence**: Cross-browser support for evidence replay with proper fallbacks when evidence store is unavailable
 - **Model Selection**: Cross-browser support for model catalog integration with graceful degradation when catalog service is unavailable
+- **Composer Selection Bar**: Cross-browser support for extensible control strip with proper fallbacks when catalog service is unavailable
 
 **Section sources**
 - [Dockerfile](file://products/operator-portal/Dockerfile)
@@ -2172,7 +2292,42 @@ Common issues and their solutions when working with the Operator Portal.
 - Verify sparse payload handling for incomplete catalog responses
 - Test model catalog API directly to confirm backend functionality
 
-**Updated** Added comprehensive troubleshooting guidance for the enhanced navigation system, including persistent 64px icon rail issues, useNarrowViewport() hook problems, responsive breakpoint detection issues, drawer integration problems, dynamic aria-labels not updating correctly, and proper handling of .view-container-inset class for content spacing. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism, and enhanced error handling for different failure types including network errors, authentication failures, and streaming interruptions. New sections cover sticky request banner issues, markdown rendering problems with proper table structure, enhanced authentication state management for unauthenticated users, comprehensive stale session handling troubleshooting for 404 errors and retry logic failures, evidence persistence troubleshooting for transcript-to-turn conversion and evidence attachment issues, and comprehensive model selection troubleshooting for catalog integration and session persistence.
+### Composer Selection Bar Issues
+
+**Problem**: ComposerSelectionBar not appearing or collapsing incorrectly
+**Solution**:
+- Verify that catalog data is properly passed to ComposerSelectionBar component
+- Check that catalog.fetch is successful and returns proper model data
+- Ensure CSS classes are properly applied for flexbox layout
+- Verify that component collapses when catalog is null or empty
+- Check browser console for JavaScript errors in component rendering
+- Test with different catalog scenarios (empty, single model, multiple models)
+- Verify proper integration with Sender component footer slot
+
+### Composer Selection Bar Styling Issues
+
+**Problem**: ComposerSelectionBar layout or styling problems
+**Solution**:
+- Verify that .composer-selection-bar class has proper flexbox styling
+- Check that .composer-selection-item has correct alignment and spacing
+- Ensure .composer-selection-label has proper typography styling
+- Verify that CSS is properly loaded and not overridden by other styles
+- Check browser developer tools for CSS specificity issues
+- Test responsive behavior on different screen sizes
+- Verify proper integration with Ant Design components
+
+### Model Selection Integration Issues
+
+**Problem**: Model selection not working with ComposerSelectionBar
+**Solution**:
+- Verify that ModelSelect component is properly imported and used within ComposerSelectionBar
+- Check that onChange callback is properly wired to parent component
+- Ensure model state is properly managed in ChatView component
+- Verify that selected model is included in chat message metadata
+- Check for TypeScript compilation errors in component interfaces
+- Test model selection flow from UI to backend API
+
+**Updated** Added comprehensive troubleshooting guidance for the enhanced navigation system, including persistent 64px icon rail issues, useNarrowViewport() hook problems, responsive breakpoint detection issues, drawer integration problems, dynamic aria-labels not updating correctly, and proper handling of .view-container-inset class for content spacing. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism, and enhanced error handling for different failure types including network errors, authentication failures, and streaming interruptions. New sections cover sticky request banner issues, markdown rendering problems with proper table structure, enhanced authentication state management for unauthenticated users, comprehensive stale session handling troubleshooting for 404 errors and retry logic failures, evidence persistence troubleshooting for transcript-to-turn conversion and evidence attachment issues, comprehensive model selection troubleshooting for catalog integration and session persistence, and comprehensive ComposerSelectionBar troubleshooting for component rendering, styling, and integration issues.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
@@ -2180,6 +2335,7 @@ Common issues and their solutions when working with the Operator Portal.
 - [App.tsx:334-357](file://products/operator-portal/web-ui/app/src/App.tsx#L334-L357)
 - [global.css:66-119](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L119)
 - [ChatView.tsx:1-790](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L790)
+- [ComposerSelectionBar.tsx:1-48](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx#L1-L48)
 - [ModelSelect.tsx:1-58](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L1-L58)
 - [models.ts:1-31](file://products/operator-portal/web-ui/app/src/api/models.ts#L1-L31)
 - [useChatStream.ts:1-405](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L405)
@@ -2190,16 +2346,17 @@ Common issues and their solutions when working with the Operator Portal.
 - [useChatStream.test.ts:380-432](file://products/operator-portal/web-ui/app/src/stream/__tests__/useChatStream.test.ts#L380-L432)
 - [transcript.ts:55-70](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L55-L70)
 - [transcript.test.ts:109-184](file://products/operator-portal/web-ui/app/src/chat/__tests__/transcript.test.ts#L109-L184)
+- [ComposerSelectionBar.test.tsx:1-115](file://products/operator-portal/web-ui/app/src/chat/__tests__/ComposerSelectionBar.test.tsx#L1-L115)
 
 ## Conclusion
 
 The Operator Portal provides a comprehensive, accessible, and customizable web interface for platform administration and monitoring within the Luban AIOPS ecosystem. The complete rebuild using React 18, TypeScript, and Vite delivers enterprise-grade functionality while maintaining simplicity and performance.
 
-**Updated** The recent enhancements include an enhanced navigation system with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states with visual dividers instead of clipped text, and enhanced mobile drawer navigation with proper positioning and z-index management. The navigation system now maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management. Additional improvements include comprehensive mobile navigation with proper positioning and z-index management, enhanced security measures with improved XSS prevention in markdown rendering through comprehensive quote escaping and protocol filtering, improved session management with defensive parseStored function to handle malformed or corrupted session data, enhanced stream ownership handling during session switches to prevent cross-session data contamination, refined error handling for different failure types including network errors, authentication failures, and streaming interruptions, and backend API v6 schema compliance for risk level handling in pending calls. **Critical Enhancement**: The platform now includes comprehensive stale session handling with automatic 404 error detection, missing reference tracking, and retry logic that automatically drops stale session references and falls back to server-side session auto-creation, ensuring more reliable chat functionality even when backend sessions become invalid. **Critical Enhancement**: The evidence persistence system provides unified rendering of both live streamed and replayed evidence, ensuring operators see consistent evidence cards with request ID display and truncation markers regardless of evidence source. **Critical Enhancement**: The model selection system provides flexible AI model choices with dynamic catalog integration and session-based persistence, while maintaining fail-open behavior when catalog services are unavailable.
+**Updated** The recent enhancements include an enhanced navigation system with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states with visual dividers instead of clipped text, and enhanced mobile drawer navigation with proper positioning and z-index management. The navigation system now maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management. Additional improvements include comprehensive mobile navigation with proper positioning and z-index management, enhanced security measures with improved XSS prevention in markdown rendering through comprehensive quote escaping and protocol filtering, improved session management with defensive parseStored function to handle malformed or corrupted session data, enhanced stream ownership handling during session switches to prevent cross-session data contamination, refined error handling for different failure types including network errors, authentication failures, and streaming interruptions, and backend API v6 schema compliance for risk level handling in pending calls. **Critical Enhancement**: The platform now includes comprehensive stale session handling with automatic 404 error detection, missing reference tracking, and retry logic that automatically drops stale session references and falls back to server-side session auto-creation, ensuring more reliable chat functionality even when backend sessions become invalid. **Critical Enhancement**: The evidence persistence system provides unified rendering of both live streamed and replayed evidence, ensuring operators see consistent evidence cards with request ID display and truncation markers regardless of evidence source. **Critical Enhancement**: The model selection system provides flexible AI model choices with dynamic catalog integration and session-based persistence, while maintaining fail-open behavior when catalog services are unavailable. **New Feature**: The introduction of the ComposerSelectionBar component provides an extensible control strip architecture that improves modularity and provides a designated mount point for future per-turn selections as referenced in SPEC-024.
 
-Key strengths of the enhanced portal include its modular React architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities, enhanced skills integration capabilities, improved navigation organization with sectioned grouping and persistent 64px icon rail for consistent layout anchoring, robust multi-session workspace management, comprehensive incident triage with automated workflows, voice input support for hands-free operation, seamless deep linking between incidents and collaborative chat sessions, and enhanced mobile navigation with proper responsive behavior below 992px breakpoint. The enhanced security measures ensure protection against XSS attacks while maintaining full functionality. **Critical Enhancement**: The stale session handling system provides robust error recovery for deleted or expired sessions, ensuring reliable chat functionality even in challenging network conditions or backend service issues. **Critical Enhancement**: The evidence persistence system ensures complete traceability of tool executions regardless of whether they were observed live or reviewed from stored transcripts, with comprehensive truncation markers that clearly indicate payload limitations. **Critical Enhancement**: The model selection system provides operators with flexible AI model choices while maintaining robust fail-open behavior and secure credential handling.
+Key strengths of the enhanced portal include its modular React architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities, enhanced skills integration capabilities, improved navigation organization with sectioned grouping and persistent 64px icon rail for consistent layout anchoring, robust multi-session workspace management, comprehensive incident triage with automated workflows, voice input support for hands-free operation, seamless deep linking between incidents and collaborative chat sessions, and enhanced mobile navigation with proper responsive behavior below 992px breakpoint. The enhanced security measures ensure protection against XSS attacks while maintaining full functionality. **Critical Enhancement**: The stale session handling system provides robust error recovery for deleted or expired sessions, ensuring reliable chat functionality even in challenging network conditions or backend service issues. **Critical Enhancement**: The evidence persistence system ensures complete traceability of tool executions regardless of whether they were observed live or reviewed from stored transcripts, with comprehensive truncation markers that clearly indicate payload limitations. **Critical Enhancement**: The model selection system provides operators with flexible AI model choices while maintaining robust fail-open behavior and secure credential handling. **New Feature**: The ComposerSelectionBar component provides an extensible architecture for model selection and future per-turn controls, improving modularity and maintainability.
 
-The React/TypeScript implementation represents a significant advancement in developer experience and code maintainability, while preserving all existing functionality from the legacy vanilla JavaScript implementation. The enhanced navigation system with persistent 64px icon rail provides consistent layout anchoring across all views, while the useNarrowViewport() hook enables precise responsive breakpoint detection. The enhanced security measures, including comprehensive XSS prevention and defensive session parsing, ensure robust protection against common web vulnerabilities. The HITL confirmation system enables safe automation of complex workflows while maintaining human oversight for critical operations. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions. The new view components provide dedicated interfaces for different operational tasks, improving workflow efficiency and user experience. **Critical Enhancement**: The stale session handling system ensures reliable chat functionality by automatically detecting and recovering from deleted or expired sessions, preventing user-facing errors and maintaining conversation continuity. **Critical Enhancement**: The evidence persistence system ensures operators always understand the completeness of displayed evidence through clear truncation markers and budget eviction indicators. **Critical Enhancement**: The model selection system provides flexible AI model choices with dynamic catalog integration and session-based persistence, ensuring operators can consistently use their preferred models throughout conversations.
+The React/TypeScript implementation represents a significant advancement in developer experience and code maintainability, while preserving all existing functionality from the legacy vanilla JavaScript implementation. The enhanced navigation system with persistent 64px icon rail provides consistent layout anchoring across all views, while the useNarrowViewport() hook enables precise responsive breakpoint detection. The enhanced security measures, including comprehensive XSS prevention and defensive session parsing, ensure robust protection against common web vulnerabilities. The HITL confirmation system enables safe automation of complex workflows while maintaining human oversight for critical operations. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions. The new view components provide dedicated interfaces for different operational tasks, improving workflow efficiency and user experience. **Critical Enhancement**: The stale session handling system ensures reliable chat functionality by automatically detecting and recovering from deleted or expired sessions, preventing user-facing errors and maintaining conversation continuity. **Critical Enhancement**: The evidence persistence system ensures operators always understand the completeness of displayed evidence through clear truncation markers and budget eviction indicators. **Critical Enhancement**: The model selection system provides flexible AI model choices with dynamic catalog integration and session-based persistence, ensuring operators can consistently use their preferred models throughout conversations. **New Feature**: The ComposerSelectionBar component provides an extensible control strip architecture that improves modularity and provides a designated mount point for future per-turn selections.
 
 **Additional Recent Enhancements:**
 - **Sticky Request Banner System**: IntersectionObserver-based conversation context maintenance that keeps user requests visible during long replies and expanded evidence panels
@@ -2212,5 +2369,7 @@ The React/TypeScript implementation represents a significant advancement in deve
 - **Comprehensive Evidence Testing**: Test coverage for evidence frame mapping, truncation marker preservation, and out-of-range handling
 - **Model Selection and Catalog Integration**: Dynamic model selector with catalog-driven rendering, session-based persistence, and fail-open UX behavior
 - **Model Catalog API Testing**: Comprehensive test coverage for catalog discovery, error handling, and sparse payload normalization
+- **ComposerSelectionBar Architecture**: Extensible control strip with intelligent collapse behavior and comprehensive TypeScript interfaces
+- **ComposerSelectionBar Testing**: Comprehensive test coverage for collapse scenarios, model selection propagation, and browser API shimming
 
-Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system, continued refinement of the navigation and resource discovery interfaces, expanded support for more complex multi-step approval workflows, additional voice input capabilities to meet evolving operational requirements, enhanced incident triage automation, expanded connector integrations, improved collaborative features for multi-operator incident response, and continued focus on mobile navigation optimization and responsive design improvements. Continued focus on security enhancements and user experience improvements will drive future development efforts. **Ongoing Enhancement**: Continued refinement of stale session handling and error recovery mechanisms to ensure maximum reliability in production environments. **Ongoing Enhancement**: Continued improvement of evidence persistence capabilities to provide even more comprehensive traceability and operational insights. **Ongoing Enhancement**: Continued enhancement of model selection capabilities to support more sophisticated model routing and performance optimization.
+Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system, continued refinement of the navigation and resource discovery interfaces, expanded support for more complex multi-step approval workflows, additional voice input capabilities to meet evolving operational requirements, enhanced incident triage automation, expanded connector integrations, improved collaborative features for multi-operator incident response, and continued focus on mobile navigation optimization and responsive design improvements. Continued focus on security enhancements and user experience improvements will drive future development efforts. **Ongoing Enhancement**: Continued refinement of stale session handling and error recovery mechanisms to ensure maximum reliability in production environments. **Ongoing Enhancement**: Continued improvement of evidence persistence capabilities to provide even more comprehensive traceability and operational insights. **Ongoing Enhancement**: Continued enhancement of model selection capabilities to support more sophisticated model routing and performance optimization. **Ongoing Enhancement**: Continued development of the ComposerSelectionBar architecture to support additional per-turn selection capabilities as specified in SPEC-024.
