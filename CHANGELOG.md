@@ -13,6 +13,38 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+### Added
+
+- **Skills usage audit trail (SPEC-029)**: skills-hub now emits audit
+  events so operators can see which skills are actually used. Every
+  authenticated `search` produces a `skill_searched` event (query, limit,
+  result count, matched skill ids, optional source/tag filters), every
+  `get` produces a `skill_retrieved` event (hit → `success` with
+  provenance, miss → `error` with `reason: not_found`), and each sync
+  cycle produces one `skills_synced` event per source (accepted/rejected
+  counts on success, token-scrubbed error on failure). Emission reuses
+  the canonical fire-and-forget emitter (now drift-guarded across four
+  services by the parity suite) behind new `SKILLS_AUDIT_SERVICE_URL` /
+  `SKILLS_AUDIT_CLIENT_ID` / `SKILLS_AUDIT_CLIENT_SECRET` knobs — an
+  empty URL disables it. Query events correlate with the caller's
+  `tool_invoked` events: tool-gateway now forwards `x-request-id` to
+  skills-hub, so one portal question can be traced end-to-end without
+  forwarding user identity. The shared audit-event contract and
+  audit-service vocabulary gained the three event types, and
+  `sync-audit-secrets.sh` provisions the skills-hub ingest credential.
+
+### Changed
+
+- Documentation review remediation: new operator guides — portal day-2
+  usage (`docs/guides/portal-user-guide.md`), add-a-tool contributor
+  walkthrough (`docs/guides/adding-a-tool.md`), and user/role
+  administration (`docs/guides/user-and-role-administration.md`); CONTRIBUTING
+  testing section and stale study README fixed; pydantic pins aligned.
+- Test-depth remediation: drift-guard parity suite for modules
+  duplicated across services (telemetry, observability, token verifier,
+  audit emitter, ingest/query auth); audit-service coverage 80% → 95%
+  and incident-service 87% → 92% with new store/telemetry/runtime tests.
+
 ## 0.10.0 — 2026-08-24
 
 ### Added

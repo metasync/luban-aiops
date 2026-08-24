@@ -79,7 +79,7 @@ Read the documents in this sequence:
 - Product boundaries: completed and documented
 - Repository reorganization plan: completed and documented
 - Spec-driven development (SDD): adopted as formal workflow (`docs/specs/`)
-- Delivered specs: SPEC-001 through SPEC-006 (see `docs/specs/README.md`)
+- Delivered specs: tracked in the spec index (`docs/specs/README.md`), which is the authoritative status list
 
 ## Goal
 
@@ -108,4 +108,4 @@ The goal of this document set is to provide a durable design record for:
 - `Workspace model` defines how the platform should be represented as a modular repository workspace
 - `Product boundaries` define ownership and interfaces for each workspace project
 - `Repository reorganization plan` shows how to evolve from the current study repository into the target workspace
-- `docs/specs/` holds the SDD workflow and delivered specs (SPEC-001..006) that replaced the earlier MVP plan, backlog, and Release 0 checklist
+- `docs/specs/` holds the SDD workflow and the authoritative delivered-spec index that replaced the earlier MVP plan, backlog, and Release 0 checklist

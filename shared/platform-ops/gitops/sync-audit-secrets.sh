@@ -3,16 +3,17 @@
 # Provision the durable-audit-trail ingest secrets for the dev-k8s overlay
 # (SPEC-013 R-3).
 #
-# The tool-gateway, platform-gateway, identity-broker, and incident-service
-# emit audit events to the audit-service, which authenticates ingest callers
-# against a static registry (AUDIT_INGEST_CLIENTS). All emitters share one
-# ingest secret:
+# The tool-gateway, platform-gateway, identity-broker, incident-service, and
+# skills-hub emit audit events to the audit-service, which authenticates
+# ingest callers against a static registry (AUDIT_INGEST_CLIENTS). All
+# emitters share one ingest secret:
 #
 #   audit-service     →  AUDIT_INGEST_CLIENTS (client registry)
 #   tool-gateway      →  GATEWAY_AUDIT_CLIENT_SECRET
 #   platform-gateway  →  PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET
 #   identity-broker   →  IDENTITY_AUDIT_CLIENT_SECRET
 #   incident-service  →  INCIDENT_AUDIT_CLIENT_SECRET
+#   skills-hub        →  SKILLS_AUDIT_CLIENT_SECRET
 #
 # This script generates one secret (or uses AUDIT_INGEST_SECRET if already
 # exported), writes/updates the runtime-secrets.env files (emitter files are
@@ -78,7 +79,7 @@ AUDIT_SECRET_FILE="$BASE_DIR/audit-service/runtime-secrets.env"
 # and dropping it here would make the secret sync below wipe it again.
 PRESERVED_OTEL_LINE=$(grep '^OTEL_EXPORTER_OTLP_HEADERS=' "$AUDIT_SECRET_FILE" 2>/dev/null || true)
 cat > "$AUDIT_SECRET_FILE" <<EOF
-AUDIT_INGEST_CLIENTS=tool-gateway=${AUDIT_INGEST_SECRET},platform-gateway=${AUDIT_INGEST_SECRET},identity-broker=${AUDIT_INGEST_SECRET},incident-service=${AUDIT_INGEST_SECRET}
+AUDIT_INGEST_CLIENTS=tool-gateway=${AUDIT_INGEST_SECRET},platform-gateway=${AUDIT_INGEST_SECRET},identity-broker=${AUDIT_INGEST_SECRET},incident-service=${AUDIT_INGEST_SECRET},skills-hub=${AUDIT_INGEST_SECRET}
 EOF
 if [ -n "$PRESERVED_OTEL_LINE" ]; then
   printf '%s\n' "$PRESERVED_OTEL_LINE" >> "$AUDIT_SECRET_FILE"
@@ -107,6 +108,11 @@ upsert_env_line "$IS_SECRET_FILE" INCIDENT_AUDIT_CLIENT_SECRET \
   "INCIDENT_AUDIT_CLIENT_SECRET=${AUDIT_INGEST_SECRET}"
 sync_secret incident-service-runtime-secrets "$IS_SECRET_FILE"
 
+SH_SECRET_FILE="$BASE_DIR/skills-hub/runtime-secrets.env"
+upsert_env_line "$SH_SECRET_FILE" SKILLS_AUDIT_CLIENT_SECRET \
+  "SKILLS_AUDIT_CLIENT_SECRET=${AUDIT_INGEST_SECRET}"
+sync_secret skills-hub-runtime-secrets "$SH_SECRET_FILE"
+
 # --- restart affected workloads ----------------------------------------------
 
 kubectl -n "$NAMESPACE" rollout restart deployment/audit-service
@@ -114,6 +120,7 @@ kubectl -n "$NAMESPACE" rollout restart deployment/tool-gateway
 kubectl -n "$NAMESPACE" rollout restart deployment/platform-gateway
 kubectl -n "$NAMESPACE" rollout restart deployment/identity-service
 kubectl -n "$NAMESPACE" rollout restart deployment/incident-service
+kubectl -n "$NAMESPACE" rollout restart deployment/skills-hub
 
 echo ""
 echo "Audit ingest secrets provisioned. Waiting for rollout..."
@@ -122,6 +129,7 @@ kubectl -n "$NAMESPACE" rollout status deployment/tool-gateway --timeout=120s
 kubectl -n "$NAMESPACE" rollout status deployment/platform-gateway --timeout=120s
 kubectl -n "$NAMESPACE" rollout status deployment/identity-service --timeout=120s
 kubectl -n "$NAMESPACE" rollout status deployment/incident-service --timeout=120s
+kubectl -n "$NAMESPACE" rollout status deployment/skills-hub --timeout=120s
 
 echo ""
 echo "Durable audit trail ingestion is now configured."

@@ -87,12 +87,23 @@ class SkillsConnector:
         registry.register(GetSkillTool(self))
         registry.register(ListSkillsTool(self))
 
-    async def _get(self, path: str, params: dict | None = None) -> httpx.Response:
-        """Issue an authenticated GET against skills-hub."""
+    async def _get(
+        self,
+        path: str,
+        params: dict | None = None,
+        request_id: str | None = None,
+    ) -> httpx.Response:
+        """Issue an authenticated GET against skills-hub.
+
+        Forwards the caller's request id so skills-hub usage audit events
+        (SPEC-029 R-3) correlate with this gateway's tool_invoked events.
+        """
+        headers = {"x-request-id": request_id} if request_id else None
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
             return await client.get(
                 f"{self._url.rstrip('/')}{path}",
                 params=params,
+                headers=headers,
                 auth=(self._client_id, self._client_secret),
             )
 
@@ -206,7 +217,9 @@ class SearchSkillsTool(BaseTool):
             params["tag"] = str(parameters["tag"])
 
         try:
-            response = await self._connector._get(SEARCH_PATH, params=params)
+            response = await self._connector._get(
+                SEARCH_PATH, params=params, request_id=identity.get("request_id")
+            )
         except httpx.HTTPError as exc:
             duration_ms = int((time.perf_counter() - start) * 1000)
             LOGGER.warning("skills.search transport error: %s", exc)
@@ -273,7 +286,9 @@ class GetSkillTool(BaseTool):
 
         path = SKILL_PATH_TEMPLATE.format(skill_id=str(skill_id))
         try:
-            response = await self._connector._get(path)
+            response = await self._connector._get(
+                path, request_id=identity.get("request_id")
+            )
         except httpx.HTTPError as exc:
             duration_ms = int((time.perf_counter() - start) * 1000)
             LOGGER.warning("skills.get transport error: %s", exc)
@@ -375,7 +390,9 @@ class ListSkillsTool(BaseTool):
             params["tag"] = str(parameters["tag"])
 
         try:
-            response = await self._connector._get(LIST_PATH, params=params)
+            response = await self._connector._get(
+                LIST_PATH, params=params, request_id=identity.get("request_id")
+            )
         except httpx.HTTPError as exc:
             duration_ms = int((time.perf_counter() - start) * 1000)
             LOGGER.warning("skills.list transport error: %s", exc)

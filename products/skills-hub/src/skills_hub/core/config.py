@@ -172,6 +172,9 @@ class SkillsSettings:
     workload_issuer_url: str = ""
     workload_audience: str = "skills-hub"
     workload_clients: tuple[WorkloadClient, ...] = field(default_factory=tuple)
+    audit_service_url: str = ""  # unset keeps log-only behavior (SPEC-029 R-2)
+    audit_client_id: str = "skills-hub"
+    audit_client_secret: str = ""
 
     @classmethod
     def from_env(cls) -> "SkillsSettings":
@@ -194,6 +197,9 @@ class SkillsSettings:
             workload_clients=parse_workload_clients(
                 os.getenv("SKILLS_WORKLOAD_CLIENTS", "")
             ),
+            audit_service_url=os.getenv("SKILLS_AUDIT_SERVICE_URL", ""),
+            audit_client_id=os.getenv("SKILLS_AUDIT_CLIENT_ID", "skills-hub"),
+            audit_client_secret=os.getenv("SKILLS_AUDIT_CLIENT_SECRET", ""),
         )
 
 

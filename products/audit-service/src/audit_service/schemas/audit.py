@@ -21,6 +21,9 @@ EventType = Literal[
     "chat_completed",
     "confirmation_decided",
     "incident_triaged",
+    "skill_searched",
+    "skill_retrieved",
+    "skills_synced",
 ]
 
 Outcome = Literal["allow", "deny", "success", "error"]

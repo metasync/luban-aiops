@@ -120,6 +120,10 @@ class FromEnvTests(unittest.TestCase):
         self.assertEqual(settings.store_backend, "memory")
         self.assertEqual(settings.workload_audience, "skills-hub")
         self.assertEqual(settings.sources, tuple())
+        # SPEC-029 R-2: audit emission is opt-in and off by default.
+        self.assertEqual(settings.audit_service_url, "")
+        self.assertEqual(settings.audit_client_id, "skills-hub")
+        self.assertEqual(settings.audit_client_secret, "")
 
     def test_reads_environment(self) -> None:
         env = {
@@ -128,6 +132,9 @@ class FromEnvTests(unittest.TestCase):
             "SKILLS_STORE_BACKEND": "Postgres",
             "SKILLS_DB_URL": "postgresql://x",
             "SKILLS_QUERY_CLIENTS": "tool-gateway=secret",
+            "SKILLS_AUDIT_SERVICE_URL": "http://audit-service:8000",
+            "SKILLS_AUDIT_CLIENT_ID": "skills-hub-dev",
+            "SKILLS_AUDIT_CLIENT_SECRET": "sh-secret",
         }
         with patch.dict(os.environ, env, clear=True):
             settings = SkillsSettings.from_env()
@@ -135,6 +142,9 @@ class FromEnvTests(unittest.TestCase):
         self.assertEqual(settings.sync_interval_seconds, 60)
         self.assertEqual(settings.store_backend, "postgres")
         self.assertEqual(settings.query_clients[0].client_id, "tool-gateway")
+        self.assertEqual(settings.audit_service_url, "http://audit-service:8000")
+        self.assertEqual(settings.audit_client_id, "skills-hub-dev")
+        self.assertEqual(settings.audit_client_secret, "sh-secret")
 
 
 if __name__ == "__main__":

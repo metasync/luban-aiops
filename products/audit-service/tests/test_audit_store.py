@@ -62,6 +62,13 @@ class CursorCodecTests(unittest.TestCase):
         with self.assertRaises(StoreError):
             decode_cursor(raw)
 
+    def test_naive_cursor_timestamp_rejected(self) -> None:
+        import base64
+
+        raw = base64.urlsafe_b64encode(b"2026-08-01T12:00:00|evt-1").decode()
+        with self.assertRaises(StoreError):
+            decode_cursor(raw)
+
 
 class InMemoryStoreTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -125,6 +132,21 @@ class InMemoryStoreTests(unittest.TestCase):
         )
         self.assertEqual([e.event_id for e in page.events], ["c"])
 
+    def test_filters_by_session_and_request_id(self) -> None:
+        _run(
+            self.store.add(
+                [
+                    _event("a", session_id="ses-1"),
+                    _event("b", session_id="ses-2"),
+                ]
+            )
+        )
+        page = _run(self.store.query(AuditQuery(session_id="ses-1"), None, 50))
+        self.assertEqual([e.event_id for e in page.events], ["a"])
+
+        page = _run(self.store.query(AuditQuery(request_id="req-b"), None, 50))
+        self.assertEqual([e.event_id for e in page.events], ["b"])
+
     def test_filters_by_since_until(self) -> None:
         _run(
             self.store.add(
@@ -184,21 +206,59 @@ class InMemoryStoreTests(unittest.TestCase):
         self.assertIsNone(_run(self.store.close()))
 
 
+def _pg_row(event: AuditEvent) -> tuple:
+    """Build a driver row tuple in ``_row_names()`` column order."""
+    return (
+        event.event_id,
+        event.occurred_at,
+        event.event_type,
+        event.service,
+        event.request_id,
+        event.subject,
+        event.username,
+        event.actor,
+        event.roles,
+        event.session_id,
+        event.outcome,
+        event.details,
+    )
+
+
 class PostgresStoreAdapterTests(unittest.TestCase):
-    """Parameter adaptation against a fake psycopg driver (live-test regression).
+    """SQL/parameter adaptation against a fake psycopg driver.
 
     A raw dict cannot be adapted for a JSONB column (``psycopg.ProgrammingError:
     cannot adapt type 'dict'``); ``add`` must hand the driver a ``Jsonb`` adapter.
+    The fake driver supports scripted ``rowcount`` sequences (evict loops) and
+    canned result rows (query/count/ready).
     """
 
-    def _fake_connect(self, calls: list[dict]):
+    def _fake_connect(
+        self,
+        calls: list[dict],
+        rows: list[tuple] | None = None,
+        rowcounts: list[int] | None = None,
+    ):
         from contextlib import asynccontextmanager
+
+        pending_rows = list(rows or [])
+        pending_counts = list(rowcounts) if rowcounts is not None else None
 
         class FakeCursor:
             rowcount = 1
 
             async def execute(self, sql, params=None):
                 calls.append({"sql": sql, "params": params})
+                if pending_counts is not None:
+                    self.rowcount = (
+                        pending_counts.pop(0) if pending_counts else 0
+                    )
+
+            async def fetchall(self):
+                return list(pending_rows)
+
+            async def fetchone(self):
+                return pending_rows[0] if pending_rows else None
 
             async def __aenter__(self):
                 return self
@@ -222,6 +282,13 @@ class PostgresStoreAdapterTests(unittest.TestCase):
 
         return connect
 
+    def _store(self, calls, **kwargs):
+        from audit_service.services.audit_store import PostgresAuditStore
+
+        return PostgresAuditStore(
+            "postgresql://fake", connect=self._fake_connect(calls, **kwargs)
+        )
+
     def test_add_wraps_details_in_jsonb_adapter(self) -> None:
         from psycopg.types.json import Jsonb
 
@@ -235,6 +302,93 @@ class PostgresStoreAdapterTests(unittest.TestCase):
         self.assertIsInstance(params["details"], Jsonb)
         self.assertEqual(params["details"].obj, {"tool_name": "k8s.list_pods"})
         self.assertEqual(params["roles"], None)
+
+    def test_initialize_runs_schema_ddl(self) -> None:
+        calls: list[dict] = []
+        _run(self._store(calls).initialize())
+        self.assertEqual(len(calls), 1)
+        self.assertIn("CREATE TABLE IF NOT EXISTS audit_events", calls[0]["sql"])
+
+    def test_query_builds_filter_clauses_and_keyset_cursor(self) -> None:
+        calls: list[dict] = []
+        filters = AuditQuery(
+            username="alice",
+            session_id="ses-1",
+            request_id="req-a",
+            event_type="tool_invoked",
+            service="tool-gateway",
+            since=BASE,
+            until=BASE + timedelta(hours=1),
+        )
+        cursor = encode_cursor(BASE + timedelta(minutes=30), "evt-9")
+        _run(self._store(calls).query(filters, cursor, 2))
+        sql = calls[0]["sql"]
+        for fragment in (
+            "username = %(username)s",
+            "session_id = %(session_id)s",
+            "request_id = %(request_id)s",
+            "event_type = %(event_type)s",
+            "service = %(service)s",
+            "occurred_at >= %(since)s",
+            "occurred_at <= %(until)s",
+            "(occurred_at, event_id) < (%(cursor_ts)s, %(cursor_id)s)",
+            "ORDER BY occurred_at DESC, event_id DESC",
+        ):
+            self.assertIn(fragment, sql)
+        params = calls[0]["params"]
+        self.assertEqual(params["limit"], 3)  # limit + 1 overflow probe
+        self.assertEqual(params["cursor_id"], "evt-9")
+
+    def test_query_maps_rows_and_paginates(self) -> None:
+        calls: list[dict] = []
+        newer, older = _event("new", minutes=10), _event("old")
+        store = self._store(calls, rows=[_pg_row(newer), _pg_row(older)])
+        page = _run(store.query(AuditQuery(), None, 1))
+        self.assertEqual(page.events, [newer])
+        self.assertIsNotNone(page.next_cursor)
+        occurred_at, event_id = decode_cursor(page.next_cursor)
+        self.assertEqual((occurred_at, event_id), (newer.occurred_at, "new"))
+
+    def test_count_returns_scalar(self) -> None:
+        calls: list[dict] = []
+        store = self._store(calls, rows=[(5,)])
+        self.assertEqual(_run(store.count()), 5)
+        self.assertIn("count(*)", calls[0]["sql"])
+
+    def test_evict_batches_until_short_delete(self) -> None:
+        # Cutoff loop: full batch (2) then short batch (1) then the cap loop
+        # sees 0 and stops -> 3 DELETEs total, 3 rows evicted.
+        calls: list[dict] = []
+        store = self._store(calls, rowcounts=[2, 1, 0])
+        evicted = _run(store.evict(BASE, max_events=10, batch_size=2))
+        self.assertEqual(evicted, 3)
+        self.assertEqual(len(calls), 3)
+        self.assertIn("occurred_at < %(cutoff)s", calls[0]["sql"])
+        self.assertIn("occurred_at < %(cutoff)s", calls[1]["sql"])
+        self.assertIn("OFFSET %(keep)s", calls[2]["sql"])
+
+    def test_ready_true_when_probe_succeeds(self) -> None:
+        calls: list[dict] = []
+        store = self._store(calls, rows=[(1,)])
+        self.assertTrue(_run(store.ready()))
+        self.assertEqual(calls[0]["sql"], "SELECT 1")
+
+    def test_ready_false_when_connect_fails(self) -> None:
+        from contextlib import asynccontextmanager
+
+        from audit_service.services.audit_store import PostgresAuditStore
+
+        @asynccontextmanager
+        async def broken_connect():
+            raise RuntimeError("connection refused")
+            yield  # pragma: no cover
+
+        store = PostgresAuditStore("postgresql://fake", connect=broken_connect)
+        self.assertFalse(_run(store.ready()))
+
+    def test_close_is_noop(self) -> None:
+        calls: list[dict] = []
+        self.assertIsNone(_run(self._store(calls).close()))
 
 
 class BuildAuditStoreTests(unittest.TestCase):

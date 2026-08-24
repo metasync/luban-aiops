@@ -71,10 +71,12 @@ class SkillsConnectorBase(unittest.TestCase):
             client_secret="secret",
         )
         self.requests: list[tuple[str, dict | None]] = []
+        self.request_ids: list[str | None] = []
 
     def _fake_get(self, response: FakeResponse | Exception):
-        async def _get(path, params=None):
+        async def _get(path, params=None, request_id=None):
             self.requests.append((path, params))
+            self.request_ids.append(request_id)
             if isinstance(response, Exception):
                 raise response
             return response
@@ -452,6 +454,84 @@ class RegistryGatingTests(unittest.TestCase):
         self.assertEqual(
             names, {"skills.search", "skills.get", "skills.list"}
         )
+
+
+class RequestIdCorrelationTests(SkillsConnectorBase):
+    """Tools forward the caller's request id to skills-hub (SPEC-029 R-3)."""
+
+    _PAYLOAD = {"matches": [], "skills": [], "total": 0}
+
+    def test_tools_forward_identity_request_id(self) -> None:
+        cases = (
+            ("skills.search", {"query": "pod"}),
+            ("skills.get", {"skill_id": "sre-alerting/alerts/kubepodnotready"}),
+            ("skills.list", {}),
+        )
+        for tool_name, params in cases:
+            with self.subTest(tool=tool_name):
+                self.request_ids.clear()
+                self.connector._get = self._fake_get(
+                    FakeResponse(200, self._PAYLOAD)
+                )
+                registry = ToolRegistry()
+                self.connector.register_tools(registry)
+                _run(
+                    registry.invoke(
+                        tool_name, params, {"request_id": "req-corr-1"}
+                    )
+                )
+                self.assertEqual(self.request_ids, ["req-corr-1"])
+
+    def test_missing_request_id_forwards_none(self) -> None:
+        self.connector._get = self._fake_get(FakeResponse(200, self._PAYLOAD))
+        registry = ToolRegistry()
+        self.connector.register_tools(registry)
+        _run(registry.invoke("skills.search", {"query": "pod"}, {}))
+        self.assertEqual(self.request_ids, [None])
+
+
+class ConnectorGetHeaderTests(unittest.TestCase):
+    """_get sets the x-request-id header only when a request id is given."""
+
+    def _captured_get(self, request_id: str | None) -> dict:
+        connector = SkillsConnector(
+            url="http://skills-hub:8000",
+            client_id="tool-gateway",
+            client_secret="secret",
+        )
+        captured: dict = {}
+
+        class _FakeAsyncClient:
+            def __init__(self, timeout=None):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def get(self, url, params=None, headers=None, auth=None):
+                captured.update(
+                    {"url": url, "headers": headers, "auth": auth}
+                )
+                return FakeResponse(200, {})
+
+        with patch(
+            "tool_gateway.tools.skills_connector.httpx.AsyncClient",
+            _FakeAsyncClient,
+        ):
+            _run(connector._get("/api/v1/skills", request_id=request_id))
+        return captured
+
+    def test_header_set_when_request_id_given(self) -> None:
+        captured = self._captured_get("req-9")
+        self.assertEqual(captured["headers"], {"x-request-id": "req-9"})
+        self.assertEqual(captured["auth"], ("tool-gateway", "secret"))
+
+    def test_header_omitted_without_request_id(self) -> None:
+        captured = self._captured_get(None)
+        self.assertIsNone(captured["headers"])
 
 
 if __name__ == "__main__":

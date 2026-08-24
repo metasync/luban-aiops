@@ -124,6 +124,32 @@ class AuditRouteTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_skills_usage_event_round_trips(self) -> None:
+        # SPEC-029 R-1: skills vocabulary is accepted and queryable.
+        event = _event_payload(
+            "sk1",
+            event_type="skill_searched",
+            service="skills-hub",
+            actor="tool-gateway",
+            details={
+                "query": "crashloop runbook",
+                "limit": 5,
+                "result_count": 2,
+                "skill_ids": ["sre-alerting/alerts/KubePodCrashLooping"],
+            },
+        )
+        response = self.client.post(
+            "/api/v1/audit/events", json={"events": [event]}, headers=self.auth
+        )
+        self.assertEqual(response.status_code, 202)
+        page = self.client.get(
+            "/api/v1/audit/events?event_type=skill_searched", headers=self.auth
+        ).json()
+        self.assertEqual([e["event_id"] for e in page["events"]], ["sk1"])
+        self.assertEqual(
+            page["events"][0]["details"]["query"], "crashloop runbook"
+        )
+
     def test_ingest_dedupes_repeated_event_id(self) -> None:
         self.client.post(
             "/api/v1/audit/events",

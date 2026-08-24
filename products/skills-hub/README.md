@@ -30,6 +30,7 @@ Current implementation status (SPEC-014):
 - `SkillStore` protocol with two backends: `InMemorySkillStore` (dev/tests) and `PostgresSkillStore` (psycopg v3, `to_tsvector` candidate selection re-ranked by the shared scorer), selected via `SKILLS_STORE_BACKEND`
 - query auth via a dedicated static Basic registry `SKILLS_QUERY_CLIENTS` (deliberately distinct from ingest vocabularies) plus projected workload tokens (`SKILLS_WORKLOAD_*`)
 - standalone validator CLI for team pre-flight checks: `python -m skills_hub.validate <dir>`
+- usage audit trail (SPEC-029): `skill_searched`/`skill_retrieved` events per authenticated query and one `skills_synced` event per sync cycle, emitted fire-and-forget to the audit service and correlated with the caller's `tool_invoked` events via `x-request-id`
 
 API surface (all query routes require Basic/workload auth unless noted):
 
@@ -57,6 +58,8 @@ Current runtime environment knobs:
   - static query credential registry (`client_id=secret,...`); lives in `skills-hub-runtime-secrets`
 - `SKILLS_WORKLOAD_ISSUER_URL`, `SKILLS_WORKLOAD_AUDIENCE`, `SKILLS_WORKLOAD_CLIENTS`
   - projected workload-token auth (production upgrade path, SPEC-009 vocabulary)
+- `SKILLS_AUDIT_SERVICE_URL`, `SKILLS_AUDIT_CLIENT_ID`, `SKILLS_AUDIT_CLIENT_SECRET`
+  - audit-service ingest endpoint and Basic credential for usage events (SPEC-029); an empty URL disables emission
 
 ## Expected Integration Points
 

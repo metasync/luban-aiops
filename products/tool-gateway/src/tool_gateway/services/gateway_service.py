@@ -262,11 +262,13 @@ async def invoke_tool(
             )
             return JSONResponse(content=result.to_dict(), status_code=403)
 
-    # Dispatch to registry.
+    # Dispatch to registry. request_id rides along so connectors can
+    # propagate correlation to downstream services (SPEC-029 R-3).
     identity_dict = {
         "sub": identity.subject,
         "username": identity.username,
         "roles": identity.roles,
+        "request_id": request_id,
     }
     result = await registry.invoke(tool_name, parameters, identity_dict)
 

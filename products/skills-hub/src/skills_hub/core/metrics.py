@@ -55,6 +55,12 @@ SKILLS_STORE_SIZE = Gauge(
     ["source"],
 )
 
+AUDIT_EMITS = Counter(
+    "audit_emits_total",
+    "Audit event emission attempts to the audit service (SPEC-013).",
+    ["result"],
+)
+
 
 def _handler_label(request: Request) -> str:
     # Templated route path (bounded cardinality), never the raw URL.
@@ -100,3 +106,7 @@ def record_rejected(reason: str) -> None:
 
 def set_source_size(source: str, count: int) -> None:
     SKILLS_STORE_SIZE.labels(source=source).set(count)
+
+
+def record_audit_emit(result: str) -> None:
+    AUDIT_EMITS.labels(result=result).inc()

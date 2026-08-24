@@ -316,20 +316,14 @@ blocked. See the [Troubleshooting Guide](troubleshooting.md) for audit-specific 
 ## Adding a New Connector
 
 New connectors follow the pattern established by the Kubernetes and Elastic connectors
-(SPEC-007 / SPEC-011):
+(SPEC-007 / SPEC-011). The step-by-step contributor walkthrough — connector class, tool
+definition, error envelope, configuration, wiring, authorization, deployment, and tests —
+is a worked example in [Adding a Tool to the Tool Gateway](adding-a-tool.md).
 
-1. **Create a connector class** under `products/tool-gateway/src/tool_gateway/tools/` that
-   manages the external client lifecycle.
-2. **Define tool classes** extending `BaseTool` with a `ToolDefinition` (name, description,
-   risk level, category, parameters schema) and an `execute()` method returning `ToolResult`.
-3. **Register tools** with the `ToolRegistry` in the connector's `register_tools()` method.
-4. **Add configuration** variables to `GatewaySettings` in `core/config.py` with a
-   `GATEWAY_<CONNECTOR>_*` prefix.
-5. **Wire the connector** into the tool registry initialization in `app.py`, gated by a
-   `GATEWAY_<CONNECTOR>_ENABLED` boolean flag.
-6. **Update the policy bundle** if the new tools require different authorization (e.g. write
-   tools must not be granted to `read-only-observer`).
-7. **Update this document** with the new tools and their activation checklist.
+In short: a connector class under `products/tool-gateway/src/tool_gateway/tools/`
+registers tool classes extending `BaseTool`; configuration uses `GATEWAY_<CONNECTOR>_*`
+variables in `core/config.py`; wiring is gated in `app.py`; the policy bundle governs who
+may invoke the tools; and this document gains the operator activation checklist.
 
 All tool results automatically pass through the redaction engine — no additional work is
 needed for credential protection.

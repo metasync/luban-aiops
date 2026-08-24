@@ -24,6 +24,7 @@ from opentelemetry import trace
 
 from skills_hub.core import metrics
 from skills_hub.core.config import SkillsSettings, SourceSpec
+from skills_hub.services.audit_emitter import build_audit_event, emit_audit_event
 from skills_hub.services.ingestion import Rejection, ingest_directory
 from skills_hub.services.skill_store import SkillStore
 
@@ -206,6 +207,23 @@ class SyncManager:
                 metrics.set_source_size(spec.source_id, status.accepted)
                 for rejection in result.rejections:
                     metrics.record_rejected(_rejection_category(rejection.reason))
+                # SPEC-029 R-4: one usage-trail event per cycle; sync has no
+                # inbound request, so the builder's "unknown" fallback applies.
+                emit_audit_event(
+                    self._settings,
+                    build_audit_event(
+                        "skills_synced",
+                        None,
+                        "success",
+                        details={
+                            "source_id": spec.source_id,
+                            "source_type": spec.type,
+                            "ref": ref,
+                            "accepted": status.accepted,
+                            "rejected": len(result.rejections),
+                        },
+                    ),
+                )
                 span.set_attribute("result", "ok")
                 span.set_attribute("accepted", status.accepted)
                 span.set_status(trace.Status(trace.StatusCode.OK))
@@ -230,6 +248,19 @@ class SyncManager:
                     message = message.replace(token, "***")
                 status = replace(previous, last_sync_at=now, last_error=message)
                 metrics.record_sync(spec.source_id, "error")
+                emit_audit_event(
+                    self._settings,
+                    build_audit_event(
+                        "skills_synced",
+                        None,
+                        "error",
+                        details={
+                            "source_id": spec.source_id,
+                            "source_type": spec.type,
+                            "error": message,
+                        },
+                    ),
+                )
                 span.set_attribute("result", "error")
                 span.set_status(
                     trace.Status(trace.StatusCode.ERROR, "sync failed")

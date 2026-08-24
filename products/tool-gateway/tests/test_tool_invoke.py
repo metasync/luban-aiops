@@ -39,7 +39,11 @@ class _EchoTool(BaseTool):
         return ToolResult(
             tool_name="test.echo",
             status="success",
-            data={"echo": parameters, "caller": identity.get("username")},
+            data={
+                "echo": parameters,
+                "caller": identity.get("username"),
+                "request_id": identity.get("request_id"),
+            },
             evidence=build_evidence("read", "test", 5),
         )
 
@@ -194,7 +198,12 @@ class ToolInvokeEndpointTests(unittest.TestCase):
         return self.client.post(
             "/api/v2/tools/invoke",
             json={"tool_name": tool_name, "parameters": parameters, "request_id": request_id},
-            headers={"Authorization": f"Bearer {token}"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                # The correlation key is the header, not the body field
+                # (SPEC-005 R-4); send both like real callers do.
+                "x-request-id": request_id,
+            },
         )
 
     def test_invoke_requires_authentication(self) -> None:
@@ -214,6 +223,9 @@ class ToolInvokeEndpointTests(unittest.TestCase):
         self.assertEqual(body["status"], "success")
         self.assertEqual(body["data"]["echo"], {"msg": "hi"})
         self.assertEqual(body["data"]["caller"], "operator.user")
+        # SPEC-029 R-3: the request id rides in the identity dict so
+        # connectors can propagate correlation downstream.
+        self.assertEqual(body["data"]["request_id"], "req-1")
         self.assertEqual(body["evidence"]["risk_level"], "read")
 
     def test_invoke_allowed_for_observer(self) -> None:

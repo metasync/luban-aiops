@@ -217,6 +217,88 @@ class SkillsRouteTests(unittest.TestCase):
         self.assertEqual(body["skill_count"], 2)
         self.assertEqual(body["source_count"], 1)
 
+    # --- Usage audit trail (SPEC-029 R-2) --------------------------------------
+
+    def _captured_events(self):
+        return patch(
+            "skills_hub.api.routes.skills.emit_audit_event"
+        )
+
+    def test_search_emits_skill_searched_event(self) -> None:
+        with self._captured_events() as emit:
+            response = self.client.get(
+                "/api/v1/skills/search?q=KubePodNotReady&limit=5",
+                headers={**self.auth, "x-request-id": "req-audit-1"},
+            )
+        self.assertEqual(response.status_code, 200)
+        emit.assert_called_once()
+        event = emit.call_args.args[1]
+        self.assertEqual(event["event_type"], "skill_searched")
+        self.assertEqual(event["outcome"], "success")
+        self.assertEqual(event["service"], "skills-hub")
+        self.assertEqual(event["actor"], "tool-gateway")
+        self.assertEqual(event["request_id"], "req-audit-1")
+        self.assertEqual(
+            event["details"],
+            {
+                "query": "KubePodNotReady",
+                "limit": 5,
+                "result_count": 1,
+                "skill_ids": ["sre-alerting/kubepodnotready"],
+            },
+        )
+
+    def test_search_event_carries_optional_filters(self) -> None:
+        with self._captured_events() as emit:
+            self.client.get(
+                "/api/v1/skills/search?q=pod&source=sre-alerting&tag=kubernetes",
+                headers=self.auth,
+            )
+        event = emit.call_args.args[1]
+        self.assertEqual(event["details"]["source"], "sre-alerting")
+        self.assertEqual(event["details"]["tag"], "kubernetes")
+
+    def test_get_hit_emits_skill_retrieved_success(self) -> None:
+        with self._captured_events() as emit:
+            response = self.client.get(
+                "/api/v1/skills/sre-alerting/kubepodnotready",
+                headers={**self.auth, "x-request-id": "req-audit-2"},
+            )
+        self.assertEqual(response.status_code, 200)
+        event = emit.call_args.args[1]
+        self.assertEqual(event["event_type"], "skill_retrieved")
+        self.assertEqual(event["outcome"], "success")
+        self.assertEqual(event["actor"], "tool-gateway")
+        self.assertEqual(event["request_id"], "req-audit-2")
+        self.assertEqual(
+            event["details"],
+            {
+                "skill_id": "sre-alerting/kubepodnotready",
+                "source": "sre-alerting",
+            },
+        )
+
+    def test_get_miss_emits_skill_retrieved_error(self) -> None:
+        with self._captured_events() as emit:
+            response = self.client.get(
+                "/api/v1/skills/sre-alerting/nope", headers=self.auth
+            )
+        self.assertEqual(response.status_code, 404)
+        event = emit.call_args.args[1]
+        self.assertEqual(event["event_type"], "skill_retrieved")
+        self.assertEqual(event["outcome"], "error")
+        self.assertEqual(
+            event["details"],
+            {"skill_id": "sre-alerting/nope", "reason": "not_found"},
+        )
+
+    def test_list_and_auth_failures_do_not_emit(self) -> None:
+        with self._captured_events() as emit:
+            self.client.get("/api/v1/skills", headers=self.auth)
+            self.client.get("/api/v1/skills/search?q=pod")  # 401
+            self.client.get("/api/v1/skills/sre-alerting/kubepodnotready")  # 401
+        emit.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

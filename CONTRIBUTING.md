@@ -56,6 +56,32 @@ closing a release bumps `VERSION` everywhere (run `make validate-version`
 to catch misses), moves the entries into a versioned section, and tags the
 release.
 
+## Testing
+
+How to run tests:
+
+- `make test` (repository root) — runs every product test suite
+- `make test` inside a `products/<name>/` directory — runs that product's
+  suite only (`uv sync --frozen` then `uv run pytest`)
+- `make verify` (repository root) — the full pre-commit gate: all product
+  tests, overlay rendering, policy bundle validation, and version lockstep.
+  Run it before every commit that touches code, manifests, or policy.
+
+What changes are expected to carry:
+
+- behavior changes and bug fixes carry a regression test that fails without
+  the change (pin the bug, not just the fix)
+- changes to `shared/shared-contracts` schemas carry a contract-parity test
+  in every consuming service — in particular, enum vocabulary must be
+  asserted for value-set equality between the JSON schema and the consuming
+  pydantic `Literal`, not just property-name parity
+- new endpoints and tools carry tests for the deny/error paths (auth
+  failure, policy deny, upstream failure), not only the happy path — for
+  tool-gateway tools, the expected shape is worked through in
+  [Adding a Tool to the Tool Gateway](docs/guides/adding-a-tool.md)
+- there is no numeric coverage bar; reviewers judge whether the risky
+  branches of the change are exercised
+
 ## Change Principles
 
 - keep identity, policy, orchestration, and execution concerns separated
@@ -72,7 +98,7 @@ Before opening a pull request:
 3. describe the release or roadmap slice the change supports
 4. call out any impact on identity, policy, approvals, audit, or execution safety
 5. update related documentation and examples
-6. run the relevant local validation for the files you changed
+6. run `make verify` and the relevant product test suites for the files you changed
 
 ## Recommended Branch Naming
 

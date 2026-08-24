@@ -183,6 +183,63 @@ class SyncOnceTests(unittest.TestCase):
         self.assertEqual(report[1]["accepted"], 1)
         self.assertEqual(report[0]["last_sync_at"], None)
 
+    # --- Usage audit trail (SPEC-029 R-4) -----------------------------------
+
+    def test_successful_sync_emits_skills_synced_event(self) -> None:
+        (self.root / "broken.md").write_text("no frontmatter")
+        spec = SourceSpec(
+            source_id="sre-alerting", type="local", path=str(self.root)
+        )
+        manager = SyncManager(_settings(spec), self.store)
+        with patch("skills_hub.services.sync.emit_audit_event") as emit:
+            _run(manager.sync_once(spec))
+        emit.assert_called_once()
+        event = emit.call_args.args[1]
+        self.assertEqual(event["event_type"], "skills_synced")
+        self.assertEqual(event["outcome"], "success")
+        self.assertEqual(event["service"], "skills-hub")
+        self.assertEqual(event["request_id"], "unknown")
+        self.assertNotIn("actor", event)
+        self.assertEqual(
+            event["details"],
+            {
+                "source_id": "sre-alerting",
+                "source_type": "local",
+                "ref": "local",
+                "accepted": 1,
+                "rejected": 1,
+            },
+        )
+
+    def test_failed_sync_emits_error_event_with_scrubbed_message(self) -> None:
+        spec = SourceSpec(
+            source_id="team-git",
+            type="git",
+            url="https://example.com/team.git",
+            ref="main",
+        )
+        settings = SkillsSettings(
+            sources=(spec,), git_tokens={"team-git": "sekrit-token"}
+        )
+        manager = SyncManager(settings, self.store)
+        with (
+            patch("skills_hub.services.sync.emit_audit_event") as emit,
+            patch(
+                "skills_hub.services.sync._git_checkout",
+                side_effect=RuntimeError(
+                    "clone failed: https://x-access-token:sekrit-token@example.com"
+                ),
+            ),
+        ):
+            _run(manager.sync_once(spec))
+        event = emit.call_args.args[1]
+        self.assertEqual(event["event_type"], "skills_synced")
+        self.assertEqual(event["outcome"], "error")
+        self.assertEqual(event["details"]["source_id"], "team-git")
+        self.assertEqual(event["details"]["source_type"], "git")
+        self.assertNotIn("sekrit-token", event["details"]["error"])
+        self.assertIn("***", event["details"]["error"])
+
 
 class GitUrlTests(unittest.TestCase):
     def test_token_injected_into_https_url(self) -> None:
