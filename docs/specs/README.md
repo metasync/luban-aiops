@@ -140,3 +140,4 @@ Mechanical enforcement:
 | `SPEC-024` | Runtime LLM model switching — credential-gated model catalog, per-session selection with affinity, audited choice, portal composer selector | `delivered` |
 | `SPEC-025` | Evidence persistence in session transcripts — durable tool-evidence frames with traceability and metrics, replayed evidence cards on reopened sessions | `delivered` |
 | `SPEC-026` | Multi-model runtime catalog — curated model series per provider with model-name entry ids, series override, generic profile consolidation (extends SPEC-024) | `delivered` |
+| `SPEC-027` | Live model discovery — provider `/models` endpoints feed the catalog with a fail-soft fallback ladder (live -> memory -> Postgres -> curated) and periodic refresh (extends SPEC-026) | `in-progress` |

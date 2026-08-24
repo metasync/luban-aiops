@@ -1,5 +1,8 @@
+import asyncio
+import contextlib
 import logging
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 
@@ -13,9 +16,41 @@ from agent_service.metadata import SERVICE_NAME, SERVICE_TITLE, SERVICE_VERSION
 LOGGER = logging.getLogger(__name__)
 
 
+@asynccontextmanager
+async def _app_lifespan(_: FastAPI):
+    """SPEC-027 R-3: start the live model discovery background task
+    (initial fetch, then periodic refresh); cancel it on shutdown.
+    Skipped entirely when discovery is disabled or no provider is
+    configured — startup stays byte-equivalent to SPEC-026."""
+    from agent_service.services.model_catalog import (
+        configured_providers,
+        startup_settings,
+    )
+    from agent_service.services.model_discovery import build_discovery_service
+
+    settings = startup_settings()
+    service = build_discovery_service(settings, configured_providers(settings))
+    if service is None:
+        yield
+        return
+    task = asyncio.create_task(service.run_loop())
+    LOGGER.info(
+        "model discovery: background refresh every %ss",
+        settings.model_discovery_refresh_seconds,
+    )
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
 def create_app() -> FastAPI:
     configure_logging()
-    app = FastAPI(title=SERVICE_TITLE, version=SERVICE_VERSION)
+    app = FastAPI(
+        title=SERVICE_TITLE, version=SERVICE_VERSION, lifespan=_app_lifespan
+    )
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):

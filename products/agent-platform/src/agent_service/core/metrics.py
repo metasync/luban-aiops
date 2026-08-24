@@ -183,3 +183,27 @@ def record_evidence_frames_persisted(count: int) -> None:
 
 def record_evidence_frame_truncated(reason: str) -> None:
     EVIDENCE_FRAMES_TRUNCATED.labels(reason=reason).inc()
+
+
+# --- Model discovery observability (SPEC-027) ---
+
+MODEL_DISCOVERY_REFRESHES = Counter(
+    "agent_model_discovery_refreshes_total",
+    "Model discovery refresh cycles by ladder outcome.",
+    ["provider", "result"],
+)
+
+MODEL_DISCOVERY_MODELS = Gauge(
+    "agent_model_discovery_models",
+    "Models currently published per provider after discovery.",
+    ["provider"],
+)
+
+
+def record_model_discovery_refresh(provider: str, result: str) -> None:
+    """result in {override, disabled, live, memory, cache, curated}."""
+    MODEL_DISCOVERY_REFRESHES.labels(provider=provider, result=result).inc()
+
+
+def record_model_discovery_models(provider: str, count: int) -> None:
+    MODEL_DISCOVERY_MODELS.labels(provider=provider).set(count)

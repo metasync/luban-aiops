@@ -15,6 +15,27 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ### Added
 
+- **Live model discovery with cached fallback (SPEC-027)**: the model
+  catalog now tracks each configured provider's real lineup — a
+  lifespan-owned background task queries the provider's OpenAI-compatible
+  `/models` endpoint at startup and every
+  `AGENT_MODEL_DISCOVERY_REFRESH_SECONDS` (default 1800), applies
+  per-provider filters (dated `-YYYY-MM-DD` snapshots and non-chat
+  modalities dropped; the provider's default model always force-included),
+  and atomically swaps the catalog in place. Failed fetches degrade down a
+  fail-soft ladder: in-memory last-good → Postgres-persisted last-good
+  (new `model_discovery_cache` table in the sessions database — Redis
+  gains no new consumers) → curated series, so restarts stay served from
+  cache before the first live fetch lands. A set `<PROVIDER>_MODELS` stays
+  authoritative and skips discovery for that provider; new knobs
+  `AGENT_MODEL_DISCOVERY_ENABLED` (default true; `false` restores the
+  pure curated-series behavior) and `AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS`
+  (default 5). Curated series refreshed to current lineups (DeepSeek V4
+  family; DashScope qwen3.7/3.8 decimal generations). Discovery never
+  blocks chat or startup — every failure is logged and swallowed. New
+  metrics: `agent_model_discovery_refreshes_total{provider,result}`,
+  `agent_model_discovery_models{provider}`.
+
 - **Multi-model runtime catalog + profile consolidation (SPEC-026)**:
   every provider with a resolvable API key now joins the model catalog
   with its curated model series — one selectable entry per model

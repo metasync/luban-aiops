@@ -275,6 +275,9 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime
 | `AGENT_STATE_TTL_SECONDS` | Sweep TTL for stale agent state rows | `3600` | code default |
 | `AGENT_EVIDENCE_ENTRY_MAX_CHARS` | Serialized-size cap for one persisted evidence frame payload (SPEC-025); oversized `tool_result.data` is truncated with an `entry_cap` marker | `131072` | code default |
 | `AGENT_EVIDENCE_SESSION_MAX_BYTES` | Per-session budget for persisted evidence (SPEC-025); when exceeded, oldest `tool_result` data payloads are evicted with a `session_budget` marker (metadata kept) | `4194304` | code default |
+| `AGENT_MODEL_DISCOVERY_ENABLED` | Live model discovery (SPEC-027): periodic `GET /models` per configured provider feeds the catalog behind a fail-soft ladder (live → memory → Postgres → curated); `false` restores the pure curated-series behavior | `true` | code default |
+| `AGENT_MODEL_DISCOVERY_REFRESH_SECONDS` | Discovery refresh cadence in seconds (must be >= 1) | `1800` | code default |
+| `AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS` | Per-provider `/models` fetch timeout in seconds (must be > 0) | `5` | code default |
 | `AGENTSCOPE_MAX_ITERS` | ReAct loop iteration cap (`ReActConfig.max_iters`; must be >= 1) | `20` | code default |
 | `AGENTSCOPE_CONTEXT_TRIGGER_RATIO` | Long-term memory trigger ratio (`ContextConfig.trigger_ratio`; must be in open interval (0, 0.9)) | `0.8` | code default |
 | `AGENTSCOPE_TOOL_RESULT_LIMIT` | Tool result character limit (`ContextConfig.tool_result_limit`; must be >= 1) | `50000` | code default |
@@ -546,6 +549,18 @@ The profile's `runtime-secrets.example.env` documents the active provider key pl
 multi-model catalog knobs: every supported provider (`deepseek`, `dashscope`, `openai`)
 with an `<PROVIDER>_API_KEY` joins the catalog with its curated model series, and an
 optional `<PROVIDER>_MODELS=a,b,c` overrides/restricts that series.
+
+Live model discovery (SPEC-027) refreshes each configured provider's series from its
+OpenAI-compatible `/models` endpoint: once at startup, then every
+`AGENT_MODEL_DISCOVERY_REFRESH_SECONDS` (default 1800). Successful fetches pass the
+per-provider filter (dated snapshots and non-chat modalities are dropped, the
+provider's default model is always kept), update the last-good caches, and atomically
+swap the catalog. On fetch failure the ladder degrades: in-memory last-good →
+Postgres-persisted last-good (`model_discovery_cache` table in the sessions database;
+Redis gains no new consumers) → curated series. A set `<PROVIDER>_MODELS` stays
+authoritative and skips discovery for that provider; `AGENT_MODEL_DISCOVERY_ENABLED=false`
+disables discovery entirely. Discovery never blocks chat or startup — every failure is
+logged and swallowed.
 
 ## Policy Management
 

@@ -9,9 +9,15 @@ from agent_service.runtime_settings import OpenAIOptions, RuntimeSettings
 class OpenAIProvider(AgentScopeProvider):
     provider_name = "openai"
     default_model = "gpt-4o-mini"
-    default_base_url = None
+    # Concrete default so live discovery (SPEC-027) has a /models URL even
+    # without AGENTSCOPE_BASE_URL; identical to the OpenAI client default.
+    default_base_url = "https://api.openai.com/v1"
     # SPEC-026 R-1: curated series (default model first).
     model_series = ("gpt-4o-mini", "gpt-4o", "o3-mini")
+    # SPEC-027 R-4: OpenAI's /models payload carries embeddings, tts,
+    # whisper, dall-e and dated snapshots — restrict to the chat families;
+    # the shared markers drop the modality stragglers within them.
+    discover_family_prefixes = ("gpt-", "o1", "o3", "o4", "chatgpt-")
 
     def build_model(self, settings: RuntimeSettings) -> Any:
         from agentscope.credential import OpenAICredential

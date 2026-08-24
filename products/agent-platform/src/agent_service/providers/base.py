@@ -1,10 +1,28 @@
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from agent_service.runtime_settings import RuntimeProvider, RuntimeSettings
+
+
+# SPEC-027 R-4: provider /models payloads carry dated snapshots and
+# non-chat modalities; the shared discovery filter drops both.
+_DATED_SNAPSHOT_RE = re.compile(r"-\d{4}-\d{2}-\d{2}")
+_NON_CHAT_MARKERS = (
+    "embedding",
+    "rerank",
+    "tts",
+    "whisper",
+    "audio",
+    "image",
+    "moderation",
+    "transcrib",
+    "guard",
+    "realtime",
+)
 
 
 class ProviderConfigurationError(ValueError):
@@ -22,6 +40,22 @@ class AgentScopeProvider(ABC):
     # Must include ``default_model`` and stay collision-free across
     # providers (the catalog enforces both at startup).
     model_series: tuple[str, ...] = ()
+    # SPEC-027 R-4: live-discovery hygiene. Family prefixes restrict the
+    # discovered ids when non-empty; exclude markers drop non-chat
+    # modalities on top of the shared dated-snapshot filter.
+    discover_family_prefixes: tuple[str, ...] = ()
+    discover_exclude_markers: tuple[str, ...] = _NON_CHAT_MARKERS
+
+    def discover_filter(self, model_id: str) -> bool:
+        """Whether a live-discovered model id joins the catalog (R-4)."""
+        if _DATED_SNAPSHOT_RE.search(model_id):
+            return False
+        lowered = model_id.lower()
+        if any(marker in lowered for marker in self.discover_exclude_markers):
+            return False
+        if self.discover_family_prefixes:
+            return lowered.startswith(self.discover_family_prefixes)
+        return True
 
     def validate(self, settings: "RuntimeSettings") -> None:
         if settings.provider != self.provider_name:

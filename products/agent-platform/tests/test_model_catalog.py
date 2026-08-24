@@ -1,10 +1,11 @@
-"""Model catalog tests (SPEC-024 R-1, extended by SPEC-026).
+"""Model catalog tests (SPEC-024 R-1, extended by SPEC-026/SPEC-027).
 
 Exercises the credential-gated catalog derivation: per-provider env knobs,
 AGENTSCOPE_* fallback for the active provider, drop-without-key, per-model
 series entries with model-name ids, ``<PROVIDER>_MODELS`` overrides,
 default flagging, legacy provider-name aliases, the duplicate-id guard,
-and the credential-free discovery view.
+the atomic refresh swap (SPEC-027 R-3), and the credential-free
+discovery view.
 """
 
 from __future__ import annotations
@@ -22,8 +23,9 @@ from agent_service.runtime_settings import RuntimeSettings
 from agent_service.services.model_catalog import (
     ModelCatalog,
     ModelCatalogEntry,
-    _legacy_aliases,
+    build_aliases,
     build_model_catalog,
+    refresh_catalog,
 )
 
 CATALOG_ENV_KNOBS = (
@@ -59,15 +61,16 @@ def _settings(**overrides) -> RuntimeSettings:
 
 def _catalog(settings: RuntimeSettings) -> ModelCatalog:
     entries = build_model_catalog(settings)
-    return ModelCatalog(entries, _legacy_aliases(entries, settings))
+    return ModelCatalog(entries, build_aliases(entries, settings))
 
 
 def test_active_provider_falls_back_to_agentscope_settings(clean_env):
     """The deploy-time profile needs zero new knobs (plan §D-1)."""
     entries = build_model_catalog(_settings(model_name="deepseek-chat"))
     by_id = {e.id: e for e in entries}
-    # SPEC-026: ids are model names; the configured model is the default.
-    assert set(by_id) == set(DEEPSEEK_SERIES)
+    # SPEC-026: ids are model names; the configured model is the default
+    # and stays force-included even when absent from the curated series.
+    assert set(by_id) == set(DEEPSEEK_SERIES) | {"deepseek-chat"}
     entry = by_id["deepseek-chat"]
     assert entry.api_key == "sk-active"
     assert entry.default is True
@@ -94,7 +97,9 @@ def test_additional_provider_contributes_its_full_series(clean_env):
         entry = by_id[name]
         assert entry.provider == "openai"
         assert entry.api_key == "sk-openai"
-        assert entry.base_url is None  # OpenAI adapter has no default base URL
+        # SPEC-027: the OpenAI adapter carries a concrete default base URL
+        # so live discovery has a /models endpoint without extra knobs.
+        assert entry.base_url == "https://api.openai.com/v1"
         assert entry.default is False
 
 
@@ -128,7 +133,8 @@ def test_empty_models_override_is_inert(clean_env):
 
 def test_duplicate_model_ids_fail_startup(clean_env):
     clean_env.setenv("OPENAI_API_KEY", "sk-openai")
-    clean_env.setenv("OPENAI_MODELS", "deepseek-chat")
+    # Collides with the deepseek curated series.
+    clean_env.setenv("OPENAI_MODELS", "deepseek-v4-flash")
     with pytest.raises(ValueError, match="Duplicate model id"):
         build_model_catalog(_settings())
 
@@ -169,7 +175,7 @@ def test_public_view_never_exposes_credentials(clean_env):
 
 def test_catalog_lookup_fails_closed_for_unknown_ids(clean_env):
     catalog = _catalog(_settings())
-    assert catalog.get("deepseek-chat") is not None
+    assert catalog.get("deepseek-v4-flash") is not None
     assert catalog.get("bogus") is None
     assert catalog.get("") is None
 
@@ -184,6 +190,47 @@ def test_catalog_aliases_legacy_provider_ids(clean_env):
     assert catalog.get("openai").id == "gpt-4o-mini"
     # Aliases never shadow real entries or invent providers.
     assert catalog.get("dashscope") is None
+
+
+# --- Atomic refresh swap (SPEC-027 R-3) ---
+
+
+def test_refresh_swaps_contents_in_place(clean_env, monkeypatch):
+    """Object identity survives the swap (name-imports stay valid)."""
+    settings = _settings()
+    catalog = _catalog(settings)
+    monkeypatch.setattr(
+        "agent_service.services.model_catalog.MODEL_CATALOG", catalog
+    )
+    assert catalog.get("deepseek-v4-pro") is not None
+
+    discovered = ("deepseek-v4-flash", "deepseek-v5-preview")
+    swapped = refresh_catalog({"deepseek": discovered}, settings)
+
+    assert swapped is True
+    # The same object now serves the new list and rebuilt aliases.
+    assert [e.id for e in catalog.entries] == list(discovered)
+    assert catalog.get("deepseek-v5-preview") is not None
+    assert catalog.get("deepseek-v4-pro") is None
+    assert catalog.get("deepseek").id == "deepseek-v4-flash"
+    assert catalog.default_entry().id == "deepseek-v4-flash"
+
+
+def test_refresh_rejects_duplicate_ids_fail_soft(clean_env, monkeypatch):
+    """A misconfigured live list keeps the previous catalog (R-2)."""
+    clean_env.setenv("OPENAI_API_KEY", "sk-openai")
+    settings = _settings()
+    catalog = _catalog(settings)
+    monkeypatch.setattr(
+        "agent_service.services.model_catalog.MODEL_CATALOG", catalog
+    )
+    before = catalog.entries
+
+    # The live list collides with the openai curated series.
+    swapped = refresh_catalog({"openai": ("deepseek-v4-flash",)}, settings)
+
+    assert swapped is False
+    assert catalog.entries == before
 
 
 def test_unknown_provider_config_fails_startup(clean_env):

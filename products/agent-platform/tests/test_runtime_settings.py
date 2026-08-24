@@ -111,6 +111,34 @@ def test_runtime_settings_empty_profile_is_unset(monkeypatch):
     assert settings.profile is None
 
 
+def test_model_discovery_settings_defaults(monkeypatch):
+    """SPEC-027 R-5: discovery is on by default with sane cadence."""
+    monkeypatch.delenv("AGENT_MODEL_DISCOVERY_ENABLED", raising=False)
+    monkeypatch.delenv("AGENT_MODEL_DISCOVERY_REFRESH_SECONDS", raising=False)
+    monkeypatch.delenv("AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS", raising=False)
+    settings = RuntimeSettings.from_env()
+    assert settings.model_discovery_enabled is True
+    assert settings.model_discovery_refresh_seconds == 1800
+    assert settings.model_discovery_timeout_seconds == 5.0
+
+
+def test_model_discovery_settings_read_env(monkeypatch):
+    monkeypatch.setenv("AGENT_MODEL_DISCOVERY_ENABLED", "false")
+    monkeypatch.setenv("AGENT_MODEL_DISCOVERY_REFRESH_SECONDS", "300")
+    monkeypatch.setenv("AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS", "2.5")
+    settings = RuntimeSettings.from_env()
+    assert settings.model_discovery_enabled is False
+    assert settings.model_discovery_refresh_seconds == 300
+    assert settings.model_discovery_timeout_seconds == 2.5
+
+
+def test_model_discovery_settings_validation():
+    with pytest.raises(ValueError, match="REFRESH_SECONDS must be >= 1"):
+        RuntimeSettings(model_discovery_refresh_seconds=0)
+    with pytest.raises(ValueError, match="TIMEOUT_SECONDS must be > 0"):
+        RuntimeSettings(model_discovery_timeout_seconds=0.0)
+
+
 def test_native_service_settings_reads_env(monkeypatch):
     monkeypatch.setenv("AGENTSCOPE_REDIS_HOST", "redis.internal")
     monkeypatch.setenv("AGENTSCOPE_REDIS_PORT", "6380")

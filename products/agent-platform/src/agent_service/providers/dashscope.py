@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent_service.providers.base import AgentScopeProvider, ProviderConfigurationError
+from agent_service.providers.base import (
+    _NON_CHAT_MARKERS,
+    AgentScopeProvider,
+    ProviderConfigurationError,
+)
 from agent_service.runtime_settings import DashScopeOptions, RuntimeSettings
 
 
@@ -10,8 +14,26 @@ class DashScopeProvider(AgentScopeProvider):
     provider_name = "dashscope"
     default_model = "qwen-plus"
     default_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    # SPEC-026 R-1: curated series (default model first).
-    model_series = ("qwen-plus", "qwen-max", "qwen3-max", "qwen-turbo")
+    # SPEC-027 R-6: curated series refreshed to the decimal-generation
+    # lineup (verified 2026-08-24) plus the stable tier aliases.
+    model_series = (
+        "qwen-plus",
+        "qwen-max",
+        "qwen3.8-max",
+        "qwen3.7-plus",
+        "qwen3.7-flash",
+        "qwen-turbo",
+    )
+    # SPEC-027 R-4: DashScope's /models payload is huge — restrict to the
+    # qwen chat families and drop vision/omni/translation/OCR modalities
+    # on top of the shared non-chat markers.
+    discover_family_prefixes = ("qwen",)
+    discover_exclude_markers = _NON_CHAT_MARKERS + (
+        "-vl",
+        "-mt",
+        "-ocr",
+        "omni",
+    )
 
     def build_model(self, settings: RuntimeSettings) -> Any:
         from agentscope.credential import DashScopeCredential

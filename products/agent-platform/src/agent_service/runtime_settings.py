@@ -149,6 +149,12 @@ class RuntimeSettings:
     # SSE data cap, which protects live bandwidth rather than storage.
     evidence_entry_max_chars: int = 131072
     evidence_session_max_bytes: int = 4194304
+    # Live model discovery (SPEC-027 R-5): periodic provider /models
+    # queries feed the catalog behind a fail-soft fallback ladder.
+    # Disabled restores the pure SPEC-026 curated-series behavior.
+    model_discovery_enabled: bool = True
+    model_discovery_refresh_seconds: int = 1800
+    model_discovery_timeout_seconds: float = 5.0
 
     @staticmethod
     def default_provider_options(provider: RuntimeProvider) -> RuntimeProviderOptions:
@@ -205,6 +211,11 @@ class RuntimeSettings:
             raise ValueError("AGENTSCOPE_TIMEZONE must not be empty.")
         if self.hitl_confirm_timeout < 0:
             raise ValueError("AGENT_HITL_CONFIRM_TIMEOUT must be >= 0.")
+        # Live model discovery validation (SPEC-027 R-5).
+        if self.model_discovery_refresh_seconds < 1:
+            raise ValueError("AGENT_MODEL_DISCOVERY_REFRESH_SECONDS must be >= 1.")
+        if self.model_discovery_timeout_seconds <= 0:
+            raise ValueError("AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS must be > 0.")
         try:
             from zoneinfo import ZoneInfo
 
@@ -290,6 +301,7 @@ class RuntimeSettings:
         output_token_weight = _optional_float(
             "AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT"
         )
+        model_discovery_enabled = _optional_bool("AGENT_MODEL_DISCOVERY_ENABLED")
         return cls(
             profile=profile,
             provider=provider,
@@ -331,6 +343,15 @@ class RuntimeSettings:
             ),
             evidence_session_max_bytes=int(
                 os.getenv("AGENT_EVIDENCE_SESSION_MAX_BYTES", "4194304")
+            ),
+            model_discovery_enabled=(
+                True if model_discovery_enabled is None else model_discovery_enabled
+            ),
+            model_discovery_refresh_seconds=int(
+                os.getenv("AGENT_MODEL_DISCOVERY_REFRESH_SECONDS", "1800")
+            ),
+            model_discovery_timeout_seconds=float(
+                os.getenv("AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS", "5")
             ),
         )
 
