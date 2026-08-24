@@ -24,7 +24,7 @@
           },
           "provider": {
             "type": "string",
-            "enum": ["dashscope", "deepseek", "openai"],
+            "enum": ["dashscope", "deepseek", "openai", "luban"],
             "description": "Provider backing this model."
           },
           "default": {

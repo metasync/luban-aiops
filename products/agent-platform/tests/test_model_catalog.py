@@ -11,6 +11,8 @@ discovery view.
 from __future__ import annotations
 
 import json
+import logging
+import typing
 from pathlib import Path
 
 import jsonschema
@@ -20,6 +22,7 @@ from fastapi.testclient import TestClient
 from agent_service.app import create_app
 from agent_service.providers import get_provider
 from agent_service.runtime_settings import RuntimeSettings
+from agent_service.schemas.v2 import AgentModelInfo
 from agent_service.services.model_catalog import (
     ModelCatalog,
     ModelCatalogEntry,
@@ -41,6 +44,10 @@ CATALOG_ENV_KNOBS = (
     "OPENAI_MODEL_NAME",
     "OPENAI_BASE_URL",
     "OPENAI_MODELS",
+    "LUBAN_API_KEY",
+    "LUBAN_MODEL_NAME",
+    "LUBAN_BASE_URL",
+    "LUBAN_MODELS",
 )
 
 DEEPSEEK_SERIES = get_provider("deepseek").model_series
@@ -149,6 +156,54 @@ def test_per_provider_knobs_never_fall_back_to_agentscope_key(clean_env):
 def test_providers_without_keys_are_dropped(clean_env):
     entries = build_model_catalog(_settings())
     assert {e.provider for e in entries} == {"deepseek"}
+
+
+# --- luban provider gating (SPEC-028 R-1) ---
+
+
+def test_luban_key_without_base_url_is_dropped_with_warning(clean_env, caplog):
+    """Mandatory-endpoint rule: an API key alone must not gate luban in."""
+    clean_env.setenv("LUBAN_API_KEY", "tok-luban")
+    with caplog.at_level(
+        logging.WARNING, logger="agent_service.services.model_catalog"
+    ):
+        entries = build_model_catalog(_settings())
+    # Existing providers are unaffected by the new rule.
+    assert {e.provider for e in entries} == {"deepseek"}
+    assert any("LUBAN_BASE_URL" in record.message for record in caplog.records)
+
+
+def test_luban_key_and_base_url_gate_in_default_model(clean_env):
+    """Empty curated series: exactly the force-included default joins."""
+    clean_env.setenv("LUBAN_API_KEY", "tok-luban")
+    clean_env.setenv("LUBAN_BASE_URL", "http://ollama.llm-hosting.svc:11434/v1")
+    clean_env.setenv("LUBAN_MODEL_NAME", "qwen3-8b")
+    entries = build_model_catalog(_settings())
+    luban = [e for e in entries if e.provider == "luban"]
+    assert [e.id for e in luban] == ["qwen3-8b"]
+    entry = luban[0]
+    assert entry.api_key == "tok-luban"
+    assert entry.base_url == "http://ollama.llm-hosting.svc:11434/v1"
+    assert entry.default is False
+
+
+def test_luban_models_override_pins_series(clean_env):
+    clean_env.setenv("LUBAN_API_KEY", "tok-luban")
+    clean_env.setenv("LUBAN_BASE_URL", "http://ollama:11434/v1")
+    clean_env.setenv("LUBAN_MODELS", "qwen3-8b, qwen2.5-1.5b-instruct")
+    entries = build_model_catalog(_settings())
+    ids = [e.id for e in entries if e.provider == "luban"]
+    # The default (qwen3-8b) stays force-included ahead of the override.
+    assert ids == ["qwen3-8b", "qwen2.5-1.5b-instruct"]
+
+
+def test_luban_duplicate_model_ids_fail_startup(clean_env):
+    clean_env.setenv("LUBAN_API_KEY", "tok-luban")
+    clean_env.setenv("LUBAN_BASE_URL", "http://ollama:11434/v1")
+    # Collides with the deepseek curated series.
+    clean_env.setenv("LUBAN_MODELS", "deepseek-v4-flash")
+    with pytest.raises(ValueError, match="Duplicate model id"):
+        build_model_catalog(_settings())
 
 
 def test_empty_catalog_allowed_when_nothing_configured(clean_env):
@@ -279,6 +334,20 @@ def test_models_route_requires_user_id_header():
     client = TestClient(create_app())
     response = client.get("/api/v2/models")
     assert response.status_code in {400, 401, 403}
+
+
+def test_provider_enum_parity_between_contract_and_schema():
+    """Contract Literal and JSON-schema enum must list identical providers.
+
+    Enum vocabulary drift silently rejects catalog payloads at pydantic
+    ingest even when both files validate independently (SPEC-028).
+    """
+    schema = json.loads((SCHEMAS_DIR / "model-catalog.schema.json").read_text())
+    schema_providers = set(
+        schema["properties"]["models"]["items"]["properties"]["provider"]["enum"]
+    )
+    literal_providers = set(typing.get_args(AgentModelInfo.model_fields["provider"].annotation))
+    assert literal_providers == schema_providers
 
 
 def test_models_route_empty_catalog_is_not_an_error(monkeypatch):

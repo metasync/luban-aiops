@@ -228,6 +228,31 @@ def test_openai_provider_options_reject_invalid_reasoning_effort(monkeypatch):
         raise AssertionError("Invalid OpenAI reasoning effort should be rejected")
 
 
+def test_luban_provider_options_default_thinking_off(monkeypatch):
+    """SPEC-028 R-1/R-4: OpenAI-shaped options with thinking off by default."""
+    monkeypatch.setenv("AGENTSCOPE_PROVIDER", "luban")
+    monkeypatch.delenv("LUBAN_THINKING_ENABLE", raising=False)
+    monkeypatch.setenv("AGENTSCOPE_MAX_TOKENS", "1024")
+    monkeypatch.setenv("AGENTSCOPE_TEMPERATURE", "0.2")
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.provider_options == OpenAIOptions(
+        max_tokens=1024,
+        temperature=0.2,
+    )
+    assert settings.provider_options.thinking_enable is False
+
+
+def test_luban_provider_options_thinking_opt_in(monkeypatch):
+    monkeypatch.setenv("AGENTSCOPE_PROVIDER", "luban")
+    monkeypatch.setenv("LUBAN_THINKING_ENABLE", "true")
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.provider_options.thinking_enable is True
+
+
 def test_runtime_settings_reject_mismatched_provider_options():
     try:
         RuntimeSettings(

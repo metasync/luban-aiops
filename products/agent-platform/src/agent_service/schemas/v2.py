@@ -218,7 +218,7 @@ class AgentModelInfo(BaseModel):
 
     id: str
     label: str
-    provider: Literal["dashscope", "deepseek", "openai"]
+    provider: Literal["dashscope", "deepseek", "openai", "luban"]
     default: bool
 
 

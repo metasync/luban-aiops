@@ -121,7 +121,7 @@ Current runtime environment knobs:
 
 - `AGENTSCOPE_PROVIDER`
   - selects the provider-specific AgentScope chat model
-  - current supported values: `dashscope`, `deepseek`, `openai`
+  - current supported values: `dashscope`, `deepseek`, `openai`, `luban` (team-hosted OpenAI-compatible server; SPEC-028)
 - `AGENTSCOPE_PROFILE`
   - optional deployment-level selector for the active runtime profile
   - when set, it must match `AGENTSCOPE_PROVIDER`
@@ -132,7 +132,9 @@ Current runtime environment knobs:
 - `AGENTSCOPE_BASE_URL`
   - optional override for provider endpoints
 - `<PROVIDER>_API_KEY`, `<PROVIDER>_MODEL_NAME`, `<PROVIDER>_BASE_URL`, `<PROVIDER>_MODELS` (SPEC-024, SPEC-026)
-  - per-provider model-catalog knobs (`PROVIDER` is one of `DASHSCOPE`, `DEEPSEEK`, `OPENAI`): each supported provider with a resolvable API key contributes its curated model series — one selectable catalog entry per model, id and label are the model name — with `_MODEL_NAME` picking the provider's default model and `_MODELS=a,b,c` overriding/restricting the series (the provider's default model is always force-included); the active profile's provider additionally falls back to the `AGENTSCOPE_*` knobs above, so a single-provider deployment needs zero new configuration. Bare provider names (pre-SPEC-026 ids) alias to that provider's default model. Providers without a resolvable key are dropped; a zero-entry catalog degrades to the existing unconfigured-runtime behavior.
+  - per-provider model-catalog knobs (`PROVIDER` is one of `DASHSCOPE`, `DEEPSEEK`, `OPENAI`, `LUBAN`): each supported provider with a resolvable API key contributes its curated model series — one selectable catalog entry per model, id and label are the model name — with `_MODEL_NAME` picking the provider's default model and `_MODELS=a,b,c` overriding/restricting the series (the provider's default model is always force-included); the active profile's provider additionally falls back to the `AGENTSCOPE_*` knobs above, so a single-provider deployment needs zero new configuration. Bare provider names (pre-SPEC-026 ids) alias to that provider's default model. Providers without a resolvable key are dropped; a zero-entry catalog degrades to the existing unconfigured-runtime behavior.
+  - `LUBAN_API_KEY`, `LUBAN_BASE_URL`, `LUBAN_MODEL_NAME`, `LUBAN_MODELS`, `LUBAN_THINKING_ENABLE` (SPEC-028)
+  - team-hosted (local/on-prem) OpenAI-compatible servers (Ollama, vLLM, llama.cpp) as the `luban` provider with bearer-token auth: both `LUBAN_API_KEY` and `LUBAN_BASE_URL` are mandatory (a key without a base URL gates the provider out — self-hosted endpoints have no default endpoint). The curated series is empty, so `LUBAN_MODELS` pinning (recommended, fixed-point ids) or live discovery supplies the lineup; thinking defaults off (small-model-safe). See `docs/guides/luban-llm-guide.md` and the reference Ollama manifests under `shared/platform-ops/gitops/llm-hosting/`.
 - `AGENT_MODEL_DISCOVERY_ENABLED`, `AGENT_MODEL_DISCOVERY_REFRESH_SECONDS`, `AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS` (SPEC-027)
   - live model discovery tuning: periodic `GET /models` per configured provider feeds the catalog behind a fail-soft ladder (live → in-memory last-good → Postgres last-good in the sessions database → curated series). Enabled by default; `false` restores the pure curated-series behavior. A set `<PROVIDER>_MODELS` stays authoritative and skips discovery for that provider.
 - `AGENTSCOPE_ORGANIZATION`

@@ -13,6 +13,26 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+### Added
+
+- **Luban-hosted small model provider (SPEC-028)**: a fourth runtime
+  provider `luban` wires team-hosted (local/on-prem) OpenAI-compatible
+  servers — Ollama, vLLM, llama.cpp `llama-server` — into the existing
+  SPEC-024/026/027 catalog machinery with bearer-token authentication.
+  New knobs: `LUBAN_API_KEY` (credential gate), `LUBAN_BASE_URL`
+  (mandatory — a key without a base URL gates the provider out, since
+  self-hosted endpoints have no default endpoint), `LUBAN_MODEL_NAME`
+  (provider default), `LUBAN_MODELS` (fixed-point pinning, authoritative
+  over live discovery), and `LUBAN_THINKING_ENABLE` (opt-in; thinking
+  defaults off for small-model-safe generation). The curated series is
+  empty, so pinning or discovery supplies the lineup; the fail-soft
+  ladder keeps an offline server degrading to the default model only.
+  New operator guide `docs/guides/luban-llm-guide.md` (stack selection,
+  token-auth setup, platform wiring, verification, troubleshooting) and
+  free-standing reference Ollama manifests under
+  `shared/platform-ops/gitops/llm-hosting/` (Deployment/Service/Secret/
+  PVC; opt-in, not wired into `dev-k8s` or `make deploy`).
+
 ## 0.10.0 — 2026-08-24
 
 ### Added

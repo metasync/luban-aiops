@@ -37,6 +37,10 @@ CATALOG_ENV_KNOBS = (
     "DEEPSEEK_MODELS",
     "OPENAI_API_KEY",
     "OPENAI_MODELS",
+    "LUBAN_API_KEY",
+    "LUBAN_BASE_URL",
+    "LUBAN_MODEL_NAME",
+    "LUBAN_MODELS",
     "SESSION_DB_URL",
     "AGENT_STATE_DB_URL",
 )
@@ -136,6 +140,98 @@ def test_discover_filter_accepts_chat_families():
     assert get_provider("openai").discover_filter("gpt-4o")
     assert get_provider("openai").discover_filter("o3-mini")
     assert get_provider("dashscope").discover_filter("qwen3.8-max")
+
+
+def test_luban_discover_filter_accepts_arbitrary_chat_names():
+    """SPEC-028 R-3: no family prefixes for self-hosted inventories."""
+    luban = get_provider("luban")
+    assert luban.discover_filter("qwen3-8b")
+    assert luban.discover_filter("llama3.2:3b")
+    assert not luban.discover_filter("qwen3-8b-2026-08-01")
+    assert not luban.discover_filter("bge-large-embedding")
+
+
+# --- luban discovery ladder (SPEC-028 R-3) ---
+
+
+def _luban_credentials(**overrides):
+    kwargs = {
+        "provider": "luban",
+        "api_key": "tok-luban",
+        "base_url": "http://ollama.llm-hosting.svc:11434/v1",
+        "default_model": "qwen3-8b",
+        "models_override": None,
+    }
+    kwargs.update(overrides)
+    return ProviderCredentials(**kwargs)
+
+
+def _set_luban_env(clean_env):
+    clean_env.setenv("LUBAN_API_KEY", "tok-luban")
+    clean_env.setenv("LUBAN_BASE_URL", "http://ollama.llm-hosting.svc:11434/v1")
+    clean_env.setenv("LUBAN_MODEL_NAME", "qwen3-8b")
+
+
+def test_luban_live_discovery_filters_and_swaps(clean_env, monkeypatch, patch_fetch):
+    """Live /models against a self-hosted endpoint feeds the catalog with
+    the shared hygiene filters applied."""
+    _set_luban_env(clean_env)
+    settings = _settings()
+    catalog = _patched_catalog(monkeypatch, settings)
+    cache = FakeCache()
+    patch_fetch.payload = (
+        "qwen3-8b",
+        "qwen2.5-1.5b-instruct",
+        "qwen3-8b-2026-08-01",   # dated snapshot -> dropped
+        "bge-large-embedding",   # non-chat modality -> dropped
+    )
+    service = ModelDiscoveryService(settings, (_luban_credentials(),))
+    service._cache = cache
+
+    _refresh_once(service)
+
+    assert patch_fetch.calls == ["luban"]
+    luban_ids = [e.id for e in catalog.entries if e.provider == "luban"]
+    assert luban_ids == ["qwen3-8b", "qwen2.5-1.5b-instruct"]
+    assert cache.writes == [
+        ("luban", ("qwen3-8b", "qwen2.5-1.5b-instruct"))
+    ]
+
+
+def test_luban_ladder_bottom_serves_only_default_model(
+    clean_env, monkeypatch, patch_fetch
+):
+    """R-3: neither LUBAN_MODELS nor a reachable /models endpoint leaves
+    exactly the force-included default model in the catalog."""
+    _set_luban_env(clean_env)
+    settings = _settings()
+    catalog = _patched_catalog(monkeypatch, settings)
+    service = ModelDiscoveryService(settings, (_luban_credentials(),))
+    service._cache = FakeCache()
+    patch_fetch.payload = None
+
+    _refresh_once(service)
+
+    luban_ids = [e.id for e in catalog.entries if e.provider == "luban"]
+    assert luban_ids == ["qwen3-8b"]
+
+
+def test_luban_models_override_skips_discovery(clean_env, monkeypatch, patch_fetch):
+    """Fixed-point pinning stays authoritative over live discovery."""
+    _set_luban_env(clean_env)
+    settings = _settings()
+    catalog = _patched_catalog(monkeypatch, settings)
+    creds = _luban_credentials(
+        models_override=("qwen3-8b", "qwen2.5-1.5b-instruct")
+    )
+    service = ModelDiscoveryService(settings, (creds,))
+    service._cache = FakeCache()
+
+    _refresh_once(service)
+
+    assert patch_fetch.calls == []
+    luban_ids = [e.id for e in catalog.entries if e.provider == "luban"]
+    assert luban_ids == ["qwen3-8b", "qwen2.5-1.5b-instruct"]
 
 
 # --- Ladder levels (R-2) ---

@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  labels:
+    app: ollama
+spec:
+  # Single replica by design: model weights are per-pod (see README).
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            # Bearer-token auth (SPEC-028 R-2): once set, Ollama rejects
+            # unauthenticated API calls with 401. Rotate by editing the
+            # Secret and restarting this Deployment.
+            - name: OLLAMA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ollama-api-key
+                  key: OLLAMA_API_KEY
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+          ports:
+            - containerPort: 11434
+          readinessProbe:
+            httpGet:
+              path: /api/version
+              port: 11434
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 11434
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            # CPU-only qwen3-8b-class quant sizing (see README); shrink
+            # for 1.5B-4B class models, add GPU limits on GPU nodes.
+            requests:
+              cpu: "2"
+              memory: 8Gi
+            limits:
+              memory: 12Gi
+          volumeMounts:
+            - name: ollama-models
+              mountPath: /root/.ollama
+      volumes:
+        - name: ollama-models
+          persistentVolumeClaim:
+            claimName: ollama-models

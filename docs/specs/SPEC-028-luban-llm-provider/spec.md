@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: chi
 - created: 2026-08-24
 - release slice: post-0.10.0 train
@@ -203,3 +203,6 @@ All resolved in spec review (2026-08-24):
 - 2026-08-24: approved — provider id resolved to `luban` (`LUBAN_*`
   knobs); Ollama chosen as the primary K8s reference stack; OpenAI-shaped
   options reused; manifests stay free-standing.
+- 2026-08-24: delivered — adapter, mandatory-base-URL gate, small-model-
+  safe options defaults, unit tests, operator hosting guide, reference
+  Ollama manifests, and living-doc wiring all landed; `make verify` green.

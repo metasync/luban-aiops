@@ -13,6 +13,7 @@ Luban AIOps platform.
 | [Tool and Connector Guide](tool-configuration.md) | Tool inventory, K8s/Elastic/skills activation checklists, audit-service activation, adding new connectors |
 | [Skills and Guidance Guide](skills-guide.md) | Managing skill content: add, revise, remove skills and sources; verification and troubleshooting |
 | [Incident Triage and Collaboration Guide](incident-guide.md) | Alertmanager wiring, incident lifecycle, running and interpreting triage, collaboration semantics |
+| [Luban-Hosted Small Model Guide](luban-llm-guide.md) | Self-hosting a small LLM (Ollama/vLLM/llama.cpp) with token auth, platform wiring, K8s hosting |
 | [Architecture Overview](architecture-overview.md) | Service topology, request flow, trust chain, RBAC model |
 | [Troubleshooting](troubleshooting.md) | Symptom-based diagnostics for common deployment and runtime issues |
 

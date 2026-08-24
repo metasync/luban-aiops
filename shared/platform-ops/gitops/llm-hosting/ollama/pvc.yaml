@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-models
+  labels:
+    app: ollama
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # Model-weight inventory (qwen3-8b q4 ~5 GB); resize before
+      # pulling larger inventories (see README sizing notes).
+      storage: 50Gi

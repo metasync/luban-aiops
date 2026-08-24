@@ -29,8 +29,8 @@ DEFAULT_SYSTEM_PROMPT = (
     "rather than formatting it in prose."
 )
 
-RuntimeProvider = Literal["dashscope", "deepseek", "openai"]
-SUPPORTED_RUNTIME_PROVIDERS = ("dashscope", "deepseek", "openai")
+RuntimeProvider = Literal["dashscope", "deepseek", "openai", "luban"]
+SUPPORTED_RUNTIME_PROVIDERS = ("dashscope", "deepseek", "openai", "luban")
 # SPEC-026 R-5: the profile is a free-form deploy label decoupled from the
 # provider (one generic profile hosts every configured provider), so there
 # is no supported-profiles allowlist anymore.
@@ -270,6 +270,16 @@ class RuntimeSettings:
                 **common_kwargs,
                 thinking_enable=_optional_bool("DEEPSEEK_THINKING_ENABLE") or False,
                 reasoning_effort=reasoning_effort,
+            )
+
+        # SPEC-028 R-1/R-4: the luban provider (team-hosted OpenAI-
+        # compatible servers) reuses the OpenAI options shape; thinking
+        # stays off unless explicitly opted in — self-hosted small models
+        # rarely have a thinking mode and the flag must not 4xx the turn.
+        if provider == "luban":
+            return OpenAIOptions(
+                **common_kwargs,
+                thinking_enable=_optional_bool("LUBAN_THINKING_ENABLE") or False,
             )
 
         reasoning_effort = _optional_choice(

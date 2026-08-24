@@ -256,12 +256,14 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime
 
 | Variable | Purpose | Default | Source |
 |---|---|---|---|
-| `AGENTSCOPE_PROVIDER` | LLM backend: `dashscope`, `deepseek`, or `openai` | *(from profile)* | profile ConfigMap |
+| `AGENTSCOPE_PROVIDER` | LLM backend: `dashscope`, `deepseek`, `openai`, or `luban` | *(from profile)* | profile ConfigMap |
 | `AGENTSCOPE_PROFILE` | Active profile name (must match provider) | *(from profile)* | profile ConfigMap |
 | `AGENTSCOPE_MODEL_NAME` | Model identifier | *(from profile)* | profile ConfigMap |
 | `AGENTSCOPE_BASE_URL` | Provider API endpoint | *(from profile)* | profile ConfigMap |
 | `AGENTSCOPE_API_KEY` | Provider API key | *(none)* | **runtime-secrets** |
-| `<PROVIDER>_API_KEY` / `<PROVIDER>_MODEL_NAME` / `<PROVIDER>_BASE_URL` | Additional model-catalog entries (SPEC-024); `PROVIDER` ∈ `DASHSCOPE`, `DEEPSEEK`, `OPENAI`. Each provider with a resolvable key contributes one selectable model (id = provider name); the active profile's provider falls back to the `AGENTSCOPE_*` knobs, so single-provider deployments need no new config | *(none)* | **runtime-secrets** |
+| `<PROVIDER>_API_KEY` / `<PROVIDER>_MODEL_NAME` / `<PROVIDER>_BASE_URL` | Additional model-catalog entries (SPEC-024); `PROVIDER` ∈ `DASHSCOPE`, `DEEPSEEK`, `OPENAI`, `LUBAN`. Each provider with a resolvable key contributes one selectable model (id = provider name); the active profile's provider falls back to the `AGENTSCOPE_*` knobs, so single-provider deployments need no new config | *(none)* | **runtime-secrets** |
+| `LUBAN_API_KEY` / `LUBAN_BASE_URL` / `LUBAN_MODEL_NAME` / `LUBAN_MODELS` | Team-hosted (local/on-prem) OpenAI-compatible server as the `luban` provider (SPEC-028). Both the API key and the base URL are mandatory — a key without `LUBAN_BASE_URL` gates the provider out (self-hosted endpoints have no default endpoint). `LUBAN_MODELS` pinning is recommended for fixed-point audit attribution; see the [Luban-Hosted Small Model Guide](luban-llm-guide.md) | *(none)* | **runtime-secrets** |
+| `LUBAN_THINKING_ENABLE` | Opt a thinking-capable luban model into thinking mode (OpenAI-shaped options; small-model-safe default is off) | `false` | **runtime-secrets** |
 | `AGENTSCOPE_AGENT_NAME` | Agent identifier | `LubanOpsRuntime` | runtime-config |
 | `AGENTSCOPE_REDIS_HOST` | Redis host for AgentScope coordination | `redis` | runtime-config |
 | `AGENTSCOPE_REDIS_PORT` | Redis port | `6379` | runtime-config |
@@ -546,9 +548,13 @@ shared/platform-ops/gitops/select-runtime-profile.sh <profile-name>
 ```
 
 The profile's `runtime-secrets.example.env` documents the active provider key plus the
-multi-model catalog knobs: every supported provider (`deepseek`, `dashscope`, `openai`)
-with an `<PROVIDER>_API_KEY` joins the catalog with its curated model series, and an
-optional `<PROVIDER>_MODELS=a,b,c` overrides/restricts that series.
+multi-model catalog knobs: every supported provider (`deepseek`, `dashscope`, `openai`,
+`luban`) with an `<PROVIDER>_API_KEY` joins the catalog with its curated model series,
+and an optional `<PROVIDER>_MODELS=a,b,c` overrides/restricts that series. The `luban`
+provider (SPEC-028) covers team-hosted OpenAI-compatible servers (Ollama, vLLM,
+llama.cpp): it additionally requires `LUBAN_BASE_URL` (no default endpoint exists) and
+ships with an empty curated series, so pinning via `LUBAN_MODELS` or live discovery
+supplies the lineup — see the [Luban-Hosted Small Model Guide](luban-llm-guide.md).
 
 Live model discovery (SPEC-027) refreshes each configured provider's series from its
 OpenAI-compatible `/models` endpoint: once at startup, then every

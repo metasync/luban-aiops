@@ -116,10 +116,23 @@ def resolve_credentials(
     if not api_key:
         return None
     adapter = get_provider(provider)
+    resolved_base_url = base_url or adapter.default_base_url
+    if resolved_base_url is None:
+        # SPEC-028 R-1: adapters with no well-known public endpoint
+        # (only ``luban``) require an operator-declared base URL; an API
+        # key alone must not gate the provider in (fail-closed).
+        LOGGER.warning(
+            "model catalog: provider %s gated out — %s_BASE_URL is "
+            "required when %s_API_KEY is set.",
+            provider,
+            prefix,
+            prefix,
+        )
+        return None
     return ProviderCredentials(
         provider=provider,
         api_key=api_key,
-        base_url=base_url or adapter.default_base_url,
+        base_url=resolved_base_url,
         default_model=model_name or adapter.default_model,
         models_override=models_override,
     )
