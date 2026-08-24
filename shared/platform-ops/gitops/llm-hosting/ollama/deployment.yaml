@@ -34,9 +34,12 @@ spec:
           ports:
             - containerPort: 11434
           readinessProbe:
-            httpGet:
-              path: /api/version
-              port: 11434
+            # exec probe: the CLI talks to the server over localhost, the
+            # one path Ollama exempts from OLLAMA_API_KEY — an httpGet
+            # probe from the kubelet would be 401-rejected once the key
+            # is set.
+            exec:
+              command: ["ollama", "list"]
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:

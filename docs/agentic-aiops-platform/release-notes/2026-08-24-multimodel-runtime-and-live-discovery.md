@@ -1,11 +1,11 @@
-# v0.10.0 — Multi-Model Runtime: Selection, Evidence, Catalog, Discovery
+# v0.10.0 — Multi-Model Runtime: Selection, Evidence, Catalog, Discovery, Self-Hosting
 
 Date: 2026-08-24
 Release type: minor (new platform capabilities; additive API surfaces)
 
 ## Summary
 
-v0.10.0 closes the multi-model runtime train — four specs that turn the
+v0.10.0 closes the multi-model runtime train — five specs that turn the
 platform from a single-provider runtime into an operator-selectable,
 self-updating multi-model platform:
 
@@ -22,12 +22,18 @@ self-updating multi-model platform:
 - **SPEC-027** feeds the catalog from each provider's live `/models`
   endpoint behind a fail-soft fallback ladder, so the lineup tracks the
   provider without ever blocking chat or startup.
+- **SPEC-028** adds a fourth `luban` provider for team-hosted (local/
+  on-prem) OpenAI-compatible servers — Ollama, vLLM, llama.cpp — with
+  bearer-token auth, a mandatory base URL, an operator hosting guide,
+  and reference Ollama K8s manifests; the foundation for the big-small
+  LLM collaboration pattern.
 
 A pre-release code and documentation review closed this train: its
 findings are remediated here — an evicted model pin wedging parked HITL
 confirmations, the fallback error text blaming the wrong provider
-(shipped mid-train), and a connection leak in the discovery cache's
-bootstrap path.
+(shipped mid-train), a connection leak in the discovery cache's
+bootstrap path, and an Ollama readiness probe that would be
+401-rejected once bearer-token auth is enforced.
 
 ## Change Set
 
@@ -123,6 +129,29 @@ bootstrap path.
   attribution names the exact model); the pinned `DASHSCOPE_MODELS`
   override skips discovery for that provider by design.
 
+### Added — SPEC-028: Luban-hosted small model provider
+
+- A fourth runtime provider `luban` wires team-hosted (local/on-prem)
+  OpenAI-compatible servers — Ollama, vLLM, llama.cpp `llama-server` —
+  into the existing catalog machinery with bearer-token authentication,
+  reusing SPEC-024 selection/pinning and SPEC-027 discovery unchanged.
+- Knobs: `LUBAN_API_KEY` (credential gate), `LUBAN_BASE_URL` (mandatory
+  — a key without a base URL gates the provider out, since self-hosted
+  endpoints have no default endpoint), `LUBAN_MODEL_NAME` (provider
+  default), `LUBAN_MODELS` (fixed-point pinning, authoritative over
+  discovery), `LUBAN_THINKING_ENABLE` (opt-in; thinking defaults off
+  for small-model-safe generation).
+- The curated series is empty, so pinning or live discovery supplies
+  the lineup; the fail-soft ladder keeps an offline server degrading to
+  the default model only. The provider enum in the agent-service
+  contract and the shared model-catalog JSON schema are locked against
+  drift by a new parity test.
+- New operator guide `docs/guides/luban-llm-guide.md` (stack selection,
+  token-auth setup, platform wiring, K8s hosting, verification,
+  troubleshooting) and free-standing reference Ollama manifests under
+  `shared/platform-ops/gitops/llm-hosting/` (Deployment/Service/
+  Secret/PVC; opt-in, not wired into `dev-k8s` or `make deploy`).
+
 ### Fixed (pre-release review findings)
 
 - **HITL confirm with an evicted model pin (major)**: `/chat/confirm`
@@ -145,19 +174,30 @@ bootstrap path.
   Postgres, `PostgresDiscoveryCache` leaked the opened connection on
   every refresh cycle; bootstrap failures now close the connection before
   the fail-soft swallow. Regression-tested.
+- **Ollama readiness probe under token auth (minor)**: the reference
+  `llm-hosting` deployment's `httpGet` readiness probe would be
+  401-rejected by the kubelet once `OLLAMA_API_KEY` is enforced (the
+  probe originates outside Ollama's auth-exempt localhost path). The
+  probe is now an `exec` of `ollama list`, which talks to the server
+  over localhost.
 
 ## Validation
 
-- Full agent-platform suite green (406 tests, including the three
-  regression tests added with the review remediations); platform-gateway
-  suite green (194 tests); `make verify` gate green (all products, overlay
-  renders, policy validation, version lockstep).
+- Full agent-platform suite green (422 tests, including the SPEC-028
+  gating/parity/discovery tests); platform-gateway suite green
+  (194 tests); `make verify` gate green (all products, overlay renders,
+  policy validation, version lockstep).
 - Live-verified in dev-k8s: startup discovery fetched both providers (55
   models before pinning), restart served from the Postgres cache tier,
   metrics report `result="live"` / `result="override"` per provider;
   after the DashScope fixed-point pin the catalog serves exactly the
   pinned lineup, and portal turns were attributed to the serving model in
   the audit trail (`details.model`).
+- SPEC-028 live-verified end-to-end in dev-k8s: the reference Ollama
+  stack runs in an `llm-hosting` namespace with a real bearer token;
+  `qwen3:1.7b` appears in `/api/v2/models` under `provider: "luban"`
+  with discovery metrics at `result="live"`, a portal turn on the luban
+  model completed, and the audit trail attributes `model=qwen3:1.7b`.
 - L3 deep security reviews at each push gate returned zero findings.
 
 ## Upgrade Notes
@@ -168,6 +208,9 @@ bootstrap path.
 - New knobs (all optional): `AGENT_MODEL_DISCOVERY_ENABLED`,
   `AGENT_MODEL_DISCOVERY_REFRESH_SECONDS`,
   `AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS`, `<PROVIDER>_MODELS`,
-  `AGENT_EVIDENCE_ENTRY_MAX_CHARS`, `AGENT_EVIDENCE_SESSION_MAX_BYTES`.
+  `AGENT_EVIDENCE_ENTRY_MAX_CHARS`, `AGENT_EVIDENCE_SESSION_MAX_BYTES`,
+  and the SPEC-028 `LUBAN_*` set (`LUBAN_API_KEY`, `LUBAN_BASE_URL`,
+  `LUBAN_MODEL_NAME`, `LUBAN_MODELS`, `LUBAN_THINKING_ENABLE`) — see
+  `docs/guides/luban-llm-guide.md` for the self-hosting walkthrough.
 - Deployments running per-provider runtime-profile overlays should move
   to the consolidated `runtime-profiles/default` profile.

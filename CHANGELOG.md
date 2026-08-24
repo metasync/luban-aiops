@@ -13,6 +13,8 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.10.0 — 2026-08-24
+
 ### Added
 
 - **Luban-hosted small model provider (SPEC-028)**: a fourth runtime
@@ -32,10 +34,6 @@ Release 1 entries are grouped retrospectively under 0.1.0.
   free-standing reference Ollama manifests under
   `shared/platform-ops/gitops/llm-hosting/` (Deployment/Service/Secret/
   PVC; opt-in, not wired into `dev-k8s` or `make deploy`).
-
-## 0.10.0 — 2026-08-24
-
-### Added
 
 - **Live model discovery with cached fallback (SPEC-027)**: the model
   catalog now tracks each configured provider's real lineup — a
