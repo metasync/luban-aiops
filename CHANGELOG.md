@@ -13,6 +13,16 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.11.1 — 2026-08-25
+
+### Fixed
+
+- `sync-skills-secrets.sh` no longer wipes `SKILLS_AUDIT_CLIENT_SECRET` from the shared skills-hub runtime secret file when re-provisioning the query credential — the missing key 401'd every skills-hub audit emission until audit sync ran again.
+
+### Changed
+
+- Version lockstep and dependency lockfiles refreshed for the 0.11.1 patch.
+
 ## 0.11.0 — 2026-08-25
 
 ### Added
@@ -52,11 +62,6 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 - `sync-audit-secrets.sh` now waits for the audit-service rollout to
   finish before restarting the emitter deployments, so an emitter's
   boot-time emission can no longer hit the old pod's registry and 401.
-- `sync-skills-secrets.sh` no longer wipes `SKILLS_AUDIT_CLIENT_SECRET`
-  from the skills-hub secret: it rewrites the shared
-  `runtime-secrets.env` after `sync-audit-secrets.sh` in `deploy.sh`
-  order and now preserves the audit line across the rewrite (same
-  pattern as the OTLP-header preservation).
 
 ## 0.10.0 — 2026-08-24
 

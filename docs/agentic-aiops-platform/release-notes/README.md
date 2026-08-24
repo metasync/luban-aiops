@@ -7,6 +7,13 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-25-skills-secret-sync-patch.md`
+  - closes v0.11.1: `sync-skills-secrets.sh` preserves
+    `SKILLS_AUDIT_CLIENT_SECRET` across its rewrite of the shared
+    skills-hub `runtime-secrets.env` (same pattern as the OTLP-header
+    preservation), fixing the wipe that 401'd every skills-hub audit
+    emission after a plain `make deploy`; version lockstep and
+    lockfiles refreshed for the patch
 - `2026-08-25-skills-usage-audit-trail.md`
   - delivers SPEC-029 (v0.11.0): skills-hub emits `skill_searched` /
     `skill_retrieved` per authenticated query and one `skills_synced`
