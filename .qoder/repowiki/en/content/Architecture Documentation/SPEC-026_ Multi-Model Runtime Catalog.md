@@ -24,11 +24,12 @@
 
 ## Update Summary
 **Changes Made**
-- Updated to reflect complete delivery of SPEC-027 Live Model Discovery (2026-08-24)
+- Updated to reflect complete delivery of both SPEC-026 and SPEC-027 (2026-08-24)
 - Enhanced architecture diagrams to include discovery service and fallback ladder implementation
 - Added comprehensive coverage of live model discovery capabilities and configuration
 - Updated troubleshooting guide with discovery-specific operational guidance
 - Integrated delivery roadmap confirmation showing feature completion status
+- Verified all acceptance criteria are met through code analysis
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -399,7 +400,7 @@ Sleep --> Fetch
 
 **Diagram sources**
 - [model_discovery.py:155-194](file://products/agent-platform/src/agent_service/services/model_discovery.py#L155-L194)
-- [model_discovery.py:227-265](file://products/agent-platform/src/agent_service/services/model_discovery.py#L227-L265)
+- [model_discovery.py:227-265](file://products/agent-platform/src/agent_service/services/model_discovery.py#L227-265)
 - [model_discovery.py:266-283](file://products/agent-platform/src/agent_service/services/model_discovery.py#L266-L283)
 - [app.py:19-47](file://products/agent-platform/src/agent_service/app.py#L19-L47)
 

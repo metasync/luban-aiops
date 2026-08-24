@@ -8,23 +8,23 @@
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [test_evidence_store.py](file://products/agent-platform/tests/test_evidence_store.py)
 - [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
 - [transcript.ts](file://products/operator-portal/web-ui/app/src/chat/transcript.ts)
-- [decoder.ts](file://products/operator-portal/web-ui/app/src/stream/decoder.ts)
 - [sessions.ts](file://products/operator-portal/web-ui/app/src/api/sessions.ts)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated Introduction to reflect delivered status and completed implementation of dual-backend evidence persistence
-- Enhanced Requirements section with detailed acceptance criteria based on actual implementation verification
-- Added comprehensive Architecture Overview showing complete data flow with evidence store integration
-- Expanded Component Analysis with specific implementation details from evidence_store.py, routes.py, schema files, and portal components
-- Updated Performance Considerations with concrete storage backends, size management, and observability metrics
-- Enhanced Troubleshooting Guide with evidence-specific scenarios and monitoring guidance
-- Added Conclusion summarizing the delivered implementation with dual-backend support and portal integration
+- Updated Introduction to reflect delivered status and completed implementation of dual-backend evidence persistence with comprehensive size management
+- Enhanced Requirements section with detailed acceptance criteria based on actual implementation verification including per-entry character limits (131KB default) and per-session byte budgets (4MB default)
+- Added comprehensive Architecture Overview showing complete data flow with evidence store integration, dual-backend pattern, and automatic eviction
+- Expanded Component Analysis with specific implementation details from evidence_store.py, routes.py, schema files, runtime settings, and portal components
+- Updated Performance Considerations with concrete storage backends, size management configuration, and observability metrics
+- Enhanced Troubleshooting Guide with evidence-specific scenarios, monitoring guidance, and configuration troubleshooting
+- Added Conclusion summarizing the delivered implementation with dual-backend support, size management, and portal integration
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -38,14 +38,14 @@
 9. [Conclusion](#conclusion)
 
 ## Introduction
-This document specifies the delivered implementation of evidence persistence for session transcripts under SPEC-025. The spec is now in `delivered` status, created on 2026-08-23, and addresses a critical parity gap where evidence only existed during live streaming but disappeared when sessions were reopened. The implementation introduces dual-backend storage (in-memory/PostgreSQL) for tool call and result frames with comprehensive size management and observability metrics. It extends existing specifications including SPEC-022 R-1 (transcripts), SPEC-011 R-4 (evidence panels), and SPEC-017 (kernel state persistence). All requirements R-1 through R-4 have been fully implemented and verified with comprehensive testing.
+This document specifies the delivered implementation of evidence persistence for session transcripts under SPEC-025. The spec is now in `delivered` status, created on 2026-08-23, and addresses a critical parity gap where evidence only existed during live streaming but disappeared when sessions were reopened. The implementation introduces dual-backend storage (in-memory/PostgreSQL) for tool call and result frames with comprehensive size management including per-entry character limits (AGENT_EVIDENCE_ENTRY_MAX_CHARS default 131KB) and per-session byte budgets (AGENT_EVIDENCE_SESSION_MAX_BYTES default 4MB) with automatic eviction. It extends existing specifications including SPEC-022 R-1 (transcripts), SPEC-011 R-4 (evidence panels), and SPEC-017 (kernel state persistence). All requirements R-1 through R-4 have been fully implemented and verified with comprehensive testing, providing complete evidence parity between live streaming and session replay experiences.
 
 **Section sources**
 - [spec.md:3-15](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/spec.md#L3-L15)
 
 ## Project Structure
 SPEC-025 touches three product areas with clear responsibilities:
-- Agent Platform: persists evidence frames alongside transcript extraction and enriches the session-detail response with dual-backend support
+- Agent Platform: persists evidence frames alongside transcript extraction and enriches the session-detail response with dual-backend support and size management
 - Operator Portal: renders evidence cards from persisted data with parity to live rendering using shared EvidenceCard component
 - Platform Gateway: passes through the additive evidence field without modification
 
@@ -57,6 +57,7 @@ B["Session transcript<br/>extract_transcript()"]
 C["Session store<br/>Postgres/Redis/Memory"]
 D["Evidence store<br/>InMemory/Postgres"]
 E["Metrics<br/>Observability"]
+F["Runtime Settings<br/>Size Configuration"]
 end
 subgraph "Platform Gateway"
 G["Sessions route<br/>get_session_route()"]
@@ -70,6 +71,7 @@ A --> B
 A --> C
 A --> D
 A --> E
+A --> F
 G --> A
 P --> G
 S --> P
@@ -81,6 +83,7 @@ T --> P
 - [session_transcript.py:30-64](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L64)
 - [evidence_store.py:504-551](file://products/agent-platform/src/agent_service/services/evidence_store.py#L504-L551)
 - [metrics.py:156-186](file://products/agent-platform/src/agent_service/core/metrics.py#L156-L186)
+- [runtime_settings.py:146-151](file://products/agent-platform/src/agent_service/runtime_settings.py#L146-L151)
 - [ChatView.tsx:134-165](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L134-L165)
 - [transcript.ts:55-70](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L55-L70)
 
@@ -88,19 +91,19 @@ T --> P
 - [spec.md:17-44](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/spec.md#L17-L44)
 
 ## Core Components
-The implementation focuses on four key components that work together to provide evidence persistence:
+The implementation focuses on five key components that work together to provide evidence persistence with comprehensive size management:
 
-- **Session detail read path**: Returns transcript availability, chat-only turns, and additive evidence field per turn with graceful degradation
+- **Session detail read path**: Returns transcript availability, chat-only turns, and additive evidence field per turn with graceful degradation and evidence store health monitoring
 - **Transcript extractor**: Best-effort reconstruction from kernel state; currently excludes tool/evidence frames by design for v1
-- **Evidence store backends**: Dual-backend pattern (in-memory for dev/CI, Postgres for production) with bounded storage and TTL refresh
-- **Portal evidence UI**: Reuses existing EvidenceCard component for both live and replayed data with identical rendering
-- **Stream decoder**: Parses tool_call and tool_result events into structured objects used by the UI
+- **Evidence store backends**: Dual-backend pattern (in-memory for dev/CI, Postgres for production) with bounded storage, TTL refresh, and automatic eviction policies
+- **Portal evidence UI**: Reuses existing EvidenceCard component for both live and replayed data with identical rendering and truncation markers
+- **Stream decoder**: Parses tool_call and tool_result events into structured objects used by the UI with size cap enforcement
 
 Key acceptance criteria from the spec define the scope:
-- **R-1**: Persist tool_call and tool_result frames per turn with traceability metadata and redaction; bounded storage with entry and session caps; best-effort persistence
-- **R-2**: Additive session-detail contract with evidence attached to turns; gateway pass-through unchanged; backward compatible
-- **R-3**: Portal evidence-card parity for reopened sessions using grouped entries and summary counts
-- **R-4**: Traceability and metrics on persisted evidence (request_id, duration, correlation to audit/observability)
+- **R-1**: Persist tool_call and tool_result frames per turn with traceability metadata and redaction; bounded storage with entry caps (131KB default) and session budgets (4MB default); best-effort persistence with automatic eviction
+- **R-2**: Additive session-detail contract with evidence attached to turns; gateway pass-through unchanged; backward compatible with null fallback for unreadable stores
+- **R-3**: Portal evidence-card parity for reopened sessions using grouped entries, summary counts, and visible truncation markers
+- **R-4**: Traceability and metrics on persisted evidence (request_id, duration, correlation to audit/observability) with comprehensive counters
 
 **Section sources**
 - [spec.md:46-116](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/spec.md#L46-L116)
@@ -108,7 +111,7 @@ Key acceptance criteria from the spec define the scope:
 - [routes.py:410-431](file://products/agent-platform/src/agent_service/api/v2/routes.py#L410-L431)
 
 ## Architecture Overview
-The implementation adds a per-turn evidence persistence layer with dual-backend support and augments the session-detail response with evidence attached to each turn. The portal reuses its existing evidence card logic for both live and replayed data, ensuring visual consistency.
+The implementation adds a per-turn evidence persistence layer with dual-backend support, comprehensive size management, and augments the session-detail response with evidence attached to each turn. The portal reuses its existing evidence card logic for both live and replayed data, ensuring visual consistency with truncation markers.
 
 ```mermaid
 sequenceDiagram
@@ -192,7 +195,7 @@ Done --> Exit
 - [session_transcript.py:30-82](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L82)
 
 ### Agent Platform: Evidence Store Backends
-The evidence store provides dual-backend support with in-memory for development/testing and PostgreSQL for production deployments. Both backends enforce identical size caps and eviction policies with TTL refresh on reads.
+The evidence store provides dual-backend support with in-memory for development/testing and PostgreSQL for production deployments. Both backends enforce identical size caps and eviction policies with TTL refresh on reads. The system includes comprehensive size management with per-entry character limits (default 131KB) and per-session byte budgets (default 4MB) with automatic eviction of oldest payloads.
 
 ```mermaid
 classDiagram
@@ -236,7 +239,7 @@ EvidenceStore <|.. _BaseEvidenceStore
 - [evidence_store.py:504-551](file://products/agent-platform/src/agent_service/services/evidence_store.py#L504-L551)
 
 ### Agent Platform: Schema and Contract
-The implementation defines Pydantic models and JSON schemas for evidence turns with strict validation and backward compatibility guarantees.
+The implementation defines Pydantic models and JSON schemas for evidence turns with strict validation and backward compatibility guarantees. The schema includes support for truncation markers indicating size cap enforcement.
 
 ```mermaid
 flowchart TD
@@ -255,8 +258,30 @@ Route --> Response["HTTP Response"]
 - [v2.py:125-158](file://products/agent-platform/src/agent_service/schemas/v2.py#L125-L158)
 - [session-evidence.schema.json:1-58](file://shared/shared-contracts/schemas/session-evidence.schema.json#L1-L58)
 
+### Agent Platform: Runtime Configuration
+The system includes comprehensive configuration for evidence persistence with environment variables for size management. Default values are measured-derived from production usage patterns and provide appropriate headroom for typical diagnostic operations.
+
+```mermaid
+flowchart TD
+Config["RuntimeSettings"] --> EntryCap["evidence_entry_max_chars<br/>Default: 131,072 chars"]
+Config --> SessionBudget["evidence_session_max_bytes<br/>Default: 4,194,304 bytes"]
+EntryCap --> EnvVar["AGENT_EVIDENCE_ENTRY_MAX_CHARS"]
+SessionBudget --> EnvVar2["AGENT_EVIDENCE_SESSION_MAX_BYTES"]
+EnvVar --> Validation["Validation & Defaults"]
+EnvVar2 --> Validation
+Validation --> EvidenceStore["Evidence Store Configuration"]
+```
+
+**Diagram sources**
+- [runtime_settings.py:146-151](file://products/agent-platform/src/agent_service/runtime_settings.py#L146-L151)
+- [runtime_settings.py:341-346](file://products/agent-platform/src/agent_service/runtime_settings.py#L341-L346)
+
+**Section sources**
+- [runtime_settings.py:146-151](file://products/agent-platform/src/agent_service/runtime_settings.py#L146-L151)
+- [runtime_settings.py:341-346](file://products/agent-platform/src/agent_service/runtime_settings.py#L341-L346)
+
 ### Operator Portal: Evidence Rendering Integration
-The operator portal seamlessly integrates persisted evidence with live stream rendering using shared components. The EvidencePanel component handles both live and replayed evidence identically, while the transcript converter maps evidence groups to chat turns.
+The operator portal seamlessly integrates persisted evidence with live stream rendering using shared components. The EvidencePanel component handles both live and replayed evidence identically, while the transcript converter maps evidence groups to chat turns with truncation marker support.
 
 ```mermaid
 flowchart TD
@@ -279,7 +304,7 @@ EvidenceCard --> TruncatedDisplay["Truncation Markers"]
 - [sessions.ts:11-42](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L11-L42)
 
 ### Observability and Metrics
-The implementation includes comprehensive metrics for evidence persistence operations, frame truncation, and storage backend health monitoring.
+The implementation includes comprehensive metrics for evidence persistence operations, frame truncation, and storage backend health monitoring with detailed counters for different failure modes.
 
 ```mermaid
 flowchart TD
@@ -300,10 +325,10 @@ WriteMetric --> Prometheus
 
 ## Dependency Analysis
 The implementation creates clear dependencies between components:
-- Agent Platform depends on session store backends for durable session metadata, transcript extractor for chat-only turns (currently), and evidence store for per-turn evidence frames
-- Portal depends on stream decoder for live events and session-detail API for replayed evidence
+- Agent Platform depends on session store backends for durable session metadata, transcript extractor for chat-only turns (currently), and evidence store for per-turn evidence frames with size management
+- Portal depends on stream decoder for live events and session-detail API for replayed evidence with truncation support
 - Gateway depends on policy enforcement and logging, plus transparent forwarding of session responses
-- Evidence store depends on metrics module for observability and shared environment configuration
+- Evidence store depends on metrics module for observability and shared environment configuration for size limits
 
 ```mermaid
 graph LR
@@ -313,6 +338,7 @@ AgentAPI --> Store["Session Store"]
 AgentAPI --> Evidence["Evidence Store"]
 AgentAPI --> Transcript["Transcript Extractor"]
 Evidence --> Metrics["Observability Metrics"]
+Evidence --> Config["Runtime Configuration"]
 ```
 
 **Diagram sources**
@@ -325,14 +351,15 @@ Evidence --> Metrics["Observability Metrics"]
 
 ## Performance Considerations
 Critical performance considerations for evidence persistence include:
-- **Dual-backend storage**: In-memory for development/CI, PostgreSQL for production with automatic fallback
-- **Size management**: Per-entry cap (131,072 chars) and per-session budget (4,194,304 bytes) with automatic eviction
-- **Best-effort persistence**: Failures must not fail chat turns; log and continue operations with graceful degradation
-- **Read paths**: Evidence retrieval uses TTL refresh on reads to maintain session activity
+- **Dual-backend storage**: In-memory for development/CI, PostgreSQL for production with automatic fallback and connection pooling
+- **Size management**: Per-entry cap (131,072 chars default) and per-session budget (4,194,304 bytes default) with automatic eviction of oldest payloads
+- **Best-effort persistence**: Failures must not fail chat turns; log and continue operations with graceful degradation and metric tracking
+- **Read paths**: Evidence retrieval uses TTL refresh on reads to maintain session activity and prevent stale data accumulation
 - **Redaction**: Apply existing redaction before storing evidence payloads to prevent secrets leakage
-- **Metrics**: Comprehensive observability with counters for writes, frames persisted, and truncation reasons
+- **Metrics**: Comprehensive observability with counters for writes, frames persisted, and truncation reasons (entry_cap vs session_budget)
+- **Configuration tuning**: Environment variables allow fine-tuning of size limits based on deployment characteristics and workload patterns
 
-These considerations align with the spec's requirements for bounded storage and graceful degradation across all deployment environments.
+These considerations align with the spec's requirements for bounded storage and graceful degradation across all deployment environments, with defaults optimized for typical diagnostic workloads.
 
 ## Troubleshooting Guide
 Common troubleshooting scenarios for evidence persistence:
@@ -340,11 +367,13 @@ Common troubleshooting scenarios for evidence persistence:
 - **If evidence contains sensitive data**: Validate redaction pipeline runs before storage, check stored payloads for credentials or secrets
 - **If performance degrades**: Inspect per-session evidence size and cap enforcement, review query patterns for evidence retrieval, check PostgreSQL connection health
 - **If evidence store is unavailable**: Monitor evidence_store_writes_total{result="error"} metric, verify AGENT_STATE_STORE_BACKEND configuration, check database connectivity
-- **If truncation occurs frequently**: Review AGENT_EVIDENCE_ENTRY_MAX_CHARS and AGENT_EVIDENCE_SESSION_MAX_BYTES settings, analyze evidence_frames_truncated_total metrics
+- **If truncation occurs frequently**: Review AGENT_EVIDENCE_ENTRY_MAX_CHARS and AGENT_EVIDENCE_SESSION_MAX_BYTES settings, analyze evidence_frames_truncated_total metrics for reason breakdown
+- **If session grows too large**: Check per-session budget enforcement, verify eviction is targeting oldest payloads correctly, monitor evidence_frames_truncated_total{reason="session_budget"}
+- **If evidence appears incomplete**: Look for truncated markers in evidence cards, check original_chars values for entry_cap truncation, verify session budget hasn't evicted critical payloads
 
 **Section sources**
 - [spec.md:59-69](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/spec.md#L59-L69)
 - [test_evidence_store.py:230-261](file://products/agent-platform/tests/test_evidence_store.py#L230-L261)
 
 ## Conclusion
-SPEC-025 successfully closes the parity gap between live and replayed evidence by implementing dual-backend evidence persistence with comprehensive size management and observability. The implementation persists tool_call and tool_result frames per turn using in-memory (development) and PostgreSQL (production) backends, exposing them via the session-detail API with graceful degradation. The portal renders evidence identically for live and reopened sessions using the existing EvidenceCard component. The implementation focuses on robust storage with bounded growth, best-effort persistence, strict redaction, and comprehensive metrics while maintaining backward compatibility. All requirements R-1 through R-4 have been fully implemented and verified with comprehensive testing, delivering complete evidence parity between live streaming and session replay experiences.
+SPEC-025 successfully closes the parity gap between live and replayed evidence by implementing dual-backend evidence persistence with comprehensive size management and observability. The implementation persists tool_call and tool_result frames per turn using in-memory (development) and PostgreSQL (production) backends, exposing them via the session-detail API with graceful degradation. The portal renders evidence identically for live and reopened sessions using the existing EvidenceCard component with truncation markers. The implementation focuses on robust storage with bounded growth through per-entry character limits (131KB default) and per-session byte budgets (4MB default), best-effort persistence, strict redaction, and comprehensive metrics while maintaining backward compatibility. All requirements R-1 through R-4 have been fully implemented and verified with comprehensive testing, delivering complete evidence parity between live streaming and session replay experiences with configurable size management and automatic eviction policies.

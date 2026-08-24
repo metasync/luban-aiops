@@ -20,6 +20,10 @@
 - [platform-gateway/src/platform_gateway/core/telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [audit-service/src/audit_service/core/telemetry.py](file://products/audit-service/src/audit_service/core/telemetry.py)
 - [skills-hub/src/skills_hub/core/telemetry.py](file://products/skills_hub/core/telemetry.py)
+- [agent-platform/src/agent_service/services/evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [agent-platform/src/agent_service/services/model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [agent-platform/src/agent_service/services/model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [agent-platform/src/agent_service/runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [shared/shared-contracts/schemas/health-response.schema.json](file://shared/shared-contracts/schemas/health-response.schema.json)
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
@@ -33,11 +37,11 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced OTLP credential management with robust secret synchronization that prevents 401 Unauthorized errors during telemetry export to OpenObserve
-- Updated secret provisioning workflow to use cluster-side merging via kubectl patch for durable credential persistence
-- Added comprehensive documentation for sibling script coordination that preserves OTLP headers across environment file regenerations
-- Enhanced troubleshooting guidance for OTLP authentication issues and credential lifecycle management
-- Updated configuration reference to reflect the improved secret synchronization process
+- Added comprehensive monitoring capabilities for multi-model runtime including evidence store operation metrics, write results tracking, truncation reasons monitoring, model discovery refresh counters, and model catalog status gauges
+- Enhanced observability for evidence persistence with detailed frame truncation tracking and session budget enforcement metrics
+- Implemented model discovery lifecycle monitoring with provider-specific refresh outcome tracking and model count gauges
+- Updated metrics collection strategy to support new multi-model runtime features while maintaining existing observability patterns
+- Added detailed documentation for evidence store backend operations and model discovery ladder outcomes
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -52,11 +56,11 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides comprehensive guidance for monitoring and observability across the Luban AIOps Platform. It consolidates the platform's metrics collection strategy using Prometheus with direct prometheus_client implementation, structured logging conventions, distributed tracing implementation with OpenObserve integration, health check endpoints, readiness/liveness probes configuration, alerting rules, dashboard templates, and incident response procedures. The platform includes a comprehensive OpenTelemetry push pipeline that exports traces, metrics, and logs to OpenObserve via OTLP HTTP/protobuf protocol, enabling end-to-end observability across all six platform services. **Updated**: The platform now features robust OTLP credential management with durable secret synchronization that prevents 401 Unauthorized errors during telemetry export.
+This document provides comprehensive guidance for monitoring and observability across the Luban AIOps Platform. It consolidates the platform's metrics collection strategy using Prometheus with direct prometheus_client implementation, structured logging conventions, distributed tracing implementation with OpenObserve integration, health check endpoints, readiness/liveness probes configuration, alerting rules, dashboard templates, and incident response procedures. The platform includes a comprehensive OpenTelemetry push pipeline that exports traces, metrics, and logs to OpenObserve via OTLP HTTP/protobuf protocol, enabling end-to-end observability across all six platform services. **Updated**: The platform now features robust monitoring capabilities for multi-model runtime including evidence store operations, model discovery lifecycle, and comprehensive observability for the new multi-model runtime features.
 
 ## Project Structure
 Observability is implemented consistently across all six services with standardized metrics collection using direct prometheus_client implementation and comprehensive OpenTelemetry telemetry:
-- Agent Platform service exposes metrics via custom RED middleware with prometheus_client and OpenTelemetry push pipeline
+- Agent Platform service exposes metrics via custom RED middleware with prometheus_client and OpenTelemetry push pipeline, enhanced with multi-model runtime monitoring
 - Identity Broker service implements similar metrics collection with domain-specific counters and OpenTelemetry integration
 - Tool Gateway service integrates metrics into request handling with policy decision tracking and OpenTelemetry support
 - Platform Gateway service provides centralized routing metrics with delegation tracking and OpenTelemetry instrumentation
@@ -67,13 +71,22 @@ Observability is implemented consistently across all six services with standardi
 
 ```mermaid
 graph TB
-subgraph "Services"
-AP["Agent Platform<br/>prometheus_client + OpenTelemetry"]
+subgraph "Multi-Model Runtime Services"
+AP["Agent Platform<br/>prometheus_client + OpenTelemetry<br/>Evidence Store + Model Discovery"]
 IB["Identity Broker<br/>prometheus_client + OpenTelemetry"]
 TG["Tool Gateway<br/>prometheus_client + OpenTelemetry"]
 PG["Platform Gateway<br/>prometheus_client + OpenTelemetry"]
 AS["Audit Service<br/>prometheus_client + OpenTelemetry"]
 SH["Skills Hub<br/>prometheus_client + OpenTelemetry"]
+end
+subgraph "Evidence Store Metrics"
+ES_WRITES["evidence_store_writes_total<br/>Write Results Tracking"]
+ES_FRAMES["evidence_frames_persisted_total<br/>Frames Persisted Counter"]
+ES_TRUNCATED["evidence_frames_truncated_total<br/>Truncation Reasons"]
+end
+subgraph "Model Discovery Metrics"
+MD_REFRESHES["agent_model_discovery_refreshes_total<br/>Refresh Outcome Tracking"]
+MD_MODELS["agent_model_discovery_models<br/>Model Count Gauges"]
 end
 subgraph "Secret Management"
 SYNC["sync-otel-secrets.sh<br/>Cluster-side Merge"]
@@ -93,6 +106,11 @@ end
 subgraph "Prometheus"
 PROM["Prometheus<br/>Scrapes /metrics"]
 end
+AP --> ES_WRITES
+AP --> ES_FRAMES
+AP --> ES_TRUNCATED
+AP --> MD_REFRESHES
+AP --> MD_MODELS
 AP --> OTEL
 IB --> OTEL
 TG --> OTEL
@@ -114,10 +132,10 @@ SH --> PROM
 ```
 
 **Diagram sources**
+- [agent-platform/src/agent_service/core/metrics.py:156-209](file://products/agent-platform/src/agent_service/core/metrics.py#L156-L209)
+- [agent-platform/src/agent_service/services/evidence_store.py:156-185](file://products/agent-platform/src/agent_service/services/evidence_store.py#L156-L185)
+- [agent-platform/src/agent_service/services/model_discovery.py:27-30](file://products/agent-platform/src/agent_service/services/model_discovery.py#L27-L30)
 - [sync-otel-secrets.sh:73-90](file://shared/platform-ops/gitops/sync-otel-secrets.sh#L73-L90)
-- [sync-delegation-secrets.sh:48-57](file://shared/platform-ops/gitops/sync-delegation-secrets.sh#L48-L57)
-- [sync-audit-secrets.sh:76-85](file://shared/platform-ops/gitops/sync-audit-secrets.sh#L76-L85)
-- [sync-skills-secrets.sh:97-106](file://shared/platform-ops/gitops/sync-skills-secrets.sh#L97-L106)
 
 **Section sources**
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
@@ -128,6 +146,7 @@ SH --> PROM
   - Custom RED middleware records HTTP requests and durations with bounded cardinality labels
   - Standardized metric naming and labels enforced through shared conventions
   - Direct implementation avoids compatibility issues with pinned starlette versions
+  - **New**: Multi-model runtime monitoring with evidence store and model discovery metrics
 - **Enhanced** Distributed Tracing Implementation:
   - Opt-in OpenTelemetry push pipeline exports traces, metrics, and logs to OpenObserve
   - Gated by OTEL_ENABLED environment variable (default: disabled)
@@ -157,6 +176,7 @@ The observability architecture centers around dual pipelines: direct prometheus_
 - Application startup sequences call configure_logging() before FastAPI initialization
 - OpenTelemetry pipeline is initialized conditionally based on OTEL_ENABLED flag
 - **Enhanced**: Durable OTLP credential management via cluster-side secret merging
+- **New**: Multi-model runtime monitoring integrated into the metrics pipeline
 - OTLP exporters send traces, metrics, and logs to OpenObserve via HTTP/protobuf
 - Kubernetes configurations inject environment variables and define probes
 - Prometheus scrapes metrics; logs are aggregated centrally; traces are exported to OpenObserve
@@ -166,7 +186,8 @@ sequenceDiagram
 participant Client as "Client"
 participant Gateway as "Tool Gateway"
 participant Agent as "Agent Platform"
-participant Identity as "Identity Broker"
+participant EvidenceStore as "Evidence Store"
+participant ModelDiscovery as "Model Discovery"
 participant SecretSync as "Secret Sync"
 participant Prometheus as "Prometheus"
 participant OpenObserve as "OpenObserve"
@@ -178,28 +199,89 @@ SecretSync->>SecretSync : Restart Deployments
 Client->>Gateway : HTTP Request
 Gateway->>Gateway : configure_logging() + Record Metrics (prometheus_client)
 Gateway->>Gateway : setup_telemetry() (if OTEL_ENABLED)
-Gateway->>Identity : Auth Call (propagate trace_id)
-Identity-->>Gateway : Auth Result
 Gateway->>Agent : Agent Call (propagate trace_id)
+Agent->>EvidenceStore : Save Turn + Track Metrics
+EvidenceStore-->>Agent : Persistence Result + Truncation Metrics
+Agent->>ModelDiscovery : Refresh Models + Track Metrics
+ModelDiscovery-->>Agent : Discovery Results + Model Count
 Agent-->>Gateway : Response
 Gateway->>Gateway : log_event("tool_invoked")
 Gateway->>Prometheus : Export metrics (prometheus_client)
 Agent->>Prometheus : Export metrics (prometheus_client)
-Identity->>Prometheus : Export metrics (prometheus_client)
+EvidenceStore->>Prometheus : Evidence Store Metrics
+ModelDiscovery->>Prometheus : Model Discovery Metrics
 Gateway->>OpenObserve : OTLP traces/metrics/logs (authenticated)
 Agent->>OpenObserve : OTLP traces/metrics/logs (authenticated)
-Identity->>OpenObserve : OTLP traces/metrics/logs (authenticated)
+EvidenceStore->>OpenObserve : Evidence Store Telemetry
+ModelDiscovery->>OpenObserve : Model Discovery Telemetry
 Gateway->>Logger : Structured logs with trace_id
 Agent->>Logger : Structured logs with trace_id
-Identity->>Logger : Structured logs with trace_id
+EvidenceStore->>Logger : Evidence Store Logs
+ModelDiscovery->>Logger : Model Discovery Logs
 ```
 
 **Diagram sources**
+- [agent-platform/src/agent_service/runtime_kernel.py:510-529](file://products/agent-platform/src/agent_service/runtime_kernel.py#L510-L529)
+- [agent-platform/src/agent_service/services/model_discovery.py:272-289](file://products/agent-platform/src/agent_service/services/model_discovery.py#L272-L289)
 - [sync-otel-secrets.sh:73-90](file://shared/platform-ops/gitops/sync-otel-secrets.sh#L73-L90)
-- [sync-delegation-secrets.sh:48-57](file://shared/platform-ops/gitops/sync-delegation-secrets.sh#L48-L57)
-- [sync-audit-secrets.sh:76-85](file://shared/platform-ops/gitops/sync-audit-secrets.sh#L76-L85)
 
 ## Detailed Component Analysis
+
+### **Enhanced** Multi-Model Runtime Monitoring Capabilities
+- **Evidence Store Operations Monitoring**:
+  - `evidence_store_writes_total` counter tracks successful and failed evidence persistence attempts
+  - `evidence_frames_persisted_total` counter monitors frames persisted for session replay
+  - `evidence_frames_truncated_total` counter with reason labels tracks truncation events
+  - Truncation reasons include "entry_cap" for oversized payloads and "session_budget" for memory constraints
+- **Model Discovery Lifecycle Monitoring**:
+  - `agent_model_discovery_refreshes_total` counter tracks refresh cycles by provider and outcome
+  - Refresh outcomes include "override", "disabled", "live", "memory", "cache", and "curated"
+  - `agent_model_discovery_models` gauge shows current model counts per provider after discovery
+- **Integration Points**:
+  - Evidence store metrics integrated into runtime kernel during turn persistence
+  - Model discovery metrics embedded in background refresh loops
+  - Comprehensive error handling with fail-open behavior for non-critical failures
+
+```mermaid
+flowchart TD
+Start(["Service Startup"]) --> InitEvidence["Initialize Evidence Store<br/>Track Backend Selection"]
+InitEvidence --> InitDiscovery["Initialize Model Discovery<br/>Background Refresh Loop"]
+InitDiscovery --> EvidenceOps["Evidence Store Operations"]
+EvidenceOps --> WriteTracking{"Evidence Write?"}
+WriteTracking --> |Success| RecordSuccess["record_evidence_write('ok')"]
+WriteTracking --> |Error| RecordError["record_evidence_write('error')"]
+RecordSuccess --> FramePersistence["Track Frames Persisted"]
+FramePersistence --> TruncationCheck{"Frame Size Check"}
+TruncationCheck --> |Oversized| EntryCap["record_evidence_frame_truncated('entry_cap')"]
+TruncationCheck --> |Budget Exceeded| SessionBudget["record_evidence_frame_truncated('session_budget')"]
+EntryCap --> Continue["Continue Processing"]
+SessionBudget --> Continue
+InitDiscovery --> DiscoveryLoop["Model Discovery Refresh Loop"]
+DiscoveryLoop --> LadderCheck{"Resolution Ladder"}
+LadderCheck --> |Override| OverridePath["record_model_discovery_refresh(provider, 'override')"]
+LadderCheck --> |Disabled| DisabledPath["record_model_discovery_refresh(provider, 'disabled')"]
+LadderCheck --> |Live Success| LivePath["record_model_discovery_refresh(provider, 'live')"]
+LadderCheck --> |Memory Cache| MemoryPath["record_model_discovery_refresh(provider, 'memory')"]
+LadderCheck --> |Postgres Cache| CachePath["record_model_discovery_refresh(provider, 'cache')"]
+LadderCheck --> |Curated Fallback| CuratedPath["record_model_discovery_refresh(provider, 'curated')"]
+OverridePath --> ModelCount["record_model_discovery_models(provider, count)"]
+DisabledPath --> ModelCount
+LivePath --> ModelCount
+MemoryPath --> ModelCount
+CachePath --> ModelCount
+CuratedPath --> ModelCount
+ModelCount --> Continue
+```
+
+**Diagram sources**
+- [agent-platform/src/agent_service/services/evidence_store.py:156-185](file://products/agent-platform/src/agent_service/services/evidence_store.py#L156-L185)
+- [agent-platform/src/agent_service/services/model_discovery.py:233-280](file://products/agent-platform/src/agent_service/services/model_discovery.py#L233-L280)
+- [agent-platform/src/agent_service/runtime_kernel.py:510-529](file://products/agent-platform/src/agent_service/runtime_kernel.py#L510-L529)
+
+**Section sources**
+- [agent-platform/src/agent_service/core/metrics.py:156-209](file://products/agent-platform/src/agent_service/core/metrics.py#L156-L209)
+- [agent-platform/src/agent_service/services/evidence_store.py:156-185](file://products/agent-platform/src/agent_service/services/evidence_store.py#L156-L185)
+- [agent-platform/src/agent_service/services/model_discovery.py:27-30](file://products/agent-platform/src/agent_service/services/model_discovery.py#L27-L30)
 
 ### **Enhanced** OTLP Credential Management and Secret Synchronization
 - **Robust Authentication**: Eliminates 401 Unauthorized errors through cluster-side secret merging
@@ -280,6 +362,7 @@ Skip --> End
   - Histogram metrics track request duration with method and handler labels
   - Domain-specific counters for business logic (sessions, tokens, policy decisions)
   - Module-level metric objects prevent double-registration during testing
+  - **New**: Multi-model runtime metrics for evidence store and model discovery operations
 - Metric naming follows shared conventions to ensure consistency across services
 - Labels include service, route, method, status code, and operation where applicable
 - Direct implementation avoids compatibility issues with pinned starlette versions
@@ -297,6 +380,11 @@ class AgentMetrics {
 +agent_chat_requests_total
 +session_store_backend gauge
 +session_store_errors counter
++evidence_store_writes_total
++evidence_frames_persisted_total
++evidence_frames_truncated_total
++agent_model_discovery_refreshes_total
++agent_model_discovery_models gauge
 }
 class IdentityMetrics {
 +identity_tokens_issued_total
@@ -333,12 +421,12 @@ PrometheusMetrics <|-- SkillsMetrics
 ```
 
 **Diagram sources**
-- [agent-platform/src/agent_service/core/metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
+- [agent-platform/src/agent_service/core/metrics.py:156-209](file://products/agent-platform/src/agent_service/core/metrics.py#L156-L209)
 - [identity-broker/src/identity_service/core/metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
 - [tool-gateway/src/tool_gateway/core/metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
 - [platform-gateway/src/platform_gateway/core/metrics.py](file://products/platform-gateway/src/platform_gateway/core/metrics.py)
 - [audit-service/src/audit_service/core/metrics.py](file://products/audit-service/src/audit_service/core/metrics.py)
-- [skills-hub/src/skills_hub/core/metrics.py](file://products/skills_hub/src/skills_hub/core/metrics.py)
+- [skills-hub/src/skills_hub/core/metrics.py](file://products/skills-hub/src/skills_hub/core/metrics.py)
 
 **Section sources**
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
@@ -463,9 +551,12 @@ ReturnFail --> End(["Unhealthy"])
 - Alerting rules are defined based on key metrics:
   - High error rates, latency spikes, resource exhaustion, dependency failures.
   - Tool invocation failures and redaction overflow events.
+  - **New**: Evidence store write failures and excessive truncation events.
+  - **New**: Model discovery refresh failures and unexpected model count changes.
 - Dashboard templates visualize:
   - Request throughput, latency percentiles, error rates, trace spans, and system resources.
   - Tool invocation patterns and audit trail events.
+  - **New**: Evidence store operation metrics and model discovery lifecycle visualization.
 - Alerts trigger notifications and runbooks for incident response.
 
 ```mermaid
@@ -475,6 +566,8 @@ Rules --> Alerts["Alertmanager Notifications"]
 Alerts --> Runbook["Incident Runbook"]
 Metrics --> Dashboards["Grafana Dashboards"]
 Dashboards --> Ops["Operations Team"]
+NewMetrics["Multi-Model Runtime Metrics"] --> Rules
+NewMetrics --> Dashboards
 ```
 
 **Section sources**
@@ -490,6 +583,7 @@ Dashboards --> Ops["Operations Team"]
   - Automatic correlation between logs and traces via trace context
   - Batch processing optimizes network usage and reduces overhead
   - **New**: Reliable authentication prevents telemetry export failures
+  - **New**: Multi-model runtime metrics integrated into OpenObserve pipeline
 
 ```mermaid
 flowchart TD
@@ -504,6 +598,8 @@ Bridge --> Correlate["Correlate with Traces"]
 Aggregate --> Search["Search & Filter"]
 ExportTrace["Export Spans<br/>with trace_id"] --> OpenObserve["OpenObserve Backend<br/>Authenticated Export"]
 OpenObserve --> Correlate
+NewMetrics["Multi-Model Runtime Metrics"] --> Scrape
+NewMetrics --> OpenObserve
 ```
 
 **Section sources**
@@ -520,6 +616,7 @@ Observability components depend on shared contracts and Kubernetes configuration
   - Optional OpenTelemetry SDK components loaded only when OTEL_ENABLED is true
   - OTLP HTTP/protobuf exporters for traces, metrics, and logs
   - Automatic instrumentation for FastAPI and HTTPX client libraries
+  - **New**: Multi-model runtime monitoring dependencies integrated into agent platform
   - **New**: Robust secret synchronization ensures credential availability
 
 ```mermaid
@@ -542,9 +639,12 @@ IB_TELEMETRY["Identity Telemetry"] --> OTEL
 TG_TELEMETRY["Gateway Telemetry"] --> OTEL
 PG_TELEMETRY["Platform Gateway Telemetry"] --> OTEL
 SECRET_SYNC["Secret Synchronization"] --> OTEL
+MULTI_MODEL["Multi-Model Runtime Metrics"] --> AP_METRICS
+MULTI_MODEL --> OTEL
 ```
 
 **Diagram sources**
+- [agent-platform/src/agent_service/core/metrics.py:156-209](file://products/agent-platform/src/agent_service/core/metrics.py#L156-L209)
 - [sync-otel-secrets.sh:73-90](file://shared/platform-ops/gitops/sync-otel-secrets.sh#L73-L90)
 
 **Section sources**
@@ -563,6 +663,8 @@ SECRET_SYNC["Secret Synchronization"] --> OTEL
   - Optional feature allows disabling telemetry in high-performance environments
   - Resource-efficient implementation with minimal CPU and memory overhead
   - **New**: Reliable authentication eliminates retry overhead from failed authentication attempts
+  - **New**: Multi-model runtime metrics have minimal performance impact due to efficient counter operations
+  - **New**: Evidence store truncation metrics use bounded label cardinality to prevent memory growth
 
 ## Troubleshooting Guide
 - Use structured logs with correlation IDs to trace requests across services.
@@ -585,13 +687,20 @@ SECRET_SYNC["Secret Synchronization"] --> OTEL
   - **New**: Run `sync-otel-secrets.sh` to re-provision credentials if experiencing 401 Unauthorized errors
   - **New**: Check sibling script output for preserved OTLP header lines
   - **New**: Verify all seven deployment rollouts completed successfully after secret provisioning
+- **New** Multi-Model Runtime Troubleshooting:
+  - Check `evidence_store_writes_total` for evidence persistence failures
+  - Monitor `evidence_frames_truncated_total` for excessive truncation events
+  - Verify `agent_model_discovery_refreshes_total` for discovery cycle issues
+  - Inspect `agent_model_discovery_models` gauge for unexpected model count changes
+  - Investigate evidence store backend selection via `agent_state_backend` gauge
+  - Check model discovery ladder outcomes for resolution failures
 
 **Section sources**
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
 
 ## Conclusion
-The Luban AIOps Platform implements a robust observability framework centered on direct prometheus_client implementation for metrics collection, enhanced structured logging with configurable log levels, and comprehensive distributed tracing with OpenObserve integration. The platform includes an opt-in OpenTelemetry push pipeline that exports traces, metrics, and logs to OpenObserve via OTLP HTTP/protobuf protocol, providing end-to-end observability across all six platform services. **Enhanced**: The platform now features robust OTLP credential management with durable secret synchronization that prevents 401 Unauthorized errors during telemetry export. By using direct prometheus_client instead of prometheus-fastapi-instrumentator, the platform avoids compatibility issues with pinned starlette versions while maintaining equivalent functionality. The framework adheres to shared conventions, calls configure_logging() at startup, and configures Kubernetes probes appropriately, enabling operators to effectively monitor, diagnose, and respond to incidents while planning for future capacity needs. The enhanced audit trail with tool_invoked events and OpenObserve integration provides comprehensive visibility into tool execution patterns and potential security concerns.
+The Luban AIOps Platform implements a robust observability framework centered on direct prometheus_client implementation for metrics collection, enhanced structured logging with configurable log levels, and comprehensive distributed tracing with OpenObserve integration. The platform includes an opt-in OpenTelemetry push pipeline that exports traces, metrics, and logs to OpenObserve via OTLP HTTP/protobuf protocol, providing end-to-end observability across all six platform services. **Enhanced**: The platform now features robust monitoring capabilities for multi-model runtime including evidence store operations, model discovery lifecycle, and comprehensive observability for the new multi-model runtime features. By using direct prometheus_client instead of prometheus-fastapi-instrumentator, the platform avoids compatibility issues with pinned starlette versions while maintaining equivalent functionality. The framework adheres to shared conventions, calls configure_logging() at startup, and configures Kubernetes probes appropriately, enabling operators to effectively monitor, diagnose, and respond to incidents while planning for future capacity needs. The enhanced audit trail with tool_invoked events and OpenObserve integration provides comprehensive visibility into tool execution patterns and potential security concerns. **New**: The multi-model runtime monitoring provides deep insights into evidence persistence, model discovery processes, and overall system health through comprehensive metrics collection.
 
 ## Appendices
 - Reference specifications for observability baseline and conventions.
@@ -600,6 +709,7 @@ The Luban AIOps Platform implements a robust observability framework centered on
 - LOG_LEVEL environment variable configuration for different environments.
 - **Updated** Migration notes from prometheus-fastapi-instrumentator to direct prometheus_client implementation.
 - **Enhanced** OpenTelemetry configuration guide for OpenObserve integration including environment variables and authentication setup.
+- **New**: Multi-model runtime monitoring guide including evidence store and model discovery metrics.
 - **New**: Secret synchronization workflow documentation for OTLP credential management.
 
 **Section sources**

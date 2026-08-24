@@ -6,6 +6,7 @@
 - [plan.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/plan.md)
 - [tasks.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/tasks.md)
 - [release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-21-hitl-confirmation-bridging.md)
+- [multimodel-runtime-and-live-discovery.md](file://docs/agentic-aiops-platform/release-notes/2026-08-24-multimodel-runtime-and-live-discovery.md)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -28,6 +29,7 @@
 - Updated confirmation registry to track risk levels per tool call
 - Enhanced portal UI with mutating badges and risk-level visualization
 - Integrated GATEWAY_MUTATING_TOOLS_ENABLED configuration gate
+- **Critical Fix**: Resolved HITL confirmation wedge issue where evicted model pins caused UnknownModelError exceptions mid-stream; /chat/confirm route now resolves model pins through the same degraded resolution ladder as other turns, falling back to catalog defaults when pinned models become unavailable due to discovery refreshes or key revocations
 
 ## Table of Contents
 1. Introduction
@@ -50,10 +52,12 @@ Key outcomes:
 - Operator portal renders an inline approval card with mutating badges and continues the stream after decision.
 - Decisions are recorded in the durable audit trail.
 - Mutating tools require both chat:confirm approval AND tools:mutate policy authorization.
+- **Model pin resilience**: Stale session pins degrade gracefully to catalog defaults instead of causing mid-stream failures.
 
 **Section sources**
 - [spec.md:11-20](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md#L11-L20)
 - [release-notes.md:3-35](file://docs/agentic-aiops-platform/release-notes/2026-08-21-hitl-confirmation-bridging.md#L3-L35)
+- [multimodel-runtime-and-live-discovery.md:126-136](file://docs/agentic-aiops-platform/release-notes/2026-08-24-multimodel-runtime-and-live-discovery.md#L126-L136)
 
 ## Project Structure
 The feature spans three products plus shared contracts, enhanced with SPEC-021 capabilities:
@@ -115,7 +119,7 @@ TG -.-> TC
 ## Core Components
 - **Enhanced Confirmation Registry**: In-memory per-process store keyed by session_id with risk_level tracking; supports register, claim, resolve, expiry, and parked checks with risk tier awareness. Single pending confirmation per session with optional risk metadata.
 - **Runtime kernel bridge**: Translates RequireUserConfirmEvent into confirmation_request frame with risk_level payload, registers pending calls with risk mapping, ends stream without message_end, and resumes via UserConfirmResultEvent on decision.
-- **Confirm route (agent platform)**: POST /api/v2/chat/confirm validates ownership, claims entry, handles expired/unknown states, streams resumed reply with confirmation_result first.
+- **Confirm route (agent platform)**: POST /api/v2/chat/confirm validates ownership, claims entry, handles expired/unknown states, streams resumed reply with confirmation_result first. **Updated**: Now uses degraded model resolution to prevent UnknownModelError exceptions.
 - **Confirm proxy (platform gateway)**: POST /api/v1/chat/confirm enforces chat:confirm action, obtains delegated token, proxies to agent platform, emits confirmation_decided audit when kernel applies decision.
 - **Risk-tier admission (tool gateway)**: Enforces tools:mutate policy action for write/admin tools, gates k8s.delete_pod behind GATEWAY_MUTATING_TOOLS_ENABLED flag.
 - **Portal card**: Renders confirmation_request as inline card with mutating badges, tool names, parameters, and permission message; posts to gateway confirm and continues SSE stream; locks card status on result or error.
@@ -132,7 +136,7 @@ TG -.-> TC
 - [styles.css:682-683](file://products/operator-portal/web-ui/styles.css#L682-L683)
 
 ## Architecture Overview
-End-to-end flow from kernel ASK to portal decision and resumed execution, enhanced with risk-tier enforcement:
+End-to-end flow from kernel ASK to portal decision and resumed execution, enhanced with risk-tier enforcement and resilient model resolution:
 
 ```mermaid
 sequenceDiagram
@@ -161,7 +165,8 @@ AP-->>Portal : 404 Not Found
 else Owner mismatch
 AP-->>Portal : Error frame
 else OK
-AP->>RK : resume_confirmation(UserConfirmResultEvent)
+AP->>AP : _resolve_model(None, session.model) - degrades stale pins
+AP->>RK : resume_confirmation(pending, decision, bearer_token, model_id)
 RK-->>AP : Stream starts with confirmation_result(approved|denied)
 AP-->>Portal : SSE continuation (tool_call/tool_result/message_*)
 GW->>GW : Emit confirmation_decided audit on first confirmation_result
@@ -262,6 +267,7 @@ Responsibilities:
 - Claim registry entry before streaming headers to prevent duplicates.
 - Map errors: unknown/resolved -> 404, expired -> 410, owner mismatch -> error frame mid-stream.
 - Reject new turns on parked sessions with 409 until resolved or expired.
+- **Updated**: Uses degraded model resolution to handle evicted session pins gracefully.
 
 ```mermaid
 sequenceDiagram
@@ -271,6 +277,7 @@ participant Reg as "ConfirmationRegistry"
 participant Kernel as "RuntimeKernel"
 Client->>Route : {session_id, confirm_id, decision}
 Route->>Route : get_session(owner check)
+Route->>Route : _resolve_model(None, session.model) - degrades stale pins
 Route->>Reg : claim(session_id, confirm_id, timeout)
 alt Expired
 Route->>Kernel : expire_confirmation
@@ -278,7 +285,7 @@ Route-->>Client : 410 Gone
 else Unknown/Resolved
 Route-->>Client : 404 Not Found
 else OK
-Route->>Kernel : resume_confirmation(pending, decision, bearer_token)
+Route->>Kernel : resume_confirmation(pending, decision, bearer_token, model_id)
 Kernel-->>Route : confirmation_result + SSE stream
 Route-->>Client : StreamingResponse
 end
@@ -434,6 +441,7 @@ TGSVC --> CONFIG["core/config.py"]
 - Tool evidence data is bounded by middleware caps to keep streams responsive.
 - Risk-level mapping is computed once at toolkit construction and cached per token.
 - Mutating tool gating prevents unnecessary policy evaluation for read operations.
+- **Model resolution caching**: Degraded model resolution happens once per confirm request, avoiding repeated catalog lookups.
 
 [No sources needed since this section provides general guidance]
 
@@ -447,6 +455,7 @@ Common issues and resolutions:
 - Mutating tool absent from discovery: Verify GATEWAY_MUTATING_TOOLS_ENABLED is set to true and RBAC permissions are configured.
 - 403 on mutating tool invocation: Ensure tools:mutate policy action is granted to the user's role.
 - No confirmation card appears: Check AGENT_HITL_CONFIRM_TIMEOUT setting; when 0, mutating tools are excluded from toolkit entirely.
+- **Stuck confirmation with evicted model pin**: If a session had a pinned model that was later evicted by discovery refresh or key revocation, the confirm route now automatically degrades to the catalog default instead of raising UnknownModelError mid-stream.
 
 Operational checks:
 - Verify AGENT_HITL_CONFIRM_TIMEOUT > 0 to enable bridging; set to 0 to restore legacy silent-park behavior.
@@ -454,6 +463,7 @@ Operational checks:
 - Inspect audit trail for confirmation_decided events to validate applied decisions.
 - Check tool discovery endpoints to verify mutating tools are registered when enabled.
 - Verify GATEWAY_MUTATING_TOOLS_ENABLED configuration in tool-gateway deployment.
+- **Monitor model catalog health**: Ensure discovery refreshes don't leave sessions with invalid pinned models; the system should automatically degrade to defaults.
 
 **Section sources**
 - [routes.py:65-94](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L94)
@@ -461,10 +471,13 @@ Operational checks:
 - [gateway_service.py:336-396](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L336-L396)
 - [policy-default.yaml:42-54](file://shared/shared-contracts/policies/policy-default.yaml#L42-L54)
 - [config.py:75-81](file://products/tool-gateway/src/tool_gateway/core/config.py#L75-L81)
+- [multimodel-runtime-and-live-discovery.md:126-136](file://docs/agentic-aiops-platform/release-notes/2026-08-24-multimodel-runtime-and-live-discovery.md#L126-L136)
 
 ## Conclusion
 SPEC-020 delivers a robust, auditable HITL bridge that transforms kernel ASK parking into a portal-driven approval workflow, enhanced with SPEC-021's bounded mutating actions. It enforces policy at the gateway, preserves session integrity, and records decisions durably. The design keeps the kernel unchanged, relies on existing agentscope machinery, and scales to future write/mutating tools by gating them behind the same confirmation surface with risk-tier enforcement.
 
 The integration provides a four-layer security model: deny-by-default policy bundle actions, tool risk tiers with tools:mutate admission gate, agent auto-allow list exclusion for mutating tools, and mandatory HITL confirmation. This ensures that no mutating action can execute without explicit human approval, maintaining the platform's operational safety guarantees while enabling powerful automated remediation capabilities.
+
+**Critical Enhancement**: The recent fix addresses a major wedge scenario where evicted model pins could cause UnknownModelError exceptions mid-stream, permanently stalling parked sessions. By implementing the same degraded resolution ladder used by other turns (request > pinned > default), the /chat/confirm route now gracefully handles stale session pins by falling back to catalog defaults when pinned models become unavailable due to discovery refreshes or key revocations. This ensures continuous operation even during model catalog changes.
 
 [No sources needed since this section summarizes without analyzing specific files]

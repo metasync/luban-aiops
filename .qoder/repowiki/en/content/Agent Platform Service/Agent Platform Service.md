@@ -40,6 +40,7 @@
 - [test_evidence_store.py](file://products/agent-platform/tests/test_evidence_store.py)
 - [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
 - [test_model_discovery.py](file://products/agent-platform/tests/test_model_discovery.py)
+- [test_model_switching.py](file://products/agent-platform/tests/test_model_switching.py)
 - [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
 - [pyproject.toml](file://products/agent-platform/pyproject.toml)
@@ -49,13 +50,13 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive model discovery service with background tasks, provider filtering, metrics collection, and atomic catalog updates via FastAPI lifespan management
-- Enhanced model catalog service with live discovery capabilities and fallback ladder system
-- Integrated background task lifecycle management through FastAPI lifespan context manager
-- Added Postgres-based persistent cache for model discovery results
-- Implemented provider-specific filtering mechanisms for chat-only models
-- Enhanced metrics collection for model discovery operations and refresh cycles
-- Updated runtime settings to support model discovery configuration options
+- Added comprehensive multi-model runtime capability with per-turn model selection and session-based model pinning
+- Implemented new `/api/v2/models` endpoint for credential-safe model catalog enumeration
+- Enhanced model resolution with fallback ladder system (request > pinned > default)
+- Integrated live model discovery service with background task management and fail-soft caching
+- Added persistent model pinning storage across all session store backends (memory, Redis, Postgres)
+- Enhanced error handling for model resolution failures with proper 422 status codes
+- Updated API endpoints to support per-turn model selection with validation and normalization
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -74,16 +75,17 @@
 14. [Evidence Store Service](#evidence-store-service)
 15. [Model Catalog Service](#model-catalog-service)
 16. [Live Model Discovery Service](#live-model-discovery-service)
-17. [Dependency Analysis](#dependency-analysis)
-18. [Performance Considerations](#performance-considerations)
-19. [Troubleshooting Guide](#troubleshooting-guide)
-20. [Conclusion](#conclusion)
-21. [Appendices](#appendices)
+17. [Multi-Model Runtime Capability](#multi-model-runtime-capability)
+18. [Dependency Analysis](#dependency-analysis)
+19. [Performance Considerations](#performance-considerations)
+20. [Troubleshooting Guide](#troubleshooting-guide)
+21. [Conclusion](#conclusion)
+22. [Appendices](#appendices)
 
 ## Introduction
 The Agent Platform Service is the core orchestration engine of the Luban AIOps Platform. It provides a runtime kernel for agent execution, a provider registry for multi-model backends (OpenAI, DashScope, DeepSeek), and robust session management with durable storage. The service exposes REST APIs for agent interactions, streaming responses, and configuration management, enabling scalable and observable AI operations across diverse model providers.
 
-**Updated** The service now includes a comprehensive model discovery service that automatically discovers available models from configured providers through background tasks with periodic refresh cycles. The discovery service implements a fail-soft ladder system (live fetch → in-memory cache → Postgres cache → curated series) with provider-specific filtering to ensure only chat-capable models are included. The service maintains atomic catalog updates via FastAPI lifespan management, ensuring seamless transitions between different model sets without disrupting ongoing operations.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, and credential-gated model catalogs. The enhanced architecture supports dynamic model switching at runtime through a sophisticated resolution system that prioritizes explicit requests over pinned sessions, falling back to defaults when needed. Live model discovery runs as background tasks with fail-soft caching to ensure continuous availability even during provider outages.
 
 ## Project Structure
 The Agent Platform Service is implemented as a Python FastAPI application organized by feature layers:
@@ -91,7 +93,7 @@ The Agent Platform Service is implemented as a Python FastAPI application organi
 - API routes and request/response schemas
 - Runtime kernel and settings with model discovery integration
 - Provider implementations and registry with filtering capabilities
-- Session services and stores
+- Session services and stores with model pinning support
 - Evidence store service with dual backend support
 - Model catalog service with live discovery capabilities
 - Background task management for model discovery
@@ -217,10 +219,11 @@ settings --> env
 ## Core Components
 - Runtime Kernel: Orchestrates agent lifecycle, conversation state, tool invocation, and provider dispatch with enhanced AgentScope 2.x toolkit registration, anti-hallucination guards, and model normalization support.
 - Provider Registry: Discovers and manages model providers (OpenAI, DashScope, DeepSeek) with pluggable interfaces using new AgentScope 2.x model construction patterns.
-- Session Management: Persists and restores conversations with durable storage, multi-session workspace support, and concurrency-safe access.
+- Session Management: Persists and restores conversations with durable storage, multi-session workspace support, and concurrency-safe access with model pinning.
 - Evidence Store: Provides persistent storage for tool execution evidence with dual backend support and size-capped retention policies.
 - Model Catalog: Manages credential-gated model discovery with multi-provider support, legacy alias resolution, and public schema compliance.
 - Live Model Discovery: Implements background task management with periodic refresh cycles, provider filtering, and atomic catalog updates.
+- **Multi-Model Runtime**: Provides per-turn model selection with session-based pinning and sophisticated resolution hierarchy.
 - API Layer: Exposes REST endpoints for chat, sessions, streaming events, model discovery, and health checks with v3 streaming protocol support.
 - Cross-Cutting: Configuration, environment, metrics, observability, telemetry, and request-scoped context.
 
@@ -229,6 +232,8 @@ Key responsibilities:
 - Conversation: Maintain message history, context, and state per session with workspace organization.
 - Evidence Capture: Persist tool_call and tool_result frames with size caps and automatic eviction.
 - Model Resolution: Normalize model IDs including legacy provider name aliases to concrete model entries.
+- **Multi-Model Selection**: Resolve models through priority hierarchy (explicit request > pinned session > default).
+- **Session Pinning**: Persist model selections per session with TTL-aware storage across all backends.
 - **Live Discovery**: Periodically discover available models from providers with fail-soft fallback ladder and provider-specific filtering.
 - **Background Tasks**: Manage model discovery lifecycle through FastAPI lifespan context with proper startup/shutdown handling.
 - **Atomic Updates**: Swap catalog contents atomically to prevent partial updates during refresh cycles.
@@ -242,7 +247,7 @@ Key responsibilities:
 - HITL Integration: Support human-in-the-loop workflows with parked confirmation management.
 - Observability: Emit structured logs, metrics, and traces for each operation with per-request audit trails.
 
-**Updated** The service now includes comprehensive model discovery capabilities with background task management, provider filtering for chat-only models, fail-soft fallback ladder system, atomic catalog updates, and enhanced metrics collection for discovery operations. The discovery service runs as a background task managed by FastAPI lifespan, providing automatic model discovery with graceful degradation when providers are unavailable.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -266,6 +271,7 @@ The service follows a layered architecture with enhanced security and anti-hallu
 - Session service persists state using a configurable store with workspace bookkeeping and transcript extraction.
 - Evidence store provides persistent storage for tool execution evidence with dual backend support and size-capped retention.
 - Model catalog provides credential-gated discovery of available models with legacy alias resolution.
+- **Multi-model runtime resolves per-turn model selection through priority hierarchy with session-based pinning.**
 - **Live discovery service runs background tasks to periodically refresh model catalogs with fail-soft fallback ladder.**
 - **FastAPI lifespan manages discovery task lifecycle with proper startup and shutdown handling.**
 - Cross-cutting modules provide configuration, metrics, observability, and telemetry with per-request audit trails.
@@ -287,14 +293,24 @@ participant Tools as "GatewayTools"
 participant Transcript as "TranscriptExtractor"
 participant HITL as "ConfirmationRegistry"
 participant Trace as "TraceQueue"
-Note over Client,HITL : Voice-Ready Chat with Model Selection
+Note over Client,HITL : Multi-Model Chat with Per-Turn Selection
 Client->>Gateway : POST /api/v1/chat {message, model, input_modality}
 Gateway->>API : Forward with model and input_modality metadata
-API->>ModelCat : validate model_id (with legacy alias resolution)
-ModelCat-->>API : model entry or error
 API->>Sess : ensure_session(sessionId, user_id)
+API->>API : _resolve_model(requested, pinned)
+alt Explicit model requested
+API->>ModelCat : validate model_id exists
+ModelCat-->>API : model entry or 422 error
+else Pinned model valid
+API->>ModelCat : get(pinned)
+ModelCat-->>API : pinned model or None
+else Fallback to default
+API->>ModelCat : default_entry()
+ModelCat-->>API : default model
+end
+API->>Sess : pin_session_model(sessionId, resolved)
 API->>Sess : mark_session_turn(sessionId, message)
-Sess->>Store : set_session_title + touch_session
+Sess->>Store : set_session_title + touch_session + set_model
 Sess-->>API : session updated
 API->>Kernel : execute(message, sessionId, bearerToken, model_id)
 Kernel->>Kernel : normalize_model_id(model_id)
@@ -318,7 +334,7 @@ Disc->>ModelCat : refresh_catalog(series_map)
 ModelCat-->>Disc : atomic catalog swap
 ```
 
-**Updated** The sequence diagram now shows the complete model discovery service integration with background task management, including periodic refresh cycles, fail-soft fallback ladder, provider filtering, and atomic catalog updates through FastAPI lifespan management.
+**Updated** The sequence diagram now shows the complete multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated validation, and the full model resolution hierarchy (request > pinned > default).
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -384,6 +400,7 @@ class SessionService {
 +get_session(session_id, user_id)
 +list_sessions(user_id)
 +mark_session_turn(session_id, message)
++pin_session_model(session_id, model)
 }
 class EvidenceStore {
 <<interface>>
@@ -429,7 +446,7 @@ ProviderRegistry --> ModelProvider : "manages"
 GatewayTools --> ModelProvider : "secure invocation"
 ```
 
-**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, enhanced session management methods for multi-session workspace operations, evidence capture and persistence for tool execution frames, model normalization for legacy provider name aliases, and voice readiness support through input_modality parameter passthrough.
+**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, enhanced session management methods for multi-session workspace operations and model pinning, evidence capture and persistence for tool execution frames, model normalization for legacy provider name aliases, and voice readiness support through input_modality parameter passthrough.
 
 **Diagram sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -505,6 +522,96 @@ Configuration examples:
 - [config.py](file://products/agent-platform/src/agent_service/core/config.py)
 - [env.py](file://products/agent-platform/src/agent_service/core/env.py)
 
+### Multi-Model Runtime Capability
+
+#### Overview
+The multi-model runtime capability enables dynamic model selection at runtime through a sophisticated resolution hierarchy that prioritizes explicit requests over pinned sessions, falling back to defaults when needed. This provides flexibility for operators to switch between different models without restarting sessions or affecting other users.
+
+#### Model Resolution Hierarchy
+```mermaid
+flowchart TD
+A["Chat Request"] --> B{"Explicit model requested?"}
+B --> |Yes| C{"Model exists in catalog?"}
+C --> |No| D["Return 422 Unknown Model Error"]
+C --> |Yes| E["Use explicit model"]
+B --> |No| F{"Pinned model exists?"}
+F --> |Yes| G{"Pinned model still valid?"}
+G --> |Yes| H["Use pinned model"]
+G --> |No| I["Fallback to default"]
+F --> |No| J["Use default model"]
+E --> K["Pin model to session"]
+H --> L["Continue processing"]
+I --> M["Continue processing"]
+J --> N["Continue processing"]
+K --> L
+```
+
+**Diagram sources**
+- [routes.py:112-137](file://products/agent-platform/src/agent_service/api/v2/routes.py#L112-L137)
+- [session_service.py:105-120](file://products/agent-platform/src/agent_service/services/session_service.py#L105-L120)
+
+#### Key Features
+- **Priority-Based Resolution**: Explicit requests take precedence over pinned sessions, which override defaults
+- **Credential-Gated Validation**: All model selections must exist in the credential-gated catalog
+- **Session Persistence**: Model selections persist across turns within a session with TTL-aware storage
+- **Graceful Degradation**: Invalid pinned models automatically fall back to defaults without errors
+- **Error Handling**: Unknown models return 422 status codes with descriptive error messages
+- **Audit Trail**: Model resolution decisions are logged with request and session context
+
+#### Implementation Details
+```mermaid
+sequenceDiagram
+participant Client as "Client"
+participant API as "API Route"
+participant Session as "Session"
+participant Catalog as "ModelCatalog"
+participant Store as "SessionStore"
+Note over Client,Store : Model Resolution Flow
+Client->>API : POST /api/v2/chat {model : "qwen-plus"}
+API->>Session : ensure_session(session_id, user_id)
+Session-->>API : SessionRecord with model field
+API->>API : _resolve_model("qwen-plus", session.model)
+alt Explicit model provided
+API->>Catalog : get("qwen-plus")
+Catalog-->>API : ModelCatalogEntry or None
+alt Model exists
+API->>Store : set_session_model(session_id, "qwen-plus")
+Store-->>API : success
+API-->>Client : Process with qwen-plus
+else Model missing
+API-->>Client : 422 Unknown Model Error
+end
+else No explicit model
+API->>Catalog : get(session.model)
+Catalog-->>API : Pinned model or None
+alt Pinned model valid
+API-->>Client : Process with pinned model
+else Pinned invalid
+API->>Catalog : default_entry()
+Catalog-->>API : Default model
+API-->>Client : Process with default model
+end
+end
+```
+
+**Diagram sources**
+- [routes.py:142-182](file://products/agent-platform/src/agent_service/api/v2/routes.py#L142-L182)
+- [routes.py:185-230](file://products/agent-platform/src/agent_service/api/v2/routes.py#L185-L230)
+- [session_store.py:349-364](file://products/agent-platform/src/agent_service/services/session_store.py#L349-L364)
+
+#### Session-Based Model Pinning
+Model pinning persists the selected model for each session with TTL-aware storage across all backend types:
+
+- **Memory Backend**: In-memory dictionary with TTL expiration
+- **Redis Backend**: JSON serialization with key expiration
+- **Postgres Backend**: Native SQL UPDATE statements with TTL conditions
+
+**Section sources**
+- [routes.py:112-137](file://products/agent-platform/src/agent_service/api/v2/routes.py#L112-L137)
+- [session_service.py:105-120](file://products/agent-platform/src/agent_service/services/session_service.py#L105-L120)
+- [session_store.py:349-364](file://products/agent-platform/src/agent_service/services/session_store.py#L349-L364)
+- [session_store.py:471-477](file://products/agent-platform/src/agent_service/services/session_store.py#L471-L477)
+
 ### Multi-Session Operator Workspace
 The multi-session operator workspace provides comprehensive session lifecycle management for operators to organize and manage conversation workspaces.
 
@@ -551,7 +658,7 @@ Key features:
 - [session_service.py:72-123](file://products/agent-platform/src/agent_service/services/session_service.py#L72-L123)
 
 ### Session Store Enhancements
-The session store has been enhanced with workspace bookkeeping capabilities including last_active_at timestamps and server-minted titles.
+The session store has been enhanced with workspace bookkeeping capabilities including last_active_at timestamps and server-minted titles, plus model pinning support.
 
 ```mermaid
 classDiagram
@@ -564,6 +671,7 @@ class SessionStore {
 +delete_session(session_id) : bool
 +touch_session(session_id) : None
 +set_session_title(session_id, title) : None
++set_session_model(session_id, model) : None
 +is_ready() : bool
 +__len__() : int
 }
@@ -593,6 +701,7 @@ SessionStore <|.. PostgresSessionStore
 Enhanced capabilities:
 - **Last Active Tracking**: `last_active_at` timestamps for workspace ordering and activity monitoring
 - **Server-Minted Titles**: Immutable titles created from first user turn (80-character cap)
+- **Model Pinning**: Persistent model selection per session with TTL-aware storage
 - **Backend-Specific Optimization**: Postgres uses native SQL ordering, memory/Redis sort client-side
 - **TTL-Aware Operations**: All workspace operations respect session TTL and idle expiration
 - **Fail-Open Design**: Workspace bookkeeping failures don't block chat operations
@@ -810,7 +919,7 @@ V --> W["200 Deleted"]
 ## Session Store Enhancements
 
 ### Overview
-The session store has been enhanced with workspace bookkeeping capabilities to support multi-session operator workspace functionality. These enhancements include last_active_at timestamps for activity tracking and server-minted titles for session identification.
+The session store has been enhanced with workspace bookkeeping capabilities to support multi-session operator workspace functionality. These enhancements include last_active_at timestamps for activity tracking and server-minted titles for session identification, plus model pinning support.
 
 ### Enhanced Schema
 ```mermaid
@@ -822,6 +931,7 @@ TIMESTAMPTZ created_at
 TIMESTAMPTZ last_accessed_at
 TEXT title
 TIMESTAMPTZ last_active_at
+TEXT model
 }
 INDEXES {
 idx_sessions_user ON user_id
@@ -1497,7 +1607,7 @@ Disc->>Live : fetch_provider_models(credentials)
 alt Live Fetch Success
 Live-->>Disc : filtered_models
 Disc->>Disc : _apply_filter(credentials, models)
-Disc->>Memory : update _last_good[provider]
+Disc->>Disc : update _last_good[provider]
 Disc->>Postgres : write(provider, models)
 Disc->>Disc : return filtered_models
 else Live Fetch Failed
@@ -1655,8 +1765,11 @@ Lifespan["FastAPI Lifespan"] --> ModelDisc
 - **Cache Tier Performance**: Multi-tier caching (memory, Postgres) reduces provider API calls
 - **Atomic Updates**: Lock-protected catalog swaps prevent partial updates during refresh cycles
 - **Provider Filtering Efficiency**: Family prefix matching and marker-based filtering minimize false positives
+- **Multi-Model Runtime**: Priority-based model resolution with minimal overhead through session caching
+- **Model Pinning**: TTL-aware storage prevents excessive writes while maintaining session affinity
+- **Error Handling**: Fast-fail model validation prevents unnecessary processing of invalid requests
 
-**Updated** Performance considerations now include multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, model catalog optimization with startup-derived catalog and efficient legacy alias resolution, live model discovery optimization with background task management, multi-tier caching strategies, and atomic catalog updates with lock protection.
+**Updated** Performance considerations now include multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, model catalog optimization with startup-derived catalog and efficient legacy alias resolution, live model discovery optimization with background task management, multi-tier caching strategies, atomic catalog updates with lock protection, and multi-model runtime optimization with priority-based resolution and session-based caching.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -1692,6 +1805,11 @@ Common issues and resolutions:
 - **Cache Tier Problems**: Validate Postgres connectivity and cache persistence operations
 - **Network Timeouts**: Adjust discovery timeout settings for slow or unreliable providers
 - **Metrics Monitoring**: Check discovery refresh counters and model count gauges for operational insights
+- **Multi-Model Runtime Issues**: Verify model resolution hierarchy and session pinning functionality
+- **Model Pinning Problems**: Check session store backend connectivity and model persistence
+- **Resolution Failures**: Validate explicit model requests against credential-gated catalog
+- **Fallback Behavior**: Test graceful degradation from invalid pinned models to defaults
+- **Error Responses**: Verify 422 status codes for unknown models and proper error messages
 
 Debugging utilities:
 - Health check endpoints for service status
@@ -1714,8 +1832,11 @@ Debugging utilities:
 - **Live Discovery Debugging**: Monitor background task status, refresh cycles, and cache tier performance
 - **Provider Filter Debugging**: Validate family prefix matching and non-chat modality exclusion logic
 - **Cache Tier Debugging**: Check Postgres connectivity, cache persistence, and fallback behavior
+- **Multi-Model Runtime Debugging**: Monitor model resolution decisions and session pinning operations
+- **Model Resolution Debugging**: Verify priority hierarchy execution and fallback behavior
+- **Error Handling Debugging**: Check 422 status codes and error message formatting for model validation
 
-**Updated** Troubleshooting guide now includes multi-session workspace troubleshooting, transcript extraction debugging strategies, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification, plus live model discovery troubleshooting with background task monitoring, provider filtering validation, cache tier diagnostics, and discovery performance optimization.
+**Updated** Troubleshooting guide now includes multi-session workspace troubleshooting, transcript extraction debugging strategies, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification, plus live model discovery troubleshooting with background task monitoring, provider filtering validation, cache tier diagnostics, and discovery performance optimization, and multi-model runtime troubleshooting with model resolution debugging and session pinning diagnostics.
 
 **Section sources**
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -1726,7 +1847,7 @@ Debugging utilities:
 ## Conclusion
 The Agent Platform Service provides a robust foundation for AI agent orchestration with multi-provider support, durable session management, and comprehensive observability. Its modular architecture enables easy customization and scaling while maintaining high performance and reliability.
 
-**Updated** The service now includes comprehensive model discovery capabilities with background task management, provider filtering for chat-only models, fail-soft fallback ladder system, atomic catalog updates, and enhanced metrics collection for discovery operations. The discovery service runs as a background task managed by FastAPI lifespan, providing automatic model discovery with graceful degradation when providers are unavailable. These enhancements strengthen the platform's flexibility, enable dynamic model management, provide detailed operational visibility, and maintain the performance characteristics that make it suitable for production AI operations.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. These enhancements strengthen the platform's flexibility, enable dynamic model management, provide detailed operational visibility, and maintain the performance characteristics that make it suitable for production AI operations.
 
 ## Appendices
 
@@ -1801,7 +1922,15 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - **Monitoring**: Check discovery metrics and refresh logs for operational insights
 - **Fallback Testing**: Validate cache tier behavior during provider outages
 
-**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, live model discovery configuration with background task management, provider filtering mechanisms, cache tier optimization, and voice-readiness support with input_modality parameters for complete operator workflow management.
+#### Multi-Model Runtime Configuration
+- **Per-Turn Selection**: Include `model` parameter in chat requests for explicit model selection
+- **Session Pinning**: Model selections automatically persist across turns within a session
+- **Fallback Behavior**: Invalid pinned models gracefully degrade to default models
+- **Error Handling**: Unknown models return 422 status with descriptive error messages
+- **Validation**: All model selections must exist in credential-gated catalog
+- **Audit Trail**: Model resolution decisions logged with request and session context
+
+**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, live model discovery configuration with background task management, provider filtering mechanisms, cache tier optimization, atomic catalog updates with lock protection, and multi-model runtime configuration with per-turn selection and session-based pinning for complete operator workflow management.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -1822,5 +1951,6 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [test_evidence_store.py](file://products/agent-platform/tests/test_evidence_store.py)
 - [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
 - [test_model_discovery.py](file://products/agent-platform/tests/test_model_discovery.py)
+- [test_model_switching.py](file://products/agent-platform/tests/test_model_switching.py)
 - [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
