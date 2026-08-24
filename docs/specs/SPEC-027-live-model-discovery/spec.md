@@ -2,10 +2,10 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: chi
 - created: 2026-08-24
-- release slice: post-0.9.1 train
+- release slice: 0.10.0 train
 - related ADRs: `docs/adr/0002-reaffirm-agentscope-runtime-kernel.md`,
   `docs/adr/0003-platform-owned-agent-service-contract.md`
 - extends: `docs/specs/SPEC-026-multi-model-runtime-catalog/spec.md`
@@ -167,3 +167,6 @@ All resolved in plan review (2026-08-24):
 - 2026-08-24: created and approved; extends SPEC-026 whose curated-series
   catalog, credential gating, alias map, and portal grouping are reused
   unchanged here.
+- 2026-08-24: delivered in 0.10.0 — live fetch with snapshot/modality
+  filtering, fail-soft ladder (live → memory → Postgres → curated),
+  1800s background refresh with atomic swap, and discovery metrics.
