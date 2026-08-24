@@ -21,7 +21,7 @@
 
 ## Delivery
 
-- [ ] T-7: `make verify`; commit; `make build`; `make deploy`
-- [ ] T-8: live verification — real lineups in `/api/v2/models`, portal
+- [x] T-7: `make verify`; commit; `make build`; `make deploy`
+- [x] T-8: live verification — real lineups in `/api/v2/models`, portal
       turn on a newly-discovered model, audit attribution,
       restart-resilience; L3 gate; push
