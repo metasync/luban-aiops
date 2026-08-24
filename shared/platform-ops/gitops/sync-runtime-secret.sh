@@ -8,7 +8,7 @@ NAMESPACE="${2:-dev-luban-aiops}"
 SECRET_NAME="${SECRET_NAME:-agent-platform-runtime-secrets}"
 
 if [ -z "$PROFILE" ]; then
-  echo "Usage: $0 <deepseek|dashscope|openai> [namespace]" >&2
+  echo "Usage: $0 <default> [namespace]" >&2
   exit 1
 fi
 

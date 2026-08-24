@@ -10,6 +10,8 @@ class DashScopeProvider(AgentScopeProvider):
     provider_name = "dashscope"
     default_model = "qwen-plus"
     default_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    # SPEC-026 R-1: curated series (default model first).
+    model_series = ("qwen-plus", "qwen-max", "qwen3-max", "qwen-turbo")
 
     def build_model(self, settings: RuntimeSettings) -> Any:
         from agentscope.credential import DashScopeCredential

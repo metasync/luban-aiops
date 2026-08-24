@@ -10,6 +10,8 @@ class DeepSeekProvider(AgentScopeProvider):
     provider_name = "deepseek"
     default_model = "deepseek-v4-flash"
     default_base_url = "https://api.deepseek.com"
+    # SPEC-026 R-1: curated series (default model first).
+    model_series = ("deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner")
 
     def build_model(self, settings: RuntimeSettings) -> Any:
         from agentscope.credential import DeepSeekCredential

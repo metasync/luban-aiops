@@ -95,27 +95,20 @@ def test_runtime_settings_rejects_unknown_provider(monkeypatch):
         raise AssertionError("RuntimeSettings.from_env() should reject unknown providers")
 
 
-def test_runtime_settings_rejects_unknown_profile(monkeypatch):
-    monkeypatch.setenv("AGENTSCOPE_PROFILE", "unknown")
-
-    try:
-        RuntimeSettings.from_env()
-    except ValueError as exc:
-        assert "AGENTSCOPE_PROFILE" in str(exc)
-    else:  # pragma: no cover - defensive assertion
-        raise AssertionError("RuntimeSettings.from_env() should reject unknown profiles")
-
-
-def test_runtime_settings_rejects_mismatched_profile_and_provider(monkeypatch):
-    monkeypatch.setenv("AGENTSCOPE_PROFILE", "dashscope")
+def test_runtime_settings_accepts_any_profile_label(monkeypatch):
+    # SPEC-026 R-5: the profile is a free-form deploy label, decoupled
+    # from the provider (one generic profile hosts every provider).
+    monkeypatch.setenv("AGENTSCOPE_PROFILE", "default")
     monkeypatch.setenv("AGENTSCOPE_PROVIDER", "deepseek")
+    settings = RuntimeSettings.from_env()
+    assert settings.profile == "default"
+    assert settings.provider == "deepseek"
 
-    try:
-        RuntimeSettings.from_env()
-    except ValueError as exc:
-        assert "AGENTSCOPE_PROFILE must match AGENTSCOPE_PROVIDER" in str(exc)
-    else:  # pragma: no cover - defensive assertion
-        raise AssertionError("Mismatched profile/provider should be rejected")
+
+def test_runtime_settings_empty_profile_is_unset(monkeypatch):
+    monkeypatch.setenv("AGENTSCOPE_PROFILE", "   ")
+    settings = RuntimeSettings.from_env()
+    assert settings.profile is None
 
 
 def test_native_service_settings_reads_env(monkeypatch):

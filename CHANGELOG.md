@@ -15,6 +15,24 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ### Added
 
+- **Multi-model runtime catalog + profile consolidation (SPEC-026)**:
+  every provider with a resolvable API key now joins the model catalog
+  with its curated model series — one selectable entry per model
+  (entry `id` = model name, sent as `model` on chat requests) instead
+  of one entry per provider. An optional `<PROVIDER>_MODELS=a,b,c`
+  overrides/restricts a provider's series, and the active provider's
+  `AGENTSCOPE_MODEL_NAME` is always force-included as the deploy-time
+  default. Legacy provider-name ids (existing session pins) alias to
+  that provider's default model; unknown ids stay fail-closed, and
+  duplicate model ids across providers fail startup as a
+  misconfiguration guard. Runtime profiles are consolidated: the
+  per-provider `runtime-profiles/{deepseek,dashscope,openai}` overlays
+  are replaced by a single generic `runtime-profiles/default` whose
+  `AGENTSCOPE_PROFILE` label is decoupled from `AGENTSCOPE_PROVIDER`
+  (additional providers are configured via the active profile's secret,
+  not by switching profile directories). The portal model selector now
+  groups options by provider.
+
 - **Evidence persistence in session transcripts (SPEC-025)**: agent-service
   now persists `tool_call`/`tool_result` frames per assistant turn into a
   dedicated `session_evidence` store behind the existing

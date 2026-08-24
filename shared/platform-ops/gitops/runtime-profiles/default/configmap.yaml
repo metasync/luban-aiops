@@ -3,7 +3,8 @@ kind: ConfigMap
 metadata:
   name: agent-platform-runtime-profile
 data:
-  AGENTSCOPE_PROFILE: deepseek
+  # Generic deploy label (SPEC-026): decoupled from the provider below.
+  AGENTSCOPE_PROFILE: default
   AGENTSCOPE_PROVIDER: deepseek
   AGENTSCOPE_MODEL_NAME: deepseek-v4-flash
   AGENTSCOPE_BASE_URL: https://api.deepseek.com

@@ -22,9 +22,7 @@ GITOPS_DIR := shared/platform-ops/gitops
 # End-to-end demo scripts run against a deployed cluster via `make e2e`.
 E2E_DIR := shared/platform-ops/e2e
 OVERLAYS := dev-k8s \
-	runtime-profiles/dashscope \
-	runtime-profiles/deepseek \
-	runtime-profiles/openai \
+	runtime-profiles/default \
 	runtime-profiles/mutating-dev
 
 # Coordinated deploy build state (written by `make build`, read by `make deploy`).

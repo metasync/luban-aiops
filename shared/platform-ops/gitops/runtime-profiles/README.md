@@ -1,8 +1,8 @@
 # Runtime Profiles
 
-This directory contains provider-specific runtime profile overlays for `agent-service`.
+This directory contains the runtime profile overlays for `agent-service`.
 
-Each profile contributes:
+The LLM profile contributes:
 
 - a committed non-secret `ConfigMap` named `agent-platform-runtime-profile`
 - an ignored local fallback secret file path `runtime-secrets.env`
@@ -10,24 +10,21 @@ Each profile contributes:
 
 Luban CI or another deployment pipeline can inject the same `agent-platform-runtime-secrets` contract directly without relying on the local `runtime-secrets.env` files.
 
-The active `dev-k8s` overlay includes exactly one runtime profile overlay at a time.
+The active `dev-k8s` overlay includes exactly one LLM runtime profile overlay at a time.
 
-Current profiles:
+Current LLM profile:
 
-- `deepseek`
-- `dashscope`
-- `openai`
+- `default` — generic deploy label (`AGENTSCOPE_PROFILE=default`), decoupled from the active provider (`AGENTSCOPE_PROVIDER` in the ConfigMap). Provider selection is a ConfigMap knob, not a directory choice, so there is one profile for any provider mix.
 
-## Additional selectable models (SPEC-024)
+## Multi-model catalog (SPEC-026)
 
-The committed overlays are unchanged by model switching: the active
-profile's provider feeds the default catalog entry through the existing
-`AGENTSCOPE_*` knobs. To enable extra models, add another provider's
-`<PROVIDER>_API_KEY` (plus optional `<PROVIDER>_MODEL_NAME` /
-`<PROVIDER>_BASE_URL`) to the local, git-ignored `runtime-secrets.env` —
-each `runtime-secrets.example.env` documents the knobs. Providers without
-a resolvable key stay dropped, and the profile's provider remains the
-deploy-time default entry.
+Every supported provider (`deepseek`, `dashscope`, `openai`) with an API key
+in the local, git-ignored `runtime-secrets.env` joins the catalog with its
+curated model series — one selectable entry per model (entry id = model
+name). `<PROVIDER>_MODELS=a,b,c` optionally overrides/restricts the series.
+Providers without a resolvable key stay dropped (fail-closed), and the
+active provider's `AGENTSCOPE_MODEL_NAME` remains the deploy-time default.
+The `runtime-secrets.example.env` documents every knob.
 
 ## Mutating tools dev posture
 

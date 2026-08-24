@@ -139,13 +139,11 @@ browser client contract for `luban-aiops-portal`. It reconciles:
 
 The `agent-service` deployment runs the v2 FastAPI adapter entrypoint (`uv run agent-service`). The `platform-gateway` connects to `http://agent-service:8000` and consumes the `/api/v2/` contract exclusively (see SPEC-002 and ADR-0003); `agent-service` in turn calls `tool-gateway` (`TOOL_GATEWAY_URL`) for tool execution.
 
-The active runtime provider is selected via the root `kustomization.yaml`, which includes exactly one provider profile from:
+The active runtime provider is selected via the root `kustomization.yaml`, which includes the single generic LLM profile:
 
-- `shared/platform-ops/gitops/runtime-profiles/deepseek`
-- `shared/platform-ops/gitops/runtime-profiles/dashscope`
-- `shared/platform-ops/gitops/runtime-profiles/openai`
+- `shared/platform-ops/gitops/runtime-profiles/default`
 
-Each profile contributes a committed non-secret `ConfigMap` named `agent-platform-runtime-profile`, which injects:
+The profile contributes a committed non-secret `ConfigMap` named `agent-platform-runtime-profile`, which injects:
 
 - `AGENTSCOPE_PROFILE`
 - `AGENTSCOPE_PROVIDER`
@@ -185,23 +183,21 @@ At minimum, provide:
 
 If Luban CI injects secrets for this deployment, that pipeline can provide the same secret contract directly and you can skip the local fallback workflow below.
 
-Use the example file that matches the selected runtime profile:
+Use the example file of the `default` runtime profile:
 
-- `shared/platform-ops/gitops/runtime-profiles/deepseek/runtime-secrets.example.env`
-- `shared/platform-ops/gitops/runtime-profiles/dashscope/runtime-secrets.example.env`
-- `shared/platform-ops/gitops/runtime-profiles/openai/runtime-secrets.example.env`
+- `shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env`
 
-For manual local testing only, create the local secret file for the selected profile, for example:
+For manual local testing only, create the local secret file, for example:
 
 ```bash
-cp shared/platform-ops/gitops/runtime-profiles/deepseek/runtime-secrets.example.env \
-  shared/platform-ops/gitops/runtime-profiles/deepseek/runtime-secrets.env
+cp shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env \
+  shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.env
 ```
 
-Edit the copied `runtime-secrets.env` file and replace the placeholder value with your real key, then sync the selected profile secret into the cluster:
+Edit the copied `runtime-secrets.env` file and replace the placeholder value with your real key, then sync the profile secret into the cluster:
 
 ```bash
-shared/platform-ops/gitops/sync-runtime-secret.sh deepseek
+shared/platform-ops/gitops/sync-runtime-secret.sh default
 ```
 
 Restart `agent-service` so it picks up the new secret:
@@ -225,7 +221,7 @@ When configured correctly, `runtime_mode` should be `agentscope` and `runtime_st
 To switch the active provider profile for the `dev-k8s` overlay:
 
 ```bash
-shared/platform-ops/gitops/select-runtime-profile.sh deepseek
+shared/platform-ops/gitops/select-runtime-profile.sh default
 ```
 
 This updates the root `kustomization.yaml` files so the selected profile becomes the declared desired state in Git.
@@ -306,7 +302,7 @@ By default the generated tag carries the platform semver (root `VERSION` file) p
 If you want extra traceability in local experiments, you can optionally add a profile suffix:
 
 ```bash
-make build IMAGE_TAG_PROFILE=deepseek
+make build IMAGE_TAG_PROFILE=experiment
 ```
 
 That avoids the stale same-tag rollout problem caused by reusing a single static placeholder tag across multiple development rebuilds.

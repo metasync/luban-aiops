@@ -37,7 +37,8 @@ class FakeCatalog:
         self._default = default
 
     def get(self, model_id):
-        return model_id if model_id in self._ids else None
+        # Routes/kernel consume ``entry.id`` (SPEC-026).
+        return SimpleNamespace(id=model_id) if model_id in self._ids else None
 
     def default_entry(self):
         return SimpleNamespace(id=self._default) if self._default else None

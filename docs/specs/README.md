@@ -137,5 +137,6 @@ Mechanical enforcement:
 | `SPEC-021` | Bounded mutating actions — first approval-gated write tool (`k8s.delete_pod`), `tools:mutate` action, Approval and HITL Governance Guide | `delivered` |
 | `SPEC-022` | Multi-session foundations — session lifecycle API with transcripts and parked-confirmation flags, voice-readiness contract, `mutating-dev` deployment profile (portal UI deferred to the rebuild spec) | `delivered` |
 | `SPEC-023` | Portal framework rebuild — multi-session workspace UI on Ant Design X behind a platform-owned SSE contract adapter (consumes SPEC-022 Appendix A) | `delivered` |
-| `SPEC-024` | Runtime LLM model switching — credential-gated model catalog, per-session selection with affinity, audited choice, portal composer selector | `draft` |
+| `SPEC-024` | Runtime LLM model switching — credential-gated model catalog, per-session selection with affinity, audited choice, portal composer selector | `delivered` |
 | `SPEC-025` | Evidence persistence in session transcripts — durable tool-evidence frames with traceability and metrics, replayed evidence cards on reopened sessions | `delivered` |
+| `SPEC-026` | Multi-model runtime catalog — curated model series per provider with model-name entry ids, series override, generic profile consolidation (extends SPEC-024) | `delivered` |

@@ -77,8 +77,8 @@ describe("ComposerSelectionBar", () => {
   it("labels the strip and shows the fixed label for one model", () => {
     const { container } = render(
       <ComposerSelectionBar
-        catalog={catalogOf([["deepseek-chat", "DeepSeek Chat"]])}
-        model="deepseek-chat"
+        catalog={catalogOf([["deepseek-v4-flash", "deepseek-v4-flash"]])}
+        model="deepseek-v4-flash"
         onModelChange={() => {}}
       />,
     );
@@ -86,7 +86,7 @@ describe("ComposerSelectionBar", () => {
       container.querySelector(".composer-selection-bar"),
     ).toBeTruthy();
     expect(screen.getByText("Model")).toBeTruthy();
-    expect(screen.getByText("DeepSeek Chat")).toBeTruthy();
+    expect(screen.getByText("deepseek-v4-flash")).toBeTruthy();
     expect(screen.queryByRole("combobox")).toBeNull();
   });
 
@@ -95,10 +95,10 @@ describe("ComposerSelectionBar", () => {
     const { container } = render(
       <ComposerSelectionBar
         catalog={catalogOf([
-          ["deepseek-chat", "DeepSeek Chat"],
-          ["glm-4.6", "GLM 4.6"],
+          ["deepseek-v4-flash", "deepseek-v4-flash"],
+          ["deepseek-chat", "deepseek-chat"],
         ])}
-        model="deepseek-chat"
+        model="deepseek-v4-flash"
         onModelChange={(id) => {
           chosen = id;
         }}
@@ -108,7 +108,7 @@ describe("ComposerSelectionBar", () => {
     fireEvent.mouseDown(
       container.querySelector(".ant-select-content") as HTMLElement,
     );
-    fireEvent.click(screen.getByText("GLM 4.6"));
-    expect(chosen).toBe("glm-4.6");
+    fireEvent.click(screen.getByText("deepseek-chat"));
+    expect(chosen).toBe("deepseek-chat");
   });
 });

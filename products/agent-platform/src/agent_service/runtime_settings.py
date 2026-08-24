@@ -31,8 +31,9 @@ DEFAULT_SYSTEM_PROMPT = (
 
 RuntimeProvider = Literal["dashscope", "deepseek", "openai"]
 SUPPORTED_RUNTIME_PROVIDERS = ("dashscope", "deepseek", "openai")
-RuntimeProfile = Literal["dashscope", "deepseek", "openai"]
-SUPPORTED_RUNTIME_PROFILES = SUPPORTED_RUNTIME_PROVIDERS
+# SPEC-026 R-5: the profile is a free-form deploy label decoupled from the
+# provider (one generic profile hosts every configured provider), so there
+# is no supported-profiles allowlist anymore.
 DeepSeekReasoningEffort = Literal["high", "max"]
 OpenAIReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
 
@@ -112,7 +113,7 @@ RuntimeProviderOptions = DashScopeOptions | DeepSeekOptions | OpenAIOptions
 
 @dataclass(frozen=True)
 class RuntimeSettings:
-    profile: RuntimeProfile | None = None
+    profile: str | None = None
     provider: RuntimeProvider = "dashscope"
     agent_name: str = RUNTIME_APP_NAME
     model_name: str | None = None
@@ -168,11 +169,9 @@ class RuntimeSettings:
         return OpenAIOptions
 
     def __post_init__(self) -> None:
-        if self.profile is not None and self.profile != self.provider:
-            raise ValueError(
-                "AGENTSCOPE_PROFILE must match AGENTSCOPE_PROVIDER when both are set. "
-                f"Got profile={self.profile!r} and provider={self.provider!r}."
-            )
+        # SPEC-026 R-5: the profile is an arbitrary deploy label; only the
+        # provider is constrained (parsed against the supported set in
+        # from_env). The former profile == provider equality check is gone.
 
         # Kernel tuning validation (SPEC-017 R-1): out-of-range values fail
         # startup with a clear error. Bounds mirror the agentscope config
@@ -278,10 +277,7 @@ class RuntimeSettings:
 
     @classmethod
     def from_env(cls) -> "RuntimeSettings":
-        profile = _optional_choice(
-            "AGENTSCOPE_PROFILE",
-            set(SUPPORTED_RUNTIME_PROFILES),
-        )
+        profile = _optional_str("AGENTSCOPE_PROFILE")
         provider = os.getenv("AGENTSCOPE_PROVIDER", "dashscope").strip().lower()
         if provider not in SUPPORTED_RUNTIME_PROVIDERS:
             raise ValueError(

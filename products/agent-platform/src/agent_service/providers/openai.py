@@ -10,6 +10,8 @@ class OpenAIProvider(AgentScopeProvider):
     provider_name = "openai"
     default_model = "gpt-4o-mini"
     default_base_url = None
+    # SPEC-026 R-1: curated series (default model first).
+    model_series = ("gpt-4o-mini", "gpt-4o", "o3-mini")
 
     def build_model(self, settings: RuntimeSettings) -> Any:
         from agentscope.credential import OpenAICredential

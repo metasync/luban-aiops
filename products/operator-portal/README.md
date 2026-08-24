@@ -57,7 +57,8 @@ Current browser baseline capabilities:
   (SPEC-023)
 - model selector: a selection bar under the message input (extensible to
   future per-turn selections) shows the credential-gated model catalog
-  (`GET /api/v1/models`) with the deploy-time default pre-selected; exactly
+  (`GET /api/v1/models`) with the deploy-time default pre-selected; options
+  are grouped by provider and labeled by model name (SPEC-026). Exactly
   one configured model renders as a fixed label, and any discovery failure
   hides the selector without affecting chat. The selection rides the stream
   request and switching sessions re-seeds the selector from the session's

@@ -116,16 +116,22 @@ def _resolve_model(requested: str | None, pinned: str | None) -> str | None:
     catalog — unknown ids fail closed with 422, never a silent default.
     A pinned id is honored only while it still exists in the catalog
     (a key revocation degrades the session back to the default).
+    Resolved ids are normalized to the concrete catalog entry (bare
+    provider names alias to the provider default, SPEC-026 R-3), so
+    pinning and audit attribution carry model names.
     """
     if requested:
-        if MODEL_CATALOG.get(requested) is None:
+        entry = MODEL_CATALOG.get(requested)
+        if entry is None:
             raise HTTPException(
                 status_code=422,
                 detail=f"unknown model id: {requested}",
             )
-        return requested
-    if pinned and MODEL_CATALOG.get(pinned) is not None:
-        return pinned
+        return entry.id
+    if pinned:
+        entry = MODEL_CATALOG.get(pinned)
+        if entry is not None:
+            return entry.id
     default = MODEL_CATALOG.default_entry()
     return default.id if default is not None else None
 

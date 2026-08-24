@@ -17,6 +17,11 @@ class AgentScopeProvider(ABC):
     provider_name: "RuntimeProvider"
     default_model: str
     default_base_url: str | None = None
+    # SPEC-026 R-1: the curated model series offered whenever this
+    # provider's API key resolves; ``<PROVIDER>_MODELS`` can override it.
+    # Must include ``default_model`` and stay collision-free across
+    # providers (the catalog enforces both at startup).
+    model_series: tuple[str, ...] = ()
 
     def validate(self, settings: "RuntimeSettings") -> None:
         if settings.provider != self.provider_name:

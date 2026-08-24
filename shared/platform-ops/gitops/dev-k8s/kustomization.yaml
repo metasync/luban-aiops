@@ -3,7 +3,7 @@ kind: Kustomization
 namespace: dev-luban-aiops
 resources:
   - base
-  - ../runtime-profiles/deepseek
+  - ../runtime-profiles/default
   - ../runtime-profiles/mutating-dev
 configMapGenerator:
   - name: platform-runtime-config

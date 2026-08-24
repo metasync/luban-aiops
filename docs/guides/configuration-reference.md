@@ -529,13 +529,12 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 ## Runtime Profiles
 
 The agent-service supports pluggable LLM backends through Kustomize profile overlays.
-Only one profile is active at a time.
+Only one LLM profile is active at a time. Since SPEC-026 the profile label is generic
+(`default`) and decoupled from the provider — provider selection is a ConfigMap knob:
 
-| Profile | Provider | Model | ConfigMap |
+| Profile | Provider | Default Model | ConfigMap |
 |---|---|---|---|
-| `deepseek` | `deepseek` | `deepseek-v4-flash` | `runtime-profiles/deepseek/configmap.yaml` |
-| `dashscope` | `dashscope` | `qwen-plus` | `runtime-profiles/dashscope/configmap.yaml` |
-| `openai` | `openai` | `gpt-4.1-mini` | `runtime-profiles/openai/configmap.yaml` |
+| `default` | `deepseek` (via `AGENTSCOPE_PROVIDER`) | `deepseek-v4-flash` | `runtime-profiles/default/configmap.yaml` |
 
 Switch profiles with:
 
@@ -543,7 +542,10 @@ Switch profiles with:
 shared/platform-ops/gitops/select-runtime-profile.sh <profile-name>
 ```
 
-Each profile also has a `runtime-secrets.example.env` documenting the required API key variable.
+The profile's `runtime-secrets.example.env` documents the active provider key plus the
+multi-model catalog knobs: every supported provider (`deepseek`, `dashscope`, `openai`)
+with an `<PROVIDER>_API_KEY` joins the catalog with its curated model series, and an
+optional `<PROVIDER>_MODELS=a,b,c` overrides/restricts that series.
 
 ## Policy Management
 

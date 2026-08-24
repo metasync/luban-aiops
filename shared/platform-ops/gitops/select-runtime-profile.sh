@@ -7,7 +7,7 @@ PROFILE="${1:-}"
 PROFILE_DIR="$SCRIPT_DIR/runtime-profiles/$PROFILE"
 
 if [ -z "$PROFILE" ]; then
-  echo "Usage: $0 <deepseek|dashscope|openai>" >&2
+  echo "Usage: $0 <default>" >&2
   exit 1
 fi
 

@@ -29,29 +29,30 @@ committed lockfiles.
 
 ## Step 2: Select a Runtime Profile
 
-Choose an LLM provider profile before building:
+Choose an LLM runtime profile before building:
 
 ```bash
-shared/platform-ops/gitops/select-runtime-profile.sh deepseek
+shared/platform-ops/gitops/select-runtime-profile.sh default
 ```
 
-Available profiles: `deepseek`, `dashscope`, `openai`. This updates the Kustomize overlay to
-include the selected provider's ConfigMap.
+The `default` profile is the single generic LLM profile; the active provider is a
+ConfigMap knob (`AGENTSCOPE_PROVIDER`). This updates the Kustomize overlay to
+include the profile's ConfigMap.
 
 ## Step 3: Provision the LLM API Key
 
-Copy the example secrets file for your chosen profile and fill in your real API key:
+Copy the example secrets file and fill in your real API key:
 
 ```bash
-cp shared/platform-ops/gitops/runtime-profiles/deepseek/runtime-secrets.example.env \
-   shared/platform-ops/gitops/runtime-profiles/deepseek/runtime-secrets.env
+cp shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env \
+   shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.env
 ```
 
 Edit `runtime-secrets.env` and replace the placeholder with your actual API key. Then sync
 the secret into the cluster:
 
 ```bash
-shared/platform-ops/gitops/sync-runtime-secret.sh deepseek
+shared/platform-ops/gitops/sync-runtime-secret.sh default
 ```
 
 ## Step 4: Build Images

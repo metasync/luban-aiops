@@ -219,7 +219,8 @@ class AgentKernel:
         ``model_id=None`` keeps the deploy-time settings path untouched.
         A concrete id derives a replaced RuntimeSettings from the catalog
         entry and reuses the existing provider adapters; an unknown id
-        raises ``UnknownModelError`` (fail-closed).
+        raises ``UnknownModelError`` (fail-closed). Bare provider names
+        alias to the provider's default entry (SPEC-026 R-3).
         """
         if model_id is None:
             return self._provider.build_model(self.settings)
@@ -227,7 +228,10 @@ class AgentKernel:
         if entry is None:
             raise UnknownModelError(f"Unknown model id: {model_id!r}.")
         if entry.provider == self.settings.provider:
-            settings = self.settings
+            # Active provider: keep the deploy-time credentials/options
+            # and swap only the model name, so non-default series entries
+            # build against the same provider (SPEC-026 R-1).
+            settings = replace(self.settings, model_name=entry.model_name)
         else:
             settings = replace(
                 self.settings,
@@ -240,6 +244,21 @@ class AgentKernel:
                 ),
             )
         return get_provider(entry.provider).build_model(settings)
+
+    def _normalize_model_id(self, model_id: str | None) -> str:
+        """Canonical id bound to a turn (SPEC-026 R-3).
+
+        Legacy provider-name ids resolve through the catalog alias map to
+        the concrete default-model entry; unknown ids pass through verbatim
+        (explicit-request paths reject them upstream, so they only surface
+        as the deploy-time provider fallback marker).
+        """
+        if model_id:
+            entry = MODEL_CATALOG.get(model_id)
+            if entry is not None:
+                return entry.id
+            return model_id
+        return self.settings.provider
 
     async def _ensure_toolkit(self, bearer_token: str | None = None):
         """Build (once per token) and return the Toolkit with gateway tools.
@@ -533,7 +552,7 @@ class AgentKernel:
             "kernel agent constructed",
             extra={
                 "session_id": session_id,
-                "model_id": model_id or self.settings.provider,
+                "model_id": self._normalize_model_id(model_id),
                 "max_iters": self.settings.max_iters,
                 "context_trigger_ratio": self.settings.context_trigger_ratio,
                 "tool_result_limit": self.settings.tool_result_limit,
@@ -542,7 +561,7 @@ class AgentKernel:
                 "state_restored": state is not None,
             },
         )
-        return agent, UserMsg, model_id or self.settings.provider
+        return agent, UserMsg, self._normalize_model_id(model_id)
 
     async def ensure_agent(
         self,
@@ -563,7 +582,7 @@ class AgentKernel:
         ``_restore_state`` rebuilds memory — the same path as a pod
         restart, so the switch never loses conversation history.
         """
-        bound_id = model_id or self.settings.provider
+        bound_id = self._normalize_model_id(model_id)
         cached = self._agents.get(session_id)
         if cached is not None:
             # Gateway tools recovered after this agent was built with an
