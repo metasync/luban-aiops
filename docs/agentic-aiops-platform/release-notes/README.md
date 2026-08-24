@@ -7,6 +7,15 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-25-skills-usage-audit-trail.md`
+  - delivers SPEC-029 (v0.11.0): skills-hub emits `skill_searched` /
+    `skill_retrieved` per authenticated query and one `skills_synced`
+    per source per sync cycle via the canonical fire-and-forget emitter
+    (fourth parity-guard member), correlated with caller `tool_invoked`
+    events through forwarded `x-request-id`; plus the pre-milestone
+    review remediation (three operator guides, drift-guard parity
+    suite, audit-service 95% / incident-service 92% coverage) and the
+    audit-secret rollout-race fix in `sync-audit-secrets.sh`
 - `2026-08-24-multimodel-runtime-and-live-discovery.md`
   - closes v0.10.0, the multi-model runtime train: SPEC-024 per-turn
     model selection with session pinning and audit attribution, SPEC-025

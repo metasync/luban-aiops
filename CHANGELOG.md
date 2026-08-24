@@ -13,6 +13,8 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.11.0 — 2026-08-25
+
 ### Added
 
 - **Skills usage audit trail (SPEC-029)**: skills-hub now emits audit
@@ -44,6 +46,12 @@ Release 1 entries are grouped retrospectively under 0.1.0.
   duplicated across services (telemetry, observability, token verifier,
   audit emitter, ingest/query auth); audit-service coverage 80% → 95%
   and incident-service 87% → 92% with new store/telemetry/runtime tests.
+
+### Fixed
+
+- `sync-audit-secrets.sh` now waits for the audit-service rollout to
+  finish before restarting the emitter deployments, so an emitter's
+  boot-time emission can no longer hit the old pod's registry and 401.
 
 ## 0.10.0 — 2026-08-24
 

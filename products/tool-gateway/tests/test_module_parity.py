@@ -14,7 +14,8 @@ Families and their allowed divergence:
   settings class names (platform-gateway / tool-gateway).
 - ``services/audit_emitter.py``  — identical except docstrings and the
   package / settings class names (platform-gateway / tool-gateway /
-  identity-broker). incident-service also has an ``audit_emitter.py`` but it
+  identity-broker / skills-hub). incident-service also has an
+  ``audit_emitter.py`` but it
   is a different design (a triage ``AuditConnector``), intentionally excluded.
 - ``services/ingest_auth.py`` (audit-service) / ``services/query_auth.py``
   (incident-service) — identical except docstrings and the package /

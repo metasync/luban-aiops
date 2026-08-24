@@ -434,7 +434,7 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-con
 | `SKILLS_WORKLOAD_ISSUER_URL` | Cluster OIDC issuer for workload tokens (prod) | *(none, disabled)* | runtime-secrets |
 | `SKILLS_WORKLOAD_AUDIENCE` | Projected token audience | `skills-hub` | code default |
 | `SKILLS_WORKLOAD_CLIENTS` | SA subject→client mapping | *(none)* | runtime-secrets |
-| `SKILLS_AUDIT_SERVICE_URL` | Audit-service ingest URL for usage events (unset = log-only) | `http://audit-service:8000` | runtime-config |
+| `SKILLS_AUDIT_SERVICE_URL` | Audit-service ingest URL for usage events (empty = emission disabled) | `http://audit-service:8000` | runtime-config |
 | `SKILLS_AUDIT_CLIENT_ID` | Audit ingest client id | `skills-hub` | runtime-config |
 | `SKILLS_AUDIT_CLIENT_SECRET` | Audit ingest credential | *(none)* | **runtime-secrets** |
 

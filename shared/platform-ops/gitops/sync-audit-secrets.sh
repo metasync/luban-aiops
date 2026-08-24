@@ -115,7 +115,18 @@ sync_secret skills-hub-runtime-secrets "$SH_SECRET_FILE"
 
 # --- restart affected workloads ----------------------------------------------
 
+# The registry update takes effect only once audit-service is serving the new
+# pod, so wait for its rollout to finish before restarting the emitters —
+# otherwise an emitter's boot-time emission can hit the old pod's registry
+# and 401 (fire-and-forget would drop the event until the next cycle).
+
+echo ""
+echo "Audit ingest secrets provisioned. Waiting for audit-service rollout..."
 kubectl -n "$NAMESPACE" rollout restart deployment/audit-service
+kubectl -n "$NAMESPACE" rollout status deployment/audit-service --timeout=120s
+
+echo ""
+echo "audit-service is serving the new registry. Restarting emitters..."
 kubectl -n "$NAMESPACE" rollout restart deployment/tool-gateway
 kubectl -n "$NAMESPACE" rollout restart deployment/platform-gateway
 kubectl -n "$NAMESPACE" rollout restart deployment/identity-service
@@ -123,8 +134,7 @@ kubectl -n "$NAMESPACE" rollout restart deployment/incident-service
 kubectl -n "$NAMESPACE" rollout restart deployment/skills-hub
 
 echo ""
-echo "Audit ingest secrets provisioned. Waiting for rollout..."
-kubectl -n "$NAMESPACE" rollout status deployment/audit-service --timeout=120s
+echo "Waiting for emitter rollouts..."
 kubectl -n "$NAMESPACE" rollout status deployment/tool-gateway --timeout=120s
 kubectl -n "$NAMESPACE" rollout status deployment/platform-gateway --timeout=120s
 kubectl -n "$NAMESPACE" rollout status deployment/identity-service --timeout=120s
