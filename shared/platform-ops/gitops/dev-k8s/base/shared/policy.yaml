@@ -19,6 +19,9 @@
 # session:list/session:delete (SPEC-022) mirror session:create's grants: the
 # API scopes both operations to the caller's own sessions server-side, so the
 # lifecycle actions share one posture across all roles.
+#
+# models:list (SPEC-024) mirrors chat's grants: catalog discovery is safe by
+# construction (id/label/provider/default only, never credentials).
 version: 1
 rules:
   - id: allow-operators-chat
@@ -28,7 +31,7 @@ rules:
     enabled: true
     match:
       roles_any: ["platform-admin", "approver", "operator", "developer"]
-      actions_any: ["chat", "session:create", "session:read", "session:list", "session:delete"]
+      actions_any: ["chat", "session:create", "session:read", "session:list", "session:delete", "models:list"]
     decision:
       outcome: allow
 
@@ -39,7 +42,7 @@ rules:
     enabled: true
     match:
       roles_any: ["read-only-observer"]
-      actions_any: ["chat", "session:create", "session:read", "session:list", "session:delete"]
+      actions_any: ["chat", "session:create", "session:read", "session:list", "session:delete", "models:list"]
     decision:
       outcome: allow
 
