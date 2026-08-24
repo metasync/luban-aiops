@@ -7,6 +7,16 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-24-multimodel-runtime-and-live-discovery.md`
+  - closes v0.10.0, the multi-model runtime train: SPEC-024 per-turn
+    model selection with session pinning and audit attribution, SPEC-025
+    evidence persistence with replayed prop-identical evidence cards,
+    SPEC-026 per-provider curated model series with `<PROVIDER>_MODELS`
+    override and consolidated `default` runtime profile, and SPEC-027
+    live `/models` discovery behind a fail-soft ladder (live → memory →
+    Postgres → curated); plus three review remediations (confirm-route
+    stale-pin degradation, fallback-response provider attribution,
+    discovery-cache bootstrap connection leak)
 - `2026-08-22-portal-framework-rebuild.md`
   - delivers SPEC-023 (v0.9.0): the operator portal rebuilt as a
     Vite + React 18 + TypeScript SPA on antd / Ant Design X — a

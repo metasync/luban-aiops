@@ -13,6 +13,8 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.10.0 — 2026-08-24
+
 ### Added
 
 - **Live model discovery with cached fallback (SPEC-027)**: the model
@@ -98,6 +100,26 @@ Release 1 entries are grouped retrospectively under 0.1.0.
   exactly one model is configured, and fail-open hiding when discovery
   is unavailable; switching sessions re-seeds the selector from the
   session's pinned model.
+
+### Fixed
+
+- **HITL confirm with an evicted model pin**: `/chat/confirm` forwarded
+  the raw session pin into the resume path, so a pinned model evicted by
+  a discovery refresh (or a key revocation) raised `UnknownModelError`
+  mid-stream — tearing the SSE stream and permanently wedging the parked
+  session (the pre-claim registry entry never resolved). The confirm
+  route now resolves the pin through the same request > pinned > default
+  ladder as other turns, degrading a stale pin to the catalog default.
+- **Fallback response provider attribution**: the provider-error fallback
+  text named the active profile's provider, so a dashscope model failure
+  read "provider deepseek failed". The kernel now resolves the turn's
+  serving model against the catalog and attributes that provider (model
+  id included); without model context the previous wording is kept.
+- **Discovery cache bootstrap connection leak**: when the
+  `model_discovery_cache` bootstrap DDL failed against a reachable
+  Postgres, `PostgresDiscoveryCache` leaked the opened connection on
+  every refresh cycle; bootstrap failures now close the connection before
+  the fail-soft swallow.
 
 ## 0.9.1 — 2026-08-23
 
