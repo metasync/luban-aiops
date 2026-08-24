@@ -341,6 +341,40 @@ def test_stream_message_end_carries_serving_model(monkeypatch):
     assert end_frames[0]["model"] == "deepseek"
 
 
+def test_fallback_message_attributes_serving_provider(monkeypatch):
+    """A dashscope model failure must not blame the active profile's
+    provider (deepseek here) in the fallback text."""
+    from agent_service.services.model_catalog import (
+        ModelCatalog,
+        ModelCatalogEntry,
+    )
+
+    entry = ModelCatalogEntry(
+        id="qwen3-8b",
+        label="qwen3-8b",
+        provider="dashscope",
+        api_key="sk-x",
+        model_name="qwen3-8b",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        default=False,
+    )
+    kernel = AgentKernel(
+        settings=RuntimeSettings(provider="deepseek", api_key="test-key")
+    )
+    kernel.remember_error(RuntimeError("403 accessdenied"))
+    monkeypatch.setattr(
+        runtime_kernel, "MODEL_CATALOG", ModelCatalog((entry,))
+    )
+
+    text = kernel.build_provider_error_message("hello", "ses-1", "qwen3-8b")
+    assert "dashscope (model qwen3-8b)" in text
+    assert "provider deepseek failed" not in text
+
+    # Without model context the profile provider attribution is unchanged.
+    text = kernel.build_provider_error_message("hello", "ses-1")
+    assert "AgentScope provider deepseek failed" in text
+
+
 def test_ensure_agent_rebuilds_on_model_switch(monkeypatch):
     kernel = _configured_kernel()
     builds: list[str | None] = []

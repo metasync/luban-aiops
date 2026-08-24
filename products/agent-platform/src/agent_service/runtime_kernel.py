@@ -639,11 +639,26 @@ class AgentKernel:
             f"Received '{message}'."
         )
 
-    def build_provider_error_message(self, message: str, session_id: str) -> str:
+    def build_provider_error_message(
+        self,
+        message: str,
+        session_id: str,
+        model_id: str | None = None,
+    ) -> str:
         detail = self._last_error or "Unknown provider error."
+        # Name the provider that actually served (attempted) the turn:
+        # a resolved catalog entry carries its own provider, so a
+        # dashscope model failure never blames the deepseek profile.
+        entry = MODEL_CATALOG.get(model_id) if model_id else None
+        if entry is not None:
+            attribution = f"{entry.provider} (model {entry.id})"
+        elif model_id:
+            attribution = f"{self.provider_name()} (model {model_id})"
+        else:
+            attribution = self.provider_name()
         return (
             "Platform runtime fallback response. "
-            f"AgentScope provider {self.provider_name()} failed for session {session_id}. "
+            f"AgentScope provider {attribution} failed for session {session_id}. "
             f"Received '{message}'. Last error: {detail}"
         )
 
@@ -695,8 +710,9 @@ class AgentKernel:
 
         from agent_service.tools.gateway_tools import DELEGATED_TOKEN
 
+        serving_model: str | None = None
         try:
-            agent, user_msg_cls, _bound_model_id = await self.ensure_agent(
+            agent, user_msg_cls, serving_model = await self.ensure_agent(
                 session_id, bearer_token, model_id
             )
             # Expose the turn's delegated token to the cached tool closures
@@ -722,7 +738,12 @@ class AgentKernel:
         except Exception as exc:  # pragma: no cover - defensive fallback
             self.remember_error(exc)
             LOGGER.exception("AgentScope reply failed; falling back to runtime error response: %s", exc)
-            return self.build_provider_error_message(message, session_id), None
+            return (
+                self.build_provider_error_message(
+                    message, session_id, serving_model or model_id
+                ),
+                None,
+            )
 
     def normalize_event(
         self,
@@ -791,6 +812,7 @@ class AgentKernel:
         from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
         from agent_service.tools.gateway_tools import DELEGATED_TOKEN
 
+        bound_model_id: str | None = None
         try:
             # Ensure the agent (with the token-cached toolkit) exists.
             agent, user_msg_cls, bound_model_id = await self.ensure_agent(
@@ -896,7 +918,9 @@ class AgentKernel:
             async for event in self.fallback_stream(
                 request_id=request_id,
                 session_id=session_id,
-                delta=self.build_provider_error_message(message, session_id),
+                delta=self.build_provider_error_message(
+                    message, session_id, bound_model_id or model_id
+                ),
             ):
                 yield event
 
