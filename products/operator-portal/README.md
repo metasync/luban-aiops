@@ -55,7 +55,8 @@ Current browser baseline capabilities:
   `input_modality=voice`; a language selector (en-US / zh-CN, defaulting from
   the browser locale and persisted locally) drives the recognizer only
   (SPEC-023)
-- model selector: the composer shows the credential-gated model catalog
+- model selector: a selection bar under the message input (extensible to
+  future per-turn selections) shows the credential-gated model catalog
   (`GET /api/v1/models`) with the deploy-time default pre-selected; exactly
   one configured model renders as a fixed label, and any discovery failure
   hides the selector without affecting chat. The selection rides the stream

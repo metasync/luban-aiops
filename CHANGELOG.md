@@ -53,11 +53,12 @@ Release 1 entries are grouped retrospectively under 0.1.0.
   `chat_started` and the serving model on `chat_completed` on both chat
   surfaces (a stream that closes without `message_end` falls back to the
   requested model; parked turns stay unattributed). The portal composer
-  gains a model selector pre-seeded with
-  the catalog default, a fixed label when exactly one model is
-  configured, and fail-open hiding when discovery is unavailable;
-  switching sessions re-seeds the selector from the session's pinned
-  model.
+  gains an extensible selection bar under the message input hosting the
+  model selector (the designated mount point for future per-turn
+  selections): pre-seeded with the catalog default, a fixed label when
+  exactly one model is configured, and fail-open hiding when discovery
+  is unavailable; switching sessions re-seeds the selector from the
+  session's pinned model.
 
 ## 0.9.1 — 2026-08-23
 

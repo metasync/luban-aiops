@@ -38,7 +38,7 @@ import {
   type ConfirmationDecision,
 } from "../stream/useChatStream";
 import { renderMarkdown } from "./markdown";
-import { ModelSelect } from "./ModelSelect";
+import { ComposerSelectionBar } from "./ComposerSelectionBar";
 import { transcriptToTurns } from "./transcript";
 import {
   VOICE_LANGUAGES,
@@ -811,12 +811,6 @@ export default function ChatView({
             autoSize={{ minRows: 1, maxRows: 6 }}
             prefix={
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <ModelSelect
-                  catalog={modelCatalog}
-                  value={selectedModel}
-                  onChange={setSelectedModel}
-                  disabled={chat.streaming || !authenticated}
-                />
                 {speech.supported ? (
                   <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <Select
@@ -863,6 +857,16 @@ export default function ChatView({
                   </Tooltip>
                 )}
               </div>
+            }
+            footer={
+              // Extensible selection strip under the input: model choice
+              // today (SPEC-024), further per-turn selections later.
+              <ComposerSelectionBar
+                catalog={modelCatalog}
+                model={selectedModel}
+                onModelChange={setSelectedModel}
+                disabled={chat.streaming || !authenticated}
+              />
             }
           />
         </div>

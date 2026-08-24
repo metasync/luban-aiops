@@ -229,6 +229,26 @@ body {
   border-top: 1px solid var(--border);
 }
 
+/* Extensible selection strip under the message input (SPEC-024): the
+   model selector today, further per-turn selections later. */
+.composer-selection-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 2px 8px 4px;
+}
+
+.composer-selection-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.composer-selection-label {
+  font-size: 0.75rem;
+}
+
 .turn-group {
   display: flex;
   flex-direction: column;
