@@ -9,22 +9,27 @@
 - [skills.py](file://products/skills-hub/src/skills_hub/api/routes/skills.py)
 - [config.py](file://products/skills-hub/src/skills_hub/core/config.py)
 - [runtime.py](file://products/skills-hub/src/skills_hub/core/runtime.py)
+- [metrics.py](file://products/skills-hub/src/skills_hub/core/metrics.py)
 - [skill_store.py](file://products/skills-hub/src/skills_hub/services/skill_store.py)
 - [ingestion.py](file://products/skills-hub/src/skills_hub/services/ingestion.py)
 - [sync.py](file://products/skills-hub/src/skills_hub/services/sync.py)
 - [query_auth.py](file://products/skills-hub/src/skills_hub/services/query_auth.py)
+- [audit_emitter.py](file://products/skills-hub/src/skills_hub/services/audit_emitter.py)
 - [skill.py](file://products/skills-hub/src/skills_hub/schemas/skill.py)
 - [skill.schema.json](file://shared/shared-contracts/schemas/skill.schema.json)
+- [audit-event.schema.json](file://shared/shared-contracts/schemas/audit-event.schema.json)
 - [skills-guide.md](file://docs/guides/skills-guide.md)
+- [test_audit_emitter.py](file://products/skills-hub/tests/test_audit_emitter.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced git-federated source support with subpath specification for monorepo scenarios
-- Added comprehensive security validation including path traversal protection and token injection
-- Improved sync engine with better error handling and credential scrubbing
-- Updated configuration parsing to support git source subpaths with security constraints
-- Enhanced testing coverage for git source functionality and security features
+- Added comprehensive audit emitter service for durable audit trail integration
+- Implemented new configuration options (SKILLS_AUDIT_SERVICE_URL, SKILLS_AUDIT_CLIENT_ID, SKILLS_AUDIT_CLIENT_SECRET)
+- Integrated audit event emission at search and retrieval endpoints with fire-and-forget delivery
+- Enhanced sync monitoring with improved error handling and credential scrubbing
+- Added Prometheus metrics for audit emission tracking
+- Updated API routes to emit usage audit events for skill searches and retrievals
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -47,6 +52,7 @@ Key responsibilities:
 - Frontmatter validation and metadata normalization against a shared schema
 - Deterministic ranking and provenance-aware search results
 - Query authentication via static Basic credentials or projected workload tokens
+- **Enhanced**: Durable audit trail integration with fire-and-forget audit event emission for all user-facing operations and sync cycles
 - Operational status reporting and metrics
 
 **Section sources**
@@ -58,33 +64,37 @@ The service follows a layered FastAPI application structure:
 - Entrypoint and runtime settings
 - Application lifecycle and middleware
 - API routing and request handlers
-- Services for ingestion, storage, scoring, synchronization, and query authentication
+- Services for ingestion, storage, scoring, synchronization, query authentication, and audit emission
 - Schemas bound to the shared skill contract
 
 ```mermaid
 graph TB
 A["main.py<br/>entrypoint"] --> B["app.py<br/>FastAPI lifespan & middleware"]
 B --> C["api/router.py<br/>route registration"]
-C --> D["api/routes/skills.py<br/>list/search/get"]
-B --> E["services/sync.py<br/>per-source sync loops"]
+C --> D["api/routes/skills.py<br/>list/search/get + audit emission"]
+B --> E["services/sync.py<br/>per-source sync loops + audit events"]
 E --> F["services/ingestion.py<br/>parse & validate docs"]
 E --> G["services/skill_store.py<br/>InMemory/Postgres backends"]
 D --> H["services/query_auth.py<br/>Basic/workload auth"]
 D --> I["services/scoring.py<br/>ranking (via skill_store)"]
-F --> J["schemas/skill.py<br/>Skill model"]
-J --> K["shared/shared-contracts/schemas/skill.schema.json"]
+D --> J["services/audit_emitter.py<br/>fire-and-forget audit events"]
+F --> K["schemas/skill.py<br/>Skill model"]
+J --> L["shared/shared-contracts/schemas/audit-event.schema.json"]
+K --> M["shared/shared-contracts/schemas/skill.schema.json"]
 ```
 
 **Diagram sources**
 - [main.py:1-9](file://products/skills-hub/src/skills_hub/main.py#L1-L9)
 - [app.py:20-86](file://products/skills-hub/src/skills_hub/app.py#LL20-L86)
 - [router.py:1-11](file://products/skills-hub/src/skills_hub/api/router.py#L1-L11)
-- [skills.py:1-119](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L1-L119)
+- [skills.py:1-172](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L1-L172)
 - [sync.py:118-238](file://products/skills-hub/src/skills_hub/services/sync.py#L118-L238)
 - [ingestion.py:151-229](file://products/skills-hub/src/skills_hub/services/ingestion.py#L151-L229)
 - [skill_store.py:30-67](file://products/skills-hub/src/skills_hub/services/skill_store.py#L30-L67)
+- [audit_emitter.py:1-98](file://products/skills-hub/src/skills_hub/services/audit_emitter.py#L1-L98)
 - [skill.py:15-33](file://products/skills-hub/src/skills_hub/schemas/skill.py#L15-L33)
 - [skill.schema.json:1-76](file://shared/shared-contracts/schemas/skill.schema.json#L1-L76)
+- [audit-event.schema.json:1-100](file://shared/shared-contracts/schemas/audit-event.schema.json#L1-L100)
 
 **Section sources**
 - [main.py:1-9](file://products/skills-hub/src/skills_hub/main.py#L1-L9)
@@ -94,34 +104,37 @@ J --> K["shared/shared-contracts/schemas/skill.schema.json"]
 ## Core Components
 - Entrypoint and runtime: loads host/port settings and starts the server.
 - Application lifecycle: initializes the skill store, prunes unconfigured sources, starts sync manager, wires metrics/telemetry/logging.
-- API routes: list, search, get endpoints with pagination, filtering, and auth.
+- API routes: list, search, get endpoints with pagination, filtering, auth, and audit event emission.
 - Ingestion: walks local directories, parses YAML frontmatter, enforces size/format limits, derives slugs, rejects duplicates within a source.
 - Storage: strategy pattern with InMemory and Postgres backends; Postgres uses GIN full-text index and re-ranks via shared scorer.
 - Scoring: deterministic keyword scoring with title/tag/body weights and capped body occurrences; stable tie-breaking by skill_id.
-- Sync: per-source async loop materializing git or local sources with subpath support, ingesting, atomically replacing store slices, tracking status and metrics.
+- Sync: per-source async loop materializing git or local sources with subpath support, ingesting, atomically replacing store slices, tracking status and metrics, emitting audit events.
 - Query auth: supports HTTP Basic against a static registry and projected workload tokens validated against cluster OIDC issuer JWKS.
+- **Enhanced**: Audit emitter: fire-and-forget delivery of usage events to the audit service with non-blocking thread-based emission and comprehensive error handling.
 
-**Updated** Enhanced sync engine now supports Git repository subpath specification for monorepo scenarios with comprehensive security validation.
+**Updated** Enhanced with comprehensive audit emitter service providing durable audit trail integration, new configuration options for audit service connectivity, and improved sync monitoring with credential scrubbing.
 
 **Section sources**
 - [runtime.py:19-30](file://products/skills-hub/src/skills_hub/core/runtime.py#L19-L30)
 - [app.py:20-86](file://products/skills-hub/src/skills_hub/app.py#L20-L86)
-- [skills.py:34-119](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L34-L119)
+- [skills.py:34-172](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L34-L172)
 - [ingestion.py:151-229](file://products/skills-hub/src/skills_hub/services/ingestion.py#L151-L229)
 - [skill_store.py:30-67](file://products/skills-hub/src/skills_hub/services/skill_store.py#L30-L67)
 - [skill_store.py:247-432](file://products/skills-hub/src/skills_hub/services/skill_store.py#L247-L432)
 - [scoring.py:28-97](file://products/skills-hub/src/skills_hub/services/scoring.py#L28-L97)
 - [sync.py:118-238](file://products/skills-hub/src/skills_hub/services/sync.py#L118-L238)
 - [query_auth.py:36-120](file://products/skills-hub/src/skills_hub/services/query_auth.py#L36-L120)
+- [audit_emitter.py:1-98](file://products/skills-hub/src/skills_hub/services/audit_emitter.py#L1-L98)
 
 ## Architecture Overview
-High-level flow from content sources to agent consumption:
+High-level flow from content sources to agent consumption with integrated audit trail:
 
 ```mermaid
 sequenceDiagram
 participant Team as "Team Sources"
 participant Hub as "Skills Hub"
 participant Store as "SkillStore"
+participant Audit as "Audit Service"
 participant GW as "Tool Gateway"
 participant Agent as "Agent"
 Note over Team,Hub : Periodic sync with subpath support
@@ -129,20 +142,24 @@ Team->>Hub : Local dir / Git repo (with optional subpath)
 Hub->>Hub : Materialize source (git checkout + subpath validation)
 Hub->>Hub : Ingest & validate docs
 Hub->>Store : Atomic replace_source(source_id, records)
-Note over Agent,GW : Query path
+Note over Agent,GW : Query path with audit emission
 Agent->>GW : tools.skills.search/list/get
 GW->>Hub : GET /api/v1/skills* (auth required)
 Hub->>Store : list/search/get
 Store-->>Hub : Results
+Hub->>Audit : Emit usage audit event (fire-and-forget)
 Hub-->>GW : JSON response
 GW-->>Agent : Tool result
+Note over Hub,Audit : Sync cycle audit events
+Hub->>Audit : Emit skills_synced event (success/error)
 ```
 
 **Diagram sources**
 - [sync.py:145-201](file://products/skills-hub/src/skills_hub/services/sync.py#L145-L201)
 - [ingestion.py:151-229](file://products/skills-hub/src/skills_hub/services/ingestion.py#L151-L229)
 - [skill_store.py:282-312](file://products/skills-hub/src/skills_hub/services/skill_store.py#L282-L312)
-- [skills.py:34-119](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L34-L119)
+- [skills.py:34-172](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L34-L172)
+- [audit_emitter.py:67-98](file://products/skills-hub/src/skills_hub/services/audit_emitter.py#L67-L98)
 
 ## Detailed Component Analysis
 
@@ -152,6 +169,7 @@ GW-->>Agent : Tool result
 - List supports offset/limit/source/tag filters with bounded limits.
 - Search requires a non-empty query and returns scored hits with excerpts and provenance.
 - Get returns the full skill envelope when present.
+- **Enhanced**: Search and retrieval endpoints emit usage audit events correlating with caller's x-request-id for durable audit trail.
 
 ```mermaid
 flowchart TD
@@ -159,20 +177,51 @@ Start(["HTTP Request"]) --> Auth{"Auth OK?"}
 Auth -- No --> Err401["Return 401 UNAUTHORIZED"]
 Auth -- Yes --> Route{"Route"}
 Route -- "/skills" --> List["Validate params<br/>store.list()"]
-Route -- "/skills/search" --> Search["Validate q/limit<br/>store.search()"]
-Route -- "/skills/{id}" --> Get["store.get(id)"]
+Route -- "/skills/search" --> Search["Validate q/limit<br/>store.search()<br/>emit_audit_event('skill_searched')"]
+Route -- "/skills/{id}" --> Get["store.get(id)<br/>emit_audit_event('skill_retrieved')"]
 List --> Resp["JSONResponse"]
 Search --> Resp
 Get --> |Found| Resp
-Get -- Not found --> Err404["Return 404 SKILL_NOT_FOUND"]
+Get -- Not found --> Err404["Return 404 SKILL_NOT_FOUND<br/>emit_audit_event('skill_retrieved', 'error')"]
 ```
 
 **Diagram sources**
-- [skills.py:34-119](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L34-L119)
+- [skills.py:34-172](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L34-L172)
 
 **Section sources**
 - [router.py:1-11](file://products/skills-hub/src/skills_hub/api/router.py#L1-L11)
-- [skills.py:1-119](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L1-L11)
+- [skills.py:1-172](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L1-L172)
+
+### Audit Emitter Service
+- Fire-and-forget delivery pattern using daemon threads for non-blocking audit event emission.
+- Configurable via `SKILLS_AUDIT_SERVICE_URL`, `SKILLS_AUDIT_CLIENT_ID`, `SKILLS_AUDIT_CLIENT_SECRET`.
+- When audit service URL is unset, maintains historical log-only behavior (no-op).
+- Built-in timeout protection (2 seconds) and comprehensive error handling.
+- Emits events matching the shared audit-event schema with correlation via x-request-id.
+- Tracks success/failure through Prometheus metrics (`audit_emits_total`).
+
+```mermaid
+flowchart TD
+Event["Build Audit Event"] --> CheckURL{"Audit URL configured?"}
+CheckURL -- No --> LogOnly["Log-only mode (no emission)"]
+CheckURL -- Yes --> Thread["Spawn daemon thread"]
+Thread --> Deliver["POST /api/v1/audit/events"]
+Deliver --> Success{"Status < 300?"}
+Success -- Yes --> RecordOK["record_audit_emit('ok')"]
+Success -- No --> RecordError["record_audit_emit('error')"]
+Deliver --> Exception{"Exception?"}
+Exception -- Yes --> RecordError
+Exception -- No --> Success
+RecordOK --> Done["Complete"]
+RecordError --> Done
+LogOnly --> Done
+```
+
+**Diagram sources**
+- [audit_emitter.py:29-98](file://products/skills-hub/src/skills_hub/services/audit_emitter.py#L29-L98)
+
+**Section sources**
+- [audit_emitter.py:1-98](file://products/skills-hub/src/skills_hub/services/audit_emitter.py#L1-L98)
 
 ### Ingestion Pipeline
 - Walks a source directory (supports Kubernetes projected volumes).
@@ -277,8 +326,9 @@ Cap --> Out(["Hits"])
 - Ingest runs synchronously in a thread to avoid blocking the event loop.
 - On success, atomically replaces the source slice in the store; on failure, retains previous snapshot and records error/metrics.
 - Status report exposes last_sync_at, ref, accepted counts, and bounded rejections.
+- **Enhanced**: Emits audit events for each sync cycle (success/error) with detailed outcome information.
 
-**Updated** The sync engine now includes comprehensive Git repository support with subpath specification, security validation, and improved error handling with credential scrubbing.
+**Updated** The sync engine now includes comprehensive Git repository support with subpath specification, security validation, improved error handling with credential scrubbing, and audit event emission for durable tracking.
 
 ```mermaid
 sequenceDiagram
@@ -286,12 +336,19 @@ participant SM as "SyncManager"
 participant FS as "Filesystem/Git"
 participant IG as "Ingestion"
 participant ST as "SkillStore"
+participant AU as "Audit Service"
 loop every interval
 SM->>FS : Materialize source (local or git checkout with subpath)
 SM->>IG : ingest_directory(source_id, root, ref, now)
 IG-->>SM : IngestResult(records, rejections)
 SM->>ST : replace_source(source_id, records)
+alt Success
+SM->>AU : emit_audit_event('skills_synced', 'success')
 SM->>SM : Update SourceStatus & metrics
+else Error
+SM->>AU : emit_audit_event('skills_synced', 'error')
+SM->>SM : Update SourceStatus with error
+end
 end
 ```
 
@@ -299,9 +356,10 @@ end
 - [sync.py:118-238](file://products/skills-hub/src/skills_hub/services/sync.py#L118-L238)
 - [ingestion.py:151-229](file://products/skills-hub/src/skills_hub/services/ingestion.py#L151-L229)
 - [skill_store.py:282-312](file://products/skills-hub/src/skills_hub/services/skill_store.py#L282-L312)
+- [audit_emitter.py:67-98](file://products/skills-hub/src/skills_hub/services/audit_emitter.py#L67-L98)
 
 **Section sources**
-- [sync.py:1-238](file://products/skills-hub/src/skills_hub/services/sync.py#L1-L238)
+- [sync.py:1-316](file://products/skills-hub/src/skills_hub/services/sync.py#L1-L316)
 
 ### Query Authentication
 - Supports two paths:
@@ -334,45 +392,62 @@ Static -- Invalid --> Deny
 - Security validation prevents path traversal attacks and ensures relative paths only.
 - Query clients and workload clients parsed from comma-separated mappings.
 - Run settings resolve host/port with safe defaults.
+- **Enhanced**: New audit configuration options: `SKILLS_AUDIT_SERVICE_URL`, `SKILLS_AUDIT_CLIENT_ID`, `SKILLS_AUDIT_CLIENT_SECRET` for audit service integration.
 
-**Updated** Configuration now supports Git source subpath specification with comprehensive security validation to prevent path traversal attacks.
+**Updated** Configuration now supports Git source subpath specification with comprehensive security validation, plus new audit service configuration options for durable audit trail integration.
 
 **Section sources**
-- [config.py:1-203](file://products/skills-hub/src/skills_hub/core/config.py#L1-L203)
+- [config.py:1-209](file://products/skills-hub/src/skills_hub/core/config.py#L1-L209)
 - [runtime.py:1-30](file://products/skills-hub/src/skills_hub/core/runtime.py#L1-L30)
 
+### Metrics and Observability
+- Prometheus metrics surface with RED (Rate, Errors, Duration) instrumentation.
+- **Enhanced**: New `audit_emits_total` counter tracking audit emission success/failure.
+- Existing metrics: `skills_syncs_total`, `skills_searches_total`, `skills_ingest_rejected_total`, `skills_store_skills`.
+- OpenTelemetry tracing integration for sync operations and Git checkout processes.
+- **Enhanced**: Credential scrubbing in error messages and trace spans to prevent secret leakage.
+
+**Section sources**
+- [metrics.py:1-113](file://products/skills-hub/src/skills_hub/core/metrics.py#L1-L113)
+
 ## Dependency Analysis
-- The API layer depends on query authentication and the skill store.
-- The sync engine depends on ingestion and the skill store.
+- The API layer depends on query authentication, the skill store, and the audit emitter.
+- The sync engine depends on ingestion, the skill store, and emits audit events.
 - Both backends depend on the shared scoring module to ensure identical ranking behavior.
 - The application lifecycle wires configuration, store initialization, pruning, and sync management.
+- **Enhanced**: Audit emitter integrates with Prometheus metrics and has no dependencies on other services beyond HTTP client.
 
 ```mermaid
 graph LR
 API["api/routes/skills.py"] --> QA["services/query_auth.py"]
 API --> SS["services/skill_store.py"]
+API --> AE["services/audit_emitter.py"]
 SS --> SC["services/scoring.py"]
 SYNC["services/sync.py"] --> INJ["services/ingestion.py"]
 SYNC --> SS
+SYNC --> AE
 APP["app.py"] --> SS
 APP --> SYNC
 CFG["core/config.py"] --> APP
 CFG --> SYNC
+AE --> METRICS["core/metrics.py"]
 ```
 
 **Diagram sources**
-- [skills.py:1-119](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L1-L119)
+- [skills.py:1-172](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L1-L172)
 - [query_auth.py:1-120](file://products/skills-hub/src/skills_hub/services/query_auth.py#L1-L120)
 - [skill_store.py:30-67](file://products/skills-hub/src/skills_hub/services/skill_store.py#L30-L67)
 - [scoring.py:1-97](file://products/skills-hub/src/skills_hub/services/scoring.py#L1-L97)
-- [sync.py:1-238](file://products/skills-hub/src/skills_hub/services/sync.py#L1-L238)
+- [sync.py:1-316](file://products/skills-hub/src/skills_hub/services/sync.py#L1-L316)
 - [ingestion.py:1-229](file://products/skills-hub/src/skills_hub/services/ingestion.py#L1-L229)
 - [app.py:20-86](file://products/skills-hub/src/skills_hub/app.py#L20-L86)
-- [config.py:1-203](file://products/skills-hub/src/skills_hub/core/config.py#L1-L203)
+- [config.py:1-209](file://products/skills-hub/src/skills_hub/core/config.py#L1-L209)
+- [audit_emitter.py:1-98](file://products/skills-hub/src/skills_hub/services/audit_emitter.py#L1-L98)
+- [metrics.py:1-113](file://products/skills-hub/src/skills_hub/core/metrics.py#L1-L113)
 
 **Section sources**
 - [app.py:20-86](file://products/skills-hub/src/skills_hub/app.py#L20-L86)
-- [config.py:1-203](file://products/skills-hub/src/skills_hub/core/config.py#L1-L203)
+- [config.py:1-209](file://products/skills-hub/src/skills_hub/core/config.py#L1-L209)
 
 ## Performance Considerations
 - Search performance:
@@ -387,6 +462,8 @@ CFG --> SYNC
 - Storage:
   - In-memory store offers fast reads/writes for dev/test; Postgres provides durability and scalable indexing.
 - **Enhanced**: Git operations now include timeout protection and efficient shallow cloning for better performance.
+- **Enhanced**: Audit emission uses fire-and-forget pattern with daemon threads and short timeouts (2 seconds) to prevent any impact on query latency.
+- **Enhanced**: Credential scrubbing in error messages and traces prevents accidental secret exposure while maintaining observability.
 
 ## Troubleshooting Guide
 Common operational issues and resolutions:
@@ -404,19 +481,24 @@ Common operational issues and resolutions:
   - Align ConfigMap entries with actual files under skills directories.
 - Agent claims no skills exist:
   - Verify tool-gateway connector configuration and query secret alignment.
+- **New**: Audit events not appearing:
+  - Verify `SKILLS_AUDIT_SERVICE_URL` is configured; check audit service availability; monitor `audit_emits_total{result="error"}` metric.
+- **New**: Audit emission failures:
+  - Check audit service credentials (`SKILLS_AUDIT_CLIENT_ID`, `SKILLS_AUDIT_CLIENT_SECRET`); verify network connectivity; review audit service logs.
 
 Operational endpoints and metrics:
 - Auth-exempt status: GET /api/v1/skills/status
-- Metrics: /metrics exposing sync outcomes, rejected documents, store size, and search counts.
+- Metrics: /metrics exposing sync outcomes, rejected documents, store size, search counts, and audit emission status.
 
 **Section sources**
 - [skills-guide.md:222-256](file://docs/guides/skills-guide.md#L222-L256)
 - [sync.py:214-238](file://products/skills-hub/src/skills_hub/services/sync.py#L214-L238)
+- [metrics.py:95-113](file://products/skills-hub/src/skills_hub/core/metrics.py#L95-L113)
 
 ## Conclusion
 The Skills Hub Service provides a robust, deterministic, and secure foundation for serving grounded guidance to agents. Its design emphasizes fail-fast configuration, resilient per-source sync, deterministic ranking, and clear operational surfaces. Integration through the tool-gateway ensures consistent policy enforcement, auditability, and evidence presentation.
 
-**Updated** The recent enhancements add comprehensive Git repository support with subpath specification for monorepo scenarios, robust security validation, and improved error handling with credential scrubbing, making it suitable for enterprise-scale federated skill management.
+**Updated** The recent enhancements add comprehensive Git repository support with subpath specification for monorepo scenarios, robust security validation, improved error handling with credential scrubbing, and a complete audit trail integration through the fire-and-forget audit emitter service. These improvements make it suitable for enterprise-scale federated skill management with durable usage tracking and enhanced observability.
 
 ## Appendices
 
@@ -448,6 +530,32 @@ string body
 **Section sources**
 - [skill.schema.json:1-76](file://shared/shared-contracts/schemas/skill.schema.json#L1-L76)
 - [skill.py:1-33](file://products/skills-hub/src/skills_hub/schemas/skill.py#L1-L33)
+
+### Audit Event Schema
+- Events follow the shared audit-event schema with correlation via x-request-id.
+- Supported event types: `skill_searched`, `skill_retrieved`, `skills_synced`.
+- Optional identity fields (subject, username, actor, roles, session_id) are included when available.
+- Service attribution identifies the event as originating from skills-hub.
+
+```mermaid
+flowchart TD
+Event["Audit Event"] --> Type{"Event Type"}
+Type -- "skill_searched" --> SearchDetails["details: query, limit, result_count, skill_ids"]
+Type -- "skill_retrieved" --> RetrieveDetails["details: skill_id, source"]
+Type -- "skills_synced" --> SyncDetails["details: source_id, source_type, ref, accepted, rejected"]
+SearchDetails --> Correlation["Correlation: x-request-id"]
+RetrieveDetails --> Correlation
+SyncDetails --> Correlation
+Correlation --> Delivery["Fire-and-forget delivery to audit service"]
+```
+
+**Diagram sources**
+- [audit-event.schema.json:1-100](file://shared/shared-contracts/schemas/audit-event.schema.json#L1-L100)
+- [audit_emitter.py:29-64](file://products/skills-hub/src/skills_hub/services/audit_emitter.py#L29-L64)
+
+**Section sources**
+- [audit-event.schema.json:1-100](file://shared/shared-contracts/schemas/audit-event.schema.json#L1-L100)
+- [audit_emitter.py:29-64](file://products/skills-hub/src/skills_hub/services/audit_emitter.py#L29-L64)
 
 ### Git Source Configuration Examples
 
@@ -489,7 +597,16 @@ With corresponding token configuration:
 }
 ```
 
+### Audit Service Configuration
+```yaml
+# Environment variables for audit service integration
+SKILLS_AUDIT_SERVICE_URL=http://audit-service:8000
+SKILLS_AUDIT_CLIENT_ID=skills-hub
+SKILLS_AUDIT_CLIENT_SECRET=your-audit-secret
+```
+
 **Section sources**
 - [config.py:50-116](file://products/skills-hub/src/skills_hub/core/config.py#L50-L116)
 - [sync.py:87-112](file://products/skills-hub/src/skills_hub/services/sync.py#L87-L112)
-- [test_sync.py:120-151](file://products/skills-hub/tests/test_sync.py#L120-L151)
+- [test_audit_emitter.py:120-151](file://products/skills-hub/tests/test_audit_emitter.py#L120-L151)
+- [config.py:175-203](file://products/skills-hub/src/skills_hub/core/config.py#L175-L203)

@@ -15,13 +15,18 @@
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
+- [request_context.py](file://products/tool-gateway/src/tool_gateway/core/request_context.py)
+- [api.py](file://products/tool-gateway/src/tool_gateway/schemas/api.py)
+- [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
+- [spec.md](file://docs/specs/SPEC-029-skills-usage-audit-trail/spec.md)
+- [test_skills_connector.py](file://products/tool-gateway/tests/test_skills_connector.py)
 - [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
 - [observability.py](file://products/tool-gateway/src/tool_gateway/core/observability.py)
 - [telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
-- [request_context.py](file://products/tool-gateway/src/tool_gateway/core/request_context.py)
 - [runtime.py](file://products/tool-gateway/src/tool_gateway/core/runtime.py)
 - [dependencies.py](file://products/tool-gateway/src/tool_gateway/core/dependencies.py)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
@@ -38,12 +43,11 @@
 
 ## Update Summary
 **Changes Made**
-- Added risk-tier admission control with GATEWAY_MUTATING_TOOLS_ENABLED environment variable for controlling mutating tool registration
-- Implemented new k8s.delete_pod tool as a bounded mutating action with proper error handling and RBAC requirements
-- Enhanced registry with mutating tool discovery controls that refuse write/admin risk tools when GATEWAY_MUTATING_TOOLS_ENABLED is disabled
-- Updated policy engine to include tools:mutate action for additional authorization on write/admin tools
-- Added comprehensive testing for the delete pod functionality including parameter validation and error mapping
-- Updated configuration documentation with new mutating tools enabled setting
+- Enhanced skills connector to forward x-request-id headers for request correlation, enabling end-to-end audit trail tracking from tool invocation through skill usage
+- Updated gateway service to include request_id in identity dictionary passed to tools
+- Added comprehensive testing for x-request-id header forwarding behavior including missing request ID scenarios
+- Updated architecture diagrams to reflect enhanced correlation capabilities across the tool execution pipeline
+- Documented SPEC-029 implementation for skills usage audit trail with request correlation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -66,13 +70,15 @@ Key responsibilities (current):
 - Internal HTTP API surface for tool discovery and invocation (`/api/v2/tools`)
 - Policy evaluation for tool-specific actions using YAML-based definitions with enhanced `tools:list`, `tools:invoke`, and `tools:mutate` permissions
 - Secure token verification with audience validation for `tool-gateway` audience
-- Multi-source tool registry supporting Kubernetes, Elastic, and Incidents connectors with safe discovery and invocation
+- Multi-source tool registry supporting Kubernetes, Elastic, Incidents, and Skills connectors with safe discovery and invocation
+- **Enhanced request correlation** enabling end-to-end audit trail tracking through x-request-id header propagation to downstream services
 - **Risk-tier admission control** preventing unauthorized access to mutating tools through GATEWAY_MUTATING_TOOLS_ENABLED
 - Comprehensive output redaction system preventing credential leakage
 - **Enhanced Kubernetes integration via cluster-wide read-only ClusterRole enabling cross-namespace diagnostic capabilities**
 - **New bounded mutating tool support** with k8s.delete_pod for controlled pod restart operations
 - Elastic connector integration for observability data access including log search, service health metrics, and alert management
 - Incidents connector integration for querying incident data through the new incident service
+- Skills connector integration for accessing team-owned operational skills and runbooks with full audit trail correlation
 - Observability, metrics, and telemetry for monitoring and debugging
 
 **Important Note**: The platform-gateway extraction is complete. Portal-facing responsibilities including chat/session proxying, authentication flows, and delegation client functionality have moved to the new `platform-gateway` service, leaving tool-gateway focused exclusively on tool execution and connector management.
@@ -81,7 +87,7 @@ Key responsibilities (current):
 The Tool Gateway is implemented as a Python service under products/tool-gateway. Core modules include:
 - API layer: FastAPI routers and route handlers for tools and health endpoints
 - Services: Gateway orchestration, policy engine, and token verifier
-- Tools: Base tool abstraction, registry, Kubernetes connector, Elastic connector, Incidents connector, and output redaction system
+- Tools: Base tool abstraction, registry, Kubernetes connector, Elastic connector, Incidents connector, Skills connector, and output redaction system
 - Core: Configuration, runtime, observability, metrics, telemetry, request context, dependencies
 - Schemas: Shared contract schemas for tool invocations and results
 - Policies: Default YAML policy definitions with enhanced tool permissions including mutating actions
@@ -100,12 +106,13 @@ H["Base Tool<br/>tools/base.py"]
 I["K8s Connector<br/>tools/k8s_connector.py"]
 J["Elastic Connector<br/>tools/elastic_connector.py"]
 K["Incidents Connector<br/>tools/incidents_connector.py"]
-L["Output Redaction<br/>tools/redaction.py"]
-M["Policies YAML<br/>policies/policy-default.yaml"]
-N["Schemas<br/>schemas/api.py + shared contracts"]
-O["Core Config/Runtime<br/>core/config.py, core/runtime.py"]
-P["Observability/Metrics/Telemetry<br/>core/*"]
-Q["Dependencies<br/>core/dependencies.py"]
+L["Skills Connector<br/>tools/skills_connector.py"]
+M["Output Redaction<br/>tools/redaction.py"]
+N["Policies YAML<br/>policies/policy-default.yaml"]
+O["Schemas<br/>schemas/api.py + shared contracts"]
+P["Core Config/Runtime<br/>core/config.py, core/runtime.py"]
+Q["Observability/Metrics/Telemetry<br/>core/*"]
+R["Dependencies<br/>core/dependencies.py"]
 end
 A --> B
 A --> C
@@ -114,20 +121,21 @@ C --> D
 D --> E
 D --> F
 D --> G
-F --> L
+F --> M
 G --> H
 G --> I
 G --> J
 G --> K
 G --> L
-E --> M
-D --> N
+G --> M
+E --> N
 D --> O
 D --> P
 D --> Q
+D --> R
 ```
 
-**Updated** Architecture diagram reflects the current structure with all three connectors and enhanced policy enforcement
+**Updated** Architecture diagram reflects the current structure with all four connectors and enhanced request correlation capabilities
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -141,6 +149,7 @@ D --> Q
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [policy-default.yaml](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
@@ -162,13 +171,15 @@ D --> Q
 - Token Verifier: Validates authentication tokens with audience verification for `tool-gateway` audience and enriches request context with identity information.
 - **Enhanced Tool Registry**: Discovers available tools from multiple connectors with risk-tier admission control, manages their metadata, and executes them safely with input validation and output redaction.
 - Output Redaction System: Automatically detects and redacts sensitive information from tool outputs using pattern matching and key-list filtering.
+- **Enhanced Request Correlation**: Propagates x-request-id headers through the entire tool execution pipeline to enable end-to-end audit trail tracking from initial tool invocation through downstream service calls.
 - **Enhanced Kubernetes Connector**: Provides safe abstractions for interacting with Kubernetes clusters across all namespaces using cluster-wide read-only ClusterRole permissions, enabling comprehensive diagnostic capabilities while maintaining strict read-only access controls, plus bounded mutating operations through k8s.delete_pod.
 - Elastic Connector: Provides read-only access to Elasticsearch for observability data including log search, service health metrics, and active alerts.
 - Incidents Connector: Provides read-only access to the incident-service query API for listing and retrieving incident data with proper authentication and parameter validation.
+- Skills Connector: Provides read-only access to the skills-hub retrieval API for searching and retrieving team-owned operational skills and runbooks with full audit trail correlation.
 - Schemas and Contracts: Enforce consistent request/response shapes for tool invocations and results.
 - Core Utilities: Configuration, runtime settings, observability, metrics, telemetry, request context propagation, and dependency injection.
 
-**Updated** Component descriptions reflect the current implementation with risk-tier admission control and bounded mutating tool support
+**Updated** Component descriptions reflect the current implementation with enhanced request correlation capabilities and all four connectors integrated
 
 **Section sources**
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
@@ -179,6 +190,7 @@ D --> Q
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
@@ -188,12 +200,12 @@ D --> Q
 - [dependencies.py](file://products/tool-gateway/src/tool_gateway/core/dependencies.py)
 
 ## Architecture Overview
-The Tool Gateway follows a streamlined architecture focused on multi-source tool execution with enhanced security features including automatic output redaction and risk-tier admission control. As an internal service, it receives requests from other platform services through well-defined APIs.
+The Tool Gateway follows a streamlined architecture focused on multi-source tool execution with enhanced security features including automatic output redaction, risk-tier admission control, and comprehensive request correlation. As an internal service, it receives requests from other platform services through well-defined APIs.
 
 **Current Architecture:**
 - API Layer: FastAPI routers expose endpoints for tool discovery and invocation only.
 - Service Layer: Gateway orchestrates tool invocation flows; policy engine enforces rules for tool actions with enhanced permissions including mutating actions; token verifier authenticates with audience validation for `tool-gateway`.
-- Tool Layer: Registry discovers and executes tools from multiple connectors with risk-tier admission control; **enhanced Kubernetes connector provides cluster-wide read-only access plus bounded mutating operations**; Elastic connector provides observability data access; incidents connector provides incident data access; output redaction ensures sensitive data never leaves the service.
+- Tool Layer: Registry discovers and executes tools from multiple connectors with risk-tier admission control; **enhanced request correlation propagates x-request-id headers through the entire pipeline**; **enhanced Kubernetes connector provides cluster-wide read-only access plus bounded mutating operations**; Elastic connector provides observability data access; incidents connector provides incident data access; skills connector provides skills and runbook access; output redaction ensures sensitive data never leaves the service.
 - Core Layer: Configuration, runtime, observability, metrics, telemetry, and request context support cross-cutting concerns.
 
 ```mermaid
@@ -208,12 +220,13 @@ participant Registry as "Tool Registry"
 participant K8s as "K8s Connector"
 participant Elastic as "Elastic Connector"
 participant Incidents as "Incidents Connector"
+participant Skills as "Skills Connector"
 participant Redaction as "Output Redaction"
 Client->>Router : "POST /api/v2/tools/invoke"
 Router->>ToolsRoute : "Handle tool invocation"
 ToolsRoute->>Gateway : "Invoke tool flow"
 Gateway->>Token : "Verify token with tool-gateway audience"
-Token-->>Gateway : "Identity context"
+Token-->>Gateway : "Identity context with request_id"
 Gateway->>Policy : "Evaluate tools : invoke/list/mutate policy"
 Policy-->>Gateway : "Decision"
 alt "Allow"
@@ -231,6 +244,10 @@ else "Incidents Tool"
 Gateway->>Registry : "Execute incidents tool with validated inputs"
 Registry->>Incidents : "List/get incidents via HTTP"
 Incidents-->>Registry : "Incident data"
+else "Skills Tool"
+Gateway->>Registry : "Execute skills tool with validated inputs"
+Registry->>Skills : "Search/get/list skills with x-request-id header"
+Skills-->>Registry : "Skill data with correlated audit trail"
 end
 Registry-->>Gateway : "Tool result"
 Gateway->>Redaction : "Apply redaction patterns"
@@ -243,7 +260,7 @@ ToolsRoute-->>Client : "403 Forbidden"
 end
 ```
 
-**Updated** Sequence diagram reflects the current architecture with risk-tier admission control and bounded mutating tool support
+**Updated** Sequence diagram reflects the current architecture with enhanced request correlation and all four connectors integrated
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -255,6 +272,7 @@ end
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 
 ## Detailed Component Analysis
@@ -288,12 +306,13 @@ Response --> End
 - [tools.py](file://products/tool-gateway/src/tool_gateway/api/routes/tools.py)
 - [health.py](file://products/tool-gateway/src/tool_gateway/api/routes/health.py)
 
-### Gateway Service with Risk-Tier Admission Control
-Orchestrates the full request lifecycle with enhanced security and automatic output sanitization:
-- Validates and enriches request context
+### Gateway Service with Risk-Tier Admission Control and Request Correlation
+Orchestrates the full request lifecycle with enhanced security, automatic output sanitization, and comprehensive request correlation:
+- Validates and enriches request context with request_id for correlation
 - Invokes token verification with audience validation and policy evaluation
 - **Implements risk-tier admission control** requiring separate authorization for mutating tools
 - Resolves and executes tools from multiple connectors via the registry
+- **Propagates request_id through identity context to downstream connectors for end-to-end audit trail correlation**
 - Applies comprehensive output redaction before returning responses
 - Handles errors and returns standardized responses with audit logging
 
@@ -346,6 +365,10 @@ class IncidentsConnector {
 +list_incidents(status, severity, source, limit, offset) dict
 +get_incident(incident_id) dict
 }
+class SkillsConnector {
++_get(path, params, request_id) httpx.Response
++register_tools(registry) void
+}
 GatewayService --> PolicyEngine : "uses"
 GatewayService --> TokenVerifier : "uses"
 GatewayService --> ToolRegistry : "uses"
@@ -355,9 +378,10 @@ ToolRegistry --> OutputRedaction : "uses"
 BaseTool --> K8sConnector : "may use"
 BaseTool --> ElasticConnector : "may use"
 BaseTool --> IncidentsConnector : "may use"
+BaseTool --> SkillsConnector : "may use"
 ```
 
-**Updated** Streamlined architecture with risk-tier admission control and all three connectors integrated
+**Updated** Streamlined architecture with enhanced request correlation, risk-tier admission control, and all four connectors integrated
 
 **Diagram sources**
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
@@ -368,6 +392,7 @@ BaseTool --> IncidentsConnector : "may use"
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 
 **Section sources**
@@ -470,6 +495,7 @@ FailClosed --> ReturnError["Return REDACTION_OVERFLOW Error"]
 - Supports dynamic registration and resolution across different tool providers
 - Executes tools with validated inputs and captures results/errors
 - Integrates with output redaction system for automatic sanitization
+- **Propagates request_id through identity context to enable end-to-end correlation**
 
 ```mermaid
 classDiagram
@@ -497,6 +523,9 @@ class ElasticTool {
 class IncidentsTool {
 +execute(params, identity) Result
 }
+class SkillsTool {
++execute(params, identity) Result
+}
 class OutputRedaction {
 +redact_result(result) Result
 +stats RedactionStats
@@ -506,9 +535,10 @@ ToolRegistry --> OutputRedaction : "uses"
 K8sTool --|> BaseTool : "extends"
 ElasticTool --|> BaseTool : "extends"
 IncidentsTool --|> BaseTool : "extends"
+SkillsTool --|> BaseTool : "extends"
 ```
 
-**Updated** Integrated with risk-tier admission control and output redaction system supporting all three tool providers
+**Updated** Integrated with risk-tier admission control, output redaction system, and enhanced request correlation supporting all four tool providers
 
 **Diagram sources**
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
@@ -516,6 +546,7 @@ IncidentsTool --|> BaseTool : "extends"
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 
 **Section sources**
@@ -625,6 +656,43 @@ BuildEvidence --> ReturnResult["Return Tool Result"]
 **Section sources**
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 
+### Enhanced Skills Connector with Request Correlation
+Provides read-only access to the skills-hub retrieval API with **enhanced request correlation** for end-to-end audit trail tracking:
+- **Search Skills**: Search team-owned operational skills and runbooks with query terms, source filters, and tag filters
+- **Get Skill**: Fetch the full body of one skill by its validated namespaced ID
+- **List Skills**: List registered skills with summaries, pagination, and filtering options
+
+**Enhanced Features**:
+- **Request Correlation**: Forwards caller's request_id as x-request-id header to skills-hub for audit trail correlation (SPEC-029 R-3)
+- **Authentication**: Uses gateway-held Basic credentials (never user's token) for secure service-to-service communication
+- **Parameter Validation**: Strict validation of skill IDs using regex pattern matching to prevent path injection attacks
+- **Pagination Support**: Configurable limit (default 5, max 20) and offset parameters for efficient data retrieval
+- **Filtering Options**: Optional source and tag filters for targeted skill queries
+- **Structured Error Handling**: Maps upstream errors to structured tool errors with appropriate codes
+- **Evidence Building**: Automatic evidence generation for audit trails with source system identification
+- **Contract Compliance**: Ensures skill data conforms to shared schema contracts
+
+```mermaid
+flowchart TD
+ToolRequest["Tool Request"] --> ValidateParams["Validate Parameters"]
+ValidateParams --> CheckConfig{"Skills Configured?"}
+CheckConfig --> |No| ReturnError["Return NOT_CONFIGURED"]
+CheckConfig --> |Yes| Authenticate["Authenticate with Basic Credentials"]
+Authenticate --> SetHeader["Set x-request-id Header"]
+SetHeader --> ExecuteQuery["Execute HTTP Request"]
+ExecuteQuery --> ProcessResults["Process Results"]
+ProcessResults --> BuildEvidence["Build Audit Evidence"]
+BuildEvidence --> ReturnResult["Return Tool Result"]
+```
+
+**Updated** Enhanced skills connector with request correlation capabilities enabling end-to-end audit trail tracking
+
+**Diagram sources**
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
+
+**Section sources**
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
+
 ### Schemas and Contracts
 - Tool invocation schema defines required fields for tool calls
 - Tool result schema standardizes responses across tools
@@ -661,6 +729,7 @@ The Tool Gateway has clear dependency boundaries with focused security component
 - **Enhanced Kubernetes connector depends on cluster-wide RBAC permissions and policy enforcement**
 - Elastic connector depends on Elasticsearch client and configuration
 - **Incidents connector depends on incident-service HTTP API and Basic authentication**
+- **Skills connector depends on skills-hub HTTP API, Basic authentication, and request correlation**
 - Output redaction depends on tool result structures and metrics tracking
 
 ```mermaid
@@ -675,11 +744,12 @@ Registry --> Redaction
 Tools --> K8s["Kubernetes Connector (Cluster-Wide)"]
 Tools --> Elastic["Elastic Connector"]
 Tools --> Incidents["Incidents Connector"]
+Tools --> Skills["Skills Connector (with Request Correlation)"]
 Services --> Schemas["Schemas & Contracts"]
 Services --> Core["Core Config/Runtime/Observability"]
 ```
 
-**Updated** Simplified dependency graph reflecting all three connectors with enhanced Kubernetes permissions and risk-tier admission control
+**Updated** Simplified dependency graph reflecting all four connectors with enhanced Kubernetes permissions, risk-tier admission control, and request correlation capabilities
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -691,6 +761,7 @@ Services --> Core["Core Config/Runtime/Observability"]
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 
@@ -704,6 +775,7 @@ Services --> Core["Core Config/Runtime/Observability"]
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 
@@ -723,6 +795,9 @@ Services --> Core["Core Config/Runtime/Observability"]
 - **Connection timeout configuration for incidents service calls (10 seconds)**
 - **Result limit enforcement for incidents queries (max 50 entries)**
 - **Efficient incident data projection to exclude unnecessary fields in list operations**
+- **Connection timeout configuration for skills connector calls (10 seconds)**
+- **Result limit enforcement for skills queries (max 20 entries)**
+- **Minimal header overhead for request correlation (conditional x-request-id forwarding)**
 - **Risk-tier admission control minimizes policy evaluation overhead for read-only tools**
 
 ## Troubleshooting Guide
@@ -742,12 +817,15 @@ Common issues and resolutions:
 - **Incidents connectivity**: Check incidents service URL, Basic authentication credentials, and network connectivity
 - **Incidents configuration**: Verify `GATEWAY_INCIDENTS_SERVICE_URL`, `GATEWAY_INCIDENTS_CLIENT_ID`, and `GATEWAY_INCIDENTS_CLIENT_SECRET`
 - **Incidents parameter validation**: Ensure incident IDs match the expected pattern (inc-<lowercase alphanumeric>)
+- **Skills connectivity**: Check skills-hub URL, Basic authentication credentials, and network connectivity
+- **Skills configuration**: Verify `GATEWAY_SKILLS_SERVICE_URL` and `GATEWAY_SKILLS_CLIENT_SECRET`
+- **Skills parameter validation**: Ensure skill IDs match the expected pattern (source_id/slug format)
+- **Request correlation issues**: Verify x-request-id header is being forwarded correctly to downstream services
 - Performance degradation: Monitor metrics and adjust rate limits
 - Output redaction issues: Check redaction configuration and overflow thresholds
 - Dependency injection problems: Verify service initialization and configuration
-- Parameter validation errors: Review tool parameter schemas and constraints
 
-**Updated** Added troubleshooting guidance for risk-tier admission control, mutating tools, and common issues
+**Updated** Added troubleshooting guidance for risk-tier admission control, mutating tools, request correlation, and common issues
 
 **Section sources**
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
@@ -756,17 +834,18 @@ Common issues and resolutions:
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
 - [observability.py](file://products/tool-gateway/src/tool_gateway/core/observability.py)
 - [dependencies.py](file://products/tool-gateway/src/tool_gateway/core/dependencies.py)
 
 ## Conclusion
-The Tool Gateway Service provides a focused, secure, and extensible platform for internal tool execution with policy enforcement, secure tool invocation, and comprehensive output redaction. Its streamlined architecture enables easy extension with new tools while maintaining strong security and observability standards. The service now operates exclusively as an internal component, receiving requests from other platform services through well-defined APIs with delegated token authentication.
+The Tool Gateway Service provides a focused, secure, and extensible platform for internal tool execution with policy enforcement, secure tool invocation, comprehensive output redaction, and enhanced request correlation. Its streamlined architecture enables easy extension with new tools while maintaining strong security and observability standards. The service now operates exclusively as an internal component, receiving requests from other platform services through well-defined APIs with delegated token authentication.
 
-The platform-gateway extraction has successfully separated portal-facing responsibilities into the new `platform-gateway` service, allowing tool-gateway to focus solely on its core mandate of connector standardization and tool execution. Recent enhancements include the addition of Elastic connector for observability data access, incidents connector for querying incident data through the new incident service, **enhanced RBAC permissions with cluster-wide read-only access enabling comprehensive diagnostic capabilities across all namespaces**, **risk-tier admission control with GATEWAY_MUTATING_TOOLS_ENABLED for secure mutating tool registration**, and **bounded mutating tool support with k8s.delete_pod for controlled pod restart operations**.
+The platform-gateway extraction has successfully separated portal-facing responsibilities into the new `platform-gateway` service, allowing tool-gateway to focus solely on its core mandate of connector standardization and tool execution. Recent enhancements include the addition of Elastic connector for observability data access, incidents connector for querying incident data through the new incident service, **skills connector for accessing team-owned operational skills and runbooks with full audit trail correlation**, **enhanced RBAC permissions with cluster-wide read-only access enabling comprehensive diagnostic capabilities across all namespaces**, **risk-tier admission control with GATEWAY_MUTATING_TOOLS_ENABLED for secure mutating tool registration**, **bounded mutating tool support with k8s.delete_pod for controlled pod restart operations**, and **enhanced request correlation through x-request-id header forwarding enabling end-to-end audit trail tracking**.
 
-This architectural change improves ownership alignment, security boundaries, and maintainability while preserving all external contracts and functionality. The transition from namespaced Role to cluster-wide ClusterRole significantly enhances operational capabilities while maintaining strict read-only access controls. The introduction of risk-tier admission control ensures that mutating operations require explicit authorization through both environment configuration and policy enforcement.
+This architectural change improves ownership alignment, security boundaries, and maintainability while preserving all external contracts and functionality. The transition from namespaced Role to cluster-wide ClusterRole significantly enhances operational capabilities while maintaining strict read-only access controls. The introduction of risk-tier admission control ensures that mutating operations require explicit authorization through both environment configuration and policy enforcement. The enhanced request correlation capabilities ensure that every tool invocation can be traced end-to-end through downstream services, providing comprehensive audit trail visibility.
 
 ## Appendices
 
@@ -779,7 +858,7 @@ The platform-gateway extraction (ADR-0005, SPEC-010) has been completed successf
 
 **Component Separation:**
 - **Moved to platform-gateway**: Token verification, policy engine, chat routes, session routes, auth routes, identity routes, runtime routes, delegation client, agent client
-- **Remaining in tool-gateway**: Tool registry, base tool framework, k8s connector, elastic connector, incidents connector, output redaction, tools routes, health endpoints
+- **Remaining in tool-gateway**: Tool registry, base tool framework, k8s connector, elastic connector, incidents connector, skills connector, output redaction, tools routes, health endpoints
 
 **Impact Assessment:**
 - External HTTP contracts remain unchanged for portal callers
@@ -828,6 +907,31 @@ The risk-tier admission control system provides defense-in-depth for mutating op
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 
+### Enhanced Request Correlation with x-request-id Header Forwarding
+The enhanced request correlation system enables end-to-end audit trail tracking through the entire tool execution pipeline:
+
+**Implementation Details**:
+- Gateway service adds `request_id` to identity context passed to tools (SPEC-029 R-3)
+- Skills connector forwards `request_id` as `x-request-id` header to skills-hub API calls
+- Missing request IDs are handled gracefully with None values forwarded
+- Downstream services receive correlation headers for audit trail continuity
+
+**Benefits**:
+- Enables per-user attribution of skill usage events
+- Joins skill usage audit events with existing tool_invoked events
+- Maintains correlation without exposing user identity to skills-hub
+- Preserves existing audit trail infrastructure and contracts
+
+**Testing Coverage**:
+- Tests verify request_id forwarding for all skills tools (search, get, list)
+- Tests confirm missing request_id handling with None values
+- Tests validate header setting behavior in HTTP client calls
+
+**Section sources**
+- [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
+- [test_skills_connector.py](file://products/tool-gateway/tests/test_skills_connector.py)
+
 ### Policy Definition Examples
 YAML-based policy definitions control access to tools and operations with enhanced permissions:
 - Rule-based access control with conditions
@@ -847,6 +951,7 @@ Tools are registered dynamically with metadata and schemas from multiple connect
 - Integration with Kubernetes connector for cluster-wide operations
 - Integration with Elastic connector for observability data access
 - Integration with Incidents connector for incident data access
+- Integration with Skills connector for skills and runbook access with request correlation
 - **Risk-level classification** for admission control (read/write/admin)
 
 **Section sources**
@@ -855,6 +960,7 @@ Tools are registered dynamically with metadata and schemas from multiple connect
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 
 ### Custom Tool Development Guidelines
 When developing custom tools:
@@ -865,11 +971,13 @@ When developing custom tools:
 - Integrate with Kubernetes connector for cluster-wide operations
 - Integrate with Elastic connector for observability data access
 - Integrate with Incidents connector for incident data access
+- Integrate with Skills connector for skills and runbook access with request correlation
 - Register tools with the registry for discovery
 - Be aware that all tool outputs will be automatically redacted for security
 - **Understand that write/admin tools require GATEWAY_MUTATING_TOOLS_ENABLED and tools:mutate policy permission**
+- **For skills tools, request_id will be automatically forwarded to downstream services for audit correlation**
 
-**Updated** Added guidance for risk-level classification and mutating tool requirements
+**Updated** Added guidance for risk-level classification, mutating tool requirements, and request correlation capabilities
 
 **Section sources**
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
@@ -877,12 +985,14 @@ When developing custom tools:
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 
 ### Security Considerations
 - Token verification with audience validation for `tool-gateway` audience
 - **Enhanced RBAC enforcement with cluster-wide read-only access via `luban-tool-gateway-readonly` ClusterRole**
 - **Risk-tier admission control preventing unauthorized access to mutating tools**
+- **Enhanced request correlation with x-request-id header forwarding for audit trail continuity**
 - Input validation and sanitization
 - Policy-based access control with enhanced tool permissions including tools:mutate
 - Secure configuration management
@@ -890,11 +1000,13 @@ When developing custom tools:
 - Fail-closed overflow protection for excessive redaction scenarios
 - Elastic connector authentication with API key or basic auth
 - Incidents connector authentication with Basic credentials (service-to-service only)
+- Skills connector authentication with Basic credentials (service-to-service only)
 - Parameter validation and clamping to prevent resource exhaustion
 - **Strict incident ID validation to prevent path injection attacks**
+- **Strict skill ID validation to prevent path injection attacks**
 - **Strict read-only access controls ensuring no mutating operations are permitted without explicit opt-in**
 
-**Updated** Enhanced security model with risk-tier admission control and improved cluster-wide RBAC permissions
+**Updated** Enhanced security model with risk-tier admission control, improved cluster-wide RBAC permissions, and enhanced request correlation capabilities
 
 **Section sources**
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
@@ -904,6 +1016,7 @@ When developing custom tools:
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 
 ### Rate Limiting and Monitoring Strategies
 - Configure rate limits at the API gateway level
@@ -914,11 +1027,13 @@ When developing custom tools:
 - Track redaction statistics and overflow events
 - Monitor Elastic connector performance and query efficiency
 - Monitor incidents connector performance and upstream service availability
+- Monitor skills connector performance and upstream service availability
 - Track tool execution times and success rates
 - **Monitor cluster-wide resource access patterns and API call volumes**
 - **Monitor risk-tier admission control effectiveness and mutating tool attempts**
+- **Monitor request correlation header forwarding and downstream service correlation**
 
-**Updated** Enhanced monitoring strategies with risk-tier admission control and cluster-wide access monitoring
+**Updated** Enhanced monitoring strategies with risk-tier admission control, cluster-wide access monitoring, and request correlation monitoring
 
 **Section sources**
 - [metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
@@ -973,6 +1088,24 @@ The Incidents connector provides incident data access with secure service-to-ser
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [test_incidents_connector.py](file://products/tool-gateway/tests/test_incidents_connector.py)
 
+### Skills Connector Configuration
+The Skills connector provides skills and runbook access with secure service-to-service authentication and enhanced request correlation:
+- **Enable/Disable**: `GATEWAY_SKILLS_SERVICE_URL` environment variable (required for activation)
+- **Service URL**: `GATEWAY_SKILLS_SERVICE_URL` for skills-hub endpoint
+- **Authentication**: `GATEWAY_SKILLS_CLIENT_ID` and `GATEWAY_SKILLS_CLIENT_SECRET` for Basic authentication
+- **Default Client ID**: `tool-gateway` (must be registered in skills-hub query clients)
+- **Timeout**: 10 seconds for HTTP requests to skills-hub
+- **Result Limits**: Maximum 20 entries per list/search operation
+- **Authentication Flow**: Uses gateway-held credentials, never exposes user tokens to skills-hub
+- **Request Correlation**: Forwards caller's request_id as x-request-id header for audit trail correlation
+
+**New** Skills connector configuration options for secure skills data access with enhanced audit trail correlation
+
+**Section sources**
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
+- [test_skills_connector.py](file://products/tool-gateway/tests/test_skills_connector.py)
+
 ### RBAC Permission Changes - Release Notes Reference
 The RBAC permissions have been significantly enhanced in Release 1:
 
@@ -1018,3 +1151,29 @@ The bounded mutating tool provides controlled pod restart capability:
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
 - [mutating-demo.sh](file://shared/platform-ops/e2e/mutating-demo.sh)
+
+### SPEC-029 Skills Usage Audit Trail Implementation
+The SPEC-029 implementation provides comprehensive audit trail correlation between tool invocations and skills usage:
+
+**Implementation Details**:
+- Gateway service adds `request_id` to identity context passed to tools (SPEC-029 R-3)
+- Skills connector forwards `request_id` as `x-request-id` header to skills-hub API calls
+- Missing request IDs are handled gracefully with None values forwarded
+- Downstream services receive correlation headers for audit trail continuity
+
+**Benefits**:
+- Enables per-user attribution of skill usage events
+- Joins skill usage audit events with existing tool_invoked events
+- Maintains correlation without exposing user identity to skills-hub
+- Preserves existing audit trail infrastructure and contracts
+
+**Testing Coverage**:
+- Tests verify request_id forwarding for all skills tools (search, get, list)
+- Tests confirm missing request_id handling with None values
+- Tests validate header setting behavior in HTTP client calls
+
+**Section sources**
+- [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
+- [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
+- [test_skills_connector.py](file://products/tool-gateway/tests/test_skills_connector.py)
+- [spec.md](file://docs/specs/SPEC-029-skills-usage-audit-trail/spec.md)

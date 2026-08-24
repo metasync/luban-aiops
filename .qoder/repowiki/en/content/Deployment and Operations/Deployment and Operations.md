@@ -17,6 +17,8 @@
 - [products/audit-service/src/audit_service/__init__.py](file://products/audit-service/src/audit_service/__init__.py)
 - [products/incident-service/src/incident_service/metadata.py](file://products/incident-service/src/incident_service/metadata.py)
 - [products/incident-service/src/incident_service/__init__.py](file://products/incident-service/src/incident_service/__init__.py)
+- [products/skills-hub/src/skills_hub/services/audit_emitter.py](file://products/skills-hub/src/skills_hub/services/audit_emitter.py)
+- [products/skills-hub/src/skills_hub/core/config.py](file://products/skills-hub/src/skills_hub/core/config.py)
 - [mk/image.mk](file://mk/image.mk)
 - [mk/python.mk](file://mk/python.mk)
 - [shared/platform-ops/gitops/dev-k8s/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
@@ -38,6 +40,8 @@
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env)
+- [shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
+- [shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.env)
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml)
@@ -89,12 +93,10 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for team-hosted LLM model hosting capabilities with Ollama deployment configurations
-- Included reference Kubernetes manifests for self-hosted model servers (Ollama, vLLM, llama.cpp)
-- Documented bearer-token authentication and secret management for local/on-prem model servers
-- Added operational guidance for model weight management, scaling considerations, and GPU node support
-- Integrated luban provider configuration into multi-model catalog system
-- Enhanced troubleshooting procedures for self-hosted model scenarios
+- Enhanced sync-audit-secrets.sh to include skills-hub as part of the AUDIT_INGEST_CLIENTS registry for comprehensive audit event ingestion
+- Improved secret upsert procedures with better handling of existing environment files to preserve other secrets
+- Enhanced restart procedures to address audit-secret rollout race conditions by ensuring audit-service is fully rolled out before restarting emitters
+- Updated skills-hub integration with audit service for usage event tracking (SPEC-029)
 
 ## Table of Contents
 1. Introduction
@@ -109,11 +111,11 @@
 10. Appendices
 
 ## Introduction
-This document provides comprehensive deployment and operations guidance for the Luban AIOps Platform. It focuses on Kubernetes deployment using GitOps with Kustomize overlays, container build processes, image management, automation scripts, environment configuration, secrets management (including enhanced delegation secret auto-provisioning, audit secrets synchronization, OpenTelemetry credential provisioning, and team-hosted LLM model server management), scaling strategies, monitoring setup (Prometheus metrics, structured logging, health checks, and OpenTelemetry push pipeline), operational procedures (updates, rollbacks, disaster recovery, capacity planning), performance tuning, resource optimization, and troubleshooting common issues. The platform now operates at version 0.5.0 with synchronized service versions across all components. Enhanced model pinning best practices ensure better audit attribution and traceability through fixed-point model IDs rather than rolling tier aliases. **New**: Team-hosted LLM model hosting capabilities enable running small models locally or on-premises with full platform integration.
+This document provides comprehensive deployment and operations guidance for the Luban AIOps Platform. It focuses on Kubernetes deployment using GitOps with Kustomize overlays, container build processes, image management, automation scripts, environment configuration, secrets management (including enhanced delegation secret auto-provisioning, comprehensive audit secrets synchronization with skills-hub support, OpenTelemetry credential provisioning, and team-hosted LLM model server management), scaling strategies, monitoring setup (Prometheus metrics, structured logging, health checks, and OpenTelemetry push pipeline), operational procedures (updates, rollbacks, disaster recovery, capacity planning), performance tuning, resource optimization, and troubleshooting common issues. The platform now operates at version 0.5.0 with synchronized service versions across all components. Enhanced model pinning best practices ensure better audit attribution and traceability through fixed-point model IDs rather than rolling tier aliases. **New**: Team-hosted LLM model hosting capabilities enable running small models locally or on-premises with full platform integration.
 
 ## Project Structure
 The platform is organized into multiple products and shared operational assets:
-- Products: agent-platform, identity-broker, tool-gateway, operator-portal, platform-gateway, audit-service, incident-service
+- Products: agent-platform, identity-broker, tool-gateway, operator-portal, platform-gateway, audit-service, incident-service, skills-hub
 - Shared ops: GitOps manifests under shared/platform-ops/gitops with base and runtime profiles
 - Build system: Makefiles per product and shared mk rules for images and Python packaging
 - Version management: Centralized version control with validation across all services
@@ -213,7 +215,7 @@ Ollama --> AP
 - Platform Gateway: Central gateway that handles user authentication and delegates tokens to downstream services through the identity broker.
 - **Audit Service**: Durable audit trail service that ingests, stores, and queries audit events from all platform components with PostgreSQL persistence.
 - **Incident Service**: Incident management service providing intake, triage, and collaboration capabilities with version 0.5.0 synchronization.
-- **Skills Hub**: Skills management service providing reusable capabilities across the platform.
+- **Skills Hub**: Skills management service providing reusable capabilities across the platform with integrated audit event emission for usage tracking.
 - **Team-Hosted LLM Provider**: Self-hosted model server support via the `luban` provider, enabling local/on-premises model execution with bearer-token authentication.
 
 Key operational artifacts:
@@ -221,7 +223,7 @@ Key operational artifacts:
 - Product Makefiles orchestrate builds and pushes.
 - mk/image.mk and mk/python.mk provide reusable build targets.
 - Kustomize base defines Kubernetes resources; overlays select runtime profiles and apply environment-specific patches.
-- Shell scripts automate deployment, secret synchronization, profile selection, verification, delegation secret provisioning, audit secret management, OpenTelemetry credential provisioning, and team-hosted model server management.
+- Shell scripts automate deployment, secret synchronization, profile selection, verification, delegation secret provisioning, comprehensive audit secret management (including skills-hub), OpenTelemetry credential provisioning, and team-hosted model server management.
 - **Version Management**: Centralized version validation ensuring all services maintain consistent version 0.5.0.
 - **Model Catalog**: Multi-provider model management with live discovery, curated series, credential gating, and team-hosted model support.
 
@@ -240,7 +242,7 @@ Key operational artifacts:
 - [products/agent-platform/src/agent_service/providers/luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
 
 ## Architecture Overview
-The platform deploys as a set of Kubernetes workloads orchestrated via Kustomize. The GitOps workflow uses overlays to compose base manifests with environment-specific settings and runtime profiles. Enhanced with automated delegation secret provisioning for secure cross-service communication, durable audit trail storage, OpenTelemetry credential provisioning for centralized observability, centralized version management ensuring all services operate at version 0.5.0, advanced model catalog management with live discovery capabilities, and team-hosted model server support for local/on-premises model execution.
+The platform deploys as a set of Kubernetes workloads orchestrated via Kustomize. The GitOps workflow uses overlays to compose base manifests with environment-specific settings and runtime profiles. Enhanced with automated delegation secret provisioning for secure cross-service communication, comprehensive audit trail storage with skills-hub integration, OpenTelemetry credential provisioning for centralized observability, centralized version management ensuring all services operate at version 0.5.0, advanced model catalog management with live discovery capabilities, and team-hosted model server support for local/on-premises model execution.
 
 ```mermaid
 graph TB
@@ -372,14 +374,14 @@ Commit --> End(["End"])
 - Base manifests define core resources (namespaces, services, deployments, RBAC, policies).
 - Runtime profiles inject model provider configurations via ConfigMaps and secrets.
 - Overlays select profiles and apply environment-specific patches.
-- Scripts automate deploy, profile selection, secret sync, verification, delegation secret provisioning, audit secret management, OpenTelemetry credential provisioning, and team-hosted model server management.
+- Scripts automate deploy, profile selection, secret sync, verification, delegation secret provisioning, comprehensive audit secret management (including skills-hub), OpenTelemetry credential provisioning, and team-hosted model server management.
 - **Version Validation**: Pre-deployment validation ensures all services maintain version 0.5.0 consistency.
 
 Operational steps:
 - Select runtime profile using the provided script.
 - Sync runtime secrets to the cluster.
 - Provision delegation secrets for cross-service authentication.
-- Provision audit secrets for audit event ingestion.
+- Provision comprehensive audit secrets for audit event ingestion from all platform components including skills-hub.
 - Provision OpenTelemetry credentials for centralized observability.
 - Deploy overlay to the target cluster.
 - Verify runtime profile and health endpoints.
@@ -400,8 +402,8 @@ Script->>Version : Validate version consistency
 Version-->>Script : Version check passed
 Script->>Delegation : Provision delegation secrets
 Delegation->>K8s : Create/update secrets
-Script->>Audit : Provision audit secrets
-Audit->>K8s : Create/update secrets
+Script->>Audit : Provision comprehensive audit secrets
+Audit->>K8s : Create/update secrets (including skills-hub)
 Script->>OTel : Provision OpenTelemetry credentials
 OTel->>K8s : Create/update secrets
 Script->>Kustomize : kustomize build <overlay>
@@ -437,7 +439,7 @@ K8s-->>Dev : Resources created/updated
 - Runtime secrets are synchronized via dedicated scripts.
 - OIDC client reconciliation is supported by a helper script.
 - **Enhanced**: Delegation secrets are automatically provisioned for secure cross-service authentication.
-- **New**: Audit secrets are automatically provisioned for audit event ingestion across all platform components.
+- **Updated**: Comprehensive audit secrets are automatically provisioned for audit event ingestion from all platform components including skills-hub, with improved secret upsert procedures and race condition handling.
 - **Updated**: OpenTelemetry credentials are automatically provisioned for centralized observability via OpenObserve with enhanced CI/CD support and durable cluster-side merging.
 - **New**: Team-hosted LLM model server secrets are managed through dedicated configuration for bearer-token authentication.
 - **Version Management**: All services configured with version 0.5.0 metadata and consistent versioning.
@@ -448,7 +450,7 @@ Best practices:
 - Separate non-sensitive config from secrets.
 - Validate overlays before applying to prevent misconfiguration.
 - Use delegation secret provisioning to ensure consistent service-to-service authentication.
-- Use audit secret provisioning to ensure consistent audit event ingestion credentials.
+- Use comprehensive audit secret provisioning to ensure consistent audit event ingestion credentials from all components including skills-hub.
 - Use OpenTelemetry secret provisioning to ensure consistent telemetry authentication headers with durable cluster-side merging.
 - Configure team-hosted model server secrets with proper bearer-token authentication.
 - **CI/CD Integration**: Set `SKIP_OTEL_SECRETS=true` in CI environments where secrets are injected externally.
@@ -460,7 +462,7 @@ flowchart TD
 EnvFiles["Environment Files"] --> Overlay["Kustomize Overlay"]
 Secrets["Runtime Secrets"] --> SecretSync["sync-runtime-secret.sh"]
 DelegationSecrets["Delegation Secrets"] --> DelegationSync["sync-delegation-secrets.sh"]
-AuditSecrets["Audit Secrets"] --> AuditSync["sync-audit-secrets.sh"]
+AuditSecrets["Comprehensive Audit Secrets"] --> AuditSync["sync-audit-secrets.sh"]
 OTELSecrets["OpenTelemetry Credentials"] --> OTESync["sync-otel-secrets.sh"]
 LLMSecrets["LLM Server Secrets"] --> LLMSync["Manual Configuration"]
 VersionCheck["Version Validation"] --> Overlay
@@ -481,6 +483,7 @@ K8sSecrets --> Pods
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
+- [shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
@@ -494,6 +497,7 @@ K8sSecrets --> Pods
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
+- [shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [shared/platform-ops/gitops/sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
@@ -541,12 +545,14 @@ PG-->>User : Response
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env)
 
 ### Audit Event Ingestion and Storage
-**New Section** The audit service provides durable audit trail storage with PostgreSQL backend and supports ingestion from all platform components.
+**Updated Section** The audit service provides durable audit trail storage with PostgreSQL backend and supports ingestion from all platform components including skills-hub with enhanced secret management.
 
-The audit service implements a comprehensive audit trail system:
+The audit service implements a comprehensive audit trail system with enhanced deployment process:
 
-- **Event Ingestion**: All platform components emit audit events to the audit-service via authenticated HTTP endpoints
-- **Client Authentication**: Static client registry validates ingest requests using shared secrets
+- **Event Ingestion**: All platform components emit audit events to the audit-service via authenticated HTTP endpoints, including skills-hub for usage tracking (SPEC-029)
+- **Client Authentication**: Static client registry validates ingest requests using shared secrets, now including skills-hub in the AUDIT_INGEST_CLIENTS registry
+- **Enhanced Secret Management**: Improved secret upsert procedures preserve existing environment files while updating audit credentials
+- **Race Condition Handling**: Enhanced restart procedures ensure audit-service is fully rolled out before restarting emitters to prevent authentication failures
 - **PostgreSQL Persistence**: Durable storage with configurable retention policies and automatic eviction
 - **Query Interface**: REST API for querying audit events with filtering capabilities
 - **Health Monitoring**: Readiness and liveness probes for reliable operation
@@ -557,31 +563,41 @@ sequenceDiagram
 participant TG as "Tool Gateway"
 participant PG as "Platform Gateway"
 participant IB as "Identity Broker"
+participant IS as "Incident Service"
+participant SH as "Skills Hub"
 participant AS as "Audit Service"
 participant DB as "PostgreSQL"
-Note over TG,DB : Audit Event Flow
+Note over TG,DB : Enhanced Audit Event Flow
 TG->>AS : POST /api/v1/audit/events (with auth)
 PG->>AS : POST /api/v1/audit/events (with auth)
 IB->>AS : POST /api/v1/audit/events (with auth)
+IS->>AS : POST /api/v1/audit/events (with auth)
+SH->>AS : POST /api/v1/audit/events (with auth)
 AS->>DB : Store audit event
 DB-->>AS : Confirmation
 AS-->>TG : 201 Created
 AS-->>PG : 201 Created
 AS-->>IB : 201 Created
+AS-->>IS : 201 Created
+AS-->>SH : 201 Created
 ```
 
 **Diagram sources**
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml)
 - [products/audit-service/src/audit_service/core/config.py](file://products/audit-service/src/audit_service/core/config.py)
+- [products/skills-hub/src/skills_hub/services/audit_emitter.py](file://products/skills-hub/src/skills_hub/services/audit_emitter.py)
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env)
+- [shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
+- [shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.env)
 - [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [products/audit-service/src/audit_service/core/config.py](file://products/audit-service/src/audit_service/core/config.py)
 - [products/audit-service/src/audit_service/metadata.py](file://products/audit-service/src/audit_service/metadata.py)
+- [products/skills-hub/src/skills_hub/services/audit_emitter.py](file://products/skills-hub/src/skills_hub/services/audit_emitter.py)
 
 ### OpenTelemetry Push Pipeline and OpenObserve Integration
 **Updated Section** Comprehensive OpenTelemetry support with enhanced automated credential provisioning for centralized observability and improved CI/CD integration.
@@ -782,6 +798,7 @@ Guidelines:
 - **OpenTelemetry Integration**: Unified telemetry pipeline with automated credential provisioning and centralized collection.
 - **Model Catalog Monitoring**: Metrics for model discovery refresh rates, cache hit ratios, and model counts per provider.
 - **Team-Hosted Model Monitoring**: Health checks for Ollama endpoints, model loading status, and inference performance metrics.
+- **Skills Hub Monitoring**: Audit emission metrics for skill usage tracking (SPEC-029).
 - **Version 0.5.0 Monitoring**: All services emit consistent version metadata for accurate monitoring and alerting.
 
 Implementation notes:
@@ -796,6 +813,7 @@ Implementation notes:
 - Track model selection patterns and pinning effectiveness.
 - Monitor team-hosted model server health, model loading times, and inference latency.
 - Track GPU utilization and memory usage for GPU-enabled model servers.
+- Monitor skills-hub audit emission metrics for usage tracking.
 
 ```mermaid
 graph TB
@@ -806,6 +824,7 @@ Health["Health Endpoints"]
 OTel["OpenTelemetry Exporters"]
 ModelMetrics["Model Catalog Metrics"]
 LLMMetrics["Team-Hosted Model Metrics"]
+SkillsMetrics["Skills Hub Audit Metrics"]
 Prometheus["Prometheus"]
 Grafana["Grafana Dashboards"]
 OpenObserve["OpenObserve Backend"]
@@ -816,9 +835,11 @@ Services --> Health
 Services --> OTel
 Services --> ModelMetrics
 Services --> LLMMetrics
+Services --> SkillsMetrics
 Prometheus --> Metrics
 Prometheus --> ModelMetrics
 Prometheus --> LLMMetrics
+Prometheus --> SkillsMetrics
 Grafana --> Prometheus
 OTel --> OpenObserve
 VersionMonitor --> Services
@@ -843,7 +864,7 @@ VersionMonitor --> Services
   - Apply overlay changes; verify rollout status.
   - Validate health endpoints and metrics.
   - Re-provision delegation secrets if service credentials change.
-  - Re-provision audit secrets if audit ingestion credentials change.
+  - Re-provision comprehensive audit secrets if audit ingestion credentials change (including skills-hub).
   - Re-provision OpenTelemetry credentials if OpenObserve authentication changes.
   - **Version Validation**: Ensure all services maintain version 0.5.0 consistency.
   - **Model Catalog Updates**: Refresh model discovery if provider model lineups change significantly.
@@ -852,7 +873,7 @@ VersionMonitor --> Services
   - Revert overlay commits to previous known-good tags.
   - Apply reverted overlay; confirm rollback success.
   - Restore delegation secrets if needed.
-  - Restore audit secrets if needed.
+  - Restore comprehensive audit secrets if needed (including skills-hub).
   - Restore OpenTelemetry credentials if needed.
   - **Version Rollback**: Ensure all services revert to consistent previous version.
   - **Model Catalog Rollback**: Revert to curated series if live discovery causes issues.
@@ -861,7 +882,7 @@ VersionMonitor --> Services
   - Back up persistent data (e.g., Redis volumes, PostgreSQL data, model weight PVCs).
   - Restore from backups and reapply overlays.
   - Re-provision delegation secrets and validate service connectivity.
-  - Re-provision audit secrets and validate audit ingestion.
+  - Re-provision comprehensive audit secrets and validate audit ingestion from all components including skills-hub.
   - Re-provision OpenTelemetry credentials and validate telemetry flow.
   - Restore team-hosted model weights and validate model availability.
   - Confirm data integrity and service functionality.
@@ -877,6 +898,7 @@ VersionMonitor --> Services
   - **Version 0.5.0 Optimization**: Leverage consistent service versions for predictable scaling behavior.
   - **Model Catalog Capacity**: Plan for increased model discovery traffic and provider API rate limits.
   - **Team-Hosted Model Capacity**: Plan GPU node capacity, model weight storage, and concurrent inference capacity based on usage patterns.
+  - **Skills Hub Capacity**: Monitor skill usage patterns and audit event volume for capacity planning.
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
@@ -889,7 +911,7 @@ VersionMonitor --> Services
 - [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
 
 ## Dependency Analysis
-The platform's dependencies span build tools, container images, Kubernetes resources, runtime profiles, delegation secret management, audit secret management, OpenTelemetry credential provisioning, centralized version management, advanced model catalog management, and team-hosted model server support.
+The platform's dependencies span build tools, container images, Kubernetes resources, runtime profiles, delegation secret management, comprehensive audit secret management (including skills-hub), OpenTelemetry credential provisioning, centralized version management, advanced model catalog management, and team-hosted model server support.
 
 ```mermaid
 graph LR
@@ -901,6 +923,7 @@ TGMake["products/tool-gateway/Makefile"] --> TGDocker["products/tool-gateway/Doc
 PGMake["products/platform-gateway/Makefile"] --> PGDocker["products/platform-gateway/Dockerfile"]
 ASMake["products/audit-service/Makefile"] --> ASDocker["products/audit-service/Dockerfile"]
 ISMake["products/incident-service/Makefile"] --> ISDocker["products/incident-service/Dockerfile"]
+SHMake["products/skills-hub/Makefile"] --> SHDocker["products/skills-hub/Dockerfile"]
 BaseKust["base/kustomization.yaml"] --> Infra["infra/*"]
 BaseKust --> APRes["agent-platform/*"]
 BaseKust --> IBRes["identity-broker/*"]
@@ -909,6 +932,7 @@ BaseKust --> OPRes["operator-portal/*"]
 BaseKust --> PGRes["platform-gateway/*"]
 BaseKust --> ASRes["audit-service/*"]
 BaseKust --> ISRes["incident-service/*"]
+BaseKust --> SHRes["skills-hub/*"]
 OverlayKust["dev-k8s/kustomization.yaml"] --> BaseKust
 OverlayKust --> Profiles["runtime-profiles/*"]
 OverlayKust --> Delegation["sync-delegation-secrets.sh"]
@@ -932,6 +956,7 @@ OllamaManifests --> Platform["Platform Integration"]
 - [products/tool-gateway/Makefile](file://products/tool-gateway/Makefile)
 - [products/audit-service/Dockerfile](file://products/audit-service/Dockerfile)
 - [products/incident-service/Dockerfile](file://products/incident-service/Dockerfile)
+- [products/skills-hub/Dockerfile](file://products/skills-hub/Dockerfile)
 - [shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
 - [shared/platform-ops/gitops/dev-k8s/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml)
@@ -971,6 +996,7 @@ OllamaManifests --> Platform["Platform Integration"]
   - Monitor PostgreSQL query performance and connection pooling.
   - Tune audit event batch sizes and eviction intervals based on ingestion volume.
   - Consider read replicas for high-volume audit query scenarios.
+  - **Enhanced Performance**: Improved secret upsert procedures reduce deployment time and minimize service disruption.
 - **OpenTelemetry Performance**:
   - Monitor telemetry export success rates and latency.
   - Configure appropriate batch sizes and timeout settings for OTel exporters.
@@ -986,6 +1012,10 @@ OllamaManifests --> Platform["Platform Integration"]
   - Optimize GPU utilization and memory usage for GPU-enabled model servers.
   - Monitor PVC storage performance and model weight access patterns.
   - Consider model quantization levels based on hardware capabilities.
+- **Skills Hub Performance**:
+  - Monitor audit emission performance and event delivery success rates.
+  - Optimize skill search and retrieval operations for better user experience.
+  - Monitor audit event volume from skills-hub for capacity planning.
 - **Version 0.5.0 Optimizations**:
   - All services benefit from consistent version optimizations and performance improvements.
   - Leverage synchronized service versions for predictable performance characteristics.
@@ -999,7 +1029,7 @@ Common issues and resolutions:
 - Secrets not applied:
   - Ensure secret sync script runs successfully and secrets exist in the target namespace.
   - Verify delegation secrets are properly provisioned for cross-service authentication.
-  - Verify audit secrets are properly provisioned for audit event ingestion.
+  - Verify comprehensive audit secrets are properly provisioned for audit event ingestion from all components including skills-hub.
   - Verify OpenTelemetry credentials are properly provisioned for telemetry authentication.
   - Verify team-hosted model server bearer tokens are correctly configured.
 - Health checks failing:
@@ -1013,10 +1043,12 @@ Common issues and resolutions:
   - Verify workload identity configuration if using projected tokens.
   - Monitor delegation exchange metrics for failure patterns.
 - **Audit ingestion failures**:
-  - Check audit secret consistency between emitters and audit-service.
+  - Check comprehensive audit secret consistency between emitters and audit-service, including skills-hub.
   - Verify PostgreSQL connectivity and database availability.
   - Monitor audit event ingestion metrics and error rates.
   - Check audit service health endpoints and database connection status.
+  - **Enhanced Troubleshooting**: The improved restart procedures in sync-audit-secrets.sh address race conditions during audit-secret rollouts by ensuring audit-service is fully rolled out before restarting emitters.
+  - **Secret Upsert Issues**: If environment files are being overwritten incorrectly, verify the upsert_env_line function is preserving existing secrets while updating audit credentials.
 - **OpenTelemetry issues**:
   - Verify `OTEL_ENABLED` is set correctly for each service.
   - Check OpenObserve endpoint configuration and network connectivity.
@@ -1042,6 +1074,11 @@ Common issues and resolutions:
   - Check GPU resource allocation and driver availability for GPU-enabled deployments.
   - Validate model names match between platform configuration and server model listings.
   - Monitor inference latency and throughput for performance issues.
+- **Skills Hub Issues**:
+  - Verify SKILLS_AUDIT_SERVICE_URL and SKILLS_AUDIT_CLIENT_SECRET are properly configured.
+  - Check that skills-hub is included in the AUDIT_INGEST_CLIENTS registry.
+  - Monitor audit emission metrics for skill usage tracking.
+  - Verify audit event delivery success rates from skills-hub.
 - **Version Consistency Issues**:
   - Use `validate_version.py` to check version drift across all services.
   - Ensure all services maintain version 0.5.0 consistency.
@@ -1053,11 +1090,12 @@ Operational commands:
 - Use deploy scripts to apply overlays and reconcile resources.
 - Use verification scripts to validate runtime profiles and health.
 - Use delegation secret provisioning script to ensure consistent service credentials.
-- Use audit secret provisioning script to ensure consistent audit ingestion credentials.
+- Use comprehensive audit secret provisioning script to ensure consistent audit ingestion credentials from all components including skills-hub.
 - Use OpenTelemetry secret provisioning script to ensure consistent telemetry authentication.
 - Use version validation script to ensure consistent service versions.
 - Use model catalog metrics to monitor discovery performance and cache effectiveness.
 - Use team-hosted model health checks to verify model server availability and model loading status.
+- Use skills-hub audit metrics to monitor skill usage tracking and audit emission performance.
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
@@ -1072,7 +1110,7 @@ Operational commands:
 - [docs/guides/luban-llm-guide.md](file://docs/guides/luban-llm-guide.md)
 
 ## Conclusion
-This guide outlines the end-to-end deployment and operations for the Luban AIOps Platform using GitOps and Kustomize. By following the documented processes for building images, managing overlays, configuring environments, provisioning delegation secrets, synchronizing audit secrets, provisioning OpenTelemetry credentials, and setting up monitoring, teams can reliably operate the platform at scale. The enhanced delegation secret auto-provisioning ensures secure cross-service authentication while maintaining operational simplicity. The new audit service provides durable audit trail storage with PostgreSQL persistence, enabling comprehensive compliance and security monitoring. The integrated OpenTelemetry pipeline with automated credential provisioning delivers centralized observability with fail-safe design and enhanced CI/CD support. The centralized version management system ensures all services operate at version 0.5.0 with consistent behavior across the platform. The advanced model catalog system with live discovery and enhanced model pinning best practices provides robust LLM model management with fixed-point model IDs for better audit attribution and traceability. **New**: Team-hosted LLM model hosting capabilities enable running small models locally or on-premises with full platform integration, supporting Ollama, vLLM, and llama.cpp backends with bearer-token authentication and reference Kubernetes manifests. Continuous validation, robust secret management, proactive capacity planning, careful monitoring of token delegation flows, audit ingestion, telemetry export, model catalog performance, team-hosted model server health, and version consistency are essential for maintaining stability and performance.
+This guide outlines the end-to-end deployment and operations for the Luban AIOps Platform using GitOps and Kustomize. By following the documented processes for building images, managing overlays, configuring environments, provisioning delegation secrets, synchronizing comprehensive audit secrets (including skills-hub integration), provisioning OpenTelemetry credentials, and setting up monitoring, teams can reliably operate the platform at scale. The enhanced delegation secret auto-provisioning ensures secure cross-service authentication while maintaining operational simplicity. The comprehensive audit service provides durable audit trail storage with PostgreSQL persistence, enabling complete compliance and security monitoring across all platform components including skills-hub usage tracking. The integrated OpenTelemetry pipeline with automated credential provisioning delivers centralized observability with fail-safe design and enhanced CI/CD support. The centralized version management system ensures all services operate at version 0.5.0 with consistent behavior across the platform. The advanced model catalog system with live discovery and enhanced model pinning best practices provides robust LLM model management with fixed-point model IDs for better audit attribution and traceability. **New**: Team-hosted LLM model hosting capabilities enable running small models locally or on-premises with full platform integration, supporting Ollama, vLLM, and llama.cpp backends with bearer-token authentication and reference Kubernetes manifests. **Enhanced**: The improved sync-audit-secrets.sh script now includes skills-hub in the AUDIT_INGEST_CLIENTS registry and addresses audit-secret rollout race conditions through enhanced restart procedures and improved secret upsert handling. Continuous validation, robust secret management, proactive capacity planning, careful monitoring of token delegation flows, comprehensive audit ingestion, telemetry export, model catalog performance, team-hosted model server health, skills-hub audit emissions, and version consistency are essential for maintaining stability and performance.
 
 ## Appendices
 
@@ -1081,7 +1119,7 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - select-runtime-profile.sh: Chooses the appropriate runtime profile for model providers.
 - sync-runtime-secret.sh: Synchronizes runtime secrets into the cluster securely.
 - sync-delegation-secrets.sh: Automatically provisions delegation secrets for cross-service authentication between platform-gateway and identity-broker.
-- sync-audit-secrets.sh: Automatically provisions audit secrets for audit event ingestion across all platform components.
+- sync-audit-secrets.sh: Automatically provisions comprehensive audit secrets for audit event ingestion from all platform components including skills-hub, with improved secret upsert procedures and race condition handling.
 - **sync-otel-secrets.sh**: Automatically provisions OpenTelemetry credentials for centralized observability via OpenObserve with enhanced CI/CD support and durable cluster-side merging using kubectl patch.
 - verify-runtime-profile.sh: Validates that the active runtime profile matches expectations.
 - reconcile-portal-oidc-client.sh: Ensures OIDC client configuration remains consistent with Keycloak.
@@ -1104,13 +1142,14 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - Observability settings centralized in a shared env file.
 - Per-service runtime configs mounted via env files.
 - **Delegation configuration**: PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET and IDENTITY_SERVICE_CLIENTS must match for secure token delegation.
-- **Audit configuration**: AUDIT_STORE_BACKEND=postgres, AUDIT_DB_URL for PostgreSQL connection, AUDIT_RETENTION_DAYS for data retention policy.
+- **Audit configuration**: AUDIT_STORE_BACKEND=postgres, AUDIT_DB_URL for PostgreSQL connection, AUDIT_RETENTION_DAYS for data retention policy, AUDIT_INGEST_CLIENTS for comprehensive client registry including skills-hub.
 - **OpenTelemetry configuration**: OTEL_ENABLED for pipeline activation, OTEL_EXPORTER_OTLP_ENDPOINT for OpenObserve URL, OTEL_EXPORTER_OTLP_HEADERS for authentication (provisioned by sync-otel-secrets.sh).
 - **Workload identity**: PLATFORM_GATEWAY_WORKLOAD_TOKEN_PATH for production deployments preferring projected tokens over static secrets.
 - **CI/CD Integration**: SKIP_OTEL_SECRETS=true to skip OpenTelemetry secret provisioning in environments where secrets are injected externally.
 - **Version Management**: All services configured with version 0.5.0 metadata and consistent versioning enforced by validate_version.py.
 - **Model Catalog Configuration**: AGENT_MODEL_DISCOVERY_ENABLED for live discovery, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS for refresh intervals, AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS for API timeouts.
 - **Team-Hosted Model Configuration**: LUBAN_API_KEY for bearer-token authentication, LUBAN_BASE_URL for model server endpoint, LUBAN_MODEL_NAME for default model, LUBAN_MODELS for model pinning.
+- **Skills Hub Configuration**: SKILLS_AUDIT_SERVICE_URL for audit event emission, SKILLS_AUDIT_CLIENT_ID for client identification, SKILLS_AUDIT_CLIENT_SECRET for audit authentication.
 - **Model Pinning Best Practices**: Use fixed-point model IDs (e.g., qwen3.8-max) over rolling tier aliases (e.g., qwen-plus) for better audit attribution and traceability.
 - Ensure consistency across environments by pinning versions and tags.
 
@@ -1120,6 +1159,7 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
+- [shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env)
 - [shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env](file://shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env)
@@ -1154,20 +1194,22 @@ SKIP_DELEGATION_SECRETS=true make deploy
 - [shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env)
 
-### Appendix D: Audit Secret Management
-**New Section** Comprehensive audit secret management for secure audit event ingestion.
+### Appendix D: Comprehensive Audit Secret Management
+**Updated Section** Enhanced audit secret management for secure audit event ingestion from all platform components including skills-hub.
 
-The audit secret system ensures secure audit event ingestion from all platform components:
+The audit secret system ensures secure audit event ingestion from all platform components with improved deployment process:
 
-- **Centralized Secret Generation**: The sync-audit-secrets.sh script generates a single shared secret for all audit emitters
-- **Multi-Component Integration**: Supports tool-gateway, platform-gateway, and identity-broker as audit event emitters
-- **Static Client Registry**: Audit-service maintains a registry of authorized clients with their corresponding secrets
+- **Centralized Secret Generation**: The sync-audit-secrets.sh script generates a single shared secret for all audit emitters including skills-hub
+- **Multi-Component Integration**: Supports tool-gateway, platform-gateway, identity-broker, incident-service, and skills-hub as audit event emitters
+- **Static Client Registry**: Audit-service maintains a registry of authorized clients with their corresponding secrets, now including skills-hub in AUDIT_INGEST_CLIENTS
+- **Enhanced Secret Upsert**: Improved upsert_env_line function preserves existing environment files while updating audit credentials
+- **Race Condition Handling**: Enhanced restart procedures ensure audit-service is fully rolled out before restarting emitters to prevent authentication failures
 - **Automatic Workload Restart**: Script automatically restarts affected deployments after secret updates
 - **Version 0.5.0 Compatibility**: Full integration with platform version synchronization
 
 Usage:
 ```bash
-# Generate and provision audit secrets
+# Generate and provision comprehensive audit secrets
 ./shared/platform-ops/gitops/sync-audit-secrets.sh dev-luban-aiops
 
 # Override with specific secret
@@ -1178,15 +1220,18 @@ SKIP_AUDIT_SECRETS=true make deploy
 ```
 
 Configuration details:
-- **AUDIT_INGEST_CLIENTS**: Comma-separated list of client_id=secret pairs for authorized emitters
-- **Per-emitter secrets**: GATEWAY_AUDIT_CLIENT_SECRET, PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET, IDENTITY_AUDIT_CLIENT_SECRET
+- **AUDIT_INGEST_CLIENTS**: Comma-separated list of client_id=secret pairs for authorized emitters, now including skills-hub
+- **Per-emitter secrets**: GATEWAY_AUDIT_CLIENT_SECRET, PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET, IDENTITY_AUDIT_CLIENT_SECRET, INCIDENT_AUDIT_CLIENT_SECRET, SKILLS_AUDIT_CLIENT_SECRET
 - **PostgreSQL backend**: AUDIT_STORE_BACKEND=postgres with connection string in AUDIT_DB_URL
 - **Retention policy**: AUDIT_RETENTION_DAYS controls how long audit events are stored
+- **Enhanced Reliability**: Improved restart procedures address audit-secret rollout race conditions
 
 **Section sources**
 - [shared/platform-ops/gitops/sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env)
+- [shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
+- [shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-secrets.env)
 - [products/audit-service/src/audit_service/core/config.py](file://products/audit-service/src/audit_service/core/config.py)
 
 ### Appendix E: OpenTelemetry Secret Management

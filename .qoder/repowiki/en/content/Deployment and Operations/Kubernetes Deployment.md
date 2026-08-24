@@ -19,20 +19,20 @@
 - [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
 - [skills-hub-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-service.yaml)
 - [skills-hub-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
+- [audit-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml)
+- [audit-service-runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
 - [deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
 - [dev-k8s-readme.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
+- [sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated deployment architecture to support independent platform-gateway and tool-gateway services instead of single api-gateway deployment
-- Added separate RBAC configurations for each gateway service with distinct security boundaries
-- Configured independent environment variables and secrets for each gateway service
-- Updated service discovery and networking to reflect the new dual-gateway architecture
-- Enhanced deployment automation scripts to handle the new service structure
-- **Enhanced Security Contexts**: All service deployments now include comprehensive security contexts with runAsNonRoot: true, runAsUser: 1000, allowPrivilegeEscalation: false, and seccompProfile: RuntimeDefault for improved container security
-- **Service Link Configuration**: Added `enableServiceLinks: false` across all dev-k8s deployments to prevent Kubernetes legacy service-link environment variable injection conflicts, ensuring DNS-based service discovery is used exclusively
-- **Added Skills Hub Service**: Complete Kubernetes deployment manifests for Skills Hub service including deployment configurations, security contexts, health probes, and Prometheus scraping annotations
+- Enhanced deployment automation with comprehensive audit secret provisioning across all platform services
+- Updated sync-audit-secrets.sh to provision audit credentials for skills-hub alongside existing emitters (tool-gateway, platform-gateway, identity-broker, incident-service)
+- Added automatic deployment restart functionality to ensure audit credentials are applied immediately
+- Integrated durable audit trail configuration across all services with centralized secret management
+- Enhanced security context configurations for all service deployments with non-root execution and privilege restrictions
 
 ## Table of Contents
 1. Overview
@@ -42,23 +42,27 @@
 5. Identity Broker Service
 6. Agent Platform Service
 7. Skills Hub Service
-8. Operator Portal Service
-9. Infrastructure Services
-10. Service Discovery and Networking
-11. Persistent Storage Configuration
-12. Deployment Automation
-13. Rollback Procedures
-14. Troubleshooting
+8. Audit Service
+9. Operator Portal Service
+10. Infrastructure Services
+11. Service Discovery and Networking
+12. Persistent Storage Configuration
+13. Deployment Automation
+14. Rollback Procedures
+15. Troubleshooting
 
 ## Overview
 
-The Luban AIOps Platform uses a Kustomize-based deployment structure that supports both platform-gateway and tool-gateway services independently. This architectural change replaces the previous single api-gateway deployment with two specialized gateways, each serving distinct responsibilities:
+The Luban AIOps Platform uses a Kustomize-based deployment structure that supports both platform-gateway and tool-gateway services independently, along with comprehensive audit trail capabilities. This architectural design replaces the previous single api-gateway deployment with two specialized gateways, each serving distinct responsibilities:
 
 - **Platform Gateway**: Handles user-facing API requests, authentication, authorization, and agent service orchestration
 - **Tool Gateway**: Manages tool execution, Kubernetes resource access, and policy enforcement for tool operations
 - **Skills Hub**: Provides skill management, ingestion, and query capabilities for AI-powered guidance and runbooks
+- **Audit Service**: Centralized audit event ingestion and storage with client authentication
 
 The deployment is organized using Kustomize overlays with a base configuration that includes all core services and their dependencies. All services are deployed with enhanced security contexts to ensure containers run as non-root users with minimal privileges. Additionally, all deployments now use `enableServiceLinks: false` to prevent Kubernetes legacy service-link environment variable injection conflicts, ensuring reliable DNS-based service discovery.
+
+The platform features comprehensive audit trail capabilities through the `sync-audit-secrets.sh` script, which provisions shared audit credentials across all emitting services and automatically restarts affected deployments when audit secrets change.
 
 ## Kustomize Structure and Base Configuration
 
@@ -76,13 +80,15 @@ C --> H[Tool Gateway]
 C --> I[Identity Broker]
 C --> J[Agent Platform]
 C --> K[Skills Hub]
-C --> L[Operator Portal]
-C --> M[Infrastructure]
-G --> N[Service Account]
-H --> O[Service Account + RBAC]
-I --> P[Service Account]
-J --> Q[Service Account]
-K --> R[Service Account]
+C --> L[Audit Service]
+C --> M[Operator Portal]
+C --> N[Infrastructure]
+G --> O[Service Account]
+H --> P[Service Account + RBAC]
+I --> Q[Service Account]
+J --> R[Service Account]
+K --> S[Service Account]
+L --> T[Service Account]
 ```
 
 **Diagram sources**
@@ -95,6 +101,7 @@ The base configuration creates a unified `platform-runtime-config` ConfigMap fro
 - Identity broker settings (`identity-broker/runtime-config.env`)
 - Agent platform settings (`agent-platform/runtime-config.env`)
 - Skills hub settings (`skills-hub/runtime-config.env`)
+- Audit service settings (`audit-service/runtime-config.env`)
 
 Additionally, the configuration generates sample skill source ConfigMaps for SRE alerting and platform runbooks.
 
@@ -119,8 +126,9 @@ The platform-gateway deployment runs with dedicated service account permissions 
 - Optional secret mounting for sensitive credentials
 - **Security Context**: Non-root execution with UID 1000, privilege escalation disabled, and seccomp profile enabled
 - **Service Link Configuration**: `enableServiceLinks: false` prevents legacy service-link environment variable injection conflicts
+- **Audit Integration**: Configured to emit audit events to the centralized audit-service with shared credentials
 
-**Updated** Enhanced security context ensures the platform-gateway container runs with minimal privileges, preventing potential security vulnerabilities. The service link configuration ensures reliable DNS-based service discovery without conflicting environment variables.
+**Updated** Enhanced security context ensures the platform-gateway container runs with minimal privileges, preventing potential security vulnerabilities. The service link configuration ensures reliable DNS-based service discovery without conflicting environment variables. Audit integration provides comprehensive audit trail capabilities for all platform operations.
 
 **Section sources**
 - [platform-gateway-deployment.yaml:1-49](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml#L1-L49)
@@ -146,6 +154,8 @@ The platform-gateway requires specific configuration for authentication, authori
 | PLATFORM_GATEWAY_TOKEN_AUDIENCE | Token audience identifier | platform-gateway |
 | PLATFORM_GATEWAY_DELEGATION_AUDIENCE | Delegated token audience | tool-gateway |
 | PLATFORM_GATEWAY_SERVICE_CLIENT_ID | Service client identifier | platform-gateway |
+| PLATFORM_GATEWAY_AUDIT_SERVICE_URL | Audit service endpoint | http://audit-service:8000 |
+| PLATFORM_GATEWAY_AUDIT_CLIENT_ID | Audit client identifier | platform-gateway |
 
 **Section sources**
 - [platform-gateway-runtime-config.env:1-8](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env#L1-L8)
@@ -166,8 +176,9 @@ The tool-gateway deployment includes comprehensive RBAC configuration with role-
 - Kubernetes integration enabled by default
 - **Security Context**: Non-root execution with UID 1000, privilege escalation disabled, and seccomp profile enabled
 - **Service Link Configuration**: `enableServiceLinks: false` prevents legacy service-link environment variable injection conflicts
+- **Audit Integration**: Configured to emit audit events to the centralized audit-service with shared credentials
 
-**Updated** Enhanced security context ensures the tool-gateway container runs with minimal privileges, reducing the attack surface for tool execution operations. The service link configuration ensures reliable DNS-based service discovery without conflicting environment variables.
+**Updated** Enhanced security context ensures the tool-gateway container runs with minimal privileges, reducing the attack surface for tool execution operations. The service link configuration ensures reliable DNS-based service discovery without conflicting environment variables. Audit integration provides comprehensive audit trail capabilities for all tool operations.
 
 **Section sources**
 - [tool-gateway-deployment.yaml:1-46](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml#L1-L46)
@@ -204,9 +215,11 @@ The tool-gateway requires configuration for authentication, Kubernetes integrati
 | GATEWAY_K8S_ENABLED | Enable Kubernetes integration | true |
 | GATEWAY_K8S_NAMESPACE | Target namespace | dev-luban-aiops |
 | GATEWAY_TOKEN_AUDIENCE | Token audience identifier | tool-gateway |
+| GATEWAY_AUDIT_SERVICE_URL | Audit service endpoint | http://audit-service:8000 |
+| GATEWAY_AUDIT_CLIENT_ID | Audit client identifier | tool-gateway |
 
 **Section sources**
-- [tool-gateway-runtime-config.env:1-7](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env#L1-L7)
+- [tool-gateway-runtime-config.env:1-44](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env#L1-L44)
 
 ## Identity Broker Service
 
@@ -223,8 +236,9 @@ The identity-broker deployment includes runtime configuration and optional secre
 - Integration with external identity providers
 - **Security Context**: Non-root execution with UID 1000, privilege escalation disabled, and seccomp profile enabled
 - **Service Link Configuration**: `enableServiceLinks: false` prevents legacy service-link environment variable injection conflicts
+- **Audit Integration**: Configured to emit audit events to the centralized audit-service with shared credentials
 
-**Updated** Enhanced security context ensures the identity-broker container runs with minimal privileges, protecting sensitive authentication operations. The service link configuration ensures reliable DNS-based service discovery without conflicting environment variables.
+**Updated** Enhanced security context ensures the identity-broker container runs with minimal privileges, protecting sensitive authentication operations. The service link configuration ensures reliable DNS-based service discovery without conflicting environment variables. Audit integration provides comprehensive audit trail capabilities for all authentication and authorization operations.
 
 **Section sources**
 - [identity-service-deployment.yaml:1-40](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml#L1-L40)
@@ -235,6 +249,22 @@ The identity-broker exposes HTTP service for authentication endpoints.
 
 **Section sources**
 - [identity-service-service.yaml:1-12](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml#L1-L12)
+
+### Environment Variables
+
+The identity-broker requires configuration for OIDC integration and audit trail capabilities:
+
+| Variable | Description | Example Value |
+|----------|-------------|---------------|
+| KEYCLOAK_BASE_URL | Keycloak server URL | https://idp.apps.metasync.cc |
+| KEYCLOAK_REALM | Keycloak realm name | luban-aiops |
+| OIDC_CLIENT_ID | Client identifier | luban-aiops-portal |
+| IDENTITY_TOKEN_AUDIENCE | Token audience | platform-gateway |
+| IDENTITY_AUDIT_SERVICE_URL | Audit service endpoint | http://audit-service:8000 |
+| IDENTITY_AUDIT_CLIENT_ID | Audit client identifier | identity-broker |
+
+**Section sources**
+- [identity-broker-runtime-config.env:1-19](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env#L1-L19)
 
 ## Agent Platform Service
 
@@ -281,8 +311,9 @@ The skills-hub deployment includes comprehensive health monitoring, security con
 - Volume mounts for skill sources and temporary cache storage
 - **Security Context**: Non-root execution with UID 1000, privilege escalation disabled, and seccomp profile enabled
 - **Service Link Configuration**: `enableServiceLinks: false` prevents legacy service-link environment variable injection conflicts
+- **Audit Integration**: Configured to emit audit events to the centralized audit-service with shared credentials
 
-**Updated** Enhanced security context ensures the skills-hub container runs with minimal privileges, protecting skill data and processing operations. The service link configuration ensures reliable DNS-based service discovery without conflicting environment variables. Health probes are configured with generous timing to prevent unnecessary restarts during development environment load spikes.
+**Updated** Enhanced security context ensures the skills-hub container runs with minimal privileges, protecting skill data and processing operations. The service link configuration ensures reliable DNS-based service discovery without conflicting environment variables. Health probes are configured with generous timing to prevent unnecessary restarts during development environment load spikes. Audit integration provides comprehensive audit trail capabilities for all skill operations including search, retrieval, and synchronization events.
 
 **Section sources**
 - [skills-hub-deployment.yaml:1-104](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml#L1-L104)
@@ -351,9 +382,53 @@ The skills-hub service requires configuration for database connectivity, skill s
 | SKILLS_DATA_PATH | Data directory path | /var/lib/skills-hub |
 | SKILLS_SOURCES | JSON array of skill sources | [{"source_id":"sre-alerting","type":"local","path":"/skills/sre-alerting"}] |
 | SKILLS_QUERY_CLIENTS | Query client credentials | tool-gateway=secret-value |
+| SKILLS_AUDIT_SERVICE_URL | Audit service endpoint | http://audit-service:8000 |
+| SKILLS_AUDIT_CLIENT_ID | Audit client identifier | skills-hub |
 
 **Section sources**
-- [skills-hub-runtime-config.env:1-11](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env#L1-L11)
+- [skills-hub-runtime-config.env:1-18](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env#L1-L18)
+
+## Audit Service
+
+The audit-service provides centralized audit event ingestion, storage, and querying capabilities for the entire platform. It authenticates incoming audit events from all emitting services using a shared secret registry.
+
+### Deployment Configuration
+
+The audit-service deployment includes comprehensive health monitoring, security contexts, and Prometheus scraping annotations for observability. The deployment features robust health probes with appropriate timing configurations.
+
+**Key Features:**
+- Prometheus monitoring with scrape annotations for metrics collection
+- Comprehensive health probes with tuned timing parameters
+- PostgreSQL backend for audit event storage and querying
+- Client authentication registry for audit event ingestion
+- Security context with non-root execution and privilege restrictions
+- **Security Context**: Non-root execution with UID 1000, privilege escalation disabled, and seccomp profile enabled
+- **Service Link Configuration**: `enableServiceLinks: false` prevents legacy service-link environment variable injection conflicts
+
+**Updated** Enhanced security context ensures the audit-service container runs with minimal privileges, protecting sensitive audit data and processing operations. The service link configuration ensures reliable DNS-based service discovery without conflicting environment variables. The audit service maintains a registry of authorized clients that can emit audit events.
+
+**Section sources**
+- [audit-service-deployment.yaml:1-58](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml#L1-L58)
+
+### Service Configuration
+
+The audit-service exposes HTTP service on port 8000 for audit event ingestion and querying.
+
+### Environment Variables
+
+The audit-service requires configuration for database connectivity, retention policies, and client authentication:
+
+| Variable | Description | Example Value |
+|----------|-------------|---------------|
+| AUDIT_STORE_BACKEND | Storage backend type | postgres |
+| AUDIT_DB_URL | PostgreSQL connection string | postgresql://audit:audit-dev-local@postgres:5432/audit |
+| AUDIT_RETENTION_DAYS | Event retention period | 30 |
+| AUDIT_MAX_EVENTS | Maximum events to store | 100000 |
+| AUDIT_EVICTION_INTERVAL_SECONDS | Cleanup interval | 3600 |
+| AUDIT_INGEST_CLIENTS | Client authentication registry | tool-gateway=secret,platform-gateway=secret,... |
+
+**Section sources**
+- [audit-service-runtime-config.env:1-8](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env#L1-L8)
 
 ## Operator Portal Service
 
@@ -416,6 +491,10 @@ C --> F[Identity Broker Service]
 E --> G[Kubernetes API Server]
 C --> H[Skills Hub Service]
 D --> H
+C --> I[Audit Service]
+E --> I
+F --> I
+H --> I
 style A fill:#e1f5fe
 style B fill:#f3e5f5
 style C fill:#fff3e0
@@ -424,6 +503,7 @@ style E fill:#fff8e1
 style F fill:#fce4ec
 style G fill:#f1f8e9
 style H fill:#e0f2f1
+style I fill:#ffebee
 ```
 
 **Diagram sources**
@@ -432,6 +512,7 @@ style H fill:#e0f2f1
 - [agent-service-service.yaml:1-12](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-service.yaml#L1-L12)
 - [identity-service-service.yaml:1-12](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml#L1-L12)
 - [skills-hub-service.yaml:1-11](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-service.yaml#L1-L11)
+- [audit-service-service.yaml:1-12](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-service.yaml#L1-L12)
 
 ### Network Flow
 
@@ -441,7 +522,8 @@ style H fill:#e0f2f1
 4. **Agent Operations**: Platform-gateway calls agent-platform service for agent operations
 5. **Tool Execution**: Agent-platform calls tool-gateway for tool execution
 6. **Skill Queries**: Agent-platform and tool-gateway call skills-hub for skill information
-7. **Kubernetes Access**: Tool-gateway accesses Kubernetes API server with RBAC permissions
+7. **Audit Events**: All services emit audit events to audit-service for centralized logging
+8. **Kubernetes Access**: Tool-gateway accesses Kubernetes API server with RBAC permissions
 
 ### Service Link Configuration Impact
 
@@ -459,6 +541,7 @@ All services now use `enableServiceLinks: false` to prevent Kubernetes from inje
 - [platform-gateway-deployment.yaml:19-21](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml#L19-L21)
 - [tool-gateway-deployment.yaml:19-21](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml#L19-L21)
 - [skills-hub-deployment.yaml:19-21](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml#L19-L21)
+- [audit-service-deployment.yaml:19-21](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml#L19-L21)
 
 ## Persistent Storage Configuration
 
@@ -471,6 +554,8 @@ The current development deployment uses ephemeral storage for simplicity. Produc
 - **Configuration**: Stored in ConfigMaps and Secrets
 - **Agent Workspaces**: Uses emptyDir for temporary workspace storage
 - **Skills Hub Data**: Uses emptyDir for temporary git-source checkouts; PostgreSQL for persistent skill storage
+- **Audit Data**: Uses PostgreSQL for persistent audit event storage
+- **Incident Data**: Uses PostgreSQL for persistent incident data storage
 
 ### Production Recommendations
 
@@ -481,6 +566,8 @@ For production deployments, consider:
 - Backup and disaster recovery procedures
 - **Security Considerations**: Ensure persistent volumes are properly secured with appropriate access controls
 - **Skills Hub**: Configure PostgreSQL with persistent volumes and backup strategies
+- **Audit Service**: Implement proper backup and retention policies for audit data
+- **Incident Service**: Configure PostgreSQL with persistent volumes and backup strategies
 
 ## Deployment Automation
 
@@ -502,7 +589,7 @@ The deployment process applies the complete platform stack:
 make deploy
 ```
 
-This performs one-time cleanup of legacy api-gateway objects and deploys the new dual-gateway architecture along with the Skills Hub service.
+This performs one-time cleanup of legacy api-gateway objects and deploys the new dual-gateway architecture along with the Skills Hub service and Audit Service.
 
 ### Manual Deployment
 
@@ -512,9 +599,35 @@ Individual components can be deployed using standard Kubernetes commands:
 kubectl apply -f shared/platform-ops/gitops/dev-k8s/base/
 ```
 
+### Audit Secret Provisioning
+
+The enhanced `sync-audit-secrets.sh` script provides comprehensive audit secret management across all platform services:
+
+```bash
+# Provision audit secrets for all services
+shared/platform-ops/gitops/sync-audit-secrets.sh
+
+# Override the generated secret
+AUDIT_INGEST_SECRET=my-secret shared/platform-ops/gitops/sync-audit-secrets.sh
+
+# Skip in CI when secrets are injected externally
+SKIP_AUDIT_SECRETS=true make deploy
+```
+
+**Key Features:**
+- Generates shared audit ingest secret if not provided
+- Updates audit-service client registry with all emitter credentials
+- Provisions audit client secrets for all emitting services (tool-gateway, platform-gateway, identity-broker, incident-service, skills-hub)
+- Automatically restarts all affected deployments to apply new audit credentials
+- Preserves existing OTLP headers and other secret values
+- Validates rollout status of all restarted deployments
+
+**Updated** The enhanced audit secret provisioning ensures all platform services can emit audit events to the centralized audit-service with consistent authentication. The automatic restart functionality ensures audit credentials are applied immediately without manual intervention.
+
 **Section sources**
 - [deploy.sh:1-15](file://shared/platform-ops/gitops/dev-k8s/deploy.sh#L1-L15)
 - [dev-k8s-readme.md:253-287](file://shared/platform-ops/gitops/dev-k8s/README.md#L253-L287)
+- [sync-audit-secrets.sh:1-137](file://shared/platform-ops/gitops/sync-audit-secrets.sh#L1-L137)
 
 ## Rollback Procedures
 
@@ -526,6 +639,7 @@ To rollback to a previous image version:
 kubectl rollout undo deployment/platform-gateway
 kubectl rollout undo deployment/tool-gateway
 kubectl rollout undo deployment/skills-hub
+kubectl rollout undo deployment/audit-service
 ```
 
 ### Configuration Rollback
@@ -536,6 +650,15 @@ Revert configuration changes by restoring previous versions of ConfigMaps and Se
 kubectl apply -f shared/platform-ops/gitops/dev-k8s/base/
 ```
 
+### Audit Secret Rollback
+
+To rollback audit secret changes:
+
+```bash
+# Regenerate audit secrets with previous values
+AUDIT_INGEST_SECRET=previous-secret shared/platform-ops/gitops/sync-audit-secrets.sh
+```
+
 ### Emergency Rollback
 
 In case of critical issues, scale down affected services:
@@ -544,6 +667,7 @@ In case of critical issues, scale down affected services:
 kubectl scale deployment/platform-gateway --replicas=0
 kubectl scale deployment/tool-gateway --replicas=0
 kubectl scale deployment/skills-hub --replicas=0
+kubectl scale deployment/audit-service --replicas=0
 ```
 
 ## Troubleshooting
@@ -571,6 +695,12 @@ kubectl scale deployment/skills-hub --replicas=0
 - Check that file permissions in mounted volumes are compatible with the specified user IDs
 - Ensure that any custom scripts or entrypoints don't require root privileges
 
+**Audit Service Issues:**
+- Verify audit-service is running and accessible
+- Check audit-service client registry contains all expected clients
+- Validate audit client secrets match between emitters and audit-service
+- Monitor audit-service health endpoints for service readiness
+
 **Skills Hub Specific Issues:**
 - Verify PostgreSQL connectivity and database schema initialization
 - Check skill source ConfigMap mounts and file permissions
@@ -589,6 +719,7 @@ kubectl get pods -n dev-luban-aiops
 kubectl logs deployment/platform-gateway -n dev-luban-aiops
 kubectl logs deployment/tool-gateway -n dev-luban-aiops
 kubectl logs deployment/skills-hub -n dev-luban-aiops
+kubectl logs deployment/audit-service -n dev-luban-aiops
 ```
 
 **Verify Service Endpoints:**
@@ -600,6 +731,7 @@ kubectl get endpoints -n dev-luban-aiops
 ```bash
 kubectl run test-pod --image=busybox -n dev-luban-aiops --command -- wget -qO- http://platform-gateway:8000/health
 kubectl run test-pod --image=busybox -n dev-luban-aiops --command -- wget -qO- http://skills-hub:8000/health/ready
+kubectl run test-pod --image=busybox -n dev-luban-aiops --command -- wget -qO- http://audit-service:8000/health/ready
 ```
 
 **Check Security Contexts:**
@@ -607,6 +739,7 @@ kubectl run test-pod --image=busybox -n dev-luban-aiops --command -- wget -qO- h
 kubectl describe pod -l app=platform-gateway -n dev-luban-aiops
 kubectl describe pod -l app=tool-gateway -n dev-luban-aiops
 kubectl describe pod -l app=skills-hub -n dev-luban-aiops
+kubectl describe pod -l app=audit-service -n dev-luban-aiops
 ```
 
 **Verify Service Link Configuration:**
@@ -617,12 +750,29 @@ kubectl describe pod -l app=web-ui -n dev-luban-aiops | grep enableServiceLinks
 kubectl describe pod -l app=platform-gateway -n dev-luban-aiops | grep enableServiceLinks
 kubectl describe pod -l app=tool-gateway -n dev-luban-aiops | grep enableServiceLinks
 kubectl describe pod -l app=skills-hub -n dev-luban-aiops | grep enableServiceLinks
+kubectl describe pod -l app=audit-service -n dev-luban-aiops | grep enableServiceLinks
 ```
 
 **Check Skills Hub Health:**
 ```bash
 kubectl exec -it deployment/skills-hub -n dev-luban-aiops -- curl -s http://localhost:8000/health/ready
 kubectl exec -it deployment/skills-hub -n dev-luban-aiops -- curl -s http://localhost:8000/health/live
+```
+
+**Check Audit Service Health:**
+```bash
+kubectl exec -it deployment/audit-service -n dev-luban-aiops -- curl -s http://localhost:8000/health/ready
+kubectl exec -it deployment/audit-service -n dev-luban-aiops -- curl -s http://localhost:8000/health/live
+```
+
+**Verify Audit Secret Configuration:**
+```bash
+kubectl get secret audit-service-runtime-secrets -n dev-luban-aiops -o yaml
+kubectl get secret tool-gateway-runtime-secrets -n dev-luban-aiops -o yaml
+kubectl get secret platform-gateway-runtime-secrets -n dev-luban-aiops -o yaml
+kubectl get secret identity-service-runtime-secrets -n dev-luban-aiops -o yaml
+kubectl get secret incident-service-runtime-secrets -n dev-luban-aiops -o yaml
+kubectl get secret skills-hub-runtime-secrets -n dev-luban-aiops -o yaml
 ```
 
 **Section sources**

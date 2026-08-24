@@ -15,15 +15,22 @@
 - [audit.py](file://products/audit-service/src/audit_service/schemas/audit.py)
 - [config.py](file://products/audit-service/src/audit_service/core/config.py)
 - [metrics.py](file://products/audit-service/src/audit_service/core/metrics.py)
+- [metadata.py](file://products/audit-service/src/audit_service/metadata.py)
+- [test_contracts.py](file://products/audit-service/tests/test_contracts.py)
+- [test_ingest_auth.py](file://products/audit-service/tests/test_ingest_auth.py)
+- [test_routes.py](file://products/audit-service/tests/test_routes.py)
+- [audit-event.schema.json](file://shared/shared-contracts/schemas/audit-event.schema.json)
+- [SPEC-029-skills-usage-audit-trail/spec.md](file://docs/specs/SPEC-029-skills-usage-audit-trail/spec.md)
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive security considerations section documenting the shared query credential limitation
-- Updated Authentication for Ingest and Query section with security implications
-- Enhanced Configuration and Runtime section with deployment-specific guidance
-- Added Known Limitations section explaining security considerations for non-development deployments
+- Extended audit event vocabulary with three new skill-related event types: `skill_searched`, `skill_retrieved`, and `skills_synced`
+- Enhanced test coverage reaching 95% with comprehensive contract validation, authentication testing, and skills usage round-trip tests
+- Improved authentication testing with workload identity support including JWKS discovery, token validation, and projected service account tokens
+- Added skills-hub integration demonstrating fire-and-forget audit emission pattern
+- Updated shared contract schema to include new event types with detailed payload descriptions
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -47,6 +54,7 @@ Key capabilities:
 - Health/readiness endpoints backed by store readiness checks
 - Prometheus metrics and OpenTelemetry telemetry
 - Background retention task enforcing time-window and hard-cap eviction without blocking ingest
+- **Extended**: Support for skill-related audit events including search, retrieval, and synchronization tracking
 
 **Section sources**
 - [README.md:1-31](file://products/audit-service/README.md#L1-L31)
@@ -117,6 +125,7 @@ A -.-> S2
 - Retention task enforces retention window and hard-cap eviction on a schedule
 - Authentication supports static credentials and workload identity via OIDC/JWKS
 - Metrics expose RED counters/histograms and domain-specific counters/gauges
+- **Enhanced**: Comprehensive test coverage including contract validation, authentication scenarios, and skills usage events
 
 **Section sources**
 - [app.py:20-70](file://products/audit-service/src/audit_service/app.py#L20-L70)
@@ -183,6 +192,7 @@ Stop --> End(["Exit"])
 - Validates JSON body and schema; rejects malformed or oversized batches
 - Persists events atomically per call and records metrics and logs
 - Returns 202 Accepted with counts
+- **Enhanced**: Supports new skill-related event types with proper validation
 
 ```mermaid
 sequenceDiagram
@@ -215,6 +225,7 @@ end
 - Decodes cursor if provided; validates filter parameters
 - Applies filters and keyset pagination; returns newest-first pages
 - Records metrics and logs
+- **Enhanced**: Supports filtering by new skill-related event types
 
 ```mermaid
 sequenceDiagram
@@ -313,6 +324,7 @@ Next --> Sleep
   - Workload: Bearer token validated against cluster OIDC issuer JWKS, audience and subject mapping
 - Centralized caller resolution used by both routes
 - **Important**: Both ingest and query endpoints use the same `AUDIT_INGEST_CLIENTS` registry for authentication
+- **Enhanced**: Comprehensive testing covering static credentials, workload identity, JWKS discovery, and token validation scenarios
 
 ```mermaid
 flowchart TD
@@ -340,6 +352,7 @@ Result -- No --> Err["Raise auth error -> 401"]
 - Event envelope includes identifiers, timestamps, actor context, outcome, and details
 - IngestRequest wraps a non-empty list of events
 - AuditQuery defines optional filters for queries
+- **Extended**: EventType Literal now includes skill-related events: `skill_searched`, `skill_retrieved`, `skills_synced`
 
 ```mermaid
 erDiagram
@@ -370,10 +383,12 @@ jsonb details
 - Parsed registries for static clients and workload subject-to-client mappings
 - Runtime entrypoint binds host/port from settings
 - **Critical**: Both ingest and query operations share the `AUDIT_INGEST_CLIENTS` registry
+- **Enhanced**: Version metadata updated to 0.10.0 reflecting new features
 
 **Section sources**
 - [config.py:52-97](file://products/audit-service/src/audit_service/core/config.py#L52-L97)
 - [main.py:6-8](file://products/audit-service/src/audit_service/main.py#L6-L8)
+- [metadata.py:1-5](file://products/audit-service/src/audit_service/metadata.py#L1-L5)
 
 ### Health Endpoints
 - Live endpoint returns service identity and version
@@ -381,6 +396,32 @@ jsonb details
 
 **Section sources**
 - [health.py:14-35](file://products/audit-service/src/audit_service/api/routes/health.py#L14-L35)
+
+### Skills Usage Integration
+- **New**: Skills-hub emits audit events through fire-and-forget pattern
+- Events include search queries, retrieval outcomes, and synchronization status
+- Non-blocking emission ensures audit delivery never degrades performance
+- Request ID correlation maintains user attribution across service boundaries
+
+```mermaid
+sequenceDiagram
+participant SkillsHub as "Skills Hub"
+participant Emitter as "Audit Emitter"
+participant AuditService as "Audit Service"
+Note over SkillsHub,AuditService : Fire-and-forget pattern
+SkillsHub->>Emitter : build_audit_event()
+Emitter->>Emitter : Thread.start(daemon)
+Emitter->>AuditService : POST /api/v1/audit/events
+AuditService-->>Emitter : 202 Accepted
+Emitter->>Emitter : record_audit_emit("ok")
+Note over Emitter : Failure handling swallows errors
+```
+
+**Diagram sources**
+- [SPEC-029-skills-usage-audit-trail/spec.md:64-98](file://docs/specs/SPEC-029-skills-usage-audit-trail/spec.md#L64-L98)
+
+**Section sources**
+- [SPEC-029-skills-usage-audit-trail/spec.md:64-98](file://docs/specs/SPEC-029-skills-usage-audit-trail/spec.md#L64-L98)
 
 ## Security Considerations
 
@@ -397,10 +438,16 @@ End-user authorization for query operations is enforced upstream by the platform
 ### Workload Identity Support
 For production deployments, the service supports Kubernetes projected service-account tokens (workload identity) as an alternative to static credentials. This approach leverages cluster OIDC issuer JWKS validation with audience and subject mapping for enhanced security.
 
+### Enhanced Authentication Testing
+- **Comprehensive Coverage**: Tests cover static credentials, workload identity, JWKS discovery, and token validation
+- **Projected Token Validation**: Full ladder testing from token minting through JWKS resolution to client mapping
+- **Error Scenario Testing**: Invalid tokens, wrong audiences, expired tokens, and unregistered subjects properly rejected
+
 **Section sources**
 - [ingest_auth.py:1-12](file://products/audit-service/src/audit_service/services/ingest_auth.py#L1-L12)
 - [query.py:1-7](file://products/audit-service/src/audit_service/api/routes/query.py#L1-L7)
 - [configuration-reference.md:108-117](file://docs/guides/configuration-reference.md#L108-L117)
+- [test_ingest_auth.py:170-219](file://products/audit-service/tests/test_ingest_auth.py#L170-L219)
 
 ## Known Limitations
 
@@ -425,6 +472,7 @@ For production deployments, the service supports Kubernetes projected service-ac
 - Store implementations depend on Pydantic models and database drivers
 - Retention depends on store and metrics
 - Authentication depends on httpx and jwt libraries
+- **Enhanced**: Test dependencies include jsonschema for contract validation and cryptography for workload token testing
 
 ```mermaid
 graph LR
@@ -437,6 +485,8 @@ Router --> Auth["ingest_auth.py"]
 Router --> Store
 Retention --> Store
 Store --> Schemas["schemas/audit.py"]
+Test["tests/*"] --> Contract["audit-event.schema.json"]
+Test --> Auth
 ```
 
 **Diagram sources**
@@ -458,6 +508,7 @@ Store --> Schemas["schemas/audit.py"]
 - Query uses keyset pagination to avoid offset-based scans and reduce load
 - Retention performs batched deletions to minimize lock contention and long-running transactions
 - Metrics are lightweight counters/gauges with bounded cardinality labels
+- **Enhanced**: Skills-hub audit emission uses fire-and-forget pattern with daemon threads and short timeouts to prevent performance degradation
 
 [No sources needed since this section provides general guidance]
 
@@ -468,12 +519,14 @@ Common issues and signals:
 - Degraded readiness: Store backend unreachable; check database connectivity and credentials
 - High rejection rate: Inspect metrics for reasons such as auth failures or malformed batches
 - Stale store size: Retention reconciles exact size each sweep; monitor eviction metrics and logs
+- **New**: Skills usage events not appearing: Verify skills-hub audit emitter configuration and network connectivity
 
 Operational tips:
 - Use /health/live and /health/ready to validate service state and store readiness
 - Expose /metrics to track ingestion, rejections, queries, evictions, and store errors
 - Validate environment variables for store backend, DB URL, retention window, and client registries
 - Monitor for shared credential usage patterns that may indicate unintended query access
+- **Enhanced**: Use comprehensive test suite to validate authentication flows and contract compliance
 
 **Section sources**
 - [ingest.py:33-82](file://products/audit-service/src/audit_service/api/routes/ingest.py#L33-L82)
@@ -484,6 +537,8 @@ Operational tips:
 
 ## Conclusion
 The Audit Service provides a robust, extensible foundation for durable audit trails across the platform. Its clear boundaries, authenticated APIs, pluggable storage backends, and bounded retention make it suitable for both development and production use. Integration points with the platform gateway and other services are minimal and well-defined, enabling reliable operation and straightforward troubleshooting.
+
+**Enhanced Capabilities**: The recent updates extend the service with comprehensive skill-related audit event support, significantly improved test coverage reaching 95%, and enhanced authentication testing including workload identity validation. These improvements ensure the service can effectively track skill usage patterns while maintaining strong security guarantees.
 
 **Important Security Note**: While the shared credential limitation is acceptable for development environments due to upstream authorization controls, production deployments should implement separate credential registries for ingest and query operations to maintain proper separation of concerns and adhere to the principle of least privilege.
 
