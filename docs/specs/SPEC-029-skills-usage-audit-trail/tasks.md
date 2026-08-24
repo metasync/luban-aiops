@@ -43,9 +43,9 @@
 
 ## Delivery
 
-- [ ] T-10: `make verify`; commit; `make build`; `make deploy`; run
+- [x] T-10: `make verify`; commit; `make build`; `make deploy`; run
       `sync-audit-secrets.sh`
-- [ ] T-11: live verification — trigger a portal skills search, query
+- [x] T-11: live verification — trigger a portal skills search, query
       `GET /api/v1/audit/events?event_type=skill_searched`, confirm
       request-id join with the matching `tool_invoked` event and a
       `skills_synced` event per source; L3 gate; push
