@@ -483,9 +483,12 @@ async def chat_stream(
         ) from exc
 
     audited = False
+    saw_delta = False
+    parked = False
+    last_frame_session: str | None = None
 
     async def _stream() -> AsyncIterator[str]:
-        nonlocal audited
+        nonlocal audited, saw_delta, parked, last_frame_session
         async for chunk in upstream:
             if not audited:
                 frame = _extract_message_end(chunk)
@@ -495,7 +498,28 @@ async def chat_stream(
                         settings, request_id, identity,
                         session_id, input_modality, frame,
                     )
+            kind = _frame_type(chunk)
+            if kind == "message_delta":
+                saw_delta = True
+            elif kind == "confirmation_request":
+                parked = True
+            frame_session = _frame_session_id(chunk)
+            if frame_session is not None:
+                last_frame_session = frame_session
             yield chunk
+        # Normal stream end without a message_end frame (the kernel may
+        # close right after the last delta, legacy parity): a turn that
+        # produced text still completed, so attribute it with the
+        # requested model — resolution is request > pinned > default and
+        # unknown ids already failed closed before the stream opened.
+        # Parked turns (confirmation_request, no completion yet) and
+        # empty streams stay unattributed (SPEC-024 R-4).
+        if not audited and saw_delta and not parked:
+            _emit_stream_chat_completed(
+                settings, request_id, identity,
+                last_frame_session or session_id, input_modality, None,
+                fallback_model=model,
+            )
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
 
@@ -589,20 +613,53 @@ def _extract_message_end(chunk: str) -> dict | None:
     return None
 
 
+def _frame_type(chunk: str) -> str | None:
+    """Best-effort frame type of an SSE chunk (SPEC-024 R-4 fallback gate)."""
+    if not chunk.startswith("data: "):
+        return None
+    try:
+        frame = json.loads(chunk.removeprefix("data: ").strip())
+    except ValueError:
+        return None
+    if isinstance(frame, dict):
+        kind = frame.get("type")
+        return kind if isinstance(kind, str) else None
+    return None
+
+
+def _frame_session_id(chunk: str) -> str | None:
+    """Best-effort session id of an SSE chunk (SPEC-024 R-4 attribution)."""
+    if not chunk.startswith("data: "):
+        return None
+    try:
+        frame = json.loads(chunk.removeprefix("data: ").strip())
+    except ValueError:
+        return None
+    if isinstance(frame, dict):
+        sid = frame.get("session_id")
+        return str(sid) if isinstance(sid, str) and sid else None
+    return None
+
+
 def _emit_stream_chat_completed(
     settings: PlatformGatewaySettings,
     request_id: str,
     identity: IdentityContext,
     session_id: str | None,
     input_modality: str,
-    frame: dict,
+    frame: dict | None,
+    fallback_model: str | None = None,
 ) -> None:
     """Audit the completed streamed turn with its serving model (SPEC-024 R-4).
 
-    Emitted from the tee when the ``message_end`` frame flows through, so
-    only turns the runtime actually completed reach the durable trail.
+    Emitted from the tee when the ``message_end`` frame flows through; a
+    stream that closes without one (known kernel edge) still completes the
+    turn, so the requested model rides as the fallback attribution.
     """
+    frame = frame or {}
     serving_model = frame.get("model")
+    if not isinstance(serving_model, str):
+        serving_model = fallback_model
     emit_audit_event(
         settings,
         build_audit_event(

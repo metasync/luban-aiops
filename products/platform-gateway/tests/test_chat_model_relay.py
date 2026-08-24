@@ -150,7 +150,7 @@ class ChatModelRelayTests(unittest.TestCase):
 class StreamAuditEnrichmentTests(unittest.TestCase):
     """The tee audits chat_completed with the serving model (SPEC-024 R-4)."""
 
-    def _run(self, frames) -> list:
+    def _run(self, frames, model: str | None = None) -> list:
         emitted: list = []
 
         async def fake_open(*args, **kwargs):
@@ -181,8 +181,11 @@ class StreamAuditEnrichmentTests(unittest.TestCase):
                 capture_emit,
             ),
         ):
+            params: dict = {"message": "hi"}
+            if model is not None:
+                params["model"] = model
             response = TestClient(_app()).get(
-                "/api/v1/chat/stream", params={"message": "hi"}
+                "/api/v1/chat/stream", params=params
             )
         self.assertEqual(response.status_code, 200)
         return emitted
@@ -221,6 +224,30 @@ class StreamAuditEnrichmentTests(unittest.TestCase):
         )
         completed = [e for e in emitted if e.get("event_type") == "chat_completed"]
         self.assertEqual(completed, [])
+
+    def test_delta_only_stream_falls_back_to_requested_model(self) -> None:
+        # Live-walkthrough edge: the kernel may close the stream right
+        # after the last delta with no message_end. The turn completed,
+        # so chat_completed rides the requested model as attribution.
+        emitted = self._run(
+            [
+                'data: {"type": "message_delta", "delta": "ok", '
+                '"session_id": "ses-1"}\n\n',
+            ],
+            model="deepseek",
+        )
+        completed = [e for e in emitted if e.get("event_type") == "chat_completed"]
+        self.assertEqual(len(completed), 1)
+        self.assertEqual(completed[0]["details"]["model"], "deepseek")
+        self.assertEqual(completed[0]["session_id"], "ses-1")
+
+    def test_delta_only_stream_without_request_model_degrades_to_null(self) -> None:
+        emitted = self._run(
+            ['data: {"type": "message_delta", "delta": "ok"}\n\n']
+        )
+        completed = [e for e in emitted if e.get("event_type") == "chat_completed"]
+        self.assertEqual(len(completed), 1)
+        self.assertIsNone(completed[0]["details"]["model"])
 
 
 class AgentClientModelParamTests(unittest.IsolatedAsyncioTestCase):

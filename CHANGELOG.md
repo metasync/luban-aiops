@@ -51,7 +51,9 @@ Release 1 entries are grouped retrospectively under 0.1.0.
   no credentials or base URLs leave the runtime. The `message_end` stream
   frame carries the serving model; audit gains the requested model on
   `chat_started` and the serving model on `chat_completed` on both chat
-  surfaces. The portal composer gains a model selector pre-seeded with
+  surfaces (a stream that closes without `message_end` falls back to the
+  requested model; parked turns stay unattributed). The portal composer
+  gains a model selector pre-seeded with
   the catalog default, a fixed label when exactly one model is
   configured, and fail-open hiding when discovery is unavailable;
   switching sessions re-seeds the selector from the session's pinned
