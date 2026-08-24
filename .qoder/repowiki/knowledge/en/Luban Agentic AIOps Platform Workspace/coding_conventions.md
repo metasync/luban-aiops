@@ -1,6 +1,0 @@
-- Each product follows a uniform package layout with `api/routes/` for HTTP handlers, `services/` for domain logic, `schemas/` for request/response models, `core/` for configuration/telemetry/metrics, and `main.py`/`app.py` as entry points.
-- Cross-service communication relies on shared JSON schemas under `shared/shared-contracts/schemas/` rather than direct module imports, keeping product boundaries contract-driven.
-- Policy enforcement is implemented per consumer (gateway/tool-gateway) via a local `services/policy_engine.py` that loads `policies/policy-default.yaml`, which is kept in sync across locations by copying the canonical file from `shared/shared-contracts/policies/`.
-- Every Python product ships its own `Dockerfile`, `Makefile`, `pyproject.toml`, `uv.lock`, and `.python-version`, and is orchestrated through the root Makefile's `PYTHON_PRODUCTS` / `IMAGE_PRODUCTS` lists instead of ad-hoc scripts.
-- Services expose health, metrics, and telemetry through a shared `core/` module (`config.py`, `metrics.py`, `observability.py`, `request_context.py`, `telemetry.py`) so each product initializes the same observability baseline.
-- Tests mirror source structure under each product's `tests/` directory with one `test_*.py` per module, covering routes, services, schemas, and telemetry uniformly.

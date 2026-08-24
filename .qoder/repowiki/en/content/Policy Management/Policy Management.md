@@ -6,6 +6,7 @@
 - [SPEC-004-policy-enforcement/spec.md](file://docs/specs/SPEC-004-policy-enforcement/spec.md)
 - [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
 - [SPEC-021-bounded-mutating-actions/spec.md](file://docs/specs/SPEC-021-bounded-mutating-actions/spec.md)
+- [SPEC-024-runtime-llm-model-switching/spec.md](file://docs/specs/SPEC-024-runtime-llm-model-switching/spec.md)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 - [Makefile](file://Makefile)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
@@ -37,6 +38,7 @@
 - Added detailed coverage of the first bounded mutating tool (`k8s.delete_pod`) and its security model
 - Updated authorization matrix to include `tools:mutate` action with restricted role-based access control
 - Enhanced troubleshooting guide with mutating tool-specific scenarios and diagnostic steps
+- **Updated**: Enhanced development Kubernetes policy configuration to grant `models:list` permissions alongside existing chat-related actions for platform-admin, approver, operator, developer, and observer roles, enabling safe catalog discovery operations per SPEC-024
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -48,18 +50,21 @@
 7. [Policy Matrix Functionality](#policy-matrix-functionality)
 8. [HITL Confirmation Bridging](#hitl-confirmation-bridging)
 9. [Risk-Tier Gating and Mutating Actions](#risk-tier-gating-and-mutating-actions)
-10. [Dependency Analysis](#dependency-analysis)
-11. [Performance Considerations](#performance-considerations)
-12. [Troubleshooting Guide](#troubleshooting-guide)
-13. [Conclusion](#conclusion)
-14. [Appendices](#appendices)
+10. [Model Catalog Discovery and Permissions](#model-catalog-discovery-and-permissions)
+11. [Dependency Analysis](#dependency-analysis)
+12. [Performance Considerations](#performance-considerations)
+13. [Troubleshooting Guide](#troubleshooting-guide)
+14. [Conclusion](#conclusion)
+15. [Appendices](#appendices)
 
 ## Introduction
 This document describes the policy management system that enables declarative policy definitions and runtime enforcement across the platform. It covers the policy language syntax, built-in rule types, custom policy development, evaluation flow, decision logic, audit trail generation, testing, validation, deployment, versioning, conflict resolution, performance optimization, and integration with identity contexts and authorization decisions across services.
 
-The system is designed to be declarative, auditable, and extensible, allowing operators to define policies centrally and enforce them consistently at the API gateway boundary and within tool execution paths. **Updated** with enhanced policy matrix functionality that provides live visibility into effective permissions through a role × action permission table, server-side row scoping for different user contexts, new policy actions including `tools:list`, `skills:read`, `chat:confirm`, and the new `tools:mutate` action for bounded mutating operations, and comprehensive HITL (Human-in-the-Loop) confirmation bridging for approval-gated bounded actions.
+The system is designed to be declarative, auditable, and extensible, allowing operators to define policies centrally and enforce them consistently at the API gateway boundary and within tool execution paths. **Updated** with enhanced policy matrix functionality that provides live visibility into effective permissions through a role × action permission table, server-side row scoping for different user contexts, new policy actions including `tools:list`, `skills:read`, `chat:confirm`, `models:list`, and the new `tools:mutate` action for bounded mutating operations, and comprehensive HITL (Human-in-the-Loop) confirmation bridging for approval-gated bounded actions.
 
 **New**: The platform now includes risk-tier gating that separates read-only tool execution from mutating operations, providing an additional layer of security for potentially destructive actions through the new `tools:mutate` policy action.
+
+**Updated**: The platform now grants `models:list` permissions to all operational roles (platform-admin, approver, operator, developer, and read-only-observer), enabling safe catalog discovery operations as specified in SPEC-024 for runtime LLM model switching capabilities.
 
 ## Project Structure
 Policy-related artifacts are distributed across documentation, schemas, runtime implementation, tests, and Kubernetes manifests:
@@ -71,6 +76,7 @@ Policy-related artifacts are distributed across documentation, schemas, runtime 
 - Kubernetes manifests provide default policies and RBAC configurations for deployment.
 - **New**: Risk-tier gating provides separation between read and mutating tool execution.
 - **New**: Bounded mutating tools like `k8s.delete_pod` require explicit approval through the triple-gated model.
+- **Updated**: Model catalog discovery permissions enable safe read-only access to available LLM models across all operational roles.
 
 ```mermaid
 graph TB
@@ -79,6 +85,7 @@ PS["Policy Specification"]
 SPEC["SPEC-004 Policy Enforcement"]
 SPEC20["SPEC-020 HITL Confirmation"]
 SPEC21["SPEC-021 Bounded Mutating"]
+SPEC24["SPEC-024 Model Switching"]
 AUTH_MATRIX["Authorization Matrix"]
 end
 subgraph "Schemas"
@@ -87,6 +94,7 @@ SCHEMA_DECISION["policy-decision.schema.json"]
 SCHEMA_IDENTITY["identity-context.schema.json"]
 SCHEMA_MATRIX["policy-matrix.schema.json"]
 SCHEMA_CONFIRM["chat-confirm.schema.json"]
+SCHEMA_MODEL["model-catalog.schema.json"]
 end
 subgraph "Runtime"
 ENGINE_TOOL["tool-gateway policy-engine.py"]
@@ -96,6 +104,7 @@ MATRIX_ENGINE["policy_matrix.py"]
 CHAT_ROUTE["chat.py confirm route"]
 K8S_CONNECTOR["k8s_connector.py"]
 DEFAULT_POLICY["policy-default.yaml (canonical)"]
+MODEL_CATALOG["model_catalog.py"]
 end
 subgraph "Validation & Tooling"
 VALIDATE_SCRIPT["validate_policy.py"]
@@ -107,6 +116,7 @@ TEST_PLATFORM["test_policy_engine.py (platform-gateway)"]
 TEST_CHAT["test_chat_confirm.py"]
 TEST_MATRIX["test_policy_matrix.py"]
 TEST_K8S["test_k8s_connector.py"]
+TEST_MODEL["test_model_catalog.py"]
 end
 subgraph "Deployment"
 K8S_POLICY["policy.yaml"]
@@ -116,6 +126,7 @@ PS --> SCHEMA_RULE
 SPEC --> SCHEMA_DECISION
 SPEC20 --> SCHEMA_CONFIRM
 SPEC21 --> K8S_CONNECTOR
+SPEC24 --> MODEL_CATALOG
 AUTH_MATRIX --> DEFAULT_POLICY
 SCHEMA_RULE --> ENGINE_TOOL
 SCHEMA_RULE --> ENGINE_PLATFORM
@@ -123,6 +134,7 @@ SCHEMA_DECISION --> ENGINE_TOOL
 SCHEMA_DECISION --> ENGINE_PLATFORM
 SCHEMA_MATRIX --> MATRIX_ENGINE
 SCHEMA_CONFIRM --> CHAT_ROUTE
+SCHEMA_MODEL --> MODEL_CATALOG
 DEFAULT_POLICY --> VALIDATE_SCRIPT
 VALIDATE_SCRIPT --> MAKEFILE_TARGETS
 MAKEFILE_TARGETS --> ENGINE_TOOL
@@ -140,6 +152,7 @@ K8S_POLICY --> ENGINE_TOOL
 K8S_POLICY --> ENGINE_PLATFORM
 RBAC_CONFIG --> ENGINE_TOOL
 RBAC_CONFIG --> ENGINE_PLATFORM
+MODEL_CATALOG --> TEST_MODEL
 ```
 
 **Diagram sources**
@@ -147,12 +160,14 @@ RBAC_CONFIG --> ENGINE_PLATFORM
 - [SPEC-004-policy-enforcement/spec.md](file://docs/specs/SPEC-004-policy-enforcement/spec.md)
 - [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
 - [SPEC-021-bounded-mutating-actions/spec.md](file://docs/specs/SPEC-021-bounded-mutating-actions/spec.md)
+- [SPEC-024-runtime-llm-model-switching/spec.md](file://docs/specs/SPEC-024-runtime-llm-model-switching/spec.md)
 - [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
 - [chat-confirm.schema.json](file://shared/shared-contracts/schemas/chat-confirm.schema.json)
+- [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 - [Makefile](file://Makefile)
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
@@ -161,12 +176,14 @@ RBAC_CONFIG --> ENGINE_PLATFORM
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
 - [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
+- [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 
@@ -175,6 +192,7 @@ RBAC_CONFIG --> ENGINE_PLATFORM
 - [SPEC-004-policy-enforcement/spec.md](file://docs/specs/SPEC-004-policy-enforcement/spec.md)
 - [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
 - [SPEC-021-bounded-mutating-actions/spec.md](file://docs/specs/SPEC-021-bounded-mutating-actions/spec.md)
+- [SPEC-024-runtime-llm-model-switching/spec.md](file://docs/specs/SPEC-024-runtime-llm-model-switching/spec.md)
 - [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 - [Makefile](file://Makefile)
@@ -185,11 +203,13 @@ RBAC_CONFIG --> ENGINE_PLATFORM
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
 - [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
+- [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
@@ -207,6 +227,7 @@ RBAC_CONFIG --> ENGINE_PLATFORM
 - **New**: Bounded Mutating Tools: First implementation includes `k8s.delete_pod` with triple-gated approval model.
 - **Updated**: Policy Matrix Engine: Generates live role × action permission tables from currently enforced policy bundle with server-side row scoping.
 - **Updated**: HITL Confirmation Bridge: Provides approval-gated workflow for mutating operations with durable audit trails.
+- **Updated**: Model Catalog Discovery: Enables safe read-only access to available LLM models across all operational roles.
 
 Key responsibilities:
 - Load and validate policy documents.
@@ -219,6 +240,7 @@ Key responsibilities:
 - **Updated**: Build effective permission matrices with full policy semantics inheritance.
 - **Updated**: Handle HITL confirmation flows with proper delegation and audit trails.
 - **Updated**: Enforce deny-by-default authorization for sensitive operations including mutating tool execution.
+- **Updated**: Enable safe model catalog discovery with `models:list` permissions for all operational roles.
 
 **Section sources**
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
@@ -227,6 +249,7 @@ Key responsibilities:
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
@@ -236,11 +259,12 @@ Key responsibilities:
 - [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
+- [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 - [Makefile](file://Makefile)
 
 ## Architecture Overview
-The policy enforcement architecture integrates at the API gateway layer and tool invocation path. Requests carry identity context; the policy engine evaluates policies and returns decisions that gate access or modify behavior. Audit trails are recorded for compliance and debugging. **Updated** with risk-tier gating that separates read-only tool execution from mutating operations, requiring separate authorization through the `tools:mutate` action for write/admin risk tools.
+The policy enforcement architecture integrates at the API gateway layer and tool invocation path. Requests carry identity context; the policy engine evaluates policies and returns decisions that gate access or modify behavior. Audit trails are recorded for compliance and debugging. **Updated** with risk-tier gating that separates read-only tool execution from mutating operations, requiring separate authorization through the `tools:mutate` action for write/admin risk tools, and enhanced model catalog discovery permissions for safe read-only operations.
 
 ```mermaid
 sequenceDiagram
@@ -250,12 +274,19 @@ participant Identity as "Identity Broker"
 participant Engine as "Policy Engine"
 participant RiskGate as "Risk-Tier Gate"
 participant Confirm as "Confirm Route"
+participant ModelCatalog as "Model Catalog"
 participant Agent as "Agent Platform"
 participant Audit as "Audit Service"
 Client->>Gateway : "Request with token"
 Gateway->>Identity : "Validate token and resolve identity"
 Identity-->>Gateway : "Identity context"
-alt "Mutating Tool Invocation"
+alt "Model Catalog Discovery"
+Gateway->>Engine : "Evaluate 'models : list'"
+Engine-->>Gateway : "Decision (granted to all roles)"
+Gateway->>ModelCatalog : "Fetch available models"
+ModelCatalog-->>Gateway : "Safe model metadata"
+Gateway-->>Client : "Model list response"
+else "Mutating Tool Invocation"
 Gateway->>Engine : "Evaluate 'tools : invoke'"
 Engine-->>Gateway : "Decision"
 alt "Allowed"
@@ -292,6 +323,7 @@ end
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 
@@ -300,6 +332,7 @@ end
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 
@@ -317,7 +350,7 @@ Built-in rule types typically cover:
 - Rate limiting per user, tenant, or resource.
 - Tool usage restrictions by capability or environment.
 - Data access control by sensitivity labels or ownership.
-- **Updated**: New policy actions including `tools:list` for tool discovery, `skills:read` for skills inventory access, `chat:confirm` for HITL confirmation bridging, and the new `tools:mutate` for bounded mutating operations.
+- **Updated**: New policy actions including `tools:list` for tool discovery, `skills:read` for skills inventory access, `chat:confirm` for HITL confirmation bridging, `models:list` for safe model catalog discovery, and the new `tools:mutate` for bounded mutating operations.
 
 Custom policy development involves extending condition evaluators and action handlers while adhering to schema constraints.
 
@@ -336,7 +369,7 @@ Evaluation proceeds through:
 
 Conflict resolution uses precedence rules and explicit allow/deny overrides. Deny typically takes precedence unless explicitly configured otherwise.
 
-**Updated**: The evaluation flow now includes risk-tier gating for tool invocations, where mutating tools require both `tools:invoke` and `tools:mutate` authorization.
+**Updated**: The evaluation flow now includes risk-tier gating for tool invocations, where mutating tools require both `tools:invoke` and `tools:mutate` authorization, and enhanced model catalog discovery with `models:list` permissions granted to all operational roles.
 
 ```mermaid
 flowchart TD
@@ -349,10 +382,15 @@ ShortCircuit --> |No| NextRule["Next Rule"]
 NextRule --> EvaluateConditions
 ApplyAction --> CheckRiskTier{"Is Mutating Tool?"}
 CheckRiskTier --> |Yes| MutateCheck["Evaluate 'tools:mutate'"]
-CheckRiskTier --> |No| Aggregate["Aggregate Decision"]
+CheckRiskTier --> |No| CheckModels{"Is Model Catalog?"}
+CheckModels --> |Yes| ModelsCheck["Evaluate 'models:list'"]
+CheckModels --> |No| Aggregate["Aggregate Decision"]
+ModelsCheck --> ModelsDecision{"models:list Allowed?"}
+ModelsDecision --> |Yes| Aggregate
+ModelsDecision --> |No| Deny["Deny Request"]
 MutateCheck --> MutateDecision{"tools:mutate Allowed?"}
 MutateDecision --> |Yes| Aggregate
-MutateDecision --> |No| Deny["Deny Request"]
+MutateDecision --> |No| Deny
 Aggregate --> Audit["Generate Audit Trail"]
 Audit --> End(["Return Decision"])
 ```
@@ -380,7 +418,7 @@ The policy matrix endpoint (`GET /api/v1/policy/matrix`) serves the effective ro
 The matrix implements strict server-side row scoping based on caller identity:
 - **Platform-Admin Role**: Receives full matrix showing all roles referenced by the bundle
 - **All Other Roles**: Receive only their own granted roles with boolean permissions for each action
-- **Action Catalog**: Shared across all scopes, showing complete action vocabulary including `tools:mutate`
+- **Action Catalog**: Shared across all scopes, showing complete action vocabulary including `tools:mutate` and `models:list`
 
 #### Implementation Details
 The policy matrix builder extracts roles and actions from the loaded bundle, unions protected route actions, and evaluates each role × action combination:
@@ -544,6 +582,65 @@ The first implementation of bounded mutating capabilities includes:
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 - [approval-and-hitl.md](file://docs/guides/approval-and-hitl.md)
 
+### Model Catalog Discovery and Permissions
+
+**New Section** - Comprehensive coverage of the model catalog discovery functionality introduced by SPEC-024 for runtime LLM model switching.
+
+#### Safe Catalog Discovery
+The `models:list` action enables safe read-only access to the available LLM model catalog. This operation is considered safe by construction as it only exposes non-sensitive metadata including model IDs, labels, providers, and default flags—never credentials or base URLs.
+
+#### Role-Based Authorization
+The `models:list` action is granted to all operational roles:
+- **Granted**: `platform-admin`, `approver`, `operator`, `developer`, `read-only-observer`
+- **Rationale**: Catalog discovery is read-only and contains no sensitive information
+- **Security Model**: Follows the same pattern as `tools:list` for read-only operations
+
+#### Implementation Details
+The model catalog discovery endpoint is implemented in the agent-platform service:
+
+```python
+# In model_catalog.py
+def get_model_catalog(settings: RuntimeSettings) -> ModelCatalogResponse:
+    """Build the credential-gated model catalog from environment configuration."""
+    entries = []
+    for provider in PROVIDERS:
+        entry = _resolve_entry(provider, settings)
+        if entry is not None:  # Only include providers with valid credentials
+            entries.append(entry)
+    
+    return ModelCatalogResponse(
+        models=[entry.model_dump() for entry in entries],
+        default=settings.provider,
+    )
+```
+
+#### Credential-Gated Catalog
+The model catalog is constructed from environment configuration with the following characteristics:
+- **Credential Validation**: Only providers with valid API keys are included in the catalog
+- **Deploy-Time Default**: The active profile's provider remains the default
+- **Additive Configuration**: Additional providers can be added via environment variables
+- **Fail-Closed**: Unknown or invalid configuration fails startup with clear errors
+
+#### Portal Integration
+The operator portal integrates with the model catalog discovery endpoint to provide:
+- **Dynamic Model Selection**: Dropdown populated from available models
+- **Default Selection**: Pre-selected to the deploy-time default model
+- **Single Model Optimization**: Fixed label display when only one model is available
+- **Fail-Open UX**: Graceful degradation when catalog is unavailable
+
+#### Audit Trail Integration
+Model selection decisions are captured in the audit trail:
+- **Chat Events**: `chat_started` and `chat_completed` events include resolved model information
+- **Session Affinity**: Selected models persist at session level for consistency
+- **Change Tracking**: Model switches are logged with timestamps and user context
+
+**Section sources**
+- [SPEC-024-runtime-llm-model-switching/spec.md](file://docs/specs/SPEC-024-runtime-llm-model-switching/spec.md)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
+- [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+
 ### Audit Trail Access Control
 Audit trail access control enforces strict role-based permissions for the `audit:read` action:
 
@@ -574,7 +671,7 @@ Audit records capture:
 - Timestamps and correlation IDs.
 - Reason codes and messages.
 
-**Updated**: Audit trails now include risk-level information for tool invocations and detailed context for mutating tool attempts.
+**Updated**: Audit trails now include risk-level information for tool invocations, detailed context for mutating tool attempts, and model selection information for chat sessions.
 
 These records support compliance reporting, debugging, and performance analysis.
 
@@ -593,6 +690,7 @@ These records support compliance reporting, debugging, and performance analysis.
   - `skills:read`: View federated skills inventory (granted to all platform roles)
   - `policy:read`: Access live permission matrix (granted to all platform roles)
   - `chat:confirm`: Approve or deny parked HITL tool confirmations (granted to platform-admin, approver, operator, and developer roles)
+  - `models:list`: Discover available LLM models (granted to all operational roles)
   - **New**: `tools:mutate`: Execute mutating (write/admin risk) tools (granted to platform-admin and operator only)
 
 Examples are implemented via rule definitions and condition evaluators aligned with schemas.
@@ -617,6 +715,7 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - Batching: Batch audit writes and metrics updates to minimize I/O.
 - **New**: Risk-tier gating adds minimal overhead through efficient tool registry lookups and early rejection of unauthorized mutating operations.
 - **New**: Bounded mutating tools leverage existing policy engine caching and evaluation semantics.
+- **New**: Model catalog discovery benefits from credential-gated filtering and efficient environment variable resolution.
 - **Updated**: Policy matrix functionality benefits from existing policy engine caching and efficient role × action computation.
 - **Updated**: HITL confirmation bridging minimizes overhead through efficient SSE passthrough and deferred audit emission.
 - **Updated**: Audit trail access controls add minimal overhead through early policy evaluation.
@@ -625,12 +724,14 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 
 ### Integration with Identity Contexts and Authorization Decisions
 - Identity Context: Resolved from tokens or upstream services; includes roles, groups, claims, and tenant identifiers.
 - Authorization Decisions: Policy engine consumes identity context to evaluate rules and produce decisions consumed by gateway and tool services.
 - Cross-Service Consistency: Shared schemas ensure uniform interpretation of identity and decisions across services.
 - **Updated**: Risk-tier gating integrates with normalized identity context for evaluating both `tools:invoke` and `tools:mutate` actions.
+- **Updated**: Model catalog discovery integrates with normalized identity context for role-based access control.
 - **Updated**: Policy matrix functionality integrates with normalized identity context for server-side row scoping.
 - **Updated**: HITL confirmation bridging uses delegated tokens to maintain identity continuity through approval workflows.
 
@@ -640,6 +741,7 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 
 ## Enhanced Policy Tooling
 
@@ -799,7 +901,7 @@ Approval decisions follow this flow:
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 
 ## Dependency Analysis
-Policy components depend on schemas for validation and consistency, and on identity services for context resolution. Deployment manifests configure runtime behavior and access controls. **Updated** with new dependencies on risk-tier gating, bounded mutating tools, policy matrix functionality, HITL confirmation bridging, and validation tooling.
+Policy components depend on schemas for validation and consistency, and on identity services for context resolution. Deployment manifests configure runtime behavior and access controls. **Updated** with new dependencies on risk-tier gating, bounded mutating tools, policy matrix functionality, HITL confirmation bridging, model catalog discovery, and validation tooling.
 
 ```mermaid
 graph TB
@@ -809,12 +911,14 @@ DECISION_SCHEMA["policy-decision.schema.json"]
 IDENTITY_SCHEMA["identity-context.schema.json"]
 MATRIX_SCHEMA["policy-matrix.schema.json"]
 CONFIRM_SCHEMA["chat-confirm.schema.json"]
+MODEL_SCHEMA["model-catalog.schema.json"]
 ENGINE_TOOL["tool-gateway policy-engine.py"]
 ENGINE_PLATFORM["platform-gateway policy-engine.py"]
 GATEWAY_SERVICE["gateway_service.py"]
 MATRIX_ENGINE["policy_matrix.py"]
 CHAT_ROUTE["chat.py confirm route"]
 K8S_CONNECTOR["k8s_connector.py"]
+MODEL_CATALOG["model_catalog.py"]
 DEFAULT_YAML["policy-default.yaml (canonical)"]
 TEST_TOOL["test_policy_engine.py (tool-gateway)"]
 TEST_PLATFORM["test_policy_engine.py (platform-gateway)"]
@@ -822,6 +926,7 @@ TEST_CHAT["test_chat_confirm.py"]
 TEST_AUDIT["test_audit_proxy.py"]
 TEST_MATRIX["test_policy_matrix.py"]
 TEST_K8S["test_k8s_connector.py"]
+TEST_MODEL["test_model_catalog.py"]
 K8S_POLICY["policy.yaml"]
 K8S_RBAC["rbac.yaml"]
 VALIDATE_SCRIPT["validate_policy.py"]
@@ -832,6 +937,7 @@ POLICY_SPEC --> RULE_SCHEMA
 POLICY_SPEC --> DECISION_SCHEMA
 SPEC20 --> CONFIRM_SCHEMA
 SPEC21 --> K8S_CONNECTOR
+SPEC24 --> MODEL_SCHEMA
 RULE_SCHEMA --> ENGINE_TOOL
 RULE_SCHEMA --> ENGINE_PLATFORM
 RULE_SCHEMA --> VALIDATE_SCRIPT
@@ -841,6 +947,7 @@ IDENTITY_SCHEMA --> ENGINE_TOOL
 IDENTITY_SCHEMA --> ENGINE_PLATFORM
 MATRIX_SCHEMA --> MATRIX_ENGINE
 CONFIRM_SCHEMA --> CHAT_ROUTE
+MODEL_SCHEMA --> MODEL_CATALOG
 DEFAULT_YAML --> VALIDATE_SCRIPT
 DEFAULT_YAML --> ENGINE_TOOL
 DEFAULT_YAML --> ENGINE_PLATFORM
@@ -848,6 +955,7 @@ DEFAULT_YAML --> AUDIT_ROUTE
 DEFAULT_YAML --> POLICY_ROUTE
 DEFAULT_YAML --> CHAT_ROUTE
 DEFAULT_YAML --> K8S_CONNECTOR
+DEFAULT_YAML --> MODEL_CATALOG
 VALIDATE_SCRIPT --> MAKEFILE_TARGETS
 MAKEFILE_TARGETS --> ENGINE_TOOL
 MAKEFILE_TARGETS --> ENGINE_PLATFORM
@@ -859,6 +967,7 @@ CHAT_ROUTE --> TEST_CHAT
 AUDIT_ROUTE --> TEST_AUDIT
 POLICY_ROUTE --> TEST_MATRIX
 MATRIX_ENGINE --> TEST_MATRIX
+MODEL_CATALOG --> TEST_MODEL
 K8S_POLICY --> ENGINE_TOOL
 K8S_POLICY --> ENGINE_PLATFORM
 K8S_RBAC --> ENGINE_TOOL
@@ -870,15 +979,18 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [SPEC-004-policy-enforcement/spec.md](file://docs/specs/SPEC-004-policy-enforcement/spec.md)
 - [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
 - [SPEC-021-bounded-mutating-actions/spec.md](file://docs/specs/SPEC-021-bounded-mutating-actions/spec.md)
+- [SPEC-024-runtime-llm-model-switching/spec.md](file://docs/specs/SPEC-024-runtime-llm-model-switching/spec.md)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
 - [chat-confirm.schema.json](file://shared/shared-contracts/schemas/chat-confirm.schema.json)
+- [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
@@ -890,6 +1002,7 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
+- [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
@@ -900,6 +1013,7 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
@@ -910,12 +1024,14 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
 - [chat-confirm.schema.json](file://shared/shared-contracts/schemas/chat-confirm.schema.json)
+- [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
 - [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
+- [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
@@ -929,6 +1045,7 @@ K8S_RBAC --> ENGINE_PLATFORM
 - Monitor hot paths and tune thresholds for rate limiting and caching.
 - **New**: Risk-tier gating adds minimal overhead through efficient tool registry lookups and early rejection of unauthorized mutating operations.
 - **New**: Bounded mutating tools leverage existing policy engine caching and evaluation semantics.
+- **New**: Model catalog discovery benefits from credential-gated filtering and efficient environment variable resolution.
 - **New**: Policy matrix evaluation benefits from existing policy engine caching and efficient role × action computation.
 - **New**: HITL confirmation bridging uses efficient SSE passthrough and deferred audit emission to minimize latency.
 - **Updated**: Audit trail access controls add minimal overhead through early policy evaluation.
@@ -946,6 +1063,7 @@ Common issues and resolutions:
 - **New**: Policy matrix access denied: Verify caller has `policy:read` action; check bundle contains `allow-all-policy-read` rule.
 - **New**: Chat confirmation access denied (403): Verify caller has one of the granted roles (`platform-admin`, `approver`, `operator`, `developer`); check bundle contains `allow-chat-confirm` rule.
 - **New**: Mutating tool access denied (403): Verify caller has `tools:mutate` action; check bundle contains `allow-operators-tools-mutate` rule; ensure `GATEWAY_MUTATING_TOOLS_ENABLED=true`.
+- **New**: Model catalog access denied: Verify caller has `models:list` permission; check bundle contains updated rules for all operational roles.
 - **Updated**: Audit access denied (403): Verify caller has `auditor` or `platform-admin` role; check policy bundle contains `allow-auditors-audit-read` rule.
 
 Operational checks:
@@ -956,6 +1074,7 @@ Operational checks:
 - **Updated**: For audit access issues, verify OIDC group membership for `ops-auditors` and `ops-admins`.
 - **Updated**: For chat confirmation issues, verify user has appropriate role and confirmation hasn't expired.
 - **New**: For mutating tool issues, verify feature flag is enabled, user has `tools:mutate` grant, and tool is properly registered.
+- **New**: For model catalog issues, verify environment configuration for additional providers and check credential setup.
 
 **Section sources**
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
@@ -964,6 +1083,7 @@ Operational checks:
 - [test_audit_proxy.py](file://products/platform-gateway/tests/test_audit_proxy.py)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
+- [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
@@ -975,7 +1095,9 @@ The policy management system provides a robust, declarative framework for enforc
 
 **Updated**: The platform now includes comprehensive risk-tier gating that separates read-only tool execution from mutating operations through the new `tools:mutate` policy action. This provides an additional layer of security for potentially destructive actions, implementing a triple-gated approval model that combines gateway risk-tier admission, agent auto-allow invariants, and HITL confirmation requirements. The first bounded mutating tool (`k8s.delete_pod`) demonstrates this approach, requiring explicit authorization and human approval before execution.
 
-**Updated**: Automated policy validation and synchronization capabilities streamline policy management and reduce operational overhead, including comprehensive audit trail access controls with deny-by-default authorization for sensitive operations, new policy matrix functionality for live permission transparency, HITL confirmation bridging for approval-gated workflows, and risk-tier gating for safe execution of potentially mutating operations.
+**Updated**: The platform now grants `models:list` permissions to all operational roles (platform-admin, approver, operator, developer, and read-only-observer), enabling safe catalog discovery operations as specified in SPEC-024 for runtime LLM model switching capabilities. This enhancement allows users to discover available LLM models without exposing sensitive credentials or configuration details.
+
+**Updated**: Automated policy validation and synchronization capabilities streamline policy management and reduce operational overhead, including comprehensive audit trail access controls with deny-by-default authorization for sensitive operations, new policy matrix functionality for live permission transparency, HITL confirmation bridging for approval-gated workflows, risk-tier gating for safe execution of potentially mutating operations, and enhanced model catalog discovery for runtime LLM model switching.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -990,6 +1112,7 @@ The policy management system provides a robust, declarative framework for enforc
   - `skills:read`: Skills inventory access for all platform roles
   - `policy:read`: Permission matrix access for all platform roles
   - `chat:confirm`: HITL confirmation approval for platform-admin, approver, operator, and developer roles
+  - `models:list`: Model catalog discovery for all operational roles
   - **New**: `tools:mutate`: Mutating tool execution for platform-admin and operator roles only
 
 **Section sources**
@@ -1009,6 +1132,7 @@ The policy management system provides a robust, declarative framework for enforc
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
 - [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
+- [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
@@ -1198,6 +1322,51 @@ kubectl -n dev-luban-aiops logs deployment/tool-gateway --tail=50 | grep "kubern
 - [SPEC-021-bounded-mutating-actions/spec.md](file://docs/specs/SPEC-021-bounded-mutating-actions/spec.md)
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 
+### Model Catalog Troubleshooting
+
+**New Section** - Specific guidance for resolving model catalog discovery and functionality issues.
+
+#### Common Symptoms
+- 403 Forbidden responses when accessing `/api/v1/models`
+- Empty model catalog responses
+- Missing model selector in portal UI
+- Authentication successful but no models displayed
+
+#### Diagnostic Steps
+```bash
+# Check platform-gateway logs for models:list denials
+kubectl -n dev-luban-aiops logs deployment/platform-gateway --tail=30 | grep "models:list"
+
+# Verify deployed policy bundle contains models:list rule
+kubectl -n dev-luban-aiops exec deployment/platform-gateway -- \
+  cat /etc/luban/policy/policy.yaml | grep -A6 allow-operators-chat
+
+# Check agent-platform logs for model catalog issues
+kubectl -n dev-luban-aiops logs deployment/agent-platform --tail=50 | grep "model.*catalog"
+
+# Verify environment configuration for additional providers
+kubectl -n dev-luban-aiops get secret agent-platform-secrets -o yaml | grep -E "(OPENAI_API_KEY|DEEPSEEK_API_KEY|DASHSCOPE_API_KEY)"
+```
+
+#### Resolution Steps
+1. **Verify User Roles**: Ensure user has one of the granted roles for `models:list` (all operational roles)
+2. **Check Policy Bundle**: Ensure `allow-operators-chat` rule includes `models:list` action
+3. **Validate Environment Configuration**: Verify API keys are properly configured for additional providers
+4. **Test Model Catalog Endpoint**: Direct curl test to verify endpoint functionality
+5. **Review Provider Configuration**: Check that provider-specific environment variables are set correctly
+
+#### Common Issues
+- **Missing API Keys**: Providers without configured API keys are excluded from the catalog
+- **Invalid Provider Names**: Unknown provider names fail startup with clear error messages
+- **Environment Variable Format**: Provider-specific variables must follow the format `PROVIDER_API_KEY` and `PROVIDER_MODEL_NAME`
+- **Default Provider**: The deploy-time default provider remains active even when other providers are configured
+
+**Section sources**
+- [SPEC-024-runtime-llm-model-switching/spec.md](file://docs/specs/SPEC-024-runtime-llm-model-switching/spec.md)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+
 ### Protected Actions Reference
 
 **New Section** - Complete reference of all protected actions enforced by the policy engine.
@@ -1215,6 +1384,7 @@ The platform-gateway enforces policy for the following actions:
 - `policy:read`: Access live permission matrix
 - `tools:list`: List available tools
 - `skills:read`: View federated skills inventory
+- `models:list`: Discover available LLM models (SPEC-024)
 - **New**: `tools:mutate`: Execute mutating (write/admin risk) tools (SPEC-021)
 
 #### Tool Gateway Protected Actions
@@ -1237,6 +1407,7 @@ The tool-gateway enforces policy for:
 | policy:read | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | tools:list | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
 | skills:read | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **models:list** | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
 | **tools:mutate** | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ |
 
 **Section sources**

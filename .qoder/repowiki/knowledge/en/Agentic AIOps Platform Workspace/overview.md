@@ -1,0 +1,1 @@
+Monorepo workspace for an enterprise agentic AIOps platform composed of product-oriented Python services, a React operator portal, shared JSON contracts, and GitOps Kubernetes overlays orchestrated by a root Makefile.

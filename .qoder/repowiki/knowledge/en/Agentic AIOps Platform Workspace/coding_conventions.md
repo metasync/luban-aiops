@@ -1,0 +1,6 @@
+- Each product follows a uniform internal layout: `src/<service>/core/` for config/metrics/telemetry/request-context, `api/routes/` for HTTP endpoints, `services/` for business logic, `schemas/` for request/response models, plus `app.py`, `main.py`, and `metadata.py` at the package root.
+- Cross-service communication is mediated exclusively through HTTP APIs whose shapes are declared as JSON Schema files under `shared/shared-contracts/schemas/`, keeping products decoupled from each other's implementations.
+- Policy enforcement is centralized: a canonical `policy-default.yaml` lives in `shared/shared-contracts/policies/` and is copied into each consuming product's `policies/` directory via the root `make sync-policy` target.
+- Container images are tagged with a coordinated semver-derived tag computed once by the root Makefile and reused across all products, ensuring deployment consistency across the dev-k8s overlay.
+- Per-product Python environments are managed locally with `uv` using a pinned interpreter declared in each product's `.python-version` file, matching the workspace-level `.python-version`.
+- Every product ships a `Makefile` exposing `test`, `lint`, `build`, `push`, and `help` targets so the root Makefile can delegate uniformly without knowing product internals.

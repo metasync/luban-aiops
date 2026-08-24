@@ -12,8 +12,22 @@
 - [env.py](file://products/agent-platform/src/agent_service/core/env.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
+- [test_model_switching.py](file://products/agent-platform/tests/test_model_switching.py)
 - [test_runtime_providers.py](file://products/agent-platform/tests/test_runtime_providers.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive documentation for runtime model switching capabilities
+- Documented credential-gated model catalog discovery system
+- Added per-session model pinning functionality
+- Enhanced dynamic provider selection without service restarts
+- Updated architecture diagrams to reflect new model switching components
+- Added detailed examples of runtime model switching workflows
 
 ## Table of Contents
 1. Introduction
@@ -21,21 +35,25 @@
 3. Core Components
 4. Architecture Overview
 5. Detailed Component Analysis
-6. Dependency Analysis
-7. Performance Considerations
-8. Troubleshooting Guide
-9. Conclusion
+6. Runtime Model Switching System
+7. Dependency Analysis
+8. Performance Considerations
+9. Troubleshooting Guide
+10. Conclusion
 
 ## Introduction
-This document explains the provider registry and multi-provider support system used by the agent platform to abstract and orchestrate calls to multiple LLM backends. It covers the abstract base provider interface, the registration mechanism, dynamic loading strategies, built-in providers (OpenAI, DashScope, DeepSeek), configuration and authentication differences, custom provider implementation patterns, selection and fallback strategies, rate limiting and retry policies, error handling, health monitoring, circuit breaker patterns, and performance benchmarking guidance.
+This document explains the provider registry and multi-provider support system used by the agent platform to abstract and orchestrate calls to multiple LLM backends. The system has been enhanced with runtime model switching capabilities including credential-gated model catalog discovery, per-session model pinning, and dynamic provider selection without service restarts. It covers the abstract base provider interface, the registration mechanism, dynamic loading strategies, built-in providers (OpenAI, DashScope, DeepSeek), configuration and authentication differences, custom provider implementation patterns, selection and fallback strategies, rate limiting and retry policies, error handling, health monitoring, circuit breaker patterns, and performance benchmarking guidance.
 
 ## Project Structure
-The provider subsystem lives under the agent platform service:
+The provider subsystem lives under the agent platform service with enhanced runtime model switching capabilities:
 - Abstract base and registry: products/agent-platform/src/agent_service/providers/base.py, registry.py
 - Built-in providers: openai.py, dashscope.py, deepseek.py
+- Runtime model switching: services/model_catalog.py, services/session_service.py
 - Configuration and environment: core/config.py, core/env.py, runtime_settings.py
+- API routes with model switching: api/v2/routes.py
+- Kernel integration: runtime_kernel.py
 - Observability and metrics: core/observability.py, core/metrics.py
-- Tests for provider behavior: tests/test_runtime_providers.py
+- Tests for provider behavior and model switching: tests/test_runtime_providers.py, tests/test_model_switching.py
 
 ```mermaid
 graph TB
@@ -45,6 +63,12 @@ Reg["Provider Registry"]
 OAI["OpenAI Provider"]
 DS["DashScope Provider"]
 DK["DeepSeek Provider"]
+end
+subgraph "Runtime Model Switching"
+Catalog["Model Catalog"]
+SessionSvc["Session Service"]
+Kernel["Agent Kernel"]
+Routes["API Routes"]
 end
 subgraph "Core Services"
 Cfg["Config & Env"]
@@ -56,6 +80,10 @@ Base --> Reg
 OAI --> Reg
 DS --> Reg
 DK --> Reg
+Catalog --> Routes
+SessionSvc --> Kernel
+Routes --> Kernel
+Kernel --> Catalog
 Cfg --> RS
 RS --> Reg
 Obs --> Reg
@@ -65,31 +93,26 @@ Met --> Reg
 **Diagram sources**
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
-- [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
-- [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
-- [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
-- [config.py](file://products/agent-platform/src/agent_service/core/config.py)
-- [env.py](file://products/agent-platform/src/agent_service/core/env.py)
-- [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
-- [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 
 **Section sources**
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
-- [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
-- [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
-- [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
-- [config.py](file://products/agent-platform/src/agent_service/core/config.py)
-- [env.py](file://products/agent-platform/src/agent_service/core/env.py)
-- [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
-- [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 
 ## Core Components
 - Abstract base provider: Defines the contract all providers must implement, including chat completion, streaming, model listing, and health checks. It also centralizes common behaviors like retries, timeouts, and telemetry hooks.
 - Provider registry: A centralized lookup that registers available providers, resolves them by name or priority, and supports dynamic loading based on runtime settings.
 - Built-in providers: Concrete implementations for OpenAI, DashScope, and DeepSeek, each mapping the abstract interface to their respective SDKs and APIs.
+- **Enhanced**: Runtime model catalog: Credential-gated discovery of available models at startup, providing safe model enumeration without exposing credentials.
+- **Enhanced**: Per-session model pinning: Sessions can be pinned to specific models, enabling dynamic provider switching without service restarts.
+- **Enhanced**: Dynamic model resolution: Request-time model selection with fallback mechanisms and fail-closed validation.
 - Configuration and environment: Centralized config and env loaders provide credentials, endpoints, and per-provider options. Runtime settings select active providers and policies.
 - Observability and metrics: Standardized instrumentation for latency, throughput, errors, and provider-specific metrics.
 
@@ -99,21 +122,19 @@ Key responsibilities:
 - Configurable retry/backoff and rate limiting
 - Health checks and readiness signals
 - Metrics and tracing for observability
+- **New**: Runtime model switching with credential safety
+- **New**: Session-based model affinity and persistence
 
 **Section sources**
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
-- [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
-- [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
-- [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
-- [config.py](file://products/agent-platform/src/agent_service/core/config.py)
-- [env.py](file://products/agent-platform/src/agent_service/core/env.py)
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
-- [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 
 ## Architecture Overview
-The provider architecture follows a clear separation between abstraction, registry, and concrete implementations:
+The provider architecture follows a clear separation between abstraction, registry, and concrete implementations, now enhanced with runtime model switching capabilities:
 
 ```mermaid
 classDiagram
@@ -144,23 +165,44 @@ class DeepSeekProvider {
 +list_models() Model[]
 +health_check() HealthStatus
 }
+class ModelCatalog {
++entries tuple[ModelCatalogEntry]
++get(model_id) ModelCatalogEntry
++default_entry() ModelCatalogEntry
++public_models() dict
+}
+class ModelCatalogEntry {
++id string
++label string
++provider RuntimeProvider
++api_key string
++model_name string
++base_url string
++default bool
+}
 class ProviderRegistry {
 +register(name, provider_class) void
 +resolve(name_or_priority) BaseProvider
 +get_health_summary() Map~string,HealthStatus~
 +reload_from_settings(settings) void
 }
+class AgentKernel {
++_build_model(model_id) Model
++ensure_agent(session_id, bearer_token, model_id) Agent
++stream_events(message, request_id, session_id, user_name, bearer_token, model_id) AsyncIterator
+}
 BaseProvider <|-- OpenAIProvider
 BaseProvider <|-- DashScopeProvider
 BaseProvider <|-- DeepSeekProvider
 ProviderRegistry --> BaseProvider : "resolves"
+AgentKernel --> ModelCatalog : "validates"
+ModelCatalog --> ModelCatalogEntry : "contains"
 ```
 
 **Diagram sources**
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
-- [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
-- [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
-- [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 
 ## Detailed Component Analysis
@@ -250,6 +292,65 @@ Configuration highlights:
 - [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
 - [config.py](file://products/agent-platform/src/agent_service/core/config.py)
 - [env.py](file://products/agent-platform/src/agent_service/core/env.py)
+
+### Runtime Model Switching System
+
+#### Credential-Gated Model Catalog Discovery
+The model catalog provides secure discovery of available models at runtime without exposing credentials:
+
+- **Startup Discovery**: Models are discovered at service startup based on environment variables
+- **Credential Safety**: Only safe metadata (id, label, provider, default) is exposed via API
+- **Fail-Closed Validation**: Unknown model IDs are rejected before any processing occurs
+- **Public API**: `/api/v2/models` endpoint returns discovery-safe model information
+
+```mermaid
+sequenceDiagram
+participant Client as "Client"
+participant Gateway as "Gateway Layer"
+participant Catalog as "Model Catalog"
+participant Kernel as "Agent Kernel"
+Client->>Gateway : GET /api/v2/models
+Gateway->>Catalog : public_models()
+Catalog-->>Gateway : {models : [...], default : "openai"}
+Gateway-->>Client : Discovery-safe model list
+Client->>Gateway : POST /api/v2/chat (model : "deepseek")
+Gateway->>Catalog : get("deepseek")
+Catalog-->>Gateway : ModelCatalogEntry
+Gateway->>Kernel : stream_events(..., model_id="deepseek")
+Kernel->>Catalog : validate model exists
+Catalog-->>Kernel : Valid ✓
+Kernel-->>Gateway : Stream events with model attribution
+Gateway-->>Client : Responses with serving model
+```
+
+**Diagram sources**
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+
+#### Per-Session Model Pinning
+Sessions maintain model affinity through persistent storage:
+
+- **Session Storage**: Model preferences stored per session in Redis/PostgreSQL
+- **Latest Wins**: Newer model selections override previous pins
+- **Fail-Open**: Store failures don't block chat operations
+- **Graceful Degradation**: Revoked credentials automatically fall back to default
+
+#### Dynamic Provider Selection Without Service Restarts
+The system enables runtime model switching through several mechanisms:
+
+- **Request-Time Resolution**: `request > pinned > default` priority order
+- **Kernel Rebuilding**: Agents are rebuilt when model switches occur
+- **State Preservation**: Conversation history maintained across model switches
+- **Validation**: All model IDs validated against credential-gated catalog
+
+**Updated** Enhanced with runtime model switching capabilities including credential-gated model catalog discovery, per-session model pinning, and dynamic provider selection without service restarts
+
+**Section sources**
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 
 ### Dynamic Provider Loading
 Dynamic loading enables runtime selection without code changes:
@@ -412,6 +513,9 @@ Provider dependencies and relationships:
 - Base provider defines the contract; concrete providers depend on it
 - Registry depends on runtime settings and configuration
 - Observability and metrics are used by providers and registry for instrumentation
+- **New**: Model catalog depends on runtime settings and provider adapters
+- **New**: Session service integrates with store backends for model persistence
+- **New**: Kernel coordinates model switching and agent rebuilding
 
 ```mermaid
 graph TB
@@ -424,6 +528,9 @@ Cfg["Config & Env"]
 RS["Runtime Settings"]
 Obs["Observability"]
 Met["Metrics"]
+Catalog["Model Catalog"]
+SessionSvc["Session Service"]
+Kernel["Agent Kernel"]
 OAI --> Base
 DS --> Base
 DK --> Base
@@ -438,31 +545,28 @@ OAI --> Met
 DS --> Met
 DK --> Met
 Reg --> Met
+Catalog --> RS
+Catalog --> OAI
+Catalog --> DS
+Catalog --> DK
+SessionSvc --> Catalog
+Kernel --> Catalog
+Kernel --> SessionSvc
 ```
 
 **Diagram sources**
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
-- [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
-- [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
-- [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
-- [config.py](file://products/agent-platform/src/agent_service/core/config.py)
-- [env.py](file://products/agent-platform/src/agent_service/core/env.py)
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
-- [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 
 **Section sources**
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
-- [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
-- [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
-- [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
-- [config.py](file://products/agent-platform/src/agent_service/core/config.py)
-- [env.py](file://products/agent-platform/src/agent_service/core/env.py)
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
-- [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 
 ## Performance Considerations
 - Prefer streaming for large responses to reduce memory usage and improve perceived latency
@@ -470,6 +574,8 @@ Reg --> Met
 - Cache model listings and static configurations where safe
 - Avoid unnecessary serialization overhead by reusing objects
 - Monitor resource utilization and scale horizontally under load
+- **New**: Minimize agent rebuilds by caching sessions effectively
+- **New**: Optimize model catalog lookups for high-throughput scenarios
 
 [No sources needed since this section provides general guidance]
 
@@ -480,14 +586,19 @@ Common issues and resolutions:
 - Provider unavailability: Inspect health checks and circuit breaker states; switch to fallback provider
 - Inconsistent responses: Validate normalization layers; compare provider schemas
 - High latency: Analyze metrics and traces; identify bottlenecks in network or provider side
+- **New**: Model switching failures: Check credential-gated catalog validity and session pinning
+- **New**: Session affinity issues: Verify store backend connectivity and model persistence
 
 Debugging tips:
 - Enable detailed logging for provider interactions
 - Use health summary endpoints to assess provider status
 - Correlate metrics with deployment changes and configuration updates
+- **New**: Monitor model catalog discovery logs for credential issues
+- **New**: Track session model pinning operations for debugging affinity problems
 
 **Section sources**
 - [test_runtime_providers.py](file://products/agent-platform/tests/test_runtime_providers.py)
+- [test_model_switching.py](file://products/agent-platform/tests/test_model_switching.py)
 
 ## Conclusion
-The provider registry and multi-provider support system provide a robust, extensible foundation for integrating multiple LLM backends. By standardizing interfaces, centralizing configuration, and enforcing health-aware selection, the system ensures reliability, flexibility, and observability across diverse providers. Following the guidance in this document will help you implement custom providers, optimize performance, and maintain high availability in production environments.
+The provider registry and multi-provider support system provide a robust, extensible foundation for integrating multiple LLM backends. The enhanced runtime model switching capabilities add significant flexibility, allowing dynamic provider selection without service restarts while maintaining security through credential-gated discovery and session-based model affinity. By standardizing interfaces, centralizing configuration, enforcing health-aware selection, and implementing runtime model switching, the system ensures reliability, flexibility, and observability across diverse providers. Following the guidance in this document will help you implement custom providers, optimize performance, and maintain high availability in production environments.
