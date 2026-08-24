@@ -10,10 +10,21 @@
 - [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
 - [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [app.py](file://products/agent-platform/src/agent_service/app.py)
+- [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive coverage of SPEC-027 live model discovery system integration
+- Updated architecture diagrams to include discovery service and fallback ladder
+- Enhanced component analysis with discovery filtering and caching mechanisms
+- Added new sections for discovery lifecycle, metrics, and operational considerations
+- Updated troubleshooting guide with discovery-specific issues
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -21,31 +32,36 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
-10. [Appendices](#appendices)
+6. [Live Model Discovery System (SPEC-027)](#live-model-discovery-system-spec-027)
+7. [Dependency Analysis](#dependency-analysis)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
+11. [Appendices](#appendices)
 
 ## Introduction
 SPEC-026 extends the credential-gated model catalog introduced by SPEC-024 so that each configured provider exposes its full curated model series instead of a single entry per provider. Entry identity moves from the provider name to the concrete model name, enabling per-session model selection without redeploying or restarting. Legacy provider-name identifiers remain supported via an alias map for backward compatibility with pinned sessions and older requests. The runtime profile is decoupled from the provider and consolidated into a generic deployment label.
 
+**Enhanced with SPEC-027**: The catalog now includes live model discovery that periodically queries provider APIs for current model lineups, implementing a fail-soft fallback ladder (live fetch → in-memory cache → Postgres persistence → curated series) to ensure chat functionality never degrades due to discovery failures.
+
 Key outcomes:
 - Each enabled provider contributes one catalog entry per model in its curated series (or override).
-- Catalog entries are identified by model name; the active profile’s resolved default model is marked as default.
-- Legacy provider-name ids resolve to the provider’s default entry.
+- Catalog entries are identified by model name; the active profile's resolved default model is marked as default.
+- Legacy provider-name ids resolve to the provider's default entry.
 - Duplicate model names across providers fail startup to prevent misconfiguration.
 - GitOps runtime profiles consolidate to a single generic profile layout.
+- **New**: Live model discovery keeps the catalog current with provider API changes without redeployment.
 
 **Section sources**
 - [spec.md:13-135](file://docs/specs/SPEC-026-multi-model-runtime-catalog/spec.md#L13-L135)
 - [plan.md:3-31](file://docs/specs/SPEC-026-multi-model-runtime-catalog/plan.md#L3-L31)
 
 ## Project Structure
-The multi-model runtime catalog spans three layers:
-- Provider adapters define curated model series and build concrete models.
-- Runtime settings parse environment configuration and validate constraints.
+The multi-model runtime catalog spans three layers with enhanced discovery capabilities:
+- Provider adapters define curated model series and build concrete models with discovery filtering.
+- Runtime settings parse environment configuration and validate constraints including discovery settings.
 - Model catalog builds the startup-time catalog and provides lookup with legacy aliases.
+- **New**: Discovery service implements periodic refresh with fallback ladder and atomic catalog swaps.
 - Runtime kernel resolves model ids per session and enforces fail-closed behavior on unknown ids.
 
 ```mermaid
@@ -59,18 +75,29 @@ end
 subgraph "Runtime Settings"
 settings["RuntimeSettings<br/>runtime_settings.py"]
 end
-subgraph "Catalog & Kernel"
+subgraph "Catalog & Discovery"
 catalog["ModelCatalog + build_model_catalog<br/>model_catalog.py"]
+discovery["ModelDiscoveryService<br/>model_discovery.py"]
 kernel["AgentKernel._build_model / ensure_agent<br/>runtime_kernel.py"]
+end
+subgraph "Infrastructure"
+postgres["Postgres Cache<br/>model_discovery_cache"]
+metrics["Prometheus Metrics<br/>metrics.py"]
+lifespan["FastAPI Lifespan<br/>app.py"]
 end
 schema["model-catalog.schema.json"]
 base --> deepseek
 base --> dashscope
 base --> openai
 settings --> catalog
+settings --> discovery
 deepseek --> catalog
 dashscope --> catalog
 openai --> catalog
+discovery --> catalog
+lifespan --> discovery
+discovery --> postgres
+discovery --> metrics
 catalog --> kernel
 kernel --> schema
 ```
@@ -82,7 +109,10 @@ kernel --> schema
 - [openai.py:9-14](file://products/agent-platform/src/agent_service/providers/openai.py#L9-L14)
 - [runtime_settings.py:32-37](file://products/agent-platform/src/agent_service/runtime_settings.py#L32-L37)
 - [model_catalog.py:110-146](file://products/agent-platform/src/agent_service/services/model_catalog.py#L110-L146)
+- [model_discovery.py:196-294](file://products/agent-platform/src/agent_service/services/model_discovery.py#L196-L294)
 - [runtime_kernel.py:216-246](file://products/agent-platform/src/agent_service/runtime_kernel.py#L216-L246)
+- [app.py:19-47](file://products/agent-platform/src/agent_service/app.py#L19-L47)
+- [metrics.py:188-210](file://products/agent-platform/src/agent_service/core/metrics.py#L188-L210)
 - [model-catalog.schema.json:1-43](file://shared/shared-contracts/schemas/model-catalog.schema.json#L1-L43)
 
 **Section sources**
@@ -91,16 +121,19 @@ kernel --> schema
 - [runtime_kernel.py:216-246](file://products/agent-platform/src/agent_service/runtime_kernel.py#L216-L246)
 
 ## Core Components
-- Provider adapters expose a curated `model_series` tuple and a `default_model`. They validate credentials and build concrete AgentScope models using resolved settings.
-- Runtime settings parse environment variables, enforce validation bounds, and provide helper methods to resolve the effective model name and base URL.
-- Model catalog constructs a startup-time list of selectable models, enforces uniqueness, marks the deploy-time default, and exposes discovery-safe public views. It also builds legacy aliases mapping bare provider names to their default model entry.
+- Provider adapters expose a curated `model_series` tuple and a `default_model`. They validate credentials and build concrete AgentScope models using resolved settings. **Enhanced** with discovery filtering capabilities to handle provider API responses.
+- Runtime settings parse environment variables, enforce validation bounds, and provide helper methods to resolve the effective model name and base URL. **Enhanced** with discovery configuration options.
+- Model catalog constructs a startup-time list of selectable models, enforces uniqueness, marks the deploy-time default, and exposes discovery-safe public views. It also builds legacy aliases mapping bare provider names to their default model entry. **Enhanced** with atomic swap support for live discovery updates.
+- **New**: Discovery service implements the complete fallback ladder system with periodic refresh, Postgres persistence, and atomic catalog updates.
 - Runtime kernel resolves model ids per turn/session, supports switching between models within a session, and fails closed when encountering unknown ids.
 
 Key behaviors:
 - Credential gating: only providers with resolvable API keys contribute entries.
 - Series override: `<PROVIDER>_MODELS` can restrict or replace the curated series while ensuring the default model remains selectable.
-- Legacy compatibility: bare provider names resolve to the provider’s default entry.
+- Legacy compatibility: bare provider names resolve to the provider's default entry.
 - Fail-closed: unknown model ids produce explicit errors rather than silent fallbacks.
+- **New**: Live discovery: periodic API calls keep catalogs current with provider changes.
+- **New**: Fallback ladder: discovery failures gracefully degrade to cached or curated lists.
 
 **Section sources**
 - [base.py:14-54](file://products/agent-platform/src/agent_service/providers/base.py#L14-L54)
@@ -111,11 +144,12 @@ Key behaviors:
 - [model_catalog.py:42-62](file://products/agent-platform/src/agent_service/services/model_catalog.py#L42-L62)
 - [model_catalog.py:82-146](file://products/agent-platform/src/agent_service/services/model_catalog.py#L82-L146)
 - [model_catalog.py:149-212](file://products/agent-platform/src/agent_service/services/model_catalog.py#L149-L212)
+- [model_discovery.py:196-294](file://products/agent-platform/src/agent_service/services/model_discovery.py#L196-L294)
 - [runtime_kernel.py:31-37](file://products/agent-platform/src/agent_service/runtime_kernel.py#L31-L37)
 - [runtime_kernel.py:216-261](file://products/agent-platform/src/agent_service/runtime_kernel.py#L216-L261)
 
 ## Architecture Overview
-The catalog is built once at startup from environment configuration and provider adapters. At request time, the kernel resolves the requested model id through the catalog, including legacy aliases, and constructs the appropriate provider model instance.
+The catalog is built once at startup from environment configuration and provider adapters, then continuously refreshed through live discovery. At request time, the kernel resolves the requested model id through the catalog, including legacy aliases, and constructs the appropriate provider model instance.
 
 ```mermaid
 sequenceDiagram
@@ -124,7 +158,25 @@ participant Gateway as "Platform Gateway"
 participant AgentAPI as "Agent Platform API"
 participant Kernel as "AgentKernel"
 participant Catalog as "ModelCatalog"
+participant Discovery as "ModelDiscoveryService"
 participant Provider as "Provider Adapter"
+participant Postgres as "Postgres Cache"
+Note over Discovery,Postgres : Background Task (SPEC-027)
+loop Every AGENT_MODEL_DISCOVERY_REFRESH_SECONDS
+Discovery->>Provider : GET /models (with auth)
+alt Success
+Provider-->>Discovery : Current model list
+Discovery->>Postgres : Write last-good
+Discovery->>Catalog : refresh_catalog()
+else Failure
+Discovery->>Postgres : Read last-good
+alt Cache hit
+Postgres-->>Discovery : Cached models
+else No cache
+Discovery->>Discovery : Use curated series
+end
+end
+end
 Client->>Gateway : Chat request with model id
 Gateway->>AgentAPI : Forward request
 AgentAPI->>Kernel : reply_text/stream_events(model_id)
@@ -148,6 +200,8 @@ end
 - [runtime_kernel.py:674-725](file://products/agent-platform/src/agent_service/runtime_kernel.py#L674-L725)
 - [runtime_kernel.py:754-780](file://products/agent-platform/src/agent_service/runtime_kernel.py#L754-L780)
 - [model_catalog.py:149-185](file://products/agent-platform/src/agent_service/services/model_catalog.py#L149-L185)
+- [model_discovery.py:155-194](file://products/agent-platform/src/agent_service/services/model_discovery.py#L155-L194)
+- [model_discovery.py:266-283](file://products/agent-platform/src/agent_service/services/model_discovery.py#L266-L283)
 - [base.py:51-54](file://products/agent-platform/src/agent_service/providers/base.py#L51-L54)
 
 ## Detailed Component Analysis
@@ -157,6 +211,7 @@ Each provider adapter defines:
 - A provider name and default model.
 - A curated model series tuple.
 - A `build_model` method that validates settings and constructs the concrete model with parameters.
+- **New**: Discovery filtering configuration including family prefixes and exclude markers for handling provider API responses.
 
 ```mermaid
 classDiagram
@@ -165,29 +220,39 @@ class AgentScopeProvider {
 +default_model
 +default_base_url
 +model_series
++discover_family_prefixes
++discover_exclude_markers
 +validate(settings)
 +resolved_model_name(settings)
 +resolved_base_url(settings)
 +describe(settings)
 +build_model(settings)
++discover_filter(model_id) bool
 }
 class DeepSeekProvider {
 +provider_name = "deepseek"
 +default_model = "deepseek-v4-flash"
-+model_series = ("deepseek-v4-flash","deepseek-chat","deepseek-reasoner")
++model_series = ("deepseek-v4-flash","deepseek-v4-pro","deepseek-v4-flash-vision-exp")
++discover_family_prefixes = ("deepseek",)
 +build_model(settings)
++discover_filter(model_id) bool
 }
 class DashScopeProvider {
 +provider_name = "dashscope"
 +default_model = "qwen-plus"
-+model_series = ("qwen-plus","qwen-max","qwen3-max","qwen-turbo")
++model_series = ("qwen-plus","qwen-max","qwen3.8-max","qwen3.7-plus","qwen3.7-flash","qwen-turbo")
++discover_family_prefixes = ("qwen",)
++discover_exclude_markers = _NON_CHAT_MARKERS + ("-vl","-mt","-ocr","omni")
 +build_model(settings)
++discover_filter(model_id) bool
 }
 class OpenAIProvider {
 +provider_name = "openai"
 +default_model = "gpt-4o-mini"
 +model_series = ("gpt-4o-mini","gpt-4o","o3-mini")
++discover_family_prefixes = ("gpt-","o1","o3","o4","chatgpt-")
 +build_model(settings)
++discover_filter(model_id) bool
 }
 AgentScopeProvider <|-- DeepSeekProvider
 AgentScopeProvider <|-- DashScopeProvider
@@ -206,7 +271,7 @@ AgentScopeProvider <|-- OpenAIProvider
 - [openai.py:9-44](file://products/agent-platform/src/agent_service/providers/openai.py#L9-L44)
 
 ### Model Catalog Construction and Lookup
-The catalog builder iterates supported providers, resolves credentials and series, ensures the default model is always included, emits one entry per model, and guards against duplicate ids. The lookup supports legacy provider-name aliases.
+The catalog builder iterates supported providers, resolves credentials and series, ensures the default model is always included, emits one entry per model, and guards against duplicate ids. The lookup supports legacy provider-name aliases. **Enhanced** with atomic swap support for live discovery updates.
 
 ```mermaid
 flowchart TD
@@ -224,11 +289,13 @@ NextProv --> Done{"All providers processed?"}
 Done -- No --> Iterate
 Done -- Yes --> AliasMap["Build legacy provider-name -> default entry map"]
 AliasMap --> Ready(["MODEL_CATALOG ready"])
+Ready --> SwapSupport["Atomic swap support for live discovery"]
 ```
 
 **Diagram sources**
 - [model_catalog.py:82-146](file://products/agent-platform/src/agent_service/services/model_catalog.py#L82-L146)
 - [model_catalog.py:188-212](file://products/agent-platform/src/agent_service/services/model_catalog.py#L188-L212)
+- [model_catalog.py:283-303](file://products/agent-platform/src/agent_service/services/model_catalog.py#L283-L303)
 
 **Section sources**
 - [model_catalog.py:82-146](file://products/agent-platform/src/agent_service/services/model_catalog.py#L82-L146)
@@ -264,7 +331,7 @@ end
 - [runtime_kernel.py:566-633](file://products/agent-platform/src/agent_service/runtime_kernel.py#L566-L633)
 
 ### Runtime Settings and Profile Decoupling
-Runtime settings parse environment variables, validate kernel tuning knobs, and support a free-form profile label decoupled from the provider. Provider-specific options are parsed per provider type.
+Runtime settings parse environment variables, validate kernel tuning knobs, and support a free-form profile label decoupled from the provider. Provider-specific options are parsed per provider type. **Enhanced** with discovery configuration validation and parsing.
 
 ```mermaid
 flowchart TD
@@ -273,13 +340,16 @@ ParseProfile --> ParseProvider["Parse AGENTSCOPE_PROVIDER"]
 ParseProvider --> ValidateProvider{"Supported provider?"}
 ValidateProvider -- No --> Err["Raise ValueError"]
 ValidateProvider -- Yes --> ParseOptions["Parse provider options"]
-ParseOptions --> ValidateBounds["Validate kernel tuning bounds"]
-ValidateBounds --> Done(["RuntimeSettings instance"])
+ParseOptions --> ParseDiscovery["Parse discovery settings"]
+ParseDiscovery --> ValidateBounds["Validate kernel tuning bounds"]
+ValidateBounds --> ValidateDiscovery["Validate discovery bounds"]
+ValidateDiscovery --> Done(["RuntimeSettings instance"])
 ```
 
 **Diagram sources**
 - [runtime_settings.py:278-335](file://products/agent-platform/src/agent_service/runtime_settings.py#L278-L335)
 - [runtime_settings.py:171-231](file://products/agent-platform/src/agent_service/runtime_settings.py#L171-L231)
+- [runtime_settings.py:304-356](file://products/agent-platform/src/agent_service/runtime_settings.py#L304-L356)
 
 **Section sources**
 - [runtime_settings.py:114-175](file://products/agent-platform/src/agent_service/runtime_settings.py#L114-L175)
@@ -291,27 +361,107 @@ The shared contract schema documents that the catalog entry `id` is the model na
 **Section sources**
 - [model-catalog.schema.json:1-43](file://shared/shared-contracts/schemas/model-catalog.schema.json#L1-L43)
 
+## Live Model Discovery System (SPEC-027)
+
+### Discovery Service Architecture
+The discovery service implements a robust fallback ladder system that ensures chat functionality never degrades due to discovery failures. It runs as a background task managed by FastAPI's lifespan system.
+
+```mermaid
+flowchart TD
+Start(["Background Task Start"]) --> Fetch["GET /models from Provider"]
+Fetch --> Success{"Success?"}
+Success -- Yes --> Filter["Apply Provider Filters"]
+Filter --> Cache["Write to In-Memory + Postgres"]
+Cache --> Metrics["Record Metrics"]
+Metrics --> Swap["refresh_catalog()"]
+Swap --> Sleep["Sleep until next refresh"]
+Success -- No --> MemoryCheck{"In-memory cache?"}
+MemoryCheck -- Yes --> UseMemory["Use Last Good"]
+MemoryCheck -- No --> PostgresCheck{"Postgres cache?"}
+PostgresCheck -- Yes --> UsePostgres["Read from Postgres"]
+PostgresCheck -- No --> Curated["Use Curated Series"]
+UseMemory --> Metrics
+UsePostgres --> Metrics
+Curated --> Metrics
+Metrics --> Sleep
+Sleep --> Fetch
+```
+
+**Diagram sources**
+- [model_discovery.py:155-194](file://products/agent-platform/src/agent_service/services/model_discovery.py#L155-L194)
+- [model_discovery.py:227-265](file://products/agent-platform/src/agent_service/services/model_discovery.py#L227-L265)
+- [model_discovery.py:266-283](file://products/agent-platform/src/agent_service/services/model_discovery.py#L266-L283)
+- [app.py:19-47](file://products/agent-platform/src/agent_service/app.py#L19-L47)
+
+### Fallback Ladder Implementation
+The discovery service implements a four-tier fallback system:
+
+1. **Live Fetch**: Direct API call to provider's `/models` endpoint with authentication
+2. **In-Memory Cache**: Last successful result stored in process memory
+3. **Postgres Persistence**: Persistent storage in sessions database (`model_discovery_cache` table)
+4. **Curated Series**: Fallback to hardcoded model series from provider adapters
+
+### Discovery Filtering
+Each provider implements custom filtering logic to handle provider-specific model naming conventions and modalities:
+
+- **DeepSeek**: Restricts to `deepseek*` family prefix
+- **DashScope**: Restricts to `qwen*` family plus additional exclusions for vision/translation modalities  
+- **OpenAI**: Restricts to chat families (`gpt-*`, `o1`, `o3`, `o4`, `chatgpt-*`)
+
+Shared filters automatically exclude dated snapshots (e.g., `-2024-01-01`) and non-chat modalities (embeddings, rerank, TTS, audio, image, moderation, transcription, guardrails, realtime).
+
+### Configuration and Lifecycle
+- **Enabled by default**: Discovery runs unless explicitly disabled via `AGENT_MODEL_DISCOVERY_ENABLED=false`
+- **Periodic refresh**: Default every 1800 seconds (30 minutes), configurable via `AGENT_MODEL_DISCOVERY_REFRESH_SECONDS`
+- **Timeout protection**: API calls timeout after 5 seconds by default (`AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS`)
+- **Override capability**: `<PROVIDER>_MODELS` environment variable skips discovery for specific providers
+- **Graceful degradation**: All failures are logged and swallowed - discovery never blocks chat or startup
+
+### Observability
+The discovery system exposes Prometheus metrics for monitoring:
+- `agent_model_discovery_refreshes_total`: Counter tracking refresh outcomes by provider and result type
+- `agent_model_discovery_models`: Gauge showing current number of models per provider
+
+**Section sources**
+- [model_discovery.py:1-294](file://products/agent-platform/src/agent_service/services/model_discovery.py#L1-294)
+- [app.py:19-47](file://products/agent-platform/src/agent_service/app.py#L19-L47)
+- [metrics.py:188-210](file://products/agent-platform/src/agent_service/core/metrics.py#L188-L210)
+- [base.py:49-58](file://products/agent-platform/src/agent_service/providers/base.py#L49-L58)
+
 ## Dependency Analysis
 - Provider adapters depend on runtime settings to resolve credentials and base URLs.
 - Model catalog depends on runtime settings and provider adapters to build entries.
+- **New**: Discovery service depends on provider adapters for filtering, runtime settings for configuration, and model catalog for atomic updates.
 - Runtime kernel depends on the catalog singleton for resolution and on provider adapters for model construction.
+- **New**: FastAPI lifespan manages discovery service lifecycle.
 - Shared contract schema constrains the public catalog envelope.
 
 ```mermaid
 graph LR
 settings["runtime_settings.py"] --> catalog["services/model_catalog.py"]
+settings --> discovery["services/model_discovery.py"]
 base["providers/base.py"] --> catalog
+base --> discovery
 deepseek["providers/deepseek.py"] --> catalog
+deepseek --> discovery
 dashscope["providers/dashscope.py"] --> catalog
+dashscope --> discovery
 openai["providers/openai.py"] --> catalog
+openai --> discovery
+discovery --> catalog
 catalog --> kernel["runtime_kernel.py"]
 kernel --> schema["shared-contracts/model-catalog.schema.json"]
+app["app.py"] --> discovery
+discovery --> metrics["core/metrics.py"]
 ```
 
 **Diagram sources**
 - [runtime_settings.py:278-335](file://products/agent-platform/src/agent_service/runtime_settings.py#L278-L335)
 - [model_catalog.py:110-146](file://products/agent-platform/src/agent_service/services/model_catalog.py#L110-L146)
+- [model_discovery.py:196-294](file://products/agent-platform/src/agent_service/services/model_discovery.py#L196-L294)
 - [runtime_kernel.py:216-246](file://products/agent-platform/src/agent_service/runtime_kernel.py#L216-L246)
+- [app.py:19-47](file://products/agent-platform/src/agent_service/app.py#L19-L47)
+- [metrics.py:188-210](file://products/agent-platform/src/agent_service/core/metrics.py#L188-L210)
 - [model-catalog.schema.json:1-43](file://shared/shared-contracts/schemas/model-catalog.schema.json#L1-L43)
 
 **Section sources**
@@ -323,35 +473,46 @@ kernel --> schema["shared-contracts/model-catalog.schema.json"]
 - Per-request model lookup is O(1) due to dictionary-based indexing.
 - Session-scoped agent caching avoids repeated model and toolkit construction; model switches trigger controlled rebuilds only when necessary.
 - Evidence persistence and toolkit discovery are guarded to avoid blocking or poisoning caches.
-
-[No sources needed since this section provides general guidance]
+- **New**: Discovery runs asynchronously in background tasks, never blocking request processing.
+- **New**: Discovery API calls use bounded timeouts to prevent hanging operations.
+- **New**: Postgres cache reads/writes are wrapped in try/catch blocks to prevent database failures from affecting core functionality.
+- **New**: Atomic catalog swaps ensure consistent state during discovery updates.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
 - Unknown model id: The kernel rejects unknown ids explicitly; verify the id exists in the catalog and that the provider is configured with credentials.
 - Duplicate model id: Startup fails with a clear error if two providers advertise the same model name; adjust curated series or overrides to remove collisions.
 - Missing credentials: Providers without resolvable API keys do not contribute entries; ensure the appropriate provider API key is set.
-- Legacy id mismatch: If a pinned session uses a bare provider name, it should resolve to the provider’s default entry; if not, check that the provider is enabled and has credentials.
+- Legacy id mismatch: If a pinned session uses a bare provider name, it should resolve to the provider's default entry; if not, check that the provider is enabled and has credentials.
+- **New**: Discovery not updating: Check `AGENT_MODEL_DISCOVERY_ENABLED` setting and verify provider API endpoints are accessible. Monitor `agent_model_discovery_refreshes_total` metric for failure patterns.
+- **New**: Stale model listings: Verify discovery is running by checking logs for refresh cycles. Ensure `AGENT_MODEL_DISCOVERY_REFRESH_SECONDS` is set appropriately.
+- **New**: Provider API failures: Check network connectivity and authentication. Review logs for specific error messages from discovery attempts.
+- **New**: High memory usage: Discovery maintains in-memory cache of last-good results. Monitor memory usage and consider adjusting refresh frequency.
 
 **Section sources**
 - [runtime_kernel.py:31-37](file://products/agent-platform/src/agent_service/runtime_kernel.py#L31-L37)
 - [model_catalog.py:132-140](file://products/agent-platform/src/agent_service/services/model_catalog.py#L132-L140)
 - [model_catalog.py:168-175](file://products/agent-platform/src/agent_service/services/model_catalog.py#L168-L175)
+- [model_discovery.py:155-194](file://products/agent-platform/src/agent_service/services/model_discovery.py#L155-L194)
+- [model_discovery.py:227-265](file://products/agent-platform/src/agent_service/services/model_discovery.py#L227-L265)
 
 ## Conclusion
-SPEC-026 delivers a robust, operator-friendly multi-model runtime catalog. Operators can now select among a provider’s curated model lineup per session without redeployment, while preserving backward compatibility for legacy identifiers. The design keeps credentials local to the catalog layer, enforces fail-closed behavior on unknown selections, and consolidates runtime profiles for simpler GitOps management.
-
-[No sources needed since this section summarizes without analyzing specific files]
+SPEC-026 delivers a robust, operator-friendly multi-model runtime catalog enhanced with SPEC-027's live model discovery system. Operators can now select among a provider's curated model lineup per session without redeployment, while preserving backward compatibility for legacy identifiers. The addition of live discovery ensures catalogs stay current with provider API changes, implementing a sophisticated fallback ladder that guarantees chat functionality never degrades due to discovery failures. The design keeps credentials local to the catalog layer, enforces fail-closed behavior on unknown selections, consolidates runtime profiles for simpler GitOps management, and provides comprehensive observability through Prometheus metrics.
 
 ## Appendices
 
 ### Acceptance Criteria Mapping
 - R-1 (per-provider model series, credential-gated): implemented via provider `model_series`, credential checks, and force-included default model.
-- R-2 (model-name entry identity): catalog entries use model names as ids; default flag marks the active profile’s resolved model.
+- R-2 (model-name entry identity): catalog entries use model names as ids; default flag marks the active profile's resolved model.
 - R-3 (legacy id compatibility): alias map resolves bare provider names to default entries; unresolvable legacy ids fall back appropriately.
 - R-4 (series override): `<PROVIDER>_MODELS` parsing and merge with default model.
 - R-5 (generic profile + gitops consolidation): profile decoupled from provider; plan outlines consolidation steps.
+- **New**: R-6 (live discovery): periodic API calls with fallback ladder implementation.
+- **New**: R-7 (filtering): per-provider discovery filters handle provider-specific model naming and modalities.
+- **New**: R-8 (observability): Prometheus metrics track discovery performance and outcomes.
 
 **Section sources**
 - [spec.md:36-135](file://docs/specs/SPEC-026-multi-model-runtime-catalog/spec.md#L36-L135)
 - [plan.md:11-31](file://docs/specs/SPEC-026-multi-model-runtime-catalog/plan.md#L11-L31)
+- [model_discovery.py:1-294](file://products/agent-platform/src/agent_service/services/model_discovery.py#L1-294)
+- [metrics.py:188-210](file://products/agent-platform/src/agent_service/core/metrics.py#L188-L210)

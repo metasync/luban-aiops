@@ -6,6 +6,7 @@
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
 - [SPEC-018-kernel-middleware-alignment/spec.md](file://docs/specs/SPEC-018-kernel-middleware-alignment/spec.md)
 - [SPEC-025-evidence-persistence-in-transcripts/plan.md](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/plan.md)
+- [SPEC-027-live-model-discovery/spec.md](file://docs/specs/SPEC-027-live-model-discovery/spec.md)
 - [agent-platform core metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [agent-platform core observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
 - [agent-platform core telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
@@ -16,6 +17,7 @@
 - [agent-platform runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [agent-platform app.py](file://products/agent-platform/src/agent_service/app.py)
 - [agent-platform main.py](file://products/agent-platform/src/agent_service/main.py)
+- [agent-platform model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [identity-broker core metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
 - [identity-broker core observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
 - [identity-broker core telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
@@ -34,11 +36,11 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for evidence-specific metrics including counters for evidence store writes, frames persisted, and truncation events
-- Documented the two types of truncation reasons: entry_cap (per-entry size limits) and session_budget (per-session storage budgets)
-- Enhanced monitoring dashboard guidance with evidence store performance metrics
-- Updated troubleshooting section with evidence persistence debugging steps
-- Added detailed coverage of evidence frame preparation and budget enforcement mechanisms
+- Added comprehensive documentation for model discovery metrics including refresh cycle counters (agent_model_discovery_refreshes_total) and published model gauges (agent_model_discovery_models)
+- Documented the model discovery fallback ladder with metrics for each tier: override, disabled, live, memory, cache, curated
+- Enhanced monitoring dashboard guidance with model discovery performance metrics
+- Updated troubleshooting section with model discovery debugging steps
+- Added detailed coverage of model discovery configuration and background refresh cycles
 
 ## Table of Contents
 1. Introduction
@@ -58,7 +60,7 @@ This document explains the observability and monitoring capabilities across the 
 - Structured logging standards and correlation
 - Distributed tracing implementation using AgentScope's TracingMiddleware and cross-service correlation
 - Evidence emission via ToolEvidenceMiddleware and SSE frames from gateway results
-- **New**: Evidence store metrics tracking write operations, frame persistence, and truncation events
+- **New**: Model discovery metrics tracking refresh cycles and published model counts
 - Health endpoints for readiness and liveness probes
 - Dashboarding and alerting guidance
 - Performance monitoring, bottleneck identification, and capacity planning
@@ -71,7 +73,7 @@ Observability is implemented consistently in each service with a common pattern:
 - An application entrypoint wiring these components into the HTTP server
 - Kubernetes manifests configuring probes and environment variables for observability backends
 - Agent-specific middleware stack for kernel-level observability
-- **New**: Evidence store with dedicated metrics for persistence operations and size cap enforcement
+- **New**: Model discovery service with dedicated metrics for refresh cycles and model catalog status
 
 ```mermaid
 graph TB
@@ -83,6 +85,7 @@ AP_telemetry["core/telemetry.py"]
 AP_kernel["runtime_kernel.py"]
 AP_middleware["services/kernel_middleware.py"]
 AP_evidence["services/evidence_store.py"]
+AP_discovery["services/model_discovery.py"]
 end
 subgraph "Identity Broker"
 IB_app["app.py"]
@@ -104,6 +107,7 @@ AP_app --> AP_telemetry
 AP_app --> AP_kernel
 AP_kernel --> AP_middleware
 AP_kernel --> AP_evidence
+AP_app --> AP_discovery
 IB_app --> IB_metrics
 IB_app --> IB_obs
 IB_app --> IB_telemetry
@@ -122,6 +126,7 @@ TG_app --> TG_health
 - [agent-platform runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [agent-platform kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [agent-platform evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [agent-platform model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [identity-broker app.py](file://products/identity-broker/src/identity_service/app.py)
 - [identity-broker core metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
 - [identity-broker core observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
@@ -144,7 +149,8 @@ Each service exposes three primary observability primitives:
 - Observability: structured logs and trace context propagation
 - Telemetry: instrumentation helpers for spans, events, and attributes
 - Kernel Middleware: AgentScope-based middleware for tool execution tracing and evidence emission
-- **New**: Evidence Store: Dedicated metrics for persistence operations, frame counting, and truncation tracking
+- **New**: Model Discovery Service: Dedicated metrics for refresh cycles and published model counts
+- **Updated**: Evidence Store: Dedicated metrics for persistence operations, frame counting, and truncation tracking
 
 Key responsibilities:
 - Initialize and configure metrics collectors and exporters
@@ -154,10 +160,11 @@ Key responsibilities:
 - Propagate distributed trace headers across service boundaries
 - Implement kernel-level tracing via AgentScope's TracingMiddleware
 - Emit evidence frames through ToolEvidenceMiddleware for tool executions
-- **New**: Track evidence store write success/failure rates and frame persistence counts
-- **New**: Monitor evidence frame truncation events with specific reasons (entry_cap vs session_budget)
+- **New**: Track model discovery refresh cycles and published model counts per provider
+- **Updated**: Track evidence store write success/failure rates and frame persistence counts
+- **Updated**: Monitor evidence frame truncation events with specific reasons (entry_cap vs session_budget)
 
-**Updated** Added evidence store metrics components for comprehensive persistence monitoring
+**Updated** Added model discovery metrics components for comprehensive refresh cycle monitoring
 
 **Section sources**
 - [agent-platform core metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -165,6 +172,7 @@ Key responsibilities:
 - [agent-platform core telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
 - [agent-platform kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [agent-platform evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [agent-platform model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [identity-broker core metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
 - [identity-broker core observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
 - [identity-broker core telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
@@ -173,11 +181,12 @@ Key responsibilities:
 - [tool-gateway core telemetry.py](file://products/tool-gateway/src/api_gateway/core/telemetry.py)
 
 ## Architecture Overview
-The observability architecture follows a consistent pattern across services with enhanced kernel-level tracing and evidence persistence monitoring:
+The observability architecture follows a consistent pattern across services with enhanced kernel-level tracing, evidence persistence monitoring, and model discovery observability:
 - Application layer wires middleware that records metrics and emits spans
 - Core modules provide reusable metrics definitions and logging/tracing utilities
 - Agent kernel uses AgentScope middleware stack for tool execution observability
-- **New**: Evidence store tracks persistence operations with detailed metrics for write success/failure, frames persisted, and truncation events
+- **New**: Model discovery service runs background tasks with metrics for refresh cycles and model catalog status
+- **Updated**: Evidence store tracks persistence operations with detailed metrics for write success/failure, frames persisted, and truncation events
 - Kubernetes deployments expose /metrics and health endpoints and configure probes
 - Shared conventions define metric names, labels, and log schemas
 
@@ -186,6 +195,7 @@ sequenceDiagram
 participant Client as "Client"
 participant Gateway as "Tool Gateway"
 participant Agent as "Agent Platform"
+participant Discovery as "Model Discovery"
 participant Kernel as "AgentKernel"
 participant EvidenceStore as "Evidence Store"
 participant Middleware as "Kernel Middleware"
@@ -197,6 +207,9 @@ Gateway->>Gateway : "Instrument request<br/>Start span"
 Gateway->>Identity : "Auth call with trace headers"
 Identity-->>Gateway : "Response with trace headers"
 Gateway->>Agent : "Agent call with trace headers"
+Agent->>Discovery : "Background refresh cycle"
+Discovery->>Prom : "Record refresh metrics"
+Discovery->>Prom : "Update model count gauge"
 Agent->>Kernel : "stream_events()"
 Kernel->>Middleware : "ToolEvidenceMiddleware.on_acting"
 Middleware-->>Kernel : "Evidence frames via SSE"
@@ -216,12 +229,13 @@ Agent->>OTLP : "Export spans"
 Identity->>OTLP : "Export spans"
 ```
 
-**Updated** Enhanced sequence diagram to show evidence store integration and metrics recording flow
+**Updated** Enhanced sequence diagram to show model discovery integration alongside evidence store and existing components
 
 **Diagram sources**
 - [tool-gateway app.py](file://products/tool-gateway/src/api_gateway/app.py)
 - [agent-platform app.py](file://products/agent-platform/src/agent_service/app.py)
 - [identity-broker app.py](file://products/identity-broker/src/identity_service/app.py)
+- [agent-platform model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [agent-platform runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [agent-platform kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [agent-platform evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
@@ -241,7 +255,11 @@ Identity->>OTLP : "Export spans"
 - Gauges reflect current state such as active sessions or queue sizes
 - Prometheus exposition endpoint is enabled via configuration and exposed by the HTTP server
 
-**New Evidence Store Metrics:**
+**New Model Discovery Metrics:**
+- `agent_model_discovery_refreshes_total {provider, result}`: Tracks model discovery refresh cycles with outcomes including override, disabled, live, memory, cache, and curated
+- `agent_model_discovery_models {provider}`: Gauge showing the number of models currently published per provider after discovery
+
+**Updated Evidence Store Metrics:**
 - `evidence_store_writes_total {result=ok|error}`: Tracks evidence persistence attempts and outcomes
 - `evidence_frames_persisted_total`: Counts total frames successfully persisted for session replay
 - `evidence_frames_truncated_total {reason=entry_cap|session_budget}`: Monitors frame truncation events with specific reasons
@@ -250,9 +268,10 @@ Typical usage patterns:
 - Increment counters on request start and completion
 - Record latencies using histogram observe calls around I/O
 - Update gauges for resource utilization and concurrency limits
-- **New**: Track evidence store write success/failure rates for reliability monitoring
-- **New**: Monitor frame persistence counts to validate evidence storage throughput
-- **New**: Alert on excessive truncation events indicating potential data loss
+- **New**: Track model discovery refresh cycles and published model counts for provider health monitoring
+- **Updated**: Track evidence store write success/failure rates for reliability monitoring
+- **Updated**: Monitor frame persistence counts to validate evidence storage throughput
+- **Updated**: Alert on excessive truncation events indicating potential data loss
 
 Prometheus scraping targets are configured through service ports and selectors in Kubernetes manifests.
 
@@ -284,13 +303,14 @@ Best practices:
 - Trace context is attached to outgoing requests to maintain correlation
 - Telemetry modules export spans to an OTLP-compatible backend
 
-**Updated** Enhanced with AgentScope kernel tracing capabilities
+**Updated** Enhanced with AgentScope kernel tracing capabilities and model discovery background task tracing
 
 Trace correlation across services:
 - Incoming requests extract trace context from headers
 - Outgoing calls inject trace context into headers
 - Errors propagate up the call stack with full trace context
 - AgentScope's TracingMiddleware provides kernel-level tracing when enabled via AGENTSCOPE_KERNEL_TRACING setting
+- **New**: Model discovery background tasks can be traced when kernel tracing is enabled
 
 **Section sources**
 - [agent-platform core telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
@@ -345,6 +365,39 @@ Configuration:
 - [agent-platform core metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [agent-platform runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 
+### Model Discovery Service and Metrics
+**New Section** The model discovery service provides comprehensive metrics for monitoring model catalog refresh cycles and published model counts:
+
+**Metrics Implementation:**
+- `record_model_discovery_refresh(provider, result)`: Tracks refresh cycle outcomes with labels for provider and result type
+- `record_model_discovery_models(provider, count)`: Updates gauge with current number of published models per provider
+
+**Refresh Cycle Ladder:**
+The discovery service follows a fail-soft ladder with different result types:
+- **override**: When `PROVIDER_MODELS` environment variable is set, skips discovery entirely
+- **disabled**: When model discovery is globally disabled via `AGENT_MODEL_DISCOVERY_ENABLED=false`
+- **live**: Successful fetch from provider's `/models` endpoint
+- **memory**: Fallback to in-memory last-good models when live fetch fails
+- **cache**: Fallback to Postgres cached models when both live and memory tiers fail
+- **curated**: Final fallback to curated model series when all other tiers fail
+
+**Background Refresh Cycle:**
+- Runs continuously in the background via `run_loop()` method
+- Initial refresh occurs at startup, then periodic refresh based on `model_discovery_refresh_seconds` setting
+- Each refresh updates the model catalog and records metrics for all configured providers
+- Failures are logged but never block the refresh cycle
+
+**Configuration:**
+- `AGENT_MODEL_DISCOVERY_ENABLED`: Enable/disable discovery (default: true)
+- `AGENT_MODEL_DISCOVERY_REFRESH_SECONDS`: Refresh interval (default: 1800 seconds)
+- `AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS`: Timeout for provider API calls (default: 5.0 seconds)
+
+**Section sources**
+- [agent-platform model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [agent-platform core metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
+- [agent-platform runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [agent-platform app.py](file://products/agent-platform/src/agent_service/app.py)
+
 ### Health Check Endpoints and Probes
 - Readiness probes verify dependencies are available and service can accept traffic
 - Liveness probes detect if the process is alive and responsive
@@ -368,7 +421,7 @@ Configuration in Kubernetes:
 - Configuration is loaded from environment variables and config files
 - Graceful shutdown ensures metrics and traces are flushed before termination
 
-**Updated** Enhanced with kernel middleware composition and evidence store integration
+**Updated** Enhanced with kernel middleware composition, evidence store integration, and model discovery background task management
 
 **Section sources**
 - [agent-platform app.py](file://products/agent-platform/src/agent_service/app.py)
@@ -381,7 +434,8 @@ Configuration in Kubernetes:
 Observability components have clear dependency relationships:
 - Application layers depend on core metrics, observability, and telemetry modules
 - Agent kernel depends on AgentScope middleware stack for tool execution observability
-- **New**: Evidence store depends on metrics module for persistence operation tracking
+- **New**: Model discovery service depends on metrics module for refresh cycle tracking
+- **Updated**: Evidence store depends on metrics module for persistence operation tracking
 - Health endpoints may depend on service-specific dependencies (databases, caches)
 - Kubernetes deployments configure network exposure and probe behavior
 - Shared conventions ensure consistency across services
@@ -391,8 +445,10 @@ graph LR
 App["Application Layer"] --> Metrics["Metrics Module"]
 App --> Observability["Observability Module"]
 App --> Telemetry["Telemetry Module"]
+App --> Discovery["Model Discovery Service"]
 Kernel["Agent Kernel"] --> Middleware["Kernel Middleware Stack"]
 Kernel --> EvidenceStore["Evidence Store"]
+Discovery --> Metrics
 EvidenceStore --> Metrics
 Middleware --> TracingMW["TracingMiddleware"]
 Middleware --> EvidenceMW["ToolEvidenceMiddleware"]
@@ -405,11 +461,12 @@ Conventions --> Observability
 Conventions --> Telemetry
 ```
 
-**Updated** Added evidence store dependency relationships and metrics integration
+**Updated** Added model discovery service dependency relationships and metrics integration
 
 **Diagram sources**
 - [agent-platform app.py](file://products/agent-platform/src/agent_service/app.py)
 - [agent-platform runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [agent-platform model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [agent-platform kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [agent-platform evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [agent-platform core metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -420,6 +477,7 @@ Conventions --> Telemetry
 **Section sources**
 - [agent-platform app.py](file://products/agent-platform/src/agent_service/app.py)
 - [agent-platform runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [agent-platform model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [agent-platform evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [identity-broker app.py](file://products/identity-broker/src/identity_service/app.py)
 - [tool-gateway app.py](file://products/tool-gateway/src/api_gateway/app.py)
@@ -432,14 +490,17 @@ Conventions --> Telemetry
 - Health checks: Keep health endpoints lightweight and avoid blocking operations
 - Resource monitoring: Track CPU, memory, and I/O metrics to identify bottlenecks
 - **Updated** Kernel middleware overhead: TracingMiddleware and ToolEvidenceMiddleware add minimal overhead but should be monitored
-- **New**: Evidence store performance: Monitor persistence latency and truncation rates to optimize storage efficiency
+- **Updated** Evidence store performance: Monitor persistence latency and truncation rates to optimize storage efficiency
+- **New**: Model discovery performance: Monitor refresh cycle frequency and provider API call latency
 
-**Evidence Store Performance Guidelines:**
-- Track `evidence_store_writes_total` error rate to identify persistence failures
-- Monitor `evidence_frames_truncated_total` to detect excessive data loss
-- Use `evidence_frames_persisted_total` to validate storage throughput
-- Adjust entry caps and session budgets based on observed truncation patterns
-- Profile evidence store operations during high-volume tool usage scenarios
+**Model Discovery Performance Guidelines:**
+- Track `agent_model_discovery_refreshes_total` to monitor refresh cycle frequency and success rates
+- Monitor `agent_model_discovery_models` gauge to validate model catalog updates
+- Adjust `model_discovery_refresh_seconds` based on provider API rate limits and model change frequency
+- Profile provider API calls during refresh cycles to identify slow responses
+- Monitor memory usage for large model catalogs in production environments
+
+**Updated** Enhanced performance guidelines for model discovery and evidence store operations
 
 Capacity planning guidance:
 - Monitor request throughput and latency percentiles
@@ -447,7 +508,8 @@ Capacity planning guidance:
 - Plan scaling based on resource utilization trends
 - Set up alerts for critical thresholds and anomalies
 - Monitor evidence frame emission rates for high-volume tool usage
-- **New**: Plan evidence storage capacity based on session growth and retention policies
+- **Updated**: Plan evidence storage capacity based on session growth and retention policies
+- **New**: Plan model discovery resources based on number of configured providers and refresh frequency
 
 [No sources needed since this section provides general guidance]
 
@@ -461,7 +523,14 @@ Common issues and resolution steps:
 - **Updated** Kernel tracing issues: Verify AGENTSCOPE_KERNEL_TRACING setting and middleware registration
 - **Updated** Evidence frame problems: Check TOOL_EVIDENCE_SINK contextvar and gateway result metadata
 
-**New Evidence Store Troubleshooting:**
+**New Model Discovery Troubleshooting:**
+- **High refresh failure rates**: Check `agent_model_discovery_refreshes_total{result="live"}` counter and investigate provider API connectivity
+- **Stale model catalog**: Verify `agent_model_discovery_models` gauge values match expected model counts
+- **Excessive refresh cycles**: Review `model_discovery_refresh_seconds` configuration and adjust based on needs
+- **Provider API timeouts**: Check `model_discovery_timeout_seconds` setting and network connectivity to provider endpoints
+- **Missing models in catalog**: Verify provider credentials and base URL configuration
+
+**Updated Evidence Store Troubleshooting:**
 - **High truncation rates**: Review entry cap settings (`AGENT_EVIDENCE_ENTRY_MAX_CHARS`) and session budget limits (`AGENT_EVIDENCE_SESSION_MAX_BYTES`)
 - **Evidence persistence failures**: Check `evidence_store_writes_total{result="error"}` counter and investigate underlying storage connectivity
 - **Excessive session budget evictions**: Monitor `evidence_frames_truncated_total{reason="session_budget"}` and adjust session storage limits
@@ -474,24 +543,26 @@ Debugging workflow:
 4. Analyze metrics for anomalies and trend analysis
 5. Scale resources based on observed patterns
 6. **Updated** For kernel-level issues, inspect middleware stack composition and evidence frame emission
-7. **New**: For evidence store issues, analyze persistence metrics and truncation patterns
+7. **Updated** For evidence store issues, analyze persistence metrics and truncation patterns
+8. **New** For model discovery issues, examine refresh cycle metrics and provider connectivity
 
-**Updated** Enhanced troubleshooting guidance for kernel middleware and evidence store operations
+**Updated** Enhanced troubleshooting guidance for kernel middleware, evidence store, and model discovery operations
 
 **Section sources**
 - [dev-k8s shared observability env](file://shared/platform-ops/gitops/dev-k8s/base/shared/observability.env)
 - [agent-platform core observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
 - [agent-platform kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [agent-platform evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [agent-platform model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [agent-platform core metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [agent-platform runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [identity-broker core observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
 - [tool-gateway core observability.py](file://products/tool-gateway/src/api_gateway/core/observability.py)
 
 ## Conclusion
-The agent platform implements comprehensive observability across all services with consistent patterns for metrics, logging, and tracing. The recent enhancement with AgentScope's TracingMiddleware and ToolEvidenceMiddleware provides robust kernel-level observability while maintaining backward compatibility. **The new evidence store metrics provide critical insights into persistence operations, enabling better monitoring of evidence storage reliability and performance.** The shared conventions ensure interoperability while individual service implementations provide domain-specific insights. Proper configuration of health checks, dashboards, and alerts enables effective monitoring and troubleshooting of the platform.
+The agent platform implements comprehensive observability across all services with consistent patterns for metrics, logging, and tracing. The recent enhancement with AgentScope's TracingMiddleware and ToolEvidenceMiddleware provides robust kernel-level observability while maintaining backward compatibility. **The new model discovery metrics provide critical insights into refresh cycle performance and model catalog health, enabling better monitoring of provider connectivity and model availability.** **The enhanced evidence store metrics provide critical insights into persistence operations, enabling better monitoring of evidence storage reliability and performance.** The shared conventions ensure interoperability while individual service implementations provide domain-specific insights. Proper configuration of health checks, dashboards, and alerts enables effective monitoring and troubleshooting of the platform.
 
-**Updated** Enhanced conclusion to reflect new kernel middleware capabilities and evidence store monitoring features
+**Updated** Enhanced conclusion to reflect new kernel middleware capabilities, evidence store monitoring features, and model discovery observability
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -505,20 +576,24 @@ Recommended dashboard panels:
 - Distributed trace topology and latency breakdowns
 - Health check success rates and dependency status
 - **Updated** Kernel middleware activity and evidence frame emission rates
-- **New**: Evidence store persistence metrics including write success rates, frame counts, and truncation events
+- **New**: Model discovery metrics including refresh cycle success rates and published model counts
+- **Updated**: Evidence store persistence metrics including write success rates, frame counts, and truncation events
 
-**Evidence Store Dashboard Panels:**
-- `evidence_store_writes_total` by result type (ok/error) for persistence reliability
-- `evidence_frames_persisted_total` for storage throughput monitoring
-- `evidence_frames_truncated_total` by reason (entry_cap/session_budget) for data loss detection
-- Evidence store backend availability and error rates
+**Model Discovery Dashboard Panels:**
+- `agent_model_discovery_refreshes_total` by result type (override/disabled/live/memory/cache/curated) for refresh cycle health
+- `agent_model_discovery_models` by provider for model catalog validation
+- Provider API call success rates and latency metrics
+- Refresh cycle frequency and duration monitoring
+
+**Updated** Enhanced dashboard guidance for model discovery and evidence store operations
 
 Dashboard organization:
 - Service-level dashboards for individual components
 - Platform-wide dashboards for cross-service visibility
 - Alert-focused dashboards for incident response
 - **Updated** Kernel observability dashboards for tool execution tracking
-- **New**: Evidence persistence dashboards for storage reliability monitoring
+- **Updated** Evidence persistence dashboards for storage reliability monitoring
+- **New**: Model discovery dashboards for provider connectivity and catalog health
 
 ### Alerting Rules Configuration
 Critical alerts:
@@ -528,8 +603,10 @@ Critical alerts:
 - Resource exhaustion warnings (memory > 80%)
 - Queue depth anomalies
 - **Updated** Evidence frame emission failures and kernel tracing errors
-- **New**: Evidence store persistence failures (`evidence_store_writes_total{result="error"} > 0`)
-- **New**: Excessive evidence truncation rates (high `evidence_frames_truncated_total` values)
+- **New**: Model discovery refresh failures (`agent_model_discovery_refreshes_total{result="live"} == 0`)
+- **New**: Stale model catalogs (no model count updates for extended periods)
+- **Updated**: Evidence store persistence failures (`evidence_store_writes_total{result="error"} > 0`)
+- **Updated**: Excessive evidence truncation rates (high `evidence_frames_truncated_total` values)
 
 Alert routing:
 - PagerDuty integration for critical alerts
@@ -544,30 +621,36 @@ Step-by-step debugging approach:
 4. Identify bottlenecks using latency histograms
 5. Validate data integrity with structured log fields
 6. **Updated** Inspect kernel middleware stack and evidence frame emission
-7. **New**: Analyze evidence store metrics for persistence issues
+7. **Updated** Analyze evidence store metrics for persistence issues
+8. **New**: Monitor model discovery refresh cycles and provider connectivity
 
-**Evidence Store Debugging Steps:**
-1. Check `evidence_store_writes_total{result="error"}` for persistence failures
-2. Monitor `evidence_frames_truncated_total` to identify data loss patterns
-3. Verify evidence store backend connectivity and performance
-4. Review entry cap and session budget configurations
-5. Analyze truncation reasons to optimize storage settings
+**Model Discovery Debugging Steps:**
+1. Check `agent_model_discovery_refreshes_total` for refresh cycle success rates
+2. Monitor `agent_model_discovery_models` gauge for model catalog updates
+3. Verify provider API connectivity and authentication
+4. Review refresh interval configuration based on model change frequency
+5. Investigate timeout issues with provider API calls
+
+**Updated** Enhanced debugging guidance for kernel middleware, evidence store, and model discovery operations
 
 Performance profiling:
 - Use built-in profilers for CPU and memory analysis
 - Profile database queries and external API calls
 - Monitor garbage collection and memory allocation patterns
 - **Updated** Monitor kernel middleware overhead and evidence frame processing
-- **New**: Profile evidence store persistence operations and storage performance
+- **Updated** Profile evidence store persistence operations and storage performance
+- **New**: Profile model discovery refresh cycles and provider API calls
 
-**Updated** Enhanced debugging guidance for kernel middleware and evidence store operations
+**Updated** Enhanced performance profiling guidance for all new observability components
 
 **Section sources**
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
 - [SPEC-018-kernel-middleware-alignment/spec.md](file://docs/specs/SPEC-018-kernel-middleware-alignment/spec.md)
 - [SPEC-025-evidence-persistence-in-transcripts/plan.md](file://docs/specs/SPEC-025-evidence-persistence-in-transcripts/plan.md)
+- [SPEC-027-live-model-discovery/spec.md](file://docs/specs/SPEC-027-live-model-discovery/spec.md)
 - [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [agent-platform kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [agent-platform evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [agent-platform model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [agent-platform core metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [agent-platform runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)

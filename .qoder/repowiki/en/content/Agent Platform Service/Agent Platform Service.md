@@ -27,6 +27,7 @@
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [runtime_service.py](file://products/agent-platform/src/agent_service/services/runtime_service.py)
 - [runtime_dependencies.py](file://products/agent-platform/src/agent_service/services/runtime_dependencies.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
@@ -38,6 +39,7 @@
 - [test_chat_stream_modality.py](file://products/agent-platform/tests/test_chat_stream_modality.py)
 - [test_evidence_store.py](file://products/agent-platform/tests/test_evidence_store.py)
 - [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
+- [test_model_discovery.py](file://products/agent-platform/tests/test_model_discovery.py)
 - [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
 - [pyproject.toml](file://products/agent-platform/pyproject.toml)
@@ -47,11 +49,13 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive model catalog service with multi-model support across OpenAI, DashScope, and DeepSeek providers
-- Updated runtime kernel with model normalization for legacy provider name aliases and concrete model ID resolution
-- Enhanced operator portal UI with grouped model display by provider and credential-gated catalog discovery
-- Integrated model catalog into platform gateway for secure model discovery pass-through
-- Added v2 models endpoint for credential-safe model enumeration with public schema compliance
+- Added comprehensive model discovery service with background tasks, provider filtering, metrics collection, and atomic catalog updates via FastAPI lifespan management
+- Enhanced model catalog service with live discovery capabilities and fallback ladder system
+- Integrated background task lifecycle management through FastAPI lifespan context manager
+- Added Postgres-based persistent cache for model discovery results
+- Implemented provider-specific filtering mechanisms for chat-only models
+- Enhanced metrics collection for model discovery operations and refresh cycles
+- Updated runtime settings to support model discovery configuration options
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -69,26 +73,28 @@
 13. [Delegated Token Management](#delegated-token-management)
 14. [Evidence Store Service](#evidence-store-service)
 15. [Model Catalog Service](#model-catalog-service)
-16. [Dependency Analysis](#dependency-analysis)
-17. [Performance Considerations](#performance-considerations)
-18. [Troubleshooting Guide](#troubleshooting-guide)
-19. [Conclusion](#conclusion)
-20. [Appendices](#appendices)
+16. [Live Model Discovery Service](#live-model-discovery-service)
+17. [Dependency Analysis](#dependency-analysis)
+18. [Performance Considerations](#performance-considerations)
+19. [Troubleshooting Guide](#troubleshooting-guide)
+20. [Conclusion](#conclusion)
+21. [Appendices](#appendices)
 
 ## Introduction
 The Agent Platform Service is the core orchestration engine of the Luban AIOps Platform. It provides a runtime kernel for agent execution, a provider registry for multi-model backends (OpenAI, DashScope, DeepSeek), and robust session management with durable storage. The service exposes REST APIs for agent interactions, streaming responses, and configuration management, enabling scalable and observable AI operations across diverse model providers.
 
-**Updated** The service now includes a comprehensive model catalog service that enables multi-model support with credential-gated discovery, runtime kernel updates for model normalization supporting both concrete model IDs and legacy provider name aliases, and enhanced operator portal UI with grouped model display by provider. The model catalog service provides secure enumeration of available models without exposing credentials, while maintaining backward compatibility with existing deployments through alias mapping.
+**Updated** The service now includes a comprehensive model discovery service that automatically discovers available models from configured providers through background tasks with periodic refresh cycles. The discovery service implements a fail-soft ladder system (live fetch → in-memory cache → Postgres cache → curated series) with provider-specific filtering to ensure only chat-capable models are included. The service maintains atomic catalog updates via FastAPI lifespan management, ensuring seamless transitions between different model sets without disrupting ongoing operations.
 
 ## Project Structure
 The Agent Platform Service is implemented as a Python FastAPI application organized by feature layers:
-- Entrypoints and application bootstrapping
+- Entrypoints and application bootstrapping with lifespan management
 - API routes and request/response schemas
-- Runtime kernel and settings
-- Provider implementations and registry
+- Runtime kernel and settings with model discovery integration
+- Provider implementations and registry with filtering capabilities
 - Session services and stores
 - Evidence store service with dual backend support
-- Model catalog service with multi-provider support
+- Model catalog service with live discovery capabilities
+- Background task management for model discovery
 - Tools and integrations
 - Core cross-cutting concerns (configuration, observability, metrics, telemetry, request context)
 
@@ -129,7 +135,12 @@ ev_schema["schemas/session-evidence.schema.json"]
 end
 subgraph "Model Catalog"
 model_cat["services/model_catalog.py"]
+model_disc["services/model_discovery.py"]
 model_schema["schemas/model-catalog.schema.json"]
+end
+subgraph "Background Tasks"
+lifespan["FastAPI Lifespan"]
+task_mgr["Task Manager"]
 end
 subgraph "Tools"
 gw_tools["tools/gateway_tools.py"]
@@ -141,6 +152,9 @@ tel["core/telemetry.py"]
 ctx["core/request_context.py"]
 end
 main --> app --> agent_app
+app --> lifespan
+lifespan --> task_mgr
+task_mgr --> model_disc
 agent_app --> routes_v2
 routes_v2 --> kernel
 kernel --> reg
@@ -155,8 +169,10 @@ routes_v2 --> hitl_reg
 kernel --> gw_tools
 kernel --> ev_store
 kernel --> model_cat
+model_disc --> model_cat
 ev_store --> metrics
 model_cat --> metrics
+model_disc --> metrics
 app --> metrics
 app --> obs
 app --> tel
@@ -186,6 +202,7 @@ settings --> env
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
@@ -203,6 +220,7 @@ settings --> env
 - Session Management: Persists and restores conversations with durable storage, multi-session workspace support, and concurrency-safe access.
 - Evidence Store: Provides persistent storage for tool execution evidence with dual backend support and size-capped retention policies.
 - Model Catalog: Manages credential-gated model discovery with multi-provider support, legacy alias resolution, and public schema compliance.
+- Live Model Discovery: Implements background task management with periodic refresh cycles, provider filtering, and atomic catalog updates.
 - API Layer: Exposes REST endpoints for chat, sessions, streaming events, model discovery, and health checks with v3 streaming protocol support.
 - Cross-Cutting: Configuration, environment, metrics, observability, telemetry, and request-scoped context.
 
@@ -211,6 +229,9 @@ Key responsibilities:
 - Conversation: Maintain message history, context, and state per session with workspace organization.
 - Evidence Capture: Persist tool_call and tool_result frames with size caps and automatic eviction.
 - Model Resolution: Normalize model IDs including legacy provider name aliases to concrete model entries.
+- **Live Discovery**: Periodically discover available models from providers with fail-soft fallback ladder and provider-specific filtering.
+- **Background Tasks**: Manage model discovery lifecycle through FastAPI lifespan context with proper startup/shutdown handling.
+- **Atomic Updates**: Swap catalog contents atomically to prevent partial updates during refresh cycles.
 - Streaming: Emit incremental events to clients over HTTP streaming with v3 tool_call/tool_result frames.
 - Security: Manage per-user toolkit closures bound to delegated tokens for secure tool execution.
 - Anti-Hallucination: Prevent model fabrication through systematic NO_TOOLS_NOTICE injection.
@@ -221,7 +242,7 @@ Key responsibilities:
 - HITL Integration: Support human-in-the-loop workflows with parked confirmation management.
 - Observability: Emit structured logs, metrics, and traces for each operation with per-request audit trails.
 
-**Updated** The service now includes comprehensive model catalog capabilities with credential-gated discovery, runtime kernel model normalization supporting both concrete model IDs and legacy provider name aliases, and enhanced operator portal integration with grouped model display by provider. The model catalog service provides secure enumeration of available models without exposing credentials, while maintaining backward compatibility with existing deployments.
+**Updated** The service now includes comprehensive model discovery capabilities with background task management, provider filtering for chat-only models, fail-soft fallback ladder system, atomic catalog updates, and enhanced metrics collection for discovery operations. The discovery service runs as a background task managed by FastAPI lifespan, providing automatic model discovery with graceful degradation when providers are unavailable.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -230,6 +251,8 @@ Key responsibilities:
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [app.py](file://products/agent-platform/src/agent_service/app.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
 - [telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
@@ -243,6 +266,8 @@ The service follows a layered architecture with enhanced security and anti-hallu
 - Session service persists state using a configurable store with workspace bookkeeping and transcript extraction.
 - Evidence store provides persistent storage for tool execution evidence with dual backend support and size-capped retention.
 - Model catalog provides credential-gated discovery of available models with legacy alias resolution.
+- **Live discovery service runs background tasks to periodically refresh model catalogs with fail-soft fallback ladder.**
+- **FastAPI lifespan manages discovery task lifecycle with proper startup and shutdown handling.**
 - Cross-cutting modules provide configuration, metrics, observability, and telemetry with per-request audit trails.
 
 ```mermaid
@@ -255,6 +280,7 @@ participant Sess as "SessionService"
 participant Store as "SessionStore"
 participant EvStore as "EvidenceStore"
 participant ModelCat as "ModelCatalog"
+participant Disc as "ModelDiscovery"
 participant Reg as "ProviderRegistry"
 participant Prov as "ModelProvider"
 participant Tools as "GatewayTools"
@@ -286,9 +312,13 @@ Kernel-->>API : StreamEvent* with v3 frames
 API-->>Client : SSE/Streaming Response with tool_call/tool_result
 Kernel->>Sess : save(sessionId, updatedState)
 Sess->>Store : set(sessionId, updatedState)
+Note over Disc : Background Task Management
+Disc->>Disc : refresh_once() every N seconds
+Disc->>ModelCat : refresh_catalog(series_map)
+ModelCat-->>Disc : atomic catalog swap
 ```
 
-**Updated** The sequence diagram now shows the complete model catalog integration with legacy alias resolution, including model validation before agent execution, runtime kernel model normalization, and enhanced operator portal integration with grouped model display by provider.
+**Updated** The sequence diagram now shows the complete model discovery service integration with background task management, including periodic refresh cycles, fail-soft fallback ladder, provider filtering, and atomic catalog updates through FastAPI lifespan management.
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -298,6 +328,8 @@ Sess->>Store : set(sessionId, updatedState)
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [app.py](file://products/agent-platform/src/agent_service/app.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
@@ -367,6 +399,11 @@ class ModelCatalog {
 +default_entry()
 +public_models()
 }
+class ModelDiscovery {
++refresh_once()
++run_loop()
++build_discovery_service(settings, credentials)
+}
 class ProviderRegistry {
 +register(name, provider)
 +resolve(name)
@@ -387,6 +424,7 @@ AgentKernel --> EvidenceStore : "persists evidence"
 AgentKernel --> ModelCatalog : "resolves models"
 AgentKernel --> ProviderRegistry : "uses"
 AgentKernel --> GatewayTools : "manages"
+ModelDiscovery --> ModelCatalog : "updates"
 ProviderRegistry --> ModelProvider : "manages"
 GatewayTools --> ModelProvider : "secure invocation"
 ```
@@ -398,6 +436,7 @@ GatewayTools --> ModelProvider : "secure invocation"
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
@@ -415,21 +454,28 @@ class BaseProvider {
 +streamChat(messages, options)
 +healthCheck()
 +build_model(settings)
++discover_filter(model_id)
++discover_family_prefixes
++discover_exclude_markers
 }
 class OpenAIProvider {
 +build_model(settings)
 +provider_name = "openai"
 +default_model = "gpt-4o-mini"
++discover_family_prefixes = ("gpt-", "o1", "o3", "o4", "chatgpt-")
 }
 class DashScopeProvider {
 +build_model(settings)
 +provider_name = "dashscope"
 +default_model = "qwen-plus"
++discover_family_prefixes = ("qwen",)
++discover_exclude_markers = _NON_CHAT_MARKERS + ("-vl", "-mt", "-ocr", "omni")
 }
 class DeepSeekProvider {
 +build_model(settings)
 +provider_name = "deepseek"
 +default_model = "deepseek-v4-flash"
++discover_family_prefixes = ("deepseek",)
 }
 class ProviderRegistry {
 +register(name, provider)
@@ -447,7 +493,7 @@ Configuration examples:
 - DashScope: Set endpoint URL, credentials, thinking budget, and parallel tool calls; select model variant.
 - DeepSeek: Provide authentication token, target model identifier, and reasoning effort level.
 
-**Updated** All provider implementations now use AgentScope 2.x model construction patterns with enhanced parameter support including reasoning effort, thinking enable flags, and parallel tool calls. Voice readiness is supported through consistent parameter passing across all modalities.
+**Updated** All provider implementations now use AgentScope 2.x model construction patterns with enhanced parameter support including reasoning effort, thinking enable flags, and parallel tool calls. Voice readiness is supported through consistent parameter passing across all modalities. Provider implementations include sophisticated filtering mechanisms for live model discovery, with family prefix restrictions and non-chat modality exclusion markers to ensure only chat-capable models are discovered.
 
 **Section sources**
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
@@ -1286,6 +1332,14 @@ class ModelCatalog {
 +get(model_id)
 +default_entry()
 +public_models()
++_swap(entries, aliases)
+}
+class ProviderCredentials {
++provider : RuntimeProvider
++api_key : str
++base_url : str | None
++default_model : str
++models_override : tuple[str, ...] | None
 }
 class RuntimeSettings {
 +provider : RuntimeProvider
@@ -1296,12 +1350,14 @@ class RuntimeSettings {
 +from_env()
 }
 ModelCatalog --> ModelCatalogEntry : "manages"
+ModelCatalog --> ProviderCredentials : "uses for defaults"
 ModelCatalog --> RuntimeSettings : "uses for defaults"
 ```
 
 **Diagram sources**
 - [model_catalog.py:42-61](file://products/agent-platform/src/agent_service/services/model_catalog.py#L42-L61)
 - [model_catalog.py:149-185](file://products/agent-platform/src/agent_service/services/model_catalog.py#L149-L185)
+- [model_catalog.py:223-280](file://products/agent-platform/src/agent_service/services/model_catalog.py#L223-L280)
 
 ### Key Features
 - **Credential-Gated Discovery**: Only providers with resolvable API keys contribute to the catalog
@@ -1311,6 +1367,7 @@ ModelCatalog --> RuntimeSettings : "uses for defaults"
 - **Environment Variable Configuration**: Supports `<PROVIDER>_API_KEY`, `<PROVIDER>_MODEL_NAME`, `<PROVIDER>_BASE_URL`, and `<PROVIDER>_MODELS`
 - **Active Profile Fallback**: Active profile maintains existing AGENTSCOPE_* environment variable compatibility
 - **Duplicate Detection**: Prevents model ID conflicts across different providers
+- **Atomic Updates**: Thread-safe catalog swapping with lock protection for concurrent access
 
 ### Model Resolution Flow
 ```mermaid
@@ -1340,7 +1397,7 @@ API-->>Client : Response with selected model
 **Diagram sources**
 - [routes.py:534-544](file://products/agent-platform/src/agent_service/api/v2/routes.py#L534-L544)
 - [model_catalog.py:168-174](file://products/agent-platform/src/agent_service/services/model_catalog.py#L168-L174)
-- [runtime_kernel.py:248-261](file://products/agent-platform/src/agent_service/runtime_kernel.py#L248-L261)
+- [runtime_kernel.py:248-261](file://products/agent-platform/src/agent_service/runtime_kernel.py#L248-261)
 
 ### Configuration Examples
 - **OpenAI**: Set `OPENAI_API_KEY`, optionally `OPENAI_MODEL_NAME`, `OPENAI_BASE_URL`, `OPENAI_MODELS`
@@ -1357,12 +1414,152 @@ The operator portal UI displays models grouped by provider with credential-gated
 - **Test Coverage**: Comprehensive tests for grouping, fallback behavior, and single model scenarios
 
 **Section sources**
-- [model_catalog.py:1-212](file://products/agent-platform/src/agent_service/services/model_catalog.py#L1-L212)
+- [model_catalog.py:1-318](file://products/agent-platform/src/agent_service/services/model_catalog.py#L1-L318)
 - [routes.py:534-544](file://products/agent-platform/src/agent_service/api/v2/routes.py#L534-L544)
 - [models.py:19-45](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L19-L45)
 - [ModelSelect.tsx:20-71](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L20-L71)
 - [models.ts:1-30](file://products/operator-portal/web-ui/app/src/api/models.ts#L1-L30)
 - [test_model_catalog.py:196-244](file://products/agent-platform/tests/test_model_catalog.py#L196-L244)
+
+## Live Model Discovery Service
+
+### Overview
+The live model discovery service implements background task management for automatic model discovery from configured providers. It provides a fail-soft ladder system that falls back through multiple tiers (live fetch → in-memory cache → Postgres cache → curated series) to ensure continuous model availability even when providers are temporarily unavailable.
+
+### Architecture
+```mermaid
+classDiagram
+class ModelDiscoveryService {
++_settings : RuntimeSettings
++_credentials : tuple[ProviderCredentials, ...]
++_cache : PostgresDiscoveryCache
++_last_good : dict[RuntimeProvider, tuple[str, ...]]
++refresh_once()
++run_loop()
++_resolve_series(credentials)
++_apply_filter(credentials, models)
+}
+class PostgresDiscoveryCache {
++_db_url : str
++_bootstrapped : bool
++read(provider) : tuple[str, ...] | None
++write(provider, models) : None
++_connect() : Any
+}
+class ModelCatalog {
++refresh_catalog(series_map, settings) : bool
++entries : tuple
++public_models() : dict
+}
+class ProviderCredentials {
++provider : RuntimeProvider
++api_key : str
++base_url : str | None
++default_model : str
++models_override : tuple[str, ...] | None
+}
+ModelDiscoveryService --> PostgresDiscoveryCache : "uses"
+ModelDiscoveryService --> ModelCatalog : "updates"
+ModelDiscoveryService --> ProviderCredentials : "processes"
+```
+
+**Diagram sources**
+- [model_discovery.py:196-283](file://products/agent-platform/src/agent_service/services/model_discovery.py#L196-L283)
+- [model_discovery.py:69-153](file://products/agent-platform/src/agent_service/services/model_discovery.py#L69-L153)
+- [model_catalog.py:283-303](file://products/agent-platform/src/agent_service/services/model_catalog.py#L283-L303)
+
+### Key Features
+- **Background Task Management**: Runs as an asyncio task managed by FastAPI lifespan context
+- **Periodic Refresh**: Configurable refresh intervals with exponential backoff on failures
+- **Fail-Soft Ladder**: Multiple fallback tiers ensure model availability even during provider outages
+- **Provider Filtering**: Chat-only model filtering with family prefix restrictions and non-chat modality exclusion
+- **Persistent Caching**: Postgres-backed cache for model discovery results across process restarts
+- **Atomic Catalog Updates**: Thread-safe catalog swapping with lock protection
+- **Metrics Collection**: Comprehensive observability for discovery operations and refresh cycles
+- **Graceful Degradation**: Discovery failures don't impact core chat functionality
+
+### Discovery Ladder Flow
+```mermaid
+sequenceDiagram
+participant Disc as "ModelDiscoveryService"
+participant Live as "Live Fetch"
+participant Memory as "In-Memory Cache"
+participant Postgres as "Postgres Cache"
+participant Curated as "Curated Series"
+Note over Disc,Curated : Discovery Ladder Process
+Disc->>Disc : _resolve_series(credentials)
+alt Models Override Enabled
+Disc->>Curated : force_include_default(models_override, default)
+else Discovery Disabled
+Disc->>Curated : curated_series(credentials)
+else Discovery Enabled
+Disc->>Live : fetch_provider_models(credentials)
+alt Live Fetch Success
+Live-->>Disc : filtered_models
+Disc->>Disc : _apply_filter(credentials, models)
+Disc->>Memory : update _last_good[provider]
+Disc->>Postgres : write(provider, models)
+Disc->>Disc : return filtered_models
+else Live Fetch Failed
+Disc->>Memory : get _last_good[provider]
+alt Memory Cache Hit
+Memory-->>Disc : cached_models
+Disc->>Disc : return cached_models
+else Memory Cache Miss
+Disc->>Postgres : read(provider)
+alt Postgres Cache Hit
+Postgres-->>Disc : cached_models
+Disc->>Disc : force_include_default(cached, default)
+Disc->>Disc : return cached_models
+else Postgres Cache Miss
+Disc->>Curated : curated_series(credentials)
+Curated-->>Disc : curated_models
+Disc->>Disc : return curated_models
+end
+end
+end
+end
+```
+
+**Diagram sources**
+- [model_discovery.py:227-264](file://products/agent-platform/src/agent_service/services/model_discovery.py#L227-L264)
+- [model_discovery.py:155-193](file://products/agent-platform/src/agent_service/services/model_discovery.py#L155-L193)
+- [model_discovery.py:69-153](file://products/agent-platform/src/agent_service/services/model_discovery.py#L69-L153)
+
+### FastAPI Lifespan Integration
+The discovery service integrates seamlessly with FastAPI's lifespan management:
+- **Startup**: Creates background task and performs initial model discovery
+- **Runtime**: Continuously refreshes model catalogs at configured intervals
+- **Shutdown**: Gracefully cancels background tasks and cleans up resources
+- **Error Handling**: Logs exceptions but never crashes the application
+
+### Provider Filtering Mechanisms
+Each provider implements sophisticated filtering to ensure only chat-capable models are discovered:
+- **Family Prefix Restrictions**: Models must match provider-specific prefixes (e.g., "gpt-", "qwen", "deepseek")
+- **Non-Chat Modality Exclusion**: Filters out embedding, rerank, TTS, audio, image, moderation, transcription, and other non-chat modalities
+- **Dated Snapshot Detection**: Automatically excludes dated model snapshots (e.g., "model-2024-01-01")
+- **Custom Exclusion Markers**: Provider-specific exclusions for vision, translation, OCR, and other specialized modalities
+
+### Configuration and Environment Variables
+- **AGENT_MODEL_DISCOVERY_ENABLED**: Enable/disable discovery (default: true)
+- **AGENT_MODEL_DISCOVERY_REFRESH_SECONDS**: Refresh interval in seconds (default: 1800)
+- **AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS**: HTTP timeout for provider /models calls (default: 5.0)
+- **SESSION_DB_URL**: Database connection for persistent cache (optional)
+- **AGENT_STATE_DB_URL**: Alternative database connection for persistent cache
+
+### Metrics and Observability
+The discovery service provides comprehensive metrics:
+- **Refresh Counters**: Track refresh attempts and outcomes (override, disabled, live, memory, cache, curated)
+- **Model Count Gauges**: Monitor current number of models per provider
+- **Error Logging**: Detailed logging for network failures, parsing errors, and database issues
+- **Performance Monitoring**: Track refresh cycle duration and cache hit rates
+
+**Section sources**
+- [model_discovery.py:1-294](file://products/agent-platform/src/agent_service/services/model_discovery.py#L1-L294)
+- [app.py:19-47](file://products/agent-platform/src/agent_service/app.py#L19-L47)
+- [metrics.py:188-210](file://products/agent-platform/src/agent_service/core/metrics.py#L188-L210)
+- [runtime_settings.py:152-157](file://products/agent-platform/src/agent_service/runtime_settings.py#L152-L157)
+- [test_model_discovery.py:1-421](file://products/agent-platform/tests/test_model_discovery.py#L1-L421)
 
 ## Dependency Analysis
 The service has clear separation of concerns with minimal coupling between layers:
@@ -1372,6 +1569,8 @@ The service has clear separation of concerns with minimal coupling between layer
 - Session service abstracts storage backend
 - Evidence store provides independent persistence layer with dual backend support
 - Model catalog provides credential-gated discovery with legacy alias resolution
+- **Live discovery service depends on model catalog, provider registry, and runtime settings**
+- **FastAPI lifespan manages discovery task lifecycle independently**
 - Cross-cutting concerns are injected into the application lifecycle
 
 ```mermaid
@@ -1398,9 +1597,13 @@ Evidence --> Metrics
 Evidence --> Store
 ModelCat --> Metrics
 ModelCat --> Registry
+ModelDisc["ModelDiscovery"] --> ModelCat
+ModelDisc --> Registry
+ModelDisc --> Metrics
+Lifespan["FastAPI Lifespan"] --> ModelDisc
 ```
 
-**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, model catalog service with credential-gated discovery and legacy alias resolution, and voice-readiness support through input_modality parameter passthrough.
+**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, model catalog service with credential-gated discovery and legacy alias resolution, live model discovery service with background task management, and voice-readiness support through input_modality parameter passthrough.
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -1408,6 +1611,8 @@ ModelCat --> Registry
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [app.py](file://products/agent-platform/src/agent_service/app.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
 - [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
@@ -1446,8 +1651,12 @@ ModelCat --> Registry
 - **Model Catalog Optimization**: Startup-derived catalog with in-memory lookup for fast model resolution
 - **Legacy Alias Resolution**: Efficient provider name to concrete model mapping for backward compatibility
 - **Credential-Gated Discovery**: Minimal overhead for model enumeration without exposing sensitive configuration
+- **Live Discovery Optimization**: Background task with configurable refresh intervals and exponential backoff
+- **Cache Tier Performance**: Multi-tier caching (memory, Postgres) reduces provider API calls
+- **Atomic Updates**: Lock-protected catalog swaps prevent partial updates during refresh cycles
+- **Provider Filtering Efficiency**: Family prefix matching and marker-based filtering minimize false positives
 
-**Updated** Performance considerations now include multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, and model catalog optimization with startup-derived catalog and efficient legacy alias resolution.
+**Updated** Performance considerations now include multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, model catalog optimization with startup-derived catalog and efficient legacy alias resolution, live model discovery optimization with background task management, multi-tier caching strategies, and atomic catalog updates with lock protection.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -1478,6 +1687,11 @@ Common issues and resolutions:
 - **Model Selection Errors**: Check model ID validation and legacy alias resolution
 - **Portal Model Display**: Verify grouped model display and provider categorization
 - **Discovery Failures**: Check platform gateway proxy configuration and upstream model endpoint
+- **Live Discovery Issues**: Verify discovery service background task status and refresh intervals
+- **Provider Filtering**: Check family prefix configurations and exclusion markers for chat-only models
+- **Cache Tier Problems**: Validate Postgres connectivity and cache persistence operations
+- **Network Timeouts**: Adjust discovery timeout settings for slow or unreliable providers
+- **Metrics Monitoring**: Check discovery refresh counters and model count gauges for operational insights
 
 Debugging utilities:
 - Health check endpoints for service status
@@ -1497,8 +1711,11 @@ Debugging utilities:
 - **Evidence Panel Debugging**: Verify evidence turn retrieval and evidence schema compliance
 - **Model Catalog Debugging**: Verify provider configuration, model enumeration, and legacy alias resolution
 - **Portal Model Debugging**: Check model selector grouping, default selection, and catalog fetch behavior
+- **Live Discovery Debugging**: Monitor background task status, refresh cycles, and cache tier performance
+- **Provider Filter Debugging**: Validate family prefix matching and non-chat modality exclusion logic
+- **Cache Tier Debugging**: Check Postgres connectivity, cache persistence, and fallback behavior
 
-**Updated** Troubleshooting guide now includes multi-session workspace troubleshooting, transcript extraction debugging strategies, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, and model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification.
+**Updated** Troubleshooting guide now includes multi-session workspace troubleshooting, transcript extraction debugging strategies, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification, plus live model discovery troubleshooting with background task monitoring, provider filtering validation, cache tier diagnostics, and discovery performance optimization.
 
 **Section sources**
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -1509,7 +1726,7 @@ Debugging utilities:
 ## Conclusion
 The Agent Platform Service provides a robust foundation for AI agent orchestration with multi-provider support, durable session management, and comprehensive observability. Its modular architecture enables easy customization and scaling while maintaining high performance and reliability.
 
-**Updated** The service now includes comprehensive model catalog capabilities with credential-gated discovery across multiple providers, runtime kernel model normalization supporting both concrete model IDs and legacy provider name aliases, and enhanced operator portal integration with grouped model display by provider. The model catalog service provides secure enumeration of available models without exposing credentials, while maintaining backward compatibility with existing deployments through alias mapping. These enhancements strengthen the platform's flexibility, enable multi-model deployments, provide detailed operational visibility, and maintain the performance characteristics that make it suitable for production AI operations.
+**Updated** The service now includes comprehensive model discovery capabilities with background task management, provider filtering for chat-only models, fail-soft fallback ladder system, atomic catalog updates, and enhanced metrics collection for discovery operations. The discovery service runs as a background task managed by FastAPI lifespan, providing automatic model discovery with graceful degradation when providers are unavailable. These enhancements strengthen the platform's flexibility, enable dynamic model management, provide detailed operational visibility, and maintain the performance characteristics that make it suitable for production AI operations.
 
 ## Appendices
 
@@ -1575,7 +1792,16 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - **Legacy Compatibility**: Test bare provider name aliases for backward compatibility
 - **Discovery Testing**: Validate credential-gated model enumeration through platform gateway
 
-**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, and voice-readiness support with input_modality parameters for complete operator workflow management.
+#### Live Model Discovery Configuration
+- **Enable Discovery**: Set `AGENT_MODEL_DISCOVERY_ENABLED=true` to activate background discovery
+- **Refresh Interval**: Configure `AGENT_MODEL_DISCOVERY_REFRESH_SECONDS` for optimal refresh frequency
+- **Timeout Settings**: Adjust `AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS` for slow providers
+- **Database Cache**: Set `SESSION_DB_URL` or `AGENT_STATE_DB_URL` for persistent model caching
+- **Provider Filtering**: Verify family prefix configurations and exclusion markers for chat-only models
+- **Monitoring**: Check discovery metrics and refresh logs for operational insights
+- **Fallback Testing**: Validate cache tier behavior during provider outages
+
+**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, live model discovery configuration with background task management, provider filtering mechanisms, cache tier optimization, and voice-readiness support with input_modality parameters for complete operator workflow management.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -1588,10 +1814,13 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [app.py](file://products/agent-platform/src/agent_service/app.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
 - [test_chat_stream_modality.py](file://products/agent-platform/tests/test_chat_stream_modality.py)
 - [test_evidence_store.py](file://products/agent-platform/tests/test_evidence_store.py)
 - [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
+- [test_model_discovery.py](file://products/agent-platform/tests/test_model_discovery.py)
 - [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)

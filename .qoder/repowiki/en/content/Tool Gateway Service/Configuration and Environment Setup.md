@@ -12,6 +12,8 @@
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [app.py](file://products/tool-gateway/src/tool_gateway/app.py)
@@ -30,18 +32,19 @@
 - [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)
 - [README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
 - [spec.md](file://docs/specs/SPEC-019-portal-transparency-navigation/spec.md)
+- [spec.md](file://docs/specs/SPEC-027-live-model-discovery/spec.md)
 - [approval-and-hitl.md](file://docs/guides/approval-and-hitl.md)
 - [tool-configuration.md](file://docs/guides/tool-configuration.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new mutating-dev kustomize runtime profile that enables GATEWAY_MUTATING_TOOLS_ENABLED=true for development environments with bounded RBAC permissions
-- Updated configuration reference to include the new runtime-profiles/mutating-dev overlay and its pod-delete Role/RoleBinding
-- Enhanced environment-specific settings section with detailed guidance for the mutating-dev profile integration
-- Added new section documenting the mutating-dev profile architecture and deployment considerations
-- Updated troubleshooting guide with profile-specific issues and resolution steps
-- Integrated triple-gate security model documentation covering risk-tier admission, policy grants, and HITL confirmation requirements
+- Added comprehensive documentation for the new live model discovery feature controlled by AGENT_MODEL_DISCOVERY_ENABLED, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS, and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS environment variables
+- Updated configuration reference to include model discovery settings with their defaults, validation rules, and behavioral impact
+- Enhanced agent platform section with detailed guidance on model discovery configuration and troubleshooting
+- Added new section documenting the live model discovery architecture and fail-soft ladder mechanism
+- Updated environment-specific settings with recommendations for model discovery tuning across different environments
+- Integrated model discovery considerations into deployment examples and security best practices
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -58,10 +61,10 @@
 ## Introduction
 This document explains how the Platform Gateway Service manages configuration and environment setup across layers: environment variables, configuration files, and runtime overrides. It details available options, defaults, validation rules, and deployment-specific settings for development, staging, and production. It also provides examples for Docker and Kubernetes (ConfigMaps/Secrets), and outlines security best practices for secrets management and consistent configuration across environments.
 
-**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations, risk-tier admission gates for mutating tools via GATEWAY_MUTATING_TOOLS_ENABLED, configurable HITL confirmation timeouts through AGENT_HITL_CONFIRM_TIMEOUT, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, and the new mutating-dev kustomize profile that provides a committed, environment-scoped development posture for enabling mutating tools safely with bounded RBAC permissions while preserving configuration across LLM provider switches.
+**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations, risk-tier admission gates for mutating tools via GATEWAY_MUTATING_TOOLS_ENABLED, configurable HITL confirmation timeouts through AGENT_HITL_CONFIRM_TIMEOUT, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, the new mutating-dev kustomize profile that provides a committed, environment-scoped development posture for enabling mutating tools safely with bounded RBAC permissions while preserving configuration across LLM provider switches, and the new live model discovery feature controlled by AGENT_MODEL_DISCOVERY_ENABLED, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS, and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS that enables automatic model catalog updates from provider endpoints with fail-soft fallback mechanisms.
 
 ## Project Structure
-The Platform Gateway Service is implemented under products/platform-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/platform-gateway. The service includes workspace resource integration features that proxy requests to tool-gateway and skills-hub services for read-only inventory access, plus enhanced OpenTelemetry configuration with durable secret management. The new mutating-dev profile provides a dedicated development posture for enabling mutating tools with appropriate RBAC controls.
+The Platform Gateway Service is implemented under products/platform-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/platform-gateway. The service includes workspace resource integration features that proxy requests to tool-gateway and skills-hub services for read-only inventory access, plus enhanced OpenTelemetry configuration with durable secret management. The new mutating-dev profile provides a dedicated development posture for enabling mutating tools with appropriate RBAC controls. The agent platform component now includes live model discovery capabilities that automatically refresh model catalogs from provider endpoints.
 
 ```mermaid
 graph TB
@@ -81,71 +84,76 @@ J["gateway_tools.py"]
 K["AGENT_GATEWAY_TOOL_AUTO_ALLOW"]
 L["AGENT_HITL_CONFIRM_TIMEOUT"]
 M["Risk Tier Enforcement"]
+N["Model Discovery Service"]
+O["AGENT_MODEL_DISCOVERY_*"]
+P["Fail-Soft Ladder"]
 end
 subgraph "Tool Gateway Risk Control"
-N["tool-gateway config.py"]
-O["registry.py"]
-P["GATEWAY_MUTATING_TOOLS_ENABLED"]
-Q["Risk-Tier Admission Gate"]
-R["Policy Enforcement"]
+Q["tool-gateway config.py"]
+R["registry.py"]
+S["GATEWAY_MUTATING_TOOLS_ENABLED"]
+T["Risk-Tier Admission Gate"]
+U["Policy Enforcement"]
 end
 subgraph "Workspace Resource Integration"
-S["tool_gateway_url"]
-T["skills_hub_url"]
-U["skills_client_id"]
-V["skills_client_secret"]
-W["Delegated Token Flow"]
-X["Basic Auth Flow"]
+V["tool_gateway_url"]
+W["skills_hub_url"]
+X["skills_client_id"]
+Y["skills_client_secret"]
+Z["Delegated Token Flow"]
+AA["Basic Auth Flow"]
 end
 subgraph "Enhanced OTel Secret Management"
-Y["sync-otel-secrets.sh"]
-Z["OTEL_EXPORTER_OTLP_HEADERS"]
-AA["Cluster Secret Merge"]
-AB["Local File Preservation"]
-AC["Sibling Script Hooks"]
+AB["sync-otel-secrets.sh"]
+AC["OTEL_EXPORTER_OTLP_HEADERS"]
+AD["Cluster Secret Merge"]
+AE["Local File Preservation"]
+AF["Sibling Script Hooks"]
 end
 subgraph "Mutating Dev Profile"
-AD["dev-k8s/kustomization.yaml"]
-AE["runtime-profiles/mutating-dev/"]
-AF["mutating.env"]
-AG["tool-gateway-pod-delete.yaml"]
-AH["RBAC Role/RoleBinding"]
-AI["ConfigMap Merge"]
+AG["dev-k8s/kustomization.yaml"]
+AH["runtime-profiles/mutating-dev/"]
+AI["mutating.env"]
+AJ["tool-gateway-pod-delete.yaml"]
+AK["RBAC Role/RoleBinding"]
+AL["ConfigMap Merge"]
 end
 subgraph "Kubernetes Base (dev)"
-AJ["base/platform-gateway/runtime-config.env"]
-AK["base/platform-gateway/platform-gateway-deployment.yaml"]
-AL["base/platform-gateway/runtime-secrets.example.env"]
-AM["base/shared/runtime.env"]
-AN["base/agent-platform/runtime-config.env"]
-AO["base/tool-gateway/runtime-config.env"]
-AP["base/tool-gateway/rbac.yaml"]
+AM["base/platform-gateway/runtime-config.env"]
+AN["base/platform-gateway/platform-gateway-deployment.yaml"]
+AO["base/platform-gateway/runtime-secrets.example.env"]
+AP["base/shared/runtime.env"]
+AQ["base/agent-platform/runtime-config.env"]
+AR["base/tool-gateway/runtime-config.env"]
+AS["base/tool-gateway/rbac.yaml"]
 end
-A --> AJ
-B --> AK
-C --> Y
+A --> AM
+B --> AN
+C --> AB
 D --> F
 E --> G
-F --> S
-G --> T
-AJ --> AK
-AL --> AK
-AM --> AK
+F --> V
+G --> W
+AM --> AN
+AO --> AN
+AP --> AN
 H --> K
 I --> L
 J --> M
+N --> O
 N --> P
-O --> Q
-P --> R
-Y --> AA
-Y --> AB
-Y --> AC
-AD --> AE
-AE --> AF
-AE --> AG
-AF --> AI
+Q --> S
+R --> T
+S --> U
+AB --> AD
+AB --> AE
+AB --> AF
 AG --> AH
-AP --> AP
+AH --> AI
+AH --> AJ
+AI --> AL
+AJ --> AK
+AS --> AS
 ```
 
 **Diagram sources**
@@ -157,6 +165,7 @@ AP --> AP
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
@@ -182,6 +191,7 @@ AP --> AP
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
@@ -209,6 +219,7 @@ AP --> AP
 - **New**: Configurable HITL confirmation timeout via AGENT_HITL_CONFIRM_TIMEOUT for operator confirmation bridging.
 - **New**: Enhanced agent auto-allow list with read-only enforcement and misconfiguration logging.
 - **New**: Mutating-dev kustomize profile providing committed development posture for enabling mutating tools with appropriate RBAC controls.
+- **New**: Live model discovery service controlled by AGENT_MODEL_DISCOVERY_* environment variables with fail-soft fallback mechanisms.
 
 Key responsibilities:
 - Provide a single source of truth for configuration via typed models.
@@ -221,8 +232,9 @@ Key responsibilities:
 - **New**: Configure HITL confirmation timeouts to balance operational efficiency with safety requirements.
 - **New**: Maintain durable OpenTelemetry authentication headers across all deployment operations through cluster-side secret merging and local file preservation.
 - **New**: Provide committed development posture through mutating-dev profile that safely enables mutating tools with bounded RBAC permissions.
+- **New**: Enable live model discovery with configurable refresh cadence and timeout controls, implementing a fail-soft ladder that falls back through live → memory → Postgres → curated series.
 
-**Updated** Enhanced core components to include comprehensive workspace resource integration capabilities with read-only proxies for tools catalog and skills inventory, supporting both delegated token flow for tools and Basic authentication for skills, risk-tier admission gates for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus durable OpenTelemetry secret provisioning that persists authentication headers across deployment operations, and the new mutating-dev kustomize profile that provides a safe, committed development posture for enabling mutating tools with appropriate RBAC controls.
+**Updated** Enhanced core components to include comprehensive workspace resource integration capabilities with read-only proxies for tools catalog and skills inventory, supporting both delegated token flow for tools and Basic authentication for skills, risk-tier admission gates for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus durable OpenTelemetry secret provisioning that persists authentication headers across deployment operations, the new mutating-dev kustomize profile that provides a safe, committed development posture for enabling mutating tools with appropriate RBAC controls, and the live model discovery service that automatically refreshes model catalogs from provider endpoints with robust fallback mechanisms.
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -233,13 +245,14 @@ Key responsibilities:
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 
 ## Architecture Overview
-The configuration system follows a layered approach with enhanced workspace resource integration, risk-tier admission gates, and durable secret management:
+The configuration system follows a layered approach with enhanced workspace resource integration, risk-tier admission gates, durable secret management, and live model discovery:
 - Defaults: defined in code or default YAML policies.
 - Config files: loaded from container filesystem or mounted volumes.
 - Environment variables: injected at runtime via platform orchestration (e.g., Kubernetes).
@@ -251,6 +264,7 @@ The configuration system follows a layered approach with enhanced workspace reso
 - **New**: Enhanced agent auto-allow list: read-only enforcement with misconfiguration logging.
 - **New**: Durable OTel secret provisioning: cluster-side merging ensures authentication headers persist across all deployment operations.
 - **New**: Mutating-dev profile: committed development posture that safely enables mutating tools with bounded RBAC permissions.
+- **New**: Live model discovery: automatic catalog updates from provider endpoints with fail-soft fallback ladder.
 
 ```mermaid
 sequenceDiagram
@@ -264,7 +278,9 @@ participant OTel as "OpenObserve"
 participant Policy as "Policy Engine"
 participant Secrets as "Secret Manager"
 participant MutDev as "Mutating Dev Profile"
+participant ModelDisc as "Model Discovery Service"
 Note over Portal,Agent : Agent Auto-Allow List & HITL Timeout
+Note over Agent,ModelDisc : Live Model Discovery
 Portal->>Agent : Tool Call Request
 Agent->>Agent : Check Auto-Allow List
 Agent->>Agent : Apply HITL Timeout
@@ -284,6 +300,13 @@ Gateway->>Secrets : Read OTEL_EXPORTER_OTLP_HEADERS
 Secrets-->>Gateway : Authenticated Headers
 Gateway->>OTel : Export traces/metrics/logs (authenticated)
 OTel-->>Gateway : Success/Failure (fail-open)
+Note over Agent,ModelDisc : Model Discovery Process
+Agent->>ModelDisc : Initialize Discovery Service
+ModelDisc->>ModelDisc : Start Periodic Refresh Loop
+ModelDisc->>Provider : GET /models (with timeout)
+Provider-->>ModelDisc : Model List or Error
+ModelDisc->>ModelDisc : Apply Fail-Soft Ladder
+ModelDisc->>Agent : Update Catalog (atomic swap)
 ```
 
 **Diagram sources**
@@ -292,6 +315,7 @@ OTel-->>Gateway : Success/Failure (fail-open)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
@@ -299,6 +323,7 @@ OTel-->>Gateway : Success/Failure (fail-open)
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [spec.md](file://docs/specs/SPEC-019-portal-transparency-navigation/spec.md)
+- [spec.md](file://docs/specs/SPEC-027-live-model-discovery/spec.md)
 
 ## Detailed Component Analysis
 
@@ -309,7 +334,7 @@ OTel-->>Gateway : Success/Failure (fail-open)
 - Error handling: Aggregates validation errors and surfaces actionable messages.
 - Service discovery: Uses DNS-based resolution for inter-service communication.
 
-**Updated** Enhanced to support workspace resource integration with new configuration fields for tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret, enabling read-only proxies for tools catalog and skills inventory, plus risk-tier admission gate configuration for mutating tools and integration with the mutating-dev profile.
+**Updated** Enhanced to support workspace resource integration with new configuration fields for tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret, enabling read-only proxies for tools catalog and skills inventory, plus risk-tier admission gate configuration for mutating tools, integration with the mutating-dev profile, and live model discovery configuration through AGENT_MODEL_DISCOVERY_* environment variables.
 
 ```mermaid
 flowchart TD
@@ -330,6 +355,49 @@ Expose --> End
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+
+### Live Model Discovery Service
+- Purpose: Automatically refresh model catalogs from provider endpoints with fail-soft fallback mechanisms.
+- Configuration: Controlled by AGENT_MODEL_DISCOVERY_ENABLED (default: true), AGENT_MODEL_DISCOVERY_REFRESH_SECONDS (default: 1800), and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS (default: 5).
+- Fallback Ladder: Implements a four-tier fallback system: live fetch → in-memory cache → Postgres cache → curated series.
+- Validation: Ensures refresh cadence >= 1 second and timeout > 0 seconds.
+- Behavior: Runs as a background task that periodically queries provider `/models` endpoints and atomically swaps catalog entries.
+- Safety: Never blocks chat operations or startup; failures are logged and swallowed.
+
+**New Section** Comprehensive live model discovery implementation with configurable refresh cadence, timeout controls, and robust fail-soft fallback mechanisms.
+
+```mermaid
+flowchart TD
+StartDiscovery["Start Discovery Service"] --> CheckEnabled{"AGENT_MODEL_DISCOVERY_ENABLED?"}
+CheckEnabled --> |false| CuratedOnly["Use curated series only"]
+CheckEnabled --> |true| InitialFetch["Initial Provider Fetch"]
+InitialFetch --> TryLive["Try Live /models Endpoint"]
+TryLive --> LiveSuccess{"Live Fetch Success?"}
+LiveSuccess --> |yes| UpdateCache["Update In-Memory & Postgres Cache"]
+LiveSuccess --> |no| TryMemory["Try In-Memory Cache"]
+TryMemory --> MemoryHit{"Memory Cache Hit?"}
+MemoryHit --> |yes| UseMemory["Use Last Good Models"]
+MemoryHit --> |no| TryPostgres["Try Postgres Cache"]
+TryPostgres --> PostgresHit{"Postgres Cache Hit?"}
+PostgresHit --> |yes| UsePostgres["Use Persisted Models"]
+PostgresHit --> |no| UseCurated["Fall Back to Curated Series"]
+UpdateCache --> AtomicSwap["Atomic Catalog Swap"]
+UseMemory --> AtomicSwap
+UsePostgres --> AtomicSwap
+UseCurated --> AtomicSwap
+AtomicSwap --> ScheduleRefresh["Schedule Next Refresh"]
+ScheduleRefresh --> WaitInterval["Wait REFRESH_SECONDS"]
+WaitInterval --> InitialFetch
+CuratedOnly --> End(["Service Ready"])
+```
+
+**Diagram sources**
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+
+**Section sources**
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 
 ### Mutating Dev Profile Architecture
 - Purpose: Provides a committed, environment-scoped development posture for enabling mutating tools safely.
@@ -651,8 +719,9 @@ SkillsHubClient --> PlatformGatewaySettings
 - Secrets management: Handles sensitive data like workspace resource credentials separately from ConfigMaps.
 - **New**: Enhanced secret management with durable OTel header provisioning through cluster-side merging.
 - **New**: Mutating-dev profile integration that merges GATEWAY_MUTATING_TOOLS_ENABLED=true into the runtime configuration.
+- **New**: Live model discovery configuration through AGENT_MODEL_DISCOVERY_* environment variables.
 
-**Updated** Enhanced deployment configuration with workspace resource integration, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list settings, plus durable OpenTelemetry secret provisioning that maintains authentication headers across deployment operations, and the new mutating-dev profile that provides a committed development posture for enabling mutating tools safely.
+**Updated** Enhanced deployment configuration with workspace resource integration, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list settings, plus durable OpenTelemetry secret provisioning that maintains authentication headers across deployment operations, the new mutating-dev profile that provides a committed development posture for enabling mutating tools safely, and live model discovery configuration for automatic catalog updates.
 
 ```mermaid
 graph TB
@@ -678,6 +747,8 @@ ToolGW --> RiskGate["Risk-Tier Admission Gate"]
 AgentEnv["AGENT_* Variables"] --> Agent["Agent Platform"]
 Agent --> AutoAllow["Auto-Allow List"]
 Agent --> HITLTimeout["HITL Confirmation Timeout"]
+Agent --> ModelDisc["Model Discovery Service"]
+ModelDisc --> ProviderEndpoints["Provider /models Endpoints"]
 MutDev["Mutating Dev Profile"] --> ConfigMerge["ConfigMap Merge"]
 ConfigMerge --> ToolGWEnv
 ```
@@ -702,7 +773,7 @@ ConfigMerge --> ToolGWEnv
 ## Dependency Analysis
 Configuration components depend on environment variables and files, while the runtime settings handle DNS-based service discovery. The Docker image encapsulates runtime dependencies, and Kubernetes manifests inject configuration at deployment time. Workspace resource integration adds dependencies on tool-gateway and skills-hub services with appropriate authentication mechanisms.
 
-**Updated** Added dependencies for workspace resource integration including tool-gateway delegation flow and skills-hub Basic authentication, risk-tier admission gate enforcement, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus enhanced OpenTelemetry secret provisioning dependencies that ensure authentication headers persist across deployment operations, and the new mutating-dev profile dependencies that provide committed development posture for enabling mutating tools safely.
+**Updated** Added dependencies for workspace resource integration including tool-gateway delegation flow and skills-hub Basic authentication, risk-tier admission gate enforcement, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus enhanced OpenTelemetry secret provisioning dependencies that ensure authentication headers persist across deployment operations, the new mutating-dev profile dependencies that provide committed development posture for enabling mutating tools safely, and live model discovery dependencies that connect to provider endpoints with robust fallback mechanisms.
 
 ```mermaid
 graph TB
@@ -728,6 +799,8 @@ SkillsClient --> SKILLS
 TELEMETRY --> BACKEND["OpenObserve Backend"]
 Agent["kernel_middleware.py"] --> AutoAllow["Auto-Allow List"]
 Agent --> HITL["HITL Timeout"]
+Agent --> ModelDisc["Model Discovery"]
+ModelDisc --> Providers["Provider Endpoints"]
 ToolGW["tool-gateway config.py"] --> RiskGate["Risk-Tier Gate"]
 RiskGate --> Policy["Policy Enforcement"]
 MutDev["mutating-dev profile"] --> ConfigMerge["ConfigMap Merge"]
@@ -744,6 +817,7 @@ RBAC --> ToolGW
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
@@ -761,6 +835,7 @@ RBAC --> ToolGW
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
@@ -786,6 +861,10 @@ RBAC --> ToolGW
 - **New**: Secret provisioning operations are optimized to minimize cluster API calls.
 - **New**: Failed OTel exports fail open to avoid impacting service performance.
 - **New**: Mutating-dev profile integration is compile-time static, adding no runtime overhead.
+- **New**: Live model discovery runs as background tasks with atomic catalog swaps to avoid blocking operations.
+- **New**: Model discovery implements fail-soft ladder to minimize network calls and leverage caches.
+- **New**: Discovery refresh intervals are configurable to balance freshness with performance.
+- **New**: Provider endpoint timeouts prevent slow responses from affecting overall performance.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -816,8 +895,13 @@ Common issues and resolutions:
 - **New**: Mutating-dev profile not active: Verify dev-k8s overlay includes the mutating-dev profile; check kustomize build output for ConfigMap merge.
 - **New**: Pod-delete RBAC missing: Verify tool-gateway-pod-delete.yaml is applied; check namespace and service account configuration.
 - **New**: Mutating tools appear in discovery but fail: Check all three gates: GATEWAY_MUTATING_TOOLS_ENABLED, tools:mutate policy grants, and AGENT_HITL_CONFIRM_TIMEOUT > 0.
+- **New**: Model discovery not updating: Verify AGENT_MODEL_DISCOVERY_ENABLED is true; check provider endpoints are reachable; review discovery logs for errors.
+- **New**: Model discovery timeout errors: Adjust AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS for slow provider endpoints; check network connectivity.
+- **New**: Model discovery refresh too frequent: Increase AGENT_MODEL_DISCOVERY_REFRESH_SECONDS to reduce provider load; monitor provider rate limits.
+- **New**: Model discovery falling back to curated series: Check if provider endpoints are failing; verify credentials are valid; examine discovery failure logs.
+- **New**: Model discovery validation errors: Ensure AGENT_MODEL_DISCOVERY_REFRESH_SECONDS >= 1 and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS > 0.
 
-**Updated** Added comprehensive troubleshooting guidance for workspace resource integration including proxy configuration, authentication issues, and downstream service connectivity problems, risk-tier admission gate configuration issues, HITL confirmation timeout problems, enhanced agent auto-allow list misconfiguration detection, plus detailed guidance for OpenTelemetry secret provisioning and authentication issues, and new troubleshooting steps for the mutating-dev profile integration including profile activation, RBAC verification, and triple-gate enforcement issues.
+**Updated** Added comprehensive troubleshooting guidance for workspace resource integration including proxy configuration, authentication issues, and downstream service connectivity problems, risk-tier admission gate configuration issues, HITL confirmation timeout problems, enhanced agent auto-allow list misconfiguration detection, plus detailed guidance for OpenTelemetry secret provisioning and authentication issues, new troubleshooting steps for the mutating-dev profile integration including profile activation, RBAC verification, and triple-gate enforcement issues, and comprehensive guidance for live model discovery configuration, provider connectivity, and fallback behavior troubleshooting.
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -828,6 +912,7 @@ Common issues and resolutions:
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
@@ -838,16 +923,16 @@ Common issues and resolutions:
 ## Conclusion
 The Platform Gateway Service employs a robust, layered configuration system that integrates environment variables, configuration files, and runtime overrides with strict validation. By following the outlined best practices for Docker and Kubernetes deployments, teams can maintain secure, consistent configurations across environments while ensuring reliability and performance. The architectural shift to DNS-based service discovery eliminates service-link conflicts and provides more reliable inter-service communication patterns. The addition of workspace resource integration enables operators to gain self-service visibility into their workspace resources through read-only proxies for tools catalog and skills inventory, enhancing operational transparency and reducing dependency on agent-mediated resource discovery.
 
-**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive workspace resource integration capabilities that provide operators with direct visibility into their workspace resources, risk-tier admission gates that provide fine-grained control over mutating tool access, configurable HITL confirmation timeouts that balance operational efficiency with safety requirements, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, plus durable OpenTelemetry secret provisioning that ensures authentication headers persist across all deployment operations, maintaining consistent telemetry collection regardless of deployment sequence or environment regeneration, and the new mutating-dev kustomize profile that provides a committed, safe development posture for enabling mutating tools with appropriate RBAC controls and triple-gate security enforcement.
+**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive workspace resource integration capabilities that provide operators with direct visibility into their workspace resources, risk-tier admission gates that provide fine-grained control over mutating tool access, configurable HITL confirmation timeouts that balance operational efficiency with safety requirements, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, plus durable OpenTelemetry secret provisioning that ensures authentication headers persist across all deployment operations, maintaining consistent telemetry collection regardless of deployment sequence or environment regeneration, the new mutating-dev kustomize profile that provides a committed, safe development posture for enabling mutating tools with appropriate RBAC controls and triple-gate security enforcement, and the live model discovery service that automatically keeps model catalogs current through periodic provider endpoint polling with robust fail-soft fallback mechanisms.
 
 ## Appendices
 
 ### Environment-Specific Settings
-- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable workspace resource proxies with local tool-gateway and skills-hub instances, configure OTel with dev OpenObserve credentials, set GATEWAY_MUTATING_TOOLS_ENABLED=false for safety, configure AGENT_HITL_CONFIRM_TIMEOUT=600 for reasonable confirmation windows, enable enhanced agent auto-allow list with vetted read-only tools, **new**: Include the mutating-dev profile permanently for safe development access to mutating tools with bounded RBAC permissions.
-- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure workspace resource proxies with staging backend services, provision OTel secrets with staging OpenObserve credentials, carefully evaluate GATEWAY_MUTATING_TOOLS_ENABLED for testing scenarios, tune AGENT_HITL_CONFIRM_TIMEOUT for staging workflows, monitor auto-allow list effectiveness, **new**: Consider including mutating-dev profile selectively for staging testing scenarios with appropriate RBAC scoping.
-- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure workspace resource proxies with production backend services and proper authentication, ensure OTel secrets are provisioned with production OpenObserve credentials, keep GATEWAY_MUTATING_TOOLS_ENABLED=false unless absolutely necessary, set AGENT_HITL_CONFIRM_TIMEOUT appropriately for production SLAs, audit auto-allow list regularly for security compliance, **new**: Never include mutating-dev profile in production deployments; use separate controlled overlays if mutating tools are absolutely required.
+- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable workspace resource proxies with local tool-gateway and skills-hub instances, configure OTel with dev OpenObserve credentials, set GATEWAY_MUTATING_TOOLS_ENABLED=false for safety, configure AGENT_HITL_CONFIRM_TIMEOUT=600 for reasonable confirmation windows, enable enhanced agent auto-allow list with vetted read-only tools, **new**: Include the mutating-dev profile permanently for safe development access to mutating tools with bounded RBAC permissions, **new**: Enable live model discovery with shorter refresh intervals (e.g., 300 seconds) for rapid testing of new provider models.
+- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure workspace resource proxies with staging backend services, provision OTel secrets with staging OpenObserve credentials, carefully evaluate GATEWAY_MUTATING_TOOLS_ENABLED for testing scenarios, tune AGENT_HITL_CONFIRM_TIMEOUT for staging workflows, monitor auto-allow list effectiveness, **new**: Consider including mutating-dev profile selectively for staging testing scenarios with appropriate RBAC scoping, **new**: Configure model discovery with moderate refresh intervals (e.g., 900 seconds) to balance freshness with stability.
+- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure workspace resource proxies with production backend services and proper authentication, ensure OTel secrets are provisioned with production OpenObserve credentials, keep GATEWAY_MUTATING_TOOLS_ENABLED=false unless absolutely necessary, set AGENT_HITL_CONFIRM_TIMEOUT appropriately for production SLAs, audit auto-allow list regularly for security compliance, **new**: Never include mutating-dev profile in production deployments; use separate controlled overlays if mutating tools are absolutely required, **new**: Configure model discovery with conservative refresh intervals (e.g., 1800 seconds) and longer timeouts to minimize provider load and ensure stability.
 
-**Updated** Added guidance for workspace resource proxy configuration across environments, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration recommendations, HITL confirmation timeout tuning guidelines, enhanced agent auto-allow list configuration, plus comprehensive OTel secret provisioning requirements for each environment, and new guidance for the mutating-dev profile usage patterns across different deployment environments.
+**Updated** Added guidance for workspace resource proxy configuration across environments, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration recommendations, HITL confirmation timeout tuning guidelines, enhanced agent auto-allow list configuration, plus comprehensive OTel secret provisioning requirements for each environment, new guidance for the mutating-dev profile usage patterns across different deployment environments, and detailed recommendations for live model discovery configuration including refresh intervals, timeout settings, and monitoring strategies across different deployment environments.
 
 ### Security and Secrets Management
 - Store secrets in Kubernetes Secrets or external vaults; never hardcode.
@@ -875,11 +960,15 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - **New**: Treat the mutating-dev profile as a security boundary; never modify it to bypass triple-gate enforcement.
 - **New**: Monitor pod-delete RBAC usage and audit logs for unauthorized deletion attempts.
 - **New**: Implement change management processes for any modifications to the mutating-dev profile.
+- **New**: Secure provider API keys used for model discovery; ensure they follow least privilege principles.
+- **New**: Monitor model discovery endpoint access patterns and implement rate limiting where appropriate.
+- **New**: Validate model discovery configuration to prevent excessive provider endpoint polling.
+- **New**: Audit model discovery fallback behavior to ensure graceful degradation under provider failures.
 
-**Updated** Enhanced security guidance with workspace resource integration security considerations, including credential management, authentication monitoring, and access pattern auditing, risk-tier admission gate security controls, HITL confirmation timeout security implications, enhanced agent auto-allow list security enforcement, plus comprehensive OpenTelemetry secret management security practices, and new security considerations for the mutating-dev profile including profile integrity, RBAC scoping, and triple-gate enforcement monitoring.
+**Updated** Enhanced security guidance with workspace resource integration security considerations, including credential management, authentication monitoring, and access pattern auditing, risk-tier admission gate security controls, HITL confirmation timeout security implications, enhanced agent auto-allow list security enforcement, plus comprehensive OpenTelemetry secret management security practices, new security considerations for the mutating-dev profile including profile integrity, RBAC scoping, and triple-gate enforcement monitoring, and comprehensive security guidance for live model discovery including provider credential management, endpoint access monitoring, and fallback behavior auditing.
 
 ### Complete Environment Variables Reference
-**Updated** Comprehensive reference including workspace resource integration variables for tools catalog and skills inventory access, risk-tier admission gate configuration, HITL confirmation timeout settings, enhanced agent auto-allow list configuration, plus enhanced OpenTelemetry configuration variables, and new variables related to the mutating-dev profile integration.
+**Updated** Comprehensive reference including workspace resource integration variables for tools catalog and skills inventory access, risk-tier admission gate configuration, HITL confirmation timeout settings, enhanced agent auto-allow list configuration, plus enhanced OpenTelemetry configuration variables, new variables related to the mutating-dev profile integration, and comprehensive live model discovery configuration variables.
 
 #### Core Configuration
 - `AGENT_SERVICE_URL`: Agent service endpoint URL (DNS-based)
@@ -923,6 +1012,11 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - `AGENT_GATEWAY_TOOL_AUTO_ALLOW`: Comma-separated list of auto-allowed tools (default: built-in vetted read-only tools)
 - `AGENT_HITL_CONFIRM_TIMEOUT`: HITL confirmation timeout in seconds (default: 600, 0 to disable)
 
+#### Live Model Discovery Configuration
+- `AGENT_MODEL_DISCOVERY_ENABLED`: Enable/disable live model discovery (default: true)
+- `AGENT_MODEL_DISCOVERY_REFRESH_SECONDS`: Discovery refresh interval in seconds (must be >= 1, default: 1800)
+- `AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS`: Per-provider /models fetch timeout in seconds (must be > 0, default: 5)
+
 #### Enhanced OpenTelemetry Configuration
 - `OTEL_ENABLED`: Enable/disable OTel push pipeline (default: false)
 - `OTEL_EXPORTER_OTLP_ENDPOINT`: OTLP endpoint for traces/metrics/logs (e.g., http://openobserve:5080)
@@ -939,6 +1033,7 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
@@ -1179,6 +1274,64 @@ data:
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 
+### Live Model Discovery Configuration Guide
+**New Section** Comprehensive guide for configuring and managing the live model discovery feature that automatically refreshes model catalogs from provider endpoints.
+
+#### Prerequisites
+- Agent platform service deployed with provider credentials configured
+- Network connectivity to provider `/models` endpoints
+- Understanding of provider API rate limits and authentication requirements
+- PostgreSQL database configured for sessions (used for discovery cache)
+
+#### Configuration Options
+- `AGENT_MODEL_DISCOVERY_ENABLED=true`: Enable automatic model discovery (default)
+- `AGENT_MODEL_DISCOVERY_ENABLED=false`: Disable discovery, use curated series only
+- `AGENT_MODEL_DISCOVERY_REFRESH_SECONDS=1800`: Refresh interval in seconds (must be >= 1)
+- `AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS=5`: Provider endpoint timeout (must be > 0)
+
+#### Environment Recommendations
+- **Development**: AGENT_MODEL_DISCOVERY_REFRESH_SECONDS=300 for rapid model updates
+- **Staging**: AGENT_MODEL_DISCOVERY_REFRESH_SECONDS=900 for balanced freshness/stability
+- **Production**: AGENT_MODEL_DISCOVERY_REFRESH_SECONDS=1800 for conservative updates
+
+#### Fallback Ladder Behavior
+The discovery service implements a four-tier fallback system:
+1. **Live fetch**: Direct call to provider `/models` endpoint
+2. **In-memory cache**: Last successful model list (survives transient failures)
+3. **Postgres cache**: Persisted model list (survives pod restarts)
+4. **Curated series**: Hardcoded fallback model list
+
+#### Monitoring and Diagnostics
+- Monitor discovery refresh metrics: `model_discovery_refreshes_total{provider,result}`
+- Track model counts per provider: `model_discovery_models{provider}`
+- Check discovery logs for provider endpoint failures
+- Verify catalog entries are being updated correctly
+- Monitor fallback behavior during provider outages
+
+#### Example Configuration
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-runtime-config
+data:
+  AGENT_MODEL_DISCOVERY_ENABLED: "true"
+  AGENT_MODEL_DISCOVERY_REFRESH_SECONDS: "900"
+  AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS: "10"
+```
+
+#### Troubleshooting Common Issues
+- **Discovery not starting**: Verify AGENT_MODEL_DISCOVERY_ENABLED is true and provider credentials are configured
+- **Provider endpoint timeouts**: Increase AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS or check network connectivity
+- **Excessive provider load**: Increase AGENT_MODEL_DISCOVERY_REFRESH_SECONDS to reduce polling frequency
+- **Fallback to curated series**: Check provider endpoint availability and credentials
+- **Validation errors**: Ensure refresh seconds >= 1 and timeout seconds > 0
+
+**Section sources**
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [spec.md](file://docs/specs/SPEC-027-live-model-discovery/spec.md)
+
 ### Workspace Resource Troubleshooting Guide
 **New Section** Comprehensive troubleshooting guide for workspace resource integration configuration and connectivity issues.
 
@@ -1196,6 +1349,11 @@ data:
 - **Mutating-dev profile not active**: Verify dev-k8s overlay includes the mutating-dev profile; check kustomize build output
 - **Pod-delete RBAC missing**: Verify tool-gateway-pod-delete.yaml is applied; check namespace and service account configuration
 - **Triple-gate enforcement failures**: Ensure all three gates pass: GATEWAY_MUTATING_TOOLS_ENABLED, tools:mutate policy grants, and AGENT_HITL_CONFIRM_TIMEOUT > 0
+- **Model discovery not updating**: Verify AGENT_MODEL_DISCOVERY_ENABLED is true; check provider endpoints are reachable; review discovery logs for errors
+- **Model discovery timeout errors**: Adjust AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS for slow provider endpoints; check network connectivity
+- **Model discovery refresh too frequent**: Increase AGENT_MODEL_DISCOVERY_REFRESH_SECONDS to reduce provider load; monitor provider rate limits
+- **Model discovery falling back to curated series**: Check if provider endpoints are failing; verify credentials are valid; examine discovery failure logs
+- **Model discovery validation errors**: Ensure AGENT_MODEL_DISCOVERY_REFRESH_SECONDS >= 1 and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS > 0
 
 #### Monitoring and Diagnostics
 - Check platform-gateway logs for workspace resource proxy errors
@@ -1208,6 +1366,9 @@ data:
 - Track auto-allow list usage and warning logs
 - Analyze HITL confirmation timeout patterns
 - Monitor mutating-dev profile activation status and RBAC permissions
+- Monitor model discovery refresh cycles and fallback behavior
+- Track provider endpoint connectivity and response times
+- Verify discovery cache utilization and effectiveness
 
 **Section sources**
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
@@ -1216,6 +1377,7 @@ data:
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
