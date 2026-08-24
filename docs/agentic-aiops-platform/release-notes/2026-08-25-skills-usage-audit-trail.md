@@ -83,6 +83,13 @@ pre-milestone code & documentation review.
   on the audit-service rollout before restarting any emitter; a rollout
   timeout fails the script before emitters move, and re-running
   converges.
+- **Audit credential wiped by skills secret sync**: `sync-skills-secrets.sh`
+  rewrites the shared skills-hub `runtime-secrets.env` and runs *after*
+  `sync-audit-secrets.sh` in `deploy.sh` order, so a plain `make deploy`
+  wiped `SKILLS_AUDIT_CLIENT_SECRET` from the cluster Secret and 401'd
+  every skills-hub emission (caught by live verification of the release
+  deploy). The rewrite now preserves the audit line across the file
+  reset, matching the existing OTLP-header preservation.
 
 ## Validation
 

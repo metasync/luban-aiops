@@ -98,11 +98,18 @@ SKILLS_SECRET_FILE="$BASE_DIR/skills-hub/runtime-secrets.env"
 # sync-otel-secrets.sh mirrors it into this file, and dropping it here would
 # make the secret sync below wipe it from the cluster Secret.
 PRESERVED_OTEL_LINE=$(grep '^OTEL_EXPORTER_OTLP_HEADERS=' "$SKILLS_SECRET_FILE" 2>/dev/null || true)
+# Preserve the audit ingest credential (SPEC-029): sync-audit-secrets.sh runs
+# before this script in deploy.sh, and dropping the line here would wipe the
+# cluster Secret's key and 401 every skills-hub audit emission.
+PRESERVED_AUDIT_LINE=$(grep '^SKILLS_AUDIT_CLIENT_SECRET=' "$SKILLS_SECRET_FILE" 2>/dev/null || true)
 cat > "$SKILLS_SECRET_FILE" <<EOF
 SKILLS_QUERY_CLIENTS=tool-gateway=${SKILLS_QUERY_SECRET},platform-gateway=${SKILLS_QUERY_SECRET}
 EOF
 if [ -n "$PRESERVED_OTEL_LINE" ]; then
   printf '%s\n' "$PRESERVED_OTEL_LINE" >> "$SKILLS_SECRET_FILE"
+fi
+if [ -n "$PRESERVED_AUDIT_LINE" ]; then
+  printf '%s\n' "$PRESERVED_AUDIT_LINE" >> "$SKILLS_SECRET_FILE"
 fi
 # Git-source PAT: the secret file was just truncated, so a plain append is
 # idempotent. The token is never echoed to the terminal.
