@@ -5,6 +5,10 @@
 - [spec.md](file://docs/specs/SPEC-026-multi-model-runtime-catalog/spec.md)
 - [plan.md](file://docs/specs/SPEC-026-multi-model-runtime-catalog/plan.md)
 - [tasks.md](file://docs/specs/SPEC-026-multi-model-runtime-catalog/tasks.md)
+- [spec.md](file://docs/specs/SPEC-027-live-model-discovery/spec.md)
+- [plan.md](file://docs/specs/SPEC-027-live-model-discovery/plan.md)
+- [tasks.md](file://docs/specs/SPEC-027-live-model-discovery/tasks.md)
+- [delivery-roadmap.md](file://docs/agentic-aiops-platform/delivery-roadmap.md)
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
 - [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
 - [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
@@ -20,11 +24,11 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive coverage of SPEC-027 live model discovery system integration
-- Updated architecture diagrams to include discovery service and fallback ladder
-- Enhanced component analysis with discovery filtering and caching mechanisms
-- Added new sections for discovery lifecycle, metrics, and operational considerations
-- Updated troubleshooting guide with discovery-specific issues
+- Updated to reflect complete delivery of SPEC-027 Live Model Discovery (2026-08-24)
+- Enhanced architecture diagrams to include discovery service and fallback ladder implementation
+- Added comprehensive coverage of live model discovery capabilities and configuration
+- Updated troubleshooting guide with discovery-specific operational guidance
+- Integrated delivery roadmap confirmation showing feature completion status
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -50,18 +54,19 @@ Key outcomes:
 - Legacy provider-name ids resolve to the provider's default entry.
 - Duplicate model names across providers fail startup to prevent misconfiguration.
 - GitOps runtime profiles consolidate to a single generic profile layout.
-- **New**: Live model discovery keeps the catalog current with provider API changes without redeployment.
+- **Delivered**: Live model discovery keeps the catalog current with provider API changes without redeployment, with robust fallback mechanisms ensuring service continuity.
 
 **Section sources**
 - [spec.md:13-135](file://docs/specs/SPEC-026-multi-model-runtime-catalog/spec.md#L13-L135)
 - [plan.md:3-31](file://docs/specs/SPEC-026-multi-model-runtime-catalog/plan.md#L3-L31)
+- [delivery-roadmap.md:303-304](file://docs/agentic-aiops-platform/delivery-roadmap.md#L303-L304)
 
 ## Project Structure
 The multi-model runtime catalog spans three layers with enhanced discovery capabilities:
 - Provider adapters define curated model series and build concrete models with discovery filtering.
 - Runtime settings parse environment configuration and validate constraints including discovery settings.
 - Model catalog builds the startup-time catalog and provides lookup with legacy aliases.
-- **New**: Discovery service implements periodic refresh with fallback ladder and atomic catalog swaps.
+- **Delivered**: Discovery service implements periodic refresh with fallback ladder and atomic catalog swaps.
 - Runtime kernel resolves model ids per session and enforces fail-closed behavior on unknown ids.
 
 ```mermaid
@@ -124,7 +129,7 @@ kernel --> schema
 - Provider adapters expose a curated `model_series` tuple and a `default_model`. They validate credentials and build concrete AgentScope models using resolved settings. **Enhanced** with discovery filtering capabilities to handle provider API responses.
 - Runtime settings parse environment variables, enforce validation bounds, and provide helper methods to resolve the effective model name and base URL. **Enhanced** with discovery configuration options.
 - Model catalog constructs a startup-time list of selectable models, enforces uniqueness, marks the deploy-time default, and exposes discovery-safe public views. It also builds legacy aliases mapping bare provider names to their default model entry. **Enhanced** with atomic swap support for live discovery updates.
-- **New**: Discovery service implements the complete fallback ladder system with periodic refresh, Postgres persistence, and atomic catalog updates.
+- **Delivered**: Discovery service implements the complete fallback ladder system with periodic refresh, Postgres persistence, and atomic catalog updates.
 - Runtime kernel resolves model ids per turn/session, supports switching between models within a session, and fails closed when encountering unknown ids.
 
 Key behaviors:
@@ -132,8 +137,8 @@ Key behaviors:
 - Series override: `<PROVIDER>_MODELS` can restrict or replace the curated series while ensuring the default model remains selectable.
 - Legacy compatibility: bare provider names resolve to the provider's default entry.
 - Fail-closed: unknown model ids produce explicit errors rather than silent fallbacks.
-- **New**: Live discovery: periodic API calls keep catalogs current with provider changes.
-- **New**: Fallback ladder: discovery failures gracefully degrade to cached or curated lists.
+- **Delivered**: Live discovery: periodic API calls keep catalogs current with provider changes.
+- **Delivered**: Fallback ladder: discovery failures gracefully degrade to cached or curated lists.
 
 **Section sources**
 - [base.py:14-54](file://products/agent-platform/src/agent_service/providers/base.py#L14-L54)
@@ -211,7 +216,7 @@ Each provider adapter defines:
 - A provider name and default model.
 - A curated model series tuple.
 - A `build_model` method that validates settings and constructs the concrete model with parameters.
-- **New**: Discovery filtering configuration including family prefixes and exclude markers for handling provider API responses.
+- **Delivered**: Discovery filtering configuration including family prefixes and exclude markers for handling provider API responses.
 
 ```mermaid
 classDiagram
@@ -363,6 +368,11 @@ The shared contract schema documents that the catalog entry `id` is the model na
 
 ## Live Model Discovery System (SPEC-027)
 
+### Delivery Status
+**Status**: ✅ **DELIVERED** (2026-08-24)
+
+The live model discovery system has been successfully delivered and integrated into the multi-model runtime catalog. This enhancement extends SPEC-026 by adding automatic model discovery capabilities that keep the catalog current with provider API changes without requiring redeployment.
+
 ### Discovery Service Architecture
 The discovery service implements a robust fallback ladder system that ensures chat functionality never degrades due to discovery failures. It runs as a background task managed by FastAPI's lifespan system.
 
@@ -431,9 +441,9 @@ The discovery system exposes Prometheus metrics for monitoring:
 ## Dependency Analysis
 - Provider adapters depend on runtime settings to resolve credentials and base URLs.
 - Model catalog depends on runtime settings and provider adapters to build entries.
-- **New**: Discovery service depends on provider adapters for filtering, runtime settings for configuration, and model catalog for atomic updates.
+- **Delivered**: Discovery service depends on provider adapters for filtering, runtime settings for configuration, and model catalog for atomic updates.
 - Runtime kernel depends on the catalog singleton for resolution and on provider adapters for model construction.
-- **New**: FastAPI lifespan manages discovery service lifecycle.
+- **Delivered**: FastAPI lifespan manages discovery service lifecycle.
 - Shared contract schema constrains the public catalog envelope.
 
 ```mermaid
@@ -473,10 +483,10 @@ discovery --> metrics["core/metrics.py"]
 - Per-request model lookup is O(1) due to dictionary-based indexing.
 - Session-scoped agent caching avoids repeated model and toolkit construction; model switches trigger controlled rebuilds only when necessary.
 - Evidence persistence and toolkit discovery are guarded to avoid blocking or poisoning caches.
-- **New**: Discovery runs asynchronously in background tasks, never blocking request processing.
-- **New**: Discovery API calls use bounded timeouts to prevent hanging operations.
-- **New**: Postgres cache reads/writes are wrapped in try/catch blocks to prevent database failures from affecting core functionality.
-- **New**: Atomic catalog swaps ensure consistent state during discovery updates.
+- **Delivered**: Discovery runs asynchronously in background tasks, never blocking request processing.
+- **Delivered**: Discovery API calls use bounded timeouts to prevent hanging operations.
+- **Delivered**: Postgres cache reads/writes are wrapped in try/catch blocks to prevent database failures from affecting core functionality.
+- **Delivered**: Atomic catalog swaps ensure consistent state during discovery updates.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -484,10 +494,11 @@ Common issues and resolutions:
 - Duplicate model id: Startup fails with a clear error if two providers advertise the same model name; adjust curated series or overrides to remove collisions.
 - Missing credentials: Providers without resolvable API keys do not contribute entries; ensure the appropriate provider API key is set.
 - Legacy id mismatch: If a pinned session uses a bare provider name, it should resolve to the provider's default entry; if not, check that the provider is enabled and has credentials.
-- **New**: Discovery not updating: Check `AGENT_MODEL_DISCOVERY_ENABLED` setting and verify provider API endpoints are accessible. Monitor `agent_model_discovery_refreshes_total` metric for failure patterns.
-- **New**: Stale model listings: Verify discovery is running by checking logs for refresh cycles. Ensure `AGENT_MODEL_DISCOVERY_REFRESH_SECONDS` is set appropriately.
-- **New**: Provider API failures: Check network connectivity and authentication. Review logs for specific error messages from discovery attempts.
-- **New**: High memory usage: Discovery maintains in-memory cache of last-good results. Monitor memory usage and consider adjusting refresh frequency.
+- **Delivered**: Discovery not updating: Check `AGENT_MODEL_DISCOVERY_ENABLED` setting and verify provider API endpoints are accessible. Monitor `agent_model_discovery_refreshes_total` metric for failure patterns.
+- **Delivered**: Stale model listings: Verify discovery is running by checking logs for refresh cycles. Ensure `AGENT_MODEL_DISCOVERY_REFRESH_SECONDS` is set appropriately.
+- **Delivered**: Provider API failures: Check network connectivity and authentication. Review logs for specific error messages from discovery attempts.
+- **Delivered**: High memory usage: Discovery maintains in-memory cache of last-good results. Monitor memory usage and consider adjusting refresh frequency.
+- **Delivered**: Postgres connection issues: Discovery falls back gracefully when Postgres is unavailable. Check database connectivity and permissions for the `model_discovery_cache` table.
 
 **Section sources**
 - [runtime_kernel.py:31-37](file://products/agent-platform/src/agent_service/runtime_kernel.py#L31-L37)
@@ -499,6 +510,8 @@ Common issues and resolutions:
 ## Conclusion
 SPEC-026 delivers a robust, operator-friendly multi-model runtime catalog enhanced with SPEC-027's live model discovery system. Operators can now select among a provider's curated model lineup per session without redeployment, while preserving backward compatibility for legacy identifiers. The addition of live discovery ensures catalogs stay current with provider API changes, implementing a sophisticated fallback ladder that guarantees chat functionality never degrades due to discovery failures. The design keeps credentials local to the catalog layer, enforces fail-closed behavior on unknown selections, consolidates runtime profiles for simpler GitOps management, and provides comprehensive observability through Prometheus metrics.
 
+**Delivery Confirmation**: Both SPEC-026 (Multi-Model Runtime Catalog) and SPEC-027 (Live Model Discovery) were delivered together on 2026-08-24, providing a complete solution for dynamic model management with robust fallback mechanisms.
+
 ## Appendices
 
 ### Acceptance Criteria Mapping
@@ -507,12 +520,13 @@ SPEC-026 delivers a robust, operator-friendly multi-model runtime catalog enhanc
 - R-3 (legacy id compatibility): alias map resolves bare provider names to default entries; unresolvable legacy ids fall back appropriately.
 - R-4 (series override): `<PROVIDER>_MODELS` parsing and merge with default model.
 - R-5 (generic profile + gitops consolidation): profile decoupled from provider; plan outlines consolidation steps.
-- **New**: R-6 (live discovery): periodic API calls with fallback ladder implementation.
-- **New**: R-7 (filtering): per-provider discovery filters handle provider-specific model naming and modalities.
-- **New**: R-8 (observability): Prometheus metrics track discovery performance and outcomes.
+- **Delivered**: R-6 (live discovery): periodic API calls with fallback ladder implementation.
+- **Delivered**: R-7 (filtering): per-provider discovery filters handle provider-specific model naming and modalities.
+- **Delivered**: R-8 (observability): Prometheus metrics track discovery performance and outcomes.
 
 **Section sources**
 - [spec.md:36-135](file://docs/specs/SPEC-026-multi-model-runtime-catalog/spec.md#L36-L135)
 - [plan.md:11-31](file://docs/specs/SPEC-026-multi-model-runtime-catalog/plan.md#L11-L31)
 - [model_discovery.py:1-294](file://products/agent-platform/src/agent_service/services/model_discovery.py#L1-294)
 - [metrics.py:188-210](file://products/agent-platform/src/agent_service/core/metrics.py#L188-L210)
+- [delivery-roadmap.md:303-304](file://docs/agentic-aiops-platform/delivery-roadmap.md#L303-L304)
