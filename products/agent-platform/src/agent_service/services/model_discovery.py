@@ -84,10 +84,16 @@ class PostgresDiscoveryCache:
         conn = psycopg.connect(
             self._db_url, autocommit=True, connect_timeout=5
         )
-        if not self._bootstrapped:
-            with conn.cursor() as cursor:
-                cursor.execute(_BOOTSTRAP_SQL)
-            self._bootstrapped = True
+        try:
+            if not self._bootstrapped:
+                with conn.cursor() as cursor:
+                    cursor.execute(_BOOTSTRAP_SQL)
+                self._bootstrapped = True
+        except Exception:
+            # A bootstrap failure must not leak the open connection —
+            # callers only see the exception out of _connect().
+            conn.close()
+            raise
         return conn
 
     def read(self, provider: str) -> tuple[str, ...] | None:

@@ -346,6 +346,23 @@ def test_postgres_cache_read_miss_and_failure_swallowed(monkeypatch):
     cache.write("deepseek", ("deepseek-v4-flash",))
 
 
+def test_postgres_cache_bootstrap_failure_closes_connection(monkeypatch):
+    """A failing bootstrap DDL must not leak the opened connection —
+    read/write swallow the error and retry on every refresh cycle.
+    """
+    conn = FakeConn()
+
+    def broken_execute(sql, params=None):
+        raise RuntimeError("permission denied")
+
+    conn.cursor_obj.execute = broken_execute
+    _stub_psycopg(monkeypatch, conn)
+    cache = PostgresDiscoveryCache("postgresql://fake")
+
+    assert cache.read("deepseek") is None
+    assert conn.closed
+
+
 # --- Live fetch parsing (mocked httpx) ---
 
 

@@ -282,8 +282,10 @@ async def chat_confirm(
                 request_id=request_id,
                 bearer_token=_bearer_token(authorization),
                 # SPEC-024 R-3: the resumed stream stays on the model that
-                # parked it, so a rebuild restores against the same entry.
-                model_id=session.model,
+                # parked it; a stale pin (evicted by discovery refresh or
+                # key revocation) degrades to the default like other turns
+                # instead of raising UnknownModelError mid-resume.
+                model_id=_resolve_model(None, session.model),
             ):
                 event = _normalize_stream_event(
                     chunk, session.session_id, request_id

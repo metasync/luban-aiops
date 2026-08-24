@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from types import SimpleNamespace
 
 import pytest
 from agentscope.event import (
@@ -14,9 +15,11 @@ from agentscope.event import (
 from agentscope.message import ToolCallBlock
 from fastapi.testclient import TestClient
 
+from agent_service.api.v2 import routes as v2_routes
 from agent_service.app import create_app
 from agent_service.runtime_kernel import AgentKernel
 from agent_service.runtime_settings import RuntimeSettings
+from agent_service.services import session_service
 from agent_service.services.hitl_confirmations import (
     CONFIRMATION_REGISTRY,
     ConfirmationExpired,
@@ -616,6 +619,51 @@ def test_duplicate_confirm_fails_closed_with_404(monkeypatch) -> None:
         "/api/v2/chat/confirm", json=payload, headers={"X-User-ID": "alice"}
     )
     assert second.status_code == 404
+
+
+def test_confirm_with_evicted_model_pin_degrades_to_default(monkeypatch) -> None:
+    """A stale session pin (evicted by a discovery refresh or a key
+    revocation) must degrade to the catalog default on resume instead
+    of raising UnknownModelError mid-stream — the registry entry is
+    claimed before headers go out, so a raise would wedge the session.
+    """
+    client = _client()
+    session = client.post("/api/v2/sessions", headers={"X-User-ID": "alice"})
+    session_id = session.json()["session_id"]
+    session_service.pin_session_model(session_id, "qwen-evicted")
+    pending = _park_registered(session_id)
+
+    class FakeCatalog:
+        """Only the default survives; the pinned id was evicted."""
+
+        def get(self, model_id):
+            if model_id == "deepseek-v4-flash":
+                return SimpleNamespace(id=model_id)
+            return None
+
+        def default_entry(self):
+            return SimpleNamespace(id="deepseek-v4-flash")
+
+    monkeypatch.setattr(v2_routes, "MODEL_CATALOG", FakeCatalog())
+    kernel = get_runtime_kernel()
+    captured: list = []
+
+    async def fake_resume(**kwargs):
+        captured.append(kwargs.get("model_id"))
+        yield {"event": "message_end", "message": "complete"}
+
+    monkeypatch.setattr(kernel, "resume_confirmation", fake_resume)
+    response = client.post(
+        "/api/v2/chat/confirm",
+        json={
+            "session_id": session_id,
+            "confirm_id": pending.confirm_id,
+            "decision": "approve",
+        },
+        headers={"X-User-ID": "alice"},
+    )
+    assert response.status_code == 200
+    assert captured == ["deepseek-v4-flash"]
 
 
 def test_expired_park_interrupts_before_new_turn(monkeypatch) -> None:
