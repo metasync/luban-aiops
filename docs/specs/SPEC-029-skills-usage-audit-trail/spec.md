@@ -5,7 +5,7 @@
 - status: `delivered`
 - owner: chi
 - created: 2026-08-25
-- release slice: post-0.10.0 train
+- release slice: 0.11.0
 - related ADRs: `docs/adr/0006-contract-purpose-invariant-enforcement.md`
 - extends: `docs/specs/SPEC-013-durable-audit-trail/spec.md` and
   `docs/specs/SPEC-014-skills-and-grounded-guidance/spec.md`
@@ -196,6 +196,7 @@ All resolved at spec review (2026-08-25):
 - 2026-08-25: delivered — contract + audit-service vocabulary, skills-hub
   emitter (fourth member of the audit-emitter parity family), search/get/
   sync emission, tool-gateway `x-request-id` forwarding, gitops secret
-  provisioning, and docs; metric named `audit_emits_total{result}`
+  provisioning, and docs; shipped in 0.11.0; metric named
+  `audit_emits_total{result}`
   (canonical emitter counter) instead of the drafted
   `skills_audit_emit_total{status}` to preserve byte-parity.
