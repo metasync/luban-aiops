@@ -10,9 +10,10 @@
 - [verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 - [dev-k8s README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 - [runtime profiles README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
-- [openai kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml)
-- [dashscope kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/kustomization.yaml)
-- [deepseek kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/kustomization.yaml)
+- [default configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml)
+- [default kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/kustomization.yaml)
+- [default runtime-secrets.example.env](file://shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env)
+- [mutating-dev kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
 - [agent-platform deployment](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [identity-broker deployment](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
 - [tool-gateway deployment](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
@@ -28,10 +29,11 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced deployment convergence behavior section with automatic ConfigMap change detection
-- Updated rolling restart mechanism for all application deployments when runtime configuration changes
-- Added detailed explanation of platform-runtime-config and platform-policy ConfigMap handling
-- Expanded troubleshooting guide with ConfigMap-related issues
+- Updated runtime profiles section to reflect simplified structure from per-provider directories to single generic default profile
+- Revised provider configuration approach from directory-based selection to ConfigMap-based multi-provider setup
+- Updated script references and workflows to match current implementation
+- Enhanced multi-model catalog documentation for SPEC-026 support
+- Clarified mutating-dev profile separation from LLM provider profiles
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -46,23 +48,23 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document explains the GitOps workflow for the Luban AIOps Platform, focusing on a Git-based deployment pipeline using Kustomize overlays and runtime profiles. It covers how to manage different deployment environments through Git branches and overlays, configure AI providers at runtime (OpenAI, DashScope, DeepSeek), manage secrets with GitOps practices, automate synchronization, and verify deployments. The system now includes enhanced deployment convergence behavior that automatically detects runtime configuration changes and triggers rolling restarts to ensure proper configuration propagation across all services.
+This document explains the GitOps workflow for the Luban AIOps Platform, focusing on a Git-based deployment pipeline using Kustomize overlays and runtime profiles. It covers how to manage different deployment environments through Git branches and overlays, configure AI providers at runtime using a unified profile system, manage secrets with GitOps practices, automate synchronization, and verify deployments. The system uses a simplified runtime profile structure where a single generic profile manages multiple AI providers (OpenAI, DashScope, DeepSeek) through ConfigMap configuration rather than separate provider-specific directories.
 
 ## Project Structure
 The GitOps assets are organized under shared/platform-ops/gitops:
 - dev-k8s: Base Kubernetes manifests and environment-specific overlays for local or development clusters.
-- runtime-profiles: Provider-specific configurations for OpenAI, DashScope, and DeepSeek.
+- runtime-profiles: Unified runtime profile configuration with a single default profile supporting multiple AI providers, plus a mutating-dev profile for development tooling.
 - Scripts: Utilities to select profiles, apply overlays, sync secrets, and verify profiles.
 
 ```mermaid
 graph TB
 subgraph "GitOps Assets"
 A["dev-k8s<br/>base + overlay"] --> B["Kustomize build"]
-C["runtime-profiles<br/>openai/dashscope/deepseek"] --> B
+C["runtime-profiles<br/>default + mutating-dev"] --> B
 D["Scripts<br/>deploy-overlay.sh<br/>select-runtime-profile.sh<br/>sync-runtime-secret.sh<br/>verify-runtime-profile.sh"] --> B
 end
 B --> E["Cluster State<br/>Namespace + Services + Deployments"]
-F["ConfigMaps<br/>platform-runtime-config<br/>platform-policy"] --> G["Rolling Restarts<br/>All Deployments"]
+F["ConfigMaps<br/>platform-runtime-config<br/>platform-policy<br/>agent-platform-runtime-profile"] --> G["Rolling Restarts<br/>All Deployments"]
 G --> E
 ```
 
@@ -79,7 +81,7 @@ G --> E
 
 ## Core Components
 - Kustomize base and overlays: The base defines common resources (namespaces, services, deployments). Overlays enable per-environment customizations.
-- Runtime profiles: Provider-specific ConfigMaps and example secret files that inject runtime configuration into applications.
+- Runtime profiles: A unified profile system with a single default profile that manages multiple AI providers through ConfigMap configuration, plus a separate mutating-dev profile for development tooling.
 - Automation scripts:
   - deploy-overlay.sh: Applies Kustomize overlays to the cluster with enhanced convergence behavior.
   - select-runtime-profile.sh: Selects and applies a runtime profile.
@@ -88,10 +90,10 @@ G --> E
 
 Key responsibilities:
 - Environment isolation via Git branches and overlays.
-- Provider selection via runtime profiles.
+- Multi-provider configuration via unified runtime profiles with ConfigMap-based provider selection.
 - Secret injection without committing sensitive values.
 - Automated sync and verification to ensure desired state.
-- **Enhanced**: Automatic detection of runtime configuration changes and coordinated rolling restarts across all services.
+- Automatic detection of runtime configuration changes and coordinated rolling restarts across all services.
 
 **Section sources**
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
@@ -101,7 +103,7 @@ Key responsibilities:
 - [verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 
 ## Architecture Overview
-The GitOps flow uses Git as the source of truth. Changes pushed to specific branches trigger builds that render Kustomize templates and apply them to target clusters. Runtime profiles allow switching AI providers without changing application code. The enhanced deployment convergence ensures that when runtime configuration changes are detected, all dependent services are automatically restarted to pick up new settings.
+The GitOps flow uses Git as the source of truth. Changes pushed to specific branches trigger builds that render Kustomize templates and apply them to target clusters. The unified runtime profile system allows configuring multiple AI providers within a single deployment through ConfigMap settings, eliminating the need for separate provider-specific directories. Enhanced deployment convergence ensures that when runtime configuration changes are detected, all dependent services are automatically restarted to pick up new settings.
 
 ```mermaid
 sequenceDiagram
@@ -113,7 +115,7 @@ participant Script as "deploy-overlay.sh"
 participant Cluster as "Kubernetes Cluster"
 Dev->>Git : Push changes to branch (env/profile)
 Git-->>CI : Webhook / Poll
-CI->>Kust : Build overlays + runtime profile
+CI->>Kust : Build overlays + unified profile
 Kust-->>CI : Rendered manifests
 CI->>Script : Apply with convergence detection
 Script->>Cluster : Apply manifests
@@ -177,16 +179,19 @@ Verify --> End(["Done"])
 - [infra redis deployment](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
 - [namespace manifest](file://shared/platform-ops/gitops/dev-k8s/base/shared/namespace.yaml)
 
-### Runtime Profiles for AI Providers
-Runtime profiles encapsulate provider-specific configuration and secrets:
-- openai: Configuration and example secrets for OpenAI integration.
-- dashscope: Configuration and example secrets for DashScope integration.
-- deepseek: Configuration and example secrets for DeepSeek integration.
+### Unified Runtime Profiles for Multiple AI Providers
+
+**Updated** The runtime profile system has been simplified from per-provider directories to a unified approach where a single default profile manages multiple AI providers through ConfigMap configuration.
+
+#### Profile Structure
+The current runtime profile structure consists of:
+- **default**: A generic profile that supports multiple AI providers through ConfigMap settings
+- **mutating-dev**: A separate profile for development tooling (not an LLM provider profile)
 
 Each profile contains:
-- A Kustomization file to patch ConfigMaps and environment variables.
-- A ConfigMap defining runtime settings.
-- An example secrets file template for secure secret management.
+- A Kustomization file to include ConfigMaps and other resources
+- A ConfigMap defining runtime settings including provider configuration
+- Example secret files for secure secret management
 
 ```mermaid
 classDiagram
@@ -194,45 +199,51 @@ class Profile {
 +name string
 +configmap ConfigMap
 +secrets_example env_file
++supports_multiple_providers boolean
 }
-class OpenAI {
-+provider string
-+api_key_ref string
+class DefaultProfile {
++provider_selection ConfigMap_based
++multi_model_catalog true
++supported_providers dashscope, deepseek, openai
 }
-class DashScope {
-+provider string
-+api_key_ref string
+class MutatingDevProfile {
++purpose development_tooling
++llm_provider false
++tools_enabled true
 }
-class DeepSeek {
-+provider string
-+api_key_ref string
-}
-Profile <|-- OpenAI
-Profile <|-- DashScope
-Profile <|-- DeepSeek
+Profile <|-- DefaultProfile
+Profile <|-- MutatingDevProfile
 ```
 
 **Diagram sources**
-- [openai kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml)
-- [dashscope kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/kustomization.yaml)
-- [deepseek kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/kustomization.yaml)
+- [default configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml)
+- [default kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/kustomization.yaml)
+- [mutating-dev kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
+
+#### Multi-Provider Configuration
+The unified profile system enables configuring multiple AI providers within a single deployment:
+
+- **ConfigMap-based Provider Selection**: Provider selection is controlled through `AGENTSCOPE_PROVIDER` in the `agent-platform-runtime-profile` ConfigMap
+- **Multi-Model Catalog**: Each supported provider with API keys joins the model catalog with curated model series
+- **Credential-Gated Access**: Providers without resolvable API keys are dropped (fail-closed)
+- **Flexible Model Selection**: Per-provider model restrictions via `<PROVIDER>_MODELS` environment variables
 
 **Section sources**
 - [runtime profiles README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
-- [openai kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml)
-- [dashscope kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/kustomization.yaml)
-- [deepseek kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/kustomization.yaml)
+- [default configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml)
+- [default runtime-secrets.example.env](file://shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env)
 
 ### Enhanced Deployment Convergence Behavior
 
-**Updated** The deploy-overlay.sh script now includes intelligent deployment convergence that automatically detects when runtime configuration changes occur and coordinates rolling restarts across all application deployments.
+**Updated** The deploy-overlay.sh script includes intelligent deployment convergence that automatically detects when runtime configuration changes occur and coordinates rolling restarts across all application deployments.
 
 #### ConfigMap Change Detection
-The script monitors Kustomize apply output for changes to two critical ConfigMaps:
+The script monitors Kustomize apply output for changes to three critical ConfigMaps:
 - `platform-runtime-config`: Contains runtime configuration parameters consumed by services via envFrom
 - `platform-policy`: Contains authorization policies mounted as volumes to gateway services
+- `agent-platform-runtime-profile`: Contains AI provider configuration (new addition)
 
-When either ConfigMap is updated, the script triggers coordinated rolling restarts of all eight application deployments to ensure consistent configuration propagation:
+When any of these ConfigMaps are updated, the script triggers coordinated rolling restarts of all eight application deployments to ensure consistent configuration propagation:
 
 ```mermaid
 sequenceDiagram
@@ -242,7 +253,7 @@ participant Deployments as "Application Deployments"
 Script->>Kubectl : Apply Kustomize manifests
 Kubectl-->>Script : Return apply status
 Script->>Script : Parse output for ConfigMap changes
-alt platform-runtime-config or platform-policy changed
+alt platform-runtime-config, platform-policy, or agent-platform-runtime-profile changed
 Script->>Deployments : Rollout restart web-ui
 Script->>Deployments : Rollout restart platform-gateway
 Script->>Deployments : Rollout restart tool-gateway
@@ -275,6 +286,9 @@ Each deployment consumes runtime configuration differently:
   - platform-gateway: Mounts policy file at /etc/luban/policy
   - tool-gateway: Mounts policy file at /etc/luban/policy
 
+- **Services consuming agent-platform-runtime-profile**:
+  - agent-service: Reads AI provider configuration from the profile ConfigMap
+
 - **Services requiring restart for configuration updates**:
   - web-ui: Frontend portal that may need restart for configuration changes
   - All other services: Require restart to pick up new ConfigMap values
@@ -296,10 +310,12 @@ Recommended practice:
 - Store only example templates in Git (e.g., runtime-secrets.example.env).
 - Maintain real secrets outside Git and sync them via CI/CD or a dedicated operator.
 - Use namespace-scoped secrets aligned with platform components.
+- Configure multiple provider credentials in a single secrets file for multi-provider deployments.
 
 **Section sources**
 - [sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [runtime profiles README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
+- [default runtime-secrets.example.env](file://shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env)
 
 ### Automated Sync and Verification Workflows
 - deploy-overlay.sh: Builds and applies Kustomize overlays for the selected environment with enhanced convergence detection.
@@ -314,7 +330,7 @@ participant Script as "deploy-overlay.sh"
 participant Kust as "Kustomize"
 participant Cluster as "Kubernetes Cluster"
 Dev->>Script : Run with env and profile flags
-Script->>Kust : Build overlays + profile
+Script->>Kust : Build overlays + unified profile
 Kust-->>Script : Rendered manifests
 Script->>Cluster : Apply manifests
 Cluster-->>Script : Apply status
@@ -342,7 +358,7 @@ The GitOps layer depends on:
 - Kubernetes API for applying manifests.
 - CI/CD system for automation and validation.
 - External secret managers for secure secret handling.
-- **Enhanced**: Coordinated rollout management for configuration convergence.
+- Coordinated rollout management for configuration convergence.
 
 ```mermaid
 graph TB
@@ -369,28 +385,31 @@ Rollout --> Apps
 - Cache Kustomize builds in CI to speed up pipelines.
 - Limit secret sync operations to necessary namespaces and resources.
 - Use readiness/liveness probes in deployments to accelerate health checks.
-- **Enhanced**: Rolling restarts are coordinated to minimize downtime during configuration updates.
-- **Enhanced**: ConfigMap change detection prevents unnecessary restarts when no runtime configuration has changed.
+- Rolling restarts are coordinated to minimize downtime during configuration updates.
+- ConfigMap change detection prevents unnecessary restarts when no runtime configuration has changed.
+- Multi-provider configuration reduces deployment complexity compared to separate provider-specific deployments.
 
 [No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
 Common issues and resolutions:
-- Profile mismatch: Ensure the selected runtime profile matches the intended provider. Use verify-runtime-profile.sh to validate.
+- Profile mismatch: Ensure the selected runtime profile matches the intended provider configuration. Use verify-runtime-profile.sh to validate.
 - Missing secrets: Confirm secrets are synced to the correct namespace before applying overlays.
 - Overlay conflicts: Review Kustomize patches for overlapping changes; resolve naming or selector mismatches.
 - Health check failures: Inspect pod logs and events after apply; confirm external dependencies (e.g., Redis) are reachable.
-- **New**: Configuration not taking effect: If runtime configuration changes don't appear to take effect, check if rolling restarts were triggered by examining deploy-overlay.sh output for ConfigMap change detection messages.
-- **New**: Stale configuration in pods: Verify that platform-runtime-config and platform-policy ConfigMaps were properly updated and that all deployments received rolling restart signals.
-- **New**: Partial rollout failures: Monitor rollout status for each deployment individually using kubectl rollout status commands if the automated status checks fail.
+- Configuration not taking effect: If runtime configuration changes don't appear to take effect, check if rolling restarts were triggered by examining deploy-overlay.sh output for ConfigMap change detection messages.
+- Stale configuration in pods: Verify that platform-runtime-config, platform-policy, and agent-platform-runtime-profile ConfigMaps were properly updated and that all deployments received rolling restart signals.
+- Partial rollout failures: Monitor rollout status for each deployment individually using kubectl rollout status commands if the automated status checks fail.
+- Multi-provider issues: When configuring multiple AI providers, verify that each provider has proper API keys configured and that the AGENTSCOPE_PROVIDER setting points to the intended active provider.
 
 Useful commands:
 - Rebuild and preview manifests locally before pushing.
 - Run verification script to assert profile and resource states.
 - Check namespace and resource existence post-apply.
-- **New**: Check ConfigMap contents: `kubectl get configmap platform-runtime-config -o yaml`
-- **New**: Verify rollout status: `kubectl rollout status deployment/<service-name>`
-- **New**: Force restart if needed: `kubectl rollout restart deployment/<service-name>`
+- Check ConfigMap contents: `kubectl get configmap platform-runtime-config -o yaml`
+- Check runtime profile ConfigMap: `kubectl get configmap agent-platform-runtime-profile -o yaml`
+- Verify rollout status: `kubectl rollout status deployment/<service-name>`
+- Force restart if needed: `kubectl rollout restart deployment/<service-name>`
 
 **Section sources**
 - [verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
@@ -398,7 +417,7 @@ Useful commands:
 - [deploy-overlay.sh:66-73](file://shared/platform-ops/gitops/deploy-overlay.sh#L66-L73)
 
 ## Conclusion
-The Luban AIOps Platform's GitOps workflow leverages Kustomize overlays and runtime profiles to deliver consistent, secure, and provider-flexible deployments across environments. The enhanced deployment convergence behavior ensures that runtime configuration changes are automatically detected and propagated across all services through coordinated rolling restarts. By separating base manifests from overlays and isolating provider configuration into profiles, teams can collaborate effectively while maintaining strong security practices around secrets. Automation scripts streamline the process, enabling reliable synchronization, verification, and configuration convergence.
+The Luban AIOps Platform's GitOps workflow leverages Kustomize overlays and a unified runtime profile system to deliver consistent, secure, and multi-provider-flexible deployments across environments. The simplified profile structure eliminates the complexity of managing separate provider-specific directories while enabling powerful multi-provider configurations through ConfigMap settings. Enhanced deployment convergence behavior ensures that runtime configuration changes are automatically detected and propagated across all services through coordinated rolling restarts. By separating base manifests from overlays and centralizing provider configuration into a unified profile system, teams can collaborate effectively while maintaining strong security practices around secrets. Automation scripts streamline the process, enabling reliable synchronization, verification, and configuration convergence.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -418,10 +437,11 @@ The Luban AIOps Platform's GitOps workflow leverages Kustomize overlays and runt
 - Collaboration:
   - Use issue templates and PR templates for consistency.
   - Document environment-specific decisions in overlay comments.
-- **Enhanced**: Configuration change management:
+- Configuration change management:
   - Test runtime configuration changes in development before production deployment.
   - Monitor rollout status after configuration updates to ensure successful convergence.
   - Document significant runtime configuration changes in commit messages for traceability.
+  - For multi-provider setups, document which providers are enabled and their purposes.
 
 **Section sources**
 - [README.md](file://README.md)
@@ -431,8 +451,27 @@ The following ConfigMaps are managed by the GitOps workflow:
 
 - **platform-runtime-config**: Contains runtime parameters consumed by services via environment variables
 - **platform-policy**: Authorization policy bundle mounted as a file to gateway services
-- **agent-platform-runtime-profile**: Provider-specific configuration for agent platform services
+- **agent-platform-runtime-profile**: Unified profile containing AI provider configuration including provider selection, model settings, and base URLs
 
 **Section sources**
 - [policy manifest:1-177](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml#L1-L177)
-- [openai configmap:1-10](file://shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml#L1-L10)
+- [default configmap.yaml:1-11](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml#L1-L11)
+
+### Multi-Provider Configuration Examples
+The unified runtime profile supports configuring multiple AI providers simultaneously:
+
+```bash
+# Example runtime-secrets.env for multiple providers
+AGENTSCOPE_API_KEY=your-default-provider-key
+DASHSCOPE_API_KEY=your-dashscope-key
+OPENAI_API_KEY=your-openai-key
+DEEPSEEK_API_KEY=your-deepseek-key
+
+# Optional per-provider model restrictions
+DASHSCOPE_MODELS=qwen-plus,qwen-max
+DEEPSEEK_MODELS=deepseek-chat,deepseek-reasoner
+OPENAI_MODELS=gpt-4,gpt-3.5-turbo
+```
+
+**Section sources**
+- [default runtime-secrets.example.env:1-23](file://shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env#L1-L23)

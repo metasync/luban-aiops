@@ -1,6 +1,6 @@
-- Each product follows a uniform layout with `src/<service_name>/api/routes/`, `core/`, `schemas/`, `services/`, plus a sibling `tests/` directory, `Dockerfile`, `Makefile`, `pyproject.toml`, and `.python-version` pinning the interpreter.
-- Every Python service exposes a FastAPI application via `app.py` and a CLI entrypoint in `main.py`, both importing a shared `metadata.py` that carries version and build info.
-- Cross-cutting infrastructure (config, metrics, observability, request context, telemetry, runtime settings) is implemented as a `core/` subpackage duplicated across services, keeping each service self-contained while sharing conventions.
-- External dependencies are accessed through client/service modules under `services/` (e.g., `agent_client`, `delegation_client`, `incident_client`, `skill_store`) rather than direct HTTP calls scattered in routes.
-- API contracts between services are declared as JSON Schema files in `shared/shared-contracts/schemas/` and validated at build time via the `validate_version` and `validate_policy` Make targets.
-- Policy configuration is centralized in `shared/shared-contracts/policies/policy-default.yaml` and copied into each consuming product's `policies/policy-default.yaml` via `make sync-policy`, ensuring consistent authorization rules.
+- Each product follows a uniform internal layout: `src/<package>/api/{routes,router.py}`, `core/{config,metrics,observability,request_context,runtime,telemetry}.py`, `schemas/`, `services/`, plus `app.py`, `main.py`, and `metadata.py` at the package root.
+- Cross-service data exchange is enforced via JSON Schema files in `shared/shared-contracts/schemas/`, validated by scripts under `shared/shared-contracts/scripts/` during CI.
+- Policy enforcement uses a single canonical YAML bundle in `shared/shared-contracts/policies/policy-default.yaml` that is copied into each consuming product's `policies/` directory via `make sync-policy`.
+- Container images are built with a coordinated tag derived from the root `VERSION` file plus git SHA and optional profile, written into a shared `.images.env` so all overlays reference one consistent image set.
+- Product test suites live alongside sources under `tests/` and are invoked uniformly through each product's `Makefile`, which the root `make test` and `make verify` targets orchestrate across all Python products.
+- Per-product environment configuration is pinned via a local `.python-version` file mirroring the workspace root, enabling reproducible interpreter selection for both local dev and container builds.

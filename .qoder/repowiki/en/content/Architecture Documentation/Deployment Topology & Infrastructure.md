@@ -28,12 +28,9 @@
 - [select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
 - [sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
-- [dashscope/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/configmap.yaml)
-- [dashscope/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/kustomization.yaml)
-- [deepseek/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/configmap.yaml)
-- [deepseek/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/kustomization.yaml)
-- [openai/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml)
-- [openai/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml)
+- [default/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml)
+- [default/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/kustomization.yaml)
+- [mutating-dev/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
 - [README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
 - [Makefile](file://Makefile)
 - [image.mk](file://mk/image.mk)
@@ -57,10 +54,11 @@
 
 ## Update Summary
 **Changes Made**
-- Updated Operator Portal section to reflect simplified nginx configuration for serving SPA at root path
-- Removed references to legacy coexistence routing logic
-- Added details about content-hashed asset caching strategy
-- Updated deployment architecture diagram to show simplified SPA serving pattern
+- Updated runtime profiles section to reflect the consolidated default profile structure
+- Removed references to legacy per-provider directories (deepseek/, dashscope/, openai/)
+- Updated GitOps workflow documentation to reflect the new unified approach
+- Enhanced multi-model catalog documentation based on SPEC-026
+- Updated deployment architecture diagrams to show simplified profile management
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -98,9 +96,8 @@ OP["operator-portal/*"]
 INFRA["infra/redis*"]
 end
 subgraph "Runtime Profiles"
-DP["runtime-profiles/dashscope/*"]
-DS["runtime-profiles/deepseek/*"]
-OA["runtime-profiles/openai/*"]
+DP["runtime-profiles/default/*"]
+MD["runtime-profiles/mutating-dev/*"]
 end
 BASE --> NS
 BASE --> OBS
@@ -110,8 +107,7 @@ BASE --> TG
 BASE --> OP
 BASE --> INFRA
 DP --> BASE
-DS --> BASE
-OA --> BASE
+MD --> BASE
 ```
 
 **Diagram sources**
@@ -123,9 +119,8 @@ OA --> BASE
 - [api-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
 - [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
 - [redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
-- [dashscope/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/kustomization.yaml)
-- [deepseek/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/kustomization.yaml)
-- [openai/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml)
+- [default/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/kustomization.yaml)
+- [mutating-dev/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
 
 **Section sources**
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
@@ -222,12 +217,15 @@ Recommendations:
 - [redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
 
 ### GitOps Workflow Using Kustomize Overlays
+**Updated** The runtime profile system has been simplified to use a unified default profile instead of per-provider directories. The new approach decouples the deploy-time profile label from the active LLM provider, allowing flexible provider selection through environment variables.
+
 - Base layer defines canonical desired state.
-- Runtime profiles overlay model configurations for different LLM providers.
+- Unified default profile overlay provides generic configuration with provider-specific settings as environment variables.
+- Mutating-dev profile remains as a committed dev posture for bounded mutating tools.
 - Scripts orchestrate profile selection, secret sync, verification, and deployment.
 
 Workflow steps:
-1. Select a runtime profile (e.g., dashscope, deepseek, openai).
+1. Select the unified default profile (provider selection is now done via ConfigMap environment variables).
 2. Sync runtime secrets into the target namespace.
 3. Verify profile consistency.
 4. Build and apply Kustomize overlay to deploy.
@@ -238,7 +236,7 @@ participant Dev as "Developer"
 participant Script as "deploy-overlay.sh"
 participant Kust as "Kustomize"
 participant K8s as "Kubernetes API"
-Dev->>Script : Run deploy with profile
+Dev->>Script : Run deploy with default profile
 Script->>Script : select-runtime-profile.sh
 Script->>Script : sync-runtime-secret.sh
 Script->>Script : verify-runtime-profile.sh
@@ -253,9 +251,8 @@ K8s-->>Dev : Deployment status
 - [select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
 - [sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
-- [dashscope/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/kustomization.yaml)
-- [deepseek/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/kustomization.yaml)
-- [openai/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/kustomization.yaml)
+- [default/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/kustomization.yaml)
+- [mutating-dev/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
 
 **Section sources**
 - [deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
@@ -289,14 +286,18 @@ Best practices:
 - [Makefile](file://Makefile)
 
 ### Secret Management and Configuration Management
+**Updated** Secrets and configuration management now supports a unified approach where provider-specific settings are handled through environment variables rather than separate directory structures.
+
 - Secrets: Runtime secrets are synced via script to the target namespace before deployment.
 - ConfigMaps and Env files: Environment variables and configs are provided through env files and configmaps.
 - Policy: Policy engine configuration is declared in YAML and mounted into the gateway.
+- Multi-model catalog: Supports multiple providers simultaneously through environment variable configuration.
 
 Guidelines:
 - Store sensitive values in a secure secret manager and sync to Kubernetes secrets.
 - Use Kustomize generators or external secret controllers for automated rotation.
 - Separate runtime configuration from code via env files and configmaps.
+- Configure multiple providers through environment variables in the unified default profile.
 
 **Section sources**
 - [sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
@@ -304,9 +305,7 @@ Guidelines:
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/policy.yaml)
-- [dashscope/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/dashscope/configmap.yaml)
-- [deepseek/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/deepseek/configmap.yaml)
-- [openai/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml)
+- [default/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml)
 
 ### Scaling Policies and High Availability
 - Replicas: Set minimum replicas for HA across zones.
@@ -451,7 +450,7 @@ Debugging aids:
 - [nginx.conf](file://products/operator-portal/nginx.conf)
 
 ## Conclusion
-The Luban AIOps Platform leverages a clear separation between base manifests and environment overlays, enabling consistent deployments across environments. By adopting robust container image strategies, centralized configuration and secret management, scalable networking patterns, and optimized SPA serving with nginx, the platform supports production-grade reliability and performance. The simplified nginx configuration for the Operator Portal eliminates legacy routing complexity while providing optimal caching and performance characteristics. Continuous improvement of monitoring, logging, and backup processes ensures operational resilience.
+The Luban AIOps Platform leverages a clear separation between base manifests and environment overlays, enabling consistent deployments across environments. The simplified runtime profile structure with a unified default profile provides greater flexibility in managing multiple LLM providers while maintaining operational simplicity. By adopting robust container image strategies, centralized configuration and secret management, scalable networking patterns, and optimized SPA serving with nginx, the platform supports production-grade reliability and performance. The unified approach eliminates the complexity of managing per-provider directories while providing enhanced multi-model capabilities through environment variable configuration. Continuous improvement of monitoring, logging, and backup processes ensures operational resilience.
 
 ## Appendices
 
@@ -472,3 +471,22 @@ The Luban AIOps Platform leverages a clear separation between base manifests and
 - [app.py](file://products/tool-gateway/src/api_gateway/app.py)
 - [config.py](file://products/tool-gateway/src/api_gateway/core/config.py)
 - [nginx.conf](file://products/operator-portal/nginx.conf)
+
+### Runtime Profile Configuration
+**Updated** The runtime profile system now uses a unified approach with the default profile containing generic configuration and provider-specific settings as environment variables.
+
+Current profile structure:
+- **default**: Generic deploy label (`AGENTSCOPE_PROFILE=default`) with provider configuration through environment variables
+- **mutating-dev**: Committed dev posture for bounded mutating tools (SPEC-022 R-3), always wired in alongside LLM profiles
+
+Multi-model catalog capabilities (SPEC-026):
+- Every supported provider (`deepseek`, `dashscope`, `openai`) with an API key joins the catalog
+- Provider selection is done through environment variables rather than directory structure
+- `<PROVIDER>_MODELS=a,b,c` optionally overrides/restricts the model series
+- Providers without resolvable keys stay dropped (fail-closed)
+- Active provider's `AGENTSCOPE_MODEL_NAME` remains the deploy-time default
+
+**Section sources**
+- [README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
+- [default/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml)
+- [mutating-dev/kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)

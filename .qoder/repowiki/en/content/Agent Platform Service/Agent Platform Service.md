@@ -26,13 +26,20 @@
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [runtime_service.py](file://products/agent-platform/src/agent_service/services/runtime_service.py)
 - [runtime_dependencies.py](file://products/agent-platform/src/agent_service/services/runtime_dependencies.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [models.py](file://products/platform-gateway/src/platform_gateway/api/routes/models.py)
+- [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
+- [ModelSelect.tsx](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx)
+- [models.ts](file://products/operator-portal/web-ui/app/src/api/models.ts)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [test_chat_stream_modality.py](file://products/agent-platform/tests/test_chat_stream_modality.py)
 - [test_evidence_store.py](file://products/agent-platform/tests/test_evidence_store.py)
+- [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
 - [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
+- [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
 - [pyproject.toml](file://products/agent-platform/pyproject.toml)
 - [Dockerfile](file://products/agent-platform/Dockerfile)
 - [README.md](file://products/agent-platform/README.md)
@@ -40,13 +47,11 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive evidence store service with dual backend support (in-memory and Postgres)
-- Integrated evidence capture into runtime kernel for tool_call/tool_result frame persistence
-- Enhanced session management with evidence store integration for complete session lifecycle
-- Added evidence store metrics and observability for monitoring evidence persistence operations
-- Implemented size-capped evidence storage with per-entry and per-session budget enforcement
-- Added evidence turn retrieval for session detail endpoints with structured evidence data
-- Updated configuration to support evidence store settings and environment variables
+- Added comprehensive model catalog service with multi-model support across OpenAI, DashScope, and DeepSeek providers
+- Updated runtime kernel with model normalization for legacy provider name aliases and concrete model ID resolution
+- Enhanced operator portal UI with grouped model display by provider and credential-gated catalog discovery
+- Integrated model catalog into platform gateway for secure model discovery pass-through
+- Added v2 models endpoint for credential-safe model enumeration with public schema compliance
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -63,16 +68,17 @@
 12. [Per-Request Trace Queues](#per-request-trace-queues)
 13. [Delegated Token Management](#delegated-token-management)
 14. [Evidence Store Service](#evidence-store-service)
-15. [Dependency Analysis](#dependency-analysis)
-16. [Performance Considerations](#performance-considerations)
-17. [Troubleshooting Guide](#troubleshooting-guide)
-18. [Conclusion](#conclusion)
-19. [Appendices](#appendices)
+15. [Model Catalog Service](#model-catalog-service)
+16. [Dependency Analysis](#dependency-analysis)
+17. [Performance Considerations](#performance-considerations)
+18. [Troubleshooting Guide](#troubleshooting-guide)
+19. [Conclusion](#conclusion)
+20. [Appendices](#appendices)
 
 ## Introduction
 The Agent Platform Service is the core orchestration engine of the Luban AIOps Platform. It provides a runtime kernel for agent execution, a provider registry for multi-model backends (OpenAI, DashScope, DeepSeek), and robust session management with durable storage. The service exposes REST APIs for agent interactions, streaming responses, and configuration management, enabling scalable and observable AI operations across diverse model providers.
 
-**Updated** The service now includes comprehensive evidence store capabilities with dual backend support for persistent tool execution evidence, enhanced runtime kernel integration for evidence capture during streaming operations, and improved session management that preserves complete audit trails of tool invocations. The evidence store service provides size-capped storage with automatic eviction policies, ensuring efficient memory usage while maintaining detailed operational visibility.
+**Updated** The service now includes a comprehensive model catalog service that enables multi-model support with credential-gated discovery, runtime kernel updates for model normalization supporting both concrete model IDs and legacy provider name aliases, and enhanced operator portal UI with grouped model display by provider. The model catalog service provides secure enumeration of available models without exposing credentials, while maintaining backward compatibility with existing deployments through alias mapping.
 
 ## Project Structure
 The Agent Platform Service is implemented as a Python FastAPI application organized by feature layers:
@@ -82,6 +88,7 @@ The Agent Platform Service is implemented as a Python FastAPI application organi
 - Provider implementations and registry
 - Session services and stores
 - Evidence store service with dual backend support
+- Model catalog service with multi-provider support
 - Tools and integrations
 - Core cross-cutting concerns (configuration, observability, metrics, telemetry, request context)
 
@@ -120,6 +127,10 @@ subgraph "Evidence Store"
 ev_store["services/evidence_store.py"]
 ev_schema["schemas/session-evidence.schema.json"]
 end
+subgraph "Model Catalog"
+model_cat["services/model_catalog.py"]
+model_schema["schemas/model-catalog.schema.json"]
+end
 subgraph "Tools"
 gw_tools["tools/gateway_tools.py"]
 end
@@ -143,7 +154,9 @@ sess_svc --> sess_transcript
 routes_v2 --> hitl_reg
 kernel --> gw_tools
 kernel --> ev_store
+kernel --> model_cat
 ev_store --> metrics
+model_cat --> metrics
 app --> metrics
 app --> obs
 app --> tel
@@ -172,6 +185,7 @@ settings --> env
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
@@ -184,17 +198,19 @@ settings --> env
 - [Dockerfile](file://products/agent-platform/Dockerfile)
 
 ## Core Components
-- Runtime Kernel: Orchestrates agent lifecycle, conversation state, tool invocation, and provider dispatch with enhanced AgentScope 2.x toolkit registration and anti-hallucination guards.
+- Runtime Kernel: Orchestrates agent lifecycle, conversation state, tool invocation, and provider dispatch with enhanced AgentScope 2.x toolkit registration, anti-hallucination guards, and model normalization support.
 - Provider Registry: Discovers and manages model providers (OpenAI, DashScope, DeepSeek) with pluggable interfaces using new AgentScope 2.x model construction patterns.
 - Session Management: Persists and restores conversations with durable storage, multi-session workspace support, and concurrency-safe access.
 - Evidence Store: Provides persistent storage for tool execution evidence with dual backend support and size-capped retention policies.
-- API Layer: Exposes REST endpoints for chat, sessions, streaming events, and health checks with v3 streaming protocol support, session workspace operations, and voice-readiness parity.
+- Model Catalog: Manages credential-gated model discovery with multi-provider support, legacy alias resolution, and public schema compliance.
+- API Layer: Exposes REST endpoints for chat, sessions, streaming events, model discovery, and health checks with v3 streaming protocol support.
 - Cross-Cutting: Configuration, environment, metrics, observability, telemetry, and request-scoped context.
 
 Key responsibilities:
 - Lifecycle: Initialize, start, run, and shutdown agents safely with AgentScope 2.x compatibility.
 - Conversation: Maintain message history, context, and state per session with workspace organization.
 - Evidence Capture: Persist tool_call and tool_result frames with size caps and automatic eviction.
+- Model Resolution: Normalize model IDs including legacy provider name aliases to concrete model entries.
 - Streaming: Emit incremental events to clients over HTTP streaming with v3 tool_call/tool_result frames.
 - Security: Manage per-user toolkit closures bound to delegated tokens for secure tool execution.
 - Anti-Hallucination: Prevent model fabrication through systematic NO_TOOLS_NOTICE injection.
@@ -205,7 +221,7 @@ Key responsibilities:
 - HITL Integration: Support human-in-the-loop workflows with parked confirmation management.
 - Observability: Emit structured logs, metrics, and traces for each operation with per-request audit trails.
 
-**Updated** The service now includes comprehensive evidence store capabilities with dual backend support, runtime kernel integration for evidence capture during streaming operations, and enhanced session management that preserves complete audit trails of tool invocations with size-capped storage and automatic eviction policies.
+**Updated** The service now includes comprehensive model catalog capabilities with credential-gated discovery, runtime kernel model normalization supporting both concrete model IDs and legacy provider name aliases, and enhanced operator portal integration with grouped model display by provider. The model catalog service provides secure enumeration of available models without exposing credentials, while maintaining backward compatibility with existing deployments.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -213,6 +229,7 @@ Key responsibilities:
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
 - [telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
@@ -221,10 +238,11 @@ Key responsibilities:
 ## Architecture Overview
 The service follows a layered architecture with enhanced security and anti-hallucination features:
 - API layer receives requests, validates payloads, and delegates to the runtime kernel with v3 streaming support, session workspace operations, and voice-readiness parity.
-- Runtime kernel coordinates sessions, tools, and provider selection via the registry with AgentScope 2.x toolkit registration and evidence capture.
+- Runtime kernel coordinates sessions, tools, and provider selection via the registry with AgentScope 2.x toolkit registration, evidence capture, and model normalization.
 - Providers implement standardized interfaces to communicate with external model APIs using new model construction patterns.
 - Session service persists state using a configurable store with workspace bookkeeping and transcript extraction.
 - Evidence store provides persistent storage for tool execution evidence with dual backend support and size-capped retention.
+- Model catalog provides credential-gated discovery of available models with legacy alias resolution.
 - Cross-cutting modules provide configuration, metrics, observability, and telemetry with per-request audit trails.
 
 ```mermaid
@@ -236,24 +254,24 @@ participant Kernel as "RuntimeKernel"
 participant Sess as "SessionService"
 participant Store as "SessionStore"
 participant EvStore as "EvidenceStore"
+participant ModelCat as "ModelCatalog"
 participant Reg as "ProviderRegistry"
 participant Prov as "ModelProvider"
 participant Tools as "GatewayTools"
 participant Transcript as "TranscriptExtractor"
 participant HITL as "ConfirmationRegistry"
 participant Trace as "TraceQueue"
-Note over Client,HITL : Voice-Ready Chat with Evidence Capture
-Client->>Gateway : POST /api/v1/chat {message, input_modality}
-Gateway->>API : Forward with input_modality metadata
+Note over Client,HITL : Voice-Ready Chat with Model Selection
+Client->>Gateway : POST /api/v1/chat {message, model, input_modality}
+Gateway->>API : Forward with model and input_modality metadata
+API->>ModelCat : validate model_id (with legacy alias resolution)
+ModelCat-->>API : model entry or error
 API->>Sess : ensure_session(sessionId, user_id)
 API->>Sess : mark_session_turn(sessionId, message)
 Sess->>Store : set_session_title + touch_session
 Sess-->>API : session updated
-API->>Kernel : execute(message, sessionId, bearerToken, input_modality)
-Kernel->>HITL : check_parked(sessionId)
-alt Session has parked confirmation
-HITL-->>API : 409 Conflict
-else No parked confirmation
+API->>Kernel : execute(message, sessionId, bearerToken, model_id)
+Kernel->>Kernel : normalize_model_id(model_id)
 Kernel->>Reg : resolveProvider(providerName)
 Reg-->>Kernel : Provider instance
 Kernel->>Tools : build_gateway_toolkit(definitions, bearerToken, traceQueue)
@@ -268,17 +286,9 @@ Kernel-->>API : StreamEvent* with v3 frames
 API-->>Client : SSE/Streaming Response with tool_call/tool_result
 Kernel->>Sess : save(sessionId, updatedState)
 Sess->>Store : set(sessionId, updatedState)
-end
-Note over Client,HITL : Voice-Ready Streaming with Evidence
-Client->>API : GET /api/v2/chat/stream?message=...&input_modality=voice
-API->>Sess : ensure_session(sessionId, user_id)
-API->>Sess : mark_session_turn(sessionId, message)
-API->>Kernel : stream_events(message, sessionId, bearerToken, input_modality)
-Kernel-->>API : StreamEvent* with v3 frames
-API-->>Client : SSE/Streaming Response
 ```
 
-**Updated** The sequence diagram now shows the complete voice-readiness flow with integrated evidence capture, including both POST /chat and GET /chat/stream endpoints accepting input_modality parameters, while maintaining consistent policy enforcement, HITL workflows, and evidence persistence across both modalities.
+**Updated** The sequence diagram now shows the complete model catalog integration with legacy alias resolution, including model validation before agent execution, runtime kernel model normalization, and enhanced operator portal integration with grouped model display by provider.
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -287,6 +297,7 @@ API-->>Client : SSE/Streaming Response
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
@@ -296,12 +307,13 @@ API-->>Client : SSE/Streaming Response
 ## Detailed Component Analysis
 
 ### Runtime Kernel
-The runtime kernel is the central orchestrator for agent execution with enhanced AgentScope 2.x compatibility and anti-hallucination features. It manages:
+The runtime kernel is the central orchestrator for agent execution with enhanced AgentScope 2.x compatibility, anti-hallucination features, and model normalization support. It manages:
 - Agent lifecycle initialization and shutdown with AgentScope 2.x toolkit registration
 - Conversation state transitions with per-request toolkit rebuilding
 - Tool invocation and result aggregation with v3 streaming support
 - Provider selection and streaming event handling with trace queue integration
 - Evidence capture and persistence for tool_call and tool_result frames
+- Model normalization for legacy provider name aliases and concrete model ID resolution
 - Anti-hallucination guard system with NO_TOOLS_NOTICE injection
 - Auto-approval mechanism for vetted read-only tools to prevent headless stream stalls
 - Voice readiness support through input_modality parameter passthrough
@@ -328,6 +340,8 @@ class AgentKernel {
 +is_configured()
 +runtime_state()
 +_persist_evidence(session_id, request_id, turn_index, frames)
++_normalize_model_id(model_id)
++_build_model(model_id)
 }
 class SessionService {
 +load(sessionId)
@@ -347,6 +361,12 @@ class EvidenceStore {
 +delete_session(session_id)
 +is_ready()
 }
+class ModelCatalog {
++entries : tuple
++get(model_id)
++default_entry()
++public_models()
+}
 class ProviderRegistry {
 +register(name, provider)
 +resolve(name)
@@ -364,18 +384,20 @@ class GatewayTools {
 }
 AgentKernel --> SessionService : "uses"
 AgentKernel --> EvidenceStore : "persists evidence"
+AgentKernel --> ModelCatalog : "resolves models"
 AgentKernel --> ProviderRegistry : "uses"
 AgentKernel --> GatewayTools : "manages"
 ProviderRegistry --> ModelProvider : "manages"
 GatewayTools --> ModelProvider : "secure invocation"
 ```
 
-**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, enhanced session management methods for multi-session workspace operations, evidence capture and persistence for tool execution frames, and voice readiness support through input_modality parameter passthrough.
+**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, enhanced session management methods for multi-session workspace operations, evidence capture and persistence for tool execution frames, model normalization for legacy provider name aliases, and voice readiness support through input_modality parameter passthrough.
 
 **Diagram sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
@@ -619,21 +641,23 @@ Core functionality:
 - [routes.py:71-100](file://products/agent-platform/src/agent_service/api/v2/routes.py#L71-L100)
 
 ### API Endpoints
-The API layer exposes REST endpoints for agent interactions, session management, and health checks. Requests are validated against schemas and routed to the runtime kernel with v3 streaming protocol support.
+The API layer exposes REST endpoints for agent interactions, session management, model discovery, and health checks. Requests are validated against schemas and routed to the runtime kernel with v3 streaming protocol support.
 
 Typical endpoints:
 - Chat: POST /chat with message, optional session ID, and delegated token
 - Sessions: GET/POST/DELETE /sessions for lifecycle management with evidence retrieval
+- Models: GET /models for credential-safe model discovery
 - Health: GET /health for readiness and liveness probes
 - Streaming: Server-sent events for incremental responses with v3 tool_call/tool_result frames
 
 Request/response validation uses Pydantic models defined in schemas with enhanced v3 streaming event types.
 
-**Updated** Chat endpoints now accept delegated tokens for secure tool execution and support v3 streaming protocol with tool_call/tool_result frames for comprehensive audit trails. Both POST /chat and GET /chat/stream endpoints accept input_modality parameters for voice-readiness parity. Session endpoints provide multi-session workspace operations with proper authorization, audit trails, and evidence turn retrieval.
+**Updated** Chat endpoints now accept delegated tokens for secure tool execution and support v3 streaming protocol with tool_call/tool_result frames for comprehensive audit trails. Both POST /chat and GET /chat/stream endpoints accept input_modality parameters for voice-readiness parity. Session endpoints provide multi-session workspace operations with proper authorization, audit trails, and evidence turn retrieval. Model endpoints provide credential-safe enumeration of available models with public schema compliance.
 
 **Section sources**
 - [routes.py:106-235](file://products/agent-platform/src/agent_service/api/v2/routes.py#L106-L235)
 - [routes.py:334-419](file://products/agent-platform/src/agent_service/api/v2/routes.py#L334-L419)
+- [routes.py:534-544](file://products/agent-platform/src/agent_service/api/v2/routes.py#L534-L544)
 - [api.py:8-18](file://products/agent-platform/src/agent_service/schemas/api.py#L8-L18)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
 
@@ -1053,7 +1077,7 @@ Kernel-->>Client : stream with trace events
 ```
 
 **Diagram sources**
-- [runtime_kernel.py:404-447](file://products/agent-platform/src/agent_service/runtime_kernel.py#L404-L447)
+- [runtime_kernel.py:404-447](file://products/agent-platform/src/agent_service/runtime_kernel.py#L404-447)
 - [gateway_tools.py:212-251](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L212-L251)
 
 ### Key Features
@@ -1070,7 +1094,7 @@ Each trace event includes:
 - **Evidence Data**: Tool-specific evidence and data summaries
 
 **Section sources**
-- [runtime_kernel.py:404-447](file://products/agent-platform/src/agent_service/runtime_kernel.py#L404-L447)
+- [runtime_kernel.py:404-447](file://products/agent-platform/src/agent_service/runtime_kernel.py#L404-447)
 - [gateway_tools.py:212-251](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L212-L251)
 
 ## Delegated Token Management
@@ -1236,13 +1260,118 @@ The evidence store follows the session-evidence schema with structured turn grou
 - [metrics.py:158-186](file://products/agent-platform/src/agent_service/core/metrics.py#L158-L186)
 - [runtime_settings.py:145-150](file://products/agent-platform/src/agent_service/runtime_settings.py#L145-L150)
 
+## Model Catalog Service
+
+### Overview
+The model catalog service provides credential-gated discovery of available LLM models across multiple providers (OpenAI, DashScope, DeepSeek). It derives the set of selectable models from per-provider environment configuration at startup, ensuring that only configured providers with resolvable API keys contribute to the catalog.
+
+### Architecture
+```mermaid
+classDiagram
+class ModelCatalogEntry {
++id : str
++label : str
++provider : RuntimeProvider
++api_key : str
++model_name : str
++base_url : str | None
++default : bool
++to_public_dict()
+}
+class ModelCatalog {
++_entries : tuple
++_by_id : dict
++_aliases : dict
++entries : tuple
++get(model_id)
++default_entry()
++public_models()
+}
+class RuntimeSettings {
++provider : RuntimeProvider
++api_key : str
++model_name : str
++base_url : str
++profile : str
++from_env()
+}
+ModelCatalog --> ModelCatalogEntry : "manages"
+ModelCatalog --> RuntimeSettings : "uses for defaults"
+```
+
+**Diagram sources**
+- [model_catalog.py:42-61](file://products/agent-platform/src/agent_service/services/model_catalog.py#L42-L61)
+- [model_catalog.py:149-185](file://products/agent-platform/src/agent_service/services/model_catalog.py#L149-L185)
+
+### Key Features
+- **Credential-Gated Discovery**: Only providers with resolvable API keys contribute to the catalog
+- **Multi-Provider Support**: OpenAI, DashScope, and DeepSeek with full model series enumeration
+- **Legacy Alias Resolution**: Bare provider names alias to provider's default model for backward compatibility
+- **Public Schema Compliance**: Discovery payload contains only id, label, provider, and default fields
+- **Environment Variable Configuration**: Supports `<PROVIDER>_API_KEY`, `<PROVIDER>_MODEL_NAME`, `<PROVIDER>_BASE_URL`, and `<PROVIDER>_MODELS`
+- **Active Profile Fallback**: Active profile maintains existing AGENTSCOPE_* environment variable compatibility
+- **Duplicate Detection**: Prevents model ID conflicts across different providers
+
+### Model Resolution Flow
+```mermaid
+sequenceDiagram
+participant Client as "Client"
+participant Gateway as "Platform Gateway"
+participant API as "Agent Platform API"
+participant Catalog as "ModelCatalog"
+participant Kernel as "RuntimeKernel"
+Note over Client,Kernel : Model Selection Flow
+Client->>Gateway : GET /api/v1/models
+Gateway->>API : GET /api/v2/models
+API->>Catalog : public_models()
+Catalog-->>API : {models : [...], default : string}
+API-->>Gateway : Public model catalog
+Gateway-->>Client : Credential-safe model list
+Client->>Gateway : POST /api/v1/chat {message, model : "qwen-plus"}
+Gateway->>API : Forward with model selection
+API->>Catalog : get("qwen-plus")
+Catalog-->>API : ModelCatalogEntry
+API->>Kernel : execute(..., model_id="qwen-plus")
+Kernel->>Kernel : normalize_model_id("qwen-plus")
+Kernel-->>API : Normalized model ID
+API-->>Client : Response with selected model
+```
+
+**Diagram sources**
+- [routes.py:534-544](file://products/agent-platform/src/agent_service/api/v2/routes.py#L534-L544)
+- [model_catalog.py:168-174](file://products/agent-platform/src/agent_service/services/model_catalog.py#L168-L174)
+- [runtime_kernel.py:248-261](file://products/agent-platform/src/agent_service/runtime_kernel.py#L248-L261)
+
+### Configuration Examples
+- **OpenAI**: Set `OPENAI_API_KEY`, optionally `OPENAI_MODEL_NAME`, `OPENAI_BASE_URL`, `OPENAI_MODELS`
+- **DashScope**: Set `DASHSCOPE_API_KEY`, optionally `DASHSCOPE_MODEL_NAME`, `DASHSCOPE_BASE_URL`, `DASHSCOPE_MODELS`
+- **DeepSeek**: Set `DEEPSEEK_API_KEY`, optionally `DEEPSEEK_MODEL_NAME`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_MODELS`
+- **Active Profile**: Existing `AGENTSCOPE_API_KEY`, `AGENTSCOPE_MODEL_NAME`, `AGENTSCOPE_BASE_URL` remain compatible
+
+### Operator Portal Integration
+The operator portal UI displays models grouped by provider with credential-gated discovery:
+- **Grouped Display**: Models organized under provider labels (OpenAI, DashScope, DeepSeek)
+- **Default Selection**: Deploy-time default model pre-selected when multiple models available
+- **Single Model Mode**: Fixed label display when only one model is configured
+- **Graceful Degradation**: Selector hides when catalog fetch fails, chat continues working
+- **Test Coverage**: Comprehensive tests for grouping, fallback behavior, and single model scenarios
+
+**Section sources**
+- [model_catalog.py:1-212](file://products/agent-platform/src/agent_service/services/model_catalog.py#L1-L212)
+- [routes.py:534-544](file://products/agent-platform/src/agent_service/api/v2/routes.py#L534-L544)
+- [models.py:19-45](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L19-L45)
+- [ModelSelect.tsx:20-71](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L20-L71)
+- [models.ts:1-30](file://products/operator-portal/web-ui/app/src/api/models.ts#L1-L30)
+- [test_model_catalog.py:196-244](file://products/agent-platform/tests/test_model_catalog.py#L196-L244)
+
 ## Dependency Analysis
 The service has clear separation of concerns with minimal coupling between layers:
 - API depends on schemas and kernel
-- Kernel depends on session service, provider registry, evidence store, and tools
+- Kernel depends on session service, provider registry, evidence store, model catalog, and tools
 - Providers are independent implementations registered at runtime
 - Session service abstracts storage backend
 - Evidence store provides independent persistence layer with dual backend support
+- Model catalog provides credential-gated discovery with legacy alias resolution
 - Cross-cutting concerns are injected into the application lifecycle
 
 ```mermaid
@@ -1250,6 +1379,7 @@ graph LR
 API["API Routes"] --> Kernel["RuntimeKernel"]
 Kernel --> Session["SessionService"]
 Kernel --> Evidence["EvidenceStore"]
+Kernel --> ModelCat["ModelCatalog"]
 Kernel --> Registry["ProviderRegistry"]
 Kernel --> Tools["GatewayTools"]
 Kernel --> Closure["ToolkitClosure"]
@@ -1266,15 +1396,18 @@ API --> Tel["Telemetry"]
 Closure --> Tools
 Evidence --> Metrics
 Evidence --> Store
+ModelCat --> Metrics
+ModelCat --> Registry
 ```
 
-**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, and voice-readiness support through input_modality parameter passthrough.
+**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, model catalog service with credential-gated discovery and legacy alias resolution, and voice-readiness support through input_modality parameter passthrough.
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
 - [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
@@ -1310,8 +1443,11 @@ Evidence --> Store
 - **Evidence Store Optimization**: Size-capped storage with automatic eviction prevents memory bloat
 - **Dual Backend Failover**: Postgres unavailability falls back to in-memory for resilience
 - **Evidence Metrics**: Comprehensive monitoring of evidence persistence operations and truncation events
+- **Model Catalog Optimization**: Startup-derived catalog with in-memory lookup for fast model resolution
+- **Legacy Alias Resolution**: Efficient provider name to concrete model mapping for backward compatibility
+- **Credential-Gated Discovery**: Minimal overhead for model enumeration without exposing sensitive configuration
 
-**Updated** Performance considerations now include multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, and voice-readiness support with minimal overhead through metadata-only processing.
+**Updated** Performance considerations now include multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, and model catalog optimization with startup-derived catalog and efficient legacy alias resolution.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -1338,6 +1474,10 @@ Common issues and resolutions:
 - **Evidence Retrieval**: Verify evidence store connectivity and session evidence availability
 - **Evidence Eviction**: Monitor evidence truncation metrics and adjust size limits as needed
 - **Postgres Evidence**: Validate database connectivity and table schema for evidence storage
+- **Model Catalog Issues**: Verify provider API key configuration and model series enumeration
+- **Model Selection Errors**: Check model ID validation and legacy alias resolution
+- **Portal Model Display**: Verify grouped model display and provider categorization
+- **Discovery Failures**: Check platform gateway proxy configuration and upstream model endpoint
 
 Debugging utilities:
 - Health check endpoints for service status
@@ -1355,8 +1495,10 @@ Debugging utilities:
 - **Voice Readiness Debugging**: Validate input_modality parameter handling and modality-specific behaviors
 - **Evidence Store Debugging**: Check evidence store backend status, size limits, and persistence metrics
 - **Evidence Panel Debugging**: Verify evidence turn retrieval and evidence schema compliance
+- **Model Catalog Debugging**: Verify provider configuration, model enumeration, and legacy alias resolution
+- **Portal Model Debugging**: Check model selector grouping, default selection, and catalog fetch behavior
 
-**Updated** Troubleshooting guide now includes multi-session workspace troubleshooting, transcript extraction debugging strategies, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, and comprehensive evidence persistence monitoring and debugging.
+**Updated** Troubleshooting guide now includes multi-session workspace troubleshooting, transcript extraction debugging strategies, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, and model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification.
 
 **Section sources**
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -1367,7 +1509,7 @@ Debugging utilities:
 ## Conclusion
 The Agent Platform Service provides a robust foundation for AI agent orchestration with multi-provider support, durable session management, and comprehensive observability. Its modular architecture enables easy customization and scaling while maintaining high performance and reliability.
 
-**Updated** The service now includes comprehensive evidence store capabilities with dual backend support, runtime kernel integration for evidence capture during streaming operations, and enhanced session management that preserves complete audit trails of tool invocations with size-capped storage and automatic eviction policies. The evidence store service provides persistent storage for tool_call and tool_result frames, ensuring complete operational visibility and session replay capabilities. The service also includes comprehensive voice-readiness support through input_modality parameters on both POST /chat and GET /chat/stream endpoints, ensuring parity between synchronous and asynchronous interfaces while maintaining consistent policy enforcement and HITL workflows. These enhancements strengthen the platform's security posture, prevent model hallucinations, eliminate headless stream stalls, provide detailed operational visibility, and maintain the flexibility and performance characteristics that make it suitable for production AI operations.
+**Updated** The service now includes comprehensive model catalog capabilities with credential-gated discovery across multiple providers, runtime kernel model normalization supporting both concrete model IDs and legacy provider name aliases, and enhanced operator portal integration with grouped model display by provider. The model catalog service provides secure enumeration of available models without exposing credentials, while maintaining backward compatibility with existing deployments through alias mapping. These enhancements strengthen the platform's flexibility, enable multi-model deployments, provide detailed operational visibility, and maintain the performance characteristics that make it suitable for production AI operations.
 
 ## Appendices
 
@@ -1425,7 +1567,15 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - **Monitoring**: Track evidence persistence metrics and truncation events
 - **Failover**: Verify graceful fallback to in-memory when Postgres is unavailable
 
-**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, and voice-readiness support with input_modality parameters for complete operator workflow management.
+#### Model Catalog Configuration
+- **Provider Setup**: Configure `<PROVIDER>_API_KEY` for each enabled provider
+- **Model Series**: Set `<PROVIDER>_MODELS` to override curated model lists
+- **Active Profile**: Existing `AGENTSCOPE_*` variables remain compatible for single-provider deployments
+- **Portal Integration**: Verify grouped model display and default selection in operator portal
+- **Legacy Compatibility**: Test bare provider name aliases for backward compatibility
+- **Discovery Testing**: Validate credential-gated model enumeration through platform gateway
+
+**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, and voice-readiness support with input_modality parameters for complete operator workflow management.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -1437,8 +1587,11 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
 - [test_chat_stream_modality.py](file://products/agent-platform/tests/test_chat_stream_modality.py)
 - [test_evidence_store.py](file://products/agent-platform/tests/test_evidence_store.py)
+- [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
 - [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
+- [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)

@@ -22,12 +22,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for runtime model switching capabilities
-- Documented credential-gated model catalog discovery system
-- Added per-session model pinning functionality
-- Enhanced dynamic provider selection without service restarts
-- Updated architecture diagrams to reflect new model switching components
-- Added detailed examples of runtime model switching workflows
+- Updated model catalog system to support multiple models per provider instead of one entry per provider
+- Enhanced provider adapters with `model_series` property exposing complete model lineup
+- Added credential-based gating and model override capabilities via environment variables
+- Implemented per-session model pinning with fail-open degradation
+- Enhanced runtime model switching with request-time resolution and kernel rebuilding
+- Updated architecture diagrams to reflect new multi-model provider support
 
 ## Table of Contents
 1. Introduction
@@ -42,7 +42,7 @@
 10. Conclusion
 
 ## Introduction
-This document explains the provider registry and multi-provider support system used by the agent platform to abstract and orchestrate calls to multiple LLM backends. The system has been enhanced with runtime model switching capabilities including credential-gated model catalog discovery, per-session model pinning, and dynamic provider selection without service restarts. It covers the abstract base provider interface, the registration mechanism, dynamic loading strategies, built-in providers (OpenAI, DashScope, DeepSeek), configuration and authentication differences, custom provider implementation patterns, selection and fallback strategies, rate limiting and retry policies, error handling, health monitoring, circuit breaker patterns, and performance benchmarking guidance.
+This document explains the provider registry and multi-provider support system used by the agent platform to abstract and orchestrate calls to multiple LLM backends. The system has been significantly enhanced with a comprehensive model catalog system that supports multiple models per provider, credential-gated discovery, per-session model pinning, and dynamic provider selection without service restarts. It covers the abstract base provider interface, the registration mechanism, dynamic loading strategies, built-in providers (OpenAI, DashScope, DeepSeek), configuration and authentication differences, custom provider implementation patterns, selection and fallback strategies, rate limiting and retry policies, error handling, health monitoring, circuit breaker patterns, and performance benchmarking guidance.
 
 ## Project Structure
 The provider subsystem lives under the agent platform service with enhanced runtime model switching capabilities:
@@ -60,15 +60,15 @@ graph TB
 subgraph "Agent Service Providers"
 Base["Base Provider Interface"]
 Reg["Provider Registry"]
-OAI["OpenAI Provider"]
-DS["DashScope Provider"]
-DK["DeepSeek Provider"]
+OAI["OpenAI Provider<br/>Model Series: gpt-4o-mini, gpt-4o, o3-mini"]
+DS["DashScope Provider<br/>Model Series: qwen-plus, qwen-max, qwen3-max, qwen-turbo"]
+DK["DeepSeek Provider<br/>Model Series: deepseek-v4-flash, deepseek-chat, deepseek-reasoner"]
 end
 subgraph "Runtime Model Switching"
-Catalog["Model Catalog"]
-SessionSvc["Session Service"]
-Kernel["Agent Kernel"]
-Routes["API Routes"]
+Catalog["Model Catalog<br/>Multi-Model Discovery"]
+SessionSvc["Session Service<br/>Model Pinning"]
+Kernel["Agent Kernel<br/>Dynamic Rebuilding"]
+Routes["API Routes<br/>Request-Time Resolution"]
 end
 subgraph "Core Services"
 Cfg["Config & Env"]
@@ -109,9 +109,9 @@ Met --> Reg
 ## Core Components
 - Abstract base provider: Defines the contract all providers must implement, including chat completion, streaming, model listing, and health checks. It also centralizes common behaviors like retries, timeouts, and telemetry hooks.
 - Provider registry: A centralized lookup that registers available providers, resolves them by name or priority, and supports dynamic loading based on runtime settings.
-- Built-in providers: Concrete implementations for OpenAI, DashScope, and DeepSeek, each mapping the abstract interface to their respective SDKs and APIs.
-- **Enhanced**: Runtime model catalog: Credential-gated discovery of available models at startup, providing safe model enumeration without exposing credentials.
-- **Enhanced**: Per-session model pinning: Sessions can be pinned to specific models, enabling dynamic provider switching without service restarts.
+- **Enhanced**: Built-in providers with model series: Concrete implementations for OpenAI, DashScope, and DeepSeek, each exposing their complete model lineup through the `model_series` property.
+- **Enhanced**: Runtime model catalog: Credential-gated discovery of available models at startup, providing safe model enumeration without exposing credentials. Supports multiple models per provider with unique model IDs across the entire catalog.
+- **Enhanced**: Per-session model pinning: Sessions can be pinned to specific models, enabling dynamic provider switching without service restarts with fail-open degradation.
 - **Enhanced**: Dynamic model resolution: Request-time model selection with fallback mechanisms and fail-closed validation.
 - Configuration and environment: Centralized config and env loaders provide credentials, endpoints, and per-provider options. Runtime settings select active providers and policies.
 - Observability and metrics: Standardized instrumentation for latency, throughput, errors, and provider-specific metrics.
@@ -122,8 +122,9 @@ Key responsibilities:
 - Configurable retry/backoff and rate limiting
 - Health checks and readiness signals
 - Metrics and tracing for observability
-- **New**: Runtime model switching with credential safety
+- **New**: Multi-model provider support with credential safety
 - **New**: Session-based model affinity and persistence
+- **New**: Request-time model switching with kernel rebuilding
 
 **Section sources**
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
@@ -134,42 +135,35 @@ Key responsibilities:
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 
 ## Architecture Overview
-The provider architecture follows a clear separation between abstraction, registry, and concrete implementations, now enhanced with runtime model switching capabilities:
+The provider architecture follows a clear separation between abstraction, registry, and concrete implementations, now enhanced with multi-model support and runtime switching capabilities:
 
 ```mermaid
 classDiagram
 class BaseProvider {
-+chat(messages, options) Response
-+stream_chat(messages, options) Stream
-+list_models() Model[]
-+health_check() HealthStatus
-+configure(config) void
-+set_retry_policy(policy) void
-+set_rate_limit(limit) void
++provider_name string
++default_model string
++model_series tuple[str]
++build_model(settings) Any
++validate(settings) void
++describe(settings) string
 }
 class OpenAIProvider {
-+chat(messages, options) Response
-+stream_chat(messages, options) Stream
-+list_models() Model[]
-+health_check() HealthStatus
++provider_name = "openai"
++default_model = "gpt-4o-mini"
++model_series = ("gpt-4o-mini", "gpt-4o", "o3-mini")
++build_model(settings) OpenAIChatModel
 }
 class DashScopeProvider {
-+chat(messages, options) Response
-+stream_chat(messages, options) Stream
-+list_models() Model[]
-+health_check() HealthStatus
++provider_name = "dashscope"
++default_model = "qwen-plus"
++model_series = ("qwen-plus", "qwen-max", "qwen3-max", "qwen-turbo")
++build_model(settings) DashScopeChatModel
 }
 class DeepSeekProvider {
-+chat(messages, options) Response
-+stream_chat(messages, options) Stream
-+list_models() Model[]
-+health_check() HealthStatus
-}
-class ModelCatalog {
-+entries tuple[ModelCatalogEntry]
-+get(model_id) ModelCatalogEntry
-+default_entry() ModelCatalogEntry
-+public_models() dict
++provider_name = "deepseek"
++default_model = "deepseek-v4-flash"
++model_series = ("deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner")
++build_model(settings) DeepSeekChatModel
 }
 class ModelCatalogEntry {
 +id string
@@ -177,14 +171,15 @@ class ModelCatalogEntry {
 +provider RuntimeProvider
 +api_key string
 +model_name string
-+base_url string
++base_url string | None
 +default bool
++to_public_dict() dict
 }
-class ProviderRegistry {
-+register(name, provider_class) void
-+resolve(name_or_priority) BaseProvider
-+get_health_summary() Map~string,HealthStatus~
-+reload_from_settings(settings) void
+class ModelCatalog {
++entries tuple[ModelCatalogEntry]
++get(model_id) ModelCatalogEntry
++default_entry() ModelCatalogEntry
++public_models() dict
 }
 class AgentKernel {
 +_build_model(model_id) Model
@@ -194,23 +189,24 @@ class AgentKernel {
 BaseProvider <|-- OpenAIProvider
 BaseProvider <|-- DashScopeProvider
 BaseProvider <|-- DeepSeekProvider
-ProviderRegistry --> BaseProvider : "resolves"
-AgentKernel --> ModelCatalog : "validates"
 ModelCatalog --> ModelCatalogEntry : "contains"
+AgentKernel --> ModelCatalog : "validates"
 ```
 
 **Diagram sources**
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
-- [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
+- [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
+- [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
+- [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
 
 ## Detailed Component Analysis
 
 ### Abstract Base Provider
-The base provider defines the canonical interface for all LLM integrations. It standardizes:
+The base provider defines the canonical interface for all LLM integrations with enhanced multi-model support:
 - Chat completion and streaming
-- Model enumeration
+- Model enumeration through `model_series` property
 - Health checks
 - Configuration binding
 - Retry policy application
@@ -221,6 +217,7 @@ Implementation expectations:
 - Each provider implements the same method signatures to ensure interchangeability
 - Common logic such as request normalization, response parsing, and error translation is centralized where possible
 - Health checks return structured status with latency and availability indicators
+- **Enhanced**: `model_series` property exposes curated list of supported models for the provider
 
 **Section sources**
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
@@ -242,12 +239,13 @@ Resolution strategy:
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 
-### Built-in Providers
+### Built-in Providers with Multi-Model Support
 
 #### OpenAI Provider
 - Authentication: API key via environment or config; supports bearer token patterns
 - Endpoint: Uses OpenAI-compatible base URL if configured; otherwise defaults to official endpoint
 - Features: Chat completions, streaming responses, model listing
+- **Enhanced**: Model series: `("gpt-4o-mini", "gpt-4o", "o3-mini")` - default model first
 - Differences: Follows OpenAI schema strictly; maps tool-use and function-calling fields accordingly
 
 Configuration highlights:
@@ -265,6 +263,7 @@ Configuration highlights:
 - Authentication: API key via environment or config; may include project-level headers
 - Endpoint: DashScope API endpoint; supports region-specific routing
 - Features: Chat completions, streaming, model listing; may differ in payload shape
+- **Enhanced**: Model series: `("qwen-plus", "qwen-max", "qwen3-max", "qwen-turbo")` - default model first
 - Differences: Payload structure and field names vary from OpenAI; provider normalizes inputs and outputs
 
 Configuration highlights:
@@ -281,6 +280,7 @@ Configuration highlights:
 - Authentication: API key via environment or config; uses compatible client library
 - Endpoint: DeepSeek API endpoint; supports custom base URL if needed
 - Features: Chat completions, streaming, model listing; aligns closely with OpenAI-like contracts
+- **Enhanced**: Model series: `("deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner")` - default model first
 - Differences: Minor variations in response fields and error codes; normalized by provider layer
 
 Configuration highlights:
@@ -295,13 +295,15 @@ Configuration highlights:
 
 ### Runtime Model Switching System
 
-#### Credential-Gated Model Catalog Discovery
-The model catalog provides secure discovery of available models at runtime without exposing credentials:
+#### Enhanced Multi-Model Catalog Discovery
+The model catalog provides secure discovery of available models at runtime without exposing credentials, now supporting multiple models per provider:
 
-- **Startup Discovery**: Models are discovered at service startup based on environment variables
+- **Startup Discovery**: Models are discovered at service startup based on environment variables and provider `model_series` properties
 - **Credential Safety**: Only safe metadata (id, label, provider, default) is exposed via API
 - **Fail-Closed Validation**: Unknown model IDs are rejected before any processing occurs
 - **Public API**: `/api/v2/models` endpoint returns discovery-safe model information
+- **Multi-Model Support**: Each provider contributes its complete model lineup through the `model_series` property
+- **Unique Model IDs**: Model names must be unique across the entire catalog to prevent conflicts
 
 ```mermaid
 sequenceDiagram
@@ -309,16 +311,19 @@ participant Client as "Client"
 participant Gateway as "Gateway Layer"
 participant Catalog as "Model Catalog"
 participant Kernel as "Agent Kernel"
+participant Provider as "Selected Provider"
 Client->>Gateway : GET /api/v2/models
 Gateway->>Catalog : public_models()
-Catalog-->>Gateway : {models : [...], default : "openai"}
+Catalog-->>Gateway : {models : [...], default : "gpt-4o-mini"}
 Gateway-->>Client : Discovery-safe model list
-Client->>Gateway : POST /api/v2/chat (model : "deepseek")
-Gateway->>Catalog : get("deepseek")
-Catalog-->>Gateway : ModelCatalogEntry
-Gateway->>Kernel : stream_events(..., model_id="deepseek")
+Client->>Gateway : POST /api/v2/chat (model : "qwen-plus")
+Gateway->>Catalog : get("qwen-plus")
+Catalog-->>Gateway : ModelCatalogEntry(provider="dashscope")
+Gateway->>Kernel : stream_events(..., model_id="qwen-plus")
 Kernel->>Catalog : validate model exists
 Catalog-->>Kernel : Valid ✓
+Kernel->>Provider : Build model with credentials
+Provider-->>Kernel : Model instance
 Kernel-->>Gateway : Stream events with model attribution
 Gateway-->>Client : Responses with serving model
 ```
@@ -328,23 +333,25 @@ Gateway-->>Client : Responses with serving model
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 
-#### Per-Session Model Pinning
-Sessions maintain model affinity through persistent storage:
+#### Per-Session Model Pinning with Fail-Open Degradation
+Sessions maintain model affinity through persistent storage with robust error handling:
 
 - **Session Storage**: Model preferences stored per session in Redis/PostgreSQL
 - **Latest Wins**: Newer model selections override previous pins
-- **Fail-Open**: Store failures don't block chat operations
+- **Fail-Open**: Store failures don't block chat operations - degraded gracefully
 - **Graceful Degradation**: Revoked credentials automatically fall back to default
+- **Cross-Backend Support**: Works consistently across InMemory, Redis, and Postgres stores
 
 #### Dynamic Provider Selection Without Service Restarts
 The system enables runtime model switching through several mechanisms:
 
 - **Request-Time Resolution**: `request > pinned > default` priority order
-- **Kernel Rebuilding**: Agents are rebuilt when model switches occur
-- **State Preservation**: Conversation history maintained across model switches
+- **Kernel Rebuilding**: Agents are rebuilt when model switches occur to maintain conversation history
+- **State Preservation**: Conversation history maintained across model switches through state restoration
 - **Validation**: All model IDs validated against credential-gated catalog
+- **Model Attribution**: Serving model tracked through message_end events for audit trails
 
-**Updated** Enhanced with runtime model switching capabilities including credential-gated model catalog discovery, per-session model pinning, and dynamic provider selection without service restarts
+**Updated** Enhanced with comprehensive multi-model support including credential-gated model catalog discovery, per-session model pinning, and dynamic provider selection without service restarts
 
 **Section sources**
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
@@ -390,8 +397,9 @@ Gateway-->>Client : "Result"
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 
 ### Custom Provider Implementation
-To add a new provider:
+To add a new provider with multi-model support:
 - Implement the base provider interface methods
+- Define `model_series` property with curated list of supported models (default model first)
 - Configure authentication and endpoint details
 - Register the provider in the registry during initialization
 - Provide configuration keys for secrets and runtime options
@@ -401,10 +409,12 @@ Best practices:
 - Handle provider-specific error codes and map to standardized exceptions
 - Emit metrics and traces consistently
 - Implement robust health checks
+- **Enhanced**: Ensure `model_series` contains unique model names across all providers
 
 Example steps:
 - Create a new file under providers directory
 - Extend the base provider class
+- Define `model_series` with supported models
 - Add registration in the registry initialization
 - Update runtime settings to include the new provider
 
@@ -422,11 +432,13 @@ Fallback mechanisms:
 - Automatic failover to next provider in priority list upon failure
 - Circuit breaker to temporarily exclude failing providers
 - Graceful degradation by switching to a cheaper or more reliable provider
+- **Enhanced**: Model-level fallback within provider when specific models become unavailable
 
 Operational considerations:
 - Monitor health and error rates to adjust priorities dynamically
 - Use feature flags to enable/disable providers per tenant or region
 - Ensure idempotency and consistent retries across providers
+- **Enhanced**: Monitor model-specific performance for optimal routing decisions
 
 **Section sources**
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
@@ -447,6 +459,7 @@ Error handling:
 - Normalize provider-specific errors into unified exceptions
 - Distinguish between client errors (bad input) and server errors (transient)
 - Surface actionable diagnostics for debugging
+- **Enhanced**: Model-specific error handling with appropriate fallback strategies
 
 ```mermaid
 flowchart TD
@@ -479,6 +492,7 @@ Health monitoring:
 - Periodic health checks for each provider
 - Track latency percentiles and error rates
 - Aggregate health summaries for operational dashboards
+- **Enhanced**: Model-level health tracking for granular insights
 
 Circuit breaker:
 - States: Closed (normal), Open (failing), Half-Open (testing recovery)
@@ -488,6 +502,7 @@ Circuit breaker:
 Integration points:
 - Registry consults circuit breaker state before selecting a provider
 - Observability emits events for state transitions and failures
+- **Enhanced**: Model-specific circuit breaking for fine-grained control
 
 **Section sources**
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
@@ -495,16 +510,18 @@ Integration points:
 
 ### Performance Benchmarking
 Benchmarking guidelines:
-- Measure latency distributions (p50, p95, p99) per provider
+- Measure latency distributions (p50, p95, p99) per provider and per model
 - Track throughput under sustained load
-- Compare cost-per-token and success rates
+- Compare cost-per-token and success rates across models
 - Validate streaming vs non-streaming performance
+- **Enhanced**: Model-specific performance profiling for optimal selection
 
 Recommended approach:
 - Use synthetic workloads mimicking real traffic patterns
-- Instrument metrics consistently across providers
+- Instrument metrics consistently across providers and models
 - Run benchmarks in isolated environments to avoid noise
 - Report results in a standardized format for comparison
+- **Enhanced**: Track model switching overhead and cache effectiveness
 
 [No sources needed since this section provides general guidance]
 
@@ -513,24 +530,24 @@ Provider dependencies and relationships:
 - Base provider defines the contract; concrete providers depend on it
 - Registry depends on runtime settings and configuration
 - Observability and metrics are used by providers and registry for instrumentation
-- **New**: Model catalog depends on runtime settings and provider adapters
-- **New**: Session service integrates with store backends for model persistence
-- **New**: Kernel coordinates model switching and agent rebuilding
+- **Enhanced**: Model catalog depends on runtime settings and provider adapters with `model_series` support
+- **Enhanced**: Session service integrates with store backends for model persistence with fail-open degradation
+- **Enhanced**: Kernel coordinates model switching and agent rebuilding with state preservation
 
 ```mermaid
 graph TB
 Base["Base Provider"]
-OAI["OpenAI Provider"]
-DS["DashScope Provider"]
-DK["DeepSeek Provider"]
+OAI["OpenAI Provider<br/>model_series: 3 models"]
+DS["DashScope Provider<br/>model_series: 4 models"]
+DK["DeepSeek Provider<br/>model_series: 3 models"]
 Reg["Provider Registry"]
 Cfg["Config & Env"]
 RS["Runtime Settings"]
 Obs["Observability"]
 Met["Metrics"]
-Catalog["Model Catalog"]
-SessionSvc["Session Service"]
-Kernel["Agent Kernel"]
+Catalog["Model Catalog<br/>Multi-Model Support"]
+SessionSvc["Session Service<br/>Model Pinning"]
+Kernel["Agent Kernel<br/>Dynamic Rebuilding"]
 OAI --> Base
 DS --> Base
 DK --> Base
@@ -560,6 +577,9 @@ Kernel --> SessionSvc
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
+- [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
+- [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
 
 **Section sources**
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
@@ -570,12 +590,13 @@ Kernel --> SessionSvc
 
 ## Performance Considerations
 - Prefer streaming for large responses to reduce memory usage and improve perceived latency
-- Tune timeouts and retries per provider based on observed SLAs
+- Tune timeouts and retries per provider and per model based on observed SLAs
 - Cache model listings and static configurations where safe
 - Avoid unnecessary serialization overhead by reusing objects
 - Monitor resource utilization and scale horizontally under load
-- **New**: Minimize agent rebuilds by caching sessions effectively
-- **New**: Optimize model catalog lookups for high-throughput scenarios
+- **Enhanced**: Minimize agent rebuilds by caching sessions effectively and optimizing model switching
+- **Enhanced**: Optimize model catalog lookups for high-throughput scenarios with proper indexing
+- **Enhanced**: Monitor model-specific performance to inform routing decisions
 
 [No sources needed since this section provides general guidance]
 
@@ -586,19 +607,21 @@ Common issues and resolutions:
 - Provider unavailability: Inspect health checks and circuit breaker states; switch to fallback provider
 - Inconsistent responses: Validate normalization layers; compare provider schemas
 - High latency: Analyze metrics and traces; identify bottlenecks in network or provider side
-- **New**: Model switching failures: Check credential-gated catalog validity and session pinning
-- **New**: Session affinity issues: Verify store backend connectivity and model persistence
+- **Enhanced**: Model switching failures: Check credential-gated catalog validity and session pinning
+- **Enhanced**: Session affinity issues: Verify store backend connectivity and model persistence
+- **Enhanced**: Model conflicts: Resolve duplicate model IDs across different providers
 
 Debugging tips:
 - Enable detailed logging for provider interactions
 - Use health summary endpoints to assess provider status
 - Correlate metrics with deployment changes and configuration updates
-- **New**: Monitor model catalog discovery logs for credential issues
-- **New**: Track session model pinning operations for debugging affinity problems
+- **Enhanced**: Monitor model catalog discovery logs for credential issues and model series validation
+- **Enhanced**: Track session model pinning operations for debugging affinity problems
+- **Enhanced**: Use model attribution in message_end events to verify serving model selection
 
 **Section sources**
 - [test_runtime_providers.py](file://products/agent-platform/tests/test_runtime_providers.py)
 - [test_model_switching.py](file://products/agent-platform/tests/test_model_switching.py)
 
 ## Conclusion
-The provider registry and multi-provider support system provide a robust, extensible foundation for integrating multiple LLM backends. The enhanced runtime model switching capabilities add significant flexibility, allowing dynamic provider selection without service restarts while maintaining security through credential-gated discovery and session-based model affinity. By standardizing interfaces, centralizing configuration, enforcing health-aware selection, and implementing runtime model switching, the system ensures reliability, flexibility, and observability across diverse providers. Following the guidance in this document will help you implement custom providers, optimize performance, and maintain high availability in production environments.
+The provider registry and multi-provider support system provide a robust, extensible foundation for integrating multiple LLM backends. The enhanced runtime model switching capabilities with multi-model support add significant flexibility, allowing dynamic provider selection without service restarts while maintaining security through credential-gated discovery and session-based model affinity. Each provider now exposes its complete model lineup through the `model_series` property, enabling fine-grained model selection and optimization. By standardizing interfaces, centralizing configuration, enforcing health-aware selection, and implementing comprehensive runtime model switching with multi-model support, the system ensures reliability, flexibility, and observability across diverse providers. Following the guidance in this document will help you implement custom providers, optimize performance, and maintain high availability in production environments.

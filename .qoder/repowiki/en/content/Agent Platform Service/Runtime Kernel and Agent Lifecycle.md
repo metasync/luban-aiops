@@ -25,13 +25,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added runtime model resolution logic with credential-gated catalog validation and fail-closed unknown model handling
-- Implemented session-level model persistence through pin_session_model() for model affinity across turns
-- Enhanced streaming event attribution to serving models with model field on message_end frames
-- Integrated model switching detection in ensure_agent() for automatic agent rebuild when model changes
-- Added comprehensive model catalog system with provider-specific configuration and public discovery endpoints
-- Updated routes to support per-turn model selection with request > pinned > default resolution order
-- Enhanced test coverage for model switching scenarios including all three session store backends
+- Enhanced model resolution logic with `_normalize_model_id()` method supporting both legacy provider names and new model names
+- Improved session management tracking normalized model IDs through `pin_session_model()` for consistent model affinity
+- Better error handling for unknown model identifiers with fail-closed validation throughout the request pipeline
+- Updated model catalog system with legacy alias support for backward compatibility with pre-SPEC-026 sessions
+- Enhanced streaming event attribution to serving models with normalized model IDs in message_end frames
+- Integrated model switching detection in `ensure_agent()` for automatic agent rebuild when model changes occur
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -45,22 +44,21 @@
 9. [Conclusion](#conclusion)
 
 ## Introduction
-This document explains the runtime kernel and agent lifecycle management within the agent platform. It covers how the execution engine initializes, manages agent states, processes runtime settings and environment variables, supports dynamic configuration updates, and handles errors, resource cleanup, and graceful shutdown. The system now includes sophisticated AgentScope 2.0.6 middleware integration with OpenTelemetry tracing, reply token budget control, enhanced toolkit management with contextvar-based token delegation, per-user toolkit closures, graceful degradation mechanisms, comprehensive state persistence capabilities, **newly added** Human-in-the-Loop (HITL) confirmation bridging that enables operator approval workflows for sensitive tool executions, **newly added** comprehensive evidence capture and persistence functionality for tool call and result evidence during streaming operations, and **newly added** runtime model resolution logic with credential-gated catalog validation and session-level model persistence. **Updated**: The runtime kernel now integrates with AgentScope 2.0.6 middleware system, supporting OpenTelemetry tracing via TracingMiddleware, reply budget control, enhanced toolkit management with contextvar-based token delegation, HITL confirmation bridging for human approval workflows, evidence capture and persistence for streaming tool calls, runtime model switching with fail-closed validation, and session-level model affinity tracking while maintaining robust operation even when authentication tokens are unavailable or state persistence fails.
+This document explains the runtime kernel and agent lifecycle management within the agent platform. It covers how the execution engine initializes, manages agent states, processes runtime settings and environment variables, supports dynamic configuration updates, and handles errors, resource cleanup, and graceful shutdown. The system now includes sophisticated AgentScope 2.0.6 middleware integration with OpenTelemetry tracing, reply token budget control, enhanced toolkit management with contextvar-based token delegation, per-user toolkit closures, graceful degradation mechanisms, comprehensive state persistence capabilities, **newly added** Human-in-the-Loop (HITL) confirmation bridging that enables operator approval workflows for sensitive tool executions, **newly added** comprehensive evidence capture and persistence functionality for tool call and result evidence during streaming operations, and **newly added** runtime model resolution logic with credential-gated catalog validation and session-level model persistence. **Updated**: The runtime kernel now integrates with AgentScope 2.0.6 middleware system, supporting OpenTelemetry tracing via TracingMiddleware, reply budget control, enhanced toolkit management with contextvar-based token delegation, HITL confirmation bridging for human approval workflows, evidence capture and persistence for streaming tool calls, runtime model switching with fail-closed validation, and session-level model affinity tracking while maintaining robust operation even when authentication tokens are unavailable or state persistence fails. **Enhanced**: The model resolution system now includes a `_normalize_model_id()` method that supports both legacy provider names and new model names, ensuring backward compatibility while providing better error handling for unknown model identifiers.
 
 ## Project Structure
 The runtime kernel and lifecycle are implemented primarily under the agent platform product. Key modules include:
-- Runtime kernel: orchestrates agent lifecycle events and state transitions with enhanced token handling, state persistence, HITL confirmation bridging, **newly added** evidence capture and persistence for streaming operations, and **newly added** runtime model resolution with credential-gated catalog validation
+- Runtime kernel: orchestrates agent lifecycle events and state transitions with enhanced token handling, state persistence, HITL confirmation bridging, **newly added** evidence capture and persistence for streaming operations, and **enhanced** runtime model resolution with legacy name normalization and improved error handling
 - Middleware system: AgentScope 2.0.6 middleware stack with permission control, evidence emission, tracing, and budget management
 - State persistence layer: pluggable AgentStateStore protocol with memory and Postgres backends supporting TTL-based cleanup
 - Evidence persistence layer: dedicated evidence store with in-memory and Postgres backends for capturing tool call and result evidence during streaming
 - HITL confirmation system: ConfirmationRegistry for managing pending confirmations with TTL expiration and single-flight decision processing
-- Model catalog system: credential-gated model discovery with provider-specific configuration and public API endpoints
-- Session model persistence: session-level model affinity tracking through pin_session_model() for consistent model routing
+- Model catalog system: credential-gated model discovery with provider-specific configuration, public API endpoints, and legacy alias support for backward compatibility
+- Session model persistence: session-level model affinity tracking through pin_session_model() for consistent model routing across turns and service restarts
 - Tool gateway integration: provides token-aware tool discovery and execution with rotation support using contextvar-based delegation
 - Runtime settings: loads and validates configuration from files and environment variables, including HITL confirmation timeout settings and **newly added** evidence persistence configuration
 - Services: runtime service for orchestration, session service for durable state, and session store for persistence
-- Metrics and observability: comprehensive monitoring for agent state operations, system health, HITL confirmation metrics, **newly added** evidence store performance metrics, and **newly added** model switching metrics
-- V2 API endpoints: structured output support, enhanced health checks reporting state store status, HITL confirmation endpoints, and **newly added** model catalog and per-turn model selection
+- Metrics and observability: comprehensive monitoring for agent state operations, system health, HITL confirmation metrics, **newly added** evidence store performance metrics, and **enhanced** model switching metrics with legacy alias tracking
 
 ```mermaid
 graph TB
@@ -104,20 +102,22 @@ D --> KK["Model Catalog System"]
 KK --> LL["Credential-Gated Discovery"]
 LL --> MM["Provider Configuration"]
 MM --> NN["Public API Endpoints"]
-D --> OO["Session Model Persistence"]
-OO --> PP["pin_session_model()"]
-PP --> QQ["Model Affinity Tracking"]
-D --> RR["Metrics Tracking"]
-RR --> SS["Error Counters"]
-RR --> TT["Backend Gauges"]
-RR --> UU["HITL Metrics"]
-RR --> VV["Evidence Metrics"]
-RR --> WW["Model Switching Metrics"]
-D --> XX["V2 Chat Endpoints"]
-XX --> YY["Structured Output"]
-XX --> ZZ["Health Checks"]
-XX --> AAA["HITL Confirm Endpoint"]
-XX --> BBB["Model Catalog Endpoint"]
+KK --> OO["Legacy Alias Support"]
+OO --> PP["Backward Compatibility"]
+D --> QQ["Session Model Persistence"]
+QQ --> RR["pin_session_model()"]
+RR --> SS["Normalized Model ID Tracking"]
+D --> TT["Metrics Tracking"]
+TT --> UU["Error Counters"]
+TT --> VV["Backend Gauges"]
+TT --> WW["HITL Metrics"]
+TT --> XX["Evidence Metrics"]
+TT --> YY["Model Switching Metrics"]
+D --> ZZ["V2 Chat Endpoints"]
+ZZ --> AAA["Structured Output"]
+ZZ --> BBB["Health Checks"]
+ZZ --> CCC["HITL Confirm Endpoint"]
+ZZ --> DDD["Model Catalog Endpoint"]
 end
 ```
 
@@ -144,34 +144,34 @@ end
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 
 ## Core Components
-- Runtime Kernel: Central coordinator for agent lifecycle events (start, execute, pause, resume, terminate), maintaining per-agent state, coordinating with services, managing delegated token handling for secure tool execution, implementing state persistence through the AgentStateStore protocol, **newly added** HITL confirmation bridging for human approval workflows, **newly added** evidence capture and persistence for streaming tool calls, and **newly added** runtime model resolution with credential-gated catalog validation.
+- Runtime Kernel: Central coordinator for agent lifecycle events (start, execute, pause, resume, terminate), maintaining per-agent state, coordinating with services, managing delegated token handling for secure tool execution, implementing state persistence through the AgentStateStore protocol, **newly added** HITL confirmation bridging for human approval workflows, **newly added** evidence capture and persistence for streaming tool calls, and **enhanced** runtime model resolution with legacy name normalization and improved error handling.
 - AgentScope Middleware System: Sophisticated middleware stack including GatewayPermissionMiddleware for headless stream permission control, ToolEvidenceMiddleware for evidence frame emission, optional TracingMiddleware for OpenTelemetry tracing, and ReplyBudgetControlMiddleware for token budget management.
 - **NEW** HITL Confirmation System: Complete Human-in-the-Loop confirmation framework with ConfirmationRegistry for managing pending confirmations, TTL-based expiration, single-flight decision processing, and seamless integration with AgentScope's RequireUserConfirmEvent handling.
 - **NEW** Evidence Persistence System: Comprehensive evidence capture and persistence for tool call and result frames during streaming operations, with size caps, budget enforcement, and best-effort failure handling.
-- **NEW** Model Catalog System: Credential-gated model discovery with provider-specific configuration, public API endpoints for model listing, and fail-closed validation for unknown model IDs.
-- **NEW** Session Model Persistence: Session-level model affinity tracking through pin_session_model() for consistent model routing across turns and service restarts.
+- **NEW** Model Catalog System: Credential-gated model discovery with provider-specific configuration, public API endpoints for model listing, fail-closed validation for unknown model IDs, and **enhanced** legacy alias support for backward compatibility with pre-SPEC-026 sessions.
+- **NEW** Session Model Persistence: Session-level model affinity tracking through pin_session_model() for consistent model routing across turns and service restarts, with **enhanced** normalized model ID tracking.
 - AgentStateStore Protocol: Pluggable state persistence interface supporting multiple backends (in-memory and Postgres) with TTL-based cleanup and graceful degradation when backends fail.
 - ContextVar-Based Token Delegation: Enhanced toolkit management using DELEGATED_TOKEN contextvar for per-request token scoping, enabling cached toolkits to work across portal token refresh.
 - Gateway Tools Integration: Provides token-aware tool discovery and execution with support for dynamic token rotation during long-running sessions.
 - Runtime Settings: Configuration loader that merges defaults, file-based settings, and environment variables; exposes typed accessors and supports reloads, including HITL confirmation timeout settings and **newly added** evidence persistence configuration.
 - Environment and Config Utilities: Provide strongly-typed access to runtime settings and environment variables, with validation and fallbacks.
 - Runtime Service: Orchestrates high-level operations such as creating sessions, invoking agents, and managing long-running tasks.
-- Session Service and Store: Manage durable session state, including persistence and retrieval, ensuring consistency across restarts and coordinating with agent state cleanup, **newly added** session-level model persistence.
+- Session Service and Store: Manage durable session state, including persistence and retrieval, ensuring consistency across restarts and coordinating with agent state cleanup, **newly added** session-level model persistence with **enhanced** normalized model ID tracking.
 - Token Handler: Manages delegated token lifecycle and validation for secure tool execution with rotation support.
 - Per-User Toolkits: Provides isolated tool execution contexts based on user identity and permissions with token rotation awareness.
 - Graceful Degradation: Ensures system continues operating with limited functionality when authentication tokens are unavailable or state persistence fails.
-- Metrics and Observability: Comprehensive monitoring for agent state operations, backend selection, error rates, system health indicators, **newly added** HITL confirmation metrics, **newly added** evidence store performance metrics, and **newly added** model switching metrics.
+- Metrics and Observability: Comprehensive monitoring for agent state operations, backend selection, error rates, system health indicators, **newly added** HITL confirmation metrics, **newly added** evidence store performance metrics, and **enhanced** model switching metrics with legacy alias tracking.
 
 Key responsibilities:
-- Initialization: Load settings, validate environment, create dependencies, boot services, initialize token handlers, configure state persistence backends, set up middleware stack, **newly added** initialize HITL confirmation registry, **newly added** configure evidence persistence, and **newly added** build model catalog.
-- Lifecycle Management: Handle agent state transitions and event-driven execution with token-aware tool execution, rotation support, persistent state management, middleware processing, **newly added** HITL confirmation bridging for human approval workflows, **newly added** evidence capture during streaming operations, and **newly added** runtime model resolution with fail-closed validation.
-- Configuration: Support dynamic updates without restarting the process where feasible, including middleware composition based on settings, HITL confirmation timeout configuration, **newly added** evidence persistence settings, and **newly added** model catalog configuration.
-- Error Handling: Robust error propagation, retries, safe cleanup, graceful degradation when tokens are missing, rotated, or state persistence fails, **newly added** proper handling of expired confirmations and owner mismatches, **newly added** best-effort evidence persistence failures, and **newly added** fail-closed model ID validation.
-- Performance: Concurrency control, resource pooling, efficient memory usage, optimized token validation with rotation handling, efficient state persistence with TTL cleanup, **newly added** efficient evidence capture with minimal overhead, **newly added** evidence size caps and budget enforcement, and **newly added** model switching detection with automatic agent rebuild.
-- State Persistence: Save and restore agent conversation state across service restarts using pluggable backends with automatic TTL-based cleanup, **newly added** session-level model persistence for model affinity tracking.
+- Initialization: Load settings, validate environment, create dependencies, boot services, initialize token handlers, configure state persistence backends, set up middleware stack, **newly added** initialize HITL confirmation registry, **newly added** configure evidence persistence, and **enhanced** build model catalog with legacy alias support.
+- Lifecycle Management: Handle agent state transitions and event-driven execution with token-aware tool execution, rotation support, persistent state management, middleware processing, **newly added** HITL confirmation bridging for human approval workflows, **newly added** evidence capture during streaming operations, and **enhanced** runtime model resolution with legacy name normalization and improved error handling.
+- Configuration: Support dynamic updates without restarting the process where feasible, including middleware composition based on settings, HITL confirmation timeout configuration, **newly added** evidence persistence settings, and **enhanced** model catalog configuration with legacy alias support.
+- Error Handling: Robust error propagation, retries, safe cleanup, graceful degradation when tokens are missing, rotated, or state persistence fails, **newly added** proper handling of expired confirmations and owner mismatches, **newly added** best-effort evidence persistence failures, and **enhanced** fail-closed model ID validation with legacy alias resolution.
+- Performance: Concurrency control, resource pooling, efficient memory usage, optimized token validation with rotation handling, efficient state persistence with TTL cleanup, **newly added** efficient evidence capture with minimal overhead, **newly added** evidence size caps and budget enforcement, and **enhanced** model switching detection with automatic agent rebuild and legacy alias optimization.
+- State Persistence: Save and restore agent conversation state across service restarts using pluggable backends with automatic TTL-based cleanup, **newly added** session-level model persistence for model affinity tracking with **enhanced** normalized model ID storage.
 - **NEW** HITL Confirmation Processing: Detect RequireUserConfirmEvent from AgentScope, park active replies, emit confirmation_request frames, manage confirmation lifecycle with TTL expiration, and resume parked replies with operator decisions.
 - **NEW** Evidence Capture and Persistence: Capture tool_call and tool_result frames during streaming operations, apply size caps and budget enforcement, persist evidence best-effort without affecting turn completion, and provide replay capability for session evidence.
-- **NEW** Runtime Model Resolution: Validate model IDs against credential-gated catalog, resolve per-turn model selection with request > pinned > default priority, attribute serving model to streaming events, and automatically rebuild agents when model switches occur.
+- **ENHANCED** Runtime Model Resolution: Validate model IDs against credential-gated catalog with legacy alias support, resolve per-turn model selection with request > pinned > default priority, attribute serving model to streaming events with normalized IDs, automatically rebuild agents when model switches occur, and provide better error handling for unknown model identifiers.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -184,7 +184,7 @@ Key responsibilities:
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 
 ## Architecture Overview
-The runtime architecture centers around a kernel that coordinates lifecycle events through services and persists state via sessions with enhanced state persistence capabilities. Configuration is loaded at startup and can be refreshed dynamically. The enhanced architecture now includes AgentScope 2.0.6 middleware integration for OpenTelemetry tracing and reply budget control, contextvar-based token delegation for secure tool execution, comprehensive state persistence through the AgentStateStore protocol, TTL-based cleanup mechanisms, structured output support for v2 chat endpoints, **newly added** complete HITL confirmation bridging that enables human approval workflows for sensitive tool executions, **newly added** comprehensive evidence capture and persistence for streaming tool calls, and **newly added** runtime model resolution with credential-gated catalog validation and session-level model persistence.
+The runtime architecture centers around a kernel that coordinates lifecycle events through services and persists state via sessions with enhanced state persistence capabilities. Configuration is loaded at startup and can be refreshed dynamically. The enhanced architecture now includes AgentScope 2.0.6 middleware integration for OpenTelemetry tracing and reply budget control, contextvar-based token delegation for secure tool execution, comprehensive state persistence through the AgentStateStore protocol, TTL-based cleanup mechanisms, structured output support for v2 chat endpoints, **newly added** complete HITL confirmation bridging that enables human approval workflows for sensitive tool executions, **newly added** comprehensive evidence capture and persistence for streaming tool calls, and **enhanced** runtime model resolution with credential-gated catalog validation, legacy alias support, and session-level model persistence.
 
 ```mermaid
 sequenceDiagram
@@ -201,17 +201,18 @@ participant RSvc as "RuntimeService"
 participant SSvc as "SessionService"
 participant Store as "SessionStore"
 participant Gateway as "Tool Gateway"
-Note over Client,Store : Normal Flow with Model Resolution and Evidence Capture
+Note over Client,Store : Normal Flow with Enhanced Model Resolution and Legacy Alias Support
 Client->>API : "POST /api/v2/chat"
-API->>Catalog : "validate model_id"
-Catalog-->>API : "known/unknown"
+API->>Catalog : "validate model_id with legacy aliases"
+Catalog-->>API : "known/unknown (with normalization)"
 alt Unknown model
 API-->>Client : "422 error"
 else Known model
-API->>SSvc : "pin_session_model(resolved_model)"
-API->>Kernel : "reply_stream(message, model_id)"
+API->>SSvc : "pin_session_model(normalized_model)"
+API->>Kernel : "reply_stream(message, normalized_model)"
 Kernel->>Kernel : "_count_user_turns(agent)"
-Kernel->>Kernel : "_build_model(model_id)"
+Kernel->>Kernel : "_build_model(normalized_model)"
+Kernel->>Kernel : "_normalize_model_id(model_id)"
 Kernel->>Agent : "reply_stream(user_message)"
 Agent-->>Kernel : "events (text, tool_calls, etc.)"
 Kernel->>Kernel : "collect evidence_frames"
@@ -235,9 +236,9 @@ Kernel->>EvidenceStore : "_persist_evidence(frames)"
 EvidenceStore-->>Kernel : "best-effort persistence"
 Kernel->>StateStore : "save_state(session_id, state)"
 StateStore-->>Kernel : "ok"
-Kernel-->>API : "content + structured_output + model"
+Kernel-->>API : "content + structured_output + normalized_model"
 API-->>Client : "response"
-Note over Client,Store : HITL Approval Flow with Model Attribution
+Note over Client,Store : HITL Approval Flow with Normalized Model Attribution
 Client->>API : "POST /api/v2/chat/confirm"
 API->>Registry : "claim(confirm_id)"
 Registry-->>API : "pending confirmation"
@@ -247,7 +248,7 @@ Kernel->>Agent : "reply_stream(UserConfirmResultEvent)"
 Agent-->>Kernel : "resumed events"
 Kernel->>EvidenceStore : "_persist_evidence(resumed_frames)"
 EvidenceStore-->>Kernel : "best-effort persistence"
-Kernel-->>API : "confirmation_result + resumed events + model"
+Kernel-->>API : "confirmation_result + resumed events + normalized_model"
 API-->>Client : "SSE : confirmation_result + events"
 end
 ```
@@ -264,12 +265,12 @@ end
 
 ## Detailed Component Analysis
 
-### Runtime Kernel with State Persistence, Middleware Integration, HITL Confirmation Bridging, Evidence Capture, and Runtime Model Resolution
-The runtime kernel manages agent lifecycle events and enforces state transitions with comprehensive state persistence capabilities, AgentScope 2.0.6 middleware integration, **newly added** complete HITL confirmation bridging for human approval workflows, **newly added** comprehensive evidence capture and persistence for streaming tool calls, and **newly added** runtime model resolution with credential-gated catalog validation. It coordinates with the runtime service to perform work, uses the session service to persist state changes, integrates with the AgentStateStore protocol for conversation durability, includes enhanced delegated token handling for secure tool execution with rotation support, applies a sophisticated middleware stack for permission control, evidence emission, tracing, and budget management, **newly added** seamlessly bridges AgentScope's RequireUserConfirmEvent into operator approval workflows, **newly added** captures and persists tool call and result evidence during streaming operations, and **newly added** resolves and validates model IDs with fail-closed behavior.
+### Runtime Kernel with State Persistence, Middleware Integration, HITL Confirmation Bridging, Evidence Capture, and Enhanced Runtime Model Resolution
+The runtime kernel manages agent lifecycle events and enforces state transitions with comprehensive state persistence capabilities, AgentScope 2.0.6 middleware integration, **newly added** complete HITL confirmation bridging for human approval workflows, **newly added** comprehensive evidence capture and persistence for streaming tool calls, and **enhanced** runtime model resolution with legacy name normalization and improved error handling. It coordinates with the runtime service to perform work, uses the session service to persist state changes, integrates with the AgentStateStore protocol for conversation durability, includes enhanced delegated token handling for secure tool execution with rotation support, applies a sophisticated middleware stack for permission control, evidence emission, tracing, and budget management, **newly added** seamlessly bridges AgentScope's RequireUserConfirmEvent into operator approval workflows, **newly added** captures and persists tool call and result evidence during streaming operations, and **enhanced** resolves and validates model IDs with legacy alias support and fail-closed behavior.
 
 Lifecycle events and typical transitions:
-- Start: Initialize resources, load settings, prepare context, set up token handlers, configure state persistence backends, build middleware stack, **newly added** initialize HITL confirmation registry, **newly added** configure evidence persistence, and **newly added** build model catalog.
-- Execute: Transition to running, validate delegated tokens, restore persisted state, invoke agent logic with per-user toolkits, apply middleware chain, handle results or errors, save state after completion, **newly added** capture evidence frames during streaming, **newly added** detect and bridge RequireUserConfirmEvent for human approval, and **newly added** resolve model ID with catalog validation.
+- Start: Initialize resources, load settings, prepare context, set up token handlers, configure state persistence backends, build middleware stack, **newly added** initialize HITL confirmation registry, **newly added** configure evidence persistence, and **enhanced** build model catalog with legacy alias support.
+- Execute: Transition to running, validate delegated tokens, restore persisted state, invoke agent logic with per-user toolkits, apply middleware chain, handle results or errors, save state after completion, **newly added** capture evidence frames during streaming, **newly added** detect and bridge RequireUserConfirmEvent for human approval, and **enhanced** resolve model ID with legacy alias support and improved error handling.
 - Pause: Suspend execution, save checkpoint, transition to paused.
 - Resume: Restore checkpoint, re-validate tokens if needed, transition back to running.
 - Terminate: Clean up resources, finalize state, revoke tokens, delete persisted state, transition to terminated.
@@ -308,13 +309,15 @@ Enhanced state persistence features:
 - Best-effort failure handling: Evidence persistence failures are logged but never affect the main streaming flow
 - Metrics tracking: Records evidence store write success/failure rates and frame counts for operational visibility
 
-**NEW** Runtime Model Resolution:
-- **_build_model()**: Validates model_id against credential-gated catalog, raises UnknownModelError for unknown IDs (fail-closed), and builds provider-specific model instances
+**ENHANCED** Runtime Model Resolution:
+- **_normalize_model_id()**: Canonical id bound to a turn that supports both legacy provider names and new model names, resolving bare provider names through the catalog alias map to concrete default-model entries
+- **_build_model()**: Validates model_id against credential-gated catalog with legacy alias support, raises UnknownModelError for unknown IDs (fail-closed), and builds provider-specific model instances
 - **ensure_agent()**: Detects model switches by comparing bound model ID with requested model ID, automatically rebuilds agent with restored state when model changes
-- **stream_events()**: Attributes serving model to message_end frames with model field for downstream telemetry and audit trails
+- **stream_events()**: Attributes serving model to message_end frames with normalized model IDs for downstream telemetry and audit trails
 - **UnknownModelError**: Custom exception class for failed model resolution with clear error messaging
 - Fail-closed validation: Unknown model IDs are rejected before any agent work begins, preventing silent fallbacks to default models
 - Provider-specific model building: Supports different providers (openai, deepseek, dashscope) with appropriate credential handling
+- Legacy alias support: Backward compatibility with pre-SPEC-026 sessions that use bare provider names as model IDs
 
 ```mermaid
 stateDiagram-v2
@@ -333,7 +336,7 @@ Completed --> Terminating : "terminate"
 Failed --> Terminating : "terminate"
 Paused --> Terminating : "terminate"
 Terminating --> [*]
-note right of Running : "Save state after each turn\nRestore state on next use\nApply middleware stack\nBridge HITL confirmations\nCapture evidence frames\nResolve model ID\nAttribute serving model"
+note right of Running : "Save state after each turn\nRestore state on next use\nApply middleware stack\nBridge HITL confirmations\nCapture evidence frames\nResolve model ID with legacy aliases\nAttribute serving model"
 note right of Parked : "Awaiting operator decision\nTTL-based expiration\nSingle-flight decisions\nPersist pre-park evidence"
 note right of Completed : "Persist final state\nClean up resources\nPersist post-stream evidence"
 ```
@@ -350,10 +353,11 @@ Key behaviors:
 - **Updated**: Middleware stack application with permission control, evidence emission, optional tracing, and budget management.
 - **NEW**: HITL confirmation bridging that seamlessly integrates with existing streaming infrastructure, providing operator approval workflows for sensitive tool executions while maintaining all existing functionality.
 - **NEW**: Evidence capture and persistence that tracks tool call and result frames during streaming operations with size caps, budget enforcement, and best-effort failure handling.
-- **NEW**: Runtime model resolution with credential-gated catalog validation, fail-closed unknown model handling, and automatic agent rebuild on model switches.
+- **ENHANCED**: Runtime model resolution with credential-gated catalog validation, legacy alias support for backward compatibility, fail-closed unknown model handling, automatic agent rebuild on model switches, and improved error handling for unknown model identifiers.
 
 **Section sources**
 - [runtime_kernel.py:216-242](file://products/agent-platform/src/agent_service/runtime_kernel.py#L216-L242)
+- [runtime_kernel.py:248-262](file://products/agent-platform/src/agent_service/runtime_kernel.py#L248-L262)
 - [runtime_kernel.py:547-614](file://products/agent-platform/src/agent_service/runtime_kernel.py#L547-L614)
 - [runtime_kernel.py:735-883](file://products/agent-platform/src/agent_service/runtime_kernel.py#L735-L883)
 - [runtime_kernel.py:886-1106](file://products/agent-platform/src/agent_service/runtime_kernel.py#L886-L1106)
@@ -488,8 +492,8 @@ Implementation details:
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [test_agent_state_store.py](file://products/agent-platform/tests/test_agent_state_store.py)
 
-### Model Catalog System and Session Model Persistence
-The **newly added** model catalog system provides credential-gated model discovery with provider-specific configuration and public API endpoints. Session-level model persistence ensures consistent model routing across turns and service restarts.
+### Model Catalog System and Session Model Persistence with Enhanced Legacy Support
+The **newly added** model catalog system provides credential-gated model discovery with provider-specific configuration and public API endpoints. Session-level model persistence ensures consistent model routing across turns and service restarts. **Enhanced** with legacy alias support for backward compatibility with pre-SPEC-026 sessions.
 
 Key features:
 - **NEW** ModelCatalog: Immutable lookup over startup-derived catalog entries with provider-specific configuration
@@ -498,23 +502,27 @@ Key features:
 - **NEW** Session Model Persistence: pin_session_model() function persists resolved model to session record for affinity tracking
 - **NEW** Fail-Closed Validation: Unknown model IDs raise HTTPException with 422 status code before any agent work begins
 - **NEW** Resolution Order: Request model > pinned model > default model with graceful degradation when catalog entries are revoked
+- **ENHANCED** Legacy Alias Support: Maps bare provider names to corresponding default-model entries for backward compatibility
+- **ENHANCED** Normalized Model ID Tracking: All model references are normalized to concrete catalog entry IDs for consistency
 
 Implementation details:
 - `build_model_catalog()`: Scans supported providers and builds entries from environment variables
 - `ModelCatalogEntry`: Dataclass representing selectable model with id, label, provider, and metadata
 - `to_public_dict()`: Returns discovery-safe view without credentials or base URLs
 - `pin_session_model()`: Best-effort persistence of resolved model to session store
-- `_resolve_model()`: Route-level function implementing resolution order with validation
+- `_resolve_model()`: Route-level function implementing resolution order with validation and legacy alias support
+- `_legacy_aliases()`: Creates mapping from bare provider names to their default-model entries
 - Provider-specific configuration: Supports openai, deepseek, dashscope with appropriate environment variables
+- Legacy compatibility: Pre-SPEC-026 sessions with provider-name ids continue working without data migration
 
 **Section sources**
-- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [model_catalog.py:188-211](file://products/agent-platform/src/agent_service/services/model_catalog.py#L188-L211)
 - [session_service.py:105-120](file://products/agent-platform/src/agent_service/services/session_service.py#L105-L120)
 - [routes.py:112-131](file://products/agent-platform/src/agent_service/api/v2/routes.py#L112-L131)
 - [session_store.py:71-77](file://products/agent-platform/src/agent_service/services/session_store.py#L71-L77)
 
-### V2 Chat Endpoints with Structured Output, HITL Confirmation, Evidence Access, and Model Selection
-The v2 chat endpoints provide enhanced functionality including structured output support, comprehensive health checks, improved error handling, **newly added** HITL confirmation endpoints, **newly added** evidence access capabilities, and **newly added** per-turn model selection with credential-gated validation. These endpoints integrate with the state persistence layer and provide better observability into system health.
+### V2 Chat Endpoints with Structured Output, HITL Confirmation, Evidence Access, and Enhanced Model Selection
+The v2 chat endpoints provide enhanced functionality including structured output support, comprehensive health checks, improved error handling, **newly added** HITL confirmation endpoints, **newly added** evidence access capabilities, and **enhanced** per-turn model selection with credential-gated validation and legacy alias support. These endpoints integrate with the state persistence layer and provide better observability into system health.
 
 Key features:
 - **Updated**: Structured output support through response_schema parameter enabling validated structured responses
@@ -530,21 +538,25 @@ Key features:
 - **NEW**: Model catalog endpoint (`/api/v2/models`) for credential-gated model discovery
 - **NEW**: Per-turn model selection with request > pinned > default resolution order
 - **NEW**: Fail-closed validation for unknown model IDs with 422 status codes
+- **ENHANCED**: Legacy alias support for backward compatibility with pre-SPEC-026 sessions
+- **ENHANCED**: Normalized model ID tracking throughout the request pipeline
 
 Implementation details:
-- `chat()`: Handles blocking chat requests with optional structured output validation and model resolution
+- `chat()`: Handles blocking chat requests with optional structured output validation and enhanced model resolution
 - `chat_stream()`: Provides streaming responses with normalized event formats, evidence capture, and model attribution
 - `health()`: Reports system health including agent state store backend status and readiness
 - `create_session()` and `read_session()`: Session management with state persistence integration
 - `chat_confirm()`: **NEW** Handles operator approval requests, validates ownership, resumes parked replies
 - `list_models()`: **NEW** Returns credential-gated model catalog with public-safe information
-- `chat()`: **NEW** Pins resolved model to session for affinity tracking
+- `chat()`: **NEW** Pins resolved model to session for affinity tracking with normalized IDs
 - Structured output: Validates and returns structured data when response_schema is provided
 - **NEW** Confirmation flow: Registers pending confirmations, handles TTL expiration, resumes with decisions
 - **NEW** Evidence flow: Loads persisted evidence groups for session replay and audit trails
-- **NEW** Model flow: Validates model IDs against catalog, pins to session, attributes to streaming events
+- **NEW** Model flow: Validates model IDs against catalog with legacy alias support, pins to session, attributes to streaming events
+- **ENHANCED** Legacy support: Bare provider names are automatically resolved to corresponding default-model entries
 
 **Section sources**
+- [routes.py:112-131](file://products/agent-platform/src/agent_service/api/v2/routes.py#L112-L131)
 - [routes.py:136-176](file://products/agent-platform/src/agent_service/api/v2/routes.py#L136-L176)
 - [routes.py:179-224](file://products/agent-platform/src/agent_service/api/v2/routes.py#L179-L224)
 - [routes.py:227-301](file://products/agent-platform/src/agent_service/api/v2/routes.py#L227-L301)
@@ -552,7 +564,7 @@ Implementation details:
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
 
 ### Runtime Settings and Configuration
-The runtime settings system has been enhanced with new configuration options for AgentScope 2.0.6 middleware integration, reply budget control, **newly added** HITL confirmation bridging, **newly added** evidence persistence configuration, and **newly added** model catalog configuration.
+The runtime settings system has been enhanced with new configuration options for AgentScope 2.0.6 middleware integration, reply budget control, **newly added** HITL confirmation bridging, **newly added** evidence persistence configuration, and **enhanced** model catalog configuration with legacy alias support.
 
 **Updated** Configuration options:
 - **AGENTSCOPE_KERNEL_TRACING**: Boolean flag to enable OpenTelemetry tracing via TracingMiddleware
@@ -575,6 +587,7 @@ Key features:
 - **NEW**: Environment variable parsing for AGENT_HITL_CONFIRM_TIMEOUT with default 600 seconds
 - **NEW**: Evidence persistence configuration with sensible defaults and validation
 - **NEW**: Model catalog configuration with provider-specific environment variables
+- **ENHANCED**: Legacy alias support configuration for backward compatibility
 
 Implementation details:
 - `__post_init__()`: Validates all settings including new middleware-related configurations, HITL timeout, and evidence settings
@@ -584,13 +597,14 @@ Implementation details:
 - **NEW**: HITL confirmation timeout validation ensuring non-negative integer values
 - **NEW**: Evidence persistence settings with appropriate defaults for development and production environments
 - **NEW**: Model catalog environment variable parsing for multi-provider deployments
+- **ENHANCED**: Legacy alias support for backward compatibility with pre-SPEC-026 sessions
 
 **Section sources**
 - [runtime_settings.py:145-150](file://products/agent-platform/src/agent_service/runtime_settings.py#L145-L150)
 - [runtime_settings.py:332-338](file://products/agent-platform/src/agent_service/runtime_settings.py#L332-L338)
 
 ### Metrics and Observability
-Comprehensive metrics tracking provides visibility into agent state operations, backend selection, error rates, system health, **newly added** HITL confirmation metrics, **newly added** evidence store performance metrics, and **newly added** model switching metrics. The metrics system follows established conventions and provides both counters and gauges for different types of observations.
+Comprehensive metrics tracking provides visibility into agent state operations, backend selection, error rates, system health, **newly added** HITL confirmation metrics, **newly added** evidence store performance metrics, and **enhanced** model switching metrics with legacy alias tracking. The metrics system follows established conventions and provides both counters and gauges for different types of observations.
 
 Key features:
 - **Updated**: Agent state store metrics including backend selection, operation errors, and fallback counts
@@ -603,6 +617,7 @@ Key features:
 - **NEW**: Confirmation approval/denial rate tracking for workflow analysis
 - **NEW**: Evidence store metrics including write success/failure rates, frame counts, and truncation reasons
 - **NEW**: Model switching metrics including resolution attempts, unknown model rejections, and session pinning operations
+- **ENHANCED**: Legacy alias usage tracking for backward compatibility monitoring
 
 Implementation details:
 - `record_agent_state_backend()`: Tracks active backend selection (memory vs postgres)
@@ -614,6 +629,7 @@ Implementation details:
 - **NEW**: Confirmation registry monitoring for operational visibility
 - **NEW**: Evidence store metrics including `record_evidence_write()`, `record_evidence_frames_persisted()`, and `record_evidence_frame_truncated()`
 - **NEW**: Model catalog metrics for discovery and validation operations
+- **ENHANCED**: Legacy alias usage metrics for backward compatibility monitoring
 
 **Section sources**
 - [metrics.py:158-186](file://products/agent-platform/src/agent_service/core/metrics.py#L158-L186)
@@ -629,7 +645,7 @@ Key features:
 - **NEW**: Integration with HITL confirmation system for parked session detection and cleanup
 - **NEW**: Confirmation expiration handling during session operations
 - **NEW**: Integration with evidence store for session cleanup
-- **NEW**: Session-level model persistence through pin_session_model() for model affinity tracking
+- **NEW**: Session-level model persistence through pin_session_model() for model affinity tracking with **enhanced** normalized model ID support
 
 Implementation details:
 - `delete_session()`: Deletes both session and associated agent state with fail-open behavior
@@ -638,13 +654,14 @@ Implementation details:
 - State cleanup: Automatically removes agent state when sessions are deleted
 - **NEW**: Confirmation registry integration for parked session management
 - **NEW**: Evidence store integration for deleting session evidence when sessions are removed
-- **NEW**: Model persistence integration for tracking resolved model per session
+- **NEW**: Model persistence integration for tracking resolved model per session with normalized IDs
+- **ENHANCED**: Legacy alias support for backward compatibility with pre-SPEC-026 sessions
 
 **Section sources**
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 
 ## Dependency Analysis
-The runtime kernel depends on configuration, services, persistence layers, token handling components, and the new state persistence infrastructure. The following diagram shows key relationships including the enhanced state persistence architecture with TTL cleanup, metrics tracking, AgentScope 2.0.6 middleware integration, **newly added** complete HITL confirmation bridging, **newly added** comprehensive evidence capture and persistence, and **newly added** runtime model resolution with credential-gated catalog validation:
+The runtime kernel depends on configuration, services, persistence layers, token handling components, and the new state persistence infrastructure. The following diagram shows key relationships including the enhanced state persistence architecture with TTL cleanup, metrics tracking, AgentScope 2.0.6 middleware integration, **newly added** complete HITL confirmation bridging, **newly added** comprehensive evidence capture and persistence, and **enhanced** runtime model resolution with legacy alias support and improved error handling:
 
 ```mermaid
 classDiagram
@@ -666,6 +683,7 @@ class RuntimeKernel {
 +resume_confirmation()
 +expire_confirmation()
 +_build_model(model_id)
++_normalize_model_id(model_id)
 }
 class AgentStateStore {
 <<interface>>
@@ -742,6 +760,7 @@ class ModelCatalog {
 +get(model_id)
 +default_entry()
 +public_models()
++_legacy_aliases()
 }
 class ModelCatalogEntry {
 +id
@@ -817,7 +836,7 @@ class RuntimeSettings {
 }
 RuntimeKernel --> AgentStateStore : "persists state"
 RuntimeKernel --> EvidenceStore : "persists evidence"
-RuntimeKernel --> ModelCatalog : "validates model_id"
+RuntimeKernel --> ModelCatalog : "validates model_id with legacy aliases"
 RuntimeKernel --> Metrics : "tracks operations"
 RuntimeKernel --> GatewayTools : "uses"
 RuntimeKernel --> DelegationClient : "manages"
@@ -840,6 +859,7 @@ EvidenceStore <|-- PostgresEvidenceStore
 PostgresAgentStateStore --> Metrics : "records errors/fallbacks"
 PostgresEvidenceStore --> Metrics : "records truncations"
 ModelCatalog --> ModelCatalogEntry : "contains"
+ModelCatalog --> RuntimeSettings : "uses for legacy aliases"
 ```
 
 **Diagram sources**
@@ -885,8 +905,9 @@ ModelCatalog --> ModelCatalogEntry : "contains"
 - **NEW**: Model Catalog Performance: Startup-time catalog building with immutable lookup structures, efficient model ID validation with hash map lookups, and minimal overhead for public model discovery endpoints.
 - **NEW**: Session Model Persistence: Lightweight model pinning operations with fail-open semantics that don't impact turn latency.
 - **NEW**: Model Switching Detection: Efficient comparison of bound model IDs with minimal overhead, and automatic agent rebuild only when model actually changes.
+- **ENHANCED**: Legacy Alias Performance: Efficient legacy alias resolution with minimal overhead, cached alias mappings for fast provider name lookups, and optimized backward compatibility checks.
 - Graceful Degradation: Minimize performance impact when falling back to empty Toolkit or in-memory state storage by using lazy initialization and caching.
-- Observability: Emit metrics and traces for lifecycle events, latency, error rates, token validation performance, state persistence operations, **newly added** HITL confirmation workflow performance, **newly added** evidence store performance metrics, and **newly added** model switching performance metrics.
+- Observability: Emit metrics and traces for lifecycle events, latency, error rates, token validation performance, state persistence operations, **newly added** HITL confirmation workflow performance, **newly added** evidence store performance metrics, and **enhanced** model switching performance metrics with legacy alias tracking.
 
 ## Troubleshooting Guide
 Common issues and strategies:
@@ -914,6 +935,8 @@ Common issues and strategies:
 - **NEW**: Unknown Model Errors: Investigate 422 errors for unknown model IDs and verify model IDs match available catalog entries.
 - **NEW**: Session Model Pinning Issues: Monitor session model persistence failures and verify session store connectivity.
 - **NEW**: Model Switching Issues: Check agent rebuild logs and verify model switching triggers when expected.
+- **ENHANCED**: Legacy Alias Issues: Monitor legacy alias usage and verify backward compatibility is working correctly for pre-SPEC-026 sessions.
+- **ENHANCED**: Model ID Normalization: Verify that model IDs are properly normalized throughout the request pipeline and check for any inconsistencies.
 - Graceful Degradation Issues: Monitor system behavior when tokens are unavailable or state persistence fails and ensure limited functionality continues.
 
 Operational checks:
@@ -934,6 +957,8 @@ Operational checks:
 - **NEW**: Model catalog monitoring: Track model discovery operations, validation failures, and public API usage.
 - **NEW**: Session model affinity monitoring: Verify model pinning operations succeed and model resolution follows expected priority order.
 - **NEW**: Model switching diagnostics: Monitor agent rebuild frequency and investigate unexpected model switches.
+- **ENHANCED**: Legacy alias monitoring: Track legacy alias usage and verify backward compatibility is functioning correctly.
+- **ENHANCED**: Model ID normalization verification: Monitor model ID normalization throughout the request pipeline and check for any inconsistencies.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -948,4 +973,4 @@ Operational checks:
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 
 ## Conclusion
-The runtime kernel and agent lifecycle management provide a robust foundation for executing agents with durable state, configurable behavior, resilient operations, enhanced security through delegated token handling with rotation support, comprehensive state persistence capabilities, sophisticated AgentScope 2.0.6 middleware integration, **newly added** complete Human-in-the-Loop (HITL) confirmation bridging for operator approval workflows, **newly added** comprehensive evidence capture and persistence for streaming tool calls, and **newly added** runtime model resolution with credential-gated catalog validation and session-level model persistence. By combining clear state transitions, strong configuration management, careful resource handling, sophisticated token management with graceful degradation, advanced state persistence through the AgentStateStore protocol, comprehensive middleware stack with OpenTelemetry tracing and reply budget control, **newly added** seamless HITL confirmation bridging that enables human approval workflows for sensitive tool executions, **newly added** evidence capture and persistence that ensures tool call and result evidence is reliably stored for replay and audit purposes, and **newly added** runtime model resolution that provides flexible model selection with fail-closed validation, the system supports scalable and maintainable agent execution in production environments. **Updated**: The enhanced state persistence system ensures conversation continuity across service restarts through pluggable backends with TTL-based cleanup, while structured output support in v2 chat endpoints enables validated structured responses. The AgentScope 2.0.6 middleware integration provides OpenTelemetry tracing for comprehensive observability, reply budget control to prevent runaway turns, and sophisticated permission management for headless environments. The contextvar-based token delegation system enables seamless token rotation across cached toolkits, while the comprehensive metrics and observability framework provides deep insights into system health and performance. **NEW**: The complete HITL confirmation bridging system seamlessly integrates with existing streaming infrastructure, providing operator approval workflows for sensitive tool executions while maintaining all existing functionality. **NEW**: The comprehensive evidence capture and persistence system ensures that tool call and result evidence is reliably captured during streaming operations, with robust size management, budget enforcement, and best-effort failure handling that never affects the main streaming flow. The evidence store provides replay capability for session evidence, enabling operators to review the exact tool interactions that occurred during agent execution. **NEW**: The runtime model resolution system provides flexible model selection with credential-gated catalog validation, session-level model persistence for consistent routing, and fail-closed behavior for unknown model IDs. Together, these enhancements provide a complete solution for reliable, auditable, and operator-controlled agent execution with flexible model management in production environments.
+The runtime kernel and agent lifecycle management provide a robust foundation for executing agents with durable state, configurable behavior, resilient operations, enhanced security through delegated token handling with rotation support, comprehensive state persistence capabilities, sophisticated AgentScope 2.0.6 middleware integration, **newly added** complete Human-in-the-Loop (HITL) confirmation bridging for operator approval workflows, **newly added** comprehensive evidence capture and persistence for streaming tool calls, and **enhanced** runtime model resolution with credential-gated catalog validation, legacy alias support, and session-level model persistence. By combining clear state transitions, strong configuration management, careful resource handling, sophisticated token management with graceful degradation, advanced state persistence through the AgentStateStore protocol, comprehensive middleware stack with OpenTelemetry tracing and reply budget control, **newly added** seamless HITL confirmation bridging that enables human approval workflows for sensitive tool executions, **newly added** evidence capture and persistence that ensures tool call and result evidence is reliably stored for replay and audit purposes, and **enhanced** runtime model resolution that provides flexible model selection with fail-closed validation, legacy alias support for backward compatibility, and improved error handling for unknown model identifiers, the system supports scalable and maintainable agent execution in production environments. **Updated**: The enhanced state persistence system ensures conversation continuity across service restarts through pluggable backends with TTL-based cleanup, while structured output support in v2 chat endpoints enables validated structured responses. The AgentScope 2.0.6 middleware integration provides OpenTelemetry tracing for comprehensive observability, reply budget control to prevent runaway turns, and sophisticated permission management for headless environments. The contextvar-based token delegation system enables seamless token rotation across cached toolkits, while the comprehensive metrics and observability framework provides deep insights into system health and performance. **NEW**: The complete HITL confirmation bridging system seamlessly integrates with existing streaming infrastructure, providing operator approval workflows for sensitive tool executions while maintaining all existing functionality. **NEW**: The comprehensive evidence capture and persistence system ensures that tool call and result evidence is reliably captured during streaming operations, with robust size management, budget enforcement, and best-effort failure handling that never affects the main streaming flow. The evidence store provides replay capability for session evidence, enabling operators to review the exact tool interactions that occurred during agent execution. **ENHANCED**: The runtime model resolution system provides flexible model selection with credential-gated catalog validation, legacy alias support for backward compatibility with pre-SPEC-026 sessions, session-level model persistence for consistent routing, fail-closed behavior for unknown model IDs, and improved error handling throughout the request pipeline. The `_normalize_model_id()` method ensures consistent model ID handling across the system, while the enhanced session management tracks normalized model IDs for better audit trails and operational visibility. Together, these enhancements provide a complete solution for reliable, auditable, and operator-controlled agent execution with flexible model management and backward compatibility in production environments.
