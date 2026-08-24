@@ -316,7 +316,7 @@ Configuration highlights:
 - **Enhanced**: Default model: `qwen3-8b` (reference model for Ollama hosting guide)
 - **Enhanced**: Empty curated series (`model_series = ()`) - only force-included default model served
 - **Enhanced**: Permissive discovery filter - no family prefixes for self-hosted model names
-- Security: Fail-closed design - never dials outside operator-declared endpoint without bearer token
+- **Security**: Fail-closed design - never dials outside operator-declared endpoint without bearer token
 
 Configuration highlights:
 - `LUBAN_API_KEY`: Required bearer token for authentication

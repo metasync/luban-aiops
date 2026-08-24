@@ -17,7 +17,6 @@
 - [deployment.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/deployment.yaml)
 - [service.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/service.yaml)
 - [secret.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml)
-- [pvc.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/pvc.yaml)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 </cite>
@@ -329,14 +328,12 @@ DEP --> PVC
 - [deployment.yaml:1-62](file://shared/platform-ops/gitops/llm-hosting/ollama/deployment.yaml#L1-L62)
 - [service.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/service.yaml)
 - [secret.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml)
-- [pvc.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/pvc.yaml)
 
 **Section sources**
 - [README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
 - [deployment.yaml:1-62](file://shared/platform-ops/gitops/llm-hosting/ollama/deployment.yaml#L1-L62)
 - [service.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/service.yaml)
 - [secret.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml)
-- [pvc.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/pvc.yaml)
 
 ### Test Coverage
 Comprehensive test suite validates all acceptance criteria with successful live verification:

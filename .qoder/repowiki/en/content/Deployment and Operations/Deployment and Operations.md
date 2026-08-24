@@ -68,6 +68,10 @@
 - [products/agent-platform/src/agent_service/providers/deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
 - [products/agent-platform/src/agent_service/providers/dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
 - [products/agent-platform/src/agent_service/providers/luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
+- [products/agent-platform/src/agent_service/runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [products/agent-platform/tests/test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
+- [products/agent-platform/tests/test_model_discovery.py](file://products/agent-platform/tests/test_model_discovery.py)
+- [products/agent-platform/tests/test_runtime_providers.py](file://products/agent-platform/tests/test_runtime_providers.py)
 - [products/identity-broker/src/identity_service/core/metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
 - [products/identity-broker/src/identity_service/core/observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
 - [products/identity-broker/src/identity_service/core/telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
@@ -89,7 +93,7 @@
 - Included reference Kubernetes manifests for self-hosted model servers (Ollama, vLLM, llama.cpp)
 - Documented bearer-token authentication and secret management for local/on-prem model servers
 - Added operational guidance for model weight management, scaling considerations, and GPU node support
-- Integrated luban provider configuration into the multi-model catalog system
+- Integrated luban provider configuration into multi-model catalog system
 - Enhanced troubleshooting procedures for self-hosted model scenarios
 
 ## Table of Contents
@@ -734,7 +738,7 @@ Ollama-->>Platform : Response
 **Section sources**
 - [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
 - [shared/platform-ops/gitops/llm-hosting/ollama/deployment.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/deployment.yaml)
-- [shared/platform-ops/gitops/llm-hosting/ollama/service.yaml](file://shared/platform-ops/gitops/llama/service.yaml)
+- [shared/platform-ops/gitops/llm-hosting/ollama/service.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/service.yaml)
 - [shared/platform-ops/gitops/llm-hosting/ollama/pvc.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/pvc.yaml)
 - [shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml)
 - [docs/guides/luban-llm-guide.md](file://docs/guides/luban-llm-guide.md)

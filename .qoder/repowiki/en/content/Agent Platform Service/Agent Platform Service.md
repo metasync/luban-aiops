@@ -20,6 +20,7 @@
 - [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
 - [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
 - [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
+- [luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
@@ -57,6 +58,7 @@
 - Added persistent model pinning storage across all session store backends (memory, Redis, Postgres)
 - Enhanced error handling for model resolution failures with proper 422 status codes
 - Updated API endpoints to support per-turn model selection with validation and normalization
+- Added support for the new luban provider with OpenAI-compatible self-hosted endpoints
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -83,9 +85,9 @@
 22. [Appendices](#appendices)
 
 ## Introduction
-The Agent Platform Service is the core orchestration engine of the Luban AIOps Platform. It provides a runtime kernel for agent execution, a provider registry for multi-model backends (OpenAI, DashScope, DeepSeek), and robust session management with durable storage. The service exposes REST APIs for agent interactions, streaming responses, and configuration management, enabling scalable and observable AI operations across diverse model providers.
+The Agent Platform Service is the core orchestration engine of the Luban AIOps Platform. It provides a runtime kernel for agent execution, a provider registry for multi-model backends (OpenAI, DashScope, DeepSeek, and Luban), and robust session management with durable storage. The service exposes REST APIs for agent interactions, streaming responses, and configuration management, enabling scalable and observable AI operations across diverse model providers.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, and credential-gated model catalogs. The enhanced architecture supports dynamic model switching at runtime through a sophisticated resolution system that prioritizes explicit requests over pinned sessions, falling back to defaults when needed. Live model discovery runs as background tasks with fail-soft caching to ensure continuous availability even during provider outages.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, and credential-gated model catalogs. The enhanced architecture supports dynamic model switching at runtime through a sophisticated resolution system that prioritizes explicit requests over pinned sessions, falling back to defaults when needed. Live model discovery runs as background tasks with fail-soft caching to ensure continuous availability even during provider outages. The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints such as Ollama, vLLM, and llama.cpp servers.
 
 ## Project Structure
 The Agent Platform Service is implemented as a Python FastAPI application organized by feature layers:
@@ -123,6 +125,7 @@ base_prov["providers/base.py"]
 openai["providers/openai.py"]
 dashscope["providers/dashscope.py"]
 deepseek["providers/deepseek.py"]
+luban["providers/luban.py"]
 reg["providers/registry.py"]
 end
 subgraph "Sessions"
@@ -164,6 +167,7 @@ reg --> base_prov
 reg --> openai
 reg --> dashscope
 reg --> deepseek
+reg --> luban
 kernel --> sess_svc
 sess_svc --> sess_store
 sess_svc --> sess_transcript
@@ -197,6 +201,7 @@ settings --> env
 - [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
 - [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
 - [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
+- [luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
@@ -218,7 +223,7 @@ settings --> env
 
 ## Core Components
 - Runtime Kernel: Orchestrates agent lifecycle, conversation state, tool invocation, and provider dispatch with enhanced AgentScope 2.x toolkit registration, anti-hallucination guards, and model normalization support.
-- Provider Registry: Discovers and manages model providers (OpenAI, DashScope, DeepSeek) with pluggable interfaces using new AgentScope 2.x model construction patterns.
+- Provider Registry: Discovers and manages model providers (OpenAI, DashScope, DeepSeek, Luban) with pluggable interfaces using new AgentScope 2.x model construction patterns.
 - Session Management: Persists and restores conversations with durable storage, multi-session workspace support, and concurrency-safe access with model pinning.
 - Evidence Store: Provides persistent storage for tool execution evidence with dual backend support and size-capped retention policies.
 - Model Catalog: Manages credential-gated model discovery with multi-provider support, legacy alias resolution, and public schema compliance.
@@ -247,7 +252,7 @@ Key responsibilities:
 - HITL Integration: Support human-in-the-loop workflows with parked confirmation management.
 - Observability: Emit structured logs, metrics, and traces for each operation with per-request audit trails.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with bearer token authentication.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -462,7 +467,7 @@ GatewayTools --> ModelProvider : "secure invocation"
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 
 ### Provider Registry and Implementations
-The provider registry supports multiple model backends through a common interface. Implementations include OpenAI, DashScope, and DeepSeek, all updated to use AgentScope 2.x model construction patterns with enhanced parameter support.
+The provider registry supports multiple model backends through a common interface. Implementations include OpenAI, DashScope, DeepSeek, and Luban, all updated to use AgentScope 2.x model construction patterns with enhanced parameter support.
 
 ```mermaid
 classDiagram
@@ -494,6 +499,13 @@ class DeepSeekProvider {
 +default_model = "deepseek-v4-flash"
 +discover_family_prefixes = ("deepseek",)
 }
+class LubanProvider {
++build_model(settings)
++provider_name = "luban"
++default_model = "qwen3-8b"
++discover_family_prefixes = ()
++validate(settings)
+}
 class ProviderRegistry {
 +register(name, provider)
 +resolve(name)
@@ -502,6 +514,7 @@ class ProviderRegistry {
 BaseProvider <|-- OpenAIProvider
 BaseProvider <|-- DashScopeProvider
 BaseProvider <|-- DeepSeekProvider
+BaseProvider <|-- LubanProvider
 ProviderRegistry --> BaseProvider : "manages"
 ```
 
@@ -509,14 +522,16 @@ Configuration examples:
 - OpenAI: Configure API key, model name, organization, and reasoning effort via environment variables or runtime settings.
 - DashScope: Set endpoint URL, credentials, thinking budget, and parallel tool calls; select model variant.
 - DeepSeek: Provide authentication token, target model identifier, and reasoning effort level.
+- **Luban**: Configure LUBAN_API_KEY and mandatory LUBAN_BASE_URL for self-hosted OpenAI-compatible endpoints; supports bearer token authentication with no default endpoint.
 
-**Updated** All provider implementations now use AgentScope 2.x model construction patterns with enhanced parameter support including reasoning effort, thinking enable flags, and parallel tool calls. Voice readiness is supported through consistent parameter passing across all modalities. Provider implementations include sophisticated filtering mechanisms for live model discovery, with family prefix restrictions and non-chat modality exclusion markers to ensure only chat-capable models are discovered.
+**Updated** All provider implementations now use AgentScope 2.x model construction patterns with enhanced parameter support including reasoning effort, thinking enable flags, and parallel tool calls. Voice readiness is supported through consistent parameter passing across all modalities. Provider implementations include sophisticated filtering mechanisms for live model discovery, with family prefix restrictions and non-chat modality exclusion markers to ensure only chat-capable models are discovered. The new Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements and no default base URL.
 
 **Section sources**
 - [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
 - [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
 - [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
 - [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
+- [luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [config.py](file://products/agent-platform/src/agent_service/core/config.py)
@@ -1419,7 +1434,7 @@ The evidence store follows the session-evidence schema with structured turn grou
 ## Model Catalog Service
 
 ### Overview
-The model catalog service provides credential-gated discovery of available LLM models across multiple providers (OpenAI, DashScope, DeepSeek). It derives the set of selectable models from per-provider environment configuration at startup, ensuring that only configured providers with resolvable API keys contribute to the catalog.
+The model catalog service provides credential-gated discovery of available LLM models across multiple providers (OpenAI, DashScope, DeepSeek, and Luban). It derives the set of selectable models from per-provider environment configuration at startup, ensuring that only configured providers with resolvable API keys contribute to the catalog.
 
 ### Architecture
 ```mermaid
@@ -1471,7 +1486,7 @@ ModelCatalog --> RuntimeSettings : "uses for defaults"
 
 ### Key Features
 - **Credential-Gated Discovery**: Only providers with resolvable API keys contribute to the catalog
-- **Multi-Provider Support**: OpenAI, DashScope, and DeepSeek with full model series enumeration
+- **Multi-Provider Support**: OpenAI, DashScope, DeepSeek, and Luban with full model series enumeration
 - **Legacy Alias Resolution**: Bare provider names alias to provider's default model for backward compatibility
 - **Public Schema Compliance**: Discovery payload contains only id, label, provider, and default fields
 - **Environment Variable Configuration**: Supports `<PROVIDER>_API_KEY`, `<PROVIDER>_MODEL_NAME`, `<PROVIDER>_BASE_URL`, and `<PROVIDER>_MODELS`
@@ -1513,18 +1528,19 @@ API-->>Client : Response with selected model
 - **OpenAI**: Set `OPENAI_API_KEY`, optionally `OPENAI_MODEL_NAME`, `OPENAI_BASE_URL`, `OPENAI_MODELS`
 - **DashScope**: Set `DASHSCOPE_API_KEY`, optionally `DASHSCOPE_MODEL_NAME`, `DASHSCOPE_BASE_URL`, `DASHSCOPE_MODELS`
 - **DeepSeek**: Set `DEEPSEEK_API_KEY`, optionally `DEEPSEEK_MODEL_NAME`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_MODELS`
+- **Luban**: Set `LUBAN_API_KEY` and mandatory `LUBAN_BASE_URL` for self-hosted OpenAI-compatible endpoints
 - **Active Profile**: Existing `AGENTSCOPE_API_KEY`, `AGENTSCOPE_MODEL_NAME`, `AGENTSCOPE_BASE_URL` remain compatible
 
 ### Operator Portal Integration
 The operator portal UI displays models grouped by provider with credential-gated discovery:
-- **Grouped Display**: Models organized under provider labels (OpenAI, DashScope, DeepSeek)
+- **Grouped Display**: Models organized under provider labels (OpenAI, DashScope, DeepSeek, Luban)
 - **Default Selection**: Deploy-time default model pre-selected when multiple models available
 - **Single Model Mode**: Fixed label display when only one model is configured
 - **Graceful Degradation**: Selector hides when catalog fetch fails, chat continues working
 - **Test Coverage**: Comprehensive tests for grouping, fallback behavior, and single model scenarios
 
 **Section sources**
-- [model_catalog.py:1-318](file://products/agent-platform/src/agent_service/services/model_catalog.py#L1-L318)
+- [model_catalog.py:1-331](file://products/agent-platform/src/agent_service/services/model_catalog.py#L1-L331)
 - [routes.py:534-544](file://products/agent-platform/src/agent_service/api/v2/routes.py#L534-L544)
 - [models.py:19-45](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L19-L45)
 - [ModelSelect.tsx:20-71](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L20-L71)
@@ -1665,7 +1681,7 @@ The discovery service provides comprehensive metrics:
 - **Performance Monitoring**: Track refresh cycle duration and cache hit rates
 
 **Section sources**
-- [model_discovery.py:1-294](file://products/agent-platform/src/agent_service/services/model_discovery.py#L1-L294)
+- [model_discovery.py:1-300](file://products/agent-platform/src/agent_service/services/model_discovery.py#L1-L300)
 - [app.py:19-47](file://products/agent-platform/src/agent_service/app.py#L19-L47)
 - [metrics.py:188-210](file://products/agent-platform/src/agent_service/core/metrics.py#L188-L210)
 - [runtime_settings.py:152-157](file://products/agent-platform/src/agent_service/runtime_settings.py#L152-L157)
@@ -1696,6 +1712,7 @@ Registry --> Base["BaseProvider"]
 Base --> OpenAI["OpenAIProvider"]
 Base --> DashScope["DashScopeProvider"]
 Base --> DeepSeek["DeepSeekProvider"]
+Base --> Luban["LubanProvider"]
 Session --> Store["SessionStore"]
 Session --> Transcript["TranscriptExtractor"]
 API --> HITL["ConfirmationRegistry"]
@@ -1713,7 +1730,7 @@ ModelDisc --> Metrics
 Lifespan["FastAPI Lifespan"] --> ModelDisc
 ```
 
-**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, model catalog service with credential-gated discovery and legacy alias resolution, live model discovery service with background task management, and voice-readiness support through input_modality parameter passthrough.
+**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, model catalog service with credential-gated discovery and legacy alias resolution, live model discovery service with background task management, voice-readiness support through input_modality parameter passthrough, and the new Luban provider for self-hosted OpenAI-compatible endpoints.
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -1728,6 +1745,7 @@ Lifespan["FastAPI Lifespan"] --> ModelDisc
 - [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
 - [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
 - [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
+- [luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
@@ -1768,8 +1786,9 @@ Lifespan["FastAPI Lifespan"] --> ModelDisc
 - **Multi-Model Runtime**: Priority-based model resolution with minimal overhead through session caching
 - **Model Pinning**: TTL-aware storage prevents excessive writes while maintaining session affinity
 - **Error Handling**: Fast-fail model validation prevents unnecessary processing of invalid requests
+- **Luban Provider Optimization**: Self-hosted endpoints with strict bearer token requirements and no default base URL
 
-**Updated** Performance considerations now include multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, model catalog optimization with startup-derived catalog and efficient legacy alias resolution, live model discovery optimization with background task management, multi-tier caching strategies, atomic catalog updates with lock protection, and multi-model runtime optimization with priority-based resolution and session-based caching.
+**Updated** Performance considerations now include multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, model catalog optimization with startup-derived catalog and efficient legacy alias resolution, live model discovery optimization with background task management, multi-tier caching strategies, atomic catalog updates with lock protection, multi-model runtime optimization with priority-based resolution and session-based caching, and Luban provider optimization for self-hosted OpenAI-compatible endpoints with strict security requirements.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -1810,6 +1829,9 @@ Common issues and resolutions:
 - **Resolution Failures**: Validate explicit model requests against credential-gated catalog
 - **Fallback Behavior**: Test graceful degradation from invalid pinned models to defaults
 - **Error Responses**: Verify 422 status codes for unknown models and proper error messages
+- **Luban Provider Issues**: Verify LUBAN_BASE_URL configuration and bearer token authentication
+- **Self-Hosted Endpoint Problems**: Check network connectivity to self-hosted OpenAI-compatible servers
+- **Luban Model Discovery**: Validate family prefix filtering and non-chat modality exclusion
 
 Debugging utilities:
 - Health check endpoints for service status
@@ -1835,8 +1857,10 @@ Debugging utilities:
 - **Multi-Model Runtime Debugging**: Monitor model resolution decisions and session pinning operations
 - **Model Resolution Debugging**: Verify priority hierarchy execution and fallback behavior
 - **Error Handling Debugging**: Check 422 status codes and error message formatting for model validation
+- **Luban Provider Debugging**: Validate LUBAN_BASE_URL configuration and bearer token authentication flow
+- **Self-Hosted Endpoint Debugging**: Check network connectivity and OpenAI-compatible API responses
 
-**Updated** Troubleshooting guide now includes multi-session workspace troubleshooting, transcript extraction debugging strategies, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification, plus live model discovery troubleshooting with background task monitoring, provider filtering validation, cache tier diagnostics, and discovery performance optimization, and multi-model runtime troubleshooting with model resolution debugging and session pinning diagnostics.
+**Updated** Troubleshooting guide now includes multi-session workspace troubleshooting, transcript extraction debugging strategies, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification, plus live model discovery troubleshooting with background task monitoring, provider filtering validation, cache tier diagnostics, and discovery performance optimization, and multi-model runtime troubleshooting with model resolution debugging and session pinning diagnostics, and Luban provider troubleshooting with self-hosted endpoint configuration and bearer token authentication.
 
 **Section sources**
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -1847,7 +1871,7 @@ Debugging utilities:
 ## Conclusion
 The Agent Platform Service provides a robust foundation for AI agent orchestration with multi-provider support, durable session management, and comprehensive observability. Its modular architecture enables easy customization and scaling while maintaining high performance and reliability.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. These enhancements strengthen the platform's flexibility, enable dynamic model management, provide detailed operational visibility, and maintain the performance characteristics that make it suitable for production AI operations.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict security requirements. These enhancements strengthen the platform's flexibility, enable dynamic model management, provide detailed operational visibility, and maintain the performance characteristics that make it suitable for production AI operations.
 
 ## Appendices
 
@@ -1930,7 +1954,15 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - **Validation**: All model selections must exist in credential-gated catalog
 - **Audit Trail**: Model resolution decisions logged with request and session context
 
-**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, live model discovery configuration with background task management, provider filtering mechanisms, cache tier optimization, atomic catalog updates with lock protection, and multi-model runtime configuration with per-turn selection and session-based pinning for complete operator workflow management.
+#### Luban Provider Configuration
+- **Self-Hosted Setup**: Configure `LUBAN_API_KEY` and mandatory `LUBAN_BASE_URL` for self-hosted OpenAI-compatible endpoints
+- **Bearer Token Authentication**: Ensure proper bearer token setup for self-hosted model servers
+- **Model Selection**: Use `LUBAN_MODEL_NAME` or `LUBAN_MODELS` to specify served model identifiers
+- **Endpoint Validation**: Verify network connectivity to self-hosted endpoints
+- **Security**: Confirm strict bearer token requirements are enforced
+- **Integration**: Test with popular self-hosted solutions like Ollama, vLLM, and llama.cpp
+
+**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, live model discovery configuration with background task management, provider filtering mechanisms, cache tier optimization, atomic catalog updates with lock protection, multi-model runtime configuration with per-turn selection and session-based pinning, and Luban provider configuration for self-hosted OpenAI-compatible endpoints with complete operator workflow management.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -1954,3 +1986,4 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [test_model_switching.py](file://products/agent-platform/tests/test_model_switching.py)
 - [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
+- [luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
