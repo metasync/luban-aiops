@@ -143,3 +143,4 @@ Mechanical enforcement:
 | `SPEC-027` | Live model discovery — provider `/models` endpoints feed the catalog with a fail-soft fallback ladder (live -> memory -> Postgres -> curated) and periodic refresh (extends SPEC-026) | `delivered` |
 | `SPEC-028` | Luban-hosted small model provider — `luban` adapter for team-hosted OpenAI-compatible servers (Ollama/vLLM/llama.cpp) with token auth, operator hosting guide, and reference K8s manifests (extends SPEC-026/027) | `delivered` |
 | `SPEC-029` | Skills usage audit trail — skills-hub emits `skill_searched`/`skill_retrieved`/`skills_synced` audit events with request-id correlation to caller `tool_invoked` events (extends SPEC-013/014) | `delivered` |
+| `SPEC-030` | Require-approval policy semantics — `require_approval` as a first-class policy outcome in both engines, approver-gated confirmation bridge with self-approval blocking, matrix/audit transparency (extends SPEC-004/019/020/021) | `draft` |

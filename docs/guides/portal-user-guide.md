@@ -176,10 +176,13 @@ If a matrix cell surprises you, the bundle edit workflow is in
 
 ## Settings & Debug (Workspace)
 
-Shows request-level debug context, including the request ID for your
-calls. When reporting a problem, include the request ID and the platform
-version chip — both correlate directly with logs, traces, and audit
-events.
+This view is being rebuilt as part of the SPEC-023 portal framework
+migration and currently shows a placeholder. Until it returns, request-level
+correlation comes from the platform version chip in the sidebar brand row;
+session identifiers appear in the session panel and in the URLs of audit
+and incident deep links. When reporting a problem, quote the platform
+version and any visible session or request identifiers — they correlate
+directly with logs, traces, and audit events.
 
 ## What Your Roles Unlock
 
