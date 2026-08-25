@@ -238,7 +238,8 @@ class ContractAlignmentTests(unittest.TestCase):
         # the tool-gateway but listed here so the permission matrix always
         # carries it (SPEC-021). session:list/session:delete complete the
         # session workspace lifecycle (SPEC-022 R-1). models:list guards
-        # model catalog discovery (SPEC-024 R-2).
+        # model catalog discovery (SPEC-024 R-2). approvals:list guards the
+        # approver confirmation inbox (SPEC-031 R-3).
         self.assertEqual(
             PROTECTED_ACTIONS,
             frozenset({
@@ -247,7 +248,7 @@ class ContractAlignmentTests(unittest.TestCase):
                 "audit:read",
                 "incident:read", "incident:create", "incident:triage",
                 "policy:read", "tools:list", "tools:mutate", "skills:read",
-                "models:list",
+                "models:list", "approvals:list",
             }),
         )
 

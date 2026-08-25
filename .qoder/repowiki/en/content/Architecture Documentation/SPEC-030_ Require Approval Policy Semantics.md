@@ -17,28 +17,32 @@
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 - [ConfirmationCard.test.tsx](file://products/operator-portal/web-ui/app/src/chat/__tests__/ConfirmationCard.test.tsx)
 - [approval-and-hitl.md](file://docs/guides/approval-and-hitl.md)
+- [triage.py](file://products/incident-service/src/incident_service/services/triage.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated Core Components section with detailed tiered approval system implementation
-- Enhanced Architecture Overview with complete enforcement flow diagram
-- Added Detailed Component Analysis for HITL Confirmation Bridge and Gateway Enforcement
-- Updated Default Bundle Posture with specific rule details
-- Expanded Troubleshooting Guide with tier-specific scenarios
-- Added comprehensive source tracking for all code changes
+- Enhanced Core Components section with triage service read-only enforcement and runtime kernel enhancements
+- Updated Architecture Overview with per-turn read_only agent cache keys and toolkit scoping
+- Added Critical Remediations section covering GenerateStructuredOutput allow-list additions and approver role permissions
+- Expanded Default Bundle Posture with approver role tool access grants
+- Updated Troubleshooting Guide with triage-specific scenarios and structured output handling
+- Added comprehensive source tracking for all applied changes including runtime kernel modifications
 
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
-5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
-10. [Appendices](#appendices)
+5. [Critical Remediations](#critical-remediations)
+6. [Detailed Component Analysis](#detailed-component-analysis)
+7. [Dependency Analysis](#dependency-analysis)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
+11. [Appendices](#appendices)
 
 ## Introduction
 SPEC-030 introduces require-approval policy semantics as a first-class, data-driven outcome for mutating actions. It upgrades the existing allow/deny-only policy model to include require_approval with explicit approval tiers:
@@ -53,16 +57,20 @@ Key outcomes:
 - Platform-gateway enforces tiered approval on the chat:confirm path; tool-gateway keeps admission unchanged.
 - Transparency surfaces (permission matrix, portal cards, audit events) render approval requirements consistently.
 
+**Updated** Live cluster validation during delivery surfaced critical issues that were immediately remediated: incident-service triage turns now run with `read_only=True` to prevent mutating tools from executing in background triage operations, `GenerateStructuredOutput` was added to the kernel's local-tool allow-list to prevent parking structured-output calls, and approver roles received necessary tool access permissions (`tools:list`, `tools:invoke`, `tools:mutate`) to support tier_2-approved execution flows.
+
 **Section sources**
 - [spec.md:16-31](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md#L16-L31)
 - [approval-and-hitl.md:170-208](file://docs/guides/approval-and-hitl.md#L170-L208)
+- [spec.md:337-352](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md#L337-L352)
 
 ## Project Structure
-This spec spans shared contracts, two gateway services, agent-platform HITL storage, and the operator portal. The most relevant files are:
+This spec spans shared contracts, two gateway services, agent-platform HITL storage, incident-service triage, and the operator portal. The most relevant files are:
 - Shared contracts: policy-rule.schema.json, policy-decision.schema.json, policy-default.yaml
 - Platform-gateway: policy engine, policy matrix, confirm bridge (routes referenced in plan)
 - Tool-gateway: policy engine (require_approval rules skipped at load)
-- Agent-platform: HITL confirmation registry exposing risk-level mapping to policy actions
+- Agent-platform: HITL confirmation registry exposing risk-level mapping to policy actions, runtime kernel with per-turn toolkit scoping
+- Incident-service: triage service with read-only enforcement
 - Portal: permission view and confirmation card rendering (referenced in plan)
 
 ```mermaid
@@ -83,10 +91,15 @@ H["policy_engine.py"]
 end
 subgraph "Agent Platform"
 I["hitl_confirmations.py"]
+J["runtime_kernel.py<br/>per-turn toolkit scoping"]
+K["kernel_middleware.py<br/>GenerateStructuredOutput allow-list"]
+end
+subgraph "Incident Service"
+L["triage.py<br/>read_only enforcement"]
 end
 subgraph "Portal"
-J["PermissionsView.tsx (plan reference)"]
-K["Confirmation Card (plan reference)"]
+M["PermissionsView.tsx (plan reference)"]
+N["Confirmation Card (plan reference)"]
 end
 A --> D
 B --> D
@@ -95,8 +108,10 @@ C --> H
 D --> E
 F --> G
 G --> I
-E --> J
-G --> K
+E --> M
+G --> N
+J --> K
+L --> J
 ```
 
 **Diagram sources**
@@ -104,6 +119,9 @@ G --> K
 - [policy-engine.py (tool-gateway):1-14](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L1-L14)
 - [policy_matrix.py:1-9](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L9)
 - [hitl_confirmations.py:34-42](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L34-L42)
+- [runtime_kernel.py:277-389](file://products/agent-platform/src/agent_service/runtime_kernel.py#L277-L389)
+- [kernel_middleware.py:55-60](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L55-L60)
+- [triage.py:250-263](file://products/incident-service/src/incident_service/services/triage.py#L250-L263)
 - [policy-default.yaml:113-135](file://shared/shared-contracts/policies/policy-default.yaml#L113-L135)
 
 **Section sources**
@@ -123,11 +141,17 @@ G --> K
   - Derives role × action cells via evaluate(); will gain a third cell state requires_approval when the caller's role evaluates to require_approval.
 - **Default bundle**:
   - Ships a tier_2 require_approval rule on tools:mutate with deciders approver and platform-admin, blocking self-approval by default.
+- **Runtime kernel enhancements**:
+  - Per-turn read_only agent cache keys ensure toolkit scoping isolation between interactive and automated diagnostic turns.
+  - GenerateStructuredOutput tool added to kernel local-tool allow-list to prevent parking structured-output calls.
+- **Triage service read-only enforcement**:
+  - Incident-service triage runs with `read_only=True` flag to structurally restrict toolkit to read-level tools, preventing any mutating tool execution or parking in background triage operations.
 
 Acceptance highlights:
 - Precedence and priority semantics implemented in both engines.
 - Confirm path enforces tiered approval; structured 403 on non-deciders and self-approval where forbidden.
 - Transparency and audit enriched with approval details.
+- Runtime kernel provides structural protection against mutating tool execution in automated contexts.
 
 **Section sources**
 - [policy-rule.schema.json:47-100](file://shared/shared-contracts/schemas/policy-rule.schema.json#L47-L100)
@@ -137,13 +161,18 @@ Acceptance highlights:
 - [hitl_confirmations.py:34-104](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L34-L104)
 - [policy_matrix.py:25-62](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L25-L62)
 - [policy-default.yaml:113-135](file://shared/shared-contracts/policies/policy-default.yaml#L113-L135)
+- [runtime_kernel.py:277-389](file://products/agent-platform/src/agent_service/runtime_kernel.py#L277-L389)
+- [kernel_middleware.py:55-60](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L55-L60)
+- [triage.py:250-263](file://products/incident-service/src/incident_service/services/triage.py#L250-L263)
 
 ## Architecture Overview
-The require-approval flow integrates into the existing HITL confirmation path:
+The require-approval flow integrates into the existing HITL confirmation path with enhanced runtime protections:
 - A mutating tool run parks a reply requiring user confirmation.
 - The platform-gateway chat:confirm route resolves the parked call's effective action (from risk level) and evaluates it against the bundle.
 - If require_approval is returned, the confirmer must hold one of the approved roles; tier_2 rejects self-approval unless explicitly allowed.
 - On success, the confirmed call proceeds through tool-gateway admission using the confirmer's delegated token (unchanged).
+- Triage operations run with read_only enforcement to prevent any mutating tool execution in background diagnostic turns.
+- Structured output generation bypasses the approval gate as it's a kernel-local operation.
 - Transparency surfaces reflect the approval requirement and decisions.
 
 ```mermaid
@@ -152,7 +181,9 @@ participant Client as "Operator / Approver"
 participant PG as "Platform Gateway<br/>chat : confirm route"
 participant PE as "Policy Engine (PG)"
 participant AP as "Agent Platform<br/>HITL Registry"
+participant RK as "Runtime Kernel<br/>Per-turn Toolkit Scoping"
 participant TG as "Tool Gateway"
+participant IS as "Incident Service<br/>Triage"
 Client->>PG : POST /api/v1/chat/confirm
 PG->>AP : Resolve parked call and read risk levels
 AP-->>PG : Highest action (e.g., tools : mutate)
@@ -172,12 +203,56 @@ PG->>TG : Forward confirmed execution
 TG-->>PG : Admission result
 PG-->>Client : Success
 end
+Note over IS,RK : Triage Operations
+IS->>RK : Chat request with read_only=True
+RK->>RK : Filter toolkit to read-level tools only
+RK-->>IS : Execute with restricted toolkit
 ```
 
 **Diagram sources**
 - [policy_engine.py (platform-gateway):335-389](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L335-L389)
 - [hitl_confirmations.py:34-104](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L34-L104)
 - [policy-default.yaml:113-135](file://shared/shared-contracts/policies/policy-default.yaml#L113-L135)
+- [runtime_kernel.py:277-389](file://products/agent-platform/src/agent_service/runtime_kernel.py#L277-L389)
+- [triage.py:250-263](file://products/incident-service/src/incident_service/services/triage.py#L250-L263)
+
+## Critical Remediations
+During live cluster validation, three critical issues were identified and immediately remediated:
+
+### Triage Service Read-Only Enforcement
+Incident-service triage turns now execute with `read_only=True` flag passed to agent-platform `/api/v2/chat`. This ensures that automated diagnostic turns never invoke — or park on — mutating tools, regardless of what the model decides. The runtime kernel filters the toolkit to read-level tools only for these turns, providing structural protection beyond prompt discipline alone.
+
+### GenerateStructuredOutput Allow-List Addition
+The kernel's built-in `GenerateStructuredOutput` tool (used for response_schema structured output) was added to the kernel local-tool allow-list. This prevents structured-output calls from being parked as if they were gateway actions, which would wedge every structured turn (including incident triage) on a headless stream. The tool is considered kernel-local and always allowed since it only shapes the final reply into the caller-provided schema without touching external systems.
+
+### Approver Role Permission Grants
+Approver roles received necessary tool access permissions (`tools:list`, `tools:invoke`, `tools:mutate`) to support tier_2-approved execution flows. When a tier_2-approved call resumes under the confirmer's delegated token, the approver needs these permissions to successfully execute the approved action. Two-person control is preserved — an approver's own parked call still requires a distinct designated approver due to tier_2 self-approval blocking.
+
+```mermaid
+flowchart TD
+Start(["Triage Request"]) --> ReadOnly["Set read_only=True"]
+ReadOnly --> FilterToolkit["Filter toolkit to read-level tools only"]
+FilterToolkit --> Execute["Execute with restricted toolkit"]
+Execute --> CheckMutating{"Any mutating tools?"}
+CheckMutating --> |Yes| Block["Block execution - structural protection"]
+CheckMutating --> |No| Proceed["Proceed with read-only tools"]
+Proceed --> StructuredOutput["GenerateStructuredOutput<br/>Always ALLOWED"]
+StructuredOutput --> Complete["Complete triage"]
+Block --> Complete
+```
+
+**Diagram sources**
+- [triage.py:250-263](file://products/incident-service/src/incident_service/services/triage.py#L250-L263)
+- [runtime_kernel.py:356-376](file://products/agent-platform/src/agent_service/runtime_kernel.py#L356-L376)
+- [kernel_middleware.py:55-60](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L55-L60)
+- [policy-default.yaml:81-119](file://shared/shared-contracts/policies/policy-default.yaml#L81-L119)
+
+**Section sources**
+- [triage.py:250-263](file://products/incident-service/src/incident_service/services/triage.py#L250-L263)
+- [runtime_kernel.py:356-376](file://products/agent-platform/src/agent_service/runtime_kernel.py#L356-L376)
+- [kernel_middleware.py:55-60](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L55-L60)
+- [policy-default.yaml:81-119](file://shared/shared-contracts/policies/policy-default.yaml#L81-L119)
+- [spec.md:337-352](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md#L337-L352)
 
 ## Detailed Component Analysis
 
@@ -262,6 +337,35 @@ class PendingConfirmation {
 **Section sources**
 - [hitl_confirmations.py:34-104](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L34-L104)
 
+### Runtime Kernel Enhancements
+The runtime kernel provides critical structural protections through per-turn toolkit scoping:
+
+- **Per-turn read_only cache keys**: Each turn creates a separate toolkit cache entry based on bearer token and read_only flag, ensuring read-only turns never leak mutating tools to interactive turns and vice versa.
+- **Read-only toolkit filtering**: For read_only turns, the kernel filters the toolkit to only include tools with risk_level="read", logging excluded mutating tools.
+- **Kernel local-tool allow-list**: GenerateStructuredOutput and task tools are always allowed as they operate on session-local state only.
+
+```mermaid
+flowchart TD
+Request["Chat Request"] --> CheckReadOnly{"read_only flag?"}
+CheckReadOnly --> |Yes| CreateROKey["Create read-only cache key"]
+CheckReadOnly --> |No| CreateIKKey["Create interactive cache key"]
+CreateROKey --> BuildROToolkit["Build read-only toolkit"]
+CreateIKKey --> BuildIKToolkit["Build full toolkit"]
+BuildROToolkit --> FilterTools["Filter to risk_level='read' only"]
+BuildIKToolkit --> UseFullToolkit["Use complete toolkit"]
+FilterTools --> Execute["Execute with restricted toolkit"]
+UseFullToolkit --> Execute
+Execute --> CacheResult["Cache toolkit by key"]
+```
+
+**Diagram sources**
+- [runtime_kernel.py:277-389](file://products/agent-platform/src/agent_service/runtime_kernel.py#L277-L389)
+- [kernel_middleware.py:44-60](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L44-L60)
+
+**Section sources**
+- [runtime_kernel.py:277-389](file://products/agent-platform/src/agent_service/runtime_kernel.py#L277-L389)
+- [kernel_middleware.py:44-60](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L44-L60)
+
 ### Gateway Enforcement Implementation
 The platform-gateway implements tiered approval enforcement in the chat:confirm flow:
 - `_enforce_approval_tier()` evaluates the parked batch's policy action against the bundle
@@ -309,9 +413,11 @@ BlockSelf --> Audit
 - policy-default.yaml includes a tier_2 require_approval rule on tools:mutate with decided_by_roles [approver, platform-admin].
 - Self-approval is blocked by default for tier_2; developer identity excluded by authoring.
 - Existing allow rules remain; precedence ensures require_approval overrides allow for mutating runs.
+- **Updated** Approver roles now have tools:list, tools:invoke, and tools:mutate permissions to support tier_2-approved execution flows under the confirmer's delegated token.
 
 **Section sources**
 - [policy-default.yaml:113-135](file://shared/shared-contracts/policies/policy-default.yaml#L113-L135)
+- [policy-default.yaml:81-119](file://shared/shared-contracts/policies/policy-default.yaml#L81-L119)
 - [spec.md:154-179](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md#L154-L179)
 
 ## Dependency Analysis
@@ -322,6 +428,8 @@ BlockSelf --> Audit
   - policy_matrix for live permissions
 - Tool-gateway depends on policy_engine for admission (allow/deny); require_approval rules are skipped at load.
 - Portal depends on matrix and confirmation card components to render approval states.
+- **Updated** Incident-service depends on runtime kernel's read_only enforcement for safe triage operations.
+- **Updated** Runtime kernel provides structural toolkit scoping independent of policy decisions.
 
 ```mermaid
 graph LR
@@ -331,6 +439,9 @@ PGEngine --> PGMatrix["Platform Gateway Matrix"]
 HITL["Agent Platform HITL"] --> PGConfirm["Platform Gateway Confirm Bridge"]
 PGConfirm --> PGEngine
 PGMatrix --> Portal["Portal UI"]
+RuntimeKernel["Runtime Kernel<br/>Per-turn Toolkit Scoping"] --> KernelMiddleware["Kernel Middleware"]
+IncidentService["Incident Service<br/>Triage"] --> RuntimeKernel
+KernelMiddleware --> Portal
 ```
 
 **Diagram sources**
@@ -338,6 +449,9 @@ PGMatrix --> Portal["Portal UI"]
 - [policy_engine.py (tool-gateway):1-14](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L1-L14)
 - [policy_matrix.py:1-9](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L9)
 - [hitl_confirmations.py:34-42](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L34-L42)
+- [runtime_kernel.py:277-389](file://products/agent-platform/src/agent_service/runtime_kernel.py#L277-L389)
+- [kernel_middleware.py:129-210](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L129-L210)
+- [triage.py:250-263](file://products/incident-service/src/incident_service/services/triage.py#L250-L263)
 
 **Section sources**
 - [spec.md:257-262](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md#L257-L262)
@@ -347,6 +461,8 @@ PGMatrix --> Portal["Portal UI"]
 - require_approval adds minimal overhead: an extra branch and approval block serialization.
 - Tool-gateway skips require_approval rules at load, avoiding runtime cost for unenforced paths.
 - Matrix computation iterates all visible roles × actions; caching and scope filtering mitigate cost.
+- **Updated** Per-turn toolkit scoping adds minimal overhead through cache key differentiation and selective toolkit filtering for read-only turns.
+- **Updated** Read-only toolkit filtering excludes mutating tools early in the pipeline, preventing unnecessary policy evaluation downstream.
 
 [No sources needed since this section provides general guidance]
 
@@ -364,15 +480,31 @@ Common issues and resolutions:
 - **Portal card not actionable**:
   - Non-deciders see read-only card; grant appropriate role or switch to an approver identity.
   - Observer without chat:confirm role sees read-only regardless of tier.
+- **Triage operations failing**:
+  - Verify triage requests include `read_only=True` flag to ensure read-only toolkit execution.
+  - Check that triage sessions are properly scoped to incident IDs.
+  - Validate structured output schema compliance when using response_schema parameter.
+- **Structured output not working**:
+  - Ensure GenerateStructuredOutput is available in the kernel's local-tool allow-list.
+  - Verify response_schema parameter is properly formatted JSON schema.
+  - Check that structured output validation passes against the provided schema.
+- **Approver execution failures**:
+  - Confirm approver has tools:list, tools:invoke, and tools:mutate permissions in the policy bundle.
+  - Verify tier_2-approved calls execute under the confirmer's delegated token.
+  - Check that approver roles are included in the allow rules for tool execution.
 
 **Section sources**
 - [policy_engine.py (platform-gateway):183-285](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L183-L285)
 - [policy_engine.py (tool-gateway):147-246](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L147-L246)
 - [test_policy_engine.py:446-502](file://products/platform-gateway/tests/test_policy_engine.py#L446-L502)
 - [gateway_service.py:610-684](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L610-L684)
+- [triage.py:250-263](file://products/incident-service/src/incident_service/services/triage.py#L250-L263)
+- [runtime_kernel.py:356-376](file://products/agent-platform/src/agent_service/runtime_kernel.py#L356-L376)
+- [kernel_middleware.py:55-60](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L55-L60)
+- [policy-default.yaml:81-119](file://shared/shared-contracts/policies/policy-default.yaml#L81-L119)
 
 ## Conclusion
-SPEC-030 makes approval a first-class, data-driven policy outcome with explicit tiers, enforced on the existing HITL confirmation path. It tightens security by default (tier_2 on mutating actions), preserves backward compatibility (v1 bundles), and improves transparency (matrix, portal, audit). Future slices can extend to policy-center and additional tiers without breaking this enforcement contract.
+SPEC-030 makes approval a first-class, data-driven policy outcome with explicit tiers, enforced on the existing HITL confirmation path. It tightens security by default (tier_2 on mutating actions), preserves backward compatibility (v1 bundles), and improves transparency (matrix, portal, audit). The critical remediations during live validation — triage read-only enforcement, GenerateStructuredOutput allow-list addition, and approver role permissions — ensure robust operation across all usage patterns. Future slices can extend to policy-center and additional tiers without breaking this enforcement contract.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -382,19 +514,24 @@ SPEC-030 makes approval a first-class, data-driven policy outcome with explicit 
 - R-1: Contract revision with require_approval and approval block.
 - R-2: Evaluation semantics in both engines (deny > require_approval > allow; priority; validation).
 - R-3: Tiered enforcement bridge on chat:confirm (decider roles, self-approval checks).
-- R-4: Default bundle posture (tier_2 on tools:mutate; demo updates).
+- R-4: Default bundle posture (tier_2 on tools:mutate; demo updates; approver role permissions).
 - R-5: Transparency and audit consistency (matrix third state, portal badges, audit enrichment).
 - R-6: Settings panel restoration (portal-only, read-only panes).
+- **Updated** R-7: Runtime kernel enhancements (per-turn read_only toolkit scoping, GenerateStructuredOutput allow-list).
+- **Updated** R-8: Triage service read-only enforcement (structural protection against mutating tools).
 
 **Section sources**
 - [spec.md:59-226](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md#L59-L226)
 - [plan.md:16-139](file://docs/specs/SPEC-030-require-approval-policy-semantics/plan.md#L16-L139)
 - [tasks.md:5-50](file://docs/specs/SPEC-030-require-approval-policy-semantics/tasks.md#L5-L50)
+- [spec.md:337-352](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md#L337-L352)
 
 ### Related Specifications and Guidance
 - Policy specification defines minimum decision response and recommended tier behavior.
 - Spike memo documents findings, options, and recommended shape leading to SPEC-030.
+- **Updated** Incident triage specifications define read-only operational boundaries for automated diagnostic turns.
 
 **Section sources**
 - [policy-specification.md:223-295](file://docs/agentic-aiops-platform/policy-specification.md#L223-L295)
 - [policy-require-approval-spike.md:21-142](file://docs/workspace/policy-require-approval-spike.md#L21-L142)
+- [triage.py:1-14](file://products/incident-service/src/incident_service/services/triage.py#L1-L14)

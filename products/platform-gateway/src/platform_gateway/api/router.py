@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from platform_gateway.api.routes import (
+    approvals,
     audit,
     auth,
     chat,
@@ -28,3 +29,4 @@ router.include_router(policy.router)
 router.include_router(tools.router)
 router.include_router(skills.router)
 router.include_router(models.router)
+router.include_router(approvals.router)

@@ -1,0 +1,303 @@
+// Approvals inbox view (SPEC-031 R-5): the designated approver's
+// cross-session queue of parked confirmations plus the 30-day decision
+// history. Reuses ConfirmationCardView so inbox cards render identically
+// to the owner-transcript cards; decisions ride the same POST
+// /api/v1/chat/confirm surface the chat uses, with the structured
+// already_resolved 409 flipping the card to the winner's outcome.
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Alert, Button, Spin, Typography } from "antd";
+import { ReloadOutlined } from "@ant-design/icons";
+import dayjs from "dayjs";
+import relativeTime from "dayjs/plugin/relativeTime";
+import { getApprovalsInbox } from "../../api/approvals";
+import type { ConfirmationRecord } from "../../api/sessions";
+import { useAuth } from "../../auth/AuthContext";
+import { ConfirmationCardView } from "../../chat/ChatView";
+import { confirmationRecordToCard } from "../../chat/transcript";
+import { CHAT_CONFIRM_ROLES, hasAnyRole } from "../../roles";
+import {
+  StreamOpenError,
+  alreadyResolvedDetail,
+  consumeStream,
+  openStream,
+} from "../../stream/transport";
+import type { ConfirmationDecision } from "../../stream/useChatStream";
+
+dayjs.extend(relativeTime);
+
+const POLL_INTERVAL_MS = 30_000;
+
+function recordStatus(raw: string | undefined): ConfirmationRecord["status"] | undefined {
+  return raw === "pending" ||
+    raw === "approved" ||
+    raw === "denied" ||
+    raw === "expired"
+    ? raw
+    : undefined;
+}
+
+export interface ApprovalsInboxState {
+  records: ConfirmationRecord[];
+  loading: boolean;
+  error: string | null;
+  pendingCount: number;
+  busyConfirmId: string | null;
+  refresh: () => Promise<void>;
+  decide: (confirmId: string, decision: ConfirmationDecision) => Promise<void>;
+}
+
+// One inbox per signed-in decider: App owns the hook so the sidebar
+// badge and the view share a single poll (30s + window focus), and a
+// decision made in either surface stays consistent.
+export function useApprovalsInbox(enabled: boolean): ApprovalsInboxState {
+  const { username } = useAuth();
+  const [records, setRecords] = useState<ConfirmationRecord[]>([]);
+  const [loading, setLoading] = useState(enabled);
+  const [error, setError] = useState<string | null>(null);
+  const [busyConfirmId, setBusyConfirmId] = useState<string | null>(null);
+  const recordsRef = useRef<ConfirmationRecord[]>([]);
+  recordsRef.current = records;
+  const loadedOnceRef = useRef(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const items = await getApprovalsInbox();
+      setRecords(items);
+      setError(null);
+    } catch (err) {
+      // Keep the last good list on transient failures; a transport
+      // error can never mean "inbox empty" (gateway maps that to 502).
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      loadedOnceRef.current = true;
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) {
+      setRecords([]);
+      setLoading(false);
+      return;
+    }
+    void refresh();
+    const timer = setInterval(() => void refresh(), POLL_INTERVAL_MS);
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [enabled, refresh]);
+
+  const patchRecord = useCallback(
+    (confirmId: string, patch: Partial<ConfirmationRecord>) => {
+      setRecords((current) =>
+        current.map((record) =>
+          record.confirm_id === confirmId ? { ...record, ...patch } : record,
+        ),
+      );
+    },
+    [],
+  );
+
+  const decide = useCallback(
+    async (confirmId: string, decision: ConfirmationDecision) => {
+      const record = recordsRef.current.find(
+        (entry) =>
+          entry.confirm_id === confirmId && entry.status === "pending",
+      );
+      if (!record || busyConfirmId) return;
+      setBusyConfirmId(confirmId);
+      try {
+        const opened = await openStream("/api/v1/chat/confirm", {
+          method: "POST",
+          body: {
+            session_id: record.session_id,
+            confirm_id: confirmId,
+            decision,
+          },
+        });
+        // The response is the owner's resumed stream; the inbox only
+        // needs the confirmation_result outcome (deltas are ignored).
+        let outcome: string | undefined;
+        await consumeStream(opened.chunks, (event) => {
+          const frame = event.frame;
+          if (frame && frame.kind === "confirmation_result") {
+            outcome = frame.status;
+          }
+        });
+        patchRecord(confirmId, {
+          status:
+            recordStatus(outcome) && recordStatus(outcome) !== "pending"
+              ? (recordStatus(outcome) as ConfirmationRecord["status"])
+              : decision === "approve"
+                ? "approved"
+                : "denied",
+          decider_user_id: username ?? null,
+          decision,
+          decided_at: new Date().toISOString(),
+        });
+        // Resync with the durable store so attribution and ordering
+        // follow the server's truth once it settles.
+        void refresh();
+      } catch (err) {
+        if (err instanceof StreamOpenError && err.status === 409) {
+          // SPEC-031 R-4 race: another decider won. Flip the card to
+          // the winner's outcome instead of leaving a doomed retry.
+          const race = alreadyResolvedDetail(err.detail);
+          if (race) {
+            patchRecord(confirmId, {
+              status: recordStatus(race.status) ?? "expired",
+              decider_user_id: race.decider_user_id ?? null,
+              decision: race.decision ?? null,
+              decided_at: race.decided_at ?? null,
+            });
+          } else {
+            setError(`Confirm request failed (409).`);
+          }
+        } else if (err instanceof StreamOpenError && err.status === 410) {
+          patchRecord(confirmId, { status: "expired" });
+        } else if (err instanceof StreamOpenError && err.status === 401) {
+          setError("Not authenticated. Please sign in from the sidebar first.");
+        } else if (!(err instanceof Error && err.name === "AbortError")) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        setBusyConfirmId(null);
+      }
+    },
+    [busyConfirmId, patchRecord, refresh, username],
+  );
+
+  return {
+    records,
+    loading: loading && !loadedOnceRef.current,
+    error,
+    pendingCount: records.filter((record) => record.status === "pending")
+      .length,
+    busyConfirmId,
+    refresh,
+    decide,
+  };
+}
+
+// One inbox entry: provenance line (metadata only — SPEC-030 Q-1) above
+// the shared confirmation card.
+function InboxEntry({
+  record,
+  inbox,
+  canDecide,
+}: {
+  record: ConfirmationRecord;
+  inbox: ApprovalsInboxState;
+  canDecide: boolean;
+}) {
+  return (
+    <div className="approvals-entry">
+      <div className="approvals-entry-meta">
+        <span>
+          session: {record.session_title ?? record.session_id}
+        </span>
+        <span>owner: {record.owner_user_id}</span>
+        {record.parked_at ? (
+          <span>parked {dayjs(record.parked_at).fromNow()}</span>
+        ) : null}
+      </div>
+      <ConfirmationCardView
+        card={confirmationRecordToCard(record)}
+        canDecide={canDecide && record.status === "pending"}
+        busy={inbox.busyConfirmId === record.confirm_id}
+        onDecide={(confirmId, decision) => void inbox.decide(confirmId, decision)}
+      />
+    </div>
+  );
+}
+
+export default function ApprovalsView({
+  inbox,
+}: {
+  inbox: ApprovalsInboxState;
+}) {
+  const { roles } = useAuth();
+  const canDecide = hasAnyRole(roles, CHAT_CONFIRM_ROLES);
+  const pending = inbox.records.filter((record) => record.status === "pending");
+  const history = inbox.records.filter(
+    (record) => record.status !== "pending",
+  );
+
+  return (
+    <div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: 8,
+        }}
+      >
+        <Typography.Title level={4} style={{ margin: 0 }}>
+          Approvals
+        </Typography.Title>
+        <Button
+          size="small"
+          icon={<ReloadOutlined />}
+          onClick={() => void inbox.refresh()}
+          aria-label="Refresh inbox"
+        >
+          Refresh
+        </Button>
+        <Typography.Text type="secondary">
+          Pending confirmations park here until decided; history keeps
+          decisions for 30 days.
+        </Typography.Text>
+      </div>
+      {inbox.error ? (
+        <Alert
+          type="warning"
+          showIcon
+          message={inbox.error}
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
+      <Spin spinning={inbox.loading}>
+        <Typography.Text strong>Pending</Typography.Text>
+        {pending.length === 0 ? (
+          <div style={{ padding: "8px 0" }}>
+            <Typography.Text type="secondary">
+              No confirmations are waiting for a decision.
+            </Typography.Text>
+          </div>
+        ) : (
+          pending.map((record) => (
+            <InboxEntry
+              key={record.confirm_id}
+              record={record}
+              inbox={inbox}
+              canDecide={canDecide}
+            />
+          ))
+        )}
+        <Typography.Text strong style={{ display: "block", marginTop: 16 }}>
+          History
+        </Typography.Text>
+        {history.length === 0 ? (
+          <div style={{ padding: "8px 0" }}>
+            <Typography.Text type="secondary">
+              No decisions in the last 30 days.
+            </Typography.Text>
+          </div>
+        ) : (
+          history.map((record) => (
+            <InboxEntry
+              key={record.confirm_id}
+              record={record}
+              inbox={inbox}
+              canDecide={canDecide}
+            />
+          ))
+        )}
+      </Spin>
+    </div>
+  );
+}

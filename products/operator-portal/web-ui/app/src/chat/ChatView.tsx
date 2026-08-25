@@ -675,7 +675,13 @@ export default function ChatView({
         }
         setSession(
           target,
-          transcriptToTurns(detail.transcript ?? [], detail.evidence_turns),
+          // SPEC-031 R-2: durable confirmation cards ride the session
+          // detail, so parked/decided cards survive a re-login.
+          transcriptToTurns(
+            detail.transcript ?? [],
+            detail.evidence_turns,
+            detail.confirmations,
+          ),
         );
       })
       .catch((error) => {

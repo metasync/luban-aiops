@@ -9,6 +9,10 @@ export class StreamOpenError extends Error {
   constructor(
     public readonly status: number,
     message?: string,
+    // SPEC-031 R-4: the parsed error body, if any — the structured
+    // already_resolved 409 detail rides here so callers can flip the
+    // card to the winner's outcome instead of retrying blindly.
+    public readonly detail?: unknown,
   ) {
     super(message || `Stream request failed (${status}).`);
     this.name = "StreamOpenError";
@@ -16,6 +20,32 @@ export class StreamOpenError extends Error {
 }
 
 export type ChunkSource = AsyncIterable<Uint8Array>;
+
+// SPEC-031 R-4: the race-loser's 409 carries the winner's outcome in the
+// FastAPI detail envelope. Returns the structured payload only when the
+// reason matches — any other 409 shape stays a plain failure.
+export interface AlreadyResolvedDetail {
+  reason?: string;
+  status?: string;
+  decider_user_id?: string | null;
+  decision?: string | null;
+  decided_at?: string | null;
+}
+
+export function alreadyResolvedDetail(
+  body: unknown,
+): AlreadyResolvedDetail | undefined {
+  const wrapped = body as { detail?: unknown } | undefined;
+  const detail = wrapped?.detail;
+  if (
+    detail &&
+    typeof detail === "object" &&
+    (detail as AlreadyResolvedDetail).reason === "already_resolved"
+  ) {
+    return detail as AlreadyResolvedDetail;
+  }
+  return undefined;
+}
 
 export interface StreamOpenOptions {
   method?: "GET" | "POST";
@@ -99,7 +129,19 @@ export async function openStream(
     signal: options.signal,
     body,
   });
-  if (!response.ok || !response.body) {
+  if (!response.ok) {
+    // Best-effort body parse: structured error payloads (FastAPI's
+    // {"detail": ...} envelope) surface on the thrown error; anything
+    // non-JSON degrades to detail=undefined (fallback messaging).
+    let detail: unknown;
+    try {
+      detail = await response.json();
+    } catch {
+      detail = undefined;
+    }
+    throw new StreamOpenError(response.status, undefined, detail);
+  }
+  if (!response.body) {
     throw new StreamOpenError(response.status);
   }
   return { requestId, chunks: readableToChunks(response.body) };

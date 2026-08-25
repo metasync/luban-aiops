@@ -370,7 +370,12 @@ consequence of the tier_2 resume semantics: the approved call executes
 under the confirmer's delegated token, so the shipped bundle grants
 `approver` the tool execution actions (`tools:list`/`tools:invoke`/
 `tools:mutate`) — separation of duties stays enforced at the approval
-gate, where tier_2 self-approval is blocked. The full approval model —
+gate, where tier_2 self-approval is blocked. SPEC-031 adds `approvals:list`
+(list the cross-session confirmation inbox: pending items plus 30 days of
+decision history, metadata only), granted exactly to the tier_2 decider
+roles `approver` and `platform-admin`; every other role receives the
+standard audited policy 403, mirroring who may decide tier_2 approvals.
+The full approval model —
 policy actions, risk-tier admission, the agent auto-allow list, and HITL
 confirmation — is documented in the
 [Approval and HITL Governance Guide](../guides/approval-and-hitl.md).

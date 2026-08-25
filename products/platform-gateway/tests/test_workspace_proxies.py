@@ -452,5 +452,122 @@ class ModelsProxyTests(WorkspaceProxyBase):
             )
 
 
+INBOX_PAYLOAD = {
+    "confirmations": [
+        {
+            "confirm_id": "cf-live",
+            "session_id": "ses-2",
+            "owner_user_id": "luban-operator",
+            "session_title": "restart demo",
+            "pending_calls": [
+                {"call_id": "call-1", "tool_name": "k8s.restart_service"}
+            ],
+            "action": "tools:mutate",
+            "status": "pending",
+            "parked_at": "2026-08-25T10:00:00Z",
+            "decider_user_id": None,
+            "decision": None,
+            "decided_at": None,
+        },
+        {
+            "confirm_id": "cf-old",
+            "session_id": "ses-1",
+            "owner_user_id": "luban-operator",
+            "session_title": None,
+            "pending_calls": [],
+            "action": "tools:mutate",
+            "status": "approved",
+            "parked_at": "2026-08-20T10:00:00Z",
+            "decider_user_id": "luban-approver",
+            "decision": "approve",
+            "decided_at": "2026-08-20T10:05:00Z",
+        },
+    ]
+}
+
+INBOX_CLIENT = (
+    "platform_gateway.services.gateway_service.agent_client.fetch_approvals_inbox"
+)
+
+
+def _inbox_status_error(status_code: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("GET", "http://agent-service/api/v2/confirmations")
+    return httpx.HTTPStatusError(
+        "upstream error", request=request, response=httpx.Response(status_code)
+    )
+
+
+class ApprovalsInboxProxyTests(WorkspaceProxyBase):
+    """Approver confirmation inbox proxy (SPEC-031 R-3)."""
+
+    def test_approver_allowed_and_payload_proxied_verbatim(self) -> None:
+        upstream = AsyncMock(return_value=INBOX_PAYLOAD)
+        with (
+            self._patch_identity("approver", "approvals"),
+            patch(INBOX_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/approvals/inbox")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), INBOX_PAYLOAD)
+        upstream.assert_awaited_once()
+
+    def test_platform_admin_allowed(self) -> None:
+        upstream = AsyncMock(return_value=INBOX_PAYLOAD)
+        with (
+            self._patch_identity("platform-admin", "approvals"),
+            patch(INBOX_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/approvals/inbox")
+        self.assertEqual(response.status_code, 200)
+
+    def test_operator_denied_before_upstream(self) -> None:
+        upstream = AsyncMock(return_value=INBOX_PAYLOAD)
+        with (
+            self._patch_identity("operator", "approvals"),
+            patch(INBOX_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/approvals/inbox")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"]["action"], "approvals:list")
+        upstream.assert_not_awaited()
+
+    def test_observer_denied_before_upstream(self) -> None:
+        upstream = AsyncMock(return_value=INBOX_PAYLOAD)
+        with (
+            self._patch_identity("read-only-observer", "approvals"),
+            patch(INBOX_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/approvals/inbox")
+        self.assertEqual(response.status_code, 403)
+        upstream.assert_not_awaited()
+
+    def test_upstream_4xx_passed_through(self) -> None:
+        upstream = AsyncMock(side_effect=_inbox_status_error(404))
+        with (
+            self._patch_identity("approver", "approvals"),
+            patch(INBOX_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/approvals/inbox")
+        self.assertEqual(response.status_code, 404)
+
+    def test_upstream_5xx_mapped_to_502(self) -> None:
+        upstream = AsyncMock(side_effect=_inbox_status_error(500))
+        with (
+            self._patch_identity("approver", "approvals"),
+            patch(INBOX_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/approvals/inbox")
+        self.assertEqual(response.status_code, 502)
+
+    def test_transport_failure_returns_502(self) -> None:
+        upstream = AsyncMock(side_effect=httpx.ConnectError("boom"))
+        with (
+            self._patch_identity("approver", "approvals"),
+            patch(INBOX_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/approvals/inbox")
+        self.assertEqual(response.status_code, 502)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-25
 - release slice: R4 — Approval-Gated Bounded Actions
@@ -202,3 +202,8 @@ All resolved (2026-08-25):
   concurrent-approver outcome opacity).
 - 2026-08-25: OQ-1/OQ-2 resolved — 30-day time-window retention for inbox
   history; expired items included in history.
+- 2026-08-25: delivered in the 0.13.0 train — R-1..R-5 complete,
+  `make verify` green, live-cluster e2e (mutating-demo HITL leg with the
+  three SPEC-031 assertions) and browser validation passed (approver
+  inbox decide + history attribution, operator no-Approvals-nav, owner
+  durable card after re-login).

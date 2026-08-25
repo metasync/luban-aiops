@@ -1,0 +1,1 @@
+New specs are created from the templates in `docs/specs/templates/`; the spec index in `README.md` must be updated when adding or changing a spec's status, and delivery requires updating living-state docs listed in each spec's Impact section.

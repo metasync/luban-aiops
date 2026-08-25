@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from agent_service.core.metrics import record_session_created
 from agent_service.schemas.api import SessionRecord
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
+from agent_service.services.confirmation_records import CONFIRMATION_RECORD_STORE
 from agent_service.services.evidence_store import EVIDENCE_STORE
 from agent_service.services.session_store import SESSION_STORE
 
@@ -142,5 +143,11 @@ def delete_session(session_id: str, user_id: str | None = None) -> bool:
             EVIDENCE_STORE.delete_session(session_id)
         except Exception:
             # Evidence cleanup is best-effort; the session is gone.
+            pass
+        try:
+            CONFIRMATION_RECORD_STORE.delete_session(session_id)
+        except Exception:
+            # Confirmation records live and die with their session;
+            # cleanup is best-effort once the session is gone.
             pass
     return deleted

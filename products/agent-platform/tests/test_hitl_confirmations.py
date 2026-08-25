@@ -20,6 +20,10 @@ from agent_service.app import create_app
 from agent_service.runtime_kernel import AgentKernel
 from agent_service.runtime_settings import RuntimeSettings
 from agent_service.services import session_service
+from agent_service.services.confirmation_records import (
+    CONFIRMATION_RECORD_STORE,
+    make_record,
+)
 from agent_service.services.hitl_confirmations import (
     CONFIRMATION_REGISTRY,
     ConfirmationExpired,
@@ -40,8 +44,13 @@ def _park_event() -> RequireUserConfirmEvent:
 @pytest.fixture(autouse=True)
 def _clean_registry():
     CONFIRMATION_REGISTRY._by_session.clear()
+    records = getattr(CONFIRMATION_RECORD_STORE, "_by_confirm_id", None)
+    if records is not None:
+        records.clear()
     yield
     CONFIRMATION_REGISTRY._by_session.clear()
+    if records is not None:
+        records.clear()
 
 
 def _configured_kernel(**overrides) -> AgentKernel:
@@ -501,6 +510,93 @@ def test_expire_confirmation_skips_claimed_entry(monkeypatch):
     assert agent.inputs == []
     # The entry stays parked until the resume's finally resolves it.
     assert CONFIRMATION_REGISTRY.is_parked("s1", 600)
+
+
+# --- Kernel: durable resolution records (SPEC-031 R-1) ---
+
+
+def _seed_parked_record(session_id: str, confirm_id: str, owner: str = "alice"):
+    CONFIRMATION_RECORD_STORE.save_parked(
+        make_record(
+            confirm_id,
+            session_id,
+            owner,
+            [{"call_id": "call-1", "tool_name": "k8s.restart_service"}],
+            "tools:mutate",
+        )
+    )
+
+
+def test_resume_confirmation_persists_durable_resolution(monkeypatch):
+    """The applied decision lands in the record store with attribution."""
+    kernel = _configured_kernel()
+    agent = FakeAgent(events=[])
+    _patch_agent(monkeypatch, kernel, agent)
+    pending = CONFIRMATION_REGISTRY.register("s1", "alice", "reply-1", [TOOL_CALL], 600)
+    _seed_parked_record("s1", pending.confirm_id)
+    claimed = CONFIRMATION_REGISTRY.claim("s1", pending.confirm_id, 600)
+
+    _drain(
+        kernel.resume_confirmation(
+            "s1", claimed, "approve", "bob-approver", "req-x"
+        )
+    )
+    record = CONFIRMATION_RECORD_STORE.load_record("s1", pending.confirm_id)
+    assert record["status"] == "approved"
+    assert record["decider_user_id"] == "bob-approver"
+    assert record["decision"] == "approve"
+    assert record["decided_at"] is not None
+
+
+def test_resume_confirmation_persists_denial(monkeypatch):
+    kernel = _configured_kernel()
+    agent = FakeAgent(events=[])
+    _patch_agent(monkeypatch, kernel, agent)
+    pending = CONFIRMATION_REGISTRY.register("s1", "alice", "reply-1", [TOOL_CALL], 600)
+    _seed_parked_record("s1", pending.confirm_id)
+    claimed = CONFIRMATION_REGISTRY.claim("s1", pending.confirm_id, 600)
+
+    _drain(kernel.resume_confirmation("s1", claimed, "deny", "alice", "req-x"))
+    record = CONFIRMATION_RECORD_STORE.load_record("s1", pending.confirm_id)
+    assert record["status"] == "denied"
+    assert record["decider_user_id"] == "alice"
+    assert record["decision"] == "deny"
+
+
+def test_expire_confirmation_persists_expired_record(monkeypatch):
+    kernel = _configured_kernel()
+    agent = FakeAgent(events=[])
+    _patch_agent(monkeypatch, kernel, agent)
+    pending = CONFIRMATION_REGISTRY.register("s1", "alice", "reply-1", [TOOL_CALL], 600)
+    _seed_parked_record("s1", pending.confirm_id)
+    pending.created_at = time.monotonic() - 601
+
+    asyncio.run(kernel.expire_confirmation("s1", pending.confirm_id))
+    record = CONFIRMATION_RECORD_STORE.load_record("s1", pending.confirm_id)
+    assert record["status"] == "expired"
+    assert record["decider_user_id"] is None
+    assert record["decision"] is None
+
+
+def test_resolution_write_failure_never_breaks_resume(monkeypatch):
+    """A failing record store degrades history only, never the decision."""
+    kernel = _configured_kernel()
+    agent = FakeAgent(events=[])
+    _patch_agent(monkeypatch, kernel, agent)
+    pending = CONFIRMATION_REGISTRY.register("s1", "alice", "reply-1", [TOOL_CALL], 600)
+    claimed = CONFIRMATION_REGISTRY.claim("s1", pending.confirm_id, 600)
+
+    def broken_mark_resolved(*args, **kwargs):
+        raise RuntimeError("store down")
+
+    monkeypatch.setattr(
+        CONFIRMATION_RECORD_STORE, "mark_resolved", broken_mark_resolved
+    )
+    frames = _drain(
+        kernel.resume_confirmation("s1", claimed, "approve", "alice", "req-x")
+    )
+    assert frames[0]["status"] == "approved"
+    assert not CONFIRMATION_REGISTRY.is_parked("s1", 600)
 
 
 # --- Routes ---

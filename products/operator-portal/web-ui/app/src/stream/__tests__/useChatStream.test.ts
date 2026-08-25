@@ -23,6 +23,9 @@ interface FakeResponse {
   ok: boolean;
   status: number;
   body: AsyncGenerator<Uint8Array> | null;
+  // SPEC-031 R-4: error bodies ride a parsed JSON payload; openStream
+  // calls this best-effort on non-OK responses.
+  json?: () => Promise<unknown>;
 }
 
 function queueFetch(...responses: FakeResponse[]) {
@@ -202,6 +205,84 @@ describe("useChatStream", () => {
     expect(result.current.turns[0]?.confirmations[0]).toMatchObject({
       status: "expired",
       note: "This confirmation expired before a decision was applied.",
+    });
+  });
+
+  // SPEC-031 R-4: two approvers click at once — the loser's confirm call
+  // returns the structured already_resolved 409 and the card must flip
+  // to the winner's outcome with attribution instead of staying pending.
+  it("flips the card to the winner's outcome on a 409 already_resolved", async () => {
+    queueFetch(
+      okStream(
+        sse({
+          type: "confirmation_request",
+          confirm_id: "cf-1",
+          session_id: "s-1",
+          pending_calls: [],
+        }),
+      ),
+      {
+        ok: false,
+        status: 409,
+        body: null,
+        json: () =>
+          Promise.resolve({
+            detail: {
+              reason: "already_resolved",
+              status: "denied",
+              decider_user_id: "luban-approver",
+              decision: "deny",
+              decided_at: "2026-08-25T10:05:00Z",
+            },
+          }),
+      },
+    );
+
+    const { result } = renderHook(() => useChatStream());
+    await act(async () => {
+      await result.current.send("restart it", { userId: "amy" });
+    });
+    await act(async () => {
+      await result.current.decide("cf-1", "approve");
+    });
+
+    expect(result.current.turns[0]?.confirmations[0]).toMatchObject({
+      status: "denied",
+      note: "Already resolved by luban-approver at 2026-08-25T10:05:00Z.",
+      deciderUserId: "luban-approver",
+      decidedAt: "2026-08-25T10:05:00Z",
+    });
+  });
+
+  it("keeps the card retryable on an unstructured 409", async () => {
+    queueFetch(
+      okStream(
+        sse({
+          type: "confirmation_request",
+          confirm_id: "cf-1",
+          session_id: "s-1",
+          pending_calls: [],
+        }),
+      ),
+      {
+        ok: false,
+        status: 409,
+        body: null,
+        json: () => Promise.resolve({ detail: "conflict" }),
+      },
+    );
+
+    const { result } = renderHook(() => useChatStream());
+    await act(async () => {
+      await result.current.send("restart it", { userId: "amy" });
+    });
+    await act(async () => {
+      await result.current.decide("cf-1", "approve");
+    });
+
+    expect(result.current.turns[0]?.confirmations[0]).toMatchObject({
+      status: "pending",
+      note: "Confirm request failed (409).",
     });
   });
 

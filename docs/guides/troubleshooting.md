@@ -831,3 +831,36 @@ supporting the selected language.
   the choice drives the recognizer only and is never sent to the platform.
 - Voice turns are audited with `details.input_modality: voice` on the
   `chat_started` event; approval/HITL behavior never changes with modality.
+
+## Symptom: Approving a confirmation returns "already_resolved" (409)
+
+**Most likely cause:** The confirmation was already decided by someone else
+(or by you in another tab). Confirmations resolve exactly once; since
+SPEC-031 the confirm route answers a structured `409 already_resolved`
+carrying the winner's outcome (status, decider, decision, decided-at)
+instead of re-executing. The portal flips the card to that outcome with
+attribution — this is the race-safe path, not an error.
+
+**Resolution:**
+
+- No action needed for the owner: the recorded outcome is authoritative,
+  and the durable card in the transcript shows who decided and when.
+- Approvers can verify the outcome in the Approvals view's History section
+  (decisions stay listed for 30 days).
+- A `404` on confirm, by contrast, means the confirm id is unknown or was
+  never parked — re-check the session/card you are acting on.
+
+## Symptom: A pending confirmation shows "expired" after a service restart
+
+**Most likely cause:** A parked kernel reply never survives its process
+(SPEC-020 posture). At startup, agent-platform flips any `pending`
+confirmation record to `expired` (SPEC-031), so the card stays visible in
+the transcript and the approver inbox with an accurate state instead of
+hanging forever.
+
+**Resolution:**
+
+- The operator simply re-sends the request; the new confirmation parks
+  fresh under the restarted service.
+- Approvals made before the restart are unaffected — decided records keep
+  their outcome and attribution.

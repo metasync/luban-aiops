@@ -191,6 +191,61 @@ class ChatConfirmRouteTests(unittest.TestCase):
             response = self.client.post(CONFIRM_PATH, json=CONFIRM_BODY)
         self.assertEqual(response.status_code, 410)
 
+    def test_upstream_already_resolved_body_passes_through_structured(self) -> None:
+        """SPEC-031 R-4: the racing approver's 409 keeps the decider and
+        outcome instead of degrading to an opaque error string."""
+        request = httpx.Request("POST", "http://agent/api/v2/chat/confirm")
+        detail = {
+            "reason": "already_resolved",
+            "status": "approved",
+            "decider_user_id": "luban-approver",
+            "decision": "approve",
+            "decided_at": "2026-08-25T12:00:00Z",
+        }
+
+        async def fake_open(*args, **kwargs):
+            raise httpx.HTTPStatusError(
+                "resolved",
+                request=request,
+                response=httpx.Response(
+                    409, request=request, json={"detail": detail}
+                ),
+            )
+
+        with (
+            self._patch_identity("operator"),
+            self._patch_delegation(),
+            self._patch_fetch(),
+            patch(OPEN_PATCH, fake_open),
+        ):
+            response = self.client.post(CONFIRM_PATH, json=CONFIRM_BODY)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], detail)
+
+    def test_upstream_unparsable_4xx_degrades_to_fallback_detail(self) -> None:
+        """SPEC-031 R-4: a body without a relayable detail keeps the
+        passthrough posture with the bridge's fallback message."""
+        request = httpx.Request("POST", "http://agent/api/v2/chat/confirm")
+
+        async def fake_open(*args, **kwargs):
+            raise httpx.HTTPStatusError(
+                "gone",
+                request=request,
+                response=httpx.Response(404, request=request, json={}),
+            )
+
+        with (
+            self._patch_identity("operator"),
+            self._patch_delegation(),
+            self._patch_fetch(),
+            patch(OPEN_PATCH, fake_open),
+        ):
+            response = self.client.post(CONFIRM_PATH, json=CONFIRM_BODY)
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json()["detail"], "agent service rejected the confirmation"
+        )
+
     def test_upstream_server_error_maps_to_502(self) -> None:
         request = httpx.Request("POST", "http://agent/api/v2/chat/confirm")
 

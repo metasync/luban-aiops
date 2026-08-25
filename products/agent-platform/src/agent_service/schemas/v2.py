@@ -172,6 +172,29 @@ class EvidenceTurn(BaseModel):
     frames: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ConfirmationRecordModel(BaseModel):
+    """Durable confirmation lifecycle record (SPEC-031 R-1/R-2).
+
+    Rides the session-detail surface (owner transcript cards) and the
+    inbox surface (approver view). ``pending_calls`` follows the parked
+    payload shape of the confirmation_request frame; decided records
+    carry the decider and outcome so cards render read-only with
+    attribution after any re-login.
+    """
+
+    confirm_id: str
+    session_id: str
+    owner_user_id: str
+    session_title: str | None = None
+    pending_calls: list[dict[str, Any]] = Field(default_factory=list)
+    action: str | None = None
+    status: Literal["pending", "approved", "denied", "expired"] = "pending"
+    parked_at: str | None = None
+    decider_user_id: str | None = None
+    decision: str | None = None
+    decided_at: str | None = None
+
+
 class AgentSession(BaseModel):
     session_id: str
     user_id: str
@@ -193,6 +216,10 @@ class AgentSession(BaseModel):
     # Empty list when the session stored none; null when the evidence
     # store is unreadable (degrades like transcript_available=false).
     evidence_turns: list[EvidenceTurn] | None = None
+    # SPEC-031 R-2: durable confirmation cards in park order, each in its
+    # current state; decided cards stay visible and read-only. Null when
+    # the record store is unreadable (degrades like evidence_turns).
+    confirmations: list[ConfirmationRecordModel] | None = None
 
 
 class AgentSessionSummary(BaseModel):

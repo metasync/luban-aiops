@@ -1,0 +1,5 @@
+- Each product follows the same src layout of `api/`, `core/`, `schemas/`, and `services/` packages with its own `app.py`, `main.py`, and `metadata.py` entry points.
+- Inter-service data exchange is governed by JSON Schema files under `shared/shared-contracts/schemas/`, which are referenced by both producers and consumers instead of inline types.
+- Policy enforcement uses a single canonical `policy-default.yaml` in `shared/shared-contracts/policies/` that is copied into each gateway's local `policies/` directory via `make sync-policy`.
+- All products share a common set of Makefile targets (`sync`, `test`, `lint`, `build`, `push`) defined in `mk/defaults.mk`, `mk/image.mk`, and `mk/python.mk` so the root Makefile can iterate over them uniformly.
+- Versioning is centralized in the root `VERSION` file and enforced across all products by `make validate-version`, keeping every service image tag synchronized with the platform release.

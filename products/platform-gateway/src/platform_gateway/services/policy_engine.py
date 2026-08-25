@@ -54,6 +54,10 @@ ACTION_TOOLS_MUTATE = "tools:mutate"
 # Model catalog discovery (SPEC-024 R-2): read-only pass-through behind its
 # own action; grants mirror the chat scope (operators + observers).
 ACTION_MODELS_LIST = "models:list"
+# Approvals inbox (SPEC-031 R-3): cross-session confirmation discovery for
+# designated approvers; the bundle grants it to the tier_2 decider roles
+# only, mirroring decided_by_roles by authoring.
+ACTION_APPROVALS_LIST = "approvals:list"
 PROTECTED_ACTIONS = frozenset(
     {
         ACTION_CHAT,
@@ -71,6 +75,7 @@ PROTECTED_ACTIONS = frozenset(
         ACTION_SKILLS_READ,
         ACTION_TOOLS_MUTATE,
         ACTION_MODELS_LIST,
+        ACTION_APPROVALS_LIST,
     }
 )
 

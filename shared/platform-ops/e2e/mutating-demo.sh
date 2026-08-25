@@ -31,11 +31,15 @@
 # (require_approval), a second approver identity approves via
 # /api/v1/chat/confirm, and the durable trail carries both the
 # confirmation_decided event (enriched with the matched approval rule
-# and tier) and the tool_invoked attempt. The deny path (leaves
-# everything untouched) is covered by the agent-platform/platform-
-# gateway unit suites because a parked confirmation is single-shot. The
-# chat leg depends on the model choosing the tool, so it is opt-in like
-# the other demos' chat legs.
+# and tier) and the tool_invoked attempt. The leg then asserts the
+# SPEC-031 durability surfaces: the owner's session detail carries the
+# approved card with decider attribution, the approver's inbox lists
+# the decided item with its outcome, and a second approve of the same
+# confirmation answers the structured 409 already_resolved. The deny
+# path (leaves everything untouched) is covered by the
+# agent-platform/platform-gateway unit suites because a parked
+# confirmation is single-shot. The chat leg depends on the model
+# choosing the tool, so it is opt-in like the other demos' chat legs.
 #
 # Prerequisites:
 #   - kubectl context pointed at the dev cluster
@@ -382,6 +386,60 @@ for event in events:
 sys.exit(1)" "$HITL_START_EPOCH" \
     || fail "no tool_invoked event for k8s.delete_pod after the leg started"
   echo "tool_invoked for the approved k8s.delete_pod call is on the durable trail"
+
+  echo "==> [SPEC-031] durable cards: owner transcript, approver inbox, race 409"
+
+  # R-2: the decided card survives a fresh session-detail fetch (the
+  # re-login path) with decider attribution.
+  SESSION_DETAIL=$(curl -fsS --max-time 30 \
+    -H "Authorization: Bearer $OPERATOR_PLATFORM_TOKEN" \
+    "$GATEWAY_URL/api/v1/sessions/$HITL_SESSION") \
+    || fail "owner session detail fetch failed"
+  printf '%s' "$SESSION_DETAIL" | python3 -c "
+import json, sys
+detail = json.load(sys.stdin)
+cards = detail.get('confirmations') or []
+card = next((c for c in cards if c.get('confirm_id') == sys.argv[1]), None)
+assert card is not None, 'no card for the decided confirmation'
+assert card.get('status') == 'approved', \
+    'card status is %r, expected approved' % card.get('status')
+assert card.get('decider_user_id'), 'approved card carries no decider'" "$CONFIRM_ID" \
+    || fail "owner session detail lacks the decided confirmation card"
+  echo "owner session detail carries the approved card with decider attribution"
+
+  # R-3: the approver inbox lists the decided item cross-session,
+  # metadata-only, with its outcome.
+  INBOX=$(curl -fsS --max-time 30 \
+    -H "Authorization: Bearer $APPROVER_PLATFORM_TOKEN" \
+    "$GATEWAY_URL/api/v1/approvals/inbox") \
+    || fail "approvals inbox fetch failed"
+  printf '%s' "$INBOX" | python3 -c "
+import json, sys
+items = json.load(sys.stdin).get('confirmations') or []
+item = next((i for i in items if i.get('confirm_id') == sys.argv[1]), None)
+assert item is not None, 'inbox lacks the decided confirmation'
+assert item.get('status') == 'approved', \
+    'inbox status is %r, expected approved' % item.get('status')
+assert item.get('session_id'), 'inbox item carries no session id'
+assert 'transcript' not in item, 'inbox item leaked transcript text'" "$CONFIRM_ID" \
+    || fail "approver inbox does not list the decided item with outcome"
+  echo "approver inbox lists the decided item with its outcome"
+
+  # R-4: a second approve of the resolved confirmation answers the
+  # structured already_resolved 409 instead of executing twice.
+  RACE_BODY=$(mktemp)
+  RACE_HTTP=$(curl -s -o "$RACE_BODY" -w "%{http_code}" \
+    --max-time 30 -X POST \
+    -H "Authorization: Bearer $APPROVER_PLATFORM_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"session_id\": \"$HITL_SESSION\", \"confirm_id\": \"$CONFIRM_ID\", \"decision\": \"approve\"}" \
+    "$GATEWAY_URL/api/v1/chat/confirm")
+  [ "$RACE_HTTP" = "409" ] \
+    || fail "second approve answered $RACE_HTTP, expected 409: $(cat "$RACE_BODY")"
+  grep -q 'already_resolved' "$RACE_BODY" \
+    || fail "second approve 409 carried no already_resolved reason: $(cat "$RACE_BODY")"
+  rm -f "$RACE_BODY"
+  echo "second approve answers 409 already_resolved (race-resilient resolution)"
 
   # Remove the scratch deployment (and whatever pod the controller
   # recreated after the approved delete).

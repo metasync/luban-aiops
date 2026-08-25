@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Avatar,
+  Badge,
   Button,
   Drawer,
   Layout,
@@ -14,6 +15,7 @@ import {
 import {
   AuditOutlined,
   BulbOutlined,
+  CheckSquareOutlined,
   LoginOutlined,
   LogoutOutlined,
   MenuOutlined,
@@ -25,9 +27,17 @@ import {
 } from "@ant-design/icons";
 import { useAuth } from "./auth/AuthContext";
 import ChatView from "./chat/ChatView";
-import { AUDIT_ROLES, INCIDENT_VIEW_ROLES, hasAnyRole } from "./roles";
+import {
+  APPROVAL_DECIDER_ROLES,
+  AUDIT_ROLES,
+  INCIDENT_VIEW_ROLES,
+  hasAnyRole,
+} from "./roles";
 import { useSessionWorkspace } from "./sessions/useSessionWorkspace";
 import AuditView from "./views/audit/AuditView";
+import ApprovalsView, {
+  useApprovalsInbox,
+} from "./views/control/ApprovalsView";
 import PermissionsView from "./views/control/PermissionsView";
 import SettingsView from "./views/control/SettingsView";
 import SkillsView from "./views/control/SkillsView";
@@ -38,6 +48,7 @@ import { PLATFORM_VERSION } from "./version";
 export type ViewId =
   | "chat"
   | "incidents"
+  | "approvals"
   | "audit"
   | "permissions"
   | "tools"
@@ -73,10 +84,14 @@ function SidebarContent({
   active,
   onNavigate,
   collapsed,
+  pendingApprovals,
 }: {
   active: ViewId;
   onNavigate: (view: ViewId) => void;
   collapsed: boolean;
+  // SPEC-031 R-5: pending-count badge on the Approvals entry; the count
+  // shares the inbox poll owned by App (no second request stream).
+  pendingApprovals: number;
 }) {
   const { username, roles, session, login, logout, authError } = useAuth();
   const signedIn = Boolean(username);
@@ -85,6 +100,9 @@ function SidebarContent({
   // when every entry in its section is hidden.
   const controlVisible = {
     incidents: hasAnyRole(roles, INCIDENT_VIEW_ROLES),
+    // The inbox is decider-only (client-side mirror of approvals:list;
+    // the gateway re-enforces it on every request).
+    approvals: signedIn && hasAnyRole(roles, APPROVAL_DECIDER_ROLES),
     audit: hasAnyRole(roles, AUDIT_ROLES),
     permissions: signedIn,
   };
@@ -104,6 +122,17 @@ function SidebarContent({
         key: "incidents",
         icon: <WarningOutlined />,
         label: "Incidents",
+      });
+    }
+    if (controlVisible.approvals) {
+      controlItems.push({
+        key: "approvals",
+        icon: <CheckSquareOutlined />,
+        label: (
+          <Badge count={pendingApprovals} size="small" offset={[10, 0]}>
+            <span>Approvals</span>
+          </Badge>
+        ),
       });
     }
     if (controlVisible.audit) {
@@ -160,7 +189,7 @@ function SidebarContent({
     }
     return entries;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roles, signedIn]);
+  }, [roles, signedIn, pendingApprovals]);
 
   return (
     <>
@@ -247,10 +276,15 @@ export default function App() {
   // auto-collapses (onBreakpoint) and the drawer takes over.
   const [siderCollapsed, setSiderCollapsed] = useState(false);
   const narrow = useNarrowViewport();
-  const { booting, username } = useAuth();
+  const { booting, username, roles } = useAuth();
   // The session workspace lives here so the incidents view can pin
   // incident sessions into the chat panel (SPEC-023 R-3 deep links).
   const workspace = useSessionWorkspace(Boolean(username));
+  // SPEC-031 R-5: one inbox poll per signed-in decider; the sidebar badge
+  // and the Approvals view share this state.
+  const approvals = useApprovalsInbox(
+    Boolean(username) && hasAnyRole(roles, APPROVAL_DECIDER_ROLES),
+  );
 
   const navigate = (view: ViewId) => {
     setActive(view);
@@ -303,6 +337,7 @@ export default function App() {
           active={active}
           onNavigate={navigate}
           collapsed={siderCollapsed}
+          pendingApprovals={approvals.pendingCount}
         />
       </Layout.Sider>
       <Layout>
@@ -317,6 +352,8 @@ export default function App() {
             <ChatView workspace={workspace} />
           ) : active === "incidents" ? (
             <IncidentsView onOpenIncidentSession={openIncidentSession} />
+          ) : active === "approvals" ? (
+            <ApprovalsView inbox={approvals} />
           ) : active === "audit" ? (
             <AuditView />
           ) : active === "permissions" ? (
@@ -340,7 +377,7 @@ export default function App() {
         onClose={() => setDrawerOpen(false)}
         styles={{ body: { padding: 0 } }}
       >
-        <SidebarContent active={active} onNavigate={navigate} collapsed={false} />
+        <SidebarContent active={active} onNavigate={navigate} collapsed={false} pendingApprovals={approvals.pendingCount} />
       </Drawer>
       <Button
         className="mobile-menu-button"

@@ -333,6 +333,7 @@ async def list_sessions(
 ) -> dict:
     """Proxy the caller's workspace session list (SPEC-022 R-1).
 
+
     Same posture as the get/delete proxies: upstream 4xx passes through
     unchanged; transport failures and upstream 5xx map to 502.
     """
@@ -347,6 +348,37 @@ async def list_sessions(
             ) from exc
         raise HTTPException(
             status_code=502, detail="agent service session list failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+
+async def approvals_inbox(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+) -> dict:
+    """Proxy the approver's cross-session confirmation inbox (SPEC-031 R-3).
+
+    Same posture as the session-list proxy: upstream 4xx passes through
+    unchanged; transport failures and upstream 5xx map to 502 so an
+    outage can never masquerade as an empty inbox.
+    """
+    try:
+        return await agent_client.fetch_approvals_inbox(
+            settings, request_id, user_id
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail="agent service rejected the approvals inbox",
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail="agent service approvals inbox failed"
         ) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(
@@ -575,10 +607,15 @@ async def chat_confirm(
         if 400 <= status < 500:
             # Pass client errors through unchanged (unknown/expired
             # confirmation, parked session) so operators can tell them
-            # apart from an upstream outage.
+            # apart from an upstream outage. SPEC-031 R-4: a structured
+            # upstream body (e.g. already_resolved with the decider and
+            # outcome) rides through untouched so the portal can render
+            # the resolution instead of an opaque error.
             raise HTTPException(
                 status_code=status,
-                detail="agent service rejected the confirmation",
+                detail=_upstream_error_detail(
+                    exc.response, "agent service rejected the confirmation"
+                ),
             ) from exc
         raise HTTPException(
             status_code=502, detail="agent service confirm failed"
@@ -605,6 +642,23 @@ async def chat_confirm(
             yield chunk
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+def _upstream_error_detail(response: httpx.Response, fallback: str) -> object:
+    """Preserve a structured upstream error body on passthrough (SPEC-031 R-4).
+
+    The agent-service already_resolved response carries the decider and
+    outcome in its ``detail``; relaying it keeps the race observable.
+    Anything unparsable degrades to the fallback string.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        return fallback
+    detail = body.get("detail") if isinstance(body, dict) else None
+    if isinstance(detail, (str, dict, list)):
+        return detail
+    return fallback
 
 
 def _enforce_approval_tier(

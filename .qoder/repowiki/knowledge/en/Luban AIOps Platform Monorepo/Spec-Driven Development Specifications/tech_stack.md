@@ -1,0 +1,1 @@
+Markdown-based spec documents coordinated by a Makefile-driven verification gate (`make verify`) that runs product tests and renders GitOps overlays; contract tests bind gateway models to schemas under `shared/shared-contracts`.

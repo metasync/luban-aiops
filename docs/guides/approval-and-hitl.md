@@ -214,6 +214,36 @@ destructive-but-routine actions added later; `require_approval` rules are only
 valid on bridged actions (`tools:mutate` today) — the engine rejects others at
 bundle load.
 
+### Approval inbox and durable confirmation cards (SPEC-031)
+
+Every parked confirmation is recorded durably (Postgres in deployed
+environments, on the shared `AGENT_STATE_DB_URL` posture) together with its
+resolution — status, decider, decision, and timestamps. Two surfaces build on
+the record store:
+
+- **Owner transcript cards.** The session detail carries an additive
+  `confirmations` array, so a card survives re-login, pod restarts, and
+  replica boundaries. Decided cards render read-only with decider
+  attribution; pending cards stay actionable in the chat.
+- **Approver inbox.** `GET /api/v1/approvals/inbox` (portal Approvals view,
+  decider roles only) lists pending confirmations across all sessions plus
+  decisions from the last 30 days, most recent first. Items are
+  **metadata only** — session id/title, owner, parked calls, outcome — and
+  never carry the owner's transcript text. Records are bounded (most recent
+  50 per session, cascade-deleted with the session), and a restart flips
+  stale pending rows to expired because a parked kernel reply never
+  survives its process.
+
+Inbox access is the `approvals:list` policy action (bundle rule
+`allow-approvers-approvals-list`), granted to `approver` and
+`platform-admin`; everyone else receives the standard audited policy 403.
+
+**Race semantics.** A confirmation resolves exactly once. A decision against
+an already-resolved confirmation answers `409 already_resolved` with the
+winner's outcome (status, decider, decision, decided-at), and the portal
+flips the loser's card to that outcome instead of offering a doomed retry.
+Unknown confirm ids still answer 404.
+
 ### Voice-readiness: modality is never privilege (SPEC-022 R-2, SPEC-023 R-4)
 
 Chat requests may carry an optional `input_modality` (`text` | `voice`,
@@ -246,10 +276,10 @@ Today's layers map onto the Tier-1
 [Policy specification](../agentic-aiops-platform/policy-specification.md) as
 follows:
 
-| Today (SPEC-020/SPEC-021/SPEC-030) | Tomorrow (policy specification) |
+| Today (SPEC-020/SPEC-021/SPEC-030/SPEC-031) | Tomorrow (policy specification) |
 |---|---|
 | Bundle `allow`/`deny` per action | `allow` / `deny` outcomes, unchanged |
-| HITL confirmation (kernel ASK park) with `require_approval` tiers on the confirm path | `require_approval` with a dedicated approval queue, persistence, and notification surfaces (policy-center) |
+| HITL confirmation (kernel ASK park) with `require_approval` tiers on the confirm path, durable records + approver inbox | `require_approval` with a dedicated approval queue, persistence, and notification surfaces (policy-center) |
 | Risk-tier gate + activation flags | `allow_with_conditions` (ticket reference, change window, environment scope) |
 
 Two extraction targets already exist as boundary stubs:
@@ -274,7 +304,7 @@ policy-center slice.
 |---|---|---|---|
 | `platform-admin` | granted | granted | Full execution capability; also a designated tier_2 approver — prefer a separate operational role for day-to-day work |
 | `operator` | granted | granted | Execution role — matches the authorization matrix's `restart-service` example; cannot self-approve tier_2 batches |
-| `approver` | granted | granted | Designated approver: decides tier_2 cards; the execution grant carries approved calls (resumed under the confirmer's token) — two-person control is enforced at the approval gate, not admission |
+| `approver` | granted | granted | Designated approver: decides tier_2 cards and works the cross-session Approvals inbox (`approvals:list`); the execution grant carries approved calls (resumed under the confirmer's token) — two-person control is enforced at the approval gate, not admission |
 | `developer` | denied | granted | Can confirm tier_1 cards; tier_2 approvals need a designated approver |
 | `read-only-observer` | denied | denied | Observation only; confirming is an act-on-the-system action |
 | `auditor` | denied | denied | Read the trail; `confirmation_decided` + `tool_invoked` events carry the full chain |

@@ -3,9 +3,21 @@
 // SPEC-025 R-3: persisted tool evidence groups attach to the matching
 // assistant turn by turn_index, so replay renders the same evidence card
 // the live stream showed.
-import type { EvidenceFrame, EvidenceTurn, TranscriptTurn } from "../api/sessions";
-import type { ToolCallFrame, ToolResultFrame } from "../stream/models";
-import type { ChatTurn } from "../stream/useChatStream";
+// SPEC-031 R-2: durable confirmation records merge into the turn timeline
+// so cards survive re-login; decided records render read-only with
+// decider attribution.
+import type {
+  ConfirmationRecord,
+  EvidenceFrame,
+  EvidenceTurn,
+  TranscriptTurn,
+} from "../api/sessions";
+import type {
+  PendingCall,
+  ToolCallFrame,
+  ToolResultFrame,
+} from "../stream/models";
+import type { ChatTurn, ConfirmationCard } from "../stream/useChatStream";
 
 // Frame mapping mirrors the live decoder's tool_call/tool_result handling
 // field-for-field so a replayed card is prop-identical to its live twin.
@@ -69,9 +81,85 @@ function attachEvidence(turns: ChatTurn[], groups: EvidenceTurn[]): void {
   }
 }
 
+// Attribution note for replayed decided cards (SPEC-031 R-2): the card
+// shows who decided and when, mirroring the live FINAL_NOTES wording.
+function attributionNote(record: ConfirmationRecord): string {
+  if (record.status === "expired") {
+    return "This confirmation expired before a decision was applied.";
+  }
+  const who = record.decider_user_id ? ` by ${record.decider_user_id}` : "";
+  const when = record.decided_at ? ` at ${record.decided_at}` : "";
+  const verb =
+    record.status === "approved"
+      ? "Approved"
+      : record.status === "denied"
+        ? "Denied"
+        : `Resolved (${record.status})`;
+  return `${verb}${who}${when}.`;
+}
+
+// Shared by transcript seeding and the approvals inbox (SPEC-031 R-5):
+// both surfaces render the same durable record through one card mapping.
+export function confirmationRecordToCard(
+  record: ConfirmationRecord,
+): ConfirmationCard {
+  const pendingCalls: PendingCall[] = (record.pending_calls ?? []).map(
+    (call) => ({
+      callId: call.call_id,
+      toolName: call.tool_name,
+      parameters: call.parameters,
+      riskLevel: call.risk_level,
+      // Per-call action wins; the record-level action is the parked
+      // batch's highest action and keeps the tier badge alive when the
+      // payload predates per-call actions.
+      action: call.action ?? record.action ?? undefined,
+    }),
+  );
+  const card: ConfirmationCard = {
+    confirmId: record.confirm_id,
+    pendingCalls,
+    // SPEC-021 R-3 parity: any non-read pending call makes the batch
+    // mutating.
+    mutating: pendingCalls.some(
+      (call) => Boolean(call.riskLevel) && call.riskLevel !== "read",
+    ),
+    status: record.status,
+    sessionId: record.session_id,
+    deciderUserId: record.decider_user_id ?? undefined,
+    decidedAt: record.decided_at ?? undefined,
+  };
+  if (record.status !== "pending") {
+    card.note = attributionNote(record);
+  }
+  return card;
+}
+
+function attachConfirmations(
+  turns: ChatTurn[],
+  records: ConfirmationRecord[],
+  makeTurn: (userMessage: string) => ChatTurn,
+): void {
+  for (const record of records ?? []) {
+    const card = confirmationRecordToCard(record);
+    // Cards anchor to the most recent turn (the one that parked them);
+    // a session without any transcript turns (empty or unrecoverable)
+    // gets a synthetic turn so parked requests stay visible.
+    const target = turns[turns.length - 1] ?? (() => {
+      const synthetic = makeTurn("");
+      turns.push(synthetic);
+      return synthetic;
+    })();
+    target.confirmations.push(card);
+    if (card.status === "pending") {
+      target.confirmationPending = true;
+    }
+  }
+}
+
 export function transcriptToTurns(
   transcript: TranscriptTurn[],
   evidenceTurns?: EvidenceTurn[] | null,
+  confirmations?: ConfirmationRecord[] | null,
 ): ChatTurn[] {
   const turns: ChatTurn[] = [];
   const makeTurn = (userMessage: string): ChatTurn => ({
@@ -102,5 +190,6 @@ export function transcriptToTurns(
     }
   }
   attachEvidence(turns, evidenceTurns ?? []);
+  attachConfirmations(turns, confirmations ?? [], makeTurn);
   return turns;
 }

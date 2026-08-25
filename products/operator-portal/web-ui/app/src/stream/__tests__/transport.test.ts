@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   StreamOpenError,
+  alreadyResolvedDetail,
   chatStreamPath,
   consumeStream,
   openStream,
@@ -110,6 +111,39 @@ describe("openStream", () => {
     );
   });
 
+  it("surfaces the parsed error body on the StreamOpenError (SPEC-031 R-4)", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve({
+        ok: false,
+        status: 409,
+        body: null,
+        json: () =>
+          Promise.resolve({
+            detail: { reason: "already_resolved", status: "denied" },
+          }),
+      }),
+    );
+    await expect(openStream("/api/v1/chat/confirm")).rejects.toMatchObject({
+      status: 409,
+      detail: { detail: { reason: "already_resolved", status: "denied" } },
+    });
+  });
+
+  it("degrades to detail=undefined when the error body is not JSON", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve({
+        ok: false,
+        status: 502,
+        body: null,
+        json: () => Promise.reject(new Error("not json")),
+      }),
+    );
+    await expect(openStream("/api/v1/chat/stream")).rejects.toMatchObject({
+      status: 502,
+      detail: undefined,
+    });
+  });
+
   it("sends x-request-id and JSON body for POST streams", async () => {
     let capturedUrl: string | undefined;
     let capturedInit: RequestInit | undefined;
@@ -131,5 +165,28 @@ describe("openStream", () => {
       confirm_id: "cf-1",
       decision: "approve",
     });
+  });
+});
+
+describe("alreadyResolvedDetail", () => {
+  it("extracts the structured payload from the FastAPI detail envelope", () => {
+    expect(
+      alreadyResolvedDetail({
+        detail: {
+          reason: "already_resolved",
+          status: "approved",
+          decider_user_id: "luban-approver",
+        },
+      }),
+    ).toMatchObject({ reason: "already_resolved", status: "approved" });
+  });
+
+  it("rejects other 409 shapes, foreign reasons, and non-objects", () => {
+    expect(alreadyResolvedDetail({ detail: "conflict" })).toBeUndefined();
+    expect(
+      alreadyResolvedDetail({ detail: { reason: "something_else" } }),
+    ).toBeUndefined();
+    expect(alreadyResolvedDetail(undefined)).toBeUndefined();
+    expect(alreadyResolvedDetail("nope")).toBeUndefined();
   });
 });

@@ -145,6 +145,16 @@ class PolicyMatrixScopingTests(PolicyMatrixBase):
         self.assertFalse(matrix["read-only-observer"]["audit:read"])
         self.assertFalse(matrix["read-only-observer"]["incident:create"])
         self.assertFalse(matrix["operator"]["audit:read"])
+        # SPEC-031 R-3: the cross-session inbox exposes other users' parked
+        # requests, so approvals:list is granted to the tier_2 decider
+        # roles only.
+        self.assertIn("approvals:list", payload["actions"])
+        self.assertTrue(matrix["approver"]["approvals:list"])
+        self.assertTrue(matrix["platform-admin"]["approvals:list"])
+        self.assertFalse(matrix["operator"]["approvals:list"])
+        self.assertFalse(matrix["developer"]["approvals:list"])
+        self.assertFalse(matrix["read-only-observer"]["approvals:list"])
+        self.assertFalse(matrix["auditor"]["approvals:list"])
         # auditor exists in the bundle (audit:read) but holds nothing else.
         self.assertTrue(matrix["auditor"]["audit:read"])
         self.assertFalse(matrix["auditor"]["chat"])

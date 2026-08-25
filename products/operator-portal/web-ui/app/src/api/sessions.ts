@@ -41,6 +41,33 @@ export interface EvidenceTurn {
   frames: EvidenceFrame[];
 }
 
+// Durable confirmation lifecycle record (SPEC-031 R-1/R-2): the owner's
+// transcript cards and the approver inbox share this wire shape.
+// pending_calls follows the parked confirmation_request payload.
+export interface ConfirmationCallPayload {
+  call_id?: string;
+  tool_name?: string;
+  parameters?: Record<string, unknown>;
+  risk_level?: string;
+  action?: string;
+}
+
+export interface ConfirmationRecord {
+  confirm_id: string;
+  session_id: string;
+  owner_user_id: string;
+  // Inbox-only enrichment (session title at list time); absent on the
+  // session-detail surface where the caller already knows the session.
+  session_title?: string | null;
+  pending_calls: ConfirmationCallPayload[];
+  action?: string | null;
+  status: "pending" | "approved" | "denied" | "expired";
+  parked_at?: string | null;
+  decider_user_id?: string | null;
+  decision?: string | null;
+  decided_at?: string | null;
+}
+
 export interface SessionSummary {
   session_id: string;
   title: string | null;
@@ -60,6 +87,10 @@ export interface SessionDetail extends SessionSummary {
   // SPEC-024 R-3: model id pinned by the session's most recent turn; the
   // composer seeds its selector from it on session switch.
   model?: string | null;
+  // SPEC-031 R-2: durable confirmation lifecycle cards for the owner
+  // transcript; empty list when the session parked none, null when the
+  // record store is unreadable (degraded, never a failure).
+  confirmations?: ConfirmationRecord[] | null;
 }
 
 export interface SessionListResponse {

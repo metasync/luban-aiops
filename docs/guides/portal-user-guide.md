@@ -124,9 +124,34 @@ tools with collapsible parameters.
   gateway re-enforces this server-side. Approving is not the same as
   executing — the run is still checked against `tools:mutate` and RBAC at
   the tool-gateway.
+- Cards are durable (SPEC-031): they survive a re-login or page reload and
+  stay in the transcript after a decision. Decided cards render read-only
+  with who decided and when; pending cards stay actionable.
 
 The full four-layer model (policy bundle, risk tiers, auto-allow, HITL) is
 in [Approval and HITL Governance](approval-and-hitl.md).
+
+## Approvals (Control)
+
+The Approvals view is the designated approver's cross-session inbox
+(SPEC-031). It appears in the Control section only for signed-in users
+with a decider role (`approver` or `platform-admin`), and its nav entry
+carries a badge with the number of pending items.
+
+- **Pending** lists every parked confirmation across all sessions with
+  Approve/Deny buttons; deciding resumes the owner's parked reply exactly
+  like deciding from the chat.
+- **History** lists decisions from the last 30 days (pending items plus
+  approved/denied/expired outcomes), most recent first, each with decider
+  attribution.
+- Entries are metadata only — session, owner, parked calls, outcome — and
+  never show the owner's conversation text.
+- The inbox refreshes every 30 seconds and on window focus. If another
+  approver decides first, your card flips to their outcome
+  (`already_resolved`) instead of executing twice.
+
+Inbox access is the `approvals:list` action; the gateway re-enforces it,
+so non-deciders receive a 403 even if they call the API directly.
 
 ## Incidents (Control)
 
@@ -201,14 +226,14 @@ from the gateway.
 
 ## What Your Roles Unlock
 
-| Role | Chat | Approve cards | Mutating tools | Incidents | Audit trail |
-|---|---|---|---|---|---|
-| `platform-admin` | yes | yes | yes | full | yes |
-| `operator` | yes | yes | yes | full | no |
-| `approver` | yes | yes | no | full | no |
-| `developer` | yes | yes | no | full | no |
-| `read-only-observer` | yes (read-only tools) | no | no | read | no |
-| `auditor` | no | no | no | no | yes |
+| Role | Chat | Approve cards | Approvals inbox | Mutating tools | Incidents | Audit trail |
+|---|---|---|---|---|---|---|
+| `platform-admin` | yes | yes | yes | yes | full | yes |
+| `operator` | yes | yes | no | yes | full | no |
+| `approver` | yes | yes | yes | no | full | no |
+| `developer` | yes | yes | no | no | full | no |
+| `read-only-observer` | yes (read-only tools) | no | no | no | read | no |
+| `auditor` | no | no | no | no | no | yes |
 
 The authoritative answer is always the Permissions view — it reflects the
 deployed bundle, including any local grants your administrators added. See

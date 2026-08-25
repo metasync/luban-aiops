@@ -281,6 +281,27 @@ async def fetch_pending_confirmation(
     return response.json()
 
 
+async def fetch_approvals_inbox(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+) -> dict:
+    """Cross-session confirmation inbox (SPEC-031 R-3).
+
+    Authorization is enforced by the gateway route (`approvals:list`);
+    agent-service serves the durable records. Transport failures and
+    upstream 5xx raise so the route answers 502 rather than an empty
+    inbox that would hide parked work.
+    """
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            f"{settings.agent_service_url}/api/v2/confirmations",
+            headers=_headers(request_id, user_id),
+        )
+    response.raise_for_status()
+    return response.json()
+
+
 async def runtime_metadata(settings: PlatformGatewaySettings) -> dict:
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(

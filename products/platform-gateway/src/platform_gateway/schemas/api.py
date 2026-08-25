@@ -86,6 +86,10 @@ class SessionRecord(BaseModel):
     # SPEC-025 R-2: persisted tool evidence grouped by assistant turn;
     # relayed verbatim (empty list = none stored, null = store unreadable).
     evidence_turns: list[dict[str, Any]] | None = None
+    # SPEC-031 R-2: durable confirmation lifecycle cards for the owner
+    # transcript; relayed verbatim (empty list = none parked, null =
+    # record store unreadable).
+    confirmations: list[dict[str, Any]] | None = None
     # SPEC-024 R-3: model id pinned on the session by the most recent turn;
     # null when the session never selected a model.
     model: str | None = None

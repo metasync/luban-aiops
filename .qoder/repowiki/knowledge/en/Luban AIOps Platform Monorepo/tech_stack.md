@@ -1,0 +1,1 @@
+Python services built with uv and pytest, containerized via Dockerfiles orchestrated by GNU Make; Kubernetes deployment through Kustomize overlays under `shared/platform-ops/gitops`; cross-service contracts expressed as JSON Schema files in `shared/shared-contracts/schemas/` and validated at build time.

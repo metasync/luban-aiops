@@ -75,6 +75,23 @@ GET_PAYLOAD = {
             ],
         }
     ],
+    # SPEC-031 R-2: durable confirmation cards ride the detail payload.
+    "confirmations": [
+        {
+            "confirm_id": "cf-1",
+            "session_id": "ses-1",
+            "owner_user_id": "operator.user",
+            "pending_calls": [
+                {"call_id": "call-9", "tool_name": "k8s.restart_service"}
+            ],
+            "action": "tools:mutate",
+            "status": "approved",
+            "parked_at": "2026-08-22T10:04:00Z",
+            "decider_user_id": "approver.user",
+            "decision": "approve",
+            "decided_at": "2026-08-22T10:04:30Z",
+        }
+    ],
 }
 
 
@@ -214,6 +231,24 @@ class GetSessionProxyTests(SessionWorkspaceProxyBase):
 
         record = SessionRecord(**response.json())
         self.assertEqual(len(record.evidence_turns or []), 1)
+
+    def test_confirmations_pass_through_verbatim(self) -> None:
+        # SPEC-031 R-2: the gateway relays durable confirmation cards
+        # untouched so owner cards survive re-login with attribution.
+        upstream = AsyncMock(return_value=GET_PAYLOAD)
+        with (
+            self._patch_identity("operator"),
+            patch(GET_PATCH, upstream),
+        ):
+            response = self.client.get(f"{SESSIONS_PATH}/ses-1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["confirmations"], GET_PAYLOAD["confirmations"]
+        )
+        from platform_gateway.schemas.api import SessionRecord
+
+        record = SessionRecord(**response.json())
+        self.assertEqual(record.confirmations[0]["decider_user_id"], "approver.user")
 
     def test_upstream_404_passes_through(self) -> None:
         # The anti-enumeration 404 for unknown/foreign sessions must reach

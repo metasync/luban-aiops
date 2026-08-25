@@ -230,3 +230,18 @@ rules:
       actions_any: ["skills:read"]
     decision:
       outcome: allow
+
+  # approvals:list serves the cross-session confirmation inbox (SPEC-031 R-3).
+  # The inbox deliberately exposes other users' parked requests (metadata only,
+  # SPEC-030 Q-1 transcript posture unchanged), so it is restricted to the
+  # roles that may actually decide tier_2 approvals.
+  - id: allow-approvers-approvals-list
+    domain: action_authz
+    description: Approvers and platform admins may list the cross-session confirmation inbox.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["approver", "platform-admin"]
+      actions_any: ["approvals:list"]
+    decision:
+      outcome: allow

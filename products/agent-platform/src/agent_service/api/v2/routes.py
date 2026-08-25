@@ -30,9 +30,13 @@ from agent_service.schemas.v2 import (
     AgentSessionList,
     AgentSessionSummary,
     AgentStreamEvent,
+    ConfirmationRecordModel,
     EvidenceTurn,
 )
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
+from agent_service.services.confirmation_records import (
+    CONFIRMATION_RECORD_STORE,
+)
 from agent_service.services.evidence_store import EVIDENCE_STORE
 from agent_service.services.hitl_confirmations import (
     ConfirmationExpired,
@@ -270,6 +274,21 @@ async def chat_confirm(
             status_code=410, detail="confirmation expired"
         ) from None
     except ConfirmationNotFound:
+        # SPEC-031 R-4: a record that already resolved answers with its
+        # outcome (stale tab, racing approver) instead of an opaque 404;
+        # genuinely unknown ids stay 404 for anti-enumeration.
+        record = _resolved_record(session.session_id, body.confirm_id)
+        if record is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "reason": "already_resolved",
+                    "status": record["status"],
+                    "decider_user_id": record["decider_user_id"],
+                    "decision": record["decision"],
+                    "decided_at": record["decided_at"],
+                },
+            ) from None
         raise HTTPException(
             status_code=404, detail="confirmation not found"
         ) from None
@@ -313,17 +332,51 @@ async def get_pending_confirmation(
     # Unknown session ids stay indistinguishable from unparked ones.
     get_session(session_id)
     pending = get_confirmation_registry().peek_parked(session_id)
-    if pending is None:
+    if pending is not None:
+        return {
+            "session_id": session_id,
+            "confirm_id": pending.confirm_id,
+            "owner_user_id": pending.user_id,
+            "action": pending.highest_action(),
+            "pending_calls": pending.pending_calls_payload(),
+        }
+    # SPEC-031 R-1: the durable record answers the approval bridge when
+    # the in-memory registry does not hold the park (a replica that did
+    # not park it). Resume still requires the parking process; the bridge
+    # only needs the authoritative metadata for its tier checks.
+    record = CONFIRMATION_RECORD_STORE.load_pending_for_session(session_id)
+    if record is None:
         raise HTTPException(
             status_code=404, detail="no pending confirmation"
         )
     return {
         "session_id": session_id,
-        "confirm_id": pending.confirm_id,
-        "owner_user_id": pending.user_id,
-        "action": pending.highest_action(),
-        "pending_calls": pending.pending_calls_payload(),
+        "confirm_id": record["confirm_id"],
+        "owner_user_id": record["owner_user_id"],
+        "action": record["action"],
+        "pending_calls": record["pending_calls"],
     }
+
+
+def _resolved_record(session_id: str, confirm_id: str) -> dict | None:
+    """A durable record that already resolved (SPEC-031 R-4).
+
+    ``None`` for unknown ids and for records still pending (a pending
+    record without a registry entry cannot be resumed here; it keeps the
+    404 posture of the confirm path instead of masquerading as decided).
+    """
+    try:
+        record = CONFIRMATION_RECORD_STORE.load_record(session_id, confirm_id)
+    except Exception as exc:
+        LOGGER.warning(
+            "confirmation record store unreadable for %s: %s",
+            session_id,
+            exc,
+        )
+        return None
+    if record is None or record["status"] == "pending":
+        return None
+    return record
 
 
 _STREAM_EVENT_TYPES = frozenset(
@@ -459,6 +512,28 @@ def _load_evidence_turns(session_id: str) -> list[EvidenceTurn] | None:
         return None
 
 
+def _load_confirmation_cards(
+    session_id: str,
+) -> list[ConfirmationRecordModel] | None:
+    """Durable confirmation cards for the session detail (SPEC-031 R-2).
+
+    ``None`` when the record store is unreadable — degrades like
+    ``evidence_turns``, never a 500.
+    """
+    try:
+        return [
+            ConfirmationRecordModel(**record)
+            for record in CONFIRMATION_RECORD_STORE.load_for_session(session_id)
+        ]
+    except Exception as exc:
+        LOGGER.warning(
+            "confirmation record store unreadable for session %s: %s",
+            session_id,
+            exc,
+        )
+        return None
+
+
 @router.post("/sessions", response_model=AgentSession, status_code=201)
 async def create_session(
     body: AgentSessionCreateRequest | None = None,
@@ -522,6 +597,7 @@ async def read_session(
         transcript_available=transcript_available,
         transcript=transcript,
         evidence_turns=_load_evidence_turns(session.session_id),
+        confirmations=_load_confirmation_cards(session.session_id),
     )
 
 
@@ -554,6 +630,34 @@ async def delete_session_route(
     if not delete_session(session.session_id, user_id):
         raise HTTPException(status_code=404, detail="session not found")
     return {"session_id": session.session_id, "deleted": True}
+
+
+# --- Approvals inbox (SPEC-031 R-3) ---
+
+
+@router.get("/confirmations")
+async def list_confirmations(
+    x_user_id: str | None = Header(None),
+) -> dict:
+    """Cross-session confirmation inbox for designated approvers.
+
+    Authorization lives in the platform-gateway (`approvals:list` is
+    granted to decider roles only); this endpoint serves the durable
+    records — pending items plus history within the retention window,
+    most recent first — with metadata only, never the owner's transcript
+    text (SPEC-030 Q-1 posture).
+    """
+    _user_id(x_user_id)
+    items = []
+    for record in CONFIRMATION_RECORD_STORE.load_inbox():
+        session = SESSION_STORE.get_session(record["session_id"])
+        items.append(
+            ConfirmationRecordModel(
+                **record,
+                session_title=session.title if session is not None else None,
+            ).model_dump()
+        )
+    return {"confirmations": items}
 
 
 # --- Model discovery (SPEC-024 R-2) ---

@@ -46,6 +46,9 @@ EXPECTED_ROUTES = {
     # Model catalog discovery (SPEC-024 R-2): credential-gated catalog
     # pass-through, discovery-safe payload.
     ("GET", "/api/v1/models"),
+    # Approval inbox (SPEC-031 R-3): cross-session confirmation discovery
+    # for the designated decider roles.
+    ("GET", "/api/v1/approvals/inbox"),
 }
 
 

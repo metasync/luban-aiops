@@ -3,12 +3,21 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-08-25T02:59:23Z"
+exported_at: "2026-08-25T10:13:03Z"
 modules:
     "":
         dir_name: Agentic AIOps Platform Workspace
         title: Agentic AIOps Platform Workspace
         scope: []
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    specs:
+        dir_name: Spec-Driven Development Specifications
+        title: Spec-Driven Development Specifications
+        scope:
+            - docs/specs/
         source_files: []
         children: []
         depends_on: []

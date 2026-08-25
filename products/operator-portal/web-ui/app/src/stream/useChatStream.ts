@@ -13,6 +13,7 @@ import type {
 } from "./models";
 import {
   StreamOpenError,
+  alreadyResolvedDetail,
   chatStreamPath,
   consumeStream,
   openStream,
@@ -29,6 +30,11 @@ export interface ConfirmationCard {
   // parked it, so approve/deny resumes that session even after the
   // operator switches away and back.
   sessionId: string | null;
+  // SPEC-031 R-5 attribution on durable cards (replayed from the record
+  // store or flipped by a race 409): who decided and when. Undefined on
+  // live undecided cards.
+  deciderUserId?: string;
+  decidedAt?: string;
 }
 
 export interface ChatTurn {
@@ -355,6 +361,24 @@ export function useChatStream(): ChatStreamApi {
             "expired",
             "This confirmation expired before a decision was applied.",
           );
+        } else if (error instanceof StreamOpenError && error.status === 409) {
+          // SPEC-031 R-4 race: another approver decided first. The card
+          // flips to the winner's outcome with attribution instead of
+          // staying pending (which would invite a doomed retry).
+          const race = alreadyResolvedDetail(error.detail);
+          if (race) {
+            lockCard(
+              decided,
+              resultStatus(race.status ?? ""),
+              `Already resolved${
+                race.decider_user_id ? ` by ${race.decider_user_id}` : ""
+              }${race.decided_at ? ` at ${race.decided_at}` : ""}.`,
+            );
+            decided.deciderUserId = race.decider_user_id ?? undefined;
+            decided.decidedAt = race.decided_at ?? undefined;
+          } else {
+            decided.note = `Confirm request failed (409).`;
+          }
         } else if (error instanceof StreamOpenError) {
           // Legacy parity: the card stays pending so the operator can retry.
           decided.note = `Confirm request failed (${error.status}).`;

@@ -12,6 +12,10 @@ from agent_service.core.metrics import (
 from agent_service.providers import get_provider
 from agent_service.runtime_settings import RuntimeSettings
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
+from agent_service.services.confirmation_records import (
+    CONFIRMATION_RECORD_STORE,
+    make_record as make_confirmation_record,
+)
 from agent_service.services.evidence_store import (
     EVIDENCE_FRAME_TYPES,
     EVIDENCE_STORE,
@@ -995,6 +999,26 @@ class AgentKernel:
             timeout=self.settings.hitl_confirm_timeout,
             risk_levels=self._toolkit_risk_map(toolkit),
         )
+        # SPEC-031 R-1: the durable record is written before the frame
+        # below reaches the client, so the card survives re-login and
+        # restarts. Best-effort: a store failure degrades to live-only
+        # cards, never blocks the park.
+        try:
+            CONFIRMATION_RECORD_STORE.save_parked(
+                make_confirmation_record(
+                    confirm_id=pending.confirm_id,
+                    session_id=session_id,
+                    owner_user_id=user_name,
+                    pending_calls=pending.pending_calls_payload(),
+                    action=pending.highest_action(),
+                )
+            )
+        except Exception as exc:
+            LOGGER.warning(
+                "confirmation record persistence failed for session %s: %s",
+                session_id,
+                exc,
+            )
         LOGGER.info(
             "kernel confirmation parked",
             extra={
@@ -1009,6 +1033,30 @@ class AgentKernel:
             "pending_calls": pending.pending_calls_payload(),
             "message": self._confirmation_message(event),
         }
+
+    @staticmethod
+    def _record_resolution(
+        session_id: str,
+        confirm_id: str,
+        status: str,
+        decider_user_id: str | None,
+        decision: str | None,
+    ) -> None:
+        """Best-effort durable outcome write (SPEC-031 R-1).
+
+        The live stream already carried the result; a store failure only
+        degrades the persisted card/inbox history, never the decision.
+        """
+        try:
+            CONFIRMATION_RECORD_STORE.mark_resolved(
+                session_id, confirm_id, status, decider_user_id, decision
+            )
+        except Exception as exc:
+            LOGGER.warning(
+                "confirmation record resolution failed for session %s: %s",
+                session_id,
+                exc,
+            )
 
     @staticmethod
     def _toolkit_risk_map(toolkit: object | None) -> dict[str, str]:
@@ -1142,6 +1190,16 @@ class AgentKernel:
             DELEGATED_TOKEN.reset(token_var)
             TOOL_EVIDENCE_SINK.reset(sink_var)
             CONFIRMATION_REGISTRY.resolve(session_id, pending.confirm_id)
+            # SPEC-031 R-1: record the outcome (decider + decision) so
+            # the owner's card and the approver inbox keep it; the
+            # confirmation_result frame above already flowed.
+            self._record_resolution(
+                session_id,
+                pending.confirm_id,
+                "approved" if confirmed else "denied",
+                user_name,
+                decision,
+            )
 
         self._snapshot_state(session_id, agent)
 
@@ -1182,6 +1240,11 @@ class AgentKernel:
             )
         finally:
             CONFIRMATION_REGISTRY.resolve(session_id, confirm_id)
+            # SPEC-031 R-1: surface expiry as an outcome, not a
+            # disappearance — the record stays visible as expired.
+            self._record_resolution(
+                session_id, confirm_id, "expired", None, None
+            )
         LOGGER.info(
             "kernel confirmation expired",
             extra={"session_id": session_id, "confirm_id": confirm_id},

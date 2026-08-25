@@ -1,0 +1,1 @@
+Monorepo that orchestrates the Luban agentic AI platform by composing seven Python services, a web portal, shared contracts, and GitOps overlays under a single build, verify, and deploy pipeline.
