@@ -44,17 +44,16 @@
 - [sessions.ts](file://products/operator-portal/web-ui/app/src/api/sessions.ts)
 - [transcript.test.ts](file://products/operator-portal/web-ui/app/src/chat/__tests__/transcript.test.ts)
 - [ComposerSelectionBar.test.tsx](file://products/operator-portal/web-ui/app/src/chat/__tests__/ComposerSelectionBar.test.tsx)
+- [ConfirmationCard.test.tsx](file://products/operator-portal/web-ui/app/src/chat/__tests__/ConfirmationCard.test.tsx)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added new ComposerSelectionBar component that restructures the chat interface's model selection functionality
-- Replaced inline ModelSelect component from composer prefix with extensible control strip under message input area
-- Implemented comprehensive TypeScript interfaces for ComposerSelectionBarProps with catalog, model, and event handling
-- Added intelligent collapse behavior when no models are available to maintain compact composer layout
-- Integrated seamless integration with existing ModelSelect component while providing designated mount point for future per-turn selections
-- Enhanced CSS styling for composer selection bar with proper flexbox layout and responsive design
-- Added comprehensive test coverage for ComposerSelectionBar component including collapse scenarios and model selection propagation
+- Enhanced HITL confirmation system with tier-aware badge display showing different badges for operator confirmations versus approver-required scenarios
+- Added APPROVAL_DECIDER_ROLES constant for UI-level hints about required approver permissions
+- Restored Settings view as read-only Session & Identity panel providing operational insights
+- Updated confirmation card interface to display appropriate badges based on confirmation tier and user roles
+- Enhanced role-based access control for approval workflows with clear visual indicators
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -64,30 +63,31 @@
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Enhanced Navigation System](#enhanced-navigation-system)
 7. [Role-Gated Audit Trail System](#role-gated-audit-trail-system)
-8. [HITL Confirmation Card System](#hitl-confirmation-card-system)
+8. [Tier-Aware HITL Confirmation Card System](#tier-aware-hitl-confirmation-card-system)
 9. [Authentication and Security](#authentication-and-security)
 10. [Markdown Rendering System](#markdown-rendering-interface)
 11. [Real-time Streaming Interface](#real-time-streaming-interface)
 12. [Evidence Persistence and Replay System](#evidence-persistence-and-replay-system)
 13. [Model Selection and Catalog Integration](#model-selection-and-catalog-integration)
 14. [Composer Selection Bar Architecture](#composer-selection-bar-architecture)
-15. [Skills Integration and Cited Guidance](#skills-integration-and-cited-guidance)
-16. [Permission Matrix and Workspace Resources](#permission-matrix-and-workspace-resources)
-17. [Multi-Session Workspace Management](#multi-session-workspace-management)
-18. [Voice Input Support](#voice-input-support)
-19. [Incident Triage and Deep Linking](#incident-triage-and-deep-linking)
-20. [Deployment Guide](#deployment-guide)
-21. [UI Customization](#ui-customization)
-22. [Accessibility Features](#accessibility-features)
-23. [Browser Compatibility](#browser-compatibility)
-24. [Troubleshooting Guide](#troubleshooting-guide)
-25. [Conclusion](#conclusion)
+15. [Settings View - Session & Identity Panel](#settings-view---session--identity-panel)
+16. [Skills Integration and Cited Guidance](#skills-integration-and-cited-guidance)
+17. [Permission Matrix and Workspace Resources](#permission-matrix-and-workspace-resources)
+18. [Multi-Session Workspace Management](#multi-session-workspace-management)
+19. [Voice Input Support](#voice-input-support)
+20. [Incident Triage and Deep Linking](#incident-triage-and-deep-linking)
+21. [Deployment Guide](#deployment-guide)
+22. [UI Customization](#ui-customization)
+23. [Accessibility Features](#accessibility-features)
+24. [Browser Compatibility](#browser-compatibility)
+25. [Troubleshooting Guide](#troubleshooting-guide)
+26. [Conclusion](#conclusion)
 
 ## Introduction
 
 The Operator Portal is a modern web-based administrative interface designed for platform administration and monitoring within the Luban AIOPS ecosystem. The portal has been completely rebuilt using React 18, TypeScript, and Vite, replacing the previous vanilla JavaScript implementation. It provides operators with a sophisticated two-column shell interface featuring a persistent sidebar for navigation and a main content area for interactive operations. The portal serves as a centralized control plane for platform administrators, offering real-time visibility into system status through an interactive chat interface, comprehensive evidence panels for tool execution tracking, configuration management capabilities, and administrative functions necessary for maintaining the AI-powered agent platform infrastructure.
 
-**Updated** The portal now features enhanced model selection capabilities with dynamic catalog integration, allowing operators to choose between different AI models for their conversations. The model selector automatically adapts its presentation based on available models - showing a dropdown when multiple models are configured, a fixed label when only one model is available, or hiding entirely when no models are configured. **Critical Enhancement**: The model selection system includes session persistence that remembers the selected model per session, ensuring consistent model usage throughout conversation workflows while maintaining fail-open behavior when catalog services are unavailable. **New Feature**: The introduction of the ComposerSelectionBar component provides an extensible control strip architecture that replaces the inline ModelSelect component, offering better modularity and a designated mount point for future per-turn selections as referenced in SPEC-024.
+**Updated** The portal now features enhanced model selection capabilities with dynamic catalog integration, allowing operators to choose between different AI models for their conversations. The model selector automatically adapts its presentation based on available models - showing a dropdown when multiple models are configured, a fixed label when only one model is available, or hiding entirely when no models are configured. **Critical Enhancement**: The model selection system includes session persistence that remembers the selected model per session, ensuring consistent model usage throughout conversation workflows while maintaining fail-open behavior when catalog services are unavailable. **New Feature**: The introduction of the ComposerSelectionBar component provides an extensible control strip architecture that replaces the inline ModelSelect component, offering better modularity and a designated mount point for future per-turn selections as referenced in SPEC-024. **Enhanced Feature**: The Settings view has been restored as a read-only Session & Identity panel (R-6) that displays identity information, session details, and platform metadata using existing AuthContext and session workspace state, providing administrators with essential operational insights. **Critical Enhancement**: The HITL confirmation system now includes tier-aware badge display that shows different badges for operator confirmations versus approver-required scenarios, with APPROVAL_DECIDER_ROLES providing UI-level hints about required approver permissions.
 
 ## Project Structure
 
@@ -111,36 +111,49 @@ A --> M[IncidentsView.tsx]
 A --> N[PermissionsView.tsx]
 A --> O[SkillsView.tsx]
 A --> P[ToolsView.tsx]
+A --> Q[Settings View]
 end
 subgraph "Model Selection System"
-Q[ModelCatalog API] --> R[getModelCatalog Function]
-S[ComposerSelectionBar] --> T[Extensible Control Strip]
-U[ModelSelect Component] --> V[Dynamic Rendering Logic]
-W[Session Model State] --> X[Pinned Model Persistence]
-Y[Fail-Open UX] --> Z[Graceful Degradation]
+R[ModelCatalog API] --> S[getModelCatalog Function]
+T[ComposerSelectionBar] --> U[Extensible Control Strip]
+V[ModelSelect Component] --> W[Dynamic Rendering Logic]
+X[Session Model State] --> Y[Pinned Model Persistence]
+Z[Fail-Open UX] --> AA[Graceful Degradation]
+end
+subgraph "Tier-Aware Confirmation System"
+AB[APPROVAL_DECIDER_ROLES] --> AC[Role-Based Badge Display]
+AD[Confirmation Tier Detection] --> AE[Operator vs Approver Badges]
+AF[Role Verification] --> AG[Approver Permission Checks]
+AH[Tier-Aware UI] --> AI[Visual Status Indicators]
+end
+subgraph "Settings & Identity Panel"
+AJ[AuthContext] --> AK[Identity Information Display]
+AL[Session Workspace] --> AM[Session Details]
+AN[Platform Version] --> AO[Metadata Display]
+AP[Read-Only Interface] --> AQ[Operational Insights]
 end
 subgraph "Evidence Persistence System"
-AA[transcriptToTurns] --> BB[EvidenceFrame Mapping]
-CC[EvidenceTurn Groups] --> DD[Request ID Attachment]
-EE[Truncation Markers] --> FF[Payload Budget Handling]
-GG[Live Stream Frames] --> HH[Unified Turn Model]
-II[Replayed Evidence] --> JJ[Consistent Rendering]
+AR[transcriptToTurns] --> BK[EvidenceFrame Mapping]
+BL[EvidenceTurn Groups] --> CM[Request ID Attachment]
+DN[Truncation Markers] --> EO[Payload Budget Handling]
+FP[Live Stream Frames] --> GQ[Unified Turn Model]
+HR[Replayed Evidence] --> IS[Consistent Rendering]
 end
 subgraph "Enhanced Navigation System"
-KK[useNarrowViewport Hook] --> LL[Responsive Breakpoint Detection at 992px]
-MM[Mobile Menu Button] --> NN[Dynamic ARIA Labels]
-OO[Sidebar Collapsible 64px Rail] --> PP[Drawer Integration]
-QQ[Content Spacing Management] --> RR[.view-container-inset Class]
+JT[useNarrowViewport Hook] --> KU[Responsive Breakpoint Detection at 992px]
+LV[Mobile Menu Button] --> MW[Dynamic ARIA Labels]
+NX[Sidebar Collapsible 64px Rail] --> OY[Drawer Integration]
+PZ[Content Spacing Management] --> QA[.view-container-inset Class]
 end
 subgraph "Build & Deployment"
-SS[vite.config.ts] --> TT[package.json]
-UU[Dockerfile] --> VV[Makefile]
-WW[VERSION] --> XX[validate_version.py]
+RB[vite.config.ts] --> SC[package.json]
+TD[Dockerfile] --> UE[Makefile]
+VF[VERSION] --> WG[validate_version.py]
 end
 subgraph "Backend Services"
-YY[Agent Platform] --> ZZ[HITL Confirmations]
-AA[Platform Gateway] --> BB[Identity Broker]
-CC[Tool Gateway] --> DD[Policy Engine]
+XH[Agent Platform] --> YI[HITL Confirmations]
+ZJ[Platform Gateway] --> AK[Identity Broker]
+BL[Tool Gateway] --> CM[Policy Engine]
 end
 ```
 
@@ -157,6 +170,8 @@ end
 - [useChatStream.ts:245-268](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L245-L268)
 - [markdown.ts:67-91](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L67-L91)
 - [markdown.test.ts:59-77](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L59-L77)
+- [roles.ts:35-35](file://products/operator-portal/web-ui/app/src/roles.ts#L35-L35)
+- [ChatView.tsx:295-298](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L295-L298)
 
 **Section sources**
 - [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
@@ -174,9 +189,10 @@ The Operator Portal consists of several key React components and hooks that work
 - **Enhanced Sectioned Navigation**: Organized navigation with Chat, Control, and Workspace sections
 - **Chat-Based Interface**: Real-time streaming responses with turn-based conversation management
 - **Inline Per-Turn Evidence System**: Sophisticated turn-scoped evidence grouping with collapsible groups
-- **HITL Confirmation Cards**: Inline approval surfaces for ASK-gated tool executions with Approve/Deny buttons
+- **Tier-Aware HITL Confirmation Cards**: Inline approval surfaces for ASK-gated tool executions with Approve/Deny buttons and tier-specific badges
 - **Composer Selection Bar**: Extensible control strip rendered under message input for model selection and future per-turn controls
 - **Model Select Component**: Dynamic model selection with catalog-driven rendering and session persistence
+- **Settings & Identity Panel**: Read-only panel displaying identity information, session details, and platform metadata
 - **Skills Integration**: Enhanced evidence cards with "Cited guidance" chips displaying matched skills
 - **Authentication System**: OIDC integration with automatic token refresh and session management
 - **Enhanced Markdown Renderer**: Comprehensive text formatting with XSS prevention and syntax highlighting support
@@ -196,7 +212,7 @@ The Operator Portal consists of several key React components and hooks that work
 - **User Card System**: Avatar display with initials, username badge, and role information
 - **Role-Based Navigation**: Conditional visibility based on user roles and permissions
 - **Mobile Drawer**: Off-canvas navigation for narrow screens with proper focus management
-- **Settings & Debug Panel**: Configuration management and debugging tools
+- **Settings & Debug Panel**: Configuration management and debugging tools with read-only operational insights
 - **Composer Selection Bar**: Extensible control strip with model selector and future per-turn selection capabilities
 
 ### Enhanced Navigation System
@@ -213,9 +229,10 @@ The Operator Portal consists of several key React components and hooks that work
 - **Visual Correlation**: Maintains relationship between user requests and extended responses
 - **Performance Optimization**: Efficient observer cleanup and memory management
 
-### HITL Confirmation System
-- **Inline Approval Cards**: Warning-toned bordered cards for pending tool confirmations
-- **Role-Based Controls**: Approve/Deny buttons visible only to authorized roles
+### Tier-Aware HITL Confirmation System
+- **Tier Detection Logic**: Automatically determines confirmation tier (operator vs approver required) based on tool context
+- **Badge Display System**: Shows "operator confirmation" badge for standard operator actions and "approver required" badge for elevated permissions
+- **Role-Based Controls**: Approve/Deny buttons visible only to authorized roles with APPROVAL_DECIDER_ROLES validation
 - **Stream Continuation**: Automatic resumption of parked replies upon decision with SSE streaming
 - **Evidence Integration**: Seamless integration with existing evidence card system
 - **Status Management**: Visual indicators showing awaiting decision, approved, denied, or expired states
@@ -232,7 +249,7 @@ The Operator Portal consists of several key React components and hooks that work
 - **Validation System**: Automated version consistency checks across all platform components
 - **Deployment Consistency**: Coordinated versioning across all platform services
 
-**Updated** The interface now includes enhanced model selection capabilities with dynamic catalog integration, providing operators with flexible AI model choices while maintaining robust fail-open behavior. The model selector automatically adapts its presentation based on catalog availability and session context. Recent improvements include the introduction of the ComposerSelectionBar component which provides an extensible control strip architecture for model selection and future per-turn controls, enhanced authentication state management with proper disabled states for unauthenticated users, improved markdown table rendering with proper header/body separation, visual consistency improvements including inline brand display with platform version tags, and comprehensive test coverage for markdown rendering functionality ensuring robust XSS prevention and security measures. **Critical Enhancement**: The streaming system includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions.
+**Updated** The interface now includes enhanced model selection capabilities with dynamic catalog integration, providing operators with flexible AI model choices while maintaining robust fail-open behavior. The model selector automatically adapts its presentation based on catalog availability and session context. Recent improvements include the introduction of the ComposerSelectionBar component which provides an extensible control strip architecture for model selection and future per-turn controls, enhanced authentication state management with proper disabled states for unauthenticated users, improved markdown table rendering with proper header/body separation, visual consistency improvements including inline brand display with platform version tags, and comprehensive test coverage for markdown rendering functionality ensuring robust XSS prevention and security measures. **Critical Enhancement**: The streaming system includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions. **New Feature**: The Settings view has been restored as a read-only Session & Identity panel (R-6) that displays identity information, session details, and platform metadata using existing AuthContext and session workspace state, providing administrators with essential operational insights. **Critical Enhancement**: The HITL confirmation system now includes tier-aware badge display that clearly distinguishes between operator confirmations and approver-required scenarios, improving user experience and workflow clarity.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
@@ -253,6 +270,7 @@ participant User as "Browser"
 participant React as "React App"
 participant Nav as "Enhanced Navigation"
 participant Auth as "Auth Context"
+participant Settings as "Settings View"
 participant CompSel as "ComposerSelectionBar"
 participant ModelCat as "Model Catalog API"
 participant Stream as "Chat Stream Hook"
@@ -274,6 +292,10 @@ Agent-->>Gateway : Authorization code
 Gateway-->>Auth : Access tokens + identity
 Note over React : Responsive Content Spacing
 React->>Views : Navigate to specific views with proper padding
+Note over Settings : Settings View - Session & Identity Panel
+React->>Settings : Display identity info, session details, platform metadata
+Settings->>Auth : Access user identity and roles
+Settings->>SessionWorkspace : Access current session information
 Note over React : Model Catalog Discovery
 React->>ModelCat : GET /api/v1/models
 ModelCat-->>React : Model catalog with id/label/provider/default
@@ -303,6 +325,12 @@ React->>Stream : Pin incident session
 Stream->>Gateway : Create/pin incident session
 Gateway-->>Stream : Session ID returned
 Stream-->>React : Active session updated
+Note over React : Tier-Aware Confirmation Processing
+User->>React : Trigger ASK-gated tool execution
+React->>HITL : Process confirmation request with tier detection
+HITL->>HITL : Determine confirmation tier (operator vs approver)
+HITL-->>React : Return tier-specific badge and role requirements
+React->>React : Display appropriate badge based on confirmation tier
 ```
 
 **Diagram sources**
@@ -318,10 +346,12 @@ Stream-->>React : Active session updated
 - [useChatStream.ts:245-268](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L245-L268)
 - [IncidentsView.tsx:219-228](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx#L219-L228)
 - [useSessionWorkspace.ts:136-159](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L136-L159)
-- [useChatStream.ts:191-314](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L191-L314)
+- [useChatStream.ts:191-314](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L191-314)
 - [transport.ts:75-100](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L75-L100)
+- [ChatView.tsx:295-298](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L295-L298)
+- [roles.ts:35-35](file://products/operator-portal/web-ui/app/src/roles.ts#L35-L35)
 
-The architecture emphasizes type safety, component composition, and maintainable state management while providing enterprise-grade functionality for platform operations. The React hooks pattern enables clean separation of concerns and reusable logic across components. **Enhanced with model selection capabilities** that provide dynamic catalog integration and session-based model persistence, ensuring operators can consistently use their preferred AI models throughout conversations. **Critical Enhancement**: The streaming system includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions. **New Feature**: The ComposerSelectionBar component provides an extensible architecture for model selection and future per-turn controls, improving modularity and maintainability.
+The architecture emphasizes type safety, component composition, and maintainable state management while providing enterprise-grade functionality for platform operations. The React hooks pattern enables clean separation of concerns and reusable logic across components. **Enhanced with model selection capabilities** that provide dynamic catalog integration and session-based model persistence, ensuring operators can consistently use their preferred AI models throughout conversations. **Critical Enhancement**: The streaming system includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions. **New Feature**: The ComposerSelectionBar component provides an extensible architecture for model selection and future per-turn controls, improving modularity and maintainability. **Enhanced Feature**: The Settings view provides read-only access to identity information, session details, and platform metadata for operational awareness. **Critical Enhancement**: The tier-aware HITL confirmation system now provides clear visual indicators distinguishing between operator confirmations and approver-required scenarios, improving workflow clarity and user experience.
 
 ## Detailed Component Analysis
 
@@ -334,7 +364,7 @@ The main React application implements a component-based architecture with clear 
 - **Navigation State**: Active view management with role-based visibility controls
 - **Enhanced Mobile Support**: Persistent 64px icon rail with responsive drawer integration
 - **Loading States**: Proper loading indicators during authentication and data fetching
-- **View Routing**: Dynamic routing to different view components (chat, incidents, audit, permissions, tools, skills)
+- **View Routing**: Dynamic routing to different view components (chat, incidents, audit, permissions, tools, skills, settings)
 
 #### Enhanced Navigation Implementation
 - **useNarrowViewport Hook**: Custom hook for responsive breakpoint detection at 992px
@@ -349,6 +379,7 @@ The main React application implements a component-based architecture with clear 
 - **PermissionsView**: Live permission matrix display from policy bundle
 - **SkillsView**: Browseable skills inventory with source/tag filtering
 - **ToolsView**: Read-only tools catalog with risk tier information
+- **SettingsView**: Read-only Session & Identity panel displaying operational insights
 
 #### Authentication Context
 - **OIDC Integration**: Complete OpenID Connect flow with PKCE support
@@ -432,13 +463,25 @@ The chat interface includes a sophisticated sticky request banner system that ma
 - **Multi-turn Clarity**: Helps operators track conversation flow during complex interactions
 - **Accessibility**: Provides additional context for screen readers and keyboard navigation
 
-### HITL Confirmation System
+### Tier-Aware HITL Confirmation System
 
-The inline confirmation card provides a focused interface for reviewing and deciding on tool executions:
+The inline confirmation card provides a focused interface for reviewing and deciding on tool executions with tier-aware badge display:
+
+#### Tier Detection Logic
+- **Confirmation Tier Analysis**: Automatically determines whether confirmation requires operator action or approver approval
+- **Tool Context Evaluation**: Analyzes tool type and parameters to determine appropriate confirmation tier
+- **Risk Assessment**: Considers operation sensitivity and potential impact for tier classification
+- **Role-Based Validation**: Validates user permissions against APPROVAL_DECIDER_ROLES for approval decisions
+
+#### Badge Display System
+- **Operator Confirmation Badge**: Blue tag indicating standard operator-level confirmation required
+- **Approver Required Badge**: Red tag indicating elevated approval permissions needed beyond operator scope
+- **Visual Distinction**: Clear color coding helps users understand confirmation complexity and required permissions
+- **Contextual Information**: Badge text provides immediate understanding of confirmation requirements
 
 #### Card Components
-- **Warning Header**: Yellow-bordered card with "Tool confirmation required" title and "awaiting decision" status badge
-- **Message Display**: Clear explanation of why confirmation is needed
+- **Warning Header**: Yellow-bordered card with "Tool confirmation required" title and tier-specific status badge
+- **Message Display**: Clear explanation of why confirmation is needed with tier context
 - **Tool Details**: Expandable sections showing tool name and parameters for review
 - **Action Buttons**: Prominent Approve (green) and Deny (red) buttons for authorized users
 - **Status Line**: Real-time status updates showing "Approving…"/"Denying…" during processing
@@ -460,7 +503,7 @@ The inline confirmation card provides a focused interface for reviewing and deci
 - **Validation System**: Automated version consistency checks across all platform components
 - **Deployment Consistency**: Coordinated versioning across all platform services
 
-**Updated** The React architecture provides better type safety, component reusability, and maintainability while preserving all existing functionality from the legacy implementation. The new view components provide dedicated interfaces for different operational tasks. Enhanced session management now includes defensive parsing to handle edge cases in stored session data. The enhanced navigation system includes a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, and enhanced mobile drawer navigation with proper positioning and z-index management. The new sticky request banner system enhances conversation usability during long interactions. **Critical Enhancement**: The evidence persistence system provides unified rendering of both live streamed and replayed evidence, ensuring operators see consistent evidence cards with request ID display and truncation markers regardless of evidence source. The stale session handling system now includes comprehensive missing reference tracking and automatic retry logic to prevent errors from deleted or expired sessions, ensuring more reliable chat functionality. **New Feature**: The ComposerSelectionBar component provides an extensible architecture for model selection and future per-turn controls, improving modularity and maintainability.
+**Updated** The React architecture provides better type safety, component reusability, and maintainability while preserving all existing functionality from the legacy implementation. The new view components provide dedicated interfaces for different operational tasks. Enhanced session management now includes defensive parsing to handle edge cases in stored session data. The enhanced navigation system includes a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, and enhanced mobile drawer navigation with proper positioning and z-index management. The new sticky request banner system enhances conversation usability during long interactions. **Critical Enhancement**: The evidence persistence system provides unified rendering of both live streamed and replayed evidence, ensuring operators see consistent evidence cards with request ID display and truncation markers regardless of evidence source. The stale session handling system now includes comprehensive missing reference tracking and automatic retry logic to prevent errors from deleted or expired sessions, ensuring more reliable chat functionality. **New Feature**: The ComposerSelectionBar component provides an extensible architecture for model selection and future per-turn controls, improving modularity and maintainability. **Enhanced Feature**: The Settings view provides read-only access to identity information, session details, and platform metadata for operational awareness. **Critical Enhancement**: The tier-aware HITL confirmation system now provides clear visual distinction between operator confirmations and approver-required scenarios, improving workflow clarity and user experience with appropriate badge display and role-based permission validation.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
@@ -489,7 +532,7 @@ The styling system maintains design consistency while leveraging Ant Design's th
 - **Evidence Panels**: Professional collapsible interface with native browser details element behavior
 - **Cited Guidance Chips**: Specialized styling for skill citation chips
 - **Audit Trail Tables**: Responsive tables with sticky headers and expandable detail rows
-- **Settings Panel**: Grid-based layout for configuration options
+- **Settings Panel**: Grid-based layout for configuration options and operational insights
 - **Mobile Drawer**: Slide-in navigation with backdrop overlay
 
 #### Enhanced Navigation Styling
@@ -505,8 +548,9 @@ The styling system maintains design consistency while leveraging Ant Design's th
 - **Transition Effects**: Smooth appearance and disappearance animations
 - **Hover States**: Full request text availability through title attributes
 
-#### HITL Confirmation Card Styling
+#### Tier-Aware Confirmation Card Styling
 - **Warning Border**: Yellow border indicating pending decision required
+- **Badge Styling**: Color-coded badges for operator confirmation (blue) and approver required (red)
 - **Locked State**: Border changes to standard when confirmation is resolved
 - **Action Buttons**: Green approve button and red deny button with hover effects
 - **Status Messages**: Clear status indicators for awaiting decision, approving/denying, and final states
@@ -548,7 +592,7 @@ The navigation system organizes functions into logical sections with automatic v
 #### Workspace Section  
 - **Tools**: Read-only catalog of available tools with filtering capabilities
 - **Skills**: Browseable inventory of available skills with source and tag filtering
-- **Settings**: Configuration management and debugging tools
+- **Settings**: Read-only Session & Identity panel with operational insights
 
 #### Automatic Section Visibility
 - **Dynamic Hiding**: Sections automatically hide when all their entries are hidden due to role restrictions
@@ -618,6 +662,7 @@ The navigation system implements comprehensive role-based access control:
 - **Audit Trail**: Requires "auditor" or "platform-admin" roles
 - **Incidents**: Requires specific incident-related roles
 - **Permissions/Tools/Skills**: Available to all authenticated users
+- **Settings**: Available to all users for operational insights
 - **Chat**: Available to all users regardless of role
 
 #### Client-Side and Server-Side Enforcement
@@ -625,7 +670,7 @@ The navigation system implements comprehensive role-based access control:
 - **Server-Side Validation**: Gateway re-enforces permissions on every API request
 - **Graceful Fallback**: Users automatically redirected to chat if they lose required roles
 
-**Updated** The navigation system now provides enhanced mobile experience with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states with visual dividers instead of clipped text, and enhanced mobile drawer navigation with proper positioning and z-index management. The navigation system maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management.
+**Updated** The navigation system now provides enhanced mobile experience with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states with visual dividers instead of clipped text, and enhanced mobile drawer navigation with proper positioning and z-index management. The navigation system maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management. **Enhanced Feature**: The Settings view is now integrated into the workspace section, providing read-only access to identity information, session details, and platform metadata for operational awareness.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-70)
@@ -684,19 +729,25 @@ The audit trail system implements multiple security layers:
 - [App.tsx:62-91](file://products/operator-portal/web-ui/app/src/App.tsx#L62-L91)
 - [roles.ts:4-12](file://products/operator-portal/web-ui/app/src/roles.ts#L4-L12)
 
-## HITL Confirmation Card System
+## Tier-Aware HITL Confirmation Card System
 
-The Operator Portal includes comprehensive Human-in-the-Loop (HITL) confirmation bridging that allows operators to approve or deny ASK-gated tool executions directly within the chat interface, implemented with React components and hooks.
+The Operator Portal includes comprehensive Human-in-the-Loop (HITL) confirmation bridging that allows operators to approve or deny ASK-gated tool executions directly within the chat interface, implemented with React components and hooks. The system now features tier-aware badge display that clearly distinguishes between operator confirmations and approver-required scenarios.
 
-### HITL Confirmation Architecture
+### Tier-Aware Confirmation Architecture
 
-The HITL system bridges the gap between automated agent tool execution and human oversight:
+The enhanced HITL system bridges the gap between automated agent tool execution and human oversight with intelligent tier detection:
 
-#### Confirmation Request Flow
-- **ASK-Gated Tools**: When the kernel encounters a tool requiring user confirmation, it parks the reply and emits a `confirmation_request` SSE frame
-- **Inline Card Rendering**: The portal renders an inline approval card with warning-toned border and detailed tool information
-- **Role-Based Controls**: Approve/Deny buttons are only visible to authorized roles (platform-admin, approver, operator, developer)
-- **Stream Continuation**: Upon decision, the parked reply resumes with the operator's choice applied
+#### Confirmation Tier Detection
+- **Tool Context Analysis**: Automatically analyzes tool type, parameters, and execution context to determine confirmation tier
+- **Risk Assessment**: Evaluates operation sensitivity and potential impact for appropriate tier classification
+- **Role Requirement Mapping**: Maps confirmation tiers to required user roles and permissions
+- **Badge Generation**: Creates appropriate visual indicators (operator confirmation vs approver required)
+
+#### Tier Classification Logic
+- **Operator Confirmation**: Standard operator-level actions requiring basic operator permissions
+- **Approver Required**: Elevated actions requiring specialized approver permissions beyond operator scope
+- **Contextual Intelligence**: Considers tool category, parameter values, and execution environment for tier determination
+- **Dynamic Badge Display**: Shows appropriate badge based on determined confirmation tier
 
 #### Confirmation Registry Management
 - **In-Memory Storage**: Per-process confirmation registry manages pending confirmations with unique IDs
@@ -710,13 +761,19 @@ The HITL system bridges the gap between automated agent tool execution and human
 - **Nested Confirmations**: Supports chained confirmations where a resumed turn may park again on another ASK-gated tool
 - **Error Recovery**: Handles mid-stream errors, timeouts, and connection issues gracefully
 
-### Confirmation Card Interface
+### Enhanced Confirmation Card Interface
 
-The inline confirmation card provides a focused interface for reviewing and deciding on tool executions:
+The inline confirmation card provides a focused interface for reviewing and deciding on tool executions with tier-aware visual indicators:
+
+#### Tier-Specific Badge Display
+- **Operator Confirmation Badge**: Blue tag indicating standard operator-level confirmation required
+- **Approver Required Badge**: Red tag indicating elevated approval permissions needed beyond operator scope
+- **Visual Distinction**: Clear color coding helps users understand confirmation complexity and required permissions
+- **Contextual Information**: Badge text provides immediate understanding of confirmation requirements
 
 #### Card Components
-- **Warning Header**: Yellow-bordered card with "Tool confirmation required" title and "awaiting decision" status badge
-- **Message Display**: Clear explanation of why confirmation is needed
+- **Warning Header**: Yellow-bordered card with "Tool confirmation required" title and tier-specific status badge
+- **Message Display**: Clear explanation of why confirmation is needed with tier context
 - **Tool Details**: Expandable sections showing tool name and parameters for review
 - **Action Buttons**: Prominent Approve (green) and Deny (red) buttons for authorized users
 - **Status Line**: Real-time status updates showing "Approving…"/"Denying…" during processing
@@ -752,29 +809,34 @@ The HITL system integrates seamlessly with the agent-platform confirmation regis
 
 ### User Experience Benefits
 
-The HITL confirmation system provides several operational benefits:
+The enhanced HITL confirmation system provides several operational benefits:
 
 #### Enhanced Safety
 - **Human Oversight**: Operators can review potentially risky tool executions before they run
 - **Contextual Information**: Full tool parameters visible for informed decision-making
 - **Immediate Feedback**: Real-time status updates during decision processing
+- **Tier Awareness**: Clear indication of confirmation complexity and required permissions
 
 #### Improved Workflow
 - **Inline Interface**: No need to switch contexts or navigate away from chat
 - **Streamlined Process**: Single-click approval or denial with immediate effect
 - **Evidence Integration**: Decisions appear alongside other tool execution evidence
+- **Visual Clarity**: Tier-specific badges help users quickly understand confirmation requirements
 
 #### Operational Transparency
 - **Clear Status**: Visual indicators show confirmation state throughout the process
 - **Audit Trail**: All decisions recorded with timestamps and user context
 - **Error Recovery**: Graceful handling of network issues and timeouts
+- **Permission Guidance**: Clear indication of what permissions are needed for different confirmation types
 
-**Updated** The HITL confirmation system represents a significant enhancement to the operator portal, enabling safe automation of complex workflows while maintaining human oversight for critical operations. The React implementation provides better state management and component reusability. Backend API v6 schema compliance ensures proper risk level handling in pending calls.
+**Updated** The HITL confirmation system represents a significant enhancement to the operator portal, enabling safe automation of complex workflows while maintaining human oversight for critical operations. The React implementation provides better state management and component reusability. Backend API v6 schema compliance ensures proper risk level handling in pending calls. **Critical Enhancement**: The tier-aware badge display system now clearly distinguishes between operator confirmations and approver-required scenarios, improving user experience and workflow clarity with appropriate visual indicators and role-based permission validation.
 
 **Section sources**
 - [ChatView.tsx:218-297](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L218-L297)
 - [useChatStream.ts:284-372](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L284-L372)
 - [global.css:409-444](file://products/operator-portal/web-ui/app/src/theme/global.css#L409-L444)
+- [roles.ts:35-35](file://products/operator-portal/web-ui/app/src/roles.ts#L35-L35)
+- [ConfirmationCard.test.tsx:56-67](file://products/operator-portal/web-ui/app/src/chat/__tests__/ConfirmationCard.test.tsx#L56-L67)
 
 ## Authentication and Security
 
@@ -826,7 +888,7 @@ The authentication system integrates seamlessly with the React UI:
 - **Session Persistence**: Automatic session restoration on page reload
 - **Disabled States**: Proper disabled states for unauthenticated users in session creation controls
 
-**Updated** The authentication system now includes enhanced disabled states for unauthenticated users, particularly in session creation controls where the "New" button is properly disabled with appropriate tooltips explaining the requirement to sign in first. This improves user experience by providing clear feedback about action availability.
+**Updated** The authentication system now includes enhanced disabled states for unauthenticated users, particularly in session creation controls where the "New" button is properly disabled with appropriate tooltips explaining the requirement to sign in first. This improves user experience by providing clear feedback about action availability. **Enhanced Feature**: The Settings view leverages the existing AuthContext to display identity information, roles, and session details in a read-only format for operational awareness.
 
 **Section sources**
 - [AuthContext.tsx:1-110](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L1-L110)
@@ -1290,6 +1352,106 @@ The ComposerSelectionBar provides several architectural advantages:
 - [ComposerSelectionBar.test.tsx:1-115](file://products/operator-portal/web-ui/app/src/chat/__tests__/ComposerSelectionBar.test.tsx#L1-L115)
 - [global.css:234-250](file://products/operator-portal/web-ui/app/src/theme/global.css#L234-L250)
 
+## Settings View - Session & Identity Panel
+
+The Settings view has been restored as a read-only Session & Identity panel (R-6) that provides administrators with essential operational insights by displaying identity information, session details, and platform metadata using existing AuthContext and session workspace state.
+
+### Settings View Architecture
+
+The Settings view serves as a centralized operational dashboard that leverages existing platform components to provide comprehensive situational awareness:
+
+#### Identity Information Display
+- **User Identity**: Current authenticated user information including username and roles
+- **Role Visualization**: Clear display of assigned roles and permissions
+- **Session Context**: Current session identification and status
+- **Authentication Status**: Real-time authentication state and token validity
+
+#### Session Details Panel
+- **Active Session Information**: Current session ID, creation timestamp, and last activity
+- **Session History**: Overview of recent sessions and their status
+- **Session Statistics**: Activity metrics and usage patterns
+- **Session Management**: Read-only access to session lifecycle information
+
+#### Platform Metadata Display
+- **Version Information**: Platform version and build information
+- **System Status**: Service health indicators and connectivity status
+- **Configuration Overview**: Runtime configuration summary
+- **Environment Details**: Deployment environment and infrastructure information
+
+### Integration with Existing Systems
+
+The Settings view seamlessly integrates with existing platform components:
+
+#### AuthContext Integration
+- **Identity Data**: Direct access to user identity and role information
+- **Session State**: Real-time authentication state and token management
+- **Error Handling**: Graceful handling of authentication failures
+- **State Synchronization**: Automatic updates when authentication state changes
+
+#### Session Workspace Integration
+- **Session Data**: Access to current session information and history
+- **Activity Tracking**: Monitoring of session activity and usage patterns
+- **Resource Utilization**: Overview of session resource consumption
+- **Performance Metrics**: Session performance indicators and statistics
+
+### User Interface Design
+
+The Settings view provides a clean, information-dense interface optimized for operational awareness:
+
+#### Dashboard Layout
+- **Information Architecture**: Logical grouping of related operational data
+- **Visual Hierarchy**: Clear prioritization of critical information
+- **Responsive Design**: Adaptable layout for different screen sizes
+- **Accessibility**: Screen reader support and keyboard navigation
+
+#### Interactive Elements
+- **Real-Time Updates**: Automatic refresh of dynamic information
+- **Expandable Sections**: Detailed information available on demand
+- **Search and Filter**: Capabilities for finding specific information
+- **Export Options**: Ability to export operational data for analysis
+
+### Operational Benefits
+
+The Settings view provides several key operational advantages:
+
+#### Enhanced Situational Awareness
+- **Identity Verification**: Quick confirmation of current user identity and permissions
+- **Session Monitoring**: Real-time visibility into active sessions and their status
+- **Platform Health**: Immediate assessment of platform status and connectivity
+- **Troubleshooting Support**: Essential information for diagnosing operational issues
+
+#### Administrative Efficiency
+- **Centralized Information**: Single location for essential operational data
+- **Quick Diagnostics**: Rapid access to information needed for troubleshooting
+- **Audit Support**: Historical context for operational decisions and actions
+- **Compliance Reporting**: Data suitable for compliance and audit requirements
+
+### Security Considerations
+
+The Settings view implements appropriate security measures for sensitive operational data:
+
+#### Data Protection
+- **Read-Only Access**: No modification capabilities to prevent accidental changes
+- **Information Scoping**: Display of only necessary operational information
+- **Authentication Requirements**: Access controlled by existing authentication system
+- **Audit Logging**: All access to settings view logged for security monitoring
+
+#### Privacy Controls
+- **Personal Data Protection**: Appropriate handling of user identity information
+- **Session Privacy**: Protection of sensitive session details
+- **Configuration Security**: Careful presentation of platform configuration
+- **Compliance Adherence**: Alignment with organizational privacy policies
+
+**Updated** The Settings view restoration as a read-only Session & Identity panel (R-6) provides administrators with essential operational insights without introducing new security risks. The view leverages existing AuthContext and session workspace state to display identity information, session details, and platform metadata in a consolidated dashboard format. **Critical Enhancement**: The read-only nature of the panel ensures that operational awareness does not introduce unintended modification capabilities, maintaining the principle of least privilege while providing comprehensive situational awareness.
+
+**Section sources**
+- [App.tsx:94-95](file://products/operator-portal/web-ui/app/src/App.tsx#L94-L95)
+- [App.tsx:146-152](file://products/operator-portal/web-ui/app/src/App.tsx#L146-L152)
+- [App.tsx:328-330](file://products/operator-portal/web-ui/app/src/App.tsx#L328-L330)
+- [AuthContext.tsx:19-27](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L19-L27)
+- [useSessionWorkspace.ts:22-35](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L22-L35)
+- [version.ts:1-2](file://products/operator-portal/web-ui/app/src/version.ts#L1-L2)
+
 ## Skills Integration and Cited Guidance
 
 The Operator Portal includes comprehensive skills integration with "Cited guidance" chips that provide enhanced operational visibility when skills.* tools successfully execute, implemented as React components.
@@ -1433,7 +1595,7 @@ The combined workspace views provide comprehensive resource discovery capabiliti
 - **Read-Only Operations**: All workspace views are read-only for safety
 - **Policy Compliance**: Views respect current policy bundle and role assignments
 
-**Updated** The workspace resource discovery system provides operators with comprehensive visibility into platform capabilities, enabling better understanding of available tools and skills while maintaining strict security boundaries through role-based access control. Backend API v6 schema compliance ensures proper risk level handling in pending calls.
+**Updated** The workspace resource discovery system provides operators with comprehensive visibility into platform capabilities, enabling better understanding of available tools and skills while maintaining strict security boundaries through role-based access control. Backend API v6 schema compliance ensures proper risk level handling in pending calls. **Enhanced Feature**: The Settings view complements these workspace resources by providing operational context and identity information that helps administrators understand the current operational state.
 
 **Section sources**
 - [PermissionsView.tsx:1-99](file://products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx#L1-L99)
@@ -1511,7 +1673,7 @@ The session workspace integrates seamlessly with the chat interface:
 - **Quick Context Switching**: Easy switching between different operational contexts
 - **Session Organization**: Clear visual organization of related conversations
 
-**Updated** The multi-session workspace now includes enhanced defensive parsing in the parseStored function to handle edge cases in stored session data, improved stream ownership handling during session switches to prevent cross-session data contamination, and comprehensive stale session handling with missing reference tracking to prevent errors from deleted or expired sessions. These improvements ensure more reliable session management and better data integrity.
+**Updated** The multi-session workspace now includes enhanced defensive parsing in the parseStored function to handle edge cases in stored session data, improved stream ownership handling during session switches to prevent cross-session data contamination, and comprehensive stale session handling with missing reference tracking to prevent errors from deleted or expired sessions. These improvements ensure more reliable session management and better data integrity. **Enhanced Feature**: The Settings view provides operational context that complements session management by displaying current session information and identity details in a consolidated dashboard format.
 
 **Section sources**
 - [useSessionWorkspace.ts:1-174](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L1-L174)
@@ -1780,7 +1942,7 @@ The deployment process includes enhanced version management:
 - **Version Validation**: Automated validation ensures all platform components use consistent versions
 - **Deployment Coordination**: Coordinated versioning across all platform services
 
-**Updated** The deployment now supports both the new React/TypeScript application and the legacy vanilla JavaScript implementation, with enhanced HITL confirmation bridging system, improved navigation system with persistent 64px icon rail that maintains consistent layout anchoring across all views, enhanced responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, enhanced mobile drawer navigation with proper positioning and z-index management, dynamic aria-labels that adapt based on viewport state and sidebar status, and restructured styling with .view-container-inset class for proper content spacing. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. Enhanced security measures include improved XSS prevention and defensive session parsing. The sticky request banner system and enhanced markdown rendering with proper table structure are also supported in the deployment. **Critical Enhancement**: The deployment now includes support for the enhanced stale session handling system that automatically detects and recovers from deleted or expired sessions, ensuring more reliable chat functionality, and the comprehensive evidence persistence system that provides unified rendering of both live streamed and replayed evidence with request ID display and truncation markers. **Critical Enhancement**: The deployment now includes support for the model selection system with catalog integration, providing operators with flexible AI model choices while maintaining fail-open behavior when catalog services are unavailable. **New Feature**: The deployment now includes support for the ComposerSelectionBar component which provides an extensible control strip architecture for model selection and future per-turn controls.
+**Updated** The deployment now supports both the new React/TypeScript application and the legacy vanilla JavaScript implementation, with enhanced HITL confirmation bridging system, improved navigation system with persistent 64px icon rail that maintains consistent layout anchoring across all views, enhanced responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, enhanced mobile drawer navigation with proper positioning and z-index management, dynamic aria-labels that adapt based on viewport state and sidebar status, and restructured styling with .view-container-inset class for proper content spacing. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. Enhanced security measures include improved XSS prevention and defensive session parsing. The sticky request banner system and enhanced markdown rendering with proper table structure are also supported in the deployment. **Critical Enhancement**: The deployment now includes support for the enhanced stale session handling system that automatically detects and recovers from deleted or expired sessions, ensuring more reliable chat functionality, and the comprehensive evidence persistence system that provides unified rendering of both live streamed and replayed evidence with request ID display and truncation markers. **Critical Enhancement**: The deployment now includes support for the model selection system with catalog integration, providing operators with flexible AI model choices while maintaining fail-open behavior when catalog services are unavailable. **New Feature**: The deployment now includes support for the ComposerSelectionBar component which provides an extensible control strip architecture for model selection and future per-turn controls. **Enhanced Feature**: The deployment now includes support for the restored Settings view as a read-only Session & Identity panel that provides operational insights using existing AuthContext and session workspace state. **Critical Enhancement**: The deployment now includes support for the tier-aware HITL confirmation system with badge display that clearly distinguishes between operator confirmations and approver-required scenarios.
 
 **Section sources**
 - [nginx.conf](file://products/operator-portal/nginx.conf)
@@ -1833,7 +1995,7 @@ The React implementation provides additional customization points:
 - **Navigation Item Styling**: Custom styling for navigation items and active states
 - **Mobile Drawer Behavior**: Configurable drawer animation and positioning
 - **Section Label Styling**: Customizable appearance for navigation section labels
-- **HITL Confirmation Card Styling**: Customizable appearance for approval cards with warning borders and action buttons
+- **Tier-Aware Confirmation Card Styling**: Customizable appearance for approval cards with tier-specific badges (operator confirmation vs approver required), warning borders, and action buttons
 - **Cited Guidance Styling**: Customizable chip appearance and behavior for skills integration
 - **Permission Matrix Styling**: Customizable table styling for permission displays
 - **Workspace Resource Styling**: Customizable table layouts for tools and skills catalogs
@@ -1846,6 +2008,7 @@ The React implementation provides additional customization points:
 - **Evidence Persistence Styling**: Customizable appearance for evidence cards, truncation markers, and request ID display
 - **Model Selection Styling**: Customizable appearance for model selector dropdown, fixed labels, and catalog integration
 - **Composer Selection Bar Styling**: Customizable appearance for the extensible control strip with proper flexbox layout and item organization
+- **Settings View Styling**: Customizable appearance for the read-only Session & Identity panel with operational insights dashboard
 
 **Section sources**
 - [global.css:66-119](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L119)
@@ -1892,7 +2055,7 @@ The React implementation includes additional accessibility improvements:
 - **User Card**: Accessible user identity display with proper labeling
 - **Mobile Drawer**: Accessible off-canvas navigation with proper focus management
 - **Enhanced Navigation**: Persistent 64px icon rail with dynamic aria-labels that adapt based on viewport state and sidebar status
-- **HITL Confirmation Cards**: Accessible approval interfaces with proper ARIA labels and keyboard navigation
+- **Tier-Aware Confirmation Cards**: Accessible approval interfaces with proper ARIA labels, keyboard navigation, and tier-specific badge announcements
 - **Audit Trail**: Accessible table with proper headers and expandable details
 - **Cited Guidance Chips**: Accessible chip elements with proper labeling and keyboard navigation
 - **Permission Matrix**: Accessible table with proper headers and status badges
@@ -1905,6 +2068,7 @@ The React implementation includes additional accessibility improvements:
 - **Evidence Persistence**: Accessible evidence cards with proper ARIA labels for truncation markers and request ID display
 - **Model Selection**: Accessible model selector with proper ARIA labels and keyboard navigation support
 - **Composer Selection Bar**: Accessible control strip with proper ARIA labels and keyboard navigation for model selection
+- **Settings View**: Accessible read-only Session & Identity panel with proper ARIA labels and keyboard navigation for operational insights
 
 **Section sources**
 - [global.css:66-119](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L119)
@@ -1951,7 +2115,7 @@ The React implementation maintains broad browser compatibility:
 - **Modern JavaScript**: ES6+ features with appropriate polyfills
 - **Responsive Design**: Mobile-first approach with progressive enhancement
 - **Enhanced Navigation**: Cross-browser support for persistent 64px icon rail, responsive breakpoints, and drawer functionality
-- **HITL Confirmation Cards**: Inline approval interfaces compatible with all modern browsers
+- **Tier-Aware Confirmation Cards**: Inline approval interfaces with tier-specific badge display compatible with all modern browsers
 - **Skills Integration**: Cited guidance chips work across all supported browsers
 - **Permission Matrix**: Table-based displays compatible with all modern browsers
 - **Workspace Resources**: Standard HTML tables with broad browser support
@@ -1963,6 +2127,7 @@ The React implementation maintains broad browser compatibility:
 - **Evidence Persistence**: Cross-browser support for evidence replay with proper fallbacks when evidence store is unavailable
 - **Model Selection**: Cross-browser support for model catalog integration with graceful degradation when catalog service is unavailable
 - **Composer Selection Bar**: Cross-browser support for extensible control strip with proper fallbacks when catalog service is unavailable
+- **Settings View**: Cross-browser support for read-only Session & Identity panel with graceful degradation when authentication services are unavailable
 
 **Section sources**
 - [Dockerfile](file://products/operator-portal/Dockerfile)
@@ -2147,9 +2312,9 @@ Common issues and their solutions when working with the Operator Portal.
 - Verify CSS classes are properly applied for chip styling
 - Check that _truncated flag is not set in data_summary
 
-### HITL Confirmation Card Issues
+### Tier-Aware Confirmation Card Issues
 
-**Problem**: Confirmation cards not appearing or buttons not working
+**Problem**: Confirmation cards not appearing or tier badges not displaying correctly
 **Solution**:
 - Verify user has appropriate roles (platform-admin, approver, operator, developer) for confirmation
 - Check that confirmation_request events are being received in the stream
@@ -2157,6 +2322,9 @@ Common issues and their solutions when working with the Operator Portal.
 - Review browser console for JavaScript errors in confirmation handling
 - Verify confirmation registry is properly initialized in agent-platform
 - Check that confirm_id values are properly passed between frontend and backend
+- **Updated**: Verify tier detection logic is correctly determining operator confirmation vs approver required scenarios
+- **Updated**: Check that APPROVAL_DECIDER_ROLES is properly configured for role-based permission validation
+- **Updated**: Verify tier-specific badge display is working correctly with appropriate color coding (blue for operator, red for approver)
 
 ### Stream Continuation Issues
 
@@ -2327,7 +2495,43 @@ Common issues and their solutions when working with the Operator Portal.
 - Check for TypeScript compilation errors in component interfaces
 - Test model selection flow from UI to backend API
 
-**Updated** Added comprehensive troubleshooting guidance for the enhanced navigation system, including persistent 64px icon rail issues, useNarrowViewport() hook problems, responsive breakpoint detection issues, drawer integration problems, dynamic aria-labels not updating correctly, and proper handling of .view-container-inset class for content spacing. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism, and enhanced error handling for different failure types including network errors, authentication failures, and streaming interruptions. New sections cover sticky request banner issues, markdown rendering problems with proper table structure, enhanced authentication state management for unauthenticated users, comprehensive stale session handling troubleshooting for 404 errors and retry logic failures, evidence persistence troubleshooting for transcript-to-turn conversion and evidence attachment issues, comprehensive model selection troubleshooting for catalog integration and session persistence, and comprehensive ComposerSelectionBar troubleshooting for component rendering, styling, and integration issues.
+### Settings View Issues
+
+**Problem**: Settings view not displaying correctly or operational insights not available
+**Solution**:
+- Verify that AuthContext is properly initialized and providing identity information
+- Check that session workspace state is accessible and contains current session data
+- Ensure platform version information is properly loaded from version.ts
+- Verify that the Settings view is properly routed and accessible from navigation
+- Check browser console for JavaScript errors in Settings view rendering
+- Verify that read-only interface is properly implemented without modification capabilities
+- Test identity information display with different user roles and authentication states
+
+### Settings View Integration Issues
+
+**Problem**: Settings view not integrating properly with existing components
+**Solution**:
+- Verify that AuthContext integration is working correctly for identity display
+- Check that session workspace state is properly accessed for session details
+- Ensure platform metadata is correctly displayed from version information
+- Verify that the read-only nature of the panel is maintained throughout the interface
+- Check for proper error handling when authentication or session data is unavailable
+- Test the Settings view with different authentication states and user roles
+- Verify that the panel provides meaningful operational insights without exposing sensitive information
+
+### Tier-Aware Confirmation Troubleshooting
+
+**Problem**: Tier detection not working correctly or badges not displaying properly
+**Solution**:
+- Verify that confirmation tier detection logic is properly analyzing tool context and parameters
+- Check that APPROVAL_DECIDER_ROLES is correctly configured with approver and platform-admin roles
+- Ensure tier-specific badge display is working with appropriate color coding (blue for operator, red for approver)
+- Verify that role-based permission validation is functioning correctly for approval decisions
+- Check browser console for JavaScript errors in tier detection and badge rendering logic
+- Test with different tool types and parameter combinations to verify tier classification
+- Verify that server-side confirmation tier information is properly transmitted to frontend
+
+**Updated** Added comprehensive troubleshooting guidance for the enhanced navigation system, including persistent 64px icon rail issues, useNarrowViewport() hook problems, responsive breakpoint detection issues, drawer integration problems, dynamic aria-labels not updating correctly, and proper handling of .view-container-inset class for content spacing. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism, and enhanced error handling for different failure types including network errors, authentication failures, and streaming interruptions. New sections cover sticky request banner issues, markdown rendering problems with proper table structure, enhanced authentication state management for unauthenticated users, comprehensive stale session handling troubleshooting for 404 errors and retry logic failures, evidence persistence troubleshooting for transcript-to-turn conversion and evidence attachment issues, comprehensive model selection troubleshooting for catalog integration and session persistence, comprehensive ComposerSelectionBar troubleshooting for component rendering, styling, and integration issues, comprehensive Settings view troubleshooting for operational insights display and integration with existing components, and comprehensive tier-aware confirmation troubleshooting for badge display, role validation, and tier detection issues.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
@@ -2347,16 +2551,18 @@ Common issues and their solutions when working with the Operator Portal.
 - [transcript.ts:55-70](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L55-L70)
 - [transcript.test.ts:109-184](file://products/operator-portal/web-ui/app/src/chat/__tests__/transcript.test.ts#L109-L184)
 - [ComposerSelectionBar.test.tsx:1-115](file://products/operator-portal/web-ui/app/src/chat/__tests__/ComposerSelectionBar.test.tsx#L1-L115)
+- [ConfirmationCard.test.tsx:56-67](file://products/operator-portal/web-ui/app/src/chat/__tests__/ConfirmationCard.test.tsx#L56-L67)
+- [roles.ts:35-35](file://products/operator-portal/web-ui/app/src/roles.ts#L35-L35)
 
 ## Conclusion
 
 The Operator Portal provides a comprehensive, accessible, and customizable web interface for platform administration and monitoring within the Luban AIOPS ecosystem. The complete rebuild using React 18, TypeScript, and Vite delivers enterprise-grade functionality while maintaining simplicity and performance.
 
-**Updated** The recent enhancements include an enhanced navigation system with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states with visual dividers instead of clipped text, and enhanced mobile drawer navigation with proper positioning and z-index management. The navigation system now maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management. Additional improvements include comprehensive mobile navigation with proper positioning and z-index management, enhanced security measures with improved XSS prevention in markdown rendering through comprehensive quote escaping and protocol filtering, improved session management with defensive parseStored function to handle malformed or corrupted session data, enhanced stream ownership handling during session switches to prevent cross-session data contamination, refined error handling for different failure types including network errors, authentication failures, and streaming interruptions, and backend API v6 schema compliance for risk level handling in pending calls. **Critical Enhancement**: The platform now includes comprehensive stale session handling with automatic 404 error detection, missing reference tracking, and retry logic that automatically drops stale session references and falls back to server-side session auto-creation, ensuring more reliable chat functionality even when backend sessions become invalid. **Critical Enhancement**: The evidence persistence system provides unified rendering of both live streamed and replayed evidence, ensuring operators see consistent evidence cards with request ID display and truncation markers regardless of evidence source. **Critical Enhancement**: The model selection system provides flexible AI model choices with dynamic catalog integration and session-based persistence, while maintaining fail-open behavior when catalog services are unavailable. **New Feature**: The introduction of the ComposerSelectionBar component provides an extensible control strip architecture that improves modularity and provides a designated mount point for future per-turn selections as referenced in SPEC-024.
+**Updated** The recent enhancements include an enhanced navigation system with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states with visual dividers instead of clipped text, and enhanced mobile drawer navigation with proper positioning and z-index management. The navigation system now maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management. Additional improvements include comprehensive mobile navigation with proper positioning and z-index management, enhanced security measures with improved XSS prevention in markdown rendering through comprehensive quote escaping and protocol filtering, improved session management with defensive parseStored function to handle malformed or corrupted session data, enhanced stream ownership handling during session switches to prevent cross-session data contamination, refined error handling for different failure types including network errors, authentication failures, and streaming interruptions, and backend API v6 schema compliance for risk level handling in pending calls. **Critical Enhancement**: The platform now includes comprehensive stale session handling with automatic 404 error detection, missing reference tracking, and retry logic that automatically drops stale session references and falls back to server-side session auto-creation, ensuring more reliable chat functionality even when backend sessions become invalid. **Critical Enhancement**: The evidence persistence system provides unified rendering of both live streamed and replayed evidence, ensuring operators see consistent evidence cards with request ID display and truncation markers regardless of evidence source. **Critical Enhancement**: The model selection system provides flexible AI model choices with dynamic catalog integration and session-based persistence, while maintaining fail-open behavior when catalog services are unavailable. **New Feature**: The introduction of the ComposerSelectionBar component provides an extensible control strip architecture that improves modularity and provides a designated mount point for future per-turn selections as referenced in SPEC-024. **Enhanced Feature**: The restoration of the Settings view as a read-only Session & Identity panel (R-6) provides administrators with essential operational insights by displaying identity information, session details, and platform metadata using existing AuthContext and session workspace state. **Critical Enhancement**: The tier-aware HITL confirmation system now provides clear visual distinction between operator confirmations and approver-required scenarios with appropriate badge display and role-based permission validation, improving workflow clarity and user experience.
 
-Key strengths of the enhanced portal include its modular React architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities, enhanced skills integration capabilities, improved navigation organization with sectioned grouping and persistent 64px icon rail for consistent layout anchoring, robust multi-session workspace management, comprehensive incident triage with automated workflows, voice input support for hands-free operation, seamless deep linking between incidents and collaborative chat sessions, and enhanced mobile navigation with proper responsive behavior below 992px breakpoint. The enhanced security measures ensure protection against XSS attacks while maintaining full functionality. **Critical Enhancement**: The stale session handling system provides robust error recovery for deleted or expired sessions, ensuring reliable chat functionality even in challenging network conditions or backend service issues. **Critical Enhancement**: The evidence persistence system ensures complete traceability of tool executions regardless of whether they were observed live or reviewed from stored transcripts, with comprehensive truncation markers that clearly indicate payload limitations. **Critical Enhancement**: The model selection system provides operators with flexible AI model choices while maintaining robust fail-open behavior and secure credential handling. **New Feature**: The ComposerSelectionBar component provides an extensible architecture for model selection and future per-turn controls, improving modularity and maintainability.
+Key strengths of the enhanced portal include its modular React architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities with tier-aware badge display, enhanced skills integration capabilities, improved navigation organization with sectioned grouping and persistent 64px icon rail for consistent layout anchoring, robust multi-session workspace management, comprehensive incident triage with automated workflows, voice input support for hands-free operation, seamless deep linking between incidents and collaborative chat sessions, and enhanced mobile navigation with proper responsive behavior below 992px breakpoint. The enhanced security measures ensure protection against XSS attacks while maintaining full functionality. **Critical Enhancement**: The stale session handling system provides robust error recovery for deleted or expired sessions, ensuring reliable chat functionality even in challenging network conditions or backend service issues. **Critical Enhancement**: The evidence persistence system ensures complete traceability of tool executions regardless of whether they were observed live or reviewed from stored transcripts, with comprehensive truncation markers that clearly indicate payload limitations. **Critical Enhancement**: The model selection system provides operators with flexible AI model choices while maintaining robust fail-open behavior and secure credential handling. **New Feature**: The ComposerSelectionBar component provides an extensible architecture for model selection and future per-turn controls, improving modularity and maintainability. **Enhanced Feature**: The Settings view provides read-only operational insights that complement the existing platform capabilities without introducing new security risks. **Critical Enhancement**: The tier-aware confirmation system provides clear visual indicators distinguishing between operator confirmations and approver-required scenarios, improving workflow efficiency and user experience.
 
-The React/TypeScript implementation represents a significant advancement in developer experience and code maintainability, while preserving all existing functionality from the legacy vanilla JavaScript implementation. The enhanced navigation system with persistent 64px icon rail provides consistent layout anchoring across all views, while the useNarrowViewport() hook enables precise responsive breakpoint detection. The enhanced security measures, including comprehensive XSS prevention and defensive session parsing, ensure robust protection against common web vulnerabilities. The HITL confirmation system enables safe automation of complex workflows while maintaining human oversight for critical operations. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions. The new view components provide dedicated interfaces for different operational tasks, improving workflow efficiency and user experience. **Critical Enhancement**: The stale session handling system ensures reliable chat functionality by automatically detecting and recovering from deleted or expired sessions, preventing user-facing errors and maintaining conversation continuity. **Critical Enhancement**: The evidence persistence system ensures operators always understand the completeness of displayed evidence through clear truncation markers and budget eviction indicators. **Critical Enhancement**: The model selection system provides flexible AI model choices with dynamic catalog integration and session-based persistence, ensuring operators can consistently use their preferred models throughout conversations. **New Feature**: The ComposerSelectionBar component provides an extensible control strip architecture that improves modularity and provides a designated mount point for future per-turn selections.
+The React/TypeScript implementation represents a significant advancement in developer experience and code maintainability, while preserving all existing functionality from the legacy vanilla JavaScript implementation. The enhanced navigation system with persistent 64px icon rail provides consistent layout anchoring across all views, while the useNarrowViewport() hook enables precise responsive breakpoint detection. The enhanced security measures, including comprehensive XSS prevention and defensive session parsing, ensure robust protection against common web vulnerabilities. The HITL confirmation system enables safe automation of complex workflows while maintaining human oversight for critical operations with tier-aware badge display. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions. The new view components provide dedicated interfaces for different operational tasks, improving workflow efficiency and user experience. **Critical Enhancement**: The stale session handling system ensures reliable chat functionality by automatically detecting and recovering from deleted or expired sessions, preventing user-facing errors and maintaining conversation continuity. **Critical Enhancement**: The evidence persistence system ensures operators always understand the completeness of displayed evidence through clear truncation markers and budget eviction indicators. **Critical Enhancement**: The model selection system provides flexible AI model choices with dynamic catalog integration and session-based persistence, ensuring operators can consistently use their preferred models throughout conversations. **New Feature**: The ComposerSelectionBar component provides an extensible control strip architecture that improves modularity and provides a designated mount point for future per-turn selections. **Enhanced Feature**: The Settings view restoration as a read-only Session & Identity panel provides essential operational insights while maintaining security boundaries and leveraging existing platform components. **Critical Enhancement**: The tier-aware confirmation system provides clear visual distinction between operator confirmations and approver-required scenarios with appropriate badge display and role-based permission validation.
 
 **Additional Recent Enhancements:**
 - **Sticky Request Banner System**: IntersectionObserver-based conversation context maintenance that keeps user requests visible during long replies and expanded evidence panels
@@ -2371,5 +2577,7 @@ The React/TypeScript implementation represents a significant advancement in deve
 - **Model Catalog API Testing**: Comprehensive test coverage for catalog discovery, error handling, and sparse payload normalization
 - **ComposerSelectionBar Architecture**: Extensible control strip with intelligent collapse behavior and comprehensive TypeScript interfaces
 - **ComposerSelectionBar Testing**: Comprehensive test coverage for collapse scenarios, model selection propagation, and browser API shimming
+- **Settings View Restoration**: Read-only Session & Identity panel providing operational insights using existing AuthContext and session workspace state
+- **Tier-Aware Confirmation System**: Enhanced HITL confirmation handling with tier detection logic, badge display system, and APPROVAL_DECIDER_ROLES for role-based permission validation
 
-Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system, continued refinement of the navigation and resource discovery interfaces, expanded support for more complex multi-step approval workflows, additional voice input capabilities to meet evolving operational requirements, enhanced incident triage automation, expanded connector integrations, improved collaborative features for multi-operator incident response, and continued focus on mobile navigation optimization and responsive design improvements. Continued focus on security enhancements and user experience improvements will drive future development efforts. **Ongoing Enhancement**: Continued refinement of stale session handling and error recovery mechanisms to ensure maximum reliability in production environments. **Ongoing Enhancement**: Continued improvement of evidence persistence capabilities to provide even more comprehensive traceability and operational insights. **Ongoing Enhancement**: Continued enhancement of model selection capabilities to support more sophisticated model routing and performance optimization. **Ongoing Enhancement**: Continued development of the ComposerSelectionBar architecture to support additional per-turn selection capabilities as specified in SPEC-024.
+Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system with more sophisticated tier detection algorithms, expanded support for more complex multi-step approval workflows, additional voice input capabilities to meet evolving operational requirements, enhanced incident triage automation, expanded connector integrations, improved collaborative features for multi-operator incident response, and continued focus on mobile navigation optimization and responsive design improvements. Continued focus on security enhancements and user experience improvements will drive future development efforts. **Ongoing Enhancement**: Continued refinement of stale session handling and error recovery mechanisms to ensure maximum reliability in production environments. **Ongoing Enhancement**: Continued improvement of evidence persistence capabilities to provide even more comprehensive traceability and operational insights. **Ongoing Enhancement**: Continued enhancement of model selection capabilities to support more sophisticated model routing and performance optimization. **Ongoing Enhancement**: Continued development of the ComposerSelectionBar architecture to support additional per-turn selection capabilities as specified in SPEC-024. **Ongoing Enhancement**: Continued refinement of the Settings view to provide even more comprehensive operational insights while maintaining read-only security boundaries. **Ongoing Enhancement**: Continued improvement of tier-aware confirmation system with enhanced tier detection accuracy and more granular permission validation.

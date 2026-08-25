@@ -6,7 +6,8 @@
 - [SPEC-004-policy-enforcement/spec.md](file://docs/specs/SPEC-004-policy-enforcement/spec.md)
 - [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
 - [SPEC-021-bounded-mutating-actions/spec.md](file://docs/specs/SPEC-021-bounded-mutating-actions/spec.md)
-- [SPEC-024-runtime-llm-model-switching/spec.md](file://docs/specs/SPEC-024-runtime-llm-model-switching/spec.md)
+- [SPEC-030-require-approval-policy-semantics/spec.md](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md)
+- [SPEC-030-require-approval-policy-semantics/plan.md](file://docs/specs/SPEC-030-require-approval-policy-semantics/plan.md)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 - [Makefile](file://Makefile)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
@@ -31,14 +32,13 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new `tools:mutate` policy action introduced by SPEC-021 (Bounded Mutating Actions)
-- Updated policy engine with risk-tier gating that enforces separate authorization for mutating tool execution
-- Enhanced default policies across platform-gateway and tool-gateway services with deny-by-default for mutating actions
-- Documented the triple-gated approval model: gateway risk-tier admission → agent auto-allow invariant → HITL confirmation
-- Added detailed coverage of the first bounded mutating tool (`k8s.delete_pod`) and its security model
-- Updated authorization matrix to include `tools:mutate` action with restricted role-based access control
-- Enhanced troubleshooting guide with mutating tool-specific scenarios and diagnostic steps
-- **Updated**: Enhanced development Kubernetes policy configuration to grant `models:list` permissions alongside existing chat-related actions for platform-admin, approver, operator, developer, and observer roles, enabling safe catalog discovery operations per SPEC-024
+- Added comprehensive documentation for the new `require_approval` policy outcome with tier-based approval system introduced by SPEC-030
+- Updated policy engine evaluation flow to implement explicit deny > require_approval > allow precedence rules
+- Enhanced default bundle posture with tier_2 require_approval rule on tools:mutate requiring designated approver distinct from requester
+- Documented tier-based approval semantics including tier_1 (session operator self-confirmation) and tier_2 (designated approver)
+- Updated authorization matrix to reflect require_approval decision states and tier information
+- Enhanced troubleshooting guide with require_approval-specific scenarios and diagnostic steps
+- **Updated**: Platform gateway now enforces tier-based approval on chat:confirm path with self-approval restrictions for tier_2 actions
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -50,12 +50,13 @@
 7. [Policy Matrix Functionality](#policy-matrix-functionality)
 8. [HITL Confirmation Bridging](#hitl-confirmation-bridging)
 9. [Risk-Tier Gating and Mutating Actions](#risk-tier-gating-and-mutating-actions)
-10. [Model Catalog Discovery and Permissions](#model-catalog-discovery-and-permissions)
-11. [Dependency Analysis](#dependency-analysis)
-12. [Performance Considerations](#performance-considerations)
-13. [Troubleshooting Guide](#troubleshooting-guide)
-14. [Conclusion](#conclusion)
-15. [Appendices](#appendices)
+10. [Require-Approval Policy Semantics](#require-approval-policy-semantics)
+11. [Model Catalog Discovery and Permissions](#model-catalog-discovery-and-permissions)
+12. [Dependency Analysis](#dependency-analysis)
+13. [Performance Considerations](#performance-considerations)
+14. [Troubleshooting Guide](#troubleshooting-guide)
+15. [Conclusion](#conclusion)
+16. [Appendices](#appendices)
 
 ## Introduction
 This document describes the policy management system that enables declarative policy definitions and runtime enforcement across the platform. It covers the policy language syntax, built-in rule types, custom policy development, evaluation flow, decision logic, audit trail generation, testing, validation, deployment, versioning, conflict resolution, performance optimization, and integration with identity contexts and authorization decisions across services.
@@ -63,6 +64,8 @@ This document describes the policy management system that enables declarative po
 The system is designed to be declarative, auditable, and extensible, allowing operators to define policies centrally and enforce them consistently at the API gateway boundary and within tool execution paths. **Updated** with enhanced policy matrix functionality that provides live visibility into effective permissions through a role × action permission table, server-side row scoping for different user contexts, new policy actions including `tools:list`, `skills:read`, `chat:confirm`, `models:list`, and the new `tools:mutate` action for bounded mutating operations, and comprehensive HITL (Human-in-the-Loop) confirmation bridging for approval-gated bounded actions.
 
 **New**: The platform now includes risk-tier gating that separates read-only tool execution from mutating operations, providing an additional layer of security for potentially destructive actions through the new `tools:mutate` policy action.
+
+**New**: The platform now implements require-approval policy semantics with tier-based approval system (SPEC-030), providing explicit approval levels for critical destructive actions where tier_1 allows session operator self-confirmation and tier_2 requires a designated approver distinct from the requester.
 
 **Updated**: The platform now grants `models:list` permissions to all operational roles (platform-admin, approver, operator, developer, and read-only-observer), enabling safe catalog discovery operations as specified in SPEC-024 for runtime LLM model switching capabilities.
 
@@ -76,6 +79,7 @@ Policy-related artifacts are distributed across documentation, schemas, runtime 
 - Kubernetes manifests provide default policies and RBAC configurations for deployment.
 - **New**: Risk-tier gating provides separation between read and mutating tool execution.
 - **New**: Bounded mutating tools like `k8s.delete_pod` require explicit approval through the triple-gated model.
+- **New**: Require-approval policy semantics provide tier-based approval system with explicit precedence rules.
 - **Updated**: Model catalog discovery permissions enable safe read-only access to available LLM models across all operational roles.
 
 ```mermaid
@@ -85,7 +89,7 @@ PS["Policy Specification"]
 SPEC["SPEC-004 Policy Enforcement"]
 SPEC20["SPEC-020 HITL Confirmation"]
 SPEC21["SPEC-021 Bounded Mutating"]
-SPEC24["SPEC-024 Model Switching"]
+SPEC30["SPEC-030 Require Approval"]
 AUTH_MATRIX["Authorization Matrix"]
 end
 subgraph "Schemas"
@@ -126,7 +130,7 @@ PS --> SCHEMA_RULE
 SPEC --> SCHEMA_DECISION
 SPEC20 --> SCHEMA_CONFIRM
 SPEC21 --> K8S_CONNECTOR
-SPEC24 --> MODEL_CATALOG
+SPEC30 --> SCHEMA_RULE
 AUTH_MATRIX --> DEFAULT_POLICY
 SCHEMA_RULE --> ENGINE_TOOL
 SCHEMA_RULE --> ENGINE_PLATFORM
@@ -160,7 +164,7 @@ MODEL_CATALOG --> TEST_MODEL
 - [SPEC-004-policy-enforcement/spec.md](file://docs/specs/SPEC-004-policy-enforcement/spec.md)
 - [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
 - [SPEC-021-bounded-mutating-actions/spec.md](file://docs/specs/SPEC-021-bounded-mutating-actions/spec.md)
-- [SPEC-024-runtime-llm-model-switching/spec.md](file://docs/specs/SPEC-024-runtime-llm-model-switching/spec.md)
+- [SPEC-030-require-approval-policy-semantics/spec.md](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md)
 - [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
@@ -192,7 +196,7 @@ MODEL_CATALOG --> TEST_MODEL
 - [SPEC-004-policy-enforcement/spec.md](file://docs/specs/SPEC-004-policy-enforcement/spec.md)
 - [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
 - [SPEC-021-bounded-mutating-actions/spec.md](file://docs/specs/SPEC-021-bounded-mutating-actions/spec.md)
-- [SPEC-024-runtime-llm-model-switching/spec.md](file://docs/specs/SPEC-024-runtime-llm-model-switching/spec.md)
+- [SPEC-030-require-approval-policy-semantics/spec.md](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md)
 - [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 - [Makefile](file://Makefile)
@@ -225,6 +229,7 @@ MODEL_CATALOG --> TEST_MODEL
 - Deployment Artifacts: Kubernetes manifests for policy configuration and RBAC controls.
 - **New**: Risk-Tier Gate: Enforces separate authorization for mutating tool execution through the `tools:mutate` action.
 - **New**: Bounded Mutating Tools: First implementation includes `k8s.delete_pod` with triple-gated approval model.
+- **New**: Require-Approval Policy Semantics: Implements tier-based approval system with explicit precedence rules.
 - **Updated**: Policy Matrix Engine: Generates live role × action permission tables from currently enforced policy bundle with server-side row scoping.
 - **Updated**: HITL Confirmation Bridge: Provides approval-gated workflow for mutating operations with durable audit trails.
 - **Updated**: Model Catalog Discovery: Enables safe read-only access to available LLM models across all operational roles.
@@ -237,6 +242,7 @@ Key responsibilities:
 - Expose metrics and observability hooks for monitoring.
 - **New**: Enforce risk-tier gating that requires separate authorization for mutating operations.
 - **New**: Handle bounded mutating tools with triple-gated approval model.
+- **New**: Implement require-approval policy semantics with tier-based approval system.
 - **Updated**: Build effective permission matrices with full policy semantics inheritance.
 - **Updated**: Handle HITL confirmation flows with proper delegation and audit trails.
 - **Updated**: Enforce deny-by-default authorization for sensitive operations including mutating tool execution.
@@ -264,7 +270,7 @@ Key responsibilities:
 - [Makefile](file://Makefile)
 
 ## Architecture Overview
-The policy enforcement architecture integrates at the API gateway layer and tool invocation path. Requests carry identity context; the policy engine evaluates policies and returns decisions that gate access or modify behavior. Audit trails are recorded for compliance and debugging. **Updated** with risk-tier gating that separates read-only tool execution from mutating operations, requiring separate authorization through the `tools:mutate` action for write/admin risk tools, and enhanced model catalog discovery permissions for safe read-only operations.
+The policy enforcement architecture integrates at the API gateway layer and tool invocation path. Requests carry identity context; the policy engine evaluates policies and returns decisions that gate access or modify behavior. Audit trails are recorded for compliance and debugging. **Updated** with risk-tier gating that separates read-only tool execution from mutating operations, requiring separate authorization through the `tools:mutate` action for write/admin risk tools, require-approval policy semantics with tier-based approval system, and enhanced model catalog discovery permissions for safe read-only operations.
 
 ```mermaid
 sequenceDiagram
@@ -295,10 +301,19 @@ RiskGate->>Engine : "Evaluate 'tools : mutate' for write/admin tools"
 Engine-->>RiskGate : "Decision"
 alt "tools : mutate allowed"
 RiskGate->>Confirm : "Process through HITL bridge"
+Confirm->>Engine : "Evaluate require_approval decision"
+Engine-->>Confirm : "require_approval with tier info"
+alt "Tier 1 - Self Approval"
 Confirm->>Agent : "Proxy with delegated token"
 Agent-->>Confirm : "SSE stream with confirmation_result"
 Confirm->>Audit : "Emit confirmation_decided event"
 Confirm-->>Client : "Resumed SSE stream"
+else "Tier 2 - Designated Approver"
+Confirm->>Agent : "Proxy with delegated token"
+Agent-->>Confirm : "SSE stream with confirmation_result"
+Confirm->>Audit : "Emit confirmation_decided event"
+Confirm-->>Client : "Resumed SSE stream"
+end
 else "tools : mutate denied"
 RiskGate-->>Client : "403 Forbidden"
 end
@@ -351,6 +366,7 @@ Built-in rule types typically cover:
 - Tool usage restrictions by capability or environment.
 - Data access control by sensitivity labels or ownership.
 - **Updated**: New policy actions including `tools:list` for tool discovery, `skills:read` for skills inventory access, `chat:confirm` for HITL confirmation bridging, `models:list` for safe model catalog discovery, and the new `tools:mutate` for bounded mutating operations.
+- **New**: Require-approval policy outcome with tier-based approval system supporting tier_1 (self-approval) and tier_2 (designated approver) approval levels.
 
 Custom policy development involves extending condition evaluators and action handlers while adhering to schema constraints.
 
@@ -369,7 +385,7 @@ Evaluation proceeds through:
 
 Conflict resolution uses precedence rules and explicit allow/deny overrides. Deny typically takes precedence unless explicitly configured otherwise.
 
-**Updated**: The evaluation flow now includes risk-tier gating for tool invocations, where mutating tools require both `tools:invoke` and `tools:mutate` authorization, and enhanced model catalog discovery with `models:list` permissions granted to all operational roles.
+**Updated**: The evaluation flow now includes risk-tier gating for tool invocations, require-approval policy semantics with explicit deny > require_approval > allow precedence rules, and enhanced model catalog discovery with `models:list` permissions granted to all operational roles.
 
 ```mermaid
 flowchart TD
@@ -389,8 +405,14 @@ ModelsCheck --> ModelsDecision{"models:list Allowed?"}
 ModelsDecision --> |Yes| Aggregate
 ModelsDecision --> |No| Deny["Deny Request"]
 MutateCheck --> MutateDecision{"tools:mutate Allowed?"}
-MutateDecision --> |Yes| Aggregate
+MutateDecision --> |Yes| CheckApproval{"require_approval?"}
 MutateDecision --> |No| Deny
+CheckApproval --> |Yes| TierCheck{"Tier Type"}
+CheckApproval --> |No| Aggregate
+TierCheck --> |tier_1| SelfApproval["Allow Self-Approval"]
+TierCheck --> |tier_2| DesignatedApprover["Require Designated Approver"]
+SelfApproval --> Aggregate
+DesignatedApprover --> Aggregate
 Aggregate --> Audit["Generate Audit Trail"]
 Audit --> End(["Return Decision"])
 ```
@@ -582,6 +604,74 @@ The first implementation of bounded mutating capabilities includes:
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 - [approval-and-hitl.md](file://docs/guides/approval-and-hitl.md)
 
+### Require-Approval Policy Semantics
+
+**New Section** - Comprehensive coverage of the require-approval policy semantics introduced by SPEC-030 for tier-based approval system.
+
+#### Tier-Based Approval System
+The platform implements a tier-based approval system that provides explicit approval levels for critical destructive actions:
+
+- **Tier 1 (tier_1)**: Session operator self-confirmation for destructive-but-routine actions
+- **Tier 2 (tier_2)**: Designated approver distinct from requester for critical destructive actions
+
+#### Explicit Precedence Rules
+The policy engine implements explicit precedence rules:
+- **Explicit Deny > Require-Approval > Allow**: Deny always takes precedence over require_approval
+- **Highest Priority Wins**: Among multiple require_approval matches, highest priority rule wins
+- **Disabled Rules Ignored**: Disabled rules are skipped during evaluation
+
+#### Approval Block Structure
+Require-approval rules include an approval block with:
+- **tier**: Required field specifying approval level (tier_1 or tier_2)
+- **decided_by_roles**: Non-empty array of roles authorized to approve
+- **allow_self_approval**: Optional boolean (tier_1 allows by default, tier_2 forbids by default)
+
+#### Implementation Details
+The require-approval semantics are implemented in both policy engines:
+
+```python
+# In policy_engine.py
+def evaluate(settings, roles, action):
+    # ... rule matching logic ...
+    approvals = [rule for rule in matched if rule.outcome == OUTCOME_REQUIRE_APPROVAL]
+    if approvals:
+        best = max(approvals, key=lambda rule: rule.priority)
+        return PolicyDecision(
+            decision="require_approval",
+            matched_rule_ids=[best.id],
+            reason="approval required by policy rule",
+            action=action,
+            approval=best.approval,
+        )
+```
+
+#### Default Bundle Posture
+The shipped default bundle includes a tier_2 require_approval rule for tools:mutate:
+- **Rule ID**: `require-approval-tools-mutate`
+- **Priority**: 200 (higher than allow rules)
+- **Decided By Roles**: ["approver", "platform-admin"]
+- **Self-Approval**: Forbids self-approval by default (tier_2 behavior)
+
+#### Tier Enforcement Bridge
+The platform-gateway enforces tier-based approval on the chat:confirm path:
+- **Tier 1**: Allows session owner to approve their own parked calls
+- **Tier 2**: Rejects self-approval when confirmer subject equals session owner subject
+- **Structured Rejections**: Returns 403 with detailed error information for unauthorized approvals
+
+#### Security Model
+- **Deny-by-Default**: No implicit approval rights
+- **Explicit Authorization**: Requires specific role membership in decided_by_roles
+- **Self-Approval Restrictions**: Tier_2 actions cannot be self-approved
+- **Bridged Actions Only**: Require-approval rules only valid on actions with approval enforcement path
+
+**Section sources**
+- [SPEC-030-require-approval-policy-semantics/spec.md](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md)
+- [SPEC-030-require-approval-policy-semantics/plan.md](file://docs/specs/SPEC-030-require-approval-policy-semantics/plan.md)
+- [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
+- [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
+- [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+
 ### Model Catalog Discovery and Permissions
 
 **New Section** - Comprehensive coverage of the model catalog discovery functionality introduced by SPEC-024 for runtime LLM model switching.
@@ -671,7 +761,7 @@ Audit records capture:
 - Timestamps and correlation IDs.
 - Reason codes and messages.
 
-**Updated**: Audit trails now include risk-level information for tool invocations, detailed context for mutating tool attempts, and model selection information for chat sessions.
+**Updated**: Audit trails now include risk-level information for tool invocations, detailed context for mutating tool attempts, require-approval decision information including tier and approval rule IDs, and model selection information for chat sessions.
 
 These records support compliance reporting, debugging, and performance analysis.
 
@@ -692,6 +782,7 @@ These records support compliance reporting, debugging, and performance analysis.
   - `chat:confirm`: Approve or deny parked HITL tool confirmations (granted to platform-admin, approver, operator, and developer roles)
   - `models:list`: Discover available LLM models (granted to all operational roles)
   - **New**: `tools:mutate`: Execute mutating (write/admin risk) tools (granted to platform-admin and operator only)
+  - **New**: Require-approval policy outcome with tier-based approval system for critical destructive actions
 
 Examples are implemented via rule definitions and condition evaluators aligned with schemas.
 
@@ -704,6 +795,8 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - Conflict Resolution: Precedence rules determine which policy applies when multiple match; explicit deny overrides allow unless configured otherwise.
 - Migration: Schema evolution ensures backward compatibility during upgrades.
 
+**Updated**: Require-approval policy semantics introduce additional conflict resolution rules where explicit deny takes precedence over require_approval, and require_approval takes precedence over allow.
+
 **Section sources**
 - [policy-specification.md](file://docs/agentic-aiops-platform/policy-specification.md)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
@@ -715,6 +808,7 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - Batching: Batch audit writes and metrics updates to minimize I/O.
 - **New**: Risk-tier gating adds minimal overhead through efficient tool registry lookups and early rejection of unauthorized mutating operations.
 - **New**: Bounded mutating tools leverage existing policy engine caching and evaluation semantics.
+- **New**: Require-approval policy semantics add minimal overhead through efficient tier-based approval evaluation.
 - **New**: Model catalog discovery benefits from credential-gated filtering and efficient environment variable resolution.
 - **Updated**: Policy matrix functionality benefits from existing policy engine caching and efficient role × action computation.
 - **Updated**: HITL confirmation bridging minimizes overhead through efficient SSE passthrough and deferred audit emission.
@@ -731,6 +825,7 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - Authorization Decisions: Policy engine consumes identity context to evaluate rules and produce decisions consumed by gateway and tool services.
 - Cross-Service Consistency: Shared schemas ensure uniform interpretation of identity and decisions across services.
 - **Updated**: Risk-tier gating integrates with normalized identity context for evaluating both `tools:invoke` and `tools:mutate` actions.
+- **Updated**: Require-approval policy semantics integrate with normalized identity context for tier-based approval enforcement.
 - **Updated**: Model catalog discovery integrates with normalized identity context for role-based access control.
 - **Updated**: Policy matrix functionality integrates with normalized identity context for server-side row scoping.
 - **Updated**: HITL confirmation bridging uses delegated tokens to maintain identity continuity through approval workflows.
@@ -901,7 +996,7 @@ Approval decisions follow this flow:
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 
 ## Dependency Analysis
-Policy components depend on schemas for validation and consistency, and on identity services for context resolution. Deployment manifests configure runtime behavior and access controls. **Updated** with new dependencies on risk-tier gating, bounded mutating tools, policy matrix functionality, HITL confirmation bridging, model catalog discovery, and validation tooling.
+Policy components depend on schemas for validation and consistency, and on identity services for context resolution. Deployment manifests configure runtime behavior and access controls. **Updated** with new dependencies on risk-tier gating, bounded mutating tools, require-approval policy semantics, policy matrix functionality, HITL confirmation bridging, model catalog discovery, and validation tooling.
 
 ```mermaid
 graph TB
@@ -937,6 +1032,7 @@ POLICY_SPEC --> RULE_SCHEMA
 POLICY_SPEC --> DECISION_SCHEMA
 SPEC20 --> CONFIRM_SCHEMA
 SPEC21 --> K8S_CONNECTOR
+SPEC30 --> RULE_SCHEMA
 SPEC24 --> MODEL_SCHEMA
 RULE_SCHEMA --> ENGINE_TOOL
 RULE_SCHEMA --> ENGINE_PLATFORM
@@ -979,6 +1075,7 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [SPEC-004-policy-enforcement/spec.md](file://docs/specs/SPEC-004-policy-enforcement/spec.md)
 - [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
 - [SPEC-021-bounded-mutating-actions/spec.md](file://docs/specs/SPEC-021-bounded-mutating-actions/spec.md)
+- [SPEC-030-require-approval-policy-semantics/spec.md](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md)
 - [SPEC-024-runtime-llm-model-switching/spec.md](file://docs/specs/SPEC-024-runtime-llm-model-switching/spec.md)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
@@ -1045,6 +1142,7 @@ K8S_RBAC --> ENGINE_PLATFORM
 - Monitor hot paths and tune thresholds for rate limiting and caching.
 - **New**: Risk-tier gating adds minimal overhead through efficient tool registry lookups and early rejection of unauthorized mutating operations.
 - **New**: Bounded mutating tools leverage existing policy engine caching and evaluation semantics.
+- **New**: Require-approval policy semantics add minimal overhead through efficient tier-based approval evaluation.
 - **New**: Model catalog discovery benefits from credential-gated filtering and efficient environment variable resolution.
 - **New**: Policy matrix evaluation benefits from existing policy engine caching and efficient role × action computation.
 - **New**: HITL confirmation bridging uses efficient SSE passthrough and deferred audit emission to minimize latency.
@@ -1063,6 +1161,7 @@ Common issues and resolutions:
 - **New**: Policy matrix access denied: Verify caller has `policy:read` action; check bundle contains `allow-all-policy-read` rule.
 - **New**: Chat confirmation access denied (403): Verify caller has one of the granted roles (`platform-admin`, `approver`, `operator`, `developer`); check bundle contains `allow-chat-confirm` rule.
 - **New**: Mutating tool access denied (403): Verify caller has `tools:mutate` action; check bundle contains `allow-operators-tools-mutate` rule; ensure `GATEWAY_MUTATING_TOOLS_ENABLED=true`.
+- **New**: Require-approval access denied (403): Verify caller has required role in decided_by_roles; check bundle contains appropriate require_approval rule; verify tier-based approval enforcement.
 - **New**: Model catalog access denied: Verify caller has `models:list` permission; check bundle contains updated rules for all operational roles.
 - **Updated**: Audit access denied (403): Verify caller has `auditor` or `platform-admin` role; check policy bundle contains `allow-auditors-audit-read` rule.
 
@@ -1074,6 +1173,7 @@ Operational checks:
 - **Updated**: For audit access issues, verify OIDC group membership for `ops-auditors` and `ops-admins`.
 - **Updated**: For chat confirmation issues, verify user has appropriate role and confirmation hasn't expired.
 - **New**: For mutating tool issues, verify feature flag is enabled, user has `tools:mutate` grant, and tool is properly registered.
+- **New**: For require-approval issues, verify tier-based approval enforcement, user has required decider role, and approval rule is properly configured.
 - **New**: For model catalog issues, verify environment configuration for additional providers and check credential setup.
 
 **Section sources**
@@ -1095,9 +1195,11 @@ The policy management system provides a robust, declarative framework for enforc
 
 **Updated**: The platform now includes comprehensive risk-tier gating that separates read-only tool execution from mutating operations through the new `tools:mutate` policy action. This provides an additional layer of security for potentially destructive actions, implementing a triple-gated approval model that combines gateway risk-tier admission, agent auto-allow invariants, and HITL confirmation requirements. The first bounded mutating tool (`k8s.delete_pod`) demonstrates this approach, requiring explicit authorization and human approval before execution.
 
+**New**: The platform now implements require-approval policy semantics with tier-based approval system (SPEC-030), providing explicit approval levels for critical destructive actions. Tier_1 allows session operator self-confirmation for routine destructive actions, while tier_2 requires a designated approver distinct from the requester for critical destructive actions. The system implements explicit precedence rules where deny > require_approval > allow, ensuring safe defaults and preventing unauthorized approvals.
+
 **Updated**: The platform now grants `models:list` permissions to all operational roles (platform-admin, approver, operator, developer, and read-only-observer), enabling safe catalog discovery operations as specified in SPEC-024 for runtime LLM model switching capabilities. This enhancement allows users to discover available LLM models without exposing sensitive credentials or configuration details.
 
-**Updated**: Automated policy validation and synchronization capabilities streamline policy management and reduce operational overhead, including comprehensive audit trail access controls with deny-by-default authorization for sensitive operations, new policy matrix functionality for live permission transparency, HITL confirmation bridging for approval-gated workflows, risk-tier gating for safe execution of potentially mutating operations, and enhanced model catalog discovery for runtime LLM model switching.
+**Updated**: Automated policy validation and synchronization capabilities streamline policy management and reduce operational overhead, including comprehensive audit trail access controls with deny-by-default authorization for sensitive operations, new policy matrix functionality for live permission transparency, HITL confirmation bridging for approval-gated workflows, risk-tier gating for safe execution of potentially mutating operations, require-approval policy semantics for tier-based approval system, and enhanced model catalog discovery for runtime LLM model switching.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -1114,6 +1216,7 @@ The policy management system provides a robust, declarative framework for enforc
   - `chat:confirm`: HITL confirmation approval for platform-admin, approver, operator, and developer roles
   - `models:list`: Model catalog discovery for all operational roles
   - **New**: `tools:mutate`: Mutating tool execution for platform-admin and operator roles only
+  - **New**: Require-approval policy outcome with tier-based approval system for critical destructive actions
 
 **Section sources**
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
@@ -1167,6 +1270,7 @@ python shared/shared-contracts/scripts/validate_policy.py /path/to/custom-policy
 - **Missing rules list**: Add empty or populated `rules:` array
 - **Duplicate rule IDs**: Ensure all rule IDs are unique within the bundle
 - **Schema validation errors**: Check rule structure against `policy-rule.schema.json`
+- **Invalid require_approval rules**: Ensure approval blocks have valid tier and decided_by_roles
 
 **Section sources**
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
@@ -1321,6 +1425,49 @@ kubectl -n dev-luban-aiops logs deployment/tool-gateway --tail=50 | grep "kubern
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [SPEC-021-bounded-mutating-actions/spec.md](file://docs/specs/SPEC-021-bounded-mutating-actions/spec.md)
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
+
+### Require-Approval Troubleshooting
+
+**New Section** - Specific guidance for resolving require-approval policy semantics and tier-based approval issues.
+
+#### Common Symptoms
+- 403 Forbidden responses when attempting to approve tier_2 actions
+- Confirmation cards showing "approver required" instead of approval buttons
+- Self-approval attempts rejected for tier_2 actions
+- Require-approval rules not taking effect as expected
+
+#### Diagnostic Steps
+```bash
+# Check platform-gateway logs for require-approval denials
+kubectl -n dev-luban-aiops logs deployment/platform-gateway --tail=30 | grep "require_approval"
+
+# Verify deployed policy bundle contains require-approval rule
+kubectl -n dev-luban-aiops exec deployment/platform-gateway -- \
+  cat /etc/luban/policy/policy.yaml | grep -A10 require-approval-tools-mutate
+
+# Check for tier-based approval enforcement
+kubectl -n dev-luban-aiops logs deployment/platform-gateway --tail=50 | grep "tier_"
+```
+
+#### Resolution Steps
+1. **Verify User Roles**: Ensure user has required role in decided_by_roles for the specific tier
+2. **Check Policy Bundle**: Ensure require-approval rule is present with correct tier configuration
+3. **Validate Tier Configuration**: Verify tier_1 allows self-approval, tier_2 requires designated approver
+4. **Test Approval Flow**: Direct curl test to verify require-approval enforcement
+5. **Review Audit Trail**: Check for detailed approval requirement information in audit events
+
+#### Common Issues
+- **Self-Approval Blocked**: Tier_2 actions cannot be self-approved by design
+- **Insufficient Decider Roles**: User must be member of decided_by_roles for the specific action
+- **Rule Priority Conflicts**: Higher priority deny rules override require_approval rules
+- **Configuration Drift**: Ensure policy bundle is synchronized across all services
+- **Tier Misconfiguration**: Verify tier_1 vs tier_2 configuration matches intended approval level
+
+**Section sources**
+- [SPEC-030-require-approval-policy-semantics/spec.md](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md)
+- [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
+- [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
 
 ### Model Catalog Troubleshooting
 
