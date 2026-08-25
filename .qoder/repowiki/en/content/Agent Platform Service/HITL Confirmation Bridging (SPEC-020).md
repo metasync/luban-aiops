@@ -8,6 +8,7 @@
 - [release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-21-hitl-confirmation-bridging.md)
 - [multimodel-runtime-and-live-discovery.md](file://docs/agentic-aiops-platform/release-notes/2026-08-24-multimodel-runtime-and-live-discovery.md)
 - [approval-inbox-persistent-confirmation.md](file://docs/agentic-aiops-platform/release-notes/2026-08-25-approval-inbox-persistent-confirmation.md)
+- [confirmation-race-and-restart-sweep-patch.md](file://docs/agentic-aiops-platform/release-notes/2026-08-25-confirmation-race-and-restart-sweep-patch.md)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -27,10 +28,10 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced race condition handling with structured 409 responses instead of opaque 404 errors for concurrent approver conflicts
-- Improved startup sweep logic with configurable TTL scoping via AGENT_HITL_CONFIRM_TIMEOUT for stale pending record cleanup
-- Better durability through immediate outcome persistence at claim time, ensuring racing approvers see structured outcomes while winner's stream continues
-- Updated confirm route to persist decision outcomes before streaming resumes, providing better race resilience
+- Enhanced race condition handling with claim-time outcome persistence providing structured 409 responses instead of bare 404 errors for concurrent approver conflicts
+- Improved startup sweep scoping with TTL-based cleanup preventing cross-replica interference through AGENT_HITL_CONFIRM_TIMEOUT configuration
+- Better durability guarantees for concurrent approval scenarios with immediate outcome persistence at claim time
+- Updated confirm route to persist decision outcomes before streaming resumes, ensuring racing approvers receive structured resolution information
 - Enhanced Postgres backend initialization with proper TTL-based stale record closure during startup
 - Added support for structured 409 conflict responses with detailed resolution information including decider identity and timestamps
 
