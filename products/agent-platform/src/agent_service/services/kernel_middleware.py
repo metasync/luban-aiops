@@ -52,6 +52,13 @@ TASK_TOOL_NAMES = frozenset({
     "TaskUpdate",
 })
 
+# Kernel-built-in tool that delivers response_schema turns (SPEC-017 R-2):
+# it only shapes the final reply into the caller-provided schema and never
+# touches external systems, so it must never park on the ASK gate either.
+STRUCTURED_OUTPUT_TOOL_NAME = "GenerateStructuredOutput"
+
+KERNEL_LOCAL_TOOL_NAMES = TASK_TOOL_NAMES | {STRUCTURED_OUTPUT_TOOL_NAME}
+
 # Vetted tool names that may bypass the permission gate. Only read-only
 # tools on this explicit allow-list are auto-approved; every other tool is
 # answered with an explicit ASK and parks for operator confirmation
@@ -160,8 +167,9 @@ class GatewayPermissionMiddleware(MiddlewareBase):
             # short-circuit the ALLOWED state; re-ASKing here would
             # re-park the resumed reply indefinitely.
             return await next_handler(**input_kwargs)
-        if name in TASK_TOOL_NAMES:
-            # State-local task tools never touch external systems.
+        if name in KERNEL_LOCAL_TOOL_NAMES:
+            # State-local kernel built-ins (task tools, structured-output
+            # delivery) never touch external systems.
             return PermissionDecision(
                 behavior=PermissionBehavior.ALLOW,
                 message=f"{name} mutates only session-local agent state.",

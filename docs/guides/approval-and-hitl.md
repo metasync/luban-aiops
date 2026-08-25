@@ -46,8 +46,11 @@ There is no configuration path that auto-runs a mutating tool.
 - **What it does:** every tool declares `risk_level` (`read` | `write` | `admin`).
   With the flag off, write/admin tools are never registered — they are absent from
   discovery and invoke answers `TOOL_NOT_FOUND`. With the flag on, invoking a
-  non-read tool additionally requires `tools:mutate` (granted by default only to
-  `platform-admin` and `operator`); read tools keep requiring only `tools:invoke`.
+  non-read tool additionally requires `tools:mutate` (granted by default to
+  `platform-admin`, `approver`, and `operator` — the approver grant carries
+  tier_2-approved executions, which resume under the confirmer's delegated
+  token; see the SPEC-030 R-3 note under Role Guidance below); read tools
+  keep requiring only `tools:invoke`.
 - **What it does NOT protect against:** it gates the execution boundary, not the
   agent's behavior — an agent can still *propose* a tool the caller cannot run,
   and the gateway gate does not itself pause for a human.
@@ -164,8 +167,12 @@ The shipped rule is `allow-operators-tools-mutate`:
   never silently park and never silently runs.
 
 Note the deliberate asymmetry: `chat:confirm` gates the *decision*, while
-`tools:mutate` gates the *execution*. An `approver` can confirm a card but cannot
-execute the tool themselves; an `operator` can do both.
+`tools:mutate` gates the *execution*. A tier_2-approved call resumes under
+the confirmer's delegated token (SPEC-030 R-3), so the shipped bundle
+grants `approver` the execution actions — otherwise the approved execution
+would fail closed at admission. Two-person control is enforced at the
+decision gate instead: an approver's own parked call still needs a distinct
+designated approver, because tier_2 blocks self-approval.
 
 ### Approval tiers: `require_approval` on the confirm path (SPEC-030)
 
@@ -267,7 +274,7 @@ policy-center slice.
 |---|---|---|---|
 | `platform-admin` | granted | granted | Full execution capability; also a designated tier_2 approver — prefer a separate operational role for day-to-day work |
 | `operator` | granted | granted | Execution role — matches the authorization matrix's `restart-service` example; cannot self-approve tier_2 batches |
-| `approver` | denied | granted | Approve-only designated approver: decides tier_2 cards without execution rights |
+| `approver` | granted | granted | Designated approver: decides tier_2 cards; the execution grant carries approved calls (resumed under the confirmer's token) — two-person control is enforced at the approval gate, not admission |
 | `developer` | denied | granted | Can confirm tier_1 cards; tier_2 approvals need a designated approver |
 | `read-only-observer` | denied | denied | Observation only; confirming is an act-on-the-system action |
 | `auditor` | denied | denied | Read the trail; `confirmation_decided` + `tool_invoked` events carry the full chain |

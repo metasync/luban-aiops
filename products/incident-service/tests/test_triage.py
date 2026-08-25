@@ -101,6 +101,10 @@ class PromptTests(unittest.TestCase):
         self.assertIn("alice", prompt)
         # Advisory discipline: no execution.
         self.assertIn("advisory", prompt)
+        # Mutating tools are banned outright (SPEC-030-era clusters register
+        # k8s.delete_pod; a parked mutating call would swallow the turn).
+        self.assertIn("Never call mutating tools", prompt)
+        self.assertIn("k8s.delete_pod", prompt)
 
     def test_prompt_renders_missing_labels_and_summary(self) -> None:
         incident = _incident().model_copy(update={"labels": {}, "summary": ""})
@@ -268,6 +272,9 @@ class CallAgentTests(unittest.IsolatedAsyncioTestCase):
         schema = calls[1]["body"]["response_schema"]
         self.assertIn("incident_id", schema["properties"])
         self.assertIn("severity_assessment", schema["properties"])
+        # Triage turns run read-only: agent-platform strips mutating tools
+        # from the turn's toolkit so nothing can execute or park here.
+        self.assertTrue(calls[1]["body"]["read_only"])
 
     async def test_falls_back_to_per_operator_session(self) -> None:
         # The shared incident session owned by another operator answers 404;

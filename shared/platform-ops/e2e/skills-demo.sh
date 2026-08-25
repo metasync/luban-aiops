@@ -57,7 +57,8 @@ echo "==> [2/3] alert-name search ranking (deterministic scoring)"
 # Pull the query credential from the provisioned secret.
 QUERY_CLIENTS=$(kubectl -n "$NAMESPACE" get secret skills-hub-runtime-secrets \
   -o jsonpath='{.data.SKILLS_QUERY_CLIENTS}' | base64 -d)
-QUERY_SECRET="${QUERY_CLIENTS#tool-gateway=}"
+QUERY_SECRET=$(printf '%s' "$QUERY_CLIENTS" | tr ',' '\n' \
+  | grep '^tool-gateway=' | cut -d= -f2-)
 
 SEARCH_RESULT=$(kubectl -n "$NAMESPACE" exec deployment/skills-hub -- \
   curl -fsS -u "tool-gateway:${QUERY_SECRET}" \

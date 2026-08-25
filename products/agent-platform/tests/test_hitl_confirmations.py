@@ -318,6 +318,27 @@ def test_filter_mutating_for_hitl_keeps_all_when_bridging_enabled():
     assert not kernel._mutating_tools_excluded
 
 
+def test_filter_read_only_drops_non_read_definitions():
+    """Read-only turns (incident triage) never see mutating tools."""
+    kernel = _configured_kernel(hitl_confirm_timeout=600)
+    definitions = [
+        {"name": "k8s.list_pods", "risk_level": "read"},
+        {"name": "skills.search"},
+        {"name": "k8s.delete_pod", "risk_level": "write"},
+    ]
+    kept = kernel._filter_read_only(definitions)
+    assert [d["name"] for d in kept] == ["k8s.list_pods", "skills.search"]
+
+
+def test_filter_read_only_keeps_everything_when_all_read():
+    kernel = _configured_kernel(hitl_confirm_timeout=600)
+    definitions = [
+        {"name": "k8s.list_pods", "risk_level": "read"},
+        {"name": "incidents.list", "risk_level": "read"},
+    ]
+    assert kernel._filter_read_only(definitions) == definitions
+
+
 def test_stream_events_disabled_mode_keeps_silent_park(monkeypatch):
     kernel = _configured_kernel(hitl_confirm_timeout=0)
     agent = FakeAgent(events=[_park_event()])

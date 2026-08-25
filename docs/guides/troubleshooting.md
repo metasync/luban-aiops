@@ -603,8 +603,9 @@ kubectl -n dev-luban-aiops logs deployment/tool-gateway --tail=200 \
 
 **Most likely cause:** The caller holds `tools:invoke` but not `tools:mutate`.
 Read tools keep requiring only `tools:invoke`; write/admin tools additionally
-require `tools:mutate`, granted by default only to `platform-admin` and
-`operator` (SPEC-021).
+require `tools:mutate`, granted by default to `platform-admin`, `approver`,
+and `operator` (SPEC-021, amended by SPEC-030 R-4 so a tier_2-approved call
+resumed under the approver's delegated token passes admission).
 
 **Diagnostic:**
 
@@ -624,7 +625,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 **Resolution:**
 
-- Expected behavior for `developer`, `approver`, `auditor`, and
+- Expected behavior for `developer`, `auditor`, and
   `read-only-observer`. Extending the grant is a deliberate policy-bundle
   edit — see the
   [Approval and HITL Governance Guide](approval-and-hitl.md#defining-approval-requirements-today).

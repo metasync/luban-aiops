@@ -53,6 +53,26 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 - Tool-gateway validates approval blocks loudly at bundle load, then
   skips `require_approval` rules with a warning — the synced default
   bundle stays loadable there and SPEC-021 admission stays allow/deny.
+- Default policy bundle grants `approver` the tool execution actions
+  (`tools:list` / `tools:invoke` / `tools:mutate`) — a tier_2-approved
+  call resumes under the confirmer's delegated token, so the approved
+  execution must pass tool-gateway admission. Separation of duties stays
+  enforced at the approval gate (tier_2 self-approval is blocked).
+
+### Fixed
+
+- Live cluster validation: incident triage turns now run in a per-turn
+  read-only mode — mutating tools are excluded from the triage toolkit,
+  so a single-shot triage can no longer park on a mutating call and lose
+  the report.
+- Live cluster validation: the kernel's structured-output delivery tool
+  (`GenerateStructuredOutput`) joins the session-local allow set in the
+  permission middleware — schema-shaped replies no longer park on the
+  confirmation gate.
+- Live cluster validation: `e2e/mutating-demo.sh` HITL leg targets a
+  scratch deployment pod (the bounded restart semantic the model accepts)
+  and matches the approved execution's `tool_invoked` audit event by
+  tool + time window, since audit details are parameter-redacted.
 
 ## 0.11.1 — 2026-08-25
 

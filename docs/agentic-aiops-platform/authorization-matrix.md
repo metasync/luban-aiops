@@ -365,7 +365,12 @@ under a `tier_2` rule decided by `approver` and `platform-admin`. The live
 matrix exposes the requirement as an additive third cell state
 (`approval_requirements`, with the tier and decider roles) alongside the
 boolean cells, and blocked approval attempts are recorded as
-`confirmation_decided` audit events. The full approval model —
+`confirmation_decided` audit events. Live validation surfaced one bundle
+consequence of the tier_2 resume semantics: the approved call executes
+under the confirmer's delegated token, so the shipped bundle grants
+`approver` the tool execution actions (`tools:list`/`tools:invoke`/
+`tools:mutate`) — separation of duties stays enforced at the approval
+gate, where tier_2 self-approval is blocked. The full approval model —
 policy actions, risk-tier admission, the agent auto-allow list, and HITL
 confirmation — is documented in the
 [Approval and HITL Governance Guide](../guides/approval-and-hitl.md).

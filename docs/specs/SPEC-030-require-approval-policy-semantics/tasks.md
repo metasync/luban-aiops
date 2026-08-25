@@ -30,6 +30,7 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 - [x] `make sync-policy` + `make validate-policy` across packaged and overlay copies
 - [x] `mutating-demo.sh`: two-identity flow (operator requests, approver confirms) + doc header update (`shared/platform-ops/e2e/`)
 - [x] dev-k8s: confirm/provision the `approver`-role test user needed by the demo (resolves spec Q-3) — `luban-approver` already provisioned by `reconcile-luban-realm.sh`
+- [x] live-validation amendment (2026-08-25): `approver` joins the `tools:list` / `tools:invoke` / `tools:mutate` allow rules so a tier_2-approved call resumed under the confirmer's delegated token passes admission; synced to all 4 bundle copies, tool-gateway test flipped to `test_approver_may_invoke_mutating_tool`, guides/spec/CHANGELOG updated
 
 ## R-5: Transparency and audit consistency
 

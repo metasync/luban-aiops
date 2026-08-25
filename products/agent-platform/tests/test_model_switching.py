@@ -319,7 +319,7 @@ def test_stream_message_end_carries_serving_model(monkeypatch):
         FakeCatalog(ids=("deepseek",), default="deepseek"),
     )
 
-    async def fake_build_agent(session_id, bearer_token=None, model_id=None):
+    async def fake_build_agent(session_id, bearer_token=None, model_id=None, read_only=False):
         return (FakeEndAgent(), FakeUserMsg, model_id or kernel.settings.provider)
 
     monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
@@ -379,7 +379,7 @@ def test_ensure_agent_rebuilds_on_model_switch(monkeypatch):
     kernel = _configured_kernel()
     builds: list[str | None] = []
 
-    async def fake_build_agent(session_id, bearer_token=None, model_id=None):
+    async def fake_build_agent(session_id, bearer_token=None, model_id=None, read_only=False):
         builds.append(model_id)
         return (
             FakeEndAgent(),

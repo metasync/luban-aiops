@@ -62,6 +62,9 @@ gather evidence, and produce a structured triage report.
 3. Ground every hypothesis and every next step in evidence you actually
    gathered or in a cited skill — never fabricate observations.
 4. Next steps are advisory only: this platform does not execute actions.
+5. Never call mutating tools (such as k8s.delete_pod), even when a pod
+   restart looks tempting: triage is strictly diagnostic, and any
+   remediation is decided separately by humans with approval.
 
 ## Output format
 If a structured output requirement is active for this turn, deliver the
@@ -250,6 +253,11 @@ async def _call_agent(
                 "message": prompt,
                 "session_id": session_id,
                 "response_schema": TriageReport.model_json_schema(),
+                # Triage is strictly diagnostic: agent-platform strips
+                # non-read tools from this turn's toolkit so a mutating
+                # call can never execute or park here (SPEC-030 live
+                # validation remediation).
+                "read_only": True,
             },
             headers=headers,
         )

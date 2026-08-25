@@ -17,6 +17,7 @@ import jsonschema
 from agent_service.services.kernel_middleware import (
     AUTO_ALLOW_ENV,
     TASK_TOOL_NAMES,
+    STRUCTURED_OUTPUT_TOOL_NAME,
     TOOL_EVIDENCE_SINK,
     GatewayPermissionMiddleware,
     ToolEvidenceMiddleware,
@@ -286,6 +287,18 @@ class GatewayPermissionMiddlewareTests(unittest.TestCase):
             decision, calls = self._decide(mw, tool)
             self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
             self.assertEqual(calls, [])
+
+    def test_structured_output_tool_always_allowed(self) -> None:
+        """response_schema turns deliver via the kernel's built-in
+        GenerateStructuredOutput tool; parking it wedges every structured
+        turn (incident triage) on a headless stream."""
+        from agentscope.permission import PermissionBehavior
+
+        mw = GatewayPermissionMiddleware()
+        tool = _StubTool(STRUCTURED_OUTPUT_TOOL_NAME, is_read_only=False)
+        decision, calls = self._decide(mw, tool)
+        self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
+        self.assertEqual(calls, [])
 
     def test_env_override_scopes_auto_approval(self) -> None:
         from agentscope.permission import PermissionBehavior

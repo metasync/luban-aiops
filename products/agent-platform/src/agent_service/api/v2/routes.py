@@ -171,6 +171,7 @@ async def chat(
         bearer_token=_bearer_token(authorization),
         response_schema=body.response_schema,
         model_id=resolved_model,
+        read_only=body.read_only,
     )
     return AgentChatResponse(
         session_id=session.session_id,

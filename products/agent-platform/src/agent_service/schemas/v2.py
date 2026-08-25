@@ -59,6 +59,15 @@ class AgentChatRequest(BaseModel):
             "changes policy or HITL outcomes."
         ),
     )
+    read_only: bool = Field(
+        default=False,
+        description=(
+            "Restrict this turn's toolkit to read-level tools. Intended "
+            "for automated diagnostic turns (incident triage) that must "
+            "never invoke — or park on — a mutating tool. Tool-surface "
+            "selection only: it never changes policy or HITL outcomes."
+        ),
+    )
 
 
 class AgentChatResponse(BaseModel):

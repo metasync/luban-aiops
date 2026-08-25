@@ -17,12 +17,15 @@
 #     2. k8s.delete_pod present in discovery with risk_level=write
 #     3. observer invoke denied 403 (no tools:mutate grant)
 #     4. operator invoke passes the policy gate (deleting a deliberately
-#        nonexistent pod ends in a structured K8s tool error, never a
-#        policy denial) and reports RBAC status
+#        nonexistent pod ends in a structured K8s tool error mapped to
+#        HTTP 400, never a policy denial) and reports RBAC status
 #
-# Optional HITL leg (RUN_HITL_LEG=true, enabled-state only): a scripted
-# chat asks the agent to delete a deliberately nonexistent pod; the demo
-# asserts the stream parks with a confirmation_request carrying
+# Optional HITL leg (RUN_HITL_LEG=true, enabled-state only): the leg
+# creates a scratch deployment, then a scripted chat asks the agent to
+# restart its pod with k8s.delete_pod (the bounded restart primitive —
+# the controller recreates the pod; the model correctly declines delete
+# calls for nonexistent or unmanaged pods); the demo asserts the stream
+# parks with a confirmation_request carrying
 # risk_level=write, then exercises the SPEC-030 tier_2 approval flow:
 # the operator's own approve attempt is rejected with a structured 403
 # (require_approval), a second approver identity approves via
@@ -210,14 +213,14 @@ gateway_http -X POST http://localhost:8000/api/v2/tools/invoke \
   -H "Authorization: Bearer $OPERATOR_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"tool_name\":\"k8s.delete_pod\",\"parameters\":{\"name\":\"$MISSING_POD\"},\"request_id\":\"mut-demo-operator-$RUN_SUFFIX\"}"
-[ "$HTTP_CODE" = "200" ] || fail "operator invoke answered $HTTP_CODE, expected 200: $GATEWAY_BODY"
+[ "$HTTP_CODE" = "400" ] || fail "operator invoke answered $HTTP_CODE, expected 400 (structured tool error): $GATEWAY_BODY"
 printf '%s' "$GATEWAY_BODY" | grep -q '"status": *"denied"\|"status":"denied"' \
   && fail "operator invoke was denied despite the tools:mutate grant"
 printf '%s' "$GATEWAY_BODY" | grep -q 'risk_level.*write\|"write"' \
   || fail "operator invoke evidence carried no write risk tier: $GATEWAY_BODY"
 # The target pod deliberately does not exist: the call must reach the
-# connector and fail there with a structured K8s error, proving every
-# policy gate opened.
+# connector and fail there with a structured K8s error (the gateway maps
+# non-success tool results to HTTP 400), proving every policy gate opened.
 printf '%s' "$GATEWAY_BODY" | grep -qi 'error\|not found' \
   || fail "operator invoke did not reach the connector: $GATEWAY_BODY"
 echo "operator invoke passed the admission and policy gates (connector-level error for the nonexistent pod)"
@@ -246,8 +249,36 @@ if [ "${RUN_HITL_LEG:-}" = "true" ]; then
   [ -n "$APPROVER_PLATFORM_TOKEN" ] \
     || fail "broker issued no platform token for $APPROVER_USER"
 
-  HITL_SESSION="mut-demo-session-$RUN_SUFFIX"
-  CHAT_MESSAGE="Delete the pod named $MISSING_POD in namespace $NAMESPACE with the k8s.delete_pod tool right away; no need to inspect anything first."
+  # A legitimate target: the model declines to delete pods that do not
+  # exist or that no controller would recreate, so the leg creates a
+  # scratch deployment and asks for the bounded "restart" semantic its
+  # pod is managed under.
+  kubectl -n "$NAMESPACE" create deployment "$MISSING_POD" \
+    --image=busybox:1.36 --replicas=1 -- sleep 600 \
+    || fail "scratch deployment creation failed"
+  TARGET_POD=""
+  for _ in $(seq 1 30); do
+    TARGET_POD=$(kubectl -n "$NAMESPACE" get pods \
+      -l "app=$MISSING_POD" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    [ -n "$TARGET_POD" ] && break
+    sleep 1
+  done
+  [ -n "$TARGET_POD" ] || fail "scratch deployment produced no pod"
+  HITL_START_EPOCH=$(date +%s)
+  echo "scratch pod $TARGET_POD (deployment $MISSING_POD) is the HITL target"
+
+  # Agent-platform rejects unknown session ids on the chat stream, so the
+  # leg creates a dedicated session through the gateway first.
+  SESSION_RESPONSE=$(curl -fsS --max-time 30 -X POST \
+    -H "Authorization: Bearer $OPERATOR_PLATFORM_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{}' \
+    "$GATEWAY_URL/api/v1/sessions") || fail "session creation failed"
+  HITL_SESSION=$(printf '%s' "$SESSION_RESPONSE" | python3 -c "
+import json, sys
+print(json.load(sys.stdin).get('session_id', ''))")
+  [ -n "$HITL_SESSION" ] || fail "session creation returned no session_id"
+  CHAT_MESSAGE="Please restart the pod named $TARGET_POD in namespace $NAMESPACE with the k8s.delete_pod tool right away. The pod belongs to the scratch deployment $MISSING_POD, so its controller recreates it immediately; this is the bounded restart action."
 
   STREAM_OUTPUT=$(curl -fsS --max-time 180 -N \
     -H "Authorization: Bearer $OPERATOR_PLATFORM_TOKEN" \
@@ -331,9 +362,31 @@ for line in sys.stdin:
   INVOKED_EVENTS=$(kubectl -n "$NAMESPACE" exec deployment/audit-service -- \
     curl -fsS -u "tool-gateway:${GATEWAY_AUDIT_SECRET}" \
     "http://localhost:8000/api/v1/audit/events?event_type=tool_invoked&limit=100")
-  printf '%s' "$INVOKED_EVENTS" | grep -q "$MISSING_POD" \
-    || fail "no tool_invoked event for k8s.delete_pod($MISSING_POD) on the durable trail"
-  echo "tool_invoked for k8s.delete_pod($MISSING_POD) is on the durable trail"
+  # Audit details are parameter-redacted by design, so the assertion
+  # matches a delete_pod invocation recorded after the leg started
+  # (step 4's earlier invoke predates HITL_START_EPOCH).
+  printf '%s' "$INVOKED_EVENTS" | python3 -c "
+import datetime, json, sys
+start = int(sys.argv[1]) - 5
+events = json.load(sys.stdin)
+if isinstance(events, dict):
+    events = events.get('events', [])
+for event in events:
+    details = event.get('details') or {}
+    if details.get('tool_name') != 'k8s.delete_pod':
+        continue
+    occurred = event.get('occurred_at', '')
+    stamp = datetime.datetime.fromisoformat(occurred.replace('Z', '+00:00'))
+    if int(stamp.timestamp()) >= start:
+        sys.exit(0)
+sys.exit(1)" "$HITL_START_EPOCH" \
+    || fail "no tool_invoked event for k8s.delete_pod after the leg started"
+  echo "tool_invoked for the approved k8s.delete_pod call is on the durable trail"
+
+  # Remove the scratch deployment (and whatever pod the controller
+  # recreated after the approved delete).
+  kubectl -n "$NAMESPACE" delete deployment "$MISSING_POD" \
+    --ignore-not-found --wait=false >/dev/null
 else
   echo "==> [HITL] chat leg skipped (RUN_HITL_LEG unset; opt-in)"
 fi

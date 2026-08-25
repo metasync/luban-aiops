@@ -334,3 +334,19 @@ Carried from the spike memo; all resolved during delivery:
   portal vitest); living docs updated (approval-and-hitl, troubleshooting,
   portal-user-guide, configuration-reference, authorization-matrix,
   policy-center boundary README).
+- 2026-08-25: live cluster validation surfaced a bundle gap — a tier_2
+  approved call resumes under the *confirmer's* delegated token (R-3's
+  delivered semantic), but the shipped bundle kept `approver`
+  approve-only, so the approved execution failed closed at tool-gateway
+  admission. Fix: `approver` joins the `tools:list` / `tools:invoke` /
+  `tools:mutate` allow rules (R-4 amendment). Separation of duties is
+  unaffected — it is enforced at the approval gate, where tier_2
+  self-approval stays blocked; an approver's own parked call still needs
+  a distinct designated approver. `e2e/mutating-demo.sh` accordingly
+  targets a scratch deployment pod (the bounded restart semantic) and
+  asserts the approved execution's `tool_invoked` event. The same
+  validation surfaced two further defects fixed in the same train:
+  incident-service triage turns now run `read_only` so mutating tools
+  never reach a background triage toolkit, and `GenerateStructuredOutput`
+  joined the kernel's local-tool allow-list so structured-output calls
+  are never parked as if they were gateway actions.

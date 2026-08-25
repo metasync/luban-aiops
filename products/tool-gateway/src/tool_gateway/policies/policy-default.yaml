@@ -82,30 +82,38 @@ rules:
   # invocation by risk tier (SPEC-021 R-1): read tools require tools:invoke,
   # write/admin tools additionally require tools:mutate below. Observer
   # keeps tier-0 read access; mutating execution stays deny-by-default for
-  # every role not explicitly granted tools:mutate.
+  # every role not explicitly granted tools:mutate. approver joins the
+  # invocation grants because a tier_2-approved call resumes under the
+  # confirmer's delegated token (SPEC-030 R-3): without it the approved
+  # execution would fail closed at admission. Two-person control is
+  # preserved — an approver's own parked call still needs a distinct
+  # designated approver (self-approval is blocked on tier_2).
   - id: allow-operators-tools
     domain: action_authz
-    description: Operational, developer, and observer roles may invoke read-only tools.
+    description: Operational, developer, approver, and observer roles may invoke read-only tools.
     priority: 100
     enabled: true
     match:
-      roles_any: ["platform-admin", "operator", "developer", "read-only-observer"]
+      roles_any: ["platform-admin", "approver", "operator", "developer", "read-only-observer"]
       actions_any: ["tools:invoke"]
     decision:
       outcome: allow
 
   # Mutating tool execution (SPEC-021): granted to the execution roles per the
-  # authorization matrix's restart-service example. approver stays
-  # approve-only (chat:confirm), developer and read-only-observer are denied
-  # by default. Extending the grant (e.g. to developer) is a deliberate
-  # bundle edit documented in the Approval and HITL Governance Guide.
+  # authorization matrix's restart-service example. approver carries the grant
+  # so a tier_2-approved call can execute on the confirmer's delegated token
+  # (SPEC-030 R-3); the require_approval rule below still wins by precedence,
+  # so every mutating run — including an approver's own — parks behind a
+  # designation distinct from the requester. developer and read-only-observer
+  # are denied by default. Extending the grant (e.g. to developer) is a
+  # deliberate bundle edit documented in the Approval and HITL Governance Guide.
   - id: allow-operators-tools-mutate
     domain: action_authz
-    description: Platform admins and operators may execute mutating (write/admin risk) tools.
+    description: Platform admins, operators, and approvers may execute mutating (write/admin risk) tools.
     priority: 100
     enabled: true
     match:
-      roles_any: ["platform-admin", "operator"]
+      roles_any: ["platform-admin", "approver", "operator"]
       actions_any: ["tools:mutate"]
     decision:
       outcome: allow
@@ -135,11 +143,11 @@ rules:
 
   - id: allow-operators-tools-list
     domain: action_authz
-    description: Operational, developer, and observer roles may list available tools.
+    description: Operational, developer, approver, and observer roles may list available tools.
     priority: 100
     enabled: true
     match:
-      roles_any: ["platform-admin", "operator", "developer", "read-only-observer"]
+      roles_any: ["platform-admin", "approver", "operator", "developer", "read-only-observer"]
       actions_any: ["tools:list"]
     decision:
       outcome: allow

@@ -259,7 +259,9 @@ class AgentKernel:
             return model_id
         return self.settings.provider
 
-    async def _ensure_toolkit(self, bearer_token: str | None = None):
+    async def _ensure_toolkit(
+        self, bearer_token: str | None = None, read_only: bool = False
+    ):
         """Build (once per token) and return the Toolkit with gateway tools.
 
         Toolkits are cached per delegated token so discovery runs once per
@@ -267,8 +269,11 @@ class AgentKernel:
         at call time, so a cached toolkit keeps working across portal token
         refresh (SPEC-018 R-2). Empty discovery results are intentionally NOT
         cached: the next caller retries discovery instead of being poisoned.
+
+        ``read_only`` selects a separate cache entry whose toolkit is
+        restricted to read-level tools (automated diagnostic turns).
         """
-        cache_key = bearer_token or ""
+        cache_key = (bearer_token or "") + ("::read-only" if read_only else "")
         cached = self._toolkits.get(cache_key)
         if cached is not None:
             return cached
@@ -301,6 +306,8 @@ class AgentKernel:
                         definitions = self._filter_mutating_for_hitl(
                             definitions
                         )
+                    if definitions and read_only:
+                        definitions = self._filter_read_only(definitions)
                     if definitions:
                         toolkit = build_gateway_toolkit(
                             definitions,
@@ -338,6 +345,28 @@ class AgentKernel:
             LOGGER.warning(
                 "HITL bridging disabled (AGENT_HITL_CONFIRM_TIMEOUT=0); "
                 "excluded %d mutating tool(s) from the agent toolkit",
+                excluded,
+            )
+        return kept
+
+    def _filter_read_only(self, definitions: list[dict]) -> list[dict]:
+        """Restrict the toolkit to read-level tools for read-only turns.
+
+        Automated diagnostic turns (incident triage) must never invoke — or
+        silently park on — a mutating tool, regardless of what the model
+        decides, so non-read tools are excluded structurally instead of
+        relying on prompt discipline alone.
+        """
+        kept = [
+            definition
+            for definition in definitions
+            if definition.get("risk_level", "read") == "read"
+        ]
+        excluded = len(definitions) - len(kept)
+        if excluded:
+            LOGGER.info(
+                "read-only turn: excluded %d mutating tool(s) from the "
+                "agent toolkit",
                 excluded,
             )
         return kept
@@ -531,11 +560,12 @@ class AgentKernel:
         session_id: str,
         bearer_token: str | None = None,
         model_id: str | None = None,
+        read_only: bool = False,
     ):
         from agentscope.agent import Agent
         from agentscope.message import UserMsg
 
-        toolkit = await self._ensure_toolkit(bearer_token)
+        toolkit = await self._ensure_toolkit(bearer_token, read_only)
         configs = self._build_kernel_configs()
         state = self._restore_state(session_id)
         agent = Agent(
@@ -567,6 +597,7 @@ class AgentKernel:
         session_id: str,
         bearer_token: str | None = None,
         model_id: str | None = None,
+        read_only: bool = False,
     ):
         """Return the agent bound to `session_id`, creating it on first use.
 
@@ -576,13 +607,18 @@ class AgentKernel:
         concurrent turns on the same session would each build an agent and
         one would be discarded along with its memory.
 
+        ``read_only`` turns use a distinct cache key for the same session so
+        a restricted toolkit never leaks into interactive turns (and vice
+        versa); both entries restore the same persisted memory.
+
         Model switching (SPEC-024 R-3): the cache tracks the bound model
         id; a turn whose resolved model differs evicts and rebuilds, and
         ``_restore_state`` rebuilds memory — the same path as a pod
         restart, so the switch never loses conversation history.
         """
         bound_id = self._normalize_model_id(model_id)
-        cached = self._agents.get(session_id)
+        agent_key = f"{session_id}::read-only" if read_only else session_id
+        cached = self._agents.get(agent_key)
         if cached is not None:
             # Gateway tools recovered after this agent was built with an
             # empty toolkit (discovery failure): rebuild so the turn can see
@@ -596,9 +632,11 @@ class AgentKernel:
                     cached_model_id,
                     bound_id,
                 )
-                self._agents.pop(session_id, None)
+                self._agents.pop(agent_key, None)
             else:
-                current_toolkit = await self._ensure_toolkit(bearer_token)
+                current_toolkit = await self._ensure_toolkit(
+                    bearer_token, read_only
+                )
                 if (
                     self._count_gateway_tools(getattr(agent, "toolkit", None)) == 0
                     and self._count_gateway_tools(current_toolkit) > 0
@@ -608,25 +646,25 @@ class AgentKernel:
                         "session %s",
                         session_id,
                     )
-                    self._agents.pop(session_id, None)
+                    self._agents.pop(agent_key, None)
                 else:
                     # Re-check membership: the await above opens a preemption
                     # window where a concurrent turn's recovery branch may pop
                     # this entry, or LRU eviction may remove it. A vanished
                     # entry falls through to the locked path, which re-checks
                     # the cache before building.
-                    if session_id in self._agents:
-                        self._agents.move_to_end(session_id)
+                    if agent_key in self._agents:
+                        self._agents.move_to_end(agent_key)
                         return cached
         async with self._agent_lock:
-            cached = self._agents.get(session_id)
+            cached = self._agents.get(agent_key)
             if cached is not None and cached[2] == bound_id:
-                self._agents.move_to_end(session_id)
+                self._agents.move_to_end(agent_key)
                 return cached
             agent, user_msg_cls, cached_model_id = await self._build_agent(
-                session_id, bearer_token, model_id
+                session_id, bearer_token, model_id, read_only
             )
-            self._agents[session_id] = (agent, user_msg_cls, cached_model_id)
+            self._agents[agent_key] = (agent, user_msg_cls, cached_model_id)
             while len(self._agents) > self._max_cached_agents:
                 self._agents.popitem(last=False)
             return agent, user_msg_cls, cached_model_id
@@ -693,6 +731,7 @@ class AgentKernel:
         bearer_token: str | None = None,
         response_schema: dict | None = None,
         model_id: str | None = None,
+        read_only: bool = False,
     ) -> tuple[str, dict | None]:
         """Run one blocking turn.
 
@@ -703,6 +742,9 @@ class AgentKernel:
         ``model_id`` selects the catalog entry for this turn (SPEC-024 R-3);
         callers validate it against the catalog first, so an unknown id
         never reaches ``_build_model`` here.
+
+        ``read_only`` restricts the turn's toolkit to read-level tools
+        (automated diagnostic turns such as incident triage).
         """
         if not self.is_configured():
             return self.build_unconfigured_message(message, session_id), None
@@ -712,7 +754,7 @@ class AgentKernel:
         serving_model: str | None = None
         try:
             agent, user_msg_cls, serving_model = await self.ensure_agent(
-                session_id, bearer_token, model_id
+                session_id, bearer_token, model_id, read_only
             )
             # Expose the turn's delegated token to the cached tool closures
             # (SPEC-018 R-2). No evidence sink is set: blocking turns emit

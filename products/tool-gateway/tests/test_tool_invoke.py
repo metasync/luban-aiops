@@ -343,13 +343,16 @@ class MutatingInvokeEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["status"], "denied")
 
-    def test_approver_denied_mutating_tool(self) -> None:
+    def test_approver_may_invoke_mutating_tool(self) -> None:
+        # SPEC-030 R-3: a tier_2-approved call resumes under the
+        # confirmer's delegated token, so the approver must pass
+        # admission for the approved execution to run.
         with _patch_jwks():
             response = self._invoke(
                 _mint_delegated("approver"), "test.mutate", "req-m5"
             )
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.json()["status"], "denied")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "success")
 
     def test_observer_still_allowed_read_tool(self) -> None:
         with _patch_jwks():
