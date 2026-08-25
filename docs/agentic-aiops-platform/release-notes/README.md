@@ -7,6 +7,12 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-25-owner-decision-sync-reseed-patch.md`
+  - closes v0.14.1: the SPEC-032 poll applied through `setSession`,
+    whose stash-then-restore hands back the stale cached turns for the
+    session already on screen — the owner window stayed deaf after an
+    external decision; the new `reseedTurns` path replaces live turns
+    and the cache entry authoritatively, with regression tests
 - `2026-08-25-owner-side-live-decision-sync.md`
   - delivers SPEC-032 (v0.14.0): the owner's open chat window syncs
     externally made decisions live — a bounded, change-gated

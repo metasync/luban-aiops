@@ -13,6 +13,28 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.14.1 — 2026-08-25
+
+### Fixed
+
+- **Owner-side live decision sync stayed deaf after an external decision
+  (SPEC-032)**: the 0.14.0 poll applied its fresh timeline through
+  `setSession`, but for the session already on screen `setSession`
+  stashes the current turns into the per-tab cache and then restores
+  that same entry — the cache hit wins over the passed history, so
+  every successful poll re-seeded the exact same stale turns and the
+  decided card never appeared until a manual refresh (which wipes the
+  cache). Added `reseedTurns` to the stream hook as the authoritative
+  same-session re-seed: it replaces both the live turns and the cache
+  entry, never moves the session pointer, and never aborts a stream;
+  the poll now applies through it. Regression tests pin both the
+  cache-shadow pitfall and the re-seed semantics.
+
+### Changed
+
+- Version lockstep and dependency lockfiles refreshed for the 0.14.1
+  patch; SPEC-032 plan and spec changelog synced to the reseed path.
+
 ## 0.14.0 — 2026-08-25
 
 ### Added
