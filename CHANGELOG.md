@@ -13,6 +13,47 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.12.0 — 2026-08-25
+
+### Added
+
+- **Require-approval policy semantics (SPEC-030)**: `require_approval` is
+  now a first-class, enforced policy outcome with approval tiers. The two
+  shared policy schemas gain an additive v2 revision (`approval` block with
+  `tier_1` / `tier_2`, `decided_by_roles`, tier-defaulted
+  `allow_self_approval`; the reserved `approval_tier` decision field is
+  activated), and both gateway engines evaluate three outcomes
+  (deny > require_approval > allow). Platform-gateway bridges the outcome
+  onto `chat:confirm`: parked batches under a `require_approval` rule check
+  the confirmer's roles against `decided_by_roles` and block self-approval
+  where the tier forbids it — structured 403s, the attempt audited as a
+  blocked `confirmation_decided`, the parked call stays parked, and the
+  parked-info fetch fails closed. The default bundle ships a `tier_2` rule
+  on `tools:mutate` decided by `approver` / `platform-admin`, so mutating
+  runs now need an approver distinct from the requester
+  (`mutating-demo.sh` exercises the two-identity flow). The live policy
+  matrix exposes requirements as an additive third cell state
+  (`approval_requirements`), the portal permissions view renders it, and
+  confirmation cards gain a tier badge ("operator confirmation" /
+  "approver required") with read-only rendering for non-deciders.
+- **Settings view restored (SPEC-030 R-6)**: the portal's Settings entry
+  now renders a read-only, tabbed Session & Identity panel (Identity,
+  Session, Platform panes — sign-in state and claims, the selected
+  session, version / API origin / last request id) built as an extensible
+  pane container; the SPEC-023 placeholder is removed and no mutable
+  controls ship.
+
+### Changed
+
+- Agent-platform relaxes the confirmer-must-own-session restriction on
+  `chat/confirm` (a tier_2 approver legitimately decides a foreign
+  session) and exposes the parked batch's policy action via a new
+  `GET /api/v2/chat/pending-confirmation` endpoint consumed by the
+  gateway bridge; approval authorization lives at the platform edge.
+- Tool-gateway validates approval blocks loudly at bundle load, then
+  skips `require_approval` rules with a warning — the synced default
+  bundle stays loadable there and SPEC-021 admission stays allow/deny.
+
 ## 0.11.1 — 2026-08-25
 
 ### Fixed
