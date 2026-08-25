@@ -7,10 +7,17 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-25-confirmation-race-and-restart-sweep-patch.md`
+  - closes v0.13.1: SPEC-031 review remediations — the confirm route
+    persists the durable outcome at claim time (racing approvers get
+    `409 already_resolved` even mid-stream of the winner's resume,
+    never a bare 404), and the Postgres startup sweep only expires
+    pending rows older than the HITL confirmation TTL so a sibling
+    replica's restart never kills a live park
 - `2026-08-25-approval-inbox-persistent-confirmation.md`
   - delivers SPEC-031 (v0.13.0): durable confirmation lifecycle records
     on the shared Postgres posture (cap 50 per session, cascade delete,
-    restart expiry, registry rehydration), an additive owner-transcript
+    TTL-scoped startup expiry, registry rehydration), an additive owner-transcript
     `confirmations` session-detail surface so cards survive re-login and
     pod restarts, a decider-scoped approvals inbox
     (`GET /api/v1/approvals/inbox` behind the new `approvals:list`

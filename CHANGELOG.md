@@ -13,6 +13,30 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.13.1 — 2026-08-25
+
+### Fixed
+
+- **Confirm race window between claim and stream end (SPEC-031 review)**:
+  the durable outcome was written only when the resumed turn finished, so
+  a racing approver answering mid-stream got a bare 404 instead of the
+  structured outcome. The confirm route now persists the outcome at claim
+  time (the claim is single-flight and the decision irrevocable once
+  claimed); the resume's safety-net write stays as an idempotent no-op,
+  and `mark_resolved` is first-write-wins in both backends.
+- **Startup sweep expired every pending row globally (SPEC-031 review)**:
+  a sibling replica's restart killed another pod's live park. The sweep
+  is now scoped to pending rows older than the HITL confirmation TTL
+  (`AGENT_HITL_CONFIRM_TIMEOUT`, default 600s) — a park past its TTL
+  answers no confirmation on any replica, so closing it is safe across
+  replicas; younger rows stay untouched.
+
+### Changed
+
+- Version lockstep and dependency lockfiles refreshed for the 0.13.1
+  patch; changelog, release notes, approval-and-hitl guide, and
+  troubleshooting guide wording synced to the TTL-scoped sweep.
+
 ## 0.13.0 — 2026-08-25
 
 ### Added
