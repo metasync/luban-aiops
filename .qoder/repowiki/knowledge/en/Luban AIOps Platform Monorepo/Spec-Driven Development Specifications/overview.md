@@ -1,1 +1,0 @@
-Curated collection of numbered feature specifications (SPEC-001 through SPEC-031) that define requirements, plans, and task lists driving the platform's security, identity, policy, observability, portal, and runtime capabilities.

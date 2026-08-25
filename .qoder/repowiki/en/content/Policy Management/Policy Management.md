@@ -8,6 +8,8 @@
 - [SPEC-021-bounded-mutating-actions/spec.md](file://docs/specs/SPEC-021-bounded-mutating-actions/spec.md)
 - [SPEC-030-require-approval-policy-semantics/spec.md](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md)
 - [SPEC-030-require-approval-policy-semantics/plan.md](file://docs/specs/SPEC-030-require-approval-policy-semantics/plan.md)
+- [SPEC-031-approval-inbox-persistent-confirmation/spec.md](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/spec.md)
+- [SPEC-031-approval-inbox-persistent-confirmation/plan.md](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/plan.md)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 - [Makefile](file://Makefile)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
@@ -20,10 +22,14 @@
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
 - [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [approvals.py](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
 - [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
+- [test_workspace_proxies.py](file://products/platform-gateway/tests/test_workspace_proxies.py)
+- [test_confirmation_records.py](file://products/agent-platform/tests/test_confirmation_records.py)
 - [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 - [approval-and-hitl.md](file://docs/guides/approval-and-hitl.md)
@@ -32,13 +38,13 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new `require_approval` policy outcome with tier-based approval system introduced by SPEC-030
-- Updated policy engine evaluation flow to implement explicit deny > require_approval > allow precedence rules
-- Enhanced default bundle posture with tier_2 require_approval rule on tools:mutate requiring designated approver distinct from requester
-- Documented tier-based approval semantics including tier_1 (session operator self-confirmation) and tier_2 (designated approver)
-- Updated authorization matrix to reflect require_approval decision states and tier information
-- Enhanced troubleshooting guide with require_approval-specific scenarios and diagnostic steps
-- **Updated**: Platform gateway now enforces tier-based approval on chat:confirm path with self-approval restrictions for tier_2 actions
+- Added comprehensive documentation for the new `approvals:list` policy action introduced by SPEC-031 for approval inbox access control
+- Enhanced confirmation bridge with persistent storage layer supporting durable confirmation lifecycle records
+- Updated authorization matrix to include `approvals:list` action granted to approver and platform-admin roles
+- Added detailed documentation for the approvals inbox API endpoint and its metadata-only posture
+- Documented persistent confirmation cards that survive re-login and pod restarts
+- Enhanced troubleshooting guide with approvals inbox-specific scenarios and diagnostic steps
+- Updated policy engine constants and enforcement flow to include the new approvals:list action
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -51,21 +57,24 @@
 8. [HITL Confirmation Bridging](#hitl-confirmation-bridging)
 9. [Risk-Tier Gating and Mutating Actions](#risk-tier-gating-and-mutating-actions)
 10. [Require-Approval Policy Semantics](#require-approval-policy-semantics)
-11. [Model Catalog Discovery and Permissions](#model-catalog-discovery-and-permissions)
-12. [Dependency Analysis](#dependency-analysis)
-13. [Performance Considerations](#performance-considerations)
-14. [Troubleshooting Guide](#troubleshooting-guide)
-15. [Conclusion](#conclusion)
-16. [Appendices](#appendices)
+11. [Approval Inbox and Persistent Confirmations](#approval-inbox-and-persistent-confirmations)
+12. [Model Catalog Discovery and Permissions](#model-catalog-discovery-and-permissions)
+13. [Dependency Analysis](#dependency-analysis)
+14. [Performance Considerations](#performance-considerations)
+15. [Troubleshooting Guide](#troubleshooting-guide)
+16. [Conclusion](#conclusion)
+17. [Appendices](#appendices)
 
 ## Introduction
 This document describes the policy management system that enables declarative policy definitions and runtime enforcement across the platform. It covers the policy language syntax, built-in rule types, custom policy development, evaluation flow, decision logic, audit trail generation, testing, validation, deployment, versioning, conflict resolution, performance optimization, and integration with identity contexts and authorization decisions across services.
 
-The system is designed to be declarative, auditable, and extensible, allowing operators to define policies centrally and enforce them consistently at the API gateway boundary and within tool execution paths. **Updated** with enhanced policy matrix functionality that provides live visibility into effective permissions through a role × action permission table, server-side row scoping for different user contexts, new policy actions including `tools:list`, `skills:read`, `chat:confirm`, `models:list`, and the new `tools:mutate` action for bounded mutating operations, and comprehensive HITL (Human-in-the-Loop) confirmation bridging for approval-gated bounded actions.
+The system is designed to be declarative, auditable, and extensible, allowing operators to define policies centrally and enforce them consistently at the API gateway boundary and within tool execution paths. **Updated** with enhanced policy matrix functionality that provides live visibility into effective permissions through a role × action permission table, server-side row scoping for different user contexts, new policy actions including `tools:list`, `skills:read`, `chat:confirm`, `models:list`, `approvals:list`, and the new `tools:mutate` action for bounded mutating operations, and comprehensive HITL (Human-in-the-Loop) confirmation bridging for approval-gated bounded actions.
 
 **New**: The platform now includes risk-tier gating that separates read-only tool execution from mutating operations, providing an additional layer of security for potentially destructive actions through the new `tools:mutate` policy action.
 
 **New**: The platform now implements require-approval policy semantics with tier-based approval system (SPEC-030), providing explicit approval levels for critical destructive actions where tier_1 allows session operator self-confirmation and tier_2 requires a designated approver distinct from the requester.
+
+**New**: The platform now provides persistent confirmation cards and an approval inbox (SPEC-031) that enables cross-session discovery of parked and historical confirmations with metadata-only access, ensuring durability across re-login and pod restarts.
 
 **Updated**: The platform now grants `models:list` permissions to all operational roles (platform-admin, approver, operator, developer, and read-only-observer), enabling safe catalog discovery operations as specified in SPEC-024 for runtime LLM model switching capabilities.
 
@@ -80,6 +89,8 @@ Policy-related artifacts are distributed across documentation, schemas, runtime 
 - **New**: Risk-tier gating provides separation between read and mutating tool execution.
 - **New**: Bounded mutating tools like `k8s.delete_pod` require explicit approval through the triple-gated model.
 - **New**: Require-approval policy semantics provide tier-based approval system with explicit precedence rules.
+- **New**: Persistent confirmation records provide durable storage for approval workflows.
+- **New**: Approval inbox API enables cross-session discovery of confirmation history.
 - **Updated**: Model catalog discovery permissions enable safe read-only access to available LLM models across all operational roles.
 
 ```mermaid
@@ -90,6 +101,7 @@ SPEC["SPEC-004 Policy Enforcement"]
 SPEC20["SPEC-020 HITL Confirmation"]
 SPEC21["SPEC-021 Bounded Mutating"]
 SPEC30["SPEC-030 Require Approval"]
+SPEC31["SPEC-031 Approval Inbox"]
 AUTH_MATRIX["Authorization Matrix"]
 end
 subgraph "Schemas"
@@ -106,6 +118,8 @@ ENGINE_PLATFORM["platform-gateway policy-engine.py"]
 GATEWAY_SERVICE["gateway_service.py"]
 MATRIX_ENGINE["policy_matrix.py"]
 CHAT_ROUTE["chat.py confirm route"]
+APPROVALS_ROUTE["approvals.py inbox route"]
+CONFIRMATION_STORE["confirmation_records.py"]
 K8S_CONNECTOR["k8s_connector.py"]
 DEFAULT_POLICY["policy-default.yaml (canonical)"]
 MODEL_CATALOG["model_catalog.py"]
@@ -121,6 +135,8 @@ TEST_CHAT["test_chat_confirm.py"]
 TEST_MATRIX["test_policy_matrix.py"]
 TEST_K8S["test_k8s_connector.py"]
 TEST_MODEL["test_model_catalog.py"]
+TEST_APPROVALS["test_workspace_proxies.py"]
+TEST_RECORDS["test_confirmation_records.py"]
 end
 subgraph "Deployment"
 K8S_POLICY["policy.yaml"]
@@ -131,6 +147,7 @@ SPEC --> SCHEMA_DECISION
 SPEC20 --> SCHEMA_CONFIRM
 SPEC21 --> K8S_CONNECTOR
 SPEC30 --> SCHEMA_RULE
+SPEC31 --> CONFIRMATION_STORE
 AUTH_MATRIX --> DEFAULT_POLICY
 SCHEMA_RULE --> ENGINE_TOOL
 SCHEMA_RULE --> ENGINE_PLATFORM
@@ -150,6 +167,8 @@ K8S_CONNECTOR --> TEST_K8S
 ENGINE_TOOL --> TEST_TOOL
 ENGINE_PLATFORM --> TEST_PLATFORM
 CHAT_ROUTE --> TEST_CHAT
+APPROVALS_ROUTE --> TEST_APPROVALS
+CONFIRMATION_STORE --> TEST_RECORDS
 POLICY_ROUTE --> TEST_MATRIX
 MATRIX_ENGINE --> TEST_MATRIX
 K8S_POLICY --> ENGINE_TOOL
@@ -165,6 +184,7 @@ MODEL_CATALOG --> TEST_MODEL
 - [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
 - [SPEC-021-bounded-mutating-actions/spec.md](file://docs/specs/SPEC-021-bounded-mutating-actions/spec.md)
 - [SPEC-030-require-approval-policy-semantics/spec.md](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md)
+- [SPEC-031-approval-inbox-persistent-confirmation/spec.md](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/spec.md)
 - [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
@@ -180,6 +200,8 @@ MODEL_CATALOG --> TEST_MODEL
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [approvals.py](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
@@ -188,6 +210,8 @@ MODEL_CATALOG --> TEST_MODEL
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
 - [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
+- [test_workspace_proxies.py](file://products/platform-gateway/tests/test_workspace_proxies.py)
+- [test_confirmation_records.py](file://products/agent-platform/tests/test_confirmation_records.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 
@@ -197,6 +221,7 @@ MODEL_CATALOG --> TEST_MODEL
 - [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
 - [SPEC-021-bounded-mutating-actions/spec.md](file://docs/specs/SPEC-021-bounded-mutating-actions/spec.md)
 - [SPEC-030-require-approval-policy-semantics/spec.md](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md)
+- [SPEC-031-approval-inbox-persistent-confirmation/spec.md](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/spec.md)
 - [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 - [Makefile](file://Makefile)
@@ -207,6 +232,8 @@ MODEL_CATALOG --> TEST_MODEL
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [approvals.py](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [test_policy_engine.py](file://products/tool-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
@@ -214,6 +241,8 @@ MODEL_CATALOG --> TEST_MODEL
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
 - [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
+- [test_workspace_proxies.py](file://products/platform-gateway/tests/test_workspace_proxies.py)
+- [test_confirmation_records.py](file://products/agent-platform/tests/test_confirmation_records.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
@@ -230,6 +259,8 @@ MODEL_CATALOG --> TEST_MODEL
 - **New**: Risk-Tier Gate: Enforces separate authorization for mutating tool execution through the `tools:mutate` action.
 - **New**: Bounded Mutating Tools: First implementation includes `k8s.delete_pod` with triple-gated approval model.
 - **New**: Require-Approval Policy Semantics: Implements tier-based approval system with explicit precedence rules.
+- **New**: Persistent Confirmation Records: Provides durable storage for approval workflows with 30-day retention and per-session caps.
+- **New**: Approval Inbox API: Enables cross-session discovery of parked and historical confirmations with metadata-only access.
 - **Updated**: Policy Matrix Engine: Generates live role × action permission tables from currently enforced policy bundle with server-side row scoping.
 - **Updated**: HITL Confirmation Bridge: Provides approval-gated workflow for mutating operations with durable audit trails.
 - **Updated**: Model Catalog Discovery: Enables safe read-only access to available LLM models across all operational roles.
@@ -243,6 +274,8 @@ Key responsibilities:
 - **New**: Enforce risk-tier gating that requires separate authorization for mutating operations.
 - **New**: Handle bounded mutating tools with triple-gated approval model.
 - **New**: Implement require-approval policy semantics with tier-based approval system.
+- **New**: Provide persistent confirmation storage with durability guarantees.
+- **New**: Enable approval inbox access control through `approvals:list` policy action.
 - **Updated**: Build effective permission matrices with full policy semantics inheritance.
 - **Updated**: Handle HITL confirmation flows with proper delegation and audit trails.
 - **Updated**: Enforce deny-by-default authorization for sensitive operations including mutating tool execution.
@@ -255,6 +288,8 @@ Key responsibilities:
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [approvals.py](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
@@ -266,11 +301,13 @@ Key responsibilities:
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
 - [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
+- [test_workspace_proxies.py](file://products/platform-gateway/tests/test_workspace_proxies.py)
+- [test_confirmation_records.py](file://products/agent-platform/tests/test_confirmation_records.py)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
 - [Makefile](file://Makefile)
 
 ## Architecture Overview
-The policy enforcement architecture integrates at the API gateway layer and tool invocation path. Requests carry identity context; the policy engine evaluates policies and returns decisions that gate access or modify behavior. Audit trails are recorded for compliance and debugging. **Updated** with risk-tier gating that separates read-only tool execution from mutating operations, requiring separate authorization through the `tools:mutate` action for write/admin risk tools, require-approval policy semantics with tier-based approval system, and enhanced model catalog discovery permissions for safe read-only operations.
+The policy enforcement architecture integrates at the API gateway layer and tool invocation path. Requests carry identity context; the policy engine evaluates policies and returns decisions that gate access or modify behavior. Audit trails are recorded for compliance and debugging. **Updated** with risk-tier gating that separates read-only tool execution from mutating operations, requiring separate authorization through the `tools:mutate` action for write/admin risk tools, require-approval policy semantics with tier-based approval system, persistent confirmation storage, approval inbox access control, and enhanced model catalog discovery permissions for safe read-only operations.
 
 ```mermaid
 sequenceDiagram
@@ -278,45 +315,34 @@ participant Client as "Client"
 participant Gateway as "API Gateway"
 participant Identity as "Identity Broker"
 participant Engine as "Policy Engine"
-participant RiskGate as "Risk-Tier Gate"
-participant Confirm as "Confirm Route"
-participant ModelCatalog as "Model Catalog"
+participant ConfirmBridge as "Confirmation Bridge"
+participant Inbox as "Approvals Inbox"
+participant Store as "Confirmation Store"
 participant Agent as "Agent Platform"
 participant Audit as "Audit Service"
 Client->>Gateway : "Request with token"
 Gateway->>Identity : "Validate token and resolve identity"
 Identity-->>Gateway : "Identity context"
-alt "Model Catalog Discovery"
-Gateway->>Engine : "Evaluate 'models : list'"
-Engine-->>Gateway : "Decision (granted to all roles)"
-Gateway->>ModelCatalog : "Fetch available models"
-ModelCatalog-->>Gateway : "Safe model metadata"
-Gateway-->>Client : "Model list response"
+alt "Approvals Inbox Access"
+Gateway->>Engine : "Evaluate 'approvals : list'"
+Engine-->>Gateway : "Decision (granted to approver/platform-admin)"
+Gateway->>Inbox : "Fetch confirmation inbox"
+Inbox->>Store : "Load pending + recent history"
+Store-->>Inbox : "Metadata-only confirmation records"
+Inbox-->>Gateway : "Confirmation list response"
+Gateway-->>Client : "Inbox response"
 else "Mutating Tool Invocation"
 Gateway->>Engine : "Evaluate 'tools : invoke'"
 Engine-->>Gateway : "Decision"
 alt "Allowed"
-Gateway->>RiskGate : "Check tool risk level"
-RiskGate->>Engine : "Evaluate 'tools : mutate' for write/admin tools"
-Engine-->>RiskGate : "Decision"
-alt "tools : mutate allowed"
-RiskGate->>Confirm : "Process through HITL bridge"
-Confirm->>Engine : "Evaluate require_approval decision"
-Engine-->>Confirm : "require_approval with tier info"
-alt "Tier 1 - Self Approval"
-Confirm->>Agent : "Proxy with delegated token"
-Agent-->>Confirm : "SSE stream with confirmation_result"
-Confirm->>Audit : "Emit confirmation_decided event"
-Confirm-->>Client : "Resumed SSE stream"
-else "Tier 2 - Designated Approver"
-Confirm->>Agent : "Proxy with delegated token"
-Agent-->>Confirm : "SSE stream with confirmation_result"
-Confirm->>Audit : "Emit confirmation_decided event"
-Confirm-->>Client : "Resumed SSE stream"
-end
-else "tools : mutate denied"
-RiskGate-->>Client : "403 Forbidden"
-end
+Gateway->>ConfirmBridge : "Process through HITL bridge"
+ConfirmBridge->>Store : "Persist confirmation record"
+Store-->>ConfirmBridge : "Record saved"
+ConfirmBridge->>Agent : "Proxy with delegated token"
+Agent-->>ConfirmBridge : "SSE stream with confirmation_request"
+ConfirmBridge->>Store : "Mark as pending"
+ConfirmBridge-->>Client : "Parked confirmation"
+Note over Client,ConfirmBridge : "Designated approver uses approvals : list to discover"
 else "tools : invoke denied"
 Gateway-->>Client : "403 Forbidden"
 end
@@ -338,7 +364,8 @@ end
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
-- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [approvals.py](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 
@@ -347,7 +374,8 @@ end
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
-- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
+- [approvals.py](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [identity-context.schema.json](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 
@@ -365,7 +393,7 @@ Built-in rule types typically cover:
 - Rate limiting per user, tenant, or resource.
 - Tool usage restrictions by capability or environment.
 - Data access control by sensitivity labels or ownership.
-- **Updated**: New policy actions including `tools:list` for tool discovery, `skills:read` for skills inventory access, `chat:confirm` for HITL confirmation bridging, `models:list` for safe model catalog discovery, and the new `tools:mutate` for bounded mutating operations.
+- **Updated**: New policy actions including `tools:list` for tool discovery, `skills:read` for skills inventory access, `chat:confirm` for HITL confirmation bridging, `models:list` for safe model catalog discovery, `approvals:list` for approval inbox access, and the new `tools:mutate` for bounded mutating operations.
 - **New**: Require-approval policy outcome with tier-based approval system supporting tier_1 (self-approval) and tier_2 (designated approver) approval levels.
 
 Custom policy development involves extending condition evaluators and action handlers while adhering to schema constraints.
@@ -385,7 +413,7 @@ Evaluation proceeds through:
 
 Conflict resolution uses precedence rules and explicit allow/deny overrides. Deny typically takes precedence unless explicitly configured otherwise.
 
-**Updated**: The evaluation flow now includes risk-tier gating for tool invocations, require-approval policy semantics with explicit deny > require_approval > allow precedence rules, and enhanced model catalog discovery with `models:list` permissions granted to all operational roles.
+**Updated**: The evaluation flow now includes risk-tier gating for tool invocations, require-approval policy semantics with explicit deny > require_approval > allow precedence rules, approval inbox access control through `approvals:list`, persistent confirmation storage, and enhanced model catalog discovery with `models:list` permissions granted to all operational roles.
 
 ```mermaid
 flowchart TD
@@ -396,23 +424,27 @@ EvaluateConditions --> ShortCircuit{"Short-Circuit?"}
 ShortCircuit --> |Yes| ApplyAction["Apply Action"]
 ShortCircuit --> |No| NextRule["Next Rule"]
 NextRule --> EvaluateConditions
-ApplyAction --> CheckRiskTier{"Is Mutating Tool?"}
-CheckRiskTier --> |Yes| MutateCheck["Evaluate 'tools:mutate'"]
-CheckRiskTier --> |No| CheckModels{"Is Model Catalog?"}
-CheckModels --> |Yes| ModelsCheck["Evaluate 'models:list'"]
-CheckModels --> |No| Aggregate["Aggregate Decision"]
-ModelsCheck --> ModelsDecision{"models:list Allowed?"}
-ModelsDecision --> |Yes| Aggregate
-ModelsDecision --> |No| Deny["Deny Request"]
+ApplyAction --> CheckAction{"Action Type"}
+CheckAction --> |approvals:list| InboxCheck["Evaluate 'approvals:list'"]
+CheckAction --> |tools:mutate| MutateCheck["Evaluate 'tools:mutate'"]
+CheckAction --> |models:list| ModelsCheck["Evaluate 'models:list'"]
+CheckAction --> |other| Aggregate["Aggregate Decision"]
+InboxCheck --> InboxDecision{"approvals:list Allowed?"}
+InboxDecision --> |Yes| Persist["Persist Confirmation Record"]
+InboxDecision --> |No| Deny["Deny Request"]
 MutateCheck --> MutateDecision{"tools:mutate Allowed?"}
 MutateDecision --> |Yes| CheckApproval{"require_approval?"}
 MutateDecision --> |No| Deny
+ModelsCheck --> ModelsDecision{"models:list Allowed?"}
+ModelsDecision --> |Yes| Aggregate
+ModelsDecision --> |No| Deny
 CheckApproval --> |Yes| TierCheck{"Tier Type"}
 CheckApproval --> |No| Aggregate
 TierCheck --> |tier_1| SelfApproval["Allow Self-Approval"]
 TierCheck --> |tier_2| DesignatedApprover["Require Designated Approver"]
 SelfApproval --> Aggregate
 DesignatedApprover --> Aggregate
+Persist --> Aggregate
 Aggregate --> Audit["Generate Audit Trail"]
 Audit --> End(["Return Decision"])
 ```
@@ -421,12 +453,14 @@ Audit --> End(["Return Decision"])
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 
 **Section sources**
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 
 ### Policy Matrix Functionality
@@ -440,7 +474,7 @@ The policy matrix endpoint (`GET /api/v1/policy/matrix`) serves the effective ro
 The matrix implements strict server-side row scoping based on caller identity:
 - **Platform-Admin Role**: Receives full matrix showing all roles referenced by the bundle
 - **All Other Roles**: Receive only their own granted roles with boolean permissions for each action
-- **Action Catalog**: Shared across all scopes, showing complete action vocabulary including `tools:mutate` and `models:list`
+- **Action Catalog**: Shared across all scopes, showing complete action vocabulary including `tools:mutate`, `approvals:list`, and `models:list`
 
 #### Implementation Details
 The policy matrix builder extracts roles and actions from the loaded bundle, unions protected route actions, and evaluates each role × action combination:
@@ -672,6 +706,84 @@ The platform-gateway enforces tier-based approval on the chat:confirm path:
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 
+### Approval Inbox and Persistent Confirmations
+
+**New Section** - Comprehensive coverage of the approval inbox and persistent confirmation functionality introduced by SPEC-031.
+
+#### Durable Confirmation Lifecycle Records
+The platform implements persistent storage for confirmation lifecycle records that survive pod restarts and re-login scenarios:
+
+- **Storage Backend**: Postgres-backed store with in-memory fallback for development
+- **Retention Policy**: 30-day history window with automatic cleanup of old records
+- **Per-Session Caps**: Maximum 50 records per session with oldest-first eviction
+- **Data Structure**: Session-scoped records containing confirmation metadata, status, and timestamps
+
+#### Approval Inbox API
+The `GET /api/v1/approvals/inbox` endpoint provides cross-session discovery of parked and historical confirmations:
+
+- **Access Control**: Protected by `approvals:list` policy action (granted to approver and platform-admin)
+- **Metadata-Only**: Never exposes owner transcript text (preserves SPEC-030 Q-1 posture)
+- **Content**: Session ID, title, owner username, pending calls, status, decider, timestamps
+- **Ordering**: Most recent first with pending items prioritized
+
+#### Persistent Cards in Owner Transcript
+Owner-side transcripts now include confirmation cards reconstructed from durable records:
+
+- **Persistence**: Cards survive logout/login cycles and pod restarts
+- **State Representation**: Pending, approved, denied, or expired states clearly indicated
+- **Read-Only Decisions**: Once decided, cards become permanently read-only with decider attribution
+- **Integration**: Additive surface alongside existing chat transcript reconstruction
+
+#### Race-Resilient Resolution Semantics
+Concurrent approval decisions are handled with structured conflict resolution:
+
+- **Single Flight**: Exactly one execution per parked confirmation regardless of concurrent attempts
+- **Structured Responses**: Late or losing attempts receive `already_resolved` responses with decider attribution
+- **Consistency**: Both requester and approver surfaces reflect the same resolution state
+- **Audit Integrity**: Single `confirmation_decided` audit event per resolution
+
+#### Implementation Details
+The confirmation record store provides both in-memory and Postgres backends:
+
+```python
+# In confirmation_records.py
+class PostgresConfirmationRecordStore:
+    """Postgres-backed confirmation records (SPEC-031 R-1)."""
+    
+    def save_parked(self, record: dict[str, Any]) -> None:
+        # Insert record with ON CONFLICT DO NOTHING for idempotency
+        # Evict records exceeding per-session cap
+        # Sweep old resolved records beyond history window
+    
+    def load_inbox(self) -> list[dict[str, Any]]:
+        # Load pending items plus recent history (30 days)
+        # Limit to INBOX_LIMIT most recent records
+        # Order by parked_at descending
+```
+
+#### Security Model
+- **Deny-by-Default**: Inbox access restricted to tier_2 decider roles only
+- **Metadata Isolation**: No cross-user transcript exposure maintained
+- **Role-Based Filtering**: Results scoped to records where caller has approval authority
+- **Audit Trail**: All inbox access attempts logged with user context
+
+#### Portal Integration
+The operator portal provides an Approvals view for designated approvers:
+
+- **Navigation**: Visible only to users with decider roles
+- **Pending Count Badge**: Real-time count of pending confirmations
+- **Dual View**: Separate sections for pending items and historical decisions
+- **Decision Interface**: Reuses existing confirmation card component for approve/deny actions
+
+**Section sources**
+- [SPEC-031-approval-inbox-persistent-confirmation/spec.md](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/spec.md)
+- [SPEC-031-approval-inbox-persistent-confirmation/plan.md](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/plan.md)
+- [approvals.py](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
+- [test_workspace_proxies.py](file://products/platform-gateway/tests/test_workspace_proxies.py)
+- [test_confirmation_records.py](file://products/agent-platform/tests/test_confirmation_records.py)
+- [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
+
 ### Model Catalog Discovery and Permissions
 
 **New Section** - Comprehensive coverage of the model catalog discovery functionality introduced by SPEC-024 for runtime LLM model switching.
@@ -761,7 +873,7 @@ Audit records capture:
 - Timestamps and correlation IDs.
 - Reason codes and messages.
 
-**Updated**: Audit trails now include risk-level information for tool invocations, detailed context for mutating tool attempts, require-approval decision information including tier and approval rule IDs, and model selection information for chat sessions.
+**Updated**: Audit trails now include risk-level information for tool invocations, detailed context for mutating tool attempts, require-approval decision information including tier and approval rule IDs, approval inbox access events, persistent confirmation lifecycle events, and model selection information for chat sessions.
 
 These records support compliance reporting, debugging, and performance analysis.
 
@@ -781,6 +893,7 @@ These records support compliance reporting, debugging, and performance analysis.
   - `policy:read`: Access live permission matrix (granted to all platform roles)
   - `chat:confirm`: Approve or deny parked HITL tool confirmations (granted to platform-admin, approver, operator, and developer roles)
   - `models:list`: Discover available LLM models (granted to all operational roles)
+  - `approvals:list`: Access approval inbox for cross-session confirmation management (granted to approver and platform-admin roles)
   - **New**: `tools:mutate`: Execute mutating (write/admin risk) tools (granted to platform-admin and operator only)
   - **New**: Require-approval policy outcome with tier-based approval system for critical destructive actions
 
@@ -795,7 +908,7 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - Conflict Resolution: Precedence rules determine which policy applies when multiple match; explicit deny overrides allow unless configured otherwise.
 - Migration: Schema evolution ensures backward compatibility during upgrades.
 
-**Updated**: Require-approval policy semantics introduce additional conflict resolution rules where explicit deny takes precedence over require_approval, and require_approval takes precedence over allow.
+**Updated**: Require-approval policy semantics introduce additional conflict resolution rules where explicit deny takes precedence over require_approval, and require_approval takes precedence over allow. Approval inbox access follows standard deny-by-default authorization patterns.
 
 **Section sources**
 - [policy-specification.md](file://docs/agentic-aiops-platform/policy-specification.md)
@@ -809,6 +922,8 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - **New**: Risk-tier gating adds minimal overhead through efficient tool registry lookups and early rejection of unauthorized mutating operations.
 - **New**: Bounded mutating tools leverage existing policy engine caching and evaluation semantics.
 - **New**: Require-approval policy semantics add minimal overhead through efficient tier-based approval evaluation.
+- **New**: Approval inbox queries use efficient database indexing and pagination with 30-day retention windows.
+- **New**: Persistent confirmation storage benefits from Postgres indexing on session_id and status fields.
 - **New**: Model catalog discovery benefits from credential-gated filtering and efficient environment variable resolution.
 - **Updated**: Policy matrix functionality benefits from existing policy engine caching and efficient role × action computation.
 - **Updated**: HITL confirmation bridging minimizes overhead through efficient SSE passthrough and deferred audit emission.
@@ -818,6 +933,7 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 
 ### Integration with Identity Contexts and Authorization Decisions
@@ -826,6 +942,7 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - Cross-Service Consistency: Shared schemas ensure uniform interpretation of identity and decisions across services.
 - **Updated**: Risk-tier gating integrates with normalized identity context for evaluating both `tools:invoke` and `tools:mutate` actions.
 - **Updated**: Require-approval policy semantics integrate with normalized identity context for tier-based approval enforcement.
+- **Updated**: Approval inbox access control integrates with normalized identity context for role-based inbox filtering.
 - **Updated**: Model catalog discovery integrates with normalized identity context for role-based access control.
 - **Updated**: Policy matrix functionality integrates with normalized identity context for server-side row scoping.
 - **Updated**: HITL confirmation bridging uses delegated tokens to maintain identity continuity through approval workflows.
@@ -836,6 +953,7 @@ Examples are implemented via rule definitions and condition evaluators aligned w
 - [policy-engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 
 ## Enhanced Policy Tooling
@@ -996,7 +1114,7 @@ Approval decisions follow this flow:
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 
 ## Dependency Analysis
-Policy components depend on schemas for validation and consistency, and on identity services for context resolution. Deployment manifests configure runtime behavior and access controls. **Updated** with new dependencies on risk-tier gating, bounded mutating tools, require-approval policy semantics, policy matrix functionality, HITL confirmation bridging, model catalog discovery, and validation tooling.
+Policy components depend on schemas for validation and consistency, and on identity services for context resolution. Deployment manifests configure runtime behavior and access controls. **Updated** with new dependencies on risk-tier gating, bounded mutating tools, require-approval policy semantics, approval inbox functionality, persistent confirmation storage, policy matrix functionality, HITL confirmation bridging, model catalog discovery, and validation tooling.
 
 ```mermaid
 graph TB
@@ -1012,6 +1130,8 @@ ENGINE_PLATFORM["platform-gateway policy-engine.py"]
 GATEWAY_SERVICE["gateway_service.py"]
 MATRIX_ENGINE["policy_matrix.py"]
 CHAT_ROUTE["chat.py confirm route"]
+APPROVALS_ROUTE["approvals.py inbox route"]
+CONFIRMATION_STORE["confirmation_records.py"]
 K8S_CONNECTOR["k8s_connector.py"]
 MODEL_CATALOG["model_catalog.py"]
 DEFAULT_YAML["policy-default.yaml (canonical)"]
@@ -1022,6 +1142,8 @@ TEST_AUDIT["test_audit_proxy.py"]
 TEST_MATRIX["test_policy_matrix.py"]
 TEST_K8S["test_k8s_connector.py"]
 TEST_MODEL["test_model_catalog.py"]
+TEST_APPROVALS["test_workspace_proxies.py"]
+TEST_RECORDS["test_confirmation_records.py"]
 K8S_POLICY["policy.yaml"]
 K8S_RBAC["rbac.yaml"]
 VALIDATE_SCRIPT["validate_policy.py"]
@@ -1033,6 +1155,7 @@ POLICY_SPEC --> DECISION_SCHEMA
 SPEC20 --> CONFIRM_SCHEMA
 SPEC21 --> K8S_CONNECTOR
 SPEC30 --> RULE_SCHEMA
+SPEC31 --> CONFIRMATION_STORE
 SPEC24 --> MODEL_SCHEMA
 RULE_SCHEMA --> ENGINE_TOOL
 RULE_SCHEMA --> ENGINE_PLATFORM
@@ -1050,6 +1173,7 @@ DEFAULT_YAML --> ENGINE_PLATFORM
 DEFAULT_YAML --> AUDIT_ROUTE
 DEFAULT_YAML --> POLICY_ROUTE
 DEFAULT_YAML --> CHAT_ROUTE
+DEFAULT_YAML --> APPROVALS_ROUTE
 DEFAULT_YAML --> K8S_CONNECTOR
 DEFAULT_YAML --> MODEL_CATALOG
 VALIDATE_SCRIPT --> MAKEFILE_TARGETS
@@ -1060,6 +1184,8 @@ K8S_CONNECTOR --> TEST_K8S
 ENGINE_TOOL --> TEST_TOOL
 ENGINE_PLATFORM --> TEST_PLATFORM
 CHAT_ROUTE --> TEST_CHAT
+APPROVALS_ROUTE --> TEST_APPROVALS
+CONFIRMATION_STORE --> TEST_RECORDS
 AUDIT_ROUTE --> TEST_AUDIT
 POLICY_ROUTE --> TEST_MATRIX
 MATRIX_ENGINE --> TEST_MATRIX
@@ -1076,6 +1202,7 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [SPEC-020-hitl-confirmation-bridging/spec.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md)
 - [SPEC-021-bounded-mutating-actions/spec.md](file://docs/specs/SPEC-021-bounded-mutating-actions/spec.md)
 - [SPEC-030-require-approval-policy-semantics/spec.md](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md)
+- [SPEC-031-approval-inbox-persistent-confirmation/spec.md](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/spec.md)
 - [SPEC-024-runtime-llm-model-switching/spec.md](file://docs/specs/SPEC-024-runtime-llm-model-switching/spec.md)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
@@ -1090,6 +1217,8 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [approvals.py](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
@@ -1100,6 +1229,8 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
 - [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
+- [test_workspace_proxies.py](file://products/platform-gateway/tests/test_workspace_proxies.py)
+- [test_confirmation_records.py](file://products/agent-platform/tests/test_confirmation_records.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
@@ -1113,6 +1244,8 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [approvals.py](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
@@ -1129,6 +1262,8 @@ K8S_RBAC --> ENGINE_PLATFORM
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
 - [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
+- [test_workspace_proxies.py](file://products/platform-gateway/tests/test_workspace_proxies.py)
+- [test_confirmation_records.py](file://products/agent-platform/tests/test_confirmation_records.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
@@ -1143,6 +1278,8 @@ K8S_RBAC --> ENGINE_PLATFORM
 - **New**: Risk-tier gating adds minimal overhead through efficient tool registry lookups and early rejection of unauthorized mutating operations.
 - **New**: Bounded mutating tools leverage existing policy engine caching and evaluation semantics.
 - **New**: Require-approval policy semantics add minimal overhead through efficient tier-based approval evaluation.
+- **New**: Approval inbox queries benefit from Postgres indexing on session_id and status fields with efficient pagination.
+- **New**: Persistent confirmation storage uses opportunistic cleanup and bounded retention to maintain performance.
 - **New**: Model catalog discovery benefits from credential-gated filtering and efficient environment variable resolution.
 - **New**: Policy matrix evaluation benefits from existing policy engine caching and efficient role × action computation.
 - **New**: HITL confirmation bridging uses efficient SSE passthrough and deferred audit emission to minimize latency.
@@ -1162,6 +1299,8 @@ Common issues and resolutions:
 - **New**: Chat confirmation access denied (403): Verify caller has one of the granted roles (`platform-admin`, `approver`, `operator`, `developer`); check bundle contains `allow-chat-confirm` rule.
 - **New**: Mutating tool access denied (403): Verify caller has `tools:mutate` action; check bundle contains `allow-operators-tools-mutate` rule; ensure `GATEWAY_MUTATING_TOOLS_ENABLED=true`.
 - **New**: Require-approval access denied (403): Verify caller has required role in decided_by_roles; check bundle contains appropriate require_approval rule; verify tier-based approval enforcement.
+- **New**: Approval inbox access denied (403): Verify caller has `approvals:list` permission (granted to approver and platform-admin roles); check bundle contains `allow-approvers-approvals-list` rule.
+- **New**: Persistent confirmation issues: Verify Postgres backend availability and confirmation record store initialization.
 - **New**: Model catalog access denied: Verify caller has `models:list` permission; check bundle contains updated rules for all operational roles.
 - **Updated**: Audit access denied (403): Verify caller has `auditor` or `platform-admin` role; check policy bundle contains `allow-auditors-audit-read` rule.
 
@@ -1174,6 +1313,8 @@ Operational checks:
 - **Updated**: For chat confirmation issues, verify user has appropriate role and confirmation hasn't expired.
 - **New**: For mutating tool issues, verify feature flag is enabled, user has `tools:mutate` grant, and tool is properly registered.
 - **New**: For require-approval issues, verify tier-based approval enforcement, user has required decider role, and approval rule is properly configured.
+- **New**: For approval inbox issues, verify user has approver or platform-admin role, confirmation records are persisted, and inbox endpoint is accessible.
+- **New**: For persistent confirmation issues, verify Postgres connection string, confirmation record store initialization, and retention policies.
 - **New**: For model catalog issues, verify environment configuration for additional providers and check credential setup.
 
 **Section sources**
@@ -1184,6 +1325,8 @@ Operational checks:
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
 - [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
+- [test_workspace_proxies.py](file://products/platform-gateway/tests/test_workspace_proxies.py)
+- [test_confirmation_records.py](file://products/agent-platform/tests/test_confirmation_records.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
@@ -1197,9 +1340,11 @@ The policy management system provides a robust, declarative framework for enforc
 
 **New**: The platform now implements require-approval policy semantics with tier-based approval system (SPEC-030), providing explicit approval levels for critical destructive actions. Tier_1 allows session operator self-confirmation for routine destructive actions, while tier_2 requires a designated approver distinct from the requester for critical destructive actions. The system implements explicit precedence rules where deny > require_approval > allow, ensuring safe defaults and preventing unauthorized approvals.
 
+**New**: The platform now provides persistent confirmation cards and an approval inbox (SPEC-031) that enables cross-session discovery of parked and historical confirmations with metadata-only access, ensuring durability across re-login and pod restarts. The approval inbox is protected by the new `approvals:list` policy action and provides designated approvers with a comprehensive view of confirmation history.
+
 **Updated**: The platform now grants `models:list` permissions to all operational roles (platform-admin, approver, operator, developer, and read-only-observer), enabling safe catalog discovery operations as specified in SPEC-024 for runtime LLM model switching capabilities. This enhancement allows users to discover available LLM models without exposing sensitive credentials or configuration details.
 
-**Updated**: Automated policy validation and synchronization capabilities streamline policy management and reduce operational overhead, including comprehensive audit trail access controls with deny-by-default authorization for sensitive operations, new policy matrix functionality for live permission transparency, HITL confirmation bridging for approval-gated workflows, risk-tier gating for safe execution of potentially mutating operations, require-approval policy semantics for tier-based approval system, and enhanced model catalog discovery for runtime LLM model switching.
+**Updated**: Automated policy validation and synchronization capabilities streamline policy management and reduce operational overhead, including comprehensive audit trail access controls with deny-by-default authorization for sensitive operations, new policy matrix functionality for live permission transparency, HITL confirmation bridging for approval-gated workflows, risk-tier gating for safe execution of potentially mutating operations, require-approval policy semantics for tier-based approval system, persistent confirmation storage for durable approval workflows, approval inbox access control for cross-session confirmation management, and enhanced model catalog discovery for runtime LLM model switching.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -1215,6 +1360,7 @@ The policy management system provides a robust, declarative framework for enforc
   - `policy:read`: Permission matrix access for all platform roles
   - `chat:confirm`: HITL confirmation approval for platform-admin, approver, operator, and developer roles
   - `models:list`: Model catalog discovery for all operational roles
+  - `approvals:list`: Approval inbox access for approver and platform-admin roles
   - **New**: `tools:mutate`: Mutating tool execution for platform-admin and operator roles only
   - **New**: Require-approval policy outcome with tier-based approval system for critical destructive actions
 
@@ -1236,6 +1382,8 @@ The policy management system provides a robust, declarative framework for enforc
 - [test_chat_confirm.py](file://products/platform-gateway/tests/test_chat_confirm.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
 - [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
+- [test_workspace_proxies.py](file://products/platform-gateway/tests/test_workspace_proxies.py)
+- [test_confirmation_records.py](file://products/agent-platform/tests/test_confirmation_records.py)
 - [policy.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/shared/tool-gateway/rbac.yaml)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
@@ -1469,6 +1617,99 @@ kubectl -n dev-luban-aiops logs deployment/platform-gateway --tail=50 | grep "ti
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [test_policy_engine.py](file://products/platform-gateway/tests/test_policy_engine.py)
 
+### Approval Inbox Troubleshooting
+
+**New Section** - Specific guidance for resolving approval inbox access and functionality issues.
+
+#### Common Symptoms
+- 403 Forbidden responses when accessing `/api/v1/approvals/inbox`
+- Empty approval inbox despite pending confirmations
+- Missing Approvals navigation in portal UI
+- Confirmation records not appearing in inbox history
+
+#### Diagnostic Steps
+```bash
+# Check platform-gateway logs for approvals:list denials
+kubectl -n dev-luban-aiops logs deployment/platform-gateway --tail=30 | grep "approvals:list"
+
+# Verify deployed policy bundle contains approvals:list rule
+kubectl -n dev-luban-aiops exec deployment/platform-gateway -- \
+  cat /etc/luban/policy/policy.yaml | grep -A6 allow-approvers-approvals-list
+
+# Check agent-platform logs for confirmation record store
+kubectl -n dev-luban-aiops logs deployment/agent-platform --tail=50 | grep "confirmation.*record"
+
+# Verify confirmation records exist
+kubectl -n dev-luban-aiops exec deployment/agent-platform -- \
+  python -c "from agent_service.services.confirmation_records import CONFIRMATION_RECORD_STORE; print(CONFIRMATION_RECORD_STORE.load_inbox())"
+```
+
+#### Resolution Steps
+1. **Verify User Roles**: Ensure user has approver or platform-admin role for `approvals:list` access
+2. **Check Policy Bundle**: Ensure `allow-approvers-approvals-list` rule is present and enabled
+3. **Validate Confirmation Records**: Verify confirmation records are being persisted to the store
+4. **Test Inbox Endpoint**: Direct curl test to verify endpoint functionality
+5. **Review Store Health**: Check confirmation record store initialization and backend availability
+
+#### Common Issues
+- **Insufficient Permissions**: Only approver and platform-admin roles can access the approval inbox
+- **Missing Confirmation Records**: Confirmation records may not be persisted if store backend is unavailable
+- **Expired History**: Confirmation history is limited to 30-day retention window
+- **Store Backend Issues**: Postgres backend failures fall back to in-memory store (records lost on restart)
+- **Metadata-Only Posture**: Inbox never exposes owner transcript text per SPEC-030 Q-1 requirements
+
+**Section sources**
+- [test_workspace_proxies.py](file://products/platform-gateway/tests/test_workspace_proxies.py)
+- [approvals.py](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
+- [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
+- [SPEC-031-approval-inbox-persistent-confirmation/spec.md](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/spec.md)
+
+### Persistent Confirmation Storage Troubleshooting
+
+**New Section** - Specific guidance for resolving persistent confirmation storage and durability issues.
+
+#### Common Symptoms
+- Confirmation cards disappearing after pod restart
+- Lost confirmation history after service restart
+- Confirmation records not persisting to Postgres
+- Stale pending confirmations not being cleaned up
+
+#### Diagnostic Steps
+```bash
+# Check agent-platform logs for confirmation store initialization
+kubectl -n dev-luban-aiops logs deployment/agent-platform --tail=50 | grep "confirmation.*store"
+
+# Verify Postgres backend configuration
+kubectl -n dev-luban-aiops get secret agent-platform-secrets -o yaml | grep AGENT_STATE_DB_URL
+
+# Check confirmation records table exists
+kubectl -n dev-luban-aiops exec deployment/agent-platform -- \
+  python -c "from agent_service.services.confirmation_records import CONFIRMATION_RECORD_STORE; print(CONFIRMATION_RECORD_STORE.is_ready())"
+
+# Verify table schema
+kubectl -n dev-luban-aiops exec -it <postgres-pod> -- psql -c "\\d confirmation_records"
+```
+
+#### Resolution Steps
+1. **Verify Backend Configuration**: Ensure `AGENT_STATE_STORE_BACKEND` and `AGENT_STATE_DB_URL` are properly configured
+2. **Check Database Connectivity**: Verify Postgres connection string and network accessibility
+3. **Validate Table Schema**: Ensure confirmation_records table exists with correct schema
+4. **Monitor Store Initialization**: Check for successful store initialization messages in logs
+5. **Test Persistence**: Create a test confirmation and verify it persists across restarts
+
+#### Common Issues
+- **Backend Fallback**: Postgres failures automatically fall back to in-memory store (no persistence)
+- **Connection Failures**: Network or authentication issues prevent Postgres connections
+- **Schema Mismatch**: Database schema may need migration if upgrading from older versions
+- **Stale Pending Records**: On startup, pending records from dead processes are marked as expired
+- **Retention Policy**: Old resolved records beyond 30-day window are opportunistically cleaned up
+
+**Section sources**
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
+- [test_confirmation_records.py](file://products/agent-platform/tests/test_confirmation_records.py)
+- [SPEC-031-approval-inbox-persistent-confirmation/spec.md](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/spec.md)
+
 ### Model Catalog Troubleshooting
 
 **New Section** - Specific guidance for resolving model catalog discovery and functionality issues.
@@ -1532,6 +1773,7 @@ The platform-gateway enforces policy for the following actions:
 - `tools:list`: List available tools
 - `skills:read`: View federated skills inventory
 - `models:list`: Discover available LLM models (SPEC-024)
+- `approvals:list`: Access approval inbox for cross-session confirmation management (SPEC-031)
 - **New**: `tools:mutate`: Execute mutating (write/admin risk) tools (SPEC-021)
 
 #### Tool Gateway Protected Actions
@@ -1555,6 +1797,7 @@ The tool-gateway enforces policy for:
 | tools:list | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
 | skills:read | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **models:list** | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
+| **approvals:list** | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ |
 | **tools:mutate** | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ |
 
 **Section sources**

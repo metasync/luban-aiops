@@ -1,6 +1,0 @@
-- Each product under `products/` is self-contained with a `src/<service>/` package exposing `app.py`, `main.py`, and `metadata.py`, plus a sibling `tests/` directory and a `Dockerfile`/`Makefile`/`pyproject.toml`.
-- Services follow a consistent internal layout with `api/` (routes + router), `core/` (config, metrics, observability, request_context, telemetry, runtime), `schemas/`, `services/`, and optional `policies/` or `tools/` subpackages.
-- Cross-product API contracts are defined as JSON Schema files under `shared/shared-contracts/schemas/` and consumed by multiple services rather than duplicated inline.
-- Policy configuration is centralized in `shared/shared-contracts/policies/policy-default.yaml` and synchronized to consumers via the `make sync-policy` target, which copies it into each product's `policies/policy-default.yaml` and the Kustomize base.
-- Versioning is single-sourced from the root `VERSION` file and enforced at build time by `make validate-version`, which checks that every product's declared version matches the platform version.
-- Container images use a coordinated tag scheme computed from `PLATFORM_VERSION`, `IMAGE_TAG_PREFIX`, and `IMAGE_TAG_PROFILE`, written once to `.images.env` and reused by both `build` and `deploy`.

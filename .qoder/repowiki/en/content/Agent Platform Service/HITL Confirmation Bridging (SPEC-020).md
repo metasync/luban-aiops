@@ -7,6 +7,7 @@
 - [tasks.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/tasks.md)
 - [release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-21-hitl-confirmation-bridging.md)
 - [multimodel-runtime-and-live-discovery.md](file://docs/agentic-aiops-platform/release-notes/2026-08-24-multimodel-runtime-and-live-discovery.md)
+- [approval-inbox-persistent-confirmation.md](file://docs/agentic-aiops-platform/release-notes/2026-08-25-approval-inbox-persistent-confirmation.md)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -17,6 +18,7 @@
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 - [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [approvals.py](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py)
 - [app.js](file://products/operator-portal/web-ui/app.js)
 - [styles.css](file://products/operator-portal/web-ui/styles.css)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
@@ -25,11 +27,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added persistent confirmation registry backed by Postgres via SPEC-031, ensuring parked calls and resolutions survive agent-platform pod restarts and are consistent across replicas
+- Enhanced with SPEC-031 persistent confirmation records backed by Postgres, ensuring parked calls and resolutions survive agent-platform pod restarts and are consistent across replicas
 - Implemented durable confirmation lifecycle records with bounded storage (50 per session, 30-day inbox history) and automatic cleanup of stale pending records on startup
-- Enhanced race-resilient resolution semantics for concurrent approvers with structured "already_resolved" responses instead of opaque errors
+- Added approval inbox API surface (`GET /api/v1/approvals/inbox`) enabling cross-session discovery for designated approvers with metadata-only exposure
 - Integrated confirmation record persistence into runtime kernel park/resume flow with best-effort degradation when Postgres is unavailable
-- Added approval inbox API surface and persistent card rendering in owner transcripts, enabling cross-session discovery for designated approvers
+- Enhanced race-resilient resolution semantics for concurrent approvers with structured "already_resolved" responses instead of opaque errors
+- Added persistent card rendering in owner transcripts, enabling cross-session visibility of parked and decided confirmations
 - Updated architecture to dual-store model: in-memory ConfirmationRegistry remains hot path for single-flight claim/resume, while Postgres-backed CONFIRMATION_RECORD_STORE provides durability and restart recovery
 
 ## Table of Contents
@@ -58,11 +61,14 @@ Key outcomes:
 - **Approval bridge**: New pending-confirmation endpoint provides authoritative state for tier enforcement decisions.
 - **Persistent state**: Confirmation records survive pod restarts and replica boundaries through Postgres-backed storage.
 - **Race resilience**: Concurrent approver attempts resolve to structured outcomes rather than errors.
+- **Cross-session discovery**: Designated approvers can discover and act on parked confirmations across sessions via approvals inbox.
+- **Owner transcript persistence**: Confirmed decisions persist in owner transcripts after re-login or pod restarts.
 
 **Section sources**
 - [spec.md:11-20](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md#L11-L20)
 - [release-notes.md:3-35](file://docs/agentic-aiops-platform/release-notes/2026-08-21-hitl-confirmation-bridging.md#L3-L35)
 - [multimodel-runtime-and-live-discovery.md:126-136](file://docs/agentic-aiops-platform/release-notes/2026-08-24-multimodel-runtime-and-live-discovery.md#L126-L136)
+- [approval-inbox-persistent-confirmation.md:6-51](file://docs/agentic-aiops-platform/release-notes/2026-08-25-approval-inbox-persistent-confirmation.md#L6-L51)
 - [spec.md:17-31](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md#L17-L31)
 - [spec.md:43-67](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/spec.md#L43-L67)
 
@@ -95,6 +101,7 @@ end
 subgraph "Operator Portal"
 PJ["web-ui/app.js"]
 PS["web-ui/styles.css"]
+AV["ApprovalsView.tsx"]
 end
 PG["PostgreSQL"]
 SC["shared/shared-contracts/schemas/*"]
@@ -112,6 +119,7 @@ R2 -.-> SC
 GS -.-> SC
 PJ -.-> SC
 TG -.-> TC
+AV -.-> AI
 ```
 
 **Diagram sources**
@@ -122,6 +130,7 @@ TG -.-> TC
 - [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
 - [gateway_service.py:336-446](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L336-L446)
 - [policy_engine.py:335-389](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L335-L389)
+- [approvals.py:19-51](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L19-L51)
 - [k8s_connector.py:439-518](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py#L439-L518)
 - [config.py:75-81](file://products/tool-gateway/src/tool_gateway/core/config.py#L75-L81)
 - [agent-stream-event.schema.json:1-96](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L1-L96)
@@ -140,18 +149,21 @@ TG -.-> TC
 - **Pending confirmation endpoint**: GET /api/v2/chat/pending-confirmation provides authoritative parked batch metadata including owner_user_id, derived policy action, and pending_calls with risk levels for gateway tier enforcement.
 - **Confirm proxy (platform gateway)**: POST /api/v1/chat/confirm enforces chat:confirm action, obtains delegated token, proxies to agent platform, emits confirmation_decided audit when kernel applies decision. **Enhanced**: Enforces tier-based approval requirements against decided_by_roles using pending confirmation data.
 - **Approvals inbox API**: GET /api/v1/approvals/inbox provides cross-session discovery for designated approvers with metadata-only items preserving owner scoping.
+- **Session detail confirmation cards**: GET /api/v2/sessions/{id} includes additive `confirmations` field with ordered records from durable store, enabling persistent card rendering in owner transcripts.
 - **Tiered Policy Engine**: Evaluates actions with deny > require_approval > allow precedence, returns ApprovalSpec with tier information for require_approval decisions.
 - **Risk-tier admission (tool gateway)**: Enforces tools:mutate policy action for write/admin tools, gates k8s.delete_pod behind GATEWAY_MUTATING_TOOLS_ENABLED flag.
-- **Portal card**: Renders confirmation_request as inline card with tier badges ("operator confirmation" vs "approver required"), tool names, parameters, and permission message; posts to gateway confirm and continues SSE stream after decision. **Enhanced**: Supports persistent card rendering from durable records.
+- **Portal card**: Renders confirmation_request as inline card with tier badges ("operator confirmation" vs "approver required"), tool names, parameters, and permission message; posts to gateway confirm and continues SSE stream after decision. **Enhanced**: Supports persistent card rendering from durable records and Approvals view for designated approvers.
 
 **Section sources**
 - [hitl_confirmations.py:34-208](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L34-L208)
 - [confirmation_records.py:114-565](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L114-L565)
 - [runtime_kernel.py:657-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L657-L794)
 - [routes.py:65-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L227)
+- [routes.py:578-601](file://products/agent-platform/src/agent_service/api/v2/routes.py#L578-L601)
 - [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
 - [gateway_service.py:336-446](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L336-L446)
 - [policy_engine.py:97-148](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L97-L148)
+- [approvals.py:19-51](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L19-L51)
 - [k8s_connector.py:439-518](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py#L439-L518)
 - [config.py:75-81](file://products/tool-gateway/src/tool_gateway/core/config.py#L75-L81)
 - [app.js:1697-1758](file://products/operator-portal/web-ui/app.js#L1697-L1758)
@@ -192,6 +204,10 @@ AP->>Reg : claim(session, confirm_id, timeout)
 alt Expired
 AP-->>Portal : 410 Gone
 else Unknown/Resolved
+AP->>Store : load_record(session, confirm_id)
+alt Already resolved
+AP-->>Portal : 409 already_resolved (structured outcome)
+else Unknown
 AP-->>Portal : 404 Not Found
 else Owner mismatch
 AP-->>Portal : Error frame
@@ -204,6 +220,7 @@ Store->>DB : UPDATE confirmation_records
 AP-->>Portal : SSE continuation (tool_call/tool_result/message_*)
 GW->>GW : Emit confirmation_decided audit on first confirmation_result
 end
+end
 ```
 
 **Diagram sources**
@@ -211,6 +228,7 @@ end
 - [runtime_kernel.py:1000-1060](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1000-L1060)
 - [confirmation_records.py:407-455](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L407-L455)
 - [routes.py:156-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L156-L227)
+- [routes.py:277-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L277-L294)
 - [gateway_service.py:336-446](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L336-L446)
 - [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
 - [policy_engine.py:335-389](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L335-L389)
@@ -375,12 +393,14 @@ Responsibilities:
 - Map errors: unknown/resolved -> 404, expired -> 410, owner mismatch -> error frame mid-stream.
 - Reject new turns on parked sessions with 409 until resolved or expired.
 - **Updated**: Uses degraded model resolution to handle evicted session pins gracefully and removed session ownership assertion for tier_2 approvers.
+- **Enhanced**: Returns structured 409 already_resolved response with winner's outcome for concurrent approver races.
 
 ```mermaid
 sequenceDiagram
 participant Client as "Gateway"
 participant Route as "POST /api/v2/chat/confirm"
 participant Reg as "ConfirmationRegistry"
+participant Store as "ConfirmationRecordStore"
 participant Kernel as "RuntimeKernel"
 Client->>Route : {session_id, confirm_id, decision}
 Route->>Route : get_session(owner check relaxed for tier_2)
@@ -390,6 +410,10 @@ alt Expired
 Route->>Kernel : expire_confirmation
 Route-->>Client : 410 Gone
 else Unknown/Resolved
+Route->>Store : load_record(session, confirm_id)
+alt Already resolved
+Route-->>Client : 409 already_resolved (structured outcome)
+else Unknown
 Route-->>Client : 404 Not Found
 else OK
 Route->>Kernel : resume_confirmation(pending, decision, bearer_token, model_id)
@@ -400,6 +424,7 @@ end
 
 **Diagram sources**
 - [routes.py:65-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L227)
+- [routes.py:277-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L277-L294)
 - [hitl_confirmations.py:101-199](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L101-L199)
 - [runtime_kernel.py:708-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L708-L794)
 
@@ -479,7 +504,7 @@ Decision -- Allow --> ExecuteTool["Execute mutating tool"]
 - [k8s_connector.py:439-518](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py#L439-L518)
 - [config.py:75-81](file://products/tool-gateway/src/tool_gateway/core/config.py#L75-L81)
 
-### Enhanced Operator Portal Confirmation Card
+### Enhanced Operator Portal Confirmation Card and Approvals View
 Responsibilities:
 - Render confirmation_request as inline card with tier badges and tool names, parameters, and permission message.
 - Hide Approve/Deny buttons for roles without chat:confirm (client-side convenience; server re-enforces).
@@ -487,6 +512,7 @@ Responsibilities:
 - Lock card status on confirmation_result or error; handle 410 as expired.
 - Display tier badges: "operator confirmation" for tier_1, "approver required" for tier_2 with decider roles.
 - **Enhanced**: Support persistent card rendering from durable records for owner transcripts and approvals inbox.
+- **New**: Approvals view for designated approvers with pending/history listing, badge count, and decision panel.
 
 ```mermaid
 flowchart TD
@@ -520,12 +546,15 @@ Normal --> Done
   - Confirm request schema binds session_id, confirm_id, decision.
   - Policy bundle adds tools:mutate action granted to platform-admin and operator roles; observer excluded.
   - **Enhanced**: Policy engine adds require_approval outcome with ApprovalSpec containing tier, decided_by_roles, and allow_self_approval.
+  - **New**: Session schema includes additive `confirmations` field for persistent card rendering.
 - Services:
   - Agent platform depends on runtime kernel and registry for park/resume semantics with risk tracking.
   - **Enhanced**: Agent platform now depends on durable confirmation records store for persistence with best-effort degradation.
   - Platform gateway depends on policy engine, delegation client, and agent client for proxying and audit.
+  - **New**: Platform gateway includes approvals inbox route with `approvals:list` policy enforcement.
   - Tool gateway depends on policy engine for tools:mutate enforcement and configuration management.
   - Portal depends on SSE parser and styles for card rendering with tier badges.
+  - **New**: Portal includes ApprovalsView component for designated approvers.
 
 ```mermaid
 graph LR
@@ -535,6 +564,7 @@ POLICY["policy-default.yaml"] --> GWSVC["services/gateway_service.py"]
 POLICY --> TGSVC["tool-gateway services"]
 POLICY --> PE["services/policy_engine.py"]
 GWSVC --> CHATROUTE["api/routes/chat.py"]
+GWSVC --> APPROVALSROUTE["api/routes/approvals.py"]
 ROUTES --> KERNEL["runtime_kernel.py"]
 KERNEL --> REGISTRY["hitl_confirmations.py"]
 KERNEL --> RECORDS["confirmation_records.py"]
@@ -553,6 +583,7 @@ PE --> DECISION["PolicyDecision with ApprovalSpec"]
 - [routes.py:230-320](file://products/agent-platform/src/agent_service/api/v2/routes.py#L230-L320)
 - [gateway_service.py:336-446](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L336-L446)
 - [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
+- [approvals.py:19-51](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L19-L51)
 - [runtime_kernel.py:657-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L657-L794)
 - [hitl_confirmations.py:85-208](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L85-L208)
 - [confirmation_records.py:214-565](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L214-L565)
@@ -578,8 +609,7 @@ PE --> DECISION["PolicyDecision with ApprovalSpec"]
 - **Dual-store pattern**: In-memory registry remains hot path for performance-critical claim/resume operations, while Postgres store provides durability with best-effort persistence that doesn't block core flows.
 - **Bounded storage**: Confirmation records use session-scoped caps (50 per session) and time-window based inbox history (30 days) to prevent unbounded growth.
 - **Opportunistic cleanup**: Stale record cleanup and old resolved record sweeping piggyback on write operations to minimize background overhead.
-
-[No sources needed since this section provides general guidance]
+- **Metadata-only inbox**: Cross-session discovery exposes only metadata fields, preserving owner privacy and reducing data transfer costs.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -598,6 +628,9 @@ Common issues and resolutions:
 - **Persistent confirmation not visible**: Check if Postgres backend is available; confirmation records fall back to in-memory when Postgres is unreachable.
 - **Concurrent approver conflicts**: Multiple approvers attempting the same confirmation will receive structured "already_resolved" responses instead of errors.
 - **Expired cards appearing**: Stale pending records are marked as expired on startup since parked kernel replies cannot survive process restarts.
+- **Approvals inbox not accessible**: Verify user has `approvals:list` permission; only `approver` and `platform-admin` roles can access the inbox.
+- **Owner transcript missing cards**: Check if session detail includes `confirmations` field; cards should appear even after re-login or pod restart.
+- **Race condition confusion**: Structured 409 responses include winner's outcome; losing approvers can see who decided and when.
 
 Operational checks:
 - Verify AGENT_HITL_CONFIRM_TIMEOUT > 0 to enable bridging; set to 0 to restore legacy silent-park behavior.
@@ -612,12 +645,16 @@ Operational checks:
 - **Verify Postgres connectivity**: Check AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL configuration for confirmation record persistence.
 - **Monitor confirmation record store**: Use confirmation record store is_ready() method to verify Postgres availability.
 - **Check for stale pending records**: After pod restarts, verify that any orphaned pending records were properly marked as expired.
+- **Test approvals inbox**: Verify GET /api/v1/approvals/inbox returns metadata-only items for authorized approvers.
+- **Validate owner transcript cards**: Check GET /api/v2/sessions/{id} includes confirmations field with persistent card data.
 
 **Section sources**
 - [routes.py:65-94](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L94)
 - [routes.py:156-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L156-L227)
-- [routes.py:298-325](file://products/agent-platform/src/agent_service/api/v2/routes.py#L298-L325)
+- [routes.py:277-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L277-L294)
+- [routes.py:578-601](file://products/agent-platform/src/agent_service/api/v2/routes.py#L578-L601)
 - [gateway_service.py:336-396](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L336-L396)
+- [approvals.py:19-51](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L19-L51)
 - [policy-default.yaml:42-54](file://shared/shared-contracts/policies/policy-default.yaml#L42-L54)
 - [policy-default.yaml:113-135](file://shared/shared-contracts/policies/policy-default.yaml#L113-L135)
 - [config.py:75-81](file://products/tool-gateway/src/tool_gateway/core/config.py#L75-L81)
@@ -639,5 +676,9 @@ The integration provides a five-layer security model: deny-by-default policy bun
 **New Capability**: The addition of the pending-confirmation endpoint, RISK_LEVEL_ACTIONS mapping, and approvals inbox enables sophisticated approval workflows where the platform gateway can make informed tier enforcement decisions based on authoritative parked batch metadata, including the original session owner and derived policy actions from tool risk levels.
 
 **New Capability**: Race-resilient resolution semantics ensure that concurrent approver attempts resolve exactly once with structured outcomes, preventing duplicate executions while providing clear feedback to all participants about the final decision and who made it.
+
+**New Capability**: The approvals inbox provides cross-session discovery for designated approvers with metadata-only exposure, enabling operators to manage parked confirmations across multiple sessions without exposing owner transcript content.
+
+**New Capability**: Persistent confirmation cards in owner transcripts survive re-login, page reloads, pod restarts, and replica boundaries, providing complete auditability of approval workflows with decider attribution and timestamps.
 
 [No sources needed since this section summarizes without analyzing specific files]

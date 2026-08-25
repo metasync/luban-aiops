@@ -1,1 +1,0 @@
-Python services managed with `uv` (pinning interpreter via `.python-version`), FastAPI-style HTTP services packaged into Docker images built from a shared `base-uv` image; Kubernetes deployment via Kustomize overlays under `shared/platform-ops/gitops`; end-to-end testing against a kind cluster; policy enforcement via YAML policies validated against a shared schema.

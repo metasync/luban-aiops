@@ -1,0 +1,6 @@
+- Each product follows a uniform internal layout: `src/<service_name>/` split into `api/` (routes + router), `core/` (config, metrics, observability, request context, telemetry, runtime), `schemas/`, `services/`, plus top-level `app.py`, `main.py`, and `metadata.py`.
+- Every Python product ships its own `Dockerfile`, `Makefile`, `pyproject.toml`, `uv.lock`, and `tests/` directory so it can be built, tested, and released independently.
+- Cross-product API and event shapes are declared once as JSON Schema files under `shared/shared-contracts/schemas/` and validated at build time rather than imported as code.
+- Policy decisions are centralized in a canonical YAML bundle under `shared/shared-contracts/policies/` and copied into each consuming product via `make sync-policy`.
+- Build artifacts use a coordinated semver tag computed from the root `VERSION` file, applied uniformly across all product images and persisted in `.images.env` for the deploy step.
+- Per-product Makefiles delegate to shared fragments in `mk/` (`defaults.mk`, `image.mk`, `python.mk`) so lint, test, and image targets stay consistent across services.

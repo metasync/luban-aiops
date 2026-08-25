@@ -1,6 +1,0 @@
-- Every spec directory follows the fixed triple-file layout of `spec.md`, `plan.md`, and `tasks.md` derived from the shared templates.
-- Specs use sequential numeric IDs (`SPEC-001`, `SPEC-002`, ...) with kebab-case slugs and stable per-spec requirement IDs (`R-1`, `R-2`, ...) once approved.
-- Each spec carries a Status header with fields for status, owner, created date, release slice, and related ADRs, and progresses through the defined lifecycle states without rewriting delivered specs.
-- Requirements include testable acceptance criteria and are linked to tasks so delivery is traceable from requirement to code change.
-- Cross-cutting changes explicitly declare Impact sections listing products touched, contracts modified, identity/policy/audit/execution safety impact, and living-state docs to update on delivery.
-- Later specs document their relationship to earlier work by stating which prior spec(s) they extend, keeping dependency chains visible in prose.
