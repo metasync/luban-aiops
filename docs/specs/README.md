@@ -146,3 +146,4 @@ Mechanical enforcement:
 | `SPEC-030` | Require-approval policy semantics — `require_approval` as a first-class policy outcome in both engines, approver-gated confirmation bridge with self-approval blocking, matrix/audit transparency, Settings view restored as a read-only Session & Identity panel (extends SPEC-004/019/020/021) | `delivered` |
 | `SPEC-031` | Approval inbox and persistent confirmation cards — durable confirmation records, owner-side cards surviving re-login, decider-scoped approvals inbox with history, race-resilient `already_resolved` semantics (extends SPEC-020/022/030) | `delivered` |
 | `SPEC-032` | Owner-side live decision sync — poll-while-pending chat view surfaces external decisions and the resumed turn without refresh (extends SPEC-031) | `delivered` |
+| `SPEC-033` | Confirmation card turn anchoring — parked records persist their turn ordinal and seeded cards anchor under the exchange that parked them (extends SPEC-031) | `draft` |
