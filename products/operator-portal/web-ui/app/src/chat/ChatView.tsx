@@ -40,6 +40,7 @@ import {
 import { renderMarkdown } from "./markdown";
 import { ComposerSelectionBar } from "./ComposerSelectionBar";
 import { transcriptToTurns } from "./transcript";
+import { usePendingDecisionPoll } from "./usePendingDecisionPoll";
 import {
   VOICE_LANGUAGES,
   loadVoiceLanguage,
@@ -713,6 +714,29 @@ export default function ChatView({
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId, setSession]);
+
+  // SPEC-032: owner-side live decision sync. While a confirmation card is
+  // pending, a decision can land from elsewhere (the approver inbox,
+  // another browser session) and the confirmation_result frame only rides
+  // the answering stream; a bounded poll re-seeds the timeline through the
+  // same transcriptToTurns path the initial load uses, so the decided card
+  // and the resumed turn appear without a manual refresh.
+  usePendingDecisionPoll({
+    sessionId: chat.sessionId,
+    turns: chat.turns,
+    streaming: chat.streaming,
+    applyDetail: (detail) => {
+      if (!chat.sessionId) return;
+      setSession(
+        chat.sessionId,
+        transcriptToTurns(
+          detail.transcript ?? [],
+          detail.evidence_turns,
+          detail.confirmations,
+        ),
+      );
+    },
+  });
 
   // The stream reports server-assigned session ids; keep the workspace
   // pointer and the panel list in sync.

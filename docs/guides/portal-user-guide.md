@@ -127,6 +127,11 @@ tools with collapsible parameters.
 - Cards are durable (SPEC-031): they survive a re-login or page reload and
   stay in the transcript after a decision. Decided cards render read-only
   with who decided and when; pending cards stay actionable.
+- External decisions sync live (SPEC-032): while a card is pending, the
+  chat watches the session state and flips the card — with the decider's
+  attribution and the agent's resumed reply — within seconds of an approval
+  or denial made from the Approvals inbox or another window. No refresh is
+  needed; the watch stops by itself once nothing is pending.
 
 The full four-layer model (policy bundle, risk tiers, auto-allow, HITL) is
 in [Approval and HITL Governance](approval-and-hitl.md).

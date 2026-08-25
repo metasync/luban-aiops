@@ -224,7 +224,12 @@ the record store:
 - **Owner transcript cards.** The session detail carries an additive
   `confirmations` array, so a card survives re-login, pod restarts, and
   replica boundaries. Decided cards render read-only with decider
-  attribution; pending cards stay actionable in the chat.
+  attribution; pending cards stay actionable in the chat. While a card is
+  pending, the owner's open chat view polls the session detail on a short,
+  bounded interval (SPEC-032), so a decision made from the inbox or another
+  window flips the card and surfaces the resumed turn without a refresh —
+  the resolution frame only rides the answering stream, and this poll is
+  the owner's sync path for every other decision.
 - **Approver inbox.** `GET /api/v1/approvals/inbox` (portal Approvals view,
   decider roles only) lists pending confirmations across all sessions plus
   decisions from the last 30 days, most recent first. Items are

@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-25
 - release slice: R4 — Approval-Gated Bounded Actions
@@ -117,3 +117,7 @@ Acceptance criteria:
 
 - 2026-08-25: created as `draft`, drafted directly from the v0.13.1 live
   validation finding (owner window deaf to external decisions).
+- 2026-08-25: delivered in the 0.14.0 train — `usePendingDecisionPoll`
+  (5s change-gated poll, settle window, stream/idle teardown) wired into
+  `ChatView` through the existing `transcriptToTurns` seeding path;
+  portal-only, 9 hook tests added (124 portal tests green, tsc clean).
