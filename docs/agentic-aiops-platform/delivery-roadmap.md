@@ -308,6 +308,7 @@ promotion; until then they stay here.
 | Require-approval policy semantics | Delivered 2026-08-25 (0.12.0) as `SPEC-030-require-approval-policy-semantics`: `require_approval` becomes a first-class, enforced policy outcome with approval tiers — `tier_1` session-operator self-confirmation and `tier_2` designated-approver with self-approval blocked — evaluated in both gateway engines (deny > require_approval > allow) and bridged onto `chat:confirm` with structured 403s, blocked-attempt audit, and fail-closed parked-info fetch. The default bundle ships a `tier_2` rule on `tools:mutate` (decided by `approver` / `platform-admin`), the live matrix gains an additive `approval_requirements` third cell state, confirmation cards gain tier badges with read-only rendering for non-deciders, and the portal Settings view is restored as an extensible read-only Session & Identity panel (add-on R-6). | `docs/specs/SPEC-030-require-approval-policy-semantics/` |
 | In-portal help & onboarding | Spiked 2026-08-25 from the 2026-08-25 code/doc review (finding D6): tiered scope and a measurement plan are recorded in `docs/workspace/portal-help-onboarding-spike.md` — guide links (option A) are the cheap floor and prerequisite, the antd first-run tour (option B) follows on real onboarding friction, contextual hints and an in-app guide renderer stay deferred/rejected. The Settings view restoration (read-only Session & identity panel) was moved forward into SPEC-030 as add-on R-6 (memo addendum). Promote on the first onboarding friction signal, not before. | portal enhancement spec |
 | Shared-package extraction of duplicated service modules | Spiked 2026-08-25 from the 2026-08-25 code/doc review (finding M1): copy-with-parity retained — the memo (`docs/workspace/shared-sdk-extraction-spike.md`) measures the five parity families (~400 unique lines) against packaging, seven-lockfile ripple, and image-build coupling, rejects a `make sync` generator, and records three revisit triggers (sixth family / five copies of one family, 3+ behavioral changes to one family per quarter, shared-sdk needed for another reason). | own spec; revisit on the recorded triggers |
+| Approval inbox and persistent confirmation cards | Drafted 2026-08-25 as `SPEC-031-approval-inbox-persistent-confirmation` directly from the SPEC-030 live-cluster validation (approver has no portal surface to discover parked sessions; confirmation cards vanish on re-login because transcripts reconstruct chat text only; concurrent-approver races answer with an opaque error). No spike memo — the evidence base is the live validation itself plus code-confirmed root causes. | `docs/specs/SPEC-031-approval-inbox-persistent-confirmation/` |
 
 Promotion rule: a spike lands its findings as a short memo (workspace docs);
 only then does the item get a SPEC number. SPEC-018 (kernel middleware
@@ -317,7 +318,10 @@ SPEC-020 (HITL confirmation bridging) was promoted from this backlog on
 2026-08-21 after its spike memo landed. SPEC-030 (require-approval policy
 semantics) was drafted on 2026-08-25 from its spike memo, promoted from the
 "next R4 slice" marker on the bounded-mutating-actions row, and delivered
-the same day in the 0.12.0 train.
+the same day in the 0.12.0 train. SPEC-031 (approval inbox and persistent
+confirmation cards) was drafted on 2026-08-25 directly from the SPEC-030
+live-cluster validation findings — a deliberate departure from the
+memo-first rule, since the validation itself supplied the evidence base.
 
 ## Validation Model Per Release
 
