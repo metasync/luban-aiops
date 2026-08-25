@@ -1,15 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/policy-decision.schema.json",
-  "title": "Policy Decision (v1)",
-  "description": "Decision object returned by policy evaluation. Matches the Tier-1 minimum decision response (docs/agentic-aiops-platform/policy-specification.md). approval_tier and conditions are reserved for a future schema revision.",
+  "title": "Policy Decision (v2)",
+  "description": "Decision object returned by policy evaluation. Matches the Tier-1 minimum decision response (docs/agentic-aiops-platform/policy-specification.md). v2 (SPEC-030) adds the require_approval outcome and activates the previously reserved approval_tier field; the optional approval object mirrors the winning rule's approval block so callers never re-read the bundle. conditions remains reserved for a future schema revision.",
   "type": "object",
   "required": ["decision", "matched_rule_ids", "reason"],
   "properties": {
     "decision": {
       "type": "string",
-      "enum": ["allow", "deny"],
-      "description": "Final outcome. deny is the default when no rule matches."
+      "enum": ["allow", "deny", "require_approval"],
+      "description": "Final outcome. deny is the default when no rule matches. require_approval means the action is allowed only through the tiered confirmation flow; approval_tier carries the winning rule's level."
     },
     "matched_rule_ids": {
       "type": "array",
@@ -27,6 +27,32 @@
     "subject": {
       "type": "string",
       "description": "The principal subject the decision applies to."
+    },
+    "approval_tier": {
+      "type": "string",
+      "enum": ["tier_1", "tier_2"],
+      "description": "Activated in v2 (SPEC-030): the winning require_approval rule's tier. Present only when decision is require_approval."
+    },
+    "approval": {
+      "type": "object",
+      "description": "Mirror of the winning rule's approval block so callers never re-read the bundle. Present only when decision is require_approval.",
+      "required": ["tier", "decided_by_roles"],
+      "properties": {
+        "tier": {
+          "type": "string",
+          "enum": ["tier_1", "tier_2"]
+        },
+        "decided_by_roles": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1
+        },
+        "allow_self_approval": {
+          "type": "boolean",
+          "description": "Optional override of the tier default; absent means the tier default applies (tier_1 allows, tier_2 forbids)."
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

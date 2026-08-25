@@ -613,9 +613,13 @@ require `tools:mutate`, granted by default only to `platform-admin` and
 kubectl -n dev-luban-aiops logs deployment/tool-gateway --tail=200 \
   | grep "mutating tool invocation denied"
 
-# Live matrix: check the caller's role against tools:mutate
+# Live matrix: check the caller's role against tools:mutate. Since
+# SPEC-030 the default bundle answers require_approval on tools:mutate,
+# so the boolean cell reads false for everyone — the approval requirement
+# (tier and decider roles) rides the additive approval_requirements map.
 curl -s -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:18000/api/v1/policy/matrix | jq '.matrix["operator"]["tools:mutate"]'
+  http://127.0.0.1:18000/api/v1/policy/matrix \
+  | jq '.matrix["operator"]["tools:mutate"], .approval_requirements["operator"]["tools:mutate"]'
 ```
 
 **Resolution:**
@@ -624,6 +628,35 @@ curl -s -H "Authorization: Bearer $TOKEN" \
   `read-only-observer`. Extending the grant is a deliberate policy-bundle
   edit — see the
   [Approval and HITL Governance Guide](approval-and-hitl.md#defining-approval-requirements-today).
+
+## Symptom: Confirming a parked mutating call returns 403
+
+**Most likely cause:** The default bundle puts `tools:mutate` under a
+`tier_2` approval requirement (SPEC-030): only designated approvers
+(`approver`, `platform-admin`) may approve, and the requester cannot
+approve their own parked call. The gateway bridge rejects both with a
+structured 403 naming the reason (`not_a_designated_approver` or
+`self_approval`); the parked call stays parked.
+
+**Diagnostic:**
+
+```bash
+# The blocked attempt is audited as confirmation_decided with blocked=true
+kubectl -n dev-luban-aiops logs deployment/platform-gateway --tail=200 \
+  | grep confirmation_decided
+
+# The parked batch's action and owner are inspectable without deciding
+# (agent-platform v2 surface; port-forward service/agent-service first)
+kubectl -n dev-luban-aiops port-forward service/agent-service 18000:8000
+curl -s -H "X-User-ID: $USER" \
+  "http://127.0.0.1:18000/api/v2/chat/pending-confirmation?session_id=<session_id>" | jq
+```
+
+**Resolution:**
+
+- Have a different user holding a designated decider role approve the
+  parked call; deny stays open to any `chat:confirm` holder, so the
+  requester can always cancel their own parked call.
 
 ## Symptom: Agent proposes an action but no confirmation card appears
 

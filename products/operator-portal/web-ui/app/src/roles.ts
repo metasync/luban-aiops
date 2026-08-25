@@ -28,6 +28,12 @@ export const CHAT_CONFIRM_ROLES = new Set([
   "developer",
 ]);
 
+// SPEC-030 R-5: parked batches whose highest action is tools:mutate are
+// tier_2 approvals decided by designated approvers. Display hint only —
+// the gateway approval-tier bridge stays authoritative and 403s anyway;
+// mirror of the shipped bundle's decided_by_roles.
+export const APPROVAL_DECIDER_ROLES = new Set(["approver", "platform-admin"]);
+
 export function hasAnyRole(roles: string[], allowed: Set<string>): boolean {
   return roles.some((role) => allowed.has(role));
 }

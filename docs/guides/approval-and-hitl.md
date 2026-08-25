@@ -2,7 +2,7 @@
 
 How tool execution is approved on the Luban AIOps platform: which layers decide,
 how to manage them, and where the model is heading. Written for operators and
-platform administrators (SPEC-021).
+platform administrators (SPEC-021, approval tiers per SPEC-030).
 
 ## Overview
 
@@ -77,11 +77,14 @@ There is no configuration path that auto-runs a mutating tool.
 - **What it does:** a non-auto-approved tool call parks the reply, surfaces a
   confirmation card (with a visible `mutating` badge when any parked call is
   non-read), and executes only after an explicit approve. Deny and expiry feed a
-  refusal/interrupt back to the agent; nothing runs silently.
-- **What it does NOT protect against:** it confirms the *session owner's* intent —
-  see the v1 caveat below. It also does not replace the gateway gates: an approved
-  call is still checked against `tools:mutate` and RBAC when it reaches the
-  tool-gateway.
+  refusal/interrupt back to the agent; nothing runs silently. Since SPEC-030 the
+  card also carries an approval-tier badge, and the gateway bridge enforces who
+  may decide: batches parked under a `require_approval` rule may need a
+  designated approver distinct from the requester (see the approval-tier
+  section below).
+- **What it does NOT protect against:** it does not replace the gateway gates:
+  an approved call is still checked against `tools:mutate` and RBAC when it
+  reaches the tool-gateway.
 
 ## Managing the Auto-Allow List
 
@@ -164,6 +167,46 @@ Note the deliberate asymmetry: `chat:confirm` gates the *decision*, while
 `tools:mutate` gates the *execution*. An `approver` can confirm a card but cannot
 execute the tool themselves; an `operator` can do both.
 
+### Approval tiers: `require_approval` on the confirm path (SPEC-030)
+
+`require_approval` is now a first-class policy outcome on the confirm path,
+with two tiers:
+
+- **`tier_1` — operator confirmation.** The session operator confirms their
+  own parked card (destructive-but-routine actions). This is the default
+  behavior for parked calls with no `require_approval` rule.
+- **`tier_2` — designated approver.** Only roles named in `decided_by_roles`
+  may approve, and self-approval is blocked by default: the requester cannot
+  approve their own parked call. Deny stays open to every `chat:confirm`
+  holder, so a requester can always cancel their own parked call.
+
+The shipped bundle rule is `require-approval-tools-mutate`:
+
+```yaml
+- id: require-approval-tools-mutate
+  domain: action_authz
+  description: Mutating tool execution requires tier-2 approval by a designated approver distinct from the requester.
+  priority: 200
+  enabled: true
+  match:
+    roles_any: ["platform-admin", "approver", "operator", "developer"]
+    actions_any: ["tools:mutate"]
+  decision:
+    outcome: require_approval
+    approval:
+      tier: tier_2
+      decided_by_roles: ["approver", "platform-admin"]
+```
+
+The gateway enforces the tier on `POST /api/v1/chat/confirm`: non-deciders and
+self-approvals receive a structured 403 naming the reason
+(`not_a_designated_approver` / `self_approval`), the attempt is audited as a
+blocked `confirmation_decided`, and the parked call stays parked. Author a
+`tier_1` rule the same way (`tier: tier_1`, omit `decided_by_roles`) for
+destructive-but-routine actions added later; `require_approval` rules are only
+valid on bridged actions (`tools:mutate` today) — the engine rejects others at
+bundle load.
+
 ### Voice-readiness: modality is never privilege (SPEC-022 R-2, SPEC-023 R-4)
 
 Chat requests may carry an optional `input_modality` (`text` | `voice`,
@@ -196,10 +239,10 @@ Today's layers map onto the Tier-1
 [Policy specification](../agentic-aiops-platform/policy-specification.md) as
 follows:
 
-| Today (SPEC-020/SPEC-021) | Tomorrow (policy specification) |
+| Today (SPEC-020/SPEC-021/SPEC-030) | Tomorrow (policy specification) |
 |---|---|
 | Bundle `allow`/`deny` per action | `allow` / `deny` outcomes, unchanged |
-| HITL confirmation (kernel ASK park) | `require_approval` as a first-class policy outcome with an approval queue |
+| HITL confirmation (kernel ASK park) with `require_approval` tiers on the confirm path | `require_approval` with a dedicated approval queue, persistence, and notification surfaces (policy-center) |
 | Risk-tier gate + activation flags | `allow_with_conditions` (ticket reference, change window, environment scope) |
 
 Two extraction targets already exist as boundary stubs:
@@ -210,30 +253,34 @@ Two extraction targets already exist as boundary stubs:
 
 **Kernel ASK confirmation and policy-level approval are different layers.** The
 HITL confirmation card answers "does the session owner want the agent to run this
-call now?" at the kernel. Policy-level approval will answer "is this class of
-action approved for this role in this environment, by a possibly different person,
-with attached conditions?" at the policy engine. The former exists today; the
-latter arrives with the policy-center slice. The guide will be updated when they
-merge into one approval surface.
+call now?" at the kernel. Policy-level approval answers "is this class of action
+approved for this role in this environment, by a possibly different person?" at
+the policy engine. Since SPEC-030 the two meet on the confirm path: the gateway
+bridge evaluates the parked batch's policy action and enforces `tier_1` /
+`tier_2` approval requirements before the kernel resumes. The queue, persistence,
+notification surfaces, and condition-bearing approvals still arrive with the
+policy-center slice.
 
 ## Role Guidance and Caveats
 
 | Role | `tools:mutate` | `chat:confirm` | Guidance |
 |---|---|---|---|
-| `platform-admin` | granted | granted | Full execution capability; prefer a separate operational role for day-to-day work |
-| `operator` | granted | granted | Execution role — matches the authorization matrix's `restart-service` example |
-| `approver` | denied | granted | Approve-only: can decide on cards without execution rights |
-| `developer` | denied | granted | Can confirm cards; execution stays with operators |
+| `platform-admin` | granted | granted | Full execution capability; also a designated tier_2 approver — prefer a separate operational role for day-to-day work |
+| `operator` | granted | granted | Execution role — matches the authorization matrix's `restart-service` example; cannot self-approve tier_2 batches |
+| `approver` | denied | granted | Approve-only designated approver: decides tier_2 cards without execution rights |
+| `developer` | denied | granted | Can confirm tier_1 cards; tier_2 approvals need a designated approver |
 | `read-only-observer` | denied | denied | Observation only; confirming is an act-on-the-system action |
 | `auditor` | denied | denied | Read the trail; `confirmation_decided` + `tool_invoked` events carry the full chain |
 
-**v1 caveat — self-confirmation.** The confirmer is the session owner: the same
-user whose chat turn proposed the action approves it. The confirmer's identity
-rides the delegated token into the invocation and the audit trail, so the act is
-attributable, but there is no separation of duties yet. Two-person rules,
-self-approval prevention, and approval queues belong to the policy-center slice;
-until then, treat `k8s.delete_pod` as a bounded, reversible-by-controller
-diagnostic action and rely on review of the `confirmation_decided` audit events.
+**Separation of duties (SPEC-030).** With the shipped `tier_2` rule on
+`tools:mutate`, the user whose chat turn parked a mutating batch cannot approve
+it — a designated approver (`approver` or `platform-admin`) must. The
+confirmer's identity rides the delegated token into the invocation and the audit
+trail, blocked attempts included (`confirmation_decided` with `blocked: true`),
+so every decision is attributable. Approval queues, tier 3 governance, and
+condition-bearing approvals belong to the policy-center slice; until then,
+treat `k8s.delete_pod` as a bounded, reversible-by-controller diagnostic action
+and rely on review of the `confirmation_decided` audit events.
 
 ## Related Documentation
 

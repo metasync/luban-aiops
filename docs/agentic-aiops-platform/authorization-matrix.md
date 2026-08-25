@@ -355,7 +355,17 @@ the lifecycle actions share one posture across all chat-capable roles and
 credential-gated LLM model catalog), granted exactly where `chat` is
 granted — including `read-only-observer` — because discovery is safe by
 construction: the payload carries only id/label/provider/default and never
-credentials or base URLs. The full approval model —
+credentials or base URLs. SPEC-030 activates this matrix's approval tiers as
+policy data: `require_approval` is a first-class bundle outcome with `tier_1`
+(session-operator self-confirmation, this matrix's `request-and-approve`)
+and `tier_2` (designated-approver with self-approval blocked, this matrix's
+`request-only` + `approve-only` separation), enforced by platform-gateway on
+the `chat:confirm` path — the shipped default bundle puts `tools:mutate`
+under a `tier_2` rule decided by `approver` and `platform-admin`. The live
+matrix exposes the requirement as an additive third cell state
+(`approval_requirements`, with the tier and decider roles) alongside the
+boolean cells, and blocked approval attempts are recorded as
+`confirmation_decided` audit events. The full approval model —
 policy actions, risk-tier admission, the agent auto-allow list, and HITL
 confirmation — is documented in the
 [Approval and HITL Governance Guide](../guides/approval-and-hitl.md).

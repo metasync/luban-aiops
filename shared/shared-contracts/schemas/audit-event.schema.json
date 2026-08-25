@@ -76,7 +76,7 @@
     },
     "details": {
       "type": "object",
-      "description": "Per-event-type payload. tool_invoked: tool_name, status, duration_ms, redacted_spans. policy_decision: action, decision, reason. token_exchange: audience, reason (rejections). session_created / session_deleted / chat_started / chat_completed: session-scoped metadata. confirmation_decided: session_id, confirm_id, tool_names, decision. incident_triaged: incident envelope, severity_assessment, report_summary, next_steps titles, skills_cited. skill_searched: query, limit, result_count, skill_ids, optional source/tag filters. skill_retrieved: skill_id, source (hits) or reason (misses). skills_synced: source_id, source_type, ref, accepted, rejected (success) or error (failures).",
+      "description": "Per-event-type payload. tool_invoked: tool_name, status, duration_ms, redacted_spans. policy_decision: action, decision, reason. token_exchange: audience, reason (rejections). session_created / session_deleted / chat_started / chat_completed: session-scoped metadata. confirmation_decided: session_id, confirm_id, tool_names, decision; approval_rule_id and approval_tier when the batch matched a require_approval rule (SPEC-030); tier-blocked approval attempts carry outcome deny with blocked=true and blocked_reason (not_a_designated_approver or self_approval). incident_triaged: incident envelope, severity_assessment, report_summary, next_steps titles, skills_cited. skill_searched: query, limit, result_count, skill_ids, optional source/tag filters. skill_retrieved: skill_id, source (hits) or reason (misses). skills_synced: source_id, source_type, ref, accepted, rejected (success) or error (failures).",
       "additionalProperties": true
     }
   },

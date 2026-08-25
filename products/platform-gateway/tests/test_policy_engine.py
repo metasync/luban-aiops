@@ -252,5 +252,250 @@ class ContractAlignmentTests(unittest.TestCase):
         )
 
 
+class RequireApprovalSemanticsTests(unittest.TestCase):
+    """SPEC-030 R-2: deny > require_approval > allow, priority, disabled."""
+
+    def setUp(self) -> None:
+        reset_policy_state()
+        self.bundle_path = Path(self.id().split(".")[-1] + "-bundle.yaml")
+
+    def tearDown(self) -> None:
+        reset_policy_state()
+        self.bundle_path.unlink(missing_ok=True)
+
+    def _write_bundle(self, rules: list[dict]) -> PlatformGatewaySettings:
+        self.bundle_path.write_text(
+            yaml.safe_dump({"version": 1, "rules": rules}), encoding="utf-8"
+        )
+        return _settings(policy_path=str(self.bundle_path))
+
+    @staticmethod
+    def _approval_rule(
+        rule_id: str,
+        *,
+        priority: int = 100,
+        enabled: bool = True,
+        tier: str = "tier_2",
+        deciders: list[str] | None = None,
+        allow_self_approval: bool | None = None,
+        roles: list[str] | None = None,
+    ) -> dict:
+        approval: dict = {
+            "tier": tier,
+            "decided_by_roles": deciders or ["approver", "platform-admin"],
+        }
+        if allow_self_approval is not None:
+            approval["allow_self_approval"] = allow_self_approval
+        return {
+            "id": rule_id,
+            "domain": "action_authz",
+            "description": rule_id,
+            "priority": priority,
+            "enabled": enabled,
+            "match": {
+                "roles_any": roles or ["operator"],
+                "actions_any": ["tools:mutate"],
+            },
+            "decision": {"outcome": "require_approval", "approval": approval},
+        }
+
+    @staticmethod
+    def _allow_rule(rule_id: str, action: str = "tools:mutate") -> dict:
+        return {
+            "id": rule_id,
+            "domain": "action_authz",
+            "description": rule_id,
+            "priority": 100,
+            "enabled": True,
+            "match": {"roles_any": ["operator"], "actions_any": [action]},
+            "decision": {"outcome": "allow"},
+        }
+
+    def test_require_approval_overrides_allow(self) -> None:
+        settings = self._write_bundle(
+            [self._allow_rule("allow-mutate"), self._approval_rule("approve-mutate")]
+        )
+        decision = evaluate(settings, ["operator"], "tools:mutate")
+        self.assertEqual(decision.decision, "require_approval")
+        self.assertEqual(decision.matched_rule_ids, ["approve-mutate"])
+        self.assertEqual(decision.approval_tier, "tier_2")
+        self.assertIsNotNone(decision.approval)
+        self.assertEqual(
+            decision.approval.decided_by_roles, ("approver", "platform-admin")
+        )
+        self.assertFalse(decision.approval.effective_self_approval())
+
+    def test_explicit_deny_overrides_require_approval(self) -> None:
+        approval = self._approval_rule("approve-mutate")
+        deny = {
+            "id": "deny-mutate",
+            "domain": "action_authz",
+            "description": "deny",
+            "priority": 1,
+            "enabled": True,
+            "match": {"roles_any": ["operator"], "actions_any": ["tools:mutate"]},
+            "decision": {"outcome": "deny"},
+        }
+        settings = self._write_bundle([approval, deny, self._allow_rule("allow-mutate")])
+        decision = evaluate(settings, ["operator"], "tools:mutate")
+        self.assertEqual(decision.decision, "deny")
+        self.assertEqual(decision.matched_rule_ids, ["deny-mutate"])
+        self.assertIsNone(decision.approval)
+
+    def test_highest_priority_approval_wins(self) -> None:
+        settings = self._write_bundle(
+            [
+                self._approval_rule("low", priority=10, tier="tier_1", deciders=["operator"]),
+                self._approval_rule("high", priority=500),
+            ]
+        )
+        decision = evaluate(settings, ["operator"], "tools:mutate")
+        self.assertEqual(decision.decision, "require_approval")
+        self.assertEqual(decision.matched_rule_ids, ["high"])
+        self.assertEqual(decision.approval_tier, "tier_2")
+
+    def test_disabled_approval_rule_is_ignored(self) -> None:
+        settings = self._write_bundle(
+            [
+                self._allow_rule("allow-mutate"),
+                self._approval_rule("approve-mutate", enabled=False),
+            ]
+        )
+        decision = evaluate(settings, ["operator"], "tools:mutate")
+        self.assertEqual(decision.decision, "allow")
+
+    def test_tier_1_self_approval_default(self) -> None:
+        settings = self._write_bundle(
+            [self._approval_rule("approve", tier="tier_1", deciders=["operator"])]
+        )
+        decision = evaluate(settings, ["operator"], "tools:mutate")
+        self.assertEqual(decision.decision, "require_approval")
+        self.assertTrue(decision.approval.effective_self_approval())
+
+    def test_require_approval_serialization_validates_schema(self) -> None:
+        schema = json.loads(DECISION_SCHEMA.read_text(encoding="utf-8"))
+        settings = self._write_bundle([self._approval_rule("approve-mutate")])
+        decision = evaluate(settings, ["operator"], "tools:mutate")
+        validate(instance=decision.to_dict(), schema=schema)
+        payload = decision.to_dict()
+        self.assertEqual(payload["approval_tier"], "tier_2")
+        self.assertEqual(payload["approval"]["tier"], "tier_2")
+
+
+class RequireApprovalLoadValidationTests(unittest.TestCase):
+    """SPEC-030 R-2: loud load failures for malformed approval rules."""
+
+    def setUp(self) -> None:
+        reset_policy_state()
+        self.bundle_path = Path(self.id().split(".")[-1] + "-bundle.yaml")
+
+    def tearDown(self) -> None:
+        reset_policy_state()
+        self.bundle_path.unlink(missing_ok=True)
+
+    def _load(self, rules: list[dict]) -> None:
+        self.bundle_path.write_text(
+            yaml.safe_dump({"version": 1, "rules": rules}), encoding="utf-8"
+        )
+        load_bundle(_settings(policy_path=str(self.bundle_path)))
+
+    @staticmethod
+    def _base_rule(decision: dict) -> dict:
+        return {
+            "id": "rule",
+            "domain": "action_authz",
+            "description": "rule",
+            "priority": 100,
+            "enabled": True,
+            "match": {"roles_any": ["operator"], "actions_any": ["tools:mutate"]},
+            "decision": decision,
+        }
+
+    def test_tier_2_with_self_approval_true_rejected(self) -> None:
+        with self.assertRaises(PolicyLoadError):
+            self._load(
+                [
+                    self._base_rule(
+                        {
+                            "outcome": "require_approval",
+                            "approval": {
+                                "tier": "tier_2",
+                                "decided_by_roles": ["approver"],
+                                "allow_self_approval": True,
+                            },
+                        }
+                    )
+                ]
+            )
+
+    def test_unbridged_action_rejected(self) -> None:
+        rule = self._base_rule(
+            {
+                "outcome": "require_approval",
+                "approval": {"tier": "tier_1", "decided_by_roles": ["operator"]},
+            }
+        )
+        rule["match"]["actions_any"] = ["chat"]
+        with self.assertRaises(PolicyLoadError):
+            self._load([rule])
+
+    def test_require_approval_without_approval_block_rejected(self) -> None:
+        with self.assertRaises(PolicyLoadError):
+            self._load([self._base_rule({"outcome": "require_approval"})])
+
+    def test_unknown_tier_rejected(self) -> None:
+        with self.assertRaises(PolicyLoadError):
+            self._load(
+                [
+                    self._base_rule(
+                        {
+                            "outcome": "require_approval",
+                            "approval": {"tier": "tier_9", "decided_by_roles": ["approver"]},
+                        }
+                    )
+                ]
+            )
+
+    def test_empty_deciders_rejected(self) -> None:
+        with self.assertRaises(PolicyLoadError):
+            self._load(
+                [
+                    self._base_rule(
+                        {
+                            "outcome": "require_approval",
+                            "approval": {"tier": "tier_1", "decided_by_roles": []},
+                        }
+                    )
+                ]
+            )
+
+    def test_approval_block_on_allow_rejected(self) -> None:
+        with self.assertRaises(PolicyLoadError):
+            self._load(
+                [
+                    self._base_rule(
+                        {
+                            "outcome": "allow",
+                            "approval": {"tier": "tier_1", "decided_by_roles": ["operator"]},
+                        }
+                    )
+                ]
+            )
+
+    def test_unknown_outcome_rejected(self) -> None:
+        with self.assertRaises(PolicyLoadError):
+            self._load([self._base_rule({"outcome": "allow_with_conditions"})])
+
+    def test_default_bundle_ships_tier_2_tools_mutate_rule(self) -> None:
+        # R-4 posture: the packaged default carries the tier_2 rule and it
+        # answers require_approval for a mutating requester.
+        settings = _settings()
+        decision = evaluate(settings, ["operator"], "tools:mutate")
+        self.assertEqual(decision.decision, "require_approval")
+        self.assertEqual(decision.approval_tier, "tier_2")
+        self.assertIn("approver", decision.approval.decided_by_roles)
+        self.assertIn("platform-admin", decision.approval.decided_by_roles)
+
+
 if __name__ == "__main__":
     unittest.main()

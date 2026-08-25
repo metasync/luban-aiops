@@ -27,8 +27,15 @@ class ConfirmationExpired(LookupError):
     """The pending confirmation exceeded its time-to-live."""
 
 
-class ConfirmationOwnerMismatch(PermissionError):
-    """The requesting user does not own the parked confirmation."""
+# Policy action a parked call maps to, derived from its risk tier snapshot
+# (SPEC-030 R-3): the platform-gateway confirm bridge evaluates this action
+# against the policy bundle. Tools without a gateway risk tier carry no
+# action and stay on the implicit no-rule path.
+RISK_LEVEL_ACTIONS = {
+    "read": "tools:invoke",
+    "write": "tools:mutate",
+    "admin": "tools:mutate",
+}
 
 
 @dataclass
@@ -68,8 +75,29 @@ class PendingConfirmation:
             risk_level = self.risk_levels.get(tool_name)
             if risk_level:
                 entry["risk_level"] = risk_level
+                action = RISK_LEVEL_ACTIONS.get(risk_level)
+                if action:
+                    entry["action"] = action
             payload.append(entry)
         return payload
+
+    def highest_action(self) -> str | None:
+        """The strictest policy action in the parked batch (SPEC-030 R-3).
+
+        ``tools:mutate`` wins over ``tools:invoke``; ``None`` means no call
+        carries a gateway risk tier (task tools), which the confirm bridge
+        treats as the implicit no-rule path.
+        """
+        actions = {
+            action
+            for risk_level in self.risk_levels.values()
+            if (action := RISK_LEVEL_ACTIONS.get(risk_level))
+        }
+        if "tools:mutate" in actions:
+            return "tools:mutate"
+        if "tools:invoke" in actions:
+            return "tools:invoke"
+        return None
 
     def tool_names(self) -> list[str]:
         return [

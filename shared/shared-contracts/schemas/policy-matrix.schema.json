@@ -37,11 +37,42 @@
     },
     "matrix": {
       "type": "object",
-      "description": "role -> action -> allow (true) or deny (false), evaluated with full policy semantics.",
+      "description": "role -> action -> allow (true) or not immediately allowed (false), evaluated with full policy semantics. Cells answering require_approval read false here and appear in approval_requirements (SPEC-030 R-5).",
       "additionalProperties": {
         "type": "object",
         "additionalProperties": {
           "type": "boolean"
+        }
+      }
+    },
+    "approval_requirements": {
+      "type": "object",
+      "description": "Additive third cell state (SPEC-030 R-5): role -> action -> approval requirement for cells evaluating require_approval, carrying the tier and the designated decider roles. Absent roles/actions have no approval requirement.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "required": ["tier", "decided_by_roles"],
+          "additionalProperties": false,
+          "properties": {
+            "tier": {
+              "type": "string",
+              "enum": ["tier_1", "tier_2"],
+              "description": "The approval tier of the matched require_approval rule."
+            },
+            "decided_by_roles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "description": "Roles designated to decide this approval."
+            },
+            "rule_id": {
+              "type": ["string", "null"],
+              "description": "The matched require_approval rule id, when one matched."
+            }
+          }
         }
       }
     }

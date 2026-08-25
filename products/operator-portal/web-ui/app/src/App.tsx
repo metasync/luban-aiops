@@ -20,7 +20,6 @@ import {
   MessageOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
-  ThunderboltOutlined,
   ToolOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
@@ -30,6 +29,7 @@ import { AUDIT_ROLES, INCIDENT_VIEW_ROLES, hasAnyRole } from "./roles";
 import { useSessionWorkspace } from "./sessions/useSessionWorkspace";
 import AuditView from "./views/audit/AuditView";
 import PermissionsView from "./views/control/PermissionsView";
+import SettingsView from "./views/control/SettingsView";
 import SkillsView from "./views/control/SkillsView";
 import ToolsView from "./views/control/ToolsView";
 import IncidentsView from "./views/incidents/IncidentsView";
@@ -326,7 +326,7 @@ export default function App() {
           ) : active === "skills" ? (
             <SkillsView />
           ) : (
-            <ViewPlaceholder view={active} />
+            <SettingsView workspace={workspace} />
           )}
         </Layout.Content>
       </Layout>
@@ -358,21 +358,5 @@ export default function App() {
         }
       />
     </Layout>
-  );
-}
-
-// Stage-1 shell placeholder: settings keeps the debug surface out of the
-// SPEC-023 acceptance scope for now.
-function ViewPlaceholder({ view }: { view: ViewId }) {
-  return (
-    <div>
-      <Typography.Title level={4} style={{ marginTop: 0 }}>
-        <ThunderboltOutlined /> {view}
-      </Typography.Title>
-      <Typography.Text type="secondary">
-        This view is part of the SPEC-023 rebuild and is being wired up in a
-        later stage.
-      </Typography.Text>
-    </div>
   );
 }

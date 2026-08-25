@@ -37,7 +37,6 @@ from agent_service.services.evidence_store import EVIDENCE_STORE
 from agent_service.services.hitl_confirmations import (
     ConfirmationExpired,
     ConfirmationNotFound,
-    ConfirmationOwnerMismatch,
 )
 from agent_service.services.model_catalog import MODEL_CATALOG
 from agent_service.services.runtime_dependencies import (
@@ -239,15 +238,17 @@ async def chat_confirm(
 ) -> StreamingResponse:
     """Answer a parked kernel confirmation and stream the resumed turn.
 
-    SPEC-020 R-2: session ownership rides the existing session lookup
-    (foreign sessions 404, matching the session routes' anti-enumeration
-    convention); registry errors map to 404/410. The entry is claimed
+    SPEC-020 R-2, relaxed by SPEC-030 R-3: who may decide is enforced by
+    the platform-gateway approval-tier bridge before the decision is
+    proxied, so the session lookup no longer asserts ownership — a
+    tier_2 approver legitimately confirms a session they do not own.
+    Registry errors still map to 404/410, and the entry is claimed
     before any headers go out, so a duplicate confirm fails closed with
     404 instead of double-resuming the parked batch.
     """
     user_id = _user_id(x_user_id)
     request_id = x_request_id or "untracked"
-    session = get_session(body.session_id, user_id)
+    session = get_session(body.session_id)
     kernel = get_runtime_kernel()
     registry = get_confirmation_registry()
     try:
@@ -273,40 +274,55 @@ async def chat_confirm(
         ) from None
 
     async def _events() -> AsyncIterator[str]:
-        try:
-            async for chunk in kernel.resume_confirmation(
-                session_id=session.session_id,
-                pending=pending,
-                decision=body.decision,
-                user_name=user_id,
-                request_id=request_id,
-                bearer_token=_bearer_token(authorization),
-                # SPEC-024 R-3: the resumed stream stays on the model that
-                # parked it; a stale pin (evicted by discovery refresh or
-                # key revocation) degrades to the default like other turns
-                # instead of raising UnknownModelError mid-resume.
-                model_id=_resolve_model(None, session.model),
-            ):
-                event = _normalize_stream_event(
-                    chunk, session.session_id, request_id
-                )
-                yield f"data: {event.model_dump_json(exclude_none=True)}\n\n"
-        except ConfirmationOwnerMismatch:
-            # Mid-stream guard (registry owner and session owner diverged);
-            # surface as an error frame since headers already went out.
-            error_event = AgentStreamEvent(
-                type="error",
-                session_id=session.session_id,
-                request_id=request_id,
-                error={
-                    "code": "confirmation_owner_mismatch",
-                    "message": "only the session owner may answer this "
-                    "confirmation",
-                },
+        async for chunk in kernel.resume_confirmation(
+            session_id=session.session_id,
+            pending=pending,
+            decision=body.decision,
+            user_name=user_id,
+            request_id=request_id,
+            bearer_token=_bearer_token(authorization),
+            # SPEC-024 R-3: the resumed stream stays on the model that
+            # parked it; a stale pin (evicted by discovery refresh or
+            # key revocation) degrades to the default like other turns
+            # instead of raising UnknownModelError mid-resume.
+            model_id=_resolve_model(None, session.model),
+        ):
+            event = _normalize_stream_event(
+                chunk, session.session_id, request_id
             )
-            yield f"data: {error_event.model_dump_json(exclude_none=True)}\n\n"
+            yield f"data: {event.model_dump_json(exclude_none=True)}\n\n"
 
     return StreamingResponse(_events(), media_type="text/event-stream")
+
+
+@router.get("/chat/pending-confirmation")
+async def get_pending_confirmation(
+    session_id: str,
+    x_user_id: str | None = Header(None),
+) -> dict:
+    """Parked-confirmation metadata for the approval bridge (SPEC-030 R-3).
+
+    The platform-gateway confirm bridge reads the parked batch's policy
+    action and the owner username before proxying a decision, so the
+    tier checks (decider role, self-approval) run against authoritative
+    state. No ownership assertion here — the gateway decides who may
+    approve; unknown or unparked sessions 404.
+    """
+    _user_id(x_user_id)
+    # Unknown session ids stay indistinguishable from unparked ones.
+    get_session(session_id)
+    pending = get_confirmation_registry().peek_parked(session_id)
+    if pending is None:
+        raise HTTPException(
+            status_code=404, detail="no pending confirmation"
+        )
+    return {
+        "session_id": session_id,
+        "confirm_id": pending.confirm_id,
+        "owner_user_id": pending.user_id,
+        "action": pending.highest_action(),
+        "pending_calls": pending.pending_calls_payload(),
+    }
 
 
 _STREAM_EVENT_TYPES = frozenset(
@@ -328,6 +344,10 @@ _TOOL_RESULT_STATUSES = frozenset(
 
 # v6 stream schema allows these risk levels on pending_calls entries.
 _PENDING_CALL_RISK_LEVELS = frozenset({"read", "write", "admin"})
+
+# v8 (SPEC-030 R-3): the policy action a parked call maps to, derived
+# from its risk tier; the confirm bridge evaluates this action.
+_PENDING_CALL_ACTIONS = frozenset({"tools:invoke", "tools:mutate"})
 
 
 def _normalize_stream_event(
@@ -408,6 +428,11 @@ def _coerce_pending_calls(value: object) -> list[dict[str, object]] | None:
         risk_level = item.get("risk_level")
         if isinstance(risk_level, str) and risk_level in _PENDING_CALL_RISK_LEVELS:
             entry["risk_level"] = risk_level
+        # v8 (SPEC-030 R-3): pass the bridged policy action through when
+        # schema-conformant; omitted for calls without a gateway risk tier.
+        action = item.get("action")
+        if isinstance(action, str) and action in _PENDING_CALL_ACTIONS:
+            entry["action"] = action
         calls.append(entry)
     return calls or None
 

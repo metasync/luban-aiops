@@ -535,12 +535,31 @@ async def chat_confirm(
 ) -> StreamingResponse:
     """Proxy a parked-confirmation decision to agent-service (SPEC-020 R-3).
 
+    SPEC-030 R-3: before proxying, the bridge evaluates the parked
+    batch's policy action against the bundle and enforces the matched
+    approval tier (decider role, self-approval); blocked attempts get a
+    structured 403, are audited, and leave the parked call parked.
     Upstream 4xx (unknown/expired confirmation, parked session) passes
     through unchanged; transport failures and upstream 5xx map to 502.
     The ``confirmation_decided`` audit event is emitted when the matching
     ``confirmation_result`` frame flows through, so only decisions the
     kernel actually applied reach the durable trail.
     """
+    try:
+        parked = await agent_client.fetch_pending_confirmation(
+            settings, request_id, identity.username, session_id
+        )
+    except httpx.HTTPError as exc:
+        # Fail closed: without the parked state the tier cannot be
+        # checked, and bypassing enforcement would run a mutating batch
+        # under a weaker guarantee than the bundle promises.
+        raise HTTPException(
+            status_code=502, detail="approval check unavailable"
+        ) from exc
+    approval_context = _enforce_approval_tier(
+        settings, request_id, identity, session_id, confirm_id,
+        decision, parked,
+    )
     try:
         upstream = await agent_client.open_chat_confirm_stream(
             settings,
@@ -581,10 +600,127 @@ async def chat_confirm(
                     _emit_confirmation_decided(
                         settings, request_id, identity,
                         session_id, confirm_id, decision, frame,
+                        approval_context,
                     )
             yield chunk
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+def _enforce_approval_tier(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    identity: IdentityContext,
+    session_id: str,
+    confirm_id: str,
+    decision: str,
+    parked: dict | None,
+) -> dict | None:
+    """Enforce the matched approval tier before proxying (SPEC-030 R-3).
+
+    Evaluates the parked batch's bridged action against the bundle. On
+    ``require_approval`` an approve needs a designated decider role, and
+    the requester cannot approve their own call when the effective
+    self-approval rule is false (the tier_2 default); the decider check
+    applies to approvals only, so any ``chat:confirm`` holder may still
+    deny a parked call to cancel it. Blocked attempts are audited and
+    answered with a structured 403; the parked call stays parked.
+    Returns the matched approval context (rule id + tier) so the decided
+    audit tee can enrich it, or ``None`` when the batch carries no
+    approval requirement (no parked state, no bridged action, or an
+    allow/deny evaluation).
+    """
+    if parked is None or decision != "approve":
+        return None
+    action = parked.get("action")
+    if not isinstance(action, str) or not action:
+        return None
+    result = evaluate(settings, identity.roles, action)
+    if result.decision != "require_approval" or result.approval is None:
+        return None
+    approval = result.approval
+    context = {
+        "approval_rule_id": (
+            result.matched_rule_ids[0] if result.matched_rule_ids else None
+        ),
+        "approval_tier": approval.tier,
+    }
+    roles = identity.roles or []
+    if not set(roles) & set(approval.decided_by_roles):
+        _emit_confirmation_blocked(
+            settings, request_id, identity, session_id, confirm_id,
+            "not_a_designated_approver", context,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "action": action,
+                "reason": "not_a_designated_approver",
+                "requirement": "require_approval",
+                "approval_tier": approval.tier,
+            },
+        )
+    # agent-platform parks the requester's username (its X-User-ID), so
+    # the self-approval comparison runs on usernames, not subjects.
+    owner_user_id = parked.get("owner_user_id")
+    if (
+        not approval.effective_self_approval()
+        and identity.username
+        and owner_user_id == identity.username
+    ):
+        _emit_confirmation_blocked(
+            settings, request_id, identity, session_id, confirm_id,
+            "self_approval", context,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "action": action,
+                "reason": "self_approval",
+                "requirement": "require_approval",
+                "approval_tier": approval.tier,
+            },
+        )
+    return context
+
+
+def _emit_confirmation_blocked(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    identity: IdentityContext,
+    session_id: str,
+    confirm_id: str,
+    reason: str,
+    approval_context: dict,
+) -> None:
+    """Audit a tier-blocked approval attempt (SPEC-030 R-3/R-5).
+
+    The parked call stays parked (nothing was decided), so the blocked
+    attempt rides the same ``confirmation_decided`` event type with a
+    deny outcome and the block reason in details.
+    """
+    emit_audit_event(
+        settings,
+        build_audit_event(
+            "confirmation_decided",
+            request_id,
+            "deny",
+            subject=identity.subject,
+            username=identity.username,
+            actor=identity.actor,
+            roles=identity.roles,
+            session_id=session_id,
+            details={
+                "session_id": session_id,
+                "confirm_id": confirm_id,
+                "decision": "approve",
+                "blocked": True,
+                "blocked_reason": reason,
+                "approval_rule_id": approval_context.get("approval_rule_id"),
+                "approval_tier": approval_context.get("approval_tier"),
+            },
+        ),
+    )
 
 
 def _extract_confirmation_result(chunk: str) -> dict | None:
@@ -689,13 +825,28 @@ def _emit_confirmation_decided(
     confirm_id: str,
     decision: str,
     frame: dict,
+    approval_context: dict | None = None,
 ) -> None:
-    """Record the applied decision in the durable audit trail (SPEC-020 R-3)."""
+    """Record the applied decision in the durable audit trail (SPEC-020 R-3).
+
+    SPEC-030 R-5: when the batch matched a ``require_approval`` rule,
+    the matched rule id and tier enrich the event (empty for
+    non-approval confirmations).
+    """
     tool_names = [
         str(call.get("tool_name") or "")
         for call in frame.get("pending_calls") or []
         if isinstance(call, dict)
     ]
+    details: dict = {
+        "session_id": session_id,
+        "confirm_id": confirm_id,
+        "decision": decision,
+        "tool_names": tool_names,
+    }
+    if approval_context:
+        details["approval_rule_id"] = approval_context.get("approval_rule_id")
+        details["approval_tier"] = approval_context.get("approval_tier")
     emit_audit_event(
         settings,
         build_audit_event(
@@ -707,11 +858,6 @@ def _emit_confirmation_decided(
             actor=identity.actor,
             roles=identity.roles,
             session_id=session_id,
-            details={
-                "session_id": session_id,
-                "confirm_id": confirm_id,
-                "decision": decision,
-                "tool_names": tool_names,
-            },
+            details=details,
         ),
     )

@@ -251,5 +251,95 @@ class ContractAlignmentTests(unittest.TestCase):
         )
 
 
+class RequireApprovalLoadTests(unittest.TestCase):
+    """SPEC-030 R-2: tool-gateway validates then skips require_approval rules.
+
+    The synced default bundle carries the tier_2 tools:mutate rule; this
+    gateway has no approval substrate, so the rule must not break the load
+    and must not participate in evaluation (SPEC-021 admission unchanged).
+    """
+
+    def setUp(self) -> None:
+        reset_policy_state()
+        self.bundle_path = Path(self.id().split(".")[-1] + "-bundle.yaml")
+
+    def tearDown(self) -> None:
+        reset_policy_state()
+        self.bundle_path.unlink(missing_ok=True)
+
+    def _load(self, rules: list[dict]) -> list:
+        self.bundle_path.write_text(
+            yaml.safe_dump({"version": 1, "rules": rules}), encoding="utf-8"
+        )
+        return load_bundle(_settings(policy_path=str(self.bundle_path)))
+
+    @staticmethod
+    def _approval_rule(rule_id: str = "approve-mutate") -> dict:
+        return {
+            "id": rule_id,
+            "domain": "action_authz",
+            "description": rule_id,
+            "priority": 200,
+            "enabled": True,
+            "match": {
+                "roles_any": ["platform-admin", "approver", "operator", "developer"],
+                "actions_any": ["tools:mutate"],
+            },
+            "decision": {
+                "outcome": "require_approval",
+                "approval": {
+                    "tier": "tier_2",
+                    "decided_by_roles": ["approver", "platform-admin"],
+                },
+            },
+        }
+
+    @staticmethod
+    def _allow_mutate_rule() -> dict:
+        return {
+            "id": "allow-mutate",
+            "domain": "action_authz",
+            "description": "allow",
+            "priority": 100,
+            "enabled": True,
+            "match": {
+                "roles_any": ["platform-admin", "operator"],
+                "actions_any": ["tools:mutate"],
+            },
+            "decision": {"outcome": "allow"},
+        }
+
+    def test_approval_rule_skipped_at_load(self) -> None:
+        rules = self._load([self._allow_mutate_rule(), self._approval_rule()])
+        self.assertEqual([rule.id for rule in rules], ["allow-mutate"])
+
+    def test_admission_stays_allow_despite_approval_rule(self) -> None:
+        self._load([self._allow_mutate_rule(), self._approval_rule()])
+        settings = _settings(policy_path=str(self.bundle_path))
+        decision = evaluate(settings, ["operator"], "tools:mutate")
+        self.assertEqual(decision.decision, "allow")
+        self.assertIsNone(decision.approval)
+
+    def test_packaged_default_bundle_loads_and_admission_unchanged(self) -> None:
+        settings = _settings()
+        rules = load_bundle(settings)
+        self.assertTrue(all(rule.outcome != "require_approval" for rule in rules))
+        for role in ["platform-admin", "operator"]:
+            decision = evaluate(settings, [role], "tools:mutate")
+            self.assertEqual(decision.decision, "allow", role)
+
+    def test_malformed_approval_block_still_rejected(self) -> None:
+        bad = self._approval_rule()
+        bad["decision"]["approval"]["allow_self_approval"] = True
+        with self.assertRaises(PolicyLoadError):
+            self._load([bad])
+
+    def test_missing_approval_block_still_rejected(self) -> None:
+        bad = self._approval_rule()
+        del bad["decision"]["approval"]
+        with self.assertRaises(PolicyLoadError):
+            self._load([bad])
+
+
 if __name__ == "__main__":
     unittest.main()

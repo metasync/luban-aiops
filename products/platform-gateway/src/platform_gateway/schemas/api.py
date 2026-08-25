@@ -115,3 +115,8 @@ class PolicyMatrixResponse(BaseModel):
     roles: list[str]
     actions: list[str]
     matrix: dict[str, dict[str, bool]]
+    # SPEC-030 R-5: additive third cell state — role -> action ->
+    # {tier, decided_by_roles, rule_id} for require_approval cells.
+    approval_requirements: dict[str, dict[str, dict[str, Any]]] = Field(
+        default_factory=dict
+    )

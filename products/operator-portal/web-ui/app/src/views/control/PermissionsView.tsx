@@ -3,8 +3,14 @@
 // arrive scoped server-side; the view displays them verbatim. Sign-in
 // gated in the sidebar; the gateway re-enforces policy:read per request.
 import { useEffect, useState } from "react";
-import { Alert, Spin, Table, Tag, Typography } from "antd";
+import { Alert, Spin, Table, Tag, Tooltip, Typography } from "antd";
 import { requestJson } from "../../api/client";
+
+interface ApprovalRequirement {
+  tier: string;
+  decided_by_roles: string[];
+  rule_id?: string | null;
+}
 
 interface PolicyMatrixPayload {
   version: string;
@@ -13,6 +19,12 @@ interface PolicyMatrixPayload {
   actions: string[];
   roles: string[];
   matrix: Record<string, Record<string, boolean>>;
+  // SPEC-030 R-5: additive third cell state — cells listed here answer
+  // require_approval (boolean false means "not immediately allowed").
+  approval_requirements?: Record<
+    string,
+    Record<string, ApprovalRequirement>
+  >;
 }
 
 export default function PermissionsView() {
@@ -54,6 +66,23 @@ export default function PermissionsView() {
       title: action,
       key: action,
       render: (_: unknown, row: { role: string }) => {
+        const requirement =
+          payload?.approval_requirements?.[row.role]?.[action];
+        // SPEC-030 R-5: the third cell state renders distinctly from
+        // allow/deny, naming the tier and the designated deciders.
+        if (requirement) {
+          return (
+            <Tooltip
+              title={`deciders: ${requirement.decided_by_roles.join(", ")}`}
+            >
+              <Tag color="warning">
+                {requirement.tier === "tier_1"
+                  ? "self-approval"
+                  : "approver required"}
+              </Tag>
+            </Tooltip>
+          );
+        }
         const allowed = Boolean(payload?.matrix?.[row.role]?.[action]);
         return (
           <Tag color={allowed ? "success" : "error"}>

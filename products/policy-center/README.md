@@ -31,6 +31,7 @@ Current implementation status:
 - `policy-center` is still a stub with no running service
 - the policy contract it will serve is already defined in `shared/shared-contracts` (`schemas/policy-rule.schema.json`, `schemas/policy-decision.schema.json`, `policies/policy-default.yaml`) per `SPEC-004`
 - the `action_authz` slice (`allow`/`deny`, deny-by-default) is currently evaluated inside `tool-gateway` (`services/policy_engine.py`); when this product becomes a service, that module lifts behind a `POST /policy/evaluate` endpoint returning the same decision object
+- since `SPEC-030`, `require_approval` is an enforced outcome on the platform-gateway confirm path: `tier_1` (session-operator self-confirmation) and `tier_2` (designated-approver, self-approval blocked) rules evaluate in both gateway engines and are bridged onto `POST /api/v1/chat/confirm`. Deferred to this product: an approval queue with persistence and notification surfaces, tier-3 governance, and `allow_with_conditions`
 
 ## Expected Integration Points
 

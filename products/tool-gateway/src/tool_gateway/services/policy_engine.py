@@ -1,10 +1,16 @@
-"""Deny-by-default policy evaluation (SPEC-004).
+"""Deny-by-default policy evaluation (SPEC-004, SPEC-030).
 
 A small, dependency-free evaluation module implementing the action_authz slice
 of the Tier-1 policy specification. The rule/decision contract lives in
 shared/shared-contracts; this module is the consumer. When policy-center becomes
 a service, evaluate() moves behind a POST /policy/evaluate endpoint returning the
 same decision object — callers swap a function call for a network call.
+
+SPEC-030 note: this gateway's invocation path has no pre-approval substrate,
+so require_approval rules are skipped at bundle load (logged, never silently
+enforced as allow) and never participate in evaluation — admission stays the
+SPEC-021 allow/deny gate, and tiered approval enforcement lives exclusively
+on the platform-gateway confirm path.
 """
 
 from __future__ import annotations
@@ -34,6 +40,16 @@ PROTECTED_ACTIONS = frozenset(
     {ACTION_TOOLS_LIST, ACTION_TOOLS_INVOKE, ACTION_TOOLS_MUTATE}
 )
 
+# Approval semantics (SPEC-030 R-2): this gateway bridges no approval
+# enforcement path, so the bridged action set is empty and every
+# require_approval rule is skipped at load (see module docstring).
+APPROVAL_TIERS = frozenset({"tier_1", "tier_2"})
+APPROVAL_BRIDGED_ACTIONS: frozenset[str] = frozenset()
+OUTCOME_ALLOW = "allow"
+OUTCOME_DENY = "deny"
+OUTCOME_REQUIRE_APPROVAL = "require_approval"
+VALID_OUTCOMES = frozenset({OUTCOME_ALLOW, OUTCOME_DENY, OUTCOME_REQUIRE_APPROVAL})
+
 # Module-level bundle singleton, keyed on the configured path.
 _bundle: list[PolicyRule] | None = None
 _configured_path: str | None = None
@@ -44,6 +60,34 @@ class PolicyLoadError(Exception):
 
 
 @dataclass(frozen=True)
+class ApprovalSpec:
+    """Approval requirement carried by a require_approval rule (SPEC-030 R-1).
+
+    ``allow_self_approval=None`` means the tier default applies: tier_1
+    allows the session operator to confirm their own parked call,
+    tier_2 forbids it.
+    """
+
+    tier: str
+    decided_by_roles: tuple[str, ...]
+    allow_self_approval: bool | None = None
+
+    def effective_self_approval(self) -> bool:
+        if self.allow_self_approval is not None:
+            return self.allow_self_approval
+        return self.tier == "tier_1"
+
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "tier": self.tier,
+            "decided_by_roles": list(self.decided_by_roles),
+        }
+        if self.allow_self_approval is not None:
+            payload["allow_self_approval"] = self.allow_self_approval
+        return payload
+
+
+@dataclass(frozen=True)
 class PolicyRule:
     id: str
     priority: int
@@ -51,6 +95,7 @@ class PolicyRule:
     roles_any: tuple[str, ...]
     actions_any: tuple[str, ...]
     outcome: str
+    approval: ApprovalSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +105,12 @@ class PolicyDecision:
     reason: str = ""
     action: str | None = None
     subject: str | None = None
+    # SPEC-030 R-1: set when decision is require_approval.
+    approval: ApprovalSpec | None = None
+
+    @property
+    def approval_tier(self) -> str | None:
+        return self.approval.tier if self.approval is not None else None
 
     def to_dict(self) -> dict[str, object]:
         """Serialize to the policy-decision.schema.json shape."""
@@ -72,6 +123,9 @@ class PolicyDecision:
             payload["action"] = self.action
         if self.subject is not None:
             payload["subject"] = self.subject
+        if self.approval is not None:
+            payload["approval_tier"] = self.approval.tier
+            payload["approval"] = self.approval.to_dict()
         return payload
 
 
@@ -87,6 +141,46 @@ def _packaged_bundle_text() -> str:
         resources.files("tool_gateway.policies")
         .joinpath(DEFAULT_BUNDLE_RESOURCE)
         .read_text(encoding="utf-8")
+    )
+
+
+def _parse_approval(raw_decision: dict, rule_id: str, source: str) -> ApprovalSpec:
+    """Validate and build the approval block of a require_approval rule."""
+    approval = raw_decision.get("approval")
+    if not isinstance(approval, dict):
+        raise PolicyLoadError(
+            f"rule {rule_id!r} in '{source}': require_approval requires an approval block"
+        )
+    tier = approval.get("tier")
+    if tier not in APPROVAL_TIERS:
+        raise PolicyLoadError(
+            f"rule {rule_id!r} in '{source}': approval.tier must be one of "
+            f"{sorted(APPROVAL_TIERS)}, got {tier!r}"
+        )
+    deciders = approval.get("decided_by_roles")
+    if (
+        not isinstance(deciders, list)
+        or not deciders
+        or not all(isinstance(role, str) and role for role in deciders)
+    ):
+        raise PolicyLoadError(
+            f"rule {rule_id!r} in '{source}': approval.decided_by_roles must be a "
+            "non-empty list of role names"
+        )
+    allow_self = approval.get("allow_self_approval")
+    if allow_self is not None and not isinstance(allow_self, bool):
+        raise PolicyLoadError(
+            f"rule {rule_id!r} in '{source}': approval.allow_self_approval must be a boolean"
+        )
+    if tier == "tier_2" and allow_self is True:
+        raise PolicyLoadError(
+            f"rule {rule_id!r} in '{source}': tier_2 approval cannot allow self-approval "
+            "(self-approval is reserved for tier_1)"
+        )
+    return ApprovalSpec(
+        tier=str(tier),
+        decided_by_roles=tuple(deciders),
+        allow_self_approval=allow_self,
     )
 
 
@@ -108,14 +202,41 @@ def _parse_rules(text: str, source: str) -> list[PolicyRule]:
         try:
             match = raw["match"]
             decision = raw["decision"]
+            rule_id = str(raw["id"])
+            outcome = str(decision["outcome"])
+            if outcome not in VALID_OUTCOMES:
+                raise PolicyLoadError(
+                    f"rule {rule_id!r} in '{source}': unknown outcome {outcome!r}"
+                )
+            approval: ApprovalSpec | None = None
+            if outcome == OUTCOME_REQUIRE_APPROVAL:
+                # Validate the block loudly so a malformed synced bundle
+                # never loads, then skip the rule: this gateway has no
+                # approval enforcement substrate (SPEC-030 R-2).
+                _parse_approval(decision, rule_id, source)
+                unbridged = set(match["actions_any"]) - APPROVAL_BRIDGED_ACTIONS
+                if unbridged:
+                    LOGGER.warning(
+                        "skipping require_approval rule %s: unenforceable actions %s "
+                        "on the tool-gateway invocation path (SPEC-030 R-2)",
+                        rule_id,
+                        sorted(unbridged),
+                    )
+                continue
+            elif "approval" in decision:
+                raise PolicyLoadError(
+                    f"rule {rule_id!r} in '{source}': approval block is only valid on "
+                    "require_approval outcomes"
+                )
             rules.append(
                 PolicyRule(
-                    id=str(raw["id"]),
+                    id=rule_id,
                     priority=int(raw["priority"]),
                     enabled=bool(raw["enabled"]),
                     roles_any=tuple(match["roles_any"]),
                     actions_any=tuple(match["actions_any"]),
-                    outcome=str(decision["outcome"]),
+                    outcome=outcome,
+                    approval=approval,
                 )
             )
         except (KeyError, TypeError, ValueError) as exc:
@@ -158,8 +279,11 @@ def load_bundle(settings: GatewaySettings) -> list[PolicyRule]:
 def evaluate(settings: GatewaySettings, roles: list[str], action: str) -> PolicyDecision:
     """Evaluate an action against the loaded bundle.
 
-    Semantics: deny by default; explicit deny overrides allow; higher priority
-    wins between allows; disabled rules are ignored.
+    Semantics: deny by default; explicit deny overrides require_approval and
+    allow; require_approval overrides allow (safe default); higher priority
+    wins within an outcome class; disabled rules are ignored (SPEC-030 R-2).
+    require_approval rules never load on this gateway, so admission stays the
+    SPEC-021 allow/deny gate.
     """
     rules = load_bundle(settings)
     role_set = set(roles)
@@ -172,8 +296,8 @@ def evaluate(settings: GatewaySettings, roles: list[str], action: str) -> Policy
         and (role_set & set(rule.roles_any))
     ]
 
-    if any(rule.outcome == "deny" for rule in matched):
-        deny_ids = [rule.id for rule in matched if rule.outcome == "deny"]
+    if any(rule.outcome == OUTCOME_DENY for rule in matched):
+        deny_ids = [rule.id for rule in matched if rule.outcome == OUTCOME_DENY]
         return PolicyDecision(
             decision="deny",
             matched_rule_ids=deny_ids,
@@ -181,7 +305,18 @@ def evaluate(settings: GatewaySettings, roles: list[str], action: str) -> Policy
             action=action,
         )
 
-    allows = [rule for rule in matched if rule.outcome == "allow"]
+    approvals = [rule for rule in matched if rule.outcome == OUTCOME_REQUIRE_APPROVAL]
+    if approvals:
+        best = max(approvals, key=lambda rule: rule.priority)
+        return PolicyDecision(
+            decision="require_approval",
+            matched_rule_ids=[best.id],
+            reason="approval required by policy rule",
+            action=action,
+            approval=best.approval,
+        )
+
+    allows = [rule for rule in matched if rule.outcome == OUTCOME_ALLOW]
     if allows:
         best = max(allows, key=lambda rule: rule.priority)
         return PolicyDecision(

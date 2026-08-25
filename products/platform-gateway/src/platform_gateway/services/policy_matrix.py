@@ -6,6 +6,12 @@ gateway actually enforces. Every cell goes through the standard
 semantics are inherited, never re-implemented — so a matrix cell always
 equals what ``enforce_policy`` would decide for that role. The surface is
 read-only transparency; authority stays with the policy engine.
+
+SPEC-030 R-5: cells evaluating to ``require_approval`` read ``false`` in
+the boolean matrix (they are not immediately allowed) and additionally
+appear in the additive ``approval_requirements`` structure with the
+tier and decider roles, so consumers that only read booleans keep the
+fail-safe view while the portal renders the third state.
 """
 
 from __future__ import annotations
@@ -43,13 +49,29 @@ def build_policy_matrix(
     is_admin = ADMIN_ROLE in identity.roles
     visible_roles = sorted(bundle_roles) if is_admin else sorted(identity.roles)
 
-    matrix = {
-        role: {
-            action: evaluate(settings, [role], action).decision == "allow"
-            for action in actions
-        }
-        for role in visible_roles
-    }
+    matrix: dict[str, dict[str, bool]] = {}
+    approval_requirements: dict[str, dict[str, dict[str, object]]] = {}
+    for role in visible_roles:
+        row: dict[str, bool] = {}
+        approval_row: dict[str, dict[str, object]] = {}
+        for action in actions:
+            decision = evaluate(settings, [role], action)
+            row[action] = decision.decision == "allow"
+            # SPEC-030 R-5: the third cell state rides an additive
+            # structure so boolean-only consumers stay unbroken.
+            if decision.decision == "require_approval" and decision.approval:
+                approval_row[action] = {
+                    "tier": decision.approval.tier,
+                    "decided_by_roles": list(decision.approval.decided_by_roles),
+                    "rule_id": (
+                        decision.matched_rule_ids[0]
+                        if decision.matched_rule_ids
+                        else None
+                    ),
+                }
+        matrix[role] = row
+        if approval_row:
+            approval_requirements[role] = approval_row
 
     return {
         "version": metadata["version"],
@@ -58,4 +80,5 @@ def build_policy_matrix(
         "roles": visible_roles,
         "actions": actions,
         "matrix": matrix,
+        "approval_requirements": approval_requirements,
     }

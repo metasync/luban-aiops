@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `delivered`
 - owner: chi
 - created: 2026-08-25
 - release slice: 0.12.0
@@ -110,7 +110,11 @@ Acceptance criteria:
   outside the engine's bridged action set is invalid. platform-gateway's
   bridged set is `{tools:mutate}` for this slice; tool-gateway accepts
   no `require_approval` rules in this slice (its invocation path has no
-  pre-approval substrate).
+  pre-approval substrate). Implementation note: because `make sync-policy`
+  ships the same bundle to both gateways, tool-gateway validates approval
+  blocks loudly and then skips the rule with a warning instead of failing
+  the load — rejecting would break startup on the synced default bundle
+  and evaluating would break SPEC-021 admission (both forbidden by R-3/R-4).
 
 - platform-gateway `evaluate()` and tool-gateway `evaluate()` implement
   the identical semantics; each service's test suite covers mixed-match,
@@ -129,15 +133,20 @@ Acceptance criteria:
   against the bundle; on `require_approval` it requires the confirmer to
   hold at least one `decided_by_roles` role and returns structured 403
   `{detail, action, reason, requirement: "require_approval"}` otherwise,
-  for both tiers.
+  for both tiers. The decider-role check applies to `approve` decisions
+  only; `deny` stays open to any `chat:confirm` holder so the requester
+  can always cancel their own parked call.
 - `tier_1`: a confirmer who is the session owner and holds a decider
   role may approve their own parked call — destructive-but-routine
   actions stay a one-person flow.
 - `tier_2` self-approval: when the effective self-approval rule is
-  `false` (the tier default, or any `tier_2` rule) and the confirmer
-  subject equals the session owner subject, the confirm route rejects
+  `false` (the tier default, or any `tier_2` rule) and the confirmer is
+  the session owner, the confirm route rejects
   with the same structured 403 naming `self_approval`; the rejection is
-  audited (R-5) and the parked call stays parked.
+  audited (R-5) and the parked call stays parked. Implementation note:
+  agent-platform parks and identifies users by username (`X-User-ID`),
+  so the owner comparison runs on usernames carried by the auth session,
+  not keycloak subjects.
 - Non-mutating parked calls (read-only tools that ASK because they left
   the auto-allow list) evaluate `allow` for `chat:confirm` holders and
   keep today's operator-confirm behavior byte-for-byte; actions with no
@@ -269,17 +278,23 @@ Acceptance criteria:
 
 ## Open Questions
 
-Carried from the spike memo; must be resolved before `approved`:
+Carried from the spike memo; all resolved during delivery:
 
-- Q-1 (observer visibility): confirm `read-only-observer` read-only card
-  rendering against the SPEC-022 session-scoping implementation — the
-  lean is read-only, but the session-visibility code must be checked for
-  cross-user transcript exposure.
-- Q-2 (matrix consumer compatibility): verify no external consumer
-  parses matrix cells as boolean-only before shipping the third state.
-- Q-3 (dev-k8s identity availability): confirm a test user with the
-  `approver` role exists in the dev realm for the two-identity demo
-  (the dev-k8s test-user configuration may need one more user).
+- Q-1 (observer visibility) — resolved: session list/get/delete are
+  scoped server-side to the caller's own sessions (SPEC-022 R-1), so a
+  parked card only ever renders inside its owner's own transcript; a
+  `read-only-observer` sees only their own parked cards, and without a
+  `chat:confirm` grant those render read-only (no approve/deny
+  buttons). No cross-user transcript exposure exists.
+- Q-2 (matrix consumer compatibility) — resolved: the only consumers of
+  `GET /api/v1/policy/matrix` are the portal permissions view (updated
+  in R-5) and one `jq` snippet in the troubleshooting guide (updated in
+  the docs pass); the boolean cells stay fail-safe (`require_approval`
+  reads `false`) and the third state rides the additive
+  `approval_requirements` structure.
+- Q-3 (dev-k8s identity availability) — resolved:
+  `reconcile-luban-realm.sh` already provisions `luban-approver` in
+  `ops-approvers`, so the two-identity demo needs no realm change.
 
 ## Changelog
 
@@ -300,3 +315,22 @@ Carried from the spike memo; must be resolved before `approved`:
 - 2026-08-25: R-6 framed as an extensible container at owner direction —
   more settings functions are expected down the road, so the panel's
   panes must be addable without restructuring the view.
+- 2026-08-25: R-2 implementation note added during delivery — tool-gateway
+  validates approval blocks loudly then skips require_approval rules at
+  load (warning-logged), because the synced default bundle must stay
+  loadable there and SPEC-021 admission must stay allow/deny (R-3/R-4).
+- 2026-08-25: R-3 clarified during delivery — the decider-role check
+  applies to approvals only (deny stays open so a requester can cancel
+  their own parked call), and the self-approval comparison runs on
+  usernames because agent-platform identifies users by `X-User-ID`;
+  agent-platform's confirmer-must-own-session restriction was relaxed
+  accordingly (approval authorization now lives in the gateway bridge).
+- 2026-08-25: open questions Q-1/Q-2/Q-3 resolved during delivery —
+  observer cards stay read-only inside owner-scoped transcripts, the
+  matrix's only consumers are the portal view and one guide snippet,
+  and `luban-approver` already exists in the dev realm.
+- 2026-08-25: delivered in the 0.12.0 train — R-1…R-6 complete with
+  full test suites green (agent-platform, platform-gateway, tool-gateway,
+  portal vitest); living docs updated (approval-and-hitl, troubleshooting,
+  portal-user-guide, configuration-reference, authorization-matrix,
+  policy-center boundary README).

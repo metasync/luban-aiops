@@ -120,15 +120,27 @@ class PolicyMatrixScopingTests(PolicyMatrixBase):
             self.assertTrue(matrix[role]["session:delete"], role)
         self.assertFalse(matrix["auditor"]["session:list"])
         self.assertFalse(matrix["auditor"]["session:delete"])
-        # SPEC-021: tools:mutate is the mutating-tool admission gate —
-        # granted only to the execution roles; approver stays approve-only,
-        # developer and observer are denied by default.
+        # SPEC-021/SPEC-030: tools:mutate answers require_approval for the
+        # rule's roles (not immediately allowed: false in the boolean
+        # matrix, listed in approval_requirements); observer holds no
+        # matching rule and stays a plain deny. developer likewise matches
+        # the requirement but is excluded from deciding by authoring.
         self.assertIn("tools:mutate", payload["actions"])
-        self.assertTrue(matrix["platform-admin"]["tools:mutate"])
-        self.assertTrue(matrix["operator"]["tools:mutate"])
-        self.assertFalse(matrix["approver"]["tools:mutate"])
-        self.assertFalse(matrix["developer"]["tools:mutate"])
+        for role in ["platform-admin", "approver", "operator", "developer"]:
+            self.assertFalse(matrix[role]["tools:mutate"], role)
         self.assertFalse(matrix["read-only-observer"]["tools:mutate"])
+        requirements = payload["approval_requirements"]
+        for role in ["platform-admin", "approver", "operator", "developer"]:
+            self.assertEqual(
+                requirements[role]["tools:mutate"],
+                {
+                    "tier": "tier_2",
+                    "decided_by_roles": ["approver", "platform-admin"],
+                    "rule_id": "require-approval-tools-mutate",
+                },
+                role,
+            )
+        self.assertNotIn("read-only-observer", requirements)
         # Deny-by-default and role scoping.
         self.assertFalse(matrix["read-only-observer"]["audit:read"])
         self.assertFalse(matrix["read-only-observer"]["incident:create"])
@@ -208,6 +220,18 @@ rules:
       actions_any: ["tools:list"]
     decision:
       outcome: allow
+  - id: approve-alpha-tools-mutate
+    domain: action_authz
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["role-alpha"]
+      actions_any: ["tools:mutate"]
+    decision:
+      outcome: require_approval
+      approval:
+        tier: tier_1
+        decided_by_roles: ["role-alpha"]
 """
 
 
@@ -251,6 +275,41 @@ class PolicyMatrixConfiguredBundleTests(PolicyMatrixBase):
         with self._patch_identity(["platform-admin"]):
             response = self.client.get("/api/v1/policy/matrix")
         self.assertEqual(response.status_code, 503)
+
+    def test_custom_tier1_requirement_renders_third_state(self) -> None:
+        with self._patch_identity(["platform-admin"]):
+            payload = self.client.get("/api/v1/policy/matrix").json()
+        row = payload["matrix"]["role-alpha"]
+        # require_approval cells are not immediately allowed.
+        self.assertFalse(row["tools:mutate"])
+        self.assertEqual(
+            payload["approval_requirements"]["role-alpha"]["tools:mutate"],
+            {
+                "tier": "tier_1",
+                "decided_by_roles": ["role-alpha"],
+                "rule_id": "approve-alpha-tools-mutate",
+            },
+        )
+
+
+class PolicyMatrixApprovalScopeTests(PolicyMatrixBase):
+    """SPEC-030 R-5: the third state honors caller-scoped rendering."""
+
+    def test_operator_scope_carries_own_approval_requirement(self) -> None:
+        with self._patch_identity(["operator"]):
+            payload = self.client.get("/api/v1/policy/matrix").json()
+        self.assertEqual(payload["scope"], "own")
+        self.assertEqual(payload["roles"], ["operator"])
+        self.assertFalse(payload["matrix"]["operator"]["tools:mutate"])
+        self.assertEqual(
+            payload["approval_requirements"]["operator"]["tools:mutate"]["tier"],
+            "tier_2",
+        )
+
+    def test_observer_scope_reports_no_approval_requirements(self) -> None:
+        with self._patch_identity(["read-only-observer"]):
+            payload = self.client.get("/api/v1/policy/matrix").json()
+        self.assertEqual(payload["approval_requirements"], {})
 
 
 if __name__ == "__main__":

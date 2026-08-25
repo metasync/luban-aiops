@@ -23,12 +23,16 @@
 # Optional HITL leg (RUN_HITL_LEG=true, enabled-state only): a scripted
 # chat asks the agent to delete a deliberately nonexistent pod; the demo
 # asserts the stream parks with a confirmation_request carrying
-# risk_level=write, approves it via /api/v1/chat/confirm, and checks the
-# durable trail carries both confirmation_decided and the tool_invoked
-# attempt. The deny path (leaves everything untouched) is covered by the
-# agent-platform/platform-gateway unit suites because a parked
-# confirmation is single-shot. The chat leg depends on the model choosing
-# the tool, so it is opt-in like the other demos' chat legs.
+# risk_level=write, then exercises the SPEC-030 tier_2 approval flow:
+# the operator's own approve attempt is rejected with a structured 403
+# (require_approval), a second approver identity approves via
+# /api/v1/chat/confirm, and the durable trail carries both the
+# confirmation_decided event (enriched with the matched approval rule
+# and tier) and the tool_invoked attempt. The deny path (leaves
+# everything untouched) is covered by the agent-platform/platform-
+# gateway unit suites because a parked confirmation is single-shot. The
+# chat leg depends on the model choosing the tool, so it is opt-in like
+# the other demos' chat legs.
 #
 # Prerequisites:
 #   - kubectl context pointed at the dev cluster
@@ -43,6 +47,7 @@
 #   GATEWAY_URL        (default http://localhost:18083, HITL leg)
 #   TEST_USER          (default luban-operator)
 #   OBSERVER_USER      (default luban-observer)
+#   APPROVER_USER      (default luban-approver, HITL leg: tier_2 decider)
 #   RUN_HITL_LEG=true  to run the opt-in chat leg (enabled-state only)
 
 set -eu
@@ -52,6 +57,7 @@ IDENTITY_URL="${IDENTITY_URL:-http://localhost:18081}"
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:18083}"
 TEST_USER="${TEST_USER:-luban-operator}"
 OBSERVER_USER="${OBSERVER_USER:-luban-observer}"
+APPROVER_USER="${APPROVER_USER:-luban-approver}"
 RUN_SUFFIX="$(date +%s)-$$"
 MISSING_POD="luban-mutating-demo-$RUN_SUFFIX"
 
@@ -227,12 +233,18 @@ else
 fi
 
 if [ "${RUN_HITL_LEG:-}" = "true" ]; then
-  echo "==> [HITL] scripted chat: park with risk_level=write, then approve"
+  echo "==> [HITL] scripted chat: park with risk_level=write, tier_2 approve"
 
   HITL_TIMEOUT=$(kubectl -n "$NAMESPACE" get configmap platform-runtime-config \
     -o jsonpath='{.data.AGENT_HITL_CONFIRM_TIMEOUT}')
   [ "${HITL_TIMEOUT:-600}" != "0" ] \
     || fail "AGENT_HITL_CONFIRM_TIMEOUT=0 disables HITL bridging; the chat leg cannot run"
+
+  # SPEC-030 R-4: the default bundle requires a designated approver for
+  # tools:mutate, so the confirm step runs under a second identity.
+  APPROVER_PLATFORM_TOKEN=$(platform_token "$APPROVER_USER" approver ops-approvers)
+  [ -n "$APPROVER_PLATFORM_TOKEN" ] \
+    || fail "broker issued no platform token for $APPROVER_USER"
 
   HITL_SESSION="mut-demo-session-$RUN_SUFFIX"
   CHAT_MESSAGE="Delete the pod named $MISSING_POD in namespace $NAMESPACE with the k8s.delete_pod tool right away; no need to inspect anything first."
@@ -266,17 +278,34 @@ for line in sys.stdin:
   [ -n "$CONFIRM_ID" ] || fail "confirmation_request frame carried no confirm_id"
   echo "parked confirmation $CONFIRM_ID carries risk_level=write"
 
-  CONFIRM_OUTPUT=$(curl -fsS --max-time 120 -X POST \
+  # SPEC-030 R-3: the requester is not a designated approver, so their own
+  # approve must be rejected with the structured require_approval 403 and
+  # the parked call must stay parked for the designated approver.
+  SELF_APPROVAL_BODY=$(mktemp)
+  SELF_APPROVAL_HTTP=$(curl -s -o "$SELF_APPROVAL_BODY" -w "%{http_code}" \
+    --max-time 60 -X POST \
     -H "Authorization: Bearer $OPERATOR_PLATFORM_TOKEN" \
     -H "Content-Type: application/json" \
     -d "{\"session_id\": \"$HITL_SESSION\", \"confirm_id\": \"$CONFIRM_ID\", \"decision\": \"approve\"}" \
-    "$GATEWAY_URL/api/v1/chat/confirm") || fail "approve call failed"
+    "$GATEWAY_URL/api/v1/chat/confirm")
+  [ "$SELF_APPROVAL_HTTP" = "403" ] \
+    || fail "operator self-approval answered $SELF_APPROVAL_HTTP, expected 403: $(cat "$SELF_APPROVAL_BODY")"
+  grep -q 'require_approval' "$SELF_APPROVAL_BODY" \
+    || fail "self-approval 403 carried no require_approval requirement: $(cat "$SELF_APPROVAL_BODY")"
+  rm -f "$SELF_APPROVAL_BODY"
+  echo "operator self-approval rejected (tier_2 require_approval); the call stays parked"
+
+  CONFIRM_OUTPUT=$(curl -fsS --max-time 120 -X POST \
+    -H "Authorization: Bearer $APPROVER_PLATFORM_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"session_id\": \"$HITL_SESSION\", \"confirm_id\": \"$CONFIRM_ID\", \"decision\": \"approve\"}" \
+    "$GATEWAY_URL/api/v1/chat/confirm") || fail "approver approve call failed"
 
   printf '%s' "$CONFIRM_OUTPUT" | grep -q '"type": *"confirmation_result"\|"type":"confirmation_result"' \
     || fail "approve stream carried no confirmation_result frame"
   printf '%s' "$CONFIRM_OUTPUT" | grep -q '"status": *"approved"\|"status":"approved"' \
     || fail "confirmation_result did not report the approval: $CONFIRM_OUTPUT"
-  echo "approval applied; the kernel resumed and executed the call"
+  echo "approval by $APPROVER_USER applied; the kernel resumed and executed the call"
 
   echo "==> [AUDIT] confirmation_decided and tool_invoked on the durable trail"
 
@@ -291,7 +320,11 @@ for line in sys.stdin:
     "http://localhost:8000/api/v1/audit/events?event_type=confirmation_decided&limit=50")
   printf '%s' "$DECIDED_EVENTS" | grep -q "$CONFIRM_ID" \
     || fail "no confirmation_decided event for $CONFIRM_ID on the durable trail"
-  echo "confirmation_decided for $CONFIRM_ID is on the durable trail"
+  printf '%s' "$DECIDED_EVENTS" | grep -q 'require-approval-tools-mutate' \
+    || fail "confirmation_decided events carry no matched approval rule id"
+  printf '%s' "$DECIDED_EVENTS" | grep -q 'tier_2' \
+    || fail "confirmation_decided events carry no approval tier"
+  echo "confirmation_decided for $CONFIRM_ID is on the durable trail (rule + tier enriched)"
 
   GATEWAY_AUDIT_SECRET=$(printf '%s' "$AUDIT_CLIENTS" | tr ',' '\n' \
     | grep '^tool-gateway=' | cut -d= -f2-)

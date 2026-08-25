@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/policy-rule.schema.json",
-  "title": "Policy Rule (v1)",
-  "description": "A single action-authorization rule. Strict subset of the Tier-1 policy specification (docs/agentic-aiops-platform/policy-specification.md): action_authz domain only, allow/deny outcomes only. Forward-compatible with require_approval and conditions via schema revision.",
+  "title": "Policy Rule (v2)",
+  "description": "A single action-authorization rule. Strict subset of the Tier-1 policy specification (docs/agentic-aiops-platform/policy-specification.md): action_authz domain only, allow/deny/require_approval outcomes. v2 (SPEC-030) activates the previously reserved require_approval outcome with an explicit approval tier: tier_1 keeps the decision with the session operator (destructive-but-routine), tier_2 requires a designated approver distinct from the requester (critical destructive). allow_with_conditions and conditions remain reserved for a future schema revision.",
   "type": "object",
   "required": ["id", "domain", "description", "priority", "enabled", "match", "decision"],
   "properties": {
@@ -13,7 +13,7 @@
     "domain": {
       "type": "string",
       "const": "action_authz",
-      "description": "Policy domain. Only action_authz is supported in v1."
+      "description": "Policy domain. Only action_authz is supported."
     },
     "description": {
       "type": "string",
@@ -21,7 +21,7 @@
     },
     "priority": {
       "type": "integer",
-      "description": "Numeric precedence. Higher wins between allow rules; explicit deny always overrides allow."
+      "description": "Numeric precedence. Higher wins between rules of the same outcome class (allows, or require_approvals); explicit deny always overrides require_approval and allow; require_approval overrides allow."
     },
     "enabled": {
       "type": "boolean",
@@ -50,10 +50,53 @@
       "properties": {
         "outcome": {
           "type": "string",
-          "enum": ["allow", "deny"],
-          "description": "Decision outcome. require_approval and allow_with_conditions are reserved for a future schema revision."
+          "enum": ["allow", "deny", "require_approval"],
+          "description": "Decision outcome. Evaluation precedence is deny > require_approval > allow. allow_with_conditions is reserved for a future schema revision."
+        },
+        "approval": {
+          "type": "object",
+          "description": "Approval requirement. Mandatory on require_approval outcomes, forbidden on allow/deny outcomes. Tier semantics mirror the authorization matrix: tier_1 = the session operator may decide their own confirmation; tier_2 = a designated approver distinct from the requester decides.",
+          "required": ["tier", "decided_by_roles"],
+          "properties": {
+            "tier": {
+              "type": "string",
+              "enum": ["tier_1", "tier_2"],
+              "description": "Approval level. tier_1: destructive-but-routine, session-operator self-confirmation allowed by default. tier_2: critical destructive, self-approval forbidden by default."
+            },
+            "decided_by_roles": {
+              "type": "array",
+              "items": {"type": "string"},
+              "minItems": 1,
+              "description": "Roles whose holders may decide the confirmation. Synthetic/workload identities are excluded by authoring, not by code."
+            },
+            "allow_self_approval": {
+              "type": "boolean",
+              "description": "Optional override of the tier default. Unset means the tier default: tier_1 allows self-approval, tier_2 forbids it. tier_2 with explicit true is rejected at bundle load."
+            }
+          },
+          "additionalProperties": false
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"outcome": {"const": "require_approval"}},
+            "required": ["outcome"]
+          },
+          "then": {
+            "required": ["approval"]
+          }
+        },
+        {
+          "if": {
+            "properties": {"outcome": {"enum": ["allow", "deny"]}},
+            "required": ["outcome"]
+          },
+          "then": {
+            "not": {"required": ["approval"]}
+          }
+        }
+      ],
       "additionalProperties": false
     }
   },

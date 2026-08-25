@@ -24,7 +24,6 @@ from agent_service.services.hitl_confirmations import (
     CONFIRMATION_REGISTRY,
     ConfirmationExpired,
     ConfirmationNotFound,
-    ConfirmationOwnerMismatch,
     ConfirmationRegistry,
 )
 from agent_service.services.runtime_dependencies import get_runtime_kernel
@@ -205,6 +204,32 @@ def test_pending_calls_payload_omits_unknown_risk_level() -> None:
     assert "risk_level" not in pending.pending_calls_payload()[0]
 
 
+def test_pending_calls_payload_carries_bridged_action() -> None:
+    """SPEC-030 R-3: risk tiers map to the policy action the confirm
+    bridge evaluates; calls without a gateway tier carry no action."""
+    registry = ConfirmationRegistry()
+    pending = registry.register(
+        "s1", "alice", "r1", [TOOL_CALL], timeout=600,
+        risk_levels={"k8s.restart_service": "write"},
+    )
+    assert pending.pending_calls_payload()[0]["action"] == "tools:mutate"
+
+
+def test_highest_action_prefers_tools_mutate() -> None:
+    registry = ConfirmationRegistry()
+    pending = registry.register(
+        "s1", "alice", "r1", [TOOL_CALL], timeout=600,
+        risk_levels={"a.read": "read", "b.write": "write", "c.admin": "admin"},
+    )
+    assert pending.highest_action() == "tools:mutate"
+
+
+def test_highest_action_none_without_risk_tiers() -> None:
+    registry = ConfirmationRegistry()
+    pending = registry.register("s1", "alice", "r1", [TOOL_CALL], timeout=600)
+    assert pending.highest_action() is None
+
+
 # --- Kernel: park on RequireUserConfirmEvent ---
 
 
@@ -371,18 +396,23 @@ def test_claim_rejects_unknown_and_expired_entries() -> None:
         CONFIRMATION_REGISTRY.claim("s1", pending.confirm_id, 600)
 
 
-def test_resume_confirmation_rejects_foreign_confirmer(monkeypatch) -> None:
+def test_resume_confirmation_accepts_cross_user_confirmer(monkeypatch) -> None:
+    """SPEC-030 R-3: tier_2 approvals resume under a confirmer other
+    than the session owner; who may decide is enforced by the
+    platform-gateway approval-tier bridge, not the kernel."""
     kernel = _configured_kernel()
-    agent = FakeAgent()
+    agent = FakeAgent(events=[{"type": "REPLY_END"}])
     _patch_agent(monkeypatch, kernel, agent)
     pending = CONFIRMATION_REGISTRY.register("s1", "alice", "reply-1", [TOOL_CALL], 600)
     claimed = CONFIRMATION_REGISTRY.claim("s1", pending.confirm_id, 600)
-    with pytest.raises(ConfirmationOwnerMismatch):
-        _drain(
-            kernel.resume_confirmation(
-                "s1", claimed, "approve", "mallory", "req-x"
-            )
+    frames = _drain(
+        kernel.resume_confirmation(
+            "s1", claimed, "approve", "bob-approver", "req-x"
         )
+    )
+    assert frames[0]["type"] == "confirmation_result"
+    assert frames[0]["status"] == "approved"
+    assert not CONFIRMATION_REGISTRY.is_parked("s1", 600)
 
 
 def test_resume_confirmation_resolves_entry_on_stream_error(monkeypatch):
@@ -484,18 +514,79 @@ def test_confirm_unknown_confirmation_returns_404() -> None:
     assert response.status_code == 404
 
 
-def test_confirm_foreign_session_returns_404() -> None:
+def test_confirm_cross_user_confirmer_reaches_registry(monkeypatch) -> None:
+    """SPEC-030 R-3: the route no longer asserts session ownership — a
+    tier_2 approver confirms a session they do not own; approval
+    authorization is enforced by the platform-gateway bridge."""
     client = _client()
     session = client.post("/api/v2/sessions", headers={"X-User-ID": "alice"})
     session_id = session.json()["session_id"]
+    pending = _park_registered(session_id)
+
+    kernel = get_runtime_kernel()
+
+    async def fake_resume(**kwargs):
+        yield {
+            "type": "confirmation_result",
+            "confirm_id": pending.confirm_id,
+            "status": "approved",
+        }
+
+    monkeypatch.setattr(kernel, "resume_confirmation", fake_resume)
     response = client.post(
         "/api/v2/chat/confirm",
         json={
             "session_id": session_id,
-            "confirm_id": "whatever",
+            "confirm_id": pending.confirm_id,
             "decision": "approve",
         },
-        headers={"X-User-ID": "mallory"},
+        headers={"X-User-ID": "bob-approver"},
+    )
+    assert response.status_code == 200
+
+
+def test_pending_confirmation_endpoint_returns_parked_metadata() -> None:
+    """SPEC-030 R-3: the confirm bridge reads the parked batch's policy
+    action and owner username from this endpoint."""
+    client = _client()
+    session = client.post("/api/v2/sessions", headers={"X-User-ID": "alice"})
+    session_id = session.json()["session_id"]
+    pending = CONFIRMATION_REGISTRY.register(
+        session_id, "alice", "reply-1", [TOOL_CALL], 600,
+        risk_levels={"k8s.restart_service": "write"},
+    )
+    response = client.get(
+        "/api/v2/chat/pending-confirmation",
+        params={"session_id": session_id},
+        headers={"X-User-ID": "bob-approver"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session_id"] == session_id
+    assert body["confirm_id"] == pending.confirm_id
+    assert body["owner_user_id"] == "alice"
+    assert body["action"] == "tools:mutate"
+    assert body["pending_calls"][0]["tool_name"] == "k8s.restart_service"
+
+
+def test_pending_confirmation_endpoint_404_when_unparked() -> None:
+    client = _client()
+    session = client.post("/api/v2/sessions", headers={"X-User-ID": "alice"})
+    session_id = session.json()["session_id"]
+    response = client.get(
+        "/api/v2/chat/pending-confirmation",
+        params={"session_id": session_id},
+        headers={"X-User-ID": "alice"},
+    )
+    assert response.status_code == 404
+
+
+def test_pending_confirmation_endpoint_404_unknown_session() -> None:
+    client = _client()
+    response = client.get(
+        "/api/v2/chat/pending-confirmation",
+        params={"session_id": "no-such-session"},
+        headers={"X-User-ID": "alice"},
     )
     assert response.status_code == 404
 

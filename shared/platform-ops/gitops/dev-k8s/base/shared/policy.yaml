@@ -1,13 +1,34 @@
 # Default action-authorization policy bundle (v1).
 #
-# Scope: action_authz domain only, allow/deny outcomes only — a strict subset of
-# the Tier-1 policy specification (docs/agentic-aiops-platform/policy-specification.md).
+# Scope: action_authz domain only, allow/deny/require_approval outcomes — a
+# strict subset of the Tier-1 policy specification
+# (docs/agentic-aiops-platform/policy-specification.md).
 #
 # Semantics (enforced by the gateway policy engine):
 #   - deny by default: no matching rule => deny
-#   - explicit deny overrides allow
-#   - higher priority wins between allow rules
+#   - explicit deny overrides require_approval and allow
+#   - require_approval overrides allow (SPEC-030)
+#   - higher priority wins within an outcome class
 #   - disabled rules are ignored
+#
+# Approval tiers (SPEC-030): a require_approval rule carries an approval
+# block. tier_1 keeps the decision with the session operator themself
+# (destructive-but-routine actions); tier_2 requires a designated approver
+# distinct from the requester (critical destructive actions).
+#
+# tier_1 authoring pattern for destructive-but-routine actions:
+#   decision:
+#     outcome: require_approval
+#     approval:
+#       tier: tier_1
+#       decided_by_roles: ["operator", "platform-admin"]
+# tier_1 allows self-approval by default, so the operator working with the
+# agent confirms their own parked call. Declare the level explicitly instead
+# of relying on the implicit no-rule path.
+#
+# Synthetic identities (workload clients holding the developer role) are
+# excluded from approval decisions by authoring — omit them from
+# decided_by_roles — never by code special cases.
 #
 # Action naming convention: <resource>:<verb>; bare "chat" for the chat action.
 #
@@ -19,9 +40,6 @@
 # session:list/session:delete (SPEC-022) mirror session:create's grants: the
 # API scopes both operations to the caller's own sessions server-side, so the
 # lifecycle actions share one posture across all roles.
-#
-# models:list (SPEC-024) mirrors chat's grants: catalog discovery is safe by
-# construction (id/label/provider/default only, never credentials).
 version: 1
 rules:
   - id: allow-operators-chat
@@ -91,6 +109,29 @@ rules:
       actions_any: ["tools:mutate"]
     decision:
       outcome: allow
+
+  # Tiered approval for mutating execution (SPEC-030 R-4): every mutating run
+  # parks behind a tier_2 requirement, enforced on the platform-gateway
+  # chat:confirm path — only a designated approver or platform admin OTHER
+  # than the requesting operator may approve. The allow rule above stays: the
+  # tool-gateway admission still evaluates tools:mutate allow/deny on the
+  # confirmer's delegated token (SPEC-021 unchanged). roles_any spans every
+  # chat:confirm holder so the requirement rides whichever identity reaches
+  # the parked call; developer is deliberately absent from decided_by_roles
+  # (synthetic-identity exclusion by authoring, see header comment).
+  - id: require-approval-tools-mutate
+    domain: action_authz
+    description: Mutating tool execution requires tier-2 approval by a designated approver distinct from the requester.
+    priority: 200
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator", "developer"]
+      actions_any: ["tools:mutate"]
+    decision:
+      outcome: require_approval
+      approval:
+        tier: tier_2
+        decided_by_roles: ["approver", "platform-admin"]
 
   - id: allow-operators-tools-list
     domain: action_authz

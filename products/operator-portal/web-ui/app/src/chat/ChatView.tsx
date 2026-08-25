@@ -28,7 +28,7 @@ import { ApiError } from "../api/client";
 import { getModelCatalog, type ModelCatalogResponse } from "../api/models";
 import { getSession, type SessionSummary } from "../api/sessions";
 import { useAuth } from "../auth/AuthContext";
-import { CHAT_CONFIRM_ROLES, hasAnyRole } from "../roles";
+import { CHAT_CONFIRM_ROLES, APPROVAL_DECIDER_ROLES, hasAnyRole } from "../roles";
 import type { SessionWorkspace } from "../sessions/useSessionWorkspace";
 import type { ToolResultFrame } from "../stream/models";
 import {
@@ -254,7 +254,7 @@ const CARD_STATUS: Record<string, { color: string; label: string }> = {
   error: { color: "error", label: "Error" },
 };
 
-function ConfirmationCardView({
+export function ConfirmationCardView({
   card,
   canDecide,
   busy,
@@ -266,6 +266,17 @@ function ConfirmationCardView({
   onDecide: (confirmId: string, decision: ConfirmationDecision) => void;
 }) {
   const status = CARD_STATUS[card.status] ?? CARD_STATUS.error;
+  // SPEC-030 R-5: a parked batch whose highest action is tools:mutate is a
+  // tier_2 approval — only designated approvers may decide. Display hint
+  // only; the gateway approval-tier bridge stays authoritative (403 either
+  // way), so an unknown/absent action degrades to tier_1 rendering.
+  const needsApprover = card.pendingCalls.some(
+    (call) => call.action === "tools:mutate",
+  );
+  const { roles } = useAuth();
+  const effectiveCanDecide =
+    canDecide &&
+    (!needsApprover || hasAnyRole(roles, APPROVAL_DECIDER_ROLES));
   const approving = card.status === "pending" && card.note === "Approving…";
   const denying = card.status === "pending" && card.note === "Denying…";
   return (
@@ -277,6 +288,15 @@ function ConfirmationCardView({
         <span>Confirmation requested</span>
         <Tag color={status.color}>{status.label}</Tag>
         {card.mutating ? <Tag color="orange">mutating</Tag> : null}
+        {needsApprover ? (
+          <Tooltip
+            title={`decided by: ${Array.from(APPROVAL_DECIDER_ROLES).join(", ")}`}
+          >
+            <Tag color="volcano">approver required</Tag>
+          </Tooltip>
+        ) : (
+          <Tag color="blue">operator confirmation</Tag>
+        )}
       </div>
       {card.message ? <div>{card.message}</div> : null}
       {card.pendingCalls.map((call, index) => (
@@ -295,7 +315,7 @@ function ConfirmationCardView({
         </div>
       ))}
       {card.status === "pending" ? (
-        canDecide ? (
+        effectiveCanDecide ? (
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             <Button
               type="primary"
@@ -316,7 +336,9 @@ function ConfirmationCardView({
           </div>
         ) : (
           <div className="confirm-note">
-            Your current role cannot approve or deny this request.
+            {needsApprover
+              ? "This request needs a designated approver — your current role cannot approve or deny it."
+              : "Your current role cannot approve or deny this request."}
           </div>
         )
       ) : null}

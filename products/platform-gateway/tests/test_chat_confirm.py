@@ -6,6 +6,7 @@ delegated-token forwarding, SSE passthrough, upstream error mapping
 audit emission tee'd off the confirmation_result frame.
 """
 
+import contextlib
 import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -39,6 +40,7 @@ CONFIRM_RESULT_FRAME = {
     "request_id": "req-1",
 }
 OPEN_PATCH = "platform_gateway.services.agent_client.open_chat_confirm_stream"
+FETCH_PATCH = "platform_gateway.services.agent_client.fetch_pending_confirmation"
 
 
 def _identity(role: str) -> IdentityContext:
@@ -112,6 +114,11 @@ class ChatConfirmRouteTests(unittest.TestCase):
 
         return patch(OPEN_PATCH, fake_open)
 
+    def _patch_fetch(self, parked: dict | None = None):
+        """SPEC-030 R-3: parked-state lookup the tier bridge runs first;
+        default None keeps the legacy no-parked-info behavior."""
+        return patch(FETCH_PATCH, new=AsyncMock(return_value=parked))
+
     # --- Policy enforcement ---
 
     def test_observer_denied_chat_confirm_with_structured_body(self) -> None:
@@ -126,6 +133,7 @@ class ChatConfirmRouteTests(unittest.TestCase):
         with (
             self._patch_identity("operator"),
             self._patch_delegation(),
+            self._patch_fetch(),
             self._patch_open_stream([CONFIRM_RESULT_FRAME], calls),
         ):
             response = self.client.post(CONFIRM_PATH, json=CONFIRM_BODY)
@@ -139,6 +147,7 @@ class ChatConfirmRouteTests(unittest.TestCase):
         with (
             self._patch_identity("operator"),
             self._patch_delegation("tok-delegated"),
+            self._patch_fetch(),
             self._patch_open_stream([CONFIRM_RESULT_FRAME], calls),
         ):
             self.client.post(CONFIRM_PATH, json=CONFIRM_BODY)
@@ -154,6 +163,7 @@ class ChatConfirmRouteTests(unittest.TestCase):
         with (
             self._patch_identity("operator"),
             self._patch_delegation(),
+            self._patch_fetch(),
             self._patch_open_stream([CONFIRM_RESULT_FRAME, end_frame]),
         ):
             response = self.client.post(CONFIRM_PATH, json=CONFIRM_BODY)
@@ -175,6 +185,7 @@ class ChatConfirmRouteTests(unittest.TestCase):
         with (
             self._patch_identity("operator"),
             self._patch_delegation(),
+            self._patch_fetch(),
             patch(OPEN_PATCH, fake_open),
         ):
             response = self.client.post(CONFIRM_PATH, json=CONFIRM_BODY)
@@ -191,6 +202,7 @@ class ChatConfirmRouteTests(unittest.TestCase):
         with (
             self._patch_identity("operator"),
             self._patch_delegation(),
+            self._patch_fetch(),
             patch(OPEN_PATCH, fake_open),
         ):
             response = self.client.post(CONFIRM_PATH, json=CONFIRM_BODY)
@@ -205,7 +217,25 @@ class ChatConfirmRouteTests(unittest.TestCase):
         with (
             self._patch_identity("operator"),
             self._patch_delegation(),
+            self._patch_fetch(),
             patch(OPEN_PATCH, fake_open),
+        ):
+            response = self.client.post(CONFIRM_PATH, json=CONFIRM_BODY)
+        self.assertEqual(response.status_code, 502)
+
+    def test_parked_fetch_failure_fails_closed_with_502(self) -> None:
+        """SPEC-030 R-3: without the parked state the tier cannot be
+        checked, so the bridge refuses to proxy instead of bypassing."""
+
+        async def fake_fetch(*args, **kwargs):
+            raise httpx.ConnectError(
+                "unreachable", request=httpx.Request("GET", "http://agent")
+            )
+
+        with (
+            self._patch_identity("operator"),
+            self._patch_delegation(),
+            patch(FETCH_PATCH, fake_fetch),
         ):
             response = self.client.post(CONFIRM_PATH, json=CONFIRM_BODY)
         self.assertEqual(response.status_code, 502)
@@ -261,6 +291,7 @@ class ChatConfirmAuditTests(unittest.TestCase):
                 "platform_gateway.api.routes.chat.obtain_delegated_token",
                 new=AsyncMock(return_value="tok"),
             ),
+            patch(FETCH_PATCH, new=AsyncMock(return_value=None)),
             patch(OPEN_PATCH, fake_open),
             patch(
                 "platform_gateway.services.gateway_service.emit_audit_event",
@@ -321,6 +352,195 @@ class ChatConfirmAuditTests(unittest.TestCase):
         response = self._post_decision("approve", [], emit_mock)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self._confirmation_events(emit_mock), [])
+
+
+class ApprovalTierBridgeTests(unittest.TestCase):
+    """SPEC-030 R-3: tiered enforcement on the confirm path.
+
+    The default bundle's tier_2 require_approval rule on tools:mutate
+    (deciders: approver, platform-admin; self-approval forbidden) drives
+    every case.
+    """
+
+    def setUp(self) -> None:
+        reset_policy_state()
+        app = create_app()
+        app.dependency_overrides[get_settings] = lambda: PlatformGatewaySettings(
+            require_auth=True
+        )
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        reset_policy_state()
+
+    def _parked(self, action: str | None, owner: str = "operator.user") -> dict:
+        return {
+            "session_id": "ses-1",
+            "confirm_id": "cf-1",
+            "owner_user_id": owner,
+            "action": action,
+            "pending_calls": [
+                {
+                    "call_id": "call-1",
+                    "tool_name": "k8s.restart_service",
+                    "parameters": {"namespace": "ops"},
+                }
+            ],
+        }
+
+    def _post(
+        self,
+        role: str,
+        parked: dict | None,
+        decision: str = "approve",
+        emit_mock=None,
+    ):
+        identity = _identity(role)
+
+        async def fake_identity(settings, request, request_id):
+            return identity
+
+        self.calls: list = []
+
+        async def fake_open(
+            settings, request_id, user_id, session_id,
+            confirm_id, decision_arg, delegated_token=None,
+        ):
+            self.calls.append(decision_arg)
+
+            async def _iter():
+                frame = dict(
+                    CONFIRM_RESULT_FRAME,
+                    status="approved" if decision_arg == "approve" else "denied",
+                )
+                yield _sse(frame)
+
+            return _iter()
+
+        patches = [
+            patch(
+                "platform_gateway.api.routes.chat.resolve_request_identity",
+                fake_identity,
+            ),
+            patch(
+                "platform_gateway.api.routes.chat.obtain_delegated_token",
+                new=AsyncMock(return_value="tok"),
+            ),
+            patch(FETCH_PATCH, new=AsyncMock(return_value=parked)),
+            patch(OPEN_PATCH, fake_open),
+        ]
+        if emit_mock is not None:
+            patches.append(
+                patch(
+                    "platform_gateway.services.gateway_service.emit_audit_event",
+                    emit_mock,
+                )
+            )
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            return self.client.post(
+                CONFIRM_PATH,
+                json={
+                    "session_id": "ses-1",
+                    "confirm_id": "cf-1",
+                    "decision": decision,
+                },
+            )
+
+    def test_non_decider_approval_blocked_with_structured_403(self) -> None:
+        emit_mock = MagicMock()
+        response = self._post(
+            "operator", self._parked("tools:mutate"), emit_mock=emit_mock
+        )
+        self.assertEqual(response.status_code, 403)
+        detail = response.json()["detail"]
+        self.assertEqual(detail["action"], "tools:mutate")
+        self.assertEqual(detail["reason"], "not_a_designated_approver")
+        self.assertEqual(detail["requirement"], "require_approval")
+        # The parked call stays parked: upstream is never called.
+        self.assertEqual(self.calls, [])
+        # The blocked attempt is audited with the block reason.
+        events = [
+            call.args[1]
+            for call in emit_mock.call_args_list
+            if call.args[1]["event_type"] == "confirmation_decided"
+        ]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["outcome"], "deny")
+        self.assertTrue(events[0]["details"]["blocked"])
+        self.assertEqual(
+            events[0]["details"]["blocked_reason"], "not_a_designated_approver"
+        )
+        self.assertEqual(
+            events[0]["details"]["approval_rule_id"],
+            "require-approval-tools-mutate",
+        )
+        self.assertEqual(events[0]["details"]["approval_tier"], "tier_2")
+
+    def test_tier2_self_approval_blocked(self) -> None:
+        # The approver owns the parked session: tier_2 forbids approving
+        # your own request even when you hold a decider role.
+        response = self._post(
+            "approver", self._parked("tools:mutate", owner="approver.user")
+        )
+        self.assertEqual(response.status_code, 403)
+        detail = response.json()["detail"]
+        self.assertEqual(detail["reason"], "self_approval")
+        self.assertEqual(detail["requirement"], "require_approval")
+        self.assertEqual(self.calls, [])
+
+    def test_tier2_distinct_decider_approves_and_audits_tier(self) -> None:
+        emit_mock = MagicMock()
+        response = self._post(
+            "approver",
+            self._parked("tools:mutate", owner="operator.user"),
+            emit_mock=emit_mock,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.calls, ["approve"])
+        events = [
+            call.args[1]
+            for call in emit_mock.call_args_list
+            if call.args[1]["event_type"] == "confirmation_decided"
+        ]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["outcome"], "allow")
+        self.assertEqual(
+            events[0]["details"]["approval_rule_id"],
+            "require-approval-tools-mutate",
+        )
+        self.assertEqual(events[0]["details"]["approval_tier"], "tier_2")
+
+    def test_tier2_deny_by_requester_still_allowed(self) -> None:
+        # The decider check applies to approvals only: the requester can
+        # still deny (cancel) their own parked mutating call.
+        response = self._post(
+            "operator", self._parked("tools:mutate"), decision="deny"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.calls, ["deny"])
+
+    def test_non_mutating_park_keeps_legacy_behavior(self) -> None:
+        emit_mock = MagicMock()
+        response = self._post(
+            "operator", self._parked("tools:invoke"), emit_mock=emit_mock
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.calls, ["approve"])
+        events = [
+            call.args[1]
+            for call in emit_mock.call_args_list
+            if call.args[1]["event_type"] == "confirmation_decided"
+        ]
+        self.assertEqual(len(events), 1)
+        self.assertNotIn("approval_rule_id", events[0]["details"])
+        self.assertNotIn("approval_tier", events[0]["details"])
+
+    def test_park_without_bridged_action_keeps_legacy_behavior(self) -> None:
+        response = self._post("operator", self._parked(None))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.calls, ["approve"])
 
 
 if __name__ == "__main__":

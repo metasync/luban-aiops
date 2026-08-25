@@ -58,6 +58,9 @@ export interface PendingCall {
   toolName?: string;
   parameters?: Record<string, unknown>;
   riskLevel?: string;
+  // SPEC-030 R-5: the policy action the call was parked under; drives the
+  // approval-tier badge (tools:mutate => tier_2 "approver required").
+  action?: string;
 }
 
 export interface ConfirmationRequestFrame {

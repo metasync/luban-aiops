@@ -168,6 +168,34 @@ describe("decodeEventBlock", () => {
     });
   });
 
+  it("keeps known parked-call policy actions and drops unknown ones (SPEC-030 R-5)", () => {
+    const decoded = decodeEventBlock(
+      sseBlock({
+        type: "confirmation_request",
+        confirm_id: "cf-3",
+        pending_calls: [
+          { tool_name: "k8s.get_pods", risk_level: "read", action: "tools:invoke" },
+          {
+            tool_name: "k8s.restart_pod",
+            risk_level: "write",
+            action: "tools:mutate",
+          },
+          { tool_name: "future.tool", risk_level: "write", action: "future:action" },
+          { tool_name: "legacy.tool", risk_level: "read" },
+        ],
+      }),
+    );
+    expect(decoded?.frame).toMatchObject({
+      kind: "confirmation_request",
+      pendingCalls: [
+        { toolName: "k8s.get_pods", action: "tools:invoke" },
+        { toolName: "k8s.restart_pod", action: "tools:mutate" },
+        { toolName: "future.tool", action: undefined },
+        { toolName: "legacy.tool", action: undefined },
+      ],
+    });
+  });
+
   it("maps confirmation_result frames", () => {
     const decoded = decodeEventBlock(
       sseBlock({ type: "confirmation_result", confirm_id: "cf-1", status: "approved" }),

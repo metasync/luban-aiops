@@ -33,7 +33,7 @@ switch — a half-typed chat draft survives a detour into the audit trail.
 
 - **Chat** stands alone at the top.
 - **Control** gathers Incidents, Audit trail, and Permissions.
-- **Workspace** gathers Tools, Skills, and Settings & Debug.
+- **Workspace** gathers Tools, Skills, and Settings.
 
 Entries you lack the role for are hidden, and a section header disappears
 when everything under it is hidden. On narrow screens the sidebar collapses
@@ -112,6 +112,11 @@ tools with collapsible parameters.
 
 - A **mutating** badge appears when any parked call would change state
   (write/admin risk) — read it before approving.
+- An approval-tier badge names who may decide: **operator confirmation**
+  means the session operator confirms their own card; **approver
+  required** names the designated approver roles (SPEC-030). If your roles
+  do not match, the card renders read-only — no Approve/Deny buttons — and
+  the gateway rejects non-decider approvals with a 403 regardless.
 - **Approve** resumes the stream and executes; **Deny** feeds a refusal
   back to the agent. Nothing runs silently, and an expired card locks with
   a status badge (the agent is interrupted).
@@ -159,7 +164,9 @@ The live role × action matrix, evaluated from the policy bundle the
 gateway actually enforces — not hand-maintained documentation. The header
 shows the bundle version and source. Platform admins see all roles;
 everyone else sees their own rows. Visible to every signed-in user under
-`policy:read`.
+`policy:read`. Cells under an approval requirement render a third state —
+**self-approval** (`tier_1`) or **approver required** (`tier_2`, hovering
+names the decider roles) — instead of plain allow/deny.
 
 If a matrix cell surprises you, the bundle edit workflow is in
 [Approval and HITL Governance](approval-and-hitl.md#policy-bundle-workflow).
@@ -174,15 +181,23 @@ If a matrix cell surprises you, the bundle edit workflow is in
   revising, removing skills) are in the
   [Skills and Guidance Guide](skills-guide.md).
 
-## Settings & Debug (Workspace)
+## Settings (Workspace)
 
-This view is being rebuilt as part of the SPEC-023 portal framework
-migration and currently shows a placeholder. Until it returns, request-level
-correlation comes from the platform version chip in the sidebar brand row;
-session identifiers appear in the session panel and in the URLs of audit
-and incident deep links. When reporting a problem, quote the platform
-version and any visible session or request identifiers — they correlate
-directly with logs, traces, and audit events.
+A read-only panel over the portal's own state, visible to everyone
+(including signed-out visitors), with three tabs:
+
+- **Identity** — sign-in state, username, roles, and the identity claims
+  carried by the auth session. Signed out, the tab shows a sign-in prompt
+  instead of stale data.
+- **Session** — the currently selected session id and title, or an
+  explicit *no session selected* state, plus the workspace session count.
+- **Platform** — the platform version chip value, the API origin the
+  portal talks to, and the most recent request id — quote these when
+  reporting issues; they correlate directly with logs, traces, and audit
+  events.
+
+The view carries no mutable controls; authorization decisions always come
+from the gateway.
 
 ## What Your Roles Unlock
 

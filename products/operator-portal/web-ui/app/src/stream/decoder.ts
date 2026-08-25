@@ -12,6 +12,10 @@ const DELTA_EVENT_TYPES = new Set([
 ]);
 const TERMINAL_EVENT_TYPES = new Set(["message_end", "reply_end"]);
 
+// SPEC-030 R-5: parked-call policy actions the card understands; anything
+// else is dropped so unknown future actions degrade to tier_1 rendering.
+const PENDING_CALL_ACTIONS = new Set(["tools:invoke", "tools:mutate"]);
+
 function streamEventType(payload: RawPayload): string {
   const raw = payload.type || payload.event || "";
   return String(raw).toLowerCase();
@@ -75,6 +79,7 @@ function toFrame(payload: RawPayload): StreamFrame | null {
       Array.isArray(payload.pending_calls) ? payload.pending_calls : []
     ).map((call) => {
       const record = asRecord(call) ?? {};
+      const action = asString(record.action);
       return {
         callId: asString(record.call_id),
         toolName: asString(record.tool_name),
@@ -82,6 +87,7 @@ function toFrame(payload: RawPayload): StreamFrame | null {
           | Record<string, unknown>
           | undefined,
         riskLevel: asString(record.risk_level),
+        action: action && PENDING_CALL_ACTIONS.has(action) ? action : undefined,
       };
     });
     return {

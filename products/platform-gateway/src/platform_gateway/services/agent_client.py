@@ -256,6 +256,31 @@ async def open_chat_confirm_stream(
     return _iter()
 
 
+async def fetch_pending_confirmation(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+    session_id: str,
+) -> dict | None:
+    """Parked-confirmation metadata for the approval bridge (SPEC-030 R-3).
+
+    Returns the parked batch's policy action and owner username, or
+    ``None`` when the session has no pending confirmation (upstream 404).
+    Transport failures and upstream 5xx raise so the confirm bridge can
+    fail closed instead of bypassing tier enforcement.
+    """
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            f"{settings.agent_service_url}/api/v2/chat/pending-confirmation",
+            params={"session_id": session_id},
+            headers=_headers(request_id, user_id),
+        )
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+    return response.json()
+
+
 async def runtime_metadata(settings: PlatformGatewaySettings) -> dict:
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(

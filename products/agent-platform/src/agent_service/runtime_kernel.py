@@ -19,7 +19,6 @@ from agent_service.services.evidence_store import (
 )
 from agent_service.services.hitl_confirmations import (
     CONFIRMATION_REGISTRY,
-    ConfirmationOwnerMismatch,
     PendingConfirmation,
 )
 from agent_service.services.model_catalog import MODEL_CATALOG
@@ -1011,8 +1010,10 @@ class AgentKernel:
         The caller must pass the entry as returned by
         ``ConfirmationRegistry.claim`` — the claim runs before response
         headers go out, so one parked batch can never be resumed twice.
-        Raises ``ConfirmationOwnerMismatch`` when the confirmer does not
-        own the parked entry; the v2 route maps it to an error frame.
+        Who may decide is enforced upstream by the platform-gateway
+        approval-tier bridge (SPEC-030 R-3): a tier_2 confirmation can
+        legitimately be resumed by a confirmer other than the session
+        owner, so the kernel no longer asserts registry ownership.
         The resumed stream follows the v2 frame contract and begins with
         the matching ``confirmation_result`` frame. The confirmer's
         bearer token rides ``DELEGATED_TOKEN`` so the tool-gateway sees
@@ -1022,9 +1023,6 @@ class AgentKernel:
 
         from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
         from agent_service.tools.gateway_tools import DELEGATED_TOKEN
-
-        if pending.user_id != user_name:
-            raise ConfirmationOwnerMismatch(user_name)
 
         # Pass the session's pinned model (SPEC-024 R-3) so the resumed
         # stream rebuilds against the same model that parked it.

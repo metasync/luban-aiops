@@ -39,6 +39,15 @@ export function buildRequestId(): string {
   return `req-${crypto.randomUUID()}`;
 }
 
+// SPEC-030 R-6: the Settings panel surfaces the most recent request id
+// for issue correlation. Read-only exposure — nothing outside this
+// module can rewrite the id a request actually carried.
+let lastRequestId: string | null = null;
+
+export function lastApiRequestId(): string | null {
+  return lastRequestId;
+}
+
 export function authHeaders(): Record<string, string> {
   const session = loadAuthSession();
   if (!session?.access_token) {
@@ -61,6 +70,7 @@ export async function requestJson<T = unknown>(
     "x-request-id": buildRequestId(),
     ...authHeaders(),
   };
+  lastRequestId = headers["x-request-id"];
   if (options.body !== undefined) {
     headers["content-type"] = "application/json";
   }

@@ -105,7 +105,10 @@ tool-gateway                     agent-service                    policy bundle
 **Dependency chain:** tool-gateway risk-tier gate (`GATEWAY_MUTATING_TOOLS_ENABLED`
 + `tools:mutate`) → agent-platform invariant (mutating tools never auto-approved;
 `AGENT_HITL_CONFIRM_TIMEOUT=0` drops them from the toolkit) → HITL confirmation
-(`chat:confirm`) → `tools:mutate` grant in the policy bundle. Turning on only the
+(`chat:confirm`) with the SPEC-030 approval-tier bridge (the default bundle's
+`tier_2` rule on `tools:mutate` requires a designated approver distinct from the
+requester; blocked attempts 403 and are audited, no new variables) →
+`tools:mutate` grant in the policy bundle. Turning on only the
 gateway flag is deliberately insufficient: without HITL bridging the agent cannot
 even offer the tool, and without the policy grant the invocation 403s at the
 gateway. See the [Approval and HITL Governance Guide](approval-and-hitl.md).
