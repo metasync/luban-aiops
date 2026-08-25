@@ -7,6 +7,27 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-25-approval-inbox-persistent-confirmation.md`
+  - delivers SPEC-031 (v0.13.0): durable confirmation lifecycle records
+    on the shared Postgres posture (cap 50 per session, cascade delete,
+    restart expiry, registry rehydration), an additive owner-transcript
+    `confirmations` session-detail surface so cards survive re-login and
+    pod restarts, a decider-scoped approvals inbox
+    (`GET /api/v1/approvals/inbox` behind the new `approvals:list`
+    action — metadata-only, pending + 30-day history incl. expired),
+    structured `409 already_resolved` race semantics, and the portal
+    Approvals view with pending-count badge and persistent owner-side
+    cards
+- `2026-08-25-require-approval-policy-semantics.md`
+  - delivers SPEC-030 (v0.12.0): `require_approval` as a first-class,
+    enforced policy outcome with approval tiers (`tier_1` operator
+    self-confirmation, `tier_2` designated approver with self-approval
+    blocked), evaluated in both gateway engines and bridged onto
+    `chat:confirm` with structured 403s and blocked-attempt audit;
+    default `tier_2` rule on `tools:mutate`, matrix third state
+    (`approval_requirements`), portal tier badges + read-only cards,
+    and the Settings view restored as a read-only Session & Identity
+    panel (add-on R-6)
 - `2026-08-25-skills-secret-sync-patch.md`
   - closes v0.11.1: `sync-skills-secrets.sh` preserves
     `SKILLS_AUDIT_CLIENT_SECRET` across its rewrite of the shared

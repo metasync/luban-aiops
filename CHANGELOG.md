@@ -13,6 +13,46 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.13.0 — 2026-08-25
+
+### Added
+
+- **Approval inbox and persistent confirmation cards (SPEC-031)**: every
+  parked confirmation and its resolution are now persisted durably
+  (Postgres on the shared `AGENT_STATE_DB_URL` posture; most recent 50
+  records per session, cascade-deleted with the session, stale pendings
+  flipped to expired on restart) — durability is the source of truth for
+  history and restart recovery while the in-memory registry stays the hot
+  path. Two surfaces build on the record store: the owner's session detail
+  gains an additive `confirmations` array so cards survive re-login, page
+  reloads, pod restarts, and replica boundaries (decided cards render
+  read-only with decider attribution, pending cards stay actionable), and
+  designated approvers get a cross-session inbox
+  (`GET /api/v1/approvals/inbox`) gated by a new `approvals:list` policy
+  action granted to `approver` and `platform-admin` (bundle rule
+  `allow-approvers-approvals-list`). Inbox items are metadata only —
+  session, owner, parked calls, outcome — never the owner's transcript
+  text, listing pending items plus the last 30 days of history (expired
+  items included) most recent first. The portal gains an Approvals view
+  for decider roles — nav entry with a pending-count badge, 30s/focus
+  polling, pending-first list + history — reusing the SPEC-030
+  confirmation card component and the existing `chat/confirm` bridge, so
+  tier enforcement, self-approval blocking, audit, and
+  resume-under-confirmer-token semantics are unchanged.
+
+### Changed
+
+- Confirm races now resolve into a structured outcome instead of an
+  opaque error: a decision against an already-resolved confirmation
+  answers `409 already_resolved` carrying the winner's status, decider,
+  decision, and decided-at timestamp (agent-platform and the gateway
+  pass it through unchanged), and the portal flips the losing card to
+  that outcome in both the chat transcript and the approvals inbox.
+- The mutating-demo e2e HITL leg asserts the SPEC-031 surfaces: the
+  owner's session detail carries the decided card, the approver inbox
+  lists the item with its outcome, and a second approve receives the
+  `already_resolved` 409.
+
 ## 0.12.0 — 2026-08-25
 
 ### Added
