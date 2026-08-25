@@ -9,13 +9,17 @@ semantics on the confirm route.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from agent_service.api.v2.routes import chat_confirm
 from agent_service.app import create_app
+from agent_service.schemas.v2 import AgentChatConfirmRequest
 from agent_service.services.confirmation_records import (
     CONFIRMATION_RECORD_STORE,
     HISTORY_WINDOW_DAYS,
@@ -91,6 +95,20 @@ class TestInMemoryStore:
         store.mark_resolved("ses-1", "nope", "approved", "bob", "approve")
         store.mark_resolved("ses-other", "cf-1", "approved", "bob", "approve")
         assert store.load_record("ses-1", "cf-1")["status"] == "pending"
+
+    def test_mark_resolved_second_write_is_noop(self) -> None:
+        """SPEC-031 R-4: the first outcome wins — the claim-time write
+        owns the resolution, the resume's safety-net write is a no-op."""
+        store = InMemoryConfirmationRecordStore()
+        store.save_parked(_record("cf-1"))
+        store.mark_resolved("ses-1", "cf-1", "approved", "bob", "approve")
+        first = store.load_record("ses-1", "cf-1")
+        store.mark_resolved("ses-1", "cf-1", "denied", "carol", "deny")
+        record = store.load_record("ses-1", "cf-1")
+        assert record["status"] == "approved"
+        assert record["decider_user_id"] == "bob"
+        assert record["decision"] == "approve"
+        assert record["decided_at"] == first["decided_at"]
 
     def test_load_pending_for_session_returns_most_recent_pending(self) -> None:
         store = InMemoryConfirmationRecordStore()
@@ -218,10 +236,31 @@ class TestPostgresStore:
         store = PostgresConfirmationRecordStore(
             db_url="postgresql://fake", connect=_fake_connect(calls)
         )
-        store.initialize()
+        store.initialize(stale_after_seconds=600)
         sqls = [call["sql"] for call in calls if "sql" in call]
         assert any("CREATE TABLE IF NOT EXISTS confirmation_records" in s for s in sqls)
-        assert any("status = 'expired'" in s and "status = 'pending'" in s for s in sqls)
+        sweep = next(
+            call
+            for call in calls
+            if "sql" in call and "status = 'expired'" in call["sql"]
+        )
+        # SPEC-031 review fix: the sweep is scoped to rows older than the
+        # HITL TTL so a sibling replica's live park is never expired.
+        assert "status = 'pending'" in sweep["sql"]
+        assert "parked_at <= now() - make_interval" in sweep["sql"]
+        assert sweep["params"] == {"stale_after_seconds": 600}
+
+    def test_mark_resolved_only_touches_pending_rows(self) -> None:
+        """Idempotent resolution at the SQL level: the UPDATE carries the
+        ``status = 'pending'`` guard so a second writer finds no row."""
+        calls: list[dict] = []
+        store = PostgresConfirmationRecordStore(
+            db_url="postgresql://fake", connect=_fake_connect(calls)
+        )
+        store.mark_resolved("ses-1", "cf-1", "approved", "bob", "approve")
+        update = next(call for call in calls if "sql" in call)
+        assert "UPDATE confirmation_records" in update["sql"]
+        assert "AND status = 'pending'" in update["sql"]
 
     def test_save_parked_wraps_pending_calls_in_jsonb_and_bounds(self) -> None:
         from psycopg.types.json import Jsonb
@@ -306,6 +345,42 @@ class TestFactory:
         with pytest.raises(ValueError):
             build_confirmation_record_store()
 
+    def test_postgres_initialize_scopes_sweep_to_hitl_timeout(
+        self, monkeypatch
+    ) -> None:
+        """The startup sweep TTL mirrors AGENT_HITL_CONFIRM_TIMEOUT."""
+        monkeypatch.setenv("AGENT_STATE_STORE_BACKEND", "postgres")
+        monkeypatch.setenv("AGENT_STATE_DB_URL", "postgresql://fake")
+        monkeypatch.setenv("AGENT_HITL_CONFIRM_TIMEOUT", "900")
+        captured: dict = {}
+
+        def fake_initialize(self, stale_after_seconds: float = 0.0) -> None:
+            captured["stale_after_seconds"] = stale_after_seconds
+
+        monkeypatch.setattr(
+            PostgresConfirmationRecordStore, "initialize", fake_initialize
+        )
+        store = build_confirmation_record_store()
+        assert store.backend_name == "postgres"
+        assert captured["stale_after_seconds"] == 900
+
+    def test_postgres_initialize_falls_back_on_bad_timeout(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("AGENT_STATE_STORE_BACKEND", "postgres")
+        monkeypatch.setenv("AGENT_STATE_DB_URL", "postgresql://fake")
+        monkeypatch.setenv("AGENT_HITL_CONFIRM_TIMEOUT", "not-a-number")
+        captured: dict = {}
+
+        def fake_initialize(self, stale_after_seconds: float = 0.0) -> None:
+            captured["stale_after_seconds"] = stale_after_seconds
+
+        monkeypatch.setattr(
+            PostgresConfirmationRecordStore, "initialize", fake_initialize
+        )
+        build_confirmation_record_store()
+        assert captured["stale_after_seconds"] == 600
+
 
 # --- Routes: persistent cards and inbox (R-2/R-3) ---
 
@@ -357,6 +432,68 @@ def test_confirm_already_resolved_returns_structured_409() -> None:
     assert detail["decider_user_id"] == "bob-approver"
     assert detail["decision"] == "approve"
     assert detail["decided_at"] is not None
+
+
+def test_confirm_persists_outcome_at_claim_time_before_stream_drains() -> None:
+    """SPEC-031 review fix (M1): the durable outcome lands the moment the
+    claim succeeds — racing approvers see the structured 409 while the
+    winner's resumed turn still streams, never an opaque 404."""
+    client = _client()
+    session = client.post("/api/v2/sessions", headers={"X-User-ID": "alice"})
+    session_id = session.json()["session_id"]
+    pending = CONFIRMATION_REGISTRY.register(
+        session_id, "alice", "reply-1", [], timeout=600.0
+    )
+    CONFIRMATION_RECORD_STORE.save_parked(
+        make_record(
+            pending.confirm_id,
+            session_id,
+            "alice",
+            [{"call_id": "call-1", "tool_name": "k8s.restart_service"}],
+            "tools:mutate",
+        )
+    )
+
+    # First approver claims; the StreamingResponse is returned but its
+    # body never drained, so the resumed turn has not finished yet.
+    asyncio.run(
+        chat_confirm(
+            AgentChatConfirmRequest(
+                session_id=session_id,
+                confirm_id=pending.confirm_id,
+                decision="approve",
+            ),
+            x_user_id="bob-approver",
+        )
+    )
+    record = CONFIRMATION_RECORD_STORE.load_record(session_id, pending.confirm_id)
+    assert record["status"] == "approved"
+    assert record["decider_user_id"] == "bob-approver"
+    assert record["decision"] == "approve"
+
+    # Second approver, still mid-stream of the winner: structured 409
+    # carrying the winner's outcome instead of a bare 404.
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(
+            chat_confirm(
+                AgentChatConfirmRequest(
+                    session_id=session_id,
+                    confirm_id=pending.confirm_id,
+                    decision="deny",
+                ),
+                x_user_id="carol-approver",
+            )
+        )
+    assert excinfo.value.status_code == 409
+    detail = excinfo.value.detail
+    assert detail["reason"] == "already_resolved"
+    assert detail["status"] == "approved"
+    assert detail["decider_user_id"] == "bob-approver"
+    assert detail["decision"] == "approve"
+    # The loser's decision never overwrites the winner's outcome.
+    record = CONFIRMATION_RECORD_STORE.load_record(session_id, pending.confirm_id)
+    assert record["status"] == "approved"
+    assert record["decider_user_id"] == "bob-approver"
 
 
 def test_confirm_pending_record_without_registry_stays_404() -> None:

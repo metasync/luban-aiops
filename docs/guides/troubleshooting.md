@@ -853,10 +853,13 @@ attribution — this is the race-safe path, not an error.
 ## Symptom: A pending confirmation shows "expired" after a service restart
 
 **Most likely cause:** A parked kernel reply never survives its process
-(SPEC-020 posture). At startup, agent-platform flips any `pending`
-confirmation record to `expired` (SPEC-031), so the card stays visible in
+(SPEC-020 posture). At startup, agent-platform flips `pending`
+confirmation records older than the HITL confirmation TTL
+(`AGENT_HITL_CONFIRM_TIMEOUT`, default 10 minutes) to `expired`
+(SPEC-031), so the card stays visible in
 the transcript and the approver inbox with an accurate state instead of
-hanging forever.
+hanging forever. Younger pending rows stay untouched — they may still be
+answerable on a live replica.
 
 **Resolution:**
 

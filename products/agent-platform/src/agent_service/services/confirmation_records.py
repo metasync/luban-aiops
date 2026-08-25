@@ -16,12 +16,15 @@ oldest evicted first) and live and die with their session. Inbox
 history is bounded by a ``HISTORY_WINDOW_DAYS`` time window; resolved
 rows older than the window are swept opportunistically on writes.
 
-At startup the Postgres backend flips any ``pending`` rows to
-``expired``: a parked kernel reply never survives its process
-(SPEC-020 posture), so after a restart the record stays visible —
-surfaced as an expired card rather than vanishing — but can never be
-resumed. Failures never fail a turn: callers persist best-effort and
-degrade to live-only cards.
+At startup the Postgres backend flips ``pending`` rows that already
+exceeded the HITL confirmation TTL to ``expired``: a parked kernel reply
+never survives its process (SPEC-020 posture) and a park past its TTL
+answers no confirmation on any replica, so closing those rows is safe
+across replicas; younger rows stay untouched so a live replica's park is
+never expired by a sibling's startup. After a restart the record stays
+visible — surfaced as an expired card rather than vanishing — but can
+never be resumed. Failures never fail a turn: callers persist
+best-effort and degrade to live-only cards.
 """
 
 from __future__ import annotations
@@ -138,6 +141,10 @@ class InMemoryConfirmationRecordStore:
         record = self._by_confirm_id.get(confirm_id)
         if record is None or record["session_id"] != session_id:
             return
+        # A confirmation resolves exactly once (SPEC-031 R-4): the
+        # claim-time write owns the outcome, later writes are no-ops.
+        if record["status"] != "pending":
+            return
         record["status"] = status
         record["decider_user_id"] = decider_user_id
         record["decision"] = decision
@@ -252,6 +259,9 @@ DELETE FROM confirmation_records
  )
 """
 
+# Resolves exactly once (SPEC-031 R-4): the claim-time write owns the
+# outcome; a later write (the resume's safety-net write, a racing expiry)
+# finds no pending row and becomes a no-op.
 _MARK_RESOLVED = """
 UPDATE confirmation_records
    SET status = %(status)s,
@@ -260,6 +270,7 @@ UPDATE confirmation_records
        decided_at = now()
  WHERE session_id = %(session_id)s
    AND confirm_id = %(confirm_id)s
+   AND status = 'pending'
 """
 
 _LOAD_FOR_SESSION = """
@@ -316,12 +327,17 @@ DELETE FROM confirmation_records
  )
 """
 
-# A parked kernel reply never survives its process: on startup any row
-# still pending belongs to a dead process and can never be resumed.
+# Startup sweep (SPEC-031): close pending rows that already exceeded the
+# HITL confirmation TTL — such a park answers no confirmation on any
+# replica (claim raises ConfirmationExpired), so expiring it here is safe
+# across replicas. Younger rows stay pending: on a live replica they are
+# still answerable, and a single replica's own orphaned parks age past
+# the TTL before a later sweep closes them.
 _CLOSE_STALE_PENDING = """
 UPDATE confirmation_records
    SET status = 'expired', decided_at = now()
  WHERE status = 'pending'
+   AND parked_at <= now() - make_interval(secs => %(stale_after_seconds)s)
 """
 
 _SWEEP_LIMIT = 100
@@ -396,12 +412,22 @@ class PostgresConfirmationRecordStore:
         finally:
             conn.close()
 
-    def initialize(self) -> None:
-        """Create the table and close pending rows orphaned by a restart."""
+    def initialize(self, stale_after_seconds: float = 0.0) -> None:
+        """Create the table and close pending rows that can no longer answer.
+
+        ``stale_after_seconds`` is the HITL confirmation TTL: only rows
+        parked longer ago than that are closed (they answer no
+        confirmation on any replica, live or restarted). ``0`` closes
+        every pending row — correct when bridging is disabled, since no
+        live park can exist anywhere.
+        """
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(_CONFIRMATION_RECORDS_DDL)
-                cur.execute(_CLOSE_STALE_PENDING)
+                cur.execute(
+                    _CLOSE_STALE_PENDING,
+                    {"stale_after_seconds": max(stale_after_seconds, 0)},
+                )
             conn.commit()
 
     def save_parked(self, record: dict[str, Any]) -> None:
@@ -541,7 +567,15 @@ def build_confirmation_record_store() -> ConfirmationRecordStore:
             )
         try:
             store = PostgresConfirmationRecordStore(db_url=db_url)
-            store.initialize()
+            # Startup sweep scope mirrors the registry TTL: a park past
+            # its confirmation timeout answers nothing on any replica.
+            try:
+                stale_after_seconds = max(
+                    int(os.getenv("AGENT_HITL_CONFIRM_TIMEOUT", "600")), 0
+                )
+            except ValueError:
+                stale_after_seconds = 600
+            store.initialize(stale_after_seconds=stale_after_seconds)
             LOGGER.info(
                 "confirmation record store: Postgres backend initialized"
             )

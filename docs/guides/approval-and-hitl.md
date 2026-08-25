@@ -230,15 +230,19 @@ the record store:
   decisions from the last 30 days, most recent first. Items are
   **metadata only** — session id/title, owner, parked calls, outcome — and
   never carry the owner's transcript text. Records are bounded (most recent
-  50 per session, cascade-deleted with the session), and a restart flips
-  stale pending rows to expired because a parked kernel reply never
-  survives its process.
+  50 per session, cascade-deleted with the session), and on startup a
+  pending row older than the HITL confirmation TTL flips to expired
+  (a parked kernel reply never survives its process, and a park past its
+  TTL answers no confirmation on any replica — younger rows stay
+  pending).
 
 Inbox access is the `approvals:list` policy action (bundle rule
 `allow-approvers-approvals-list`), granted to `approver` and
 `platform-admin`; everyone else receives the standard audited policy 403.
 
-**Race semantics.** A confirmation resolves exactly once. A decision against
+**Race semantics.** A confirmation resolves exactly once — the outcome is
+persisted at claim time, so a racing approver gets a structured result even
+while the winner's resumed turn still streams. A decision against
 an already-resolved confirmation answers `409 already_resolved` with the
 winner's outcome (status, decider, decision, decided-at), and the portal
 flips the loser's card to that outcome instead of offering a doomed retry.

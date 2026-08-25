@@ -20,10 +20,11 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 - **Approval inbox and persistent confirmation cards (SPEC-031)**: every
   parked confirmation and its resolution are now persisted durably
   (Postgres on the shared `AGENT_STATE_DB_URL` posture; most recent 50
-  records per session, cascade-deleted with the session, stale pendings
-  flipped to expired on restart) — durability is the source of truth for
-  history and restart recovery while the in-memory registry stays the hot
-  path. Two surfaces build on the record store: the owner's session detail
+  records per session, cascade-deleted with the session, pending rows
+  older than the HITL confirmation TTL flipped to expired on startup) —
+  durability is the source of truth for history and restart recovery
+  while the in-memory registry stays the hot path. Two surfaces build on
+  the record store: the owner's session detail
   gains an additive `confirmations` array so cards survive re-login, page
   reloads, pod restarts, and replica boundaries (decided cards render
   read-only with decider attribution, pending cards stay actionable), and
@@ -47,7 +48,11 @@ Release 1 entries are grouped retrospectively under 0.1.0.
   answers `409 already_resolved` carrying the winner's status, decider,
   decision, and decided-at timestamp (agent-platform and the gateway
   pass it through unchanged), and the portal flips the losing card to
-  that outcome in both the chat transcript and the approvals inbox.
+  that outcome in both the chat transcript and the approvals inbox. The
+  outcome is persisted at claim time — the durable write lands the
+  moment the single-flight claim succeeds, so a racing approver sees the
+  structured 409 even while the winner's resumed turn still streams,
+  never an opaque 404.
 - The mutating-demo e2e HITL leg asserts the SPEC-031 surfaces: the
   owner's session detail carries the decided card, the approver inbox
   lists the item with its outcome, and a second approve receives the

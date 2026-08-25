@@ -1190,9 +1190,9 @@ class AgentKernel:
             DELEGATED_TOKEN.reset(token_var)
             TOOL_EVIDENCE_SINK.reset(sink_var)
             CONFIRMATION_REGISTRY.resolve(session_id, pending.confirm_id)
-            # SPEC-031 R-1: record the outcome (decider + decision) so
-            # the owner's card and the approver inbox keep it; the
-            # confirmation_result frame above already flowed.
+            # SPEC-031 R-1: idempotent safety net — the confirm route
+            # already wrote the outcome at claim time (R-4), so this only
+            # covers paths that resolved without a claim-time write.
             self._record_resolution(
                 session_id,
                 pending.confirm_id,

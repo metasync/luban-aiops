@@ -17,8 +17,11 @@ structured outcome instead of an opaque error.
   `confirmation_request` frame reaches the client and the outcome before
   `confirmation_result` flows. Records are bounded (most recent 50 per
   session, evicted oldest-first), cascade-deleted with their session, and
-  stale pendings flip to `expired` on restart (a parked kernel reply never
-  survives its process). The in-memory registry stays the hot path, with
+  pending rows older than the HITL confirmation TTL flip to `expired` on
+  startup (a parked kernel reply never survives its process, and a park
+  past its TTL answers no confirmation on any replica — younger rows stay
+  untouched so a live replica's park is never expired by a sibling's
+  restart). The in-memory registry stays the hot path, with
   startup + on-miss rehydration across restarts and replicas.
 - **Owner-side cards survive everything.** The session detail grows an
   additive `confirmations` array reconstructed from the durable records,
@@ -38,8 +41,10 @@ structured outcome instead of an opaque error.
 - **Races resolve, they don't error.** A decision against an
   already-resolved confirmation answers `409 already_resolved` carrying
   the winner's status, decider, decision, and decided-at timestamp;
-  exactly one execution and one audit event per confirmation. Unknown
-  confirm ids keep 404.
+  exactly one execution and one audit event per confirmation. The
+  outcome is persisted at claim time, so a racing approver gets the
+  structured 409 even while the winner's resumed turn still streams.
+  Unknown confirm ids keep 404.
 - **Portal Approvals view.** Decider-role users see an Approvals nav
   entry with a pending-count badge (single shared 30s/focus poll); the
   view lists pending items first, then history, reuses the SPEC-030

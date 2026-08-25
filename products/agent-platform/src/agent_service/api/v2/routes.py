@@ -293,6 +293,15 @@ async def chat_confirm(
             status_code=404, detail="confirmation not found"
         ) from None
 
+    # SPEC-031 R-4: persist the outcome at claim time — the claim is
+    # single-flight and the decision irrevocable once claimed, so racing
+    # approvers answering while the resumed turn still streams get the
+    # structured 409 above instead of an opaque 404. The resume's
+    # ``finally`` write remains as an idempotent safety net.
+    _persist_claimed_outcome(
+        session.session_id, body.confirm_id, body.decision, user_id
+    )
+
     async def _events() -> AsyncIterator[str]:
         async for chunk in kernel.resume_confirmation(
             session_id=session.session_id,
@@ -356,6 +365,28 @@ async def get_pending_confirmation(
         "action": record["action"],
         "pending_calls": record["pending_calls"],
     }
+
+
+def _persist_claimed_outcome(
+    session_id: str, confirm_id: str, decision: str, decider_user_id: str
+) -> None:
+    """Best-effort durable outcome write at claim time (SPEC-031 R-4).
+
+    Mirrors the kernel's resolution write posture: a store failure only
+    degrades the race response and persisted history, never the decision
+    itself (the resumed stream still flows).
+    """
+    status = "approved" if decision == "approve" else "denied"
+    try:
+        CONFIRMATION_RECORD_STORE.mark_resolved(
+            session_id, confirm_id, status, decider_user_id, decision
+        )
+    except Exception as exc:
+        LOGGER.warning(
+            "confirmation record claim-time resolution failed for session %s: %s",
+            session_id,
+            exc,
+        )
 
 
 def _resolved_record(session_id: str, confirm_id: str) -> dict | None:
