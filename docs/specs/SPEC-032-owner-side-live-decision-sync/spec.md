@@ -121,3 +121,10 @@ Acceptance criteria:
   (5s change-gated poll, settle window, stream/idle teardown) wired into
   `ChatView` through the existing `transcriptToTurns` seeding path;
   portal-only, 9 hook tests added (124 portal tests green, tsc clean).
+- 2026-08-25: patched in the 0.14.1 train — live validation of 0.14.0
+  found the owner window still deaf: the poll applied through
+  `setSession`, whose stash-then-restore hands back the stale cached
+  turns for the session already on screen. Added `reseedTurns` as the
+  authoritative same-session re-seed (replaces live turns and the cache
+  entry, never moves the session pointer or aborts a stream) plus three
+  regression tests pinning the cache-shadow pitfall.

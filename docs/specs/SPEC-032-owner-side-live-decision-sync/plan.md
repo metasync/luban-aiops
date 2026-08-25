@@ -22,9 +22,14 @@ policy surface changes.
 - approach: `setInterval`-driven `getSession(sessionId)` while active; on a
   moved fingerprint, call `applyDetail(detail)` which runs
   `transcriptToTurns(detail.transcript, detail.evidence_turns,
-  detail.confirmations)` and `chat.setSession(sessionId, turns)` — the same
-  seeding path as the initial load (SPEC-031 R-2). Change-gating keeps
-  identical responses no-ops (no turn rebuild, no scroll disturbance).
+  detail.confirmations)` and `chat.reseedTurns(sessionId, turns)` — the
+  same transcript mapping as the initial load (SPEC-031 R-2), applied
+  through the authoritative same-session re-seed: `setSession` called for
+  the session already on screen stashes the current turns into the
+  per-tab cache and restores that same entry, so its `history` argument
+  never applies (the v0.14.0 bug that kept the owner window deaf; fixed
+  in v0.14.1). Change-gating keeps identical responses no-ops (no turn
+  rebuild, no scroll disturbance).
 - alternatives rejected: (a) unconditional periodic re-render — disturbs
   scroll/focus on every tick; (b) SSE session channel — new backend surface
   for a 5s-acceptable latency (Non-Goals).
@@ -38,8 +43,8 @@ policy surface changes.
 - in-flight guard: a fetch started under `active` can resolve after a stream
   begins; the apply callback re-checks a `shouldApply()` closure (streaming
   flag + session match) before touching turn state, so a poll can never
-  abort or interleave with a live stream (`setSession` aborts controllers —
-  it must not run mid-stream).
+  abort or interleave with a live stream (`reseedTurns` touches no
+  controller and never aborts — it must not run mid-stream anyway).
 
 ### R-3: Outcome parity
 

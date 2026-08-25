@@ -720,14 +720,17 @@ export default function ChatView({
   // another browser session) and the confirmation_result frame only rides
   // the answering stream; a bounded poll re-seeds the timeline through the
   // same transcriptToTurns path the initial load uses, so the decided card
-  // and the resumed turn appear without a manual refresh.
+  // and the resumed turn appear without a manual refresh. The re-seed
+  // goes through reseedTurns (not setSession): for the session already on
+  // screen, setSession's stash-then-restore would hand back the stale
+  // cached turns and shadow the fresh state.
   usePendingDecisionPoll({
     sessionId: chat.sessionId,
     turns: chat.turns,
     streaming: chat.streaming,
     applyDetail: (detail) => {
       if (!chat.sessionId) return;
-      setSession(
+      chat.reseedTurns(
         chat.sessionId,
         transcriptToTurns(
           detail.transcript ?? [],

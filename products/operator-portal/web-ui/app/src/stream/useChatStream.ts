@@ -106,6 +106,11 @@ export interface ChatStreamApi {
   // stashes the current session's turns, and restores the target session's
   // cached turns — or seeds them from `history` (the loaded transcript).
   setSession: (sessionId: string | null, history?: ChatTurn[]) => void;
+  // Authoritative re-seed of the CURRENT session's timeline (SPEC-032):
+  // replaces both the live turns and the cache entry, so the per-tab
+  // cache can never shadow the fresh state. Never moves the session
+  // pointer and never aborts a stream.
+  reseedTurns: (sessionId: string, turns: ChatTurn[]) => void;
 }
 
 export function useChatStream(): ChatStreamApi {
@@ -422,6 +427,19 @@ export function useChatStream(): ChatStreamApi {
     [],
   );
 
+  // SPEC-032: setSession called for the session already on screen stashes
+  // the current turns into the cache and then restores that same entry —
+  // a passed-in `history` never applies (the cache hit wins). The pending-
+  // decision poll therefore re-seeds through this dedicated path, which
+  // replaces the live turns AND the cache entry so a later switch away
+  // and back restores the fresh timeline, not the shadowed stale one.
+  const reseedTurns = useCallback((sessionId: string, turns: ChatTurn[]) => {
+    if (sessionIdRef.current !== sessionId) return;
+    turnsRef.current = turns;
+    turnsCacheRef.current.set(sessionId, turns);
+    bump();
+  }, []);
+
   return {
     turns: turnsRef.current,
     sessionId: sessionIdRef.current,
@@ -430,5 +448,6 @@ export function useChatStream(): ChatStreamApi {
     send,
     decide,
     setSession,
+    reseedTurns,
   };
 }
