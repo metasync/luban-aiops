@@ -308,3 +308,57 @@ describe("transcriptToTurns confirmation replay (SPEC-031 R-2)", () => {
     );
   });
 });
+
+// --- Turn-anchored cards (SPEC-033 R-3) ---
+
+describe("transcriptToTurns card turn anchoring (SPEC-033 R-3)", () => {
+  it("anchors each record under the turn that parked it", () => {
+    const turns = transcriptToTurns(TWO_TURNS, null, [
+      recordOf({
+        confirm_id: "cf-first",
+        status: "approved",
+        decider_user_id: "luban-approver",
+        decided_at: "2026-08-25T10:05:00Z",
+        turn_index: 0,
+      }),
+      recordOf({
+        confirm_id: "cf-second",
+        status: "approved",
+        decider_user_id: "luban-approver",
+        decided_at: "2026-08-25T11:05:00Z",
+        turn_index: 1,
+      }),
+    ]);
+    // No stacking under the newest turn — one card per parking exchange.
+    expect(turns[0].confirmations.map((c) => c.confirmId)).toEqual([
+      "cf-first",
+    ]);
+    expect(turns[1].confirmations.map((c) => c.confirmId)).toEqual([
+      "cf-second",
+    ]);
+  });
+
+  it("anchors a pending record to its parking turn", () => {
+    const turns = transcriptToTurns(TWO_TURNS, null, [
+      recordOf({ turn_index: 0 }),
+    ]);
+    expect(turns[0].confirmations).toHaveLength(1);
+    expect(turns[0].confirmationPending).toBe(true);
+    expect(turns[1].confirmationPending).toBe(false);
+    expect(turns[1].confirmations).toEqual([]);
+  });
+
+  it("falls back to the newest turn without a usable ordinal", () => {
+    const turns = transcriptToTurns(TWO_TURNS, null, [
+      recordOf({ confirm_id: "cf-null", turn_index: null }),
+      recordOf({ confirm_id: "cf-absent" }),
+      recordOf({ confirm_id: "cf-stale", turn_index: 7 }),
+    ]);
+    expect(turns[0].confirmations).toEqual([]);
+    expect(turns[1].confirmations.map((c) => c.confirmId)).toEqual([
+      "cf-null",
+      "cf-absent",
+      "cf-stale",
+    ]);
+  });
+});

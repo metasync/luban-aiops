@@ -61,6 +61,10 @@ export interface ConfirmationRecord {
   session_title?: string | null;
   pending_calls: ConfirmationCallPayload[];
   action?: string | null;
+  // SPEC-033 R-2: ordinal of the user turn that parked the record (same
+  // convention as evidence_turns.turn_index); absent/null for records
+  // parked before the field existed.
+  turn_index?: number | null;
   status: "pending" | "approved" | "denied" | "expired";
   parked_at?: string | null;
   decider_user_id?: string | null;

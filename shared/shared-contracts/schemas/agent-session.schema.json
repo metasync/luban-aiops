@@ -93,7 +93,7 @@
     },
     "confirmations": {
       "type": ["array", "null"],
-      "description": "Durable confirmation lifecycle cards for the owner transcript (SPEC-031 R-2), ordered by parked_at ascending; empty array when the session parked none, null when the record store is unreadable (degrades like evidence_turns, never 500). Decided records carry the decider and outcome so cards render read-only with attribution after any re-login.",
+      "description": "Durable confirmation lifecycle cards for the owner transcript (SPEC-031 R-2), ordered by parked_at ascending; empty array when the session parked none, null when the record store is unreadable (degrades like evidence_turns, never 500). Decided records carry the decider and outcome so cards render read-only with attribution after any re-login. SPEC-033 R-2 adds the additive turn_index field carrying the parking turn ordinal.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -119,6 +119,10 @@
           },
           "action": {
             "type": ["string", "null"]
+          },
+          "turn_index": {
+            "type": ["integer", "null"],
+            "description": "SPEC-033 R-2: ordinal of the user turn that parked the record (same convention as evidence_turns.turn_index), so transcript seeding anchors the card under its parking exchange; null for records parked before the column existed."
           },
           "status": {
             "type": "string",

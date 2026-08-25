@@ -188,6 +188,9 @@ class ConfirmationRecordModel(BaseModel):
     session_title: str | None = None
     pending_calls: list[dict[str, Any]] = Field(default_factory=list)
     action: str | None = None
+    # SPEC-033 R-2: additive parking-turn ordinal; null for records that
+    # predate the column.
+    turn_index: int | None = Field(default=None, ge=0)
     status: Literal["pending", "approved", "denied", "expired"] = "pending"
     parked_at: str | None = None
     decider_user_id: str | None = None

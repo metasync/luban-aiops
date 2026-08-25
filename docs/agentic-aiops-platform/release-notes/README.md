@@ -7,6 +7,15 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-26-confirmation-card-turn-anchoring.md`
+  - delivers SPEC-033 (v0.15.0): the v0.14.1 live validation found a
+    multi-park session stacking every confirmation card under the
+    newest turn — parked records now persist their parking turn
+    ordinal (additive column with in-place migration), the session
+    detail carries it additively, and transcript seeding anchors each
+    card under the exchange that parked it, with the legacy
+    newest-turn anchoring kept as the fallback for pre-delivery
+    records
 - `2026-08-25-owner-decision-sync-reseed-patch.md`
   - closes v0.14.1: the SPEC-032 poll applied through `setSession`,
     whose stash-then-restore hands back the stale cached turns for the

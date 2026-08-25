@@ -42,6 +42,7 @@ def _record(
     session_id: str = "ses-1",
     owner: str = "alice",
     parked_at: datetime | None = None,
+    turn_index: int | None = None,
 ) -> dict:
     record = make_record(
         confirm_id,
@@ -49,6 +50,7 @@ def _record(
         owner,
         [{"call_id": "call-1", "tool_name": "k8s.restart_service"}],
         "tools:mutate",
+        turn_index=turn_index,
     )
     if parked_at is not None:
         record["parked_at"] = _iso(parked_at)
@@ -78,6 +80,16 @@ class TestInMemoryStore:
         store.save_parked(_record("cf-1", parked_at=base - timedelta(minutes=5)))
         rows = store.load_for_session("ses-1")
         assert [row["confirm_id"] for row in rows] == ["cf-1", "cf-2"]
+
+    def test_save_and_load_round_trips_turn_index(self) -> None:
+        """SPEC-033 R-1: the parking turn ordinal survives the store."""
+        store = InMemoryConfirmationRecordStore()
+        store.save_parked(_record("cf-1", turn_index=4))
+        store.save_parked(_record("cf-2"))
+        rows = store.load_for_session("ses-1")
+        assert rows[0]["turn_index"] == 4
+        assert rows[1]["turn_index"] is None
+        assert store.load_pending_for_session("ses-1")["turn_index"] is None
 
     def test_mark_resolved_attributes_decider_and_outcome(self) -> None:
         store = InMemoryConfirmationRecordStore()
@@ -239,6 +251,10 @@ class TestPostgresStore:
         store.initialize(stale_after_seconds=600)
         sqls = [call["sql"] for call in calls if "sql" in call]
         assert any("CREATE TABLE IF NOT EXISTS confirmation_records" in s for s in sqls)
+        # SPEC-033 R-1: pre-spec tables migrate in place at startup.
+        assert any(
+            "ADD COLUMN IF NOT EXISTS turn_index" in s for s in sqls
+        )
         sweep = next(
             call
             for call in calls
@@ -269,11 +285,13 @@ class TestPostgresStore:
         store = PostgresConfirmationRecordStore(
             db_url="postgresql://fake", connect=_fake_connect(calls)
         )
-        store.save_parked(_record("cf-1"))
+        store.save_parked(_record("cf-1", turn_index=2))
         executed = [call for call in calls if "sql" in call]
         insert = executed[0]
         assert "ON CONFLICT (confirm_id) DO NOTHING" in insert["sql"]
         assert isinstance(insert["params"]["pending_calls"], Jsonb)
+        # SPEC-033 R-1: the parking turn ordinal rides the insert.
+        assert insert["params"]["turn_index"] == 2
         assert any("OFFSET" in call["sql"] for call in executed[1:])
         assert any("status <> 'pending'" in call["sql"] for call in executed[1:])
 
@@ -290,6 +308,7 @@ class TestPostgresStore:
             "bob",
             "approve",
             datetime(2026, 8, 25, 10, 5, 0, tzinfo=timezone.utc),
+            3,
         )
         store = PostgresConfirmationRecordStore(
             db_url="postgresql://fake", connect=_fake_connect(calls, rows=[row])
@@ -299,6 +318,30 @@ class TestPostgresStore:
         assert record["parked_at"] == "2026-08-25T10:00:00Z"
         assert record["decided_at"] == "2026-08-25T10:05:00Z"
         assert record["status"] == "approved"
+        assert record["turn_index"] == 3
+
+    def test_load_record_maps_legacy_row_without_turn_index(self) -> None:
+        """SPEC-033 R-1: rows parked before the column existed load with
+        ``turn_index=None`` and keep the legacy newest-turn anchoring."""
+        calls: list[dict] = []
+        row = (
+            "cf-1",
+            "ses-1",
+            "alice",
+            [{"tool_name": "k8s.restart_service"}],
+            "tools:mutate",
+            "pending",
+            datetime(2026, 8, 25, 10, 0, 0, tzinfo=timezone.utc),
+            None,
+            None,
+            None,
+            None,
+        )
+        store = PostgresConfirmationRecordStore(
+            db_url="postgresql://fake", connect=_fake_connect(calls, rows=[row])
+        )
+        record = store.load_record("ses-1", "cf-1")
+        assert record["turn_index"] is None
 
     def test_load_record_returns_none_without_row(self) -> None:
         calls: list[dict] = []
@@ -575,6 +618,7 @@ def test_session_detail_carries_confirmation_cards() -> None:
             "alice",
             [{"call_id": "call-2", "tool_name": "k8s.restart_service"}],
             "tools:mutate",
+            turn_index=2,
         )
     )
     detail = client.get(
@@ -586,6 +630,10 @@ def test_session_detail_carries_confirmation_cards() -> None:
     assert cards[0]["status"] == "approved"
     assert cards[0]["decider_user_id"] == "bob-approver"
     assert cards[1]["status"] == "pending"
+    # SPEC-033 R-2: the parking turn ordinal rides the session detail;
+    # pre-spec records stay null.
+    assert cards[1]["turn_index"] == 2
+    assert cards[0]["turn_index"] is None
 
 
 def test_session_detail_confirmations_empty_for_clean_session() -> None:

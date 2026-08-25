@@ -55,6 +55,7 @@ def make_record(
     owner_user_id: str,
     pending_calls: list[dict[str, Any]],
     action: str | None,
+    turn_index: int | None = None,
 ) -> dict[str, Any]:
     """Shape the parked record written before the request frame flows."""
     return {
@@ -63,6 +64,10 @@ def make_record(
         "owner_user_id": owner_user_id,
         "pending_calls": list(pending_calls),
         "action": action,
+        # SPEC-033 R-1: the parking turn ordinal (same convention as
+        # SPEC-025 evidence turn_index) so seeded cards anchor under the
+        # exchange that parked them. None for pre-spec records.
+        "turn_index": turn_index,
         "status": "pending",
         "parked_at": _utc_now_iso(),
         "decider_user_id": None,
@@ -229,7 +234,8 @@ CREATE TABLE IF NOT EXISTS confirmation_records (
     parked_at       TIMESTAMPTZ NOT NULL,
     decider_user_id TEXT,
     decision        TEXT,
-    decided_at      TIMESTAMPTZ
+    decided_at      TIMESTAMPTZ,
+    turn_index      INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_confirmation_records_session
     ON confirmation_records (session_id, parked_at);
@@ -237,14 +243,22 @@ CREATE INDEX IF NOT EXISTS idx_confirmation_records_status
     ON confirmation_records (status, parked_at);
 """
 
+# SPEC-033 R-1: clusters whose table predates the turn-anchoring column
+# migrate in place at startup; pre-spec rows stay NULL and keep the
+# legacy newest-turn anchoring.
+_ADD_TURN_INDEX_COLUMN = """
+ALTER TABLE confirmation_records
+    ADD COLUMN IF NOT EXISTS turn_index INTEGER
+"""
+
 _INSERT_PARKED = """
 INSERT INTO confirmation_records (
     confirm_id, session_id, owner_user_id, pending_calls, action,
-    status, parked_at
+    status, parked_at, turn_index
 )
 VALUES (
     %(confirm_id)s, %(session_id)s, %(owner_user_id)s, %(pending_calls)s,
-    %(action)s, 'pending', now()
+    %(action)s, 'pending', now(), %(turn_index)s
 )
 ON CONFLICT (confirm_id) DO NOTHING
 """
@@ -275,7 +289,8 @@ UPDATE confirmation_records
 
 _LOAD_FOR_SESSION = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
-       status, parked_at, decider_user_id, decision, decided_at
+       status, parked_at, decider_user_id, decision, decided_at,
+       turn_index
   FROM confirmation_records
  WHERE session_id = %(session_id)s
  ORDER BY parked_at ASC
@@ -283,7 +298,8 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
 
 _LOAD_RECORD = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
-       status, parked_at, decider_user_id, decision, decided_at
+       status, parked_at, decider_user_id, decision, decided_at,
+       turn_index
   FROM confirmation_records
  WHERE session_id = %(session_id)s
    AND confirm_id = %(confirm_id)s
@@ -291,7 +307,8 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
 
 _LOAD_PENDING_FOR_SESSION = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
-       status, parked_at, decider_user_id, decision, decided_at
+       status, parked_at, decider_user_id, decision, decided_at,
+       turn_index
   FROM confirmation_records
  WHERE session_id = %(session_id)s
    AND status = 'pending'
@@ -301,7 +318,8 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
 
 _LOAD_INBOX = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
-       status, parked_at, decider_user_id, decision, decided_at
+       status, parked_at, decider_user_id, decision, decided_at,
+       turn_index
   FROM confirmation_records
  WHERE status = 'pending'
     OR decided_at >= now() - make_interval(days => %(history_days)s)
@@ -357,6 +375,7 @@ def _row_to_record(row: Any) -> dict[str, Any]:
         decider_user_id,
         decision,
         decided_at,
+        turn_index,
     ) = row
     return {
         "confirm_id": confirm_id,
@@ -369,6 +388,7 @@ def _row_to_record(row: Any) -> dict[str, Any]:
         "decider_user_id": decider_user_id,
         "decision": decision,
         "decided_at": _iso(decided_at),
+        "turn_index": turn_index,
     }
 
 
@@ -424,6 +444,7 @@ class PostgresConfirmationRecordStore:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(_CONFIRMATION_RECORDS_DDL)
+                cur.execute(_ADD_TURN_INDEX_COLUMN)
                 cur.execute(
                     _CLOSE_STALE_PENDING,
                     {"stale_after_seconds": max(stale_after_seconds, 0)},
@@ -443,6 +464,7 @@ class PostgresConfirmationRecordStore:
                         "owner_user_id": record["owner_user_id"],
                         "pending_calls": Jsonb(record["pending_calls"]),
                         "action": record["action"],
+                        "turn_index": record.get("turn_index"),
                     },
                 )
                 cur.execute(

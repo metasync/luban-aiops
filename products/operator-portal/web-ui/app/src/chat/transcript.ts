@@ -141,13 +141,18 @@ function attachConfirmations(
 ): void {
   for (const record of records ?? []) {
     const card = confirmationRecordToCard(record);
-    // Records carry no turn index, so every card anchors to the most
-    // recent turn — exact for the latest park, approximate for older
-    // decided cards in multi-turn sessions (they still render, just
-    // under the newest turn group). A session without any transcript
-    // turns (empty or unrecoverable) gets a synthetic turn so parked
-    // requests stay visible.
-    const target = turns[turns.length - 1] ?? (() => {
+    // SPEC-033 R-3: records parked after the anchoring spec carry the
+    // parking turn ordinal and land under the exchange that created them.
+    // Records without a usable ordinal (predating the field, or pointing
+    // past a truncated transcript) keep the legacy anchor — the most
+    // recent turn — and a session without any transcript turns (empty or
+    // unrecoverable) gets a synthetic turn so parked requests stay
+    // visible.
+    const anchored =
+      typeof record.turn_index === "number"
+        ? turns[record.turn_index]
+        : undefined;
+    const target = anchored ?? turns[turns.length - 1] ?? (() => {
       const synthetic = makeTurn("");
       turns.push(synthetic);
       return synthetic;

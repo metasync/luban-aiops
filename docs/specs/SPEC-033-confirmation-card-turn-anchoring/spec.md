@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-26
 - release slice: R4 — Approval-Gated Bounded Actions
@@ -114,3 +114,10 @@ Acceptance criteria:
 
 - 2026-08-26: created as `draft`, drafted directly from the v0.14.1 live
   validation finding (all approved requests stacked under the newest turn).
+- 2026-08-26: delivered in the 0.15.0 train — the park path stores the
+  parking turn ordinal (additive `turn_index` column with in-place
+  migration), the session-detail/inbox record model and the
+  `agent-session.schema.json` contract carry it additively, and the
+  portal's transcript seeding anchors each card under its parking turn
+  with the legacy newest-turn anchoring kept as the fallback for
+  pre-delivery records.

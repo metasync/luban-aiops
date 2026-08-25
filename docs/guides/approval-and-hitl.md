@@ -223,7 +223,10 @@ the record store:
 
 - **Owner transcript cards.** The session detail carries an additive
   `confirmations` array, so a card survives re-login, pod restarts, and
-  replica boundaries. Decided cards render read-only with decider
+  replica boundaries. Each card renders under the exchange that parked it
+  (SPEC-033): the record stores the parking turn ordinal, so a session
+  with several decided requests shows one card per exchange instead of
+  stacking them all under the newest turn. Decided cards render read-only with decider
   attribution; pending cards stay actionable in the chat. While a card is
   pending, the owner's open chat view polls the session detail on a short,
   bounded interval (SPEC-032), so a decision made from the inbox or another

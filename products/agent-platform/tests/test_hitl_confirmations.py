@@ -267,6 +267,36 @@ def test_stream_events_parks_and_emits_confirmation_request(monkeypatch):
     # The stream ends without message_end after parking.
     assert not any(f.get("event") == "message_end" for f in frames)
     assert CONFIRMATION_REGISTRY.is_parked("s1", 600)
+    # SPEC-033 R-1: the durable record carries the parking turn ordinal
+    # (0 here — the fake agent has no prior context).
+    record = CONFIRMATION_RECORD_STORE.load_pending_for_session("s1")
+    assert record is not None
+    assert record["turn_index"] == 0
+
+
+def test_parked_record_carries_parking_turn_ordinal(monkeypatch):
+    """SPEC-033 R-1: the record stores the same ordinal evidence uses."""
+    kernel = _configured_kernel()
+    agent = FakeAgent(events=[_park_event()])
+    agent.state = SimpleNamespace(
+        context=[
+            SimpleNamespace(role="user"),
+            SimpleNamespace(role="assistant"),
+            SimpleNamespace(role="user"),
+        ]
+    )
+    _patch_agent(monkeypatch, kernel, agent)
+
+    _drain(
+        kernel.stream_events(
+            message="restart it",
+            request_id="req-1",
+            session_id="s1",
+            user_name="alice",
+        )
+    )
+    record = CONFIRMATION_RECORD_STORE.load_pending_for_session("s1")
+    assert record["turn_index"] == 2
 
 
 def test_confirmation_request_carries_risk_level(monkeypatch):

@@ -916,7 +916,11 @@ class AgentKernel:
                     # confirmation_request frame and ends the stream without
                     # message_end; the confirm endpoint resumes it.
                     frame = self._build_confirmation_frame(
-                        event, session_id, user_name, agent.toolkit
+                        event,
+                        session_id,
+                        user_name,
+                        agent.toolkit,
+                        turn_index=turn_index,
                     )
                     if frame is not None:
                         yield {
@@ -977,6 +981,7 @@ class AgentKernel:
         session_id: str,
         user_name: str,
         toolkit: object | None = None,
+        turn_index: int = 0,
     ) -> dict[str, object] | None:
         """Register a kernel ASK park and build its confirmation_request frame.
 
@@ -1011,6 +1016,9 @@ class AgentKernel:
                     owner_user_id=user_name,
                     pending_calls=pending.pending_calls_payload(),
                     action=pending.highest_action(),
+                    # SPEC-033 R-1: anchor the durable card under the
+                    # parking turn (same ordinal convention as evidence).
+                    turn_index=turn_index,
                 )
             )
         except Exception as exc:
@@ -1161,7 +1169,11 @@ class AgentKernel:
                     yield decorated
                 # A resumed turn can park again on another ASK-gated tool.
                 frame = self._build_confirmation_frame(
-                    event, session_id, user_name, agent.toolkit
+                    event,
+                    session_id,
+                    user_name,
+                    agent.toolkit,
+                    turn_index=turn_index,
                 )
                 if frame is not None:
                     yield {

@@ -13,6 +13,30 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.15.0 — 2026-08-26
+
+### Added
+
+- **Confirmation card turn anchoring (SPEC-033)**: the v0.14.1 live
+  validation found that a session with several parked requests stacked
+  every confirmation card under the newest turn — the record store is
+  session-scoped, but records carried no turn correlation, so the
+  seeding path anchored them all to the last turn group. The park path
+  now stores the parking turn ordinal on the durable record (the same
+  `_count_user_turns` convention SPEC-025 evidence uses), via an
+  additive `turn_index` column with an in-place migration for existing
+  tables. The session-detail surface and the `agent-session.schema.json`
+  contract carry the ordinal additively (null for pre-delivery records),
+  and the portal's transcript seeding anchors each card under the
+  exchange that parked it, falling back to the legacy newest-turn
+  anchoring when the ordinal is absent or out of range.
+
+### Changed
+
+- Version lockstep and dependency lockfiles refreshed for the 0.15.0
+  train; `docs/guides/approval-and-hitl.md` documents the per-exchange
+  card placement.
+
 ## 0.14.1 — 2026-08-25
 
 ### Fixed
