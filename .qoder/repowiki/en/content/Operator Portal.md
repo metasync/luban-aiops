@@ -5,6 +5,8 @@
 - [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
 - [global.css](file://products/operator-portal/web-ui/app/src/theme/global.css)
 - [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [usePendingDecisionPoll.ts](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts)
+- [usePendingDecisionPoll.test.ts](file://products/operator-portal/web-ui/app/src/chat/__tests__/usePendingDecisionPoll.test.ts)
 - [ComposerSelectionBar.tsx](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx)
 - [ModelSelect.tsx](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx)
 - [markdown.ts](file://products/operator-portal/web-ui/app/src/chat/markdown.ts)
@@ -52,11 +54,11 @@
 
 ## Update Summary
 **Changes Made**
-- Added new Approvals view with real-time polling, decision attribution, and 30-day history browsing capabilities
-- Integrated approvals inbox into navigation system with pending count badge for decider roles
-- Implemented cross-session confirmation management with race-resilient resolution semantics
-- Enhanced role-based access control for approval workflows with APPROVAL_DECIDER_ROLES constant
-- Added comprehensive test coverage for approvals functionality including race condition handling
+- Added live decision sync capability through usePendingDecisionPoll hook integration in ChatView component
+- Enhanced session management system with approximately 24 lines of code connecting polling mechanism to session state
+- Implemented bounded polling with change detection and settle window for external decision synchronization
+- Added comprehensive test coverage for pending decision polling functionality including race condition handling
+- Updated streaming interface documentation to reflect new live decision sync capabilities
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -91,7 +93,7 @@
 
 The Operator Portal is a modern web-based administrative interface designed for platform administration and monitoring within the Luban AIOPS ecosystem. The portal has been completely rebuilt using React 18, TypeScript, and Vite, replacing the previous vanilla JavaScript implementation. It provides operators with a sophisticated two-column shell interface featuring a persistent sidebar for navigation and a main content area for interactive operations. The portal serves as a centralized control plane for platform administrators, offering real-time visibility into system status through an interactive chat interface, comprehensive evidence panels for tool execution tracking, configuration management capabilities, and administrative functions necessary for maintaining the AI-powered agent platform infrastructure.
 
-**Updated** The portal now features enhanced model selection capabilities with dynamic catalog integration, allowing operators to choose between different AI models for their conversations. The model selector automatically adapts its presentation based on available models - showing a dropdown when multiple models are configured, a fixed label when only one model is available, or hiding entirely when no models are configured. **Critical Enhancement**: The model selection system includes session persistence that remembers the selected model per session, ensuring consistent model usage throughout conversation workflows while maintaining fail-open behavior when catalog services are unavailable. **New Feature**: The introduction of the ComposerSelectionBar component provides an extensible control strip architecture that replaces the inline ModelSelect component, offering better modularity and a designated mount point for future per-turn selections as referenced in SPEC-024. **Enhanced Feature**: The Settings view has been restored as a read-only Session & Identity panel (R-6) that displays identity information, session details, and platform metadata using existing AuthContext and session workspace state, providing administrators with essential operational insights. **Critical Enhancement**: The HITL confirmation system now includes tier-aware badge display that shows different badges for operator confirmations versus approver-required scenarios, with APPROVAL_DECIDER_ROLES providing UI-level hints about required approver permissions. **New Feature**: The Approvals view provides a dedicated cross-session inbox for designated approvers to manage parked confirmations with real-time polling, decision attribution, and 30-day history browsing capabilities.
+**Updated** The portal now features enhanced live decision synchronization capabilities through the integration of the usePendingDecisionPoll hook in the ChatView component, providing approximately 24 lines of code that connect the polling mechanism to the session management system. This enhancement ensures that decisions made from external sources (such as the approver inbox or other browser sessions) are immediately reflected in the active chat view without requiring manual refresh. **Critical Enhancement**: The live decision sync system includes bounded polling with change detection and settle windows to prevent unnecessary API calls while ensuring timely updates when external decisions occur. **New Feature**: The introduction of comprehensive test coverage for the pending decision polling functionality validates race condition handling and edge cases in multi-session scenarios.
 
 ## Project Structure
 
@@ -108,63 +110,70 @@ B --> F[markdown.ts]
 B --> G[transcript.ts]
 B --> H[ComposerSelectionBar.tsx]
 H --> I[ModelSelect.tsx]
-D --> J[transport.ts]
-I --> K[decoder.ts]
-A --> L[AuditView.tsx]
-A --> M[IncidentsView.tsx]
-A --> N[PermissionsView.tsx]
-A --> O[SkillsView.tsx]
-A --> P[ToolsView.tsx]
-A --> Q[ApprovalsView.tsx]
-A --> R[Settings View]
+B --> J[usePendingDecisionPoll.ts]
+D --> K[transport.ts]
+I --> L[decoder.ts]
+A --> M[AuditView.tsx]
+A --> N[IncidentsView.tsx]
+A --> O[PermissionsView.tsx]
+A --> P[SkillsView.tsx]
+A --> Q[ToolsView.tsx]
+A --> R[ApprovalsView.tsx]
+A --> S[Settings View]
+end
+subgraph "Live Decision Sync System"
+J --> T[Bounded Polling 5s Interval]
+U[Change Detection] --> V[Fingerprint Comparison]
+W[Settle Window] --> X[12 Tick Buffer]
+Y[Session Detail API] --> Z[Re-seed Timeline]
 end
 subgraph "Approvals Inbox System"
-S[useApprovalsInbox Hook] --> T[Real-time Polling 30s]
-U[getApprovalsInbox API] --> V[Cross-session Discovery]
-W[ConfirmationRecord Types] --> X[Decision Attribution]
-Y[Race Resolution Handling] --> Z[409 Already Resolved]
+AA[useApprovalsInbox Hook] --> BB[Real-time Polling 30s]
+CC[getApprovalsInbox API] --> DD[Cross-session Discovery]
+EE[ConfirmationRecord Types] --> FF[Decision Attribution]
+GG[Race Resolution Handling] --> HH[409 Already Resolved]
 end
 subgraph "Model Selection System"
-AA[ModelCatalog API] --> BB[getModelCatalog Function]
-CC[ComposerSelectionBar] --> DD[Extensible Control Strip]
-EE[ModelSelect Component] --> FF[Dynamic Rendering Logic]
-GG[Session Model State] --> HH[Pinned Model Persistence]
-II[Fail-Open UX] --> JJ[Graceful Degradation]
+II[ModelCatalog API] --> JJ[getModelCatalog Function]
+KK[ComposerSelectionBar] --> LL[Extensible Control Strip]
+MM[ModelSelect Component] --> NN[Dynamic Rendering Logic]
+OO[Session Model State] --> PP[Pinned Model Persistence]
+QQ[Fail-Open UX] --> RR[Graceful Degradation]
 end
 subgraph "Tier-Aware Confirmation System"
-KK[APPROVAL_DECIDER_ROLES] --> LL[Role-Based Badge Display]
-MM[Confirmation Tier Detection] --> NN[Operator vs Approver Badges]
-OO[Role Verification] --> PP[Approver Permission Checks]
-QQ[Tier-Aware UI] --> RR[Visual Status Indicators]
+SS[APPROVAL_DECIDER_ROLES] --> TT[Role-Based Badge Display]
+UU[Confirmation Tier Detection] --> VV[Operator vs Approver Badges]
+WW[Role Verification] --> XX[Approver Permission Checks]
+YY[Tier-Aware UI] --> ZZ[Visual Status Indicators]
 end
 subgraph "Settings & Identity Panel"
-SS[AuthContext] --> TT[Identity Information Display]
-UU[Session Workspace] --> VV[Session Details]
-WW[Platform Version] --> XX[Metadata Display]
-YY[Read-Only Interface] --> ZZ[Operational Insights]
+AAA[AuthContext] --> BBB[Identity Information Display]
+CCC[Session Workspace] --> DDD[Session Details]
+EEE[Platform Version] --> FFF[Metadata Display]
+GGG[Read-Only Interface] --> HHH[Operational Insights]
 end
 subgraph "Evidence Persistence System"
-AAA[transcriptToTurns] --> BBB[EvidenceFrame Mapping]
-CCC[EvidenceTurn Groups] --> DDD[Request ID Attachment]
-EEE[Truncation Markers] --> FFF[Payload Budget Handling]
-GGG[Live Stream Frames] --> HHH[Unified Turn Model]
-III[Replayed Evidence] --> JJJ[Consistent Rendering]
+III[transcriptToTurns] --> JJJ[EvidenceFrame Mapping]
+KKK[EvidenceTurn Groups] --> LLL[Request ID Attachment]
+MMM[Truncation Markers] --> NNN[Payload Budget Handling]
+OOO[Live Stream Frames] --> PPP[Unified Turn Model]
+QQQ[Replayed Evidence] --> RRR[Consistent Rendering]
 end
 subgraph "Enhanced Navigation System"
-KKK[useNarrowViewport Hook] --> LLL[Responsive Breakpoint Detection at 992px]
-MMM[Mobile Menu Button] --> NNN[Dynamic ARIA Labels]
-OOO[Sidebar Collapsible 64px Rail] --> PPP[Drawer Integration]
-QQQ[Content Spacing Management] --> RRR[.view-container-inset Class]
+SSS[useNarrowViewport Hook] --> TTT[Responsive Breakpoint Detection at 992px]
+UUU[Mobile Menu Button] --> VVV[Dynamic ARIA Labels]
+WWW[Sidebar Collapsible 64px Rail] --> XXX[Drawer Integration]
+YYY[Content Spacing Management] --> ZZZ[.view-container-inset Class]
 end
 subgraph "Build & Deployment"
-SSS[vite.config.ts] --> TTT[package.json]
-UUU[Dockerfile] --> VVV[Makefile]
-WWW[VERSION] --> XXX[validate_version.py]
+AAAA[vite.config.ts] --> BBBB[package.json]
+CCCC[Dockerfile] --> DDDD[Makefile]
+EEEE[VERSION] --> FFFF[validate_version.py]
 end
 subgraph "Backend Services"
-YYY[Agent Platform] --> ZZZ[HITL Confirmations]
-AAA[Platform Gateway] --> BBB[Identity Broker]
-CCC[Tool Gateway] --> DDD[Policy Engine]
+GGGG[Agent Platform] --> HHHH[HITL Confirmations]
+IIII[Platform Gateway] --> JJJJ[Identity Broker]
+KKKK[Tool Gateway] --> LLLL[Policy Engine]
 end
 ```
 
@@ -172,9 +181,10 @@ end
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
 - [App.tsx:288-307](file://products/operator-portal/web-ui/app/src/App.tsx#L288-L307)
 - [App.tsx:334-357](file://products/operator-portal/web-ui/app/src/App.tsx#L334-L357)
+- [ChatView.tsx:720-739](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L720-L739)
+- [usePendingDecisionPoll.ts:51-145](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts#L51-L145)
 - [ApprovalsView.tsx:52-183](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L52-L183)
 - [approvals.ts:11-19](file://products/operator-portal/web-ui/app/src/api/approvals.ts#L11-L19)
-- [ChatView.tsx:860-877](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L860-L877)
 - [ComposerSelectionBar.tsx:16-47](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx#L16-L47)
 - [ModelSelect.tsx:18-57](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L18-L57)
 - [models.ts:20-30](file://products/operator-portal/web-ui/app/src/api/models.ts#L20-L30)
@@ -204,6 +214,7 @@ The Operator Portal consists of several key React components and hooks that work
 - **Inline Per-Turn Evidence System**: Sophisticated turn-scoped evidence grouping with collapsible groups
 - **Tier-Aware HITL Confirmation Cards**: Inline approval surfaces for ASK-gated tool executions with Approve/Deny buttons and tier-specific badges
 - **Approvals Inbox**: Cross-session confirmation management with real-time polling and decision attribution
+- **Live Decision Sync**: Bounded polling mechanism that synchronizes external decisions to active chat views
 - **Composer Selection Bar**: Extensible control strip rendered under message input for model selection and future per-turn controls
 - **Model Select Component**: Dynamic model selection with catalog-driven rendering and session persistence
 - **Settings & Identity Panel**: Read-only panel displaying identity information, session details, and platform metadata
@@ -216,6 +227,7 @@ The Operator Portal consists of several key React components and hooks that work
 - **Streaming API Client**: Robust Server-Sent Events implementation with error handling and reconnection
 - **Model Catalog API Client**: Safe discovery of available models via GET /api/v1/models endpoint
 - **Approvals Inbox API Client**: Cross-session confirmation discovery via GET /api/v1/approvals/inbox endpoint
+- **Session Detail API Client**: Bounded polling of session detail surface for live decision synchronization
 - **HITL Confirmation Bridge**: Seamless integration with agent-platform confirmation registry for pending tool approvals
 - **Authentication Handler**: Secure integration with identity broker for authentication and authorization
 - **Enhanced Session Management**: Multi-session support with transcript caching, workspace persistence, and defensive parsing
@@ -231,47 +243,22 @@ The Operator Portal consists of several key React components and hooks that work
 - **Approvals Inbox Interface**: Dedicated view for managing parked confirmations with provenance metadata and decision history
 - **Composer Selection Bar**: Extensible control strip with model selector and future per-turn selection capabilities
 
-### Enhanced Navigation System
-- **Persistent 64px Icon Rail**: Fixed-width collapsed sidebar that maintains navigation access across all views
-- **Responsive Breakpoint Detection**: useNarrowViewport() hook for precise 992px breakpoint handling
-- **Collapsible Sidebar**: Desktop sidebar with collapse/expand functionality and consistent layout anchoring
-- **Drawer Integration**: Mobile-specific off-canvas navigation below lg breakpoint with proper positioning
-- **Dynamic Accessibility**: Context-aware aria-labels that change based on viewport and sidebar state
-- **Content Spacing Management**: Automatic padding adjustments via .view-container-inset class
+### Live Decision Sync Implementation
+- **Bounded Polling**: 5-second interval polling that only activates when confirmation cards are pending
+- **Change Detection**: Fingerprint-based comparison to detect state changes in session details
+- **Settle Window**: 12-tick buffer after decision resolution to ensure resumed turn content appears
+- **Session Isolation**: Proper scoping to prevent cross-session data contamination
+- **Streaming Protection**: Automatic pause during active streaming to prevent interference
+- **Error Resilience**: Graceful handling of network failures while maintaining last-good view
 
-### Sticky Request Banner System
-- **IntersectionObserver Implementation**: Tracks when user messages scroll out of viewport
-- **Context Maintenance**: Displays sticky banner showing original request during long conversations
-- **Visual Correlation**: Maintains relationship between user requests and extended responses
-- **Performance Optimization**: Efficient observer cleanup and memory management
-
-### Tier-Aware HITL Confirmation System
-- **Tier Detection Logic**: Automatically determines confirmation tier (operator vs approver required) based on tool context
-- **Badge Display System**: Shows "operator confirmation" badge for standard operator actions and "approver required" badge for elevated permissions
-- **Role-Based Controls**: Approve/Deny buttons visible only to authorized roles with APPROVAL_DECIDER_ROLES validation
-- **Stream Continuation**: Automatic resumption of parked replies upon decision with SSE streaming
-- **Evidence Integration**: Seamless integration with existing evidence card system
-- **Status Management**: Visual indicators showing awaiting decision, approved, denied, or expired states
-
-### Stale Session Handling System
-- **Missing Reference Tracking**: Uses `missingRef` to track sessions that return 404 errors during history loading
-- **Automatic Retry Logic**: When stream opening encounters 404 errors, automatically drops stale session references and retries without session ID
-- **Graceful Fallback**: Falls back to server-side session auto-creation when stale sessions are detected
-- **Error Recovery**: Handles both successful retries and permanent failures with appropriate user feedback
-
-### Version Management and Cache Busting
-- **Version Synchronization**: PLATFORM_VERSION constant injected at build time from root VERSION file
-- **Cache-Busting Mechanism**: Query parameter versioning ensures proper client-side caching behavior
-- **Validation System**: Automated version consistency checks across all platform components
-- **Deployment Consistency**: Coordinated versioning across all platform services
-
-**Updated** The interface now includes enhanced model selection capabilities with dynamic catalog integration, providing operators with flexible AI model choices while maintaining robust fail-open behavior. The model selector automatically adapts its presentation based on catalog availability and session context. Recent improvements include the introduction of the ComposerSelectionBar component which provides an extensible control strip architecture for model selection and future per-turn controls, enhanced authentication state management with proper disabled states for unauthenticated users, improved markdown table rendering with proper header/body separation, visual consistency improvements including inline brand display with platform version tags, and comprehensive test coverage for markdown rendering functionality ensuring robust XSS prevention and security measures. **Critical Enhancement**: The streaming system includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions. **New Feature**: The Settings view has been restored as a read-only Session & Identity panel (R-6) that displays identity information, session details, and platform metadata using existing AuthContext and session workspace state, providing administrators with essential operational insights. **Critical Enhancement**: The HITL confirmation system now includes tier-aware badge display that clearly distinguishes between operator confirmations and approver-required scenarios, improving user experience and workflow clarity. **New Feature**: The Approvals view provides a dedicated cross-session inbox for designated approvers to manage parked confirmations with real-time polling, decision attribution, and 30-day history browsing capabilities, integrated into the navigation system with pending count badges.
+**Updated** The interface now includes enhanced live decision synchronization capabilities through the usePendingDecisionPoll hook integration, providing approximately 24 lines of code that connect the polling mechanism to the session management system. This enhancement ensures immediate reflection of external decisions in active chat views without manual refresh. **Critical Enhancement**: The live decision sync system includes bounded polling with change detection and settle windows to prevent unnecessary API calls while ensuring timely updates when external decisions occur. **New Feature**: The introduction of comprehensive test coverage for the pending decision polling functionality validates race condition handling and edge cases in multi-session scenarios. **Enhanced Feature**: The streaming system now includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions. **Critical Enhancement**: The model selection system includes session persistence that remembers the selected model per session, ensuring consistent model usage throughout conversation workflows while maintaining fail-open behavior when catalog services are unavailable.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
 - [App.tsx:288-307](file://products/operator-portal/web-ui/app/src/App.tsx#L288-L307)
 - [App.tsx:334-357](file://products/operator-portal/web-ui/app/src/App.tsx#L334-L357)
 - [ChatView.tsx:1-790](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L790)
+- [usePendingDecisionPoll.ts:1-145](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts#L1-L145)
 - [ComposerSelectionBar.tsx:1-48](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx#L1-L48)
 - [ModelSelect.tsx:1-58](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L1-L58)
 - [useChatStream.ts:1-405](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L405)
@@ -287,6 +274,7 @@ participant User as "Browser"
 participant React as "React App"
 participant Nav as "Enhanced Navigation"
 participant Auth as "Auth Context"
+participant PendingSync as "usePendingDecisionPoll"
 participant Approvals as "Approvals Inbox"
 participant ApprovalsView as "ApprovalsView"
 participant CompSel as "ComposerSelectionBar"
@@ -310,6 +298,16 @@ Agent-->>Gateway : Authorization code
 Gateway-->>Auth : Access tokens + identity
 Note over React : Responsive Content Spacing
 React->>Views : Navigate to specific views with proper padding
+Note over PendingSync : Live Decision Sync Initialization
+React->>PendingSync : usePendingDecisionPoll(sessionId, turns, streaming, applyDetail)
+PendingSync->>PendingSync : Check for pending confirmation cards
+PendingSync->>Gateway : GET /api/v1/sessions/{id} (every 5s)
+Gateway->>Agent : Fetch session detail with confirmations
+Agent-->>PendingSync : SessionDetail with transcript & confirmations
+PendingSync->>PendingSync : Compare fingerprint (transcript length + chars + records)
+PendingSync->>Transcript : transcriptToTurns(detail.transcript, detail.evidence_turns, detail.confirmations)
+Transcript-->>PendingSync : Re-seeded turns with updated confirmations
+PendingSync->>React : applyDetail(re-seeded turns)
 Note over Approvals : Approvals Inbox Initialization
 React->>Approvals : useApprovalsInbox(enabled=true for deciders)
 Approvals->>Gateway : GET /api/v1/approvals/inbox
@@ -365,9 +363,10 @@ ApprovalsView->>ApprovalsView : Update record status and attribution
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
 - [App.tsx:288-307](file://products/operator-portal/web-ui/app/src/App.tsx#L288-L307)
 - [App.tsx:334-357](file://products/operator-portal/web-ui/app/src/App.tsx#L334-L357)
+- [ChatView.tsx:720-739](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L720-L739)
+- [usePendingDecisionPoll.ts:51-145](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts#L51-L145)
 - [ApprovalsView.tsx:52-183](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L52-L183)
 - [approvals.ts:11-19](file://products/operator-portal/web-ui/app/src/api/approvals.ts#L11-L19)
-- [ChatView.tsx:860-877](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L860-L877)
 - [ComposerSelectionBar.tsx:16-47](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx#L16-L47)
 - [ModelSelect.tsx:18-57](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L18-L57)
 - [models.ts:20-30](file://products/operator-portal/web-ui/app/src/api/models.ts#L20-L30)
@@ -381,7 +380,7 @@ ApprovalsView->>ApprovalsView : Update record status and attribution
 - [ChatView.tsx:295-298](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L295-L298)
 - [roles.ts:35-35](file://products/operator-portal/web-ui/app/src/roles.ts#L35-L35)
 
-The architecture emphasizes type safety, component composition, and maintainable state management while providing enterprise-grade functionality for platform operations. The React hooks pattern enables clean separation of concerns and reusable logic across components. **Enhanced with model selection capabilities** that provide dynamic catalog integration and session-based model persistence, ensuring operators can consistently use their preferred AI models throughout conversations. **Critical Enhancement**: The streaming system includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions. **New Feature**: The ComposerSelectionBar component provides an extensible architecture for model selection and future per-turn controls, improving modularity and maintainability. **Enhanced Feature**: The Settings view provides read-only access to identity information, session details, and platform metadata for operational awareness. **Critical Enhancement**: The tier-aware HITL confirmation system now provides clear visual indicators distinguishing between operator confirmations and approver-required scenarios, improving workflow clarity and user experience. **New Feature**: The Approvals inbox provides cross-session confirmation management with real-time polling, decision attribution, and 30-day history browsing for designated approvers.
+The architecture emphasizes type safety, component composition, and maintainable state management while providing enterprise-grade functionality for platform operations. The React hooks pattern enables clean separation of concerns and reusable logic across components. **Enhanced with live decision sync capabilities** that provide immediate reflection of external decisions in active chat views through bounded polling with change detection and settle windows. **Critical Enhancement**: The streaming system includes robust stale session handling with automatic retry logic and missing session reference tracking to prevent errors from deleted or expired sessions. **New Feature**: The ComposerSelectionBar component provides an extensible architecture for model selection and future per-turn controls, improving modularity and maintainability. **Enhanced Feature**: The Settings view provides read-only access to identity information, session details, and platform metadata for operational awareness. **Critical Enhancement**: The tier-aware HITL confirmation system now provides clear visual indicators distinguishing between operator confirmations and approver-required scenarios, improving workflow clarity and user experience. **New Feature**: The Approvals inbox provides cross-session confirmation management with real-time polling, decision attribution, and 30-day history browsing for designated approvers.
 
 ## Detailed Component Analysis
 
@@ -417,6 +416,28 @@ The main React application implements a component-based architecture with clear 
 - **Token Management**: Automatic refresh and session persistence
 - **Error Handling**: Graceful error handling with user feedback
 - **State Management**: Centralized authentication state across components
+
+### Live Decision Sync Implementation
+
+The usePendingDecisionPoll hook provides bounded polling for external decision synchronization:
+
+#### Bounded Polling Mechanism
+- **Conditional Activation**: Only polls when confirmation cards are pending or during settle window
+- **5-Second Intervals**: Configurable polling interval (PENDING_SYNC_INTERVAL_MS = 5000ms)
+- **Change Detection**: Fingerprint-based comparison prevents unnecessary timeline re-seeding
+- **Settle Window**: 12-tick buffer (SETTLE_TICKS = 12) after decision resolution ensures resumed content appears
+
+#### Session Detail Synchronization
+- **Fingerprint Generation**: Combines transcript length, character count, and confirmation records for change detection
+- **Timeline Re-seeding**: Uses same transcriptToTurns path as initial load for consistency
+- **Session Isolation**: Proper scoping prevents cross-session data contamination
+- **Streaming Protection**: Automatically pauses during active streaming to prevent interference
+
+#### Error Handling and Resilience
+- **Transport Error Recovery**: Maintains last-good view on network failures
+- **Session Switch Detection**: Drops in-flight responses when session changes
+- **Graceful Degradation**: No-op behavior when no pending confirmations exist
+- **Cleanup Management**: Proper interval cleanup on component unmount
 
 ### Enhanced Navigation System
 
@@ -534,13 +555,14 @@ The inline confirmation card provides a focused interface for reviewing and deci
 - **Validation System**: Automated version consistency checks across all platform components
 - **Deployment Consistency**: Coordinated versioning across all platform services
 
-**Updated** The React architecture provides better type safety, component reusability, and maintainability while preserving all existing functionality from the legacy implementation. The new view components provide dedicated interfaces for different operational tasks. Enhanced session management now includes defensive parsing to handle edge cases in stored session data. The enhanced navigation system includes a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, and enhanced mobile drawer navigation with proper positioning and z-index management. The new sticky request banner system enhances conversation usability during long interactions. **Critical Enhancement**: The evidence persistence system provides unified rendering of both live streamed and replayed evidence, ensuring operators see consistent evidence cards with request ID display and truncation markers regardless of evidence source. The stale session handling system now includes comprehensive missing reference tracking and automatic retry logic to prevent errors from deleted or expired sessions, ensuring more reliable chat functionality. **New Feature**: The ComposerSelectionBar component provides an extensible architecture for model selection and future per-turn controls, improving modularity and maintainability. **Enhanced Feature**: The Settings view provides read-only access to identity information, session details, and platform metadata for operational awareness. **Critical Enhancement**: The tier-aware HITL confirmation system now provides clear visual distinction between operator confirmations and approver-required scenarios, improving workflow clarity and user experience with appropriate badge display and role-based permission validation. **New Feature**: The Approvals view provides a dedicated cross-session inbox for designated approvers to manage parked confirmations with real-time polling, decision attribution, and 30-day history browsing capabilities.
+**Updated** The React architecture provides better type safety, component reusability, and maintainability while preserving all existing functionality from the legacy implementation. The new view components provide dedicated interfaces for different operational tasks. Enhanced session management now includes defensive parsing to handle edge cases in stored session data. The enhanced navigation system includes a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, and enhanced mobile drawer navigation with proper positioning and z-index management. The new sticky request banner system enhances conversation usability during long interactions. **Critical Enhancement**: The evidence persistence system provides unified rendering of both live streamed and replayed evidence, ensuring operators see consistent evidence cards with request ID display and truncation markers regardless of evidence source. The stale session handling system now includes comprehensive missing reference tracking and automatic retry logic to prevent errors from deleted or expired sessions, ensuring more reliable chat functionality. **New Feature**: The live decision sync system provides bounded polling with change detection and settle windows to synchronize external decisions to active chat views without manual refresh. **New Feature**: The ComposerSelectionBar component provides an extensible architecture for model selection and future per-turn controls, improving modularity and maintainability. **Enhanced Feature**: The Settings view provides read-only access to identity information, session details, and platform metadata for operational awareness. **Critical Enhancement**: The tier-aware HITL confirmation system now provides clear visual distinction between operator confirmations and approver-required scenarios, improving workflow clarity and user experience with appropriate badge display and role-based permission validation. **New Feature**: The Approvals view provides a dedicated cross-session inbox for designated approvers to manage parked confirmations with real-time polling, decision attribution, and 30-day history browsing capabilities.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
 - [App.tsx:288-307](file://products/operator-portal/web-ui/app/src/App.tsx#L288-L307)
 - [App.tsx:334-357](file://products/operator-portal/web-ui/app/src/App.tsx#L334-L357)
 - [ChatView.tsx:1-790](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L790)
+- [usePendingDecisionPoll.ts:1-145](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts#L1-L145)
 - [ComposerSelectionBar.tsx:1-48](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx#L1-L48)
 - [ModelSelect.tsx:1-58](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L1-L58)
 - [useChatStream.ts:1-405](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L405)
@@ -1204,7 +1226,7 @@ The React implementation includes additional streaming enhancements:
 - **Error Recovery**: Graceful handling of streaming errors with user feedback
 - **Session Management**: Multi-session support with per-session turn caching and ownership validation
 
-**Updated** The streaming interface now includes enhanced stale session handling with automatic 404 error detection, session pointer dropping, and retry logic that falls back to server-side session auto-creation. These improvements ensure more reliable streaming performance and better user experience when dealing with deleted or expired sessions.
+**Updated** The streaming interface now includes enhanced stale session handling with automatic 404 error detection, session pointer dropping, and retry logic that falls back to server-side session auto-creation. These improvements ensure more reliable streaming performance and better user experience when dealing with deleted or expired sessions. **Critical Enhancement**: The live decision sync system integrates with the streaming interface to provide immediate reflection of external decisions without interfering with active streaming operations.
 
 **Section sources**
 - [useChatStream.ts:195-282](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L195-L282)
@@ -1316,7 +1338,7 @@ The evidence persistence system integrates seamlessly with existing portal featu
 - **Status Indicators**: Success, error, and denied statuses are preserved in replayed evidence
 - **HITL Integration**: Confirmation cards work consistently for both live and replayed evidence
 
-**Updated** The evidence persistence system represents a significant enhancement to the operator portal, providing complete traceability of tool executions regardless of whether they were observed live or reviewed from stored transcripts. The system includes comprehensive truncation markers that clearly indicate payload limitations, request ID display for cross-referencing, and unified rendering that ensures consistent visual presentation. **Critical Enhancement**: The evidence persistence system ensures operators always understand the completeness of displayed evidence through clear truncation markers and budget eviction indicators.
+**Updated** The evidence persistence system represents a significant enhancement to the operator portal, providing complete traceability of tool executions regardless of whether they were observed live or reviewed from stored transcripts. The system includes comprehensive truncation markers that clearly indicate payload limitations, request ID display for cross-referencing, and unified rendering that ensures consistent visual presentation. **Critical Enhancement**: The evidence persistence system ensures operators always understand the completeness of displayed evidence through clear truncation markers and budget eviction indicators. **Enhanced Integration**: The live decision sync system works seamlessly with evidence persistence to ensure external decisions are properly reflected in both live and replayed evidence contexts.
 
 **Section sources**
 - [transcript.ts:1-107](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L1-L107)
@@ -1837,7 +1859,7 @@ The session workspace integrates seamlessly with the chat interface:
 - **Quick Context Switching**: Easy switching between different operational contexts
 - **Session Organization**: Clear visual organization of related conversations
 
-**Updated** The multi-session workspace now includes enhanced defensive parsing in the parseStored function to handle edge cases in stored session data, improved stream ownership handling during session switches to prevent cross-session data contamination, and comprehensive stale session handling with missing reference tracking to prevent errors from deleted or expired sessions. These improvements ensure more reliable session management and better data integrity. **Enhanced Feature**: The Settings view provides operational context that complements session management by displaying current session information and identity details in a consolidated dashboard format. **Enhanced Feature**: The approvals inbox integrates with session management to provide cross-session confirmation management capabilities for designated approvers.
+**Updated** The multi-session workspace now includes enhanced defensive parsing in the parseStored function to handle edge cases in stored session data, improved stream ownership handling during session switches to prevent cross-session data contamination, and comprehensive stale session handling with missing reference tracking to prevent errors from deleted or expired sessions. These improvements ensure more reliable session management and better data integrity. **Enhanced Feature**: The Settings view provides operational context that complements session management by displaying current session information and identity details in a consolidated dashboard format. **Enhanced Feature**: The approvals inbox integrates with session management to provide cross-session confirmation management capabilities for designated approvers. **Critical Enhancement**: The live decision sync system works seamlessly with multi-session management to ensure external decisions are properly synchronized to the correct active session context.
 
 **Section sources**
 - [useSessionWorkspace.ts:1-174](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L1-L174)
@@ -2106,7 +2128,7 @@ The deployment process includes enhanced version management:
 - **Version Validation**: Automated validation ensures all platform components use consistent versions
 - **Deployment Coordination**: Coordinated versioning across all platform services
 
-**Updated** The deployment now supports both the new React/TypeScript application and the legacy vanilla JavaScript implementation, with enhanced HITL confirmation bridging system, improved navigation system with persistent 64px icon rail that maintains consistent layout anchoring across all views, enhanced responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, enhanced mobile drawer navigation with proper positioning and z-index management, dynamic aria-labels that adapt based on viewport state and sidebar status, and restructured styling with .view-container-inset class for proper content spacing. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. Enhanced security measures include improved XSS prevention and defensive session parsing. The sticky request banner system and enhanced markdown rendering with proper table structure are also supported in the deployment. **Critical Enhancement**: The deployment now includes support for the enhanced stale session handling system that automatically detects and recovers from deleted or expired sessions, ensuring more reliable chat functionality, and the comprehensive evidence persistence system that provides unified rendering of both live streamed and replayed evidence with request ID display and truncation markers. **Critical Enhancement**: The deployment now includes support for the model selection system with catalog integration, providing operators with flexible AI model choices while maintaining fail-open behavior when catalog services are unavailable. **New Feature**: The deployment now includes support for the ComposerSelectionBar component which provides an extensible control strip architecture for model selection and future per-turn controls. **Enhanced Feature**: The deployment now includes support for the restored Settings view as a read-only Session & Identity panel that provides operational insights using existing AuthContext and session workspace state. **Critical Enhancement**: The deployment now includes support for the tier-aware HITL confirmation system with badge display that clearly distinguishes between operator confirmations and approver-required scenarios. **New Feature**: The deployment now includes support for the Approvals inbox with cross-session confirmation management, real-time polling, decision attribution, and 30-day history browsing capabilities for designated approvers.
+**Updated** The deployment now supports both the new React/TypeScript application and the legacy vanilla JavaScript implementation, with enhanced HITL confirmation bridging system, improved navigation system with persistent 64px icon rail that maintains consistent layout anchoring across all views, enhanced responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states, enhanced mobile drawer navigation with proper positioning and z-index management, dynamic aria-labels that adapt based on viewport state and sidebar status, and restructured styling with .view-container-inset class for proper content spacing. The nginx configuration remains optimized for streaming support and non-root execution while supporting the new permission matrix and workspace resource endpoints. Enhanced security measures include improved XSS prevention and defensive session parsing. The sticky request banner system and enhanced markdown rendering with proper table structure are also supported in the deployment. **Critical Enhancement**: The deployment now includes support for the enhanced stale session handling system that automatically detects and recovers from deleted or expired sessions, ensuring more reliable chat functionality, and the comprehensive evidence persistence system that provides unified rendering of both live streamed and replayed evidence with request ID display and truncation markers. **Critical Enhancement**: The deployment now includes support for the model selection system with catalog integration, providing operators with flexible AI model choices while maintaining fail-open behavior when catalog services are unavailable. **New Feature**: The deployment now includes support for the ComposerSelectionBar component which provides an extensible control strip architecture for model selection and future per-turn controls. **Enhanced Feature**: The deployment now includes support for the restored Settings view as a read-only Session & Identity panel that provides operational insights using existing AuthContext and session workspace state. **Critical Enhancement**: The deployment now includes support for the tier-aware HITL confirmation system with badge display that clearly distinguishes between operator confirmations and approver-required scenarios. **New Feature**: The deployment now includes support for the Approvals inbox with cross-session confirmation management, real-time polling, decision attribution, and 30-day history browsing capabilities for designated approvers. **Critical Enhancement**: The deployment now includes support for the live decision sync system that provides bounded polling with change detection and settle windows to synchronize external decisions to active chat views without manual refresh.
 
 **Section sources**
 - [nginx.conf](file://products/operator-portal/nginx.conf)
@@ -2174,6 +2196,7 @@ The React implementation provides additional customization points:
 - **Model Selection Styling**: Customizable appearance for model selector dropdown, fixed labels, and catalog integration
 - **Composer Selection Bar Styling**: Customizable appearance for the extensible control strip with proper flexbox layout and item organization
 - **Settings View Styling**: Customizable appearance for the read-only Session & Identity panel with operational insights dashboard
+- **Live Decision Sync Styling**: Customizable appearance for pending decision polling indicators and settlement status
 
 **Section sources**
 - [global.css:66-119](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L119)
@@ -2235,6 +2258,7 @@ The React implementation includes additional accessibility improvements:
 - **Model Selection**: Accessible model selector with proper ARIA labels and keyboard navigation support
 - **Composer Selection Bar**: Accessible control strip with proper ARIA labels and keyboard navigation for model selection
 - **Settings View**: Accessible read-only Session & Identity panel with proper ARIA labels and keyboard navigation for operational insights
+- **Live Decision Sync**: Accessible polling indicators with proper ARIA labels for pending decision synchronization status
 
 **Section sources**
 - [global.css:66-119](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L119)
@@ -2295,6 +2319,7 @@ The React implementation maintains broad browser compatibility:
 - **Model Selection**: Cross-browser support for model catalog integration with graceful degradation when catalog service is unavailable
 - **Composer Selection Bar**: Cross-browser support for extensible control strip with proper fallbacks when catalog service is unavailable
 - **Settings View**: Cross-browser support for read-only Session & Identity panel with graceful degradation when authentication services are unavailable
+- **Live Decision Sync**: Cross-browser support for bounded polling with proper fallbacks when session detail API is unavailable
 
 **Section sources**
 - [Dockerfile](file://products/operator-portal/Dockerfile)
@@ -2756,7 +2781,88 @@ Common issues and their solutions when working with the Operator Portal.
 - Test with different tool types and parameter combinations to verify tier classification
 - Verify that server-side confirmation tier information is properly transmitted to frontend
 
-**Updated** Added comprehensive troubleshooting guidance for the enhanced navigation system, including persistent 64px icon rail issues, useNarrowViewport() hook problems, responsive breakpoint detection issues, drawer integration problems, dynamic aria-labels not updating correctly, and proper handling of .view-container-inset class for content spacing. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism, and enhanced error handling for different failure types including network errors, authentication failures, and streaming interruptions. New sections cover sticky request banner issues, markdown rendering problems with proper table structure, enhanced authentication state management for unauthenticated users, comprehensive stale session handling troubleshooting for 404 errors and retry logic failures, evidence persistence troubleshooting for transcript-to-turn conversion and evidence attachment issues, comprehensive model selection troubleshooting for catalog integration and session persistence, comprehensive ComposerSelectionBar troubleshooting for component rendering, styling, and integration issues, comprehensive Settings view troubleshooting for operational insights display and integration with existing components, comprehensive Approvals inbox troubleshooting for cross-session confirmation management, real-time polling, decision attribution, and 30-day history browsing, comprehensive race condition troubleshooting for concurrent approval attempts, and comprehensive tier-aware confirmation troubleshooting for badge display, role validation, and tier detection issues.
+### Live Decision Sync Issues
+
+**Problem**: External decisions not appearing in active chat view or polling not working correctly
+**Solution**:
+- Verify that usePendingDecisionPoll hook is properly integrated in ChatView component
+- Check that polling interval (5 seconds) is functioning correctly
+- Ensure that fingerprint comparison is detecting state changes properly
+- Verify that settle window (12 ticks) is working to ensure resumed content appears
+- Check browser console for JavaScript errors in pending decision polling logic
+- Verify that session detail API (/api/v1/sessions/{id}) is accessible and returns proper data
+- Test with external decision sources (approver inbox, other browser sessions) to verify synchronization
+- Check that polling pauses during active streaming to prevent interference
+
+### Live Decision Sync API Issues
+
+**Problem**: Session detail API returning errors or incomplete data for decision sync
+**Solution**:
+- Check that platform gateway has /api/v1/sessions/{id} endpoint configured
+- Verify agent-platform session store is running and accessible
+- Review browser console for API call errors and network issues
+- Ensure proper authentication for session detail requests
+- Check that session detail responses include required fields (transcript, confirmations, evidence_turns)
+- Verify that confirmation records include proper status and decision information
+- Test session detail API directly to confirm backend functionality
+
+### Live Decision Sync Testing Issues
+
+**Problem**: Insufficient test coverage for pending decision polling functionality
+**Solution**:
+- Verify that usePendingDecisionPoll.test.ts includes comprehensive test scenarios
+- Check that tests cover baseline establishment, change detection, and settle window behavior
+- Ensure tests validate streaming protection and session isolation
+- Verify that race condition scenarios are properly tested
+- Check that transport error handling is covered in test suite
+- Test with mock session detail responses to verify proper timeline re-seeding
+
+### Enhanced Error Handling Issues
+
+**Problem**: Various error types not handled properly in live decision sync
+**Solution**:
+- **Network Errors**: Check network connectivity and session detail API endpoint availability
+- **Authentication Failures**: Verify token validity and refresh mechanisms for session detail requests
+- **Streaming Interruptions**: Check that polling pauses during active streaming operations
+- **Session Switching Errors**: Verify proper session isolation to prevent cross-session data contamination
+- **Malformed Data**: Check defensive parsing for corrupted session detail responses
+- **Backend API Issues**: Verify API v6 schema compliance for session detail responses
+- **Polling Errors**: Check interval cleanup and error recovery mechanisms
+- **Settle Window Issues**: Verify proper countdown and termination of polling after decision resolution
+
+### Sticky Request Banner Issues
+
+**Problem**: Sticky request banner not appearing or behaving incorrectly
+**Solution**:
+- Verify IntersectionObserver is properly initialized and observing user message elements
+- Check that .turn-request-banner.visible class is being applied when user message scrolls out of view
+- Ensure chat-messages container is properly identified for observer root
+- Verify CSS styles for sticky positioning and transitions are correctly applied
+- Check browser console for JavaScript errors in IntersectionObserver logic
+- Test with long conversations to verify banner appears when user message scrolls out of viewport
+
+### Markdown Rendering Issues
+
+**Problem**: Markdown not rendering correctly or security vulnerabilities detected
+**Solution**:
+- Verify renderMarkdown function is properly escaping HTML content
+- Check that javascript: and data: protocols are being blocked in link processing
+- Ensure table rendering produces proper thead/tbody structure instead of disconnected tables
+- Review test coverage for XSS prevention and quote escaping
+- Check browser console for JavaScript errors in markdown processing
+- Verify that all user input is properly escaped before HTML injection
+
+### Enhanced Authentication Issues
+
+**Problem**: Authentication state not properly managing disabled states for unauthenticated users
+**Solution**:
+- Verify that session creation controls are properly disabled when user is not authenticated
+- Check that appropriate tooltips are displayed explaining authentication requirements
+- Ensure disabled states are consistently applied across all unauthenticated user interactions
+- Review browser console for JavaScript errors in authentication state management
+- Test session creation workflow with unauthenticated user to verify proper disabled behavior
+
+**Updated** Added comprehensive troubleshooting guidance for the enhanced navigation system, including persistent 64px icon rail issues, useNarrowViewport() hook problems, responsive breakpoint detection issues, drawer integration problems, dynamic aria-labels not updating correctly, and proper handling of .view-container-inset class for content spacing. Also added guidance for version and cache-related issues introduced by the cache-busting mechanism, and enhanced error handling for different failure types including network errors, authentication failures, and streaming interruptions. New sections cover sticky request banner issues, markdown rendering problems with proper table structure, enhanced authentication state management for unauthenticated users, comprehensive stale session handling troubleshooting for 404 errors and retry logic failures, evidence persistence troubleshooting for transcript-to-turn conversion and evidence attachment issues, comprehensive model selection troubleshooting for catalog integration and session persistence, comprehensive ComposerSelectionBar troubleshooting for component rendering, styling, and integration issues, comprehensive Settings view troubleshooting for operational insights display and integration with existing components, comprehensive Approvals inbox troubleshooting for cross-session confirmation management, real-time polling, decision attribution, and 30-day history browsing, comprehensive race condition troubleshooting for concurrent approval attempts, comprehensive tier-aware confirmation troubleshooting for badge display, role validation, and tier detection issues, and comprehensive live decision sync troubleshooting for bounded polling, change detection, settle windows, and session detail API integration.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
@@ -2764,6 +2870,8 @@ Common issues and their solutions when working with the Operator Portal.
 - [App.tsx:334-357](file://products/operator-portal/web-ui/app/src/App.tsx#L334-L357)
 - [global.css:66-119](file://products/operator-portal/web-ui/app/src/theme/global.css#L66-L119)
 - [ChatView.tsx:1-790](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L790)
+- [usePendingDecisionPoll.ts:1-145](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts#L1-L145)
+- [usePendingDecisionPoll.test.ts:1-297](file://products/operator-portal/web-ui/app/src/chat/__tests__/usePendingDecisionPoll.test.ts#L1-L297)
 - [ComposerSelectionBar.tsx:1-48](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx#L1-L48)
 - [ModelSelect.tsx:1-58](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L1-L58)
 - [models.ts:1-31](file://products/operator-portal/web-ui/app/src/api/models.ts#L1-L31)
@@ -2786,11 +2894,11 @@ Common issues and their solutions when working with the Operator Portal.
 
 The Operator Portal provides a comprehensive, accessible, and customizable web interface for platform administration and monitoring within the Luban AIOPS ecosystem. The complete rebuild using React 18, TypeScript, and Vite delivers enterprise-grade functionality while maintaining simplicity and performance.
 
-**Updated** The recent enhancements include an enhanced navigation system with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states with visual dividers instead of clipped text, and enhanced mobile drawer navigation with proper positioning and z-index management. The navigation system now maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management. Additional improvements include comprehensive mobile navigation with proper positioning and z-index management, enhanced security measures with improved XSS prevention in markdown rendering through comprehensive quote escaping and protocol filtering, improved session management with defensive parseStored function to handle malformed or corrupted session data, enhanced stream ownership handling during session switches to prevent cross-session data contamination, refined error handling for different failure types including network errors, authentication failures, and streaming interruptions, and backend API v6 schema compliance for risk level handling in pending calls. **Critical Enhancement**: The platform now includes comprehensive stale session handling with automatic 404 error detection, missing reference tracking, and retry logic that automatically drops stale session references and falls back to server-side session auto-creation, ensuring more reliable chat functionality even when backend sessions become invalid. **Critical Enhancement**: The evidence persistence system provides unified rendering of both live streamed and replayed evidence, ensuring operators see consistent evidence cards with request ID display and truncation markers regardless of evidence source. **Critical Enhancement**: The model selection system provides flexible AI model choices with dynamic catalog integration and session-based persistence, while maintaining fail-open behavior when catalog services are unavailable. **New Feature**: The introduction of the ComposerSelectionBar component provides an extensible control strip architecture that improves modularity and provides a designated mount point for future per-turn selections as referenced in SPEC-024. **Enhanced Feature**: The restoration of the Settings view as a read-only Session & Identity panel (R-6) provides administrators with essential operational insights by displaying identity information, session details, and platform metadata using existing AuthContext and session workspace state. **Critical Enhancement**: The tier-aware HITL confirmation system now provides clear visual distinction between operator confirmations and approver-required scenarios with appropriate badge display and role-based permission validation, improving workflow clarity and user experience. **New Feature**: The Approvals inbox provides cross-session confirmation management with real-time polling, decision attribution, and 30-day history browsing for designated approvers, integrated into the navigation system with pending count badges and comprehensive role-based access control.
+**Updated** The recent enhancements include an enhanced navigation system with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states with visual dividers instead of clipped text, and enhanced mobile drawer navigation with proper positioning and z-index management. The navigation system now maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management. Additional improvements include comprehensive mobile navigation with proper positioning and z-index management, enhanced security measures with improved XSS prevention in markdown rendering through comprehensive quote escaping and protocol filtering, improved session management with defensive parseStored function to handle malformed or corrupted session data, enhanced stream ownership handling during session switches to prevent cross-session data contamination, refined error handling for different failure types including network errors, authentication failures, and streaming interruptions, and backend API v6 schema compliance for risk level handling in pending calls. **Critical Enhancement**: The platform now includes comprehensive stale session handling with automatic 404 error detection, missing reference tracking, and retry logic that automatically drops stale session references and falls back to server-side session auto-creation, ensuring more reliable chat functionality even when backend sessions become invalid. **Critical Enhancement**: The evidence persistence system provides unified rendering of both live streamed and replayed evidence, ensuring operators see consistent evidence cards with request ID display and truncation markers regardless of evidence source. **Critical Enhancement**: The model selection system provides flexible AI model choices with dynamic catalog integration and session-based persistence, while maintaining fail-open behavior when catalog services are unavailable. **New Feature**: The introduction of the ComposerSelectionBar component provides an extensible control strip architecture that improves modularity and provides a designated mount point for future per-turn selections as referenced in SPEC-024. **Enhanced Feature**: The restoration of the Settings view as a read-only Session & Identity panel (R-6) provides administrators with essential operational insights by displaying identity information, session details, and platform metadata using existing AuthContext and session workspace state. **Critical Enhancement**: The tier-aware HITL confirmation system now provides clear visual distinction between operator confirmations and approver-required scenarios with appropriate badge display and role-based permission validation, improving workflow clarity and user experience. **New Feature**: The Approvals inbox provides cross-session confirmation management with real-time polling, decision attribution, and 30-day history browsing for designated approvers, integrated into the navigation system with pending count badges and comprehensive role-based access control. **Critical Enhancement**: The live decision sync system provides bounded polling with change detection and settle windows to synchronize external decisions to active chat views without manual refresh, ensuring immediate reflection of decisions made from external sources such as the approver inbox or other browser sessions.
 
-Key strengths of the enhanced portal include its modular React architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities with tier-aware badge display, enhanced skills integration capabilities, improved navigation organization with sectioned grouping and persistent 64px icon rail for consistent layout anchoring, robust multi-session workspace management, comprehensive incident triage with automated workflows, voice input support for hands-free operation, seamless deep linking between incidents and collaborative chat sessions, and enhanced mobile navigation with proper responsive behavior below 992px breakpoint. The enhanced security measures ensure protection against XSS attacks while maintaining full functionality. **Critical Enhancement**: The stale session handling system provides robust error recovery for deleted or expired sessions, ensuring reliable chat functionality even in challenging network conditions or backend service issues. **Critical Enhancement**: The evidence persistence system ensures complete traceability of tool executions regardless of whether they were observed live or reviewed from stored transcripts, with comprehensive truncation markers that clearly indicate payload limitations. **Critical Enhancement**: The model selection system provides operators with flexible AI model choices while maintaining robust fail-open behavior and secure credential handling. **New Feature**: The ComposerSelectionBar component provides an extensible architecture for model selection and future per-turn controls, improving modularity and maintainability. **Enhanced Feature**: The Settings view provides read-only operational insights that complement the existing platform capabilities without introducing new security risks. **Critical Enhancement**: The tier-aware confirmation system provides clear visual indicators distinguishing between operator confirmations and approver-required scenarios, improving workflow efficiency and user experience. **New Feature**: The Approvals inbox provides designated approvers with comprehensive cross-session confirmation management capabilities including real-time polling, decision attribution, and 30-day history browsing with race-resilient resolution semantics.
+Key strengths of the enhanced portal include its modular React architecture, extensive customization options, strong accessibility features, seamless integration with backend services, comprehensive HITL confirmation bridging capabilities with tier-aware badge display, enhanced skills integration capabilities, improved navigation organization with sectioned grouping and persistent 64px icon rail for consistent layout anchoring, robust multi-session workspace management, comprehensive incident triage with automated workflows, voice input support for hands-free operation, seamless deep linking between incidents and collaborative chat sessions, and enhanced mobile navigation with proper responsive behavior below 992px breakpoint. The enhanced security measures ensure protection against XSS attacks while maintaining full functionality. **Critical Enhancement**: The stale session handling system provides robust error recovery for deleted or expired sessions, ensuring reliable chat functionality even in challenging network conditions or backend service issues. **Critical Enhancement**: The evidence persistence system ensures complete traceability of tool executions regardless of whether they were observed live or reviewed from stored transcripts, with comprehensive truncation markers that clearly indicate payload limitations. **Critical Enhancement**: The model selection system provides operators with flexible AI model choices while maintaining robust fail-open behavior and secure credential handling. **New Feature**: The ComposerSelectionBar component provides an extensible architecture for model selection and future per-turn controls, improving modularity and maintainability. **Enhanced Feature**: The Settings view provides read-only operational insights that complement the existing platform capabilities without introducing new security risks. **Critical Enhancement**: The tier-aware confirmation system provides clear visual indicators distinguishing between operator confirmations and approver-required scenarios, improving workflow efficiency and user experience. **New Feature**: The Approvals inbox provides designated approvers with comprehensive cross-session confirmation management capabilities including real-time polling, decision attribution, and 30-day history browsing with race-resilient resolution semantics. **Critical Enhancement**: The live decision sync system provides immediate reflection of external decisions in active chat views through bounded polling with change detection and settle windows, ensuring operators see decisions from external sources without manual refresh.
 
-The React/TypeScript implementation represents a significant advancement in developer experience and code maintainability, while preserving all existing functionality from the legacy vanilla JavaScript implementation. The enhanced navigation system with persistent 64px icon rail provides consistent layout anchoring across all views, while the useNarrowViewport() hook enables precise responsive breakpoint detection. The enhanced security measures, including comprehensive XSS prevention and defensive session parsing, ensure robust protection against common web vulnerabilities. The HITL confirmation system enables safe automation of complex workflows while maintaining human oversight for critical operations with tier-aware badge display. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions. The new view components provide dedicated interfaces for different operational tasks, improving workflow efficiency and user experience. **Critical Enhancement**: The stale session handling system ensures reliable chat functionality by automatically detecting and recovering from deleted or expired sessions, preventing user-facing errors and maintaining conversation continuity. **Critical Enhancement**: The evidence persistence system ensures operators always understand the completeness of displayed evidence through clear truncation markers and budget eviction indicators. **Critical Enhancement**: The model selection system provides flexible AI model choices with dynamic catalog integration and session-based persistence, ensuring operators can consistently use their preferred models throughout conversations. **New Feature**: The ComposerSelectionBar component provides an extensible control strip architecture that improves modularity and provides a designated mount point for future per-turn selections. **Enhanced Feature**: The Settings view restoration as a read-only Session & Identity panel provides essential operational insights while maintaining security boundaries and leveraging existing platform components. **Critical Enhancement**: The tier-aware confirmation system provides clear visual distinction between operator confirmations and approver-required scenarios with appropriate badge display and role-based permission validation. **New Feature**: The Approvals inbox provides designated approvers with comprehensive cross-session confirmation management capabilities including real-time polling, decision attribution, and 30-day history browsing with race-resilient resolution semantics.
+The React/TypeScript implementation represents a significant advancement in developer experience and code maintainability, while preserving all existing functionality from the legacy vanilla JavaScript implementation. The enhanced navigation system with persistent 64px icon rail provides consistent layout anchoring across all views, while the useNarrowViewport() hook enables precise responsive breakpoint detection. The enhanced security measures, including comprehensive XSS prevention and defensive session parsing, ensure robust protection against common web vulnerabilities. The HITL confirmation system enables safe automation of complex workflows while maintaining human oversight for critical operations with tier-aware badge display. The inline approval interface provides immediate feedback and seamless integration with the existing evidence system, while role-based controls ensure only authorized personnel can make decisions on sensitive tool executions. The new view components provide dedicated interfaces for different operational tasks, improving workflow efficiency and user experience. **Critical Enhancement**: The stale session handling system ensures reliable chat functionality by automatically detecting and recovering from deleted or expired sessions, preventing user-facing errors and maintaining conversation continuity. **Critical Enhancement**: The evidence persistence system ensures operators always understand the completeness of displayed evidence through clear truncation markers and budget eviction indicators. **Critical Enhancement**: The model selection system provides flexible AI model choices with dynamic catalog integration and session-based persistence, ensuring operators can consistently use their preferred models throughout conversations. **New Feature**: The ComposerSelectionBar component provides an extensible control strip architecture that improves modularity and provides a designated mount point for future per-turn selections. **Enhanced Feature**: The Settings view restoration as a read-only Session & Identity panel provides essential operational insights while maintaining security boundaries and leveraging existing platform components. **Critical Enhancement**: The tier-aware confirmation system provides clear visual distinction between operator confirmations and approver-required scenarios with appropriate badge display and role-based permission validation. **New Feature**: The Approvals inbox provides designated approvers with comprehensive cross-session confirmation management capabilities including real-time polling, decision attribution, and 30-day history browsing with race-resilient resolution semantics. **Critical Enhancement**: The live decision sync system provides immediate reflection of external decisions in active chat views through bounded polling with change detection and settle windows, ensuring operators see decisions from external sources without manual refresh.
 
 **Additional Recent Enhancements:**
 - **Sticky Request Banner System**: IntersectionObserver-based conversation context maintenance that keeps user requests visible during long replies and expanded evidence panels
@@ -2809,5 +2917,6 @@ The React/TypeScript implementation represents a significant advancement in deve
 - **Tier-Aware Confirmation System**: Enhanced HITL confirmation handling with tier detection logic, badge display system, and APPROVAL_DECIDER_ROLES for role-based permission validation
 - **Approvals Inbox Implementation**: Cross-session confirmation management with real-time polling, decision attribution, and 30-day history browsing for designated approvers
 - **Approvals Inbox Testing**: Comprehensive test coverage for pending/history rendering, decision processing, race condition handling, and role-based access control
+- **Live Decision Sync Implementation**: Bounded polling with change detection and settle windows for external decision synchronization, including comprehensive test coverage for race condition handling and streaming protection
 
-Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system with more sophisticated tier detection algorithms, expanded support for more complex multi-step approval workflows, additional voice input capabilities to meet evolving operational requirements, enhanced incident triage automation, expanded connector integrations, improved collaborative features for multi-operator incident response, and continued focus on mobile navigation optimization and responsive design improvements. Continued focus on security enhancements and user experience improvements will drive future development efforts. **Ongoing Enhancement**: Continued refinement of stale session handling and error recovery mechanisms to ensure maximum reliability in production environments. **Ongoing Enhancement**: Continued improvement of evidence persistence capabilities to provide even more comprehensive traceability and operational insights. **Ongoing Enhancement**: Continued enhancement of model selection capabilities to support more sophisticated model routing and performance optimization. **Ongoing Enhancement**: Continued development of the ComposerSelectionBar architecture to support additional per-turn selection capabilities as specified in SPEC-024. **Ongoing Enhancement**: Continued refinement of the Settings view to provide even more comprehensive operational insights while maintaining read-only security boundaries. **Ongoing Enhancement**: Continued improvement of tier-aware confirmation system with enhanced tier detection accuracy and more granular permission validation. **Ongoing Enhancement**: Continued enhancement of the Approvals inbox with additional cross-session management capabilities and improved decision workflow automation.
+Future enhancements may include additional dashboard widgets, advanced analytics capabilities, mobile app integration, expanded customization options, enhanced collaboration features, further improvements to the HITL confirmation system with more sophisticated tier detection algorithms, expanded support for more complex multi-step approval workflows, additional voice input capabilities to meet evolving operational requirements, enhanced incident triage automation, expanded connector integrations, improved collaborative features for multi-operator incident response, and continued focus on mobile navigation optimization and responsive design improvements. Continued focus on security enhancements and user experience improvements will drive future development efforts. **Ongoing Enhancement**: Continued refinement of stale session handling and error recovery mechanisms to ensure maximum reliability in production environments. **Ongoing Enhancement**: Continued improvement of evidence persistence capabilities to provide even more comprehensive traceability and operational insights. **Ongoing Enhancement**: Continued enhancement of model selection capabilities to support more sophisticated model routing and performance optimization. **Ongoing Enhancement**: Continued development of the ComposerSelectionBar architecture to support additional per-turn selection capabilities as specified in SPEC-024. **Ongoing Enhancement**: Continued refinement of the Settings view to provide even more comprehensive operational insights while maintaining read-only security boundaries. **Ongoing Enhancement**: Continued improvement of tier-aware confirmation system with enhanced tier detection accuracy and more granular permission validation. **Ongoing Enhancement**: Continued enhancement of the Approvals inbox with additional cross-session management capabilities and improved decision workflow automation. **Ongoing Enhancement**: Continued refinement of the live decision sync system to optimize polling efficiency and enhance change detection accuracy for external decision synchronization.

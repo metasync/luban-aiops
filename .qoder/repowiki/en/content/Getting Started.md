@@ -16,6 +16,8 @@
 - [products/operator-portal/web-ui/app/tsconfig.json](file://products/operator-portal/web-ui/app/tsconfig.json)
 - [products/operator-portal/web-ui/app/src/main.tsx](file://products/operator-portal/web-ui/app/src/main.tsx)
 - [products/operator-portal/web-ui/app/src/App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
+- [products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts)
+- [products/operator-portal/web-ui/app/src/chat/ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
 - [shared/platform-ops/gitops/dev-k8s/README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 - [shared/platform-ops/gitops/deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
 - [shared/platform-ops/gitops/select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
@@ -50,12 +52,11 @@
 
 ## Update Summary
 **Changes Made**
-- Updated development workflow section to reflect new Vite/React/TypeScript stack for the operator portal web UI
-- Added Node.js 22+ prerequisite requirement for local frontend development
-- Updated build and deployment instructions to include frontend asset compilation with Vite
-- Enhanced troubleshooting guide with Vite-specific development issues
-- Added documentation for React-based operator portal with Ant Design components
-- Updated Docker build process to include multi-stage build for frontend assets
+- Updated version information from v0.13.1 to v0.14.0 across all platform components
+- Added documentation for new live decision sync capabilities in the operator portal
+- Enhanced operator experience features with real-time approval status updates
+- Updated release notes and specifications for SPEC-032 owner-side live decision sync
+- Modified troubleshooting section to include new live sync validation steps
 
 ## Table of Contents
 1. Introduction
@@ -74,7 +75,7 @@
 ## Introduction
 This guide helps you get up and running with the Luban AIOps Platform for local development and production deployment. It covers prerequisites, installation steps, environment configuration, secret management, initial validation, and common troubleshooting tips. You will also find links to additional resources and next steps tailored for developers, operators, and security teams.
 
-**Updated** This document reflects the coordinated 0.5.0 release with synchronized versions across all seven platform components, plus the modernized operator portal built with Vite, React, and TypeScript instead of the legacy vanilla JavaScript setup.
+**Updated** This document reflects the coordinated 0.14.0 release with synchronized versions across all seven platform components, plus enhanced live decision sync capabilities that improve the operator experience through real-time approval status updates in the chat interface.
 
 ## Prerequisites
 Ensure your environment meets the following requirements before proceeding:
@@ -89,8 +90,8 @@ Ensure your environment meets the following requirements before proceeding:
 Notes:
 - The platform uses Kustomize overlays under shared/platform-ops/gitops for both development and production profiles.
 - Runtime profiles are provided for OpenAI, DashScope, and DeepSeek; select one based on your needs.
-- **New**: Version 0.5.0 introduces coordinated versioning that requires all components to maintain synchronized versions through the centralized VERSION file.
-- **Updated**: The operator portal now uses a modern Vite/React/TypeScript stack requiring Node.js 22+ for local development and builds.
+- **Updated**: Version 0.14.0 introduces live decision sync capabilities that require the updated operator portal for optimal operator experience.
+- **Updated**: The operator portal now includes enhanced real-time approval status updates through the usePendingDecisionPoll hook.
 
 **Section sources**
 - [products/operator-portal/web-ui/app/package.json:6-8](file://products/operator-portal/web-ui/app/package.json#L6-L8)
@@ -103,7 +104,7 @@ The repository is organized into product services and shared operational assets:
   - agent-platform: Agent runtime service and providers
   - identity-broker: Identity and token services
   - tool-gateway: API gateway, policy enforcement, and tool orchestration
-  - **Updated**: operator-portal: Modern React/TypeScript web UI built with Vite and Ant Design
+  - **Updated**: operator-portal: Modern React/TypeScript web UI built with Vite and Ant Design, featuring live decision sync
   - **New**: audit-service: Durable audit trail service for authenticated event ingestion and retention
   - **New**: incident-service: Incident intake, triage, and collaboration dispatch
   - **Existing**: skills-hub: Skills and grounded guidance federation
@@ -118,7 +119,7 @@ subgraph "Products"
 AP["Agent Platform"]
 IB["Identity Broker"]
 TG["Tool Gateway"]
-OP["Operator Portal (Vite/React)"]
+OP["Operator Portal (Vite/React + Live Sync)"]
 AS["Audit Service"]
 IS["Incident Service"]
 SH["Skills Hub"]
@@ -266,6 +267,7 @@ Environment variables and secrets are managed through Kustomize overlays and scr
   - Platform version is injected at build time from the root VERSION file
   - Vite configuration handles content hashing for immutable caching
   - Nginx serves the compiled React application with proper caching headers
+  - Live decision sync capabilities are enabled by default in the operator portal
 
 - Example references
   - OpenAI runtime configmap: shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml
@@ -275,8 +277,9 @@ Best practices:
 - Never commit real secrets to version control; use the example templates and external secret stores.
 - Rotate secrets regularly and audit access.
 - Validate configurations with the verification script before deploying.
-- **New**: Ensure version consistency across all components using the coordinated version validation system.
+- **Updated**: Ensure version consistency across all components using the coordinated version validation system.
 - **Updated**: For frontend development, ensure Node.js 22+ is installed and dependencies are properly cached.
+- **New**: Test live decision sync functionality by creating approval workflows and verifying real-time status updates.
 
 **Section sources**
 - [shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml)
@@ -287,7 +290,7 @@ Best practices:
 - [products/operator-portal/nginx.conf:19-30](file://products/operator-portal/nginx.conf#L19-L30)
 
 ## Coordinated Version Management
-Version 0.5.0 introduces a coordinated versioning system that ensures all platform components maintain synchronized versions:
+Version 0.14.0 introduces enhanced coordinated versioning that ensures all platform components maintain synchronized versions:
 
 ### Single Source of Truth
 - The root `VERSION` file serves as the single source of truth for the platform semver
@@ -296,13 +299,13 @@ Version 0.5.0 introduces a coordinated versioning system that ensures all platfo
 
 ### Components Covered
 The coordinated versioning applies to:
-- audit-service (SERVICE_VERSION: 0.5.0)
-- incident-service (SERVICE_VERSION: 0.5.0)
-- agent-platform (SERVICE_VERSION: 0.5.0)
-- identity-broker (SERVICE_VERSION: 0.5.0)
-- platform-gateway (SERVICE_VERSION: 0.5.0)
-- skills-hub (SERVICE_VERSION: 0.5.0)
-- tool-gateway (SERVICE_VERSION: 0.5.0)
+- audit-service (SERVICE_VERSION: 0.14.0)
+- incident-service (SERVICE_VERSION: 0.14.0)
+- agent-platform (SERVICE_VERSION: 0.14.0)
+- identity-broker (SERVICE_VERSION: 0.14.0)
+- platform-gateway (SERVICE_VERSION: 0.14.0)
+- skills-hub (SERVICE_VERSION: 0.14.0)
+- tool-gateway (SERVICE_VERSION: 0.14.0)
 - **Updated**: operator-portal (frontend version displayed in UI)
 
 ### Version Validation
@@ -340,6 +343,7 @@ After deployment, validate the platform and make your first API call:
 2. Operator Portal
    - Access the web UI via port-forwarding or ingress.
    - **Updated**: The React-based portal displays the platform version in the sidebar and provides enhanced user experience with Ant Design components.
+   - **New**: Test live decision sync by initiating an approval workflow and observing real-time status updates in the chat interface.
    - Confirm basic navigation and service status displays.
 
 3. First API call
@@ -354,6 +358,11 @@ After deployment, validate the platform and make your first API call:
    - Test audit-service endpoints for event ingestion and querying
    - Validate incident-service functionality for incident management workflows
 
+6. Live decision sync validation
+   - **New**: Create a tier_2 confirmation workflow to test the live decision sync capability
+   - **New**: Observe how the owner's chat window updates when decisions are made from other sessions
+   - **New**: Verify that pending cards flip to their resolution state with decider attribution
+
 Use curl or an HTTP client to test endpoints. Refer to service READMEs for endpoint details and examples.
 
 **Section sources**
@@ -361,6 +370,7 @@ Use curl or an HTTP client to test endpoints. Refer to service READMEs for endpo
 - [products/identity-broker/README.md](file://products/identity-broker/README.md)
 - [products/agent-platform/README.md](file://products/agent-platform/README.md)
 - [products/operator-portal/web-ui/app/src/App.tsx:150-154](file://products/operator-portal/web-ui/app/src/App.tsx#L150-L154)
+- [products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts:1-5](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts#L1-L5)
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -386,15 +396,16 @@ Common issues and resolutions:
   - Review policy definitions and RBAC rules.
   - Adjust policies to allow intended operations while maintaining security.
 
-- **New**: Version consistency issues
+- **Updated**: Version consistency issues
   - Run `make validate-version` to check for version drift between components
   - Ensure all SERVICE_VERSION values match the root VERSION file
   - Verify pyproject.toml files have consistent version declarations
 
-- **New**: New service connectivity issues
-  - Check audit-service and incident-service health endpoints
-  - Verify database connections for stateful services
-  - Validate inter-service communication through the platform gateway
+- **New**: Live decision sync issues
+  - Check that the usePendingDecisionPoll hook is properly integrated in ChatView
+  - Verify that session detail endpoints return expected confirmation state
+  - Ensure polling intervals are functioning correctly (5-second intervals)
+  - Test approval workflows to confirm real-time status updates work as expected
 
 - **Updated**: Frontend development issues
   - Ensure Node.js 22+ is installed and compatible with Vite
@@ -412,9 +423,10 @@ Useful commands:
 - kubectl describe pod <pod-name> -n <namespace>
 - kubectl logs <pod-name> -n <namespace>
 - kubectl get configmaps, secrets -n <namespace>
-- **New**: make validate-version
+- **Updated**: make validate-version
 - **Updated**: npm run dev (for frontend development)
 - **Updated**: npm run build (for frontend production builds)
+- **New**: Test live decision sync by monitoring session detail endpoints during approval workflows
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
@@ -429,35 +441,40 @@ Useful commands:
 - [shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-service.yaml)
 - [products/operator-portal/web-ui/app/package.json:6-8](file://products/operator-portal/web-ui/app/package.json#L6-L8)
 - [products/operator-portal/Dockerfile:1-29](file://products/operator-portal/Dockerfile#L1-L29)
+- [products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts:51-80](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts#L51-L80)
 
 ## Next Steps by Persona
 - Developers
   - Explore service codebases and APIs under products/* directories.
   - Run unit tests and integration tests locally.
   - Extend providers and tools as needed.
-  - **New**: Understand the coordinated versioning system and contribute to version updates.
+  - **Updated**: Understand the coordinated versioning system and contribute to version updates.
   - **Updated**: Work with the modern React/TypeScript frontend stack using Vite for development and builds.
+  - **New**: Implement and test live decision sync functionality using the usePendingDecisionPoll hook.
 
 - Operators
   - Manage Kustomize overlays and secrets lifecycle.
   - Implement CI/CD pipelines for automated deployments.
   - Configure monitoring, alerting, and log aggregation.
-  - **New**: Monitor version consistency across all seven platform components.
+  - **Updated**: Monitor version consistency across all seven platform components.
   - **Updated**: Handle multi-stage Docker builds that compile frontend assets alongside backend services.
+  - **New**: Validate live decision sync capabilities in production environments to ensure smooth operator workflows.
 
 - Security Teams
   - Review RBAC rules and policy definitions.
   - Audit secrets management and rotation procedures.
   - Enforce compliance policies and conduct periodic assessments.
-  - **New**: Validate audit-service and incident-service security configurations.
+  - **Updated**: Validate audit-service and incident-service security configurations.
   - **Updated**: Review frontend security headers and caching policies in nginx configuration.
+  - **New**: Assess the security implications of live decision sync polling mechanisms.
 
 Additional resources:
 - Repository README for high-level overview and links
 - Product READMEs for detailed service documentation
 - GitOps scripts and overlays for deployment automation
-- **New**: Version validation scripts and coordinated release processes
+- **Updated**: Version validation scripts and coordinated release processes
 - **Updated**: Vite documentation and React/TypeScript best practices for frontend development
+- **New**: SPEC-032 documentation for understanding live decision sync implementation
 
 **Section sources**
 - [README.md](file://README.md)
@@ -465,13 +482,14 @@ Additional resources:
 - [products/identity-broker/README.md](file://products/identity-broker/README.md)
 - [products/tool-gateway/README.md](file://products/tool-gateway/README.md)
 - [products/operator-portal/web-ui/app/package.json:15-34](file://products/operator-portal/web-ui/app/package.json#L15-L34)
+- [docs/specs/SPEC-032-owner-side-live-decision-sync/spec.md:1-124](file://docs/specs/SPEC-032-owner-side-live-decision-sync/spec.md#L1-L124)
 
 ## Architecture Overview
 The platform consists of several microservices orchestrated via Kubernetes and exposed through an API gateway. Core components include:
 - Tool Gateway: Central API entry point with policy enforcement and tool orchestration
 - Identity Broker: Authentication, authorization, and token management
 - Agent Platform: Agent runtime and provider integrations
-- **Updated**: Operator Portal: Modern React/TypeScript web UI built with Vite, served by nginx with optimized caching
+- **Updated**: Operator Portal: Modern React/TypeScript web UI built with Vite, served by nginx with optimized caching, featuring live decision sync capabilities
 - **New**: Audit Service: Durable audit trail with authenticated event ingestion and retention
 - **New**: Incident Service: Incident intake, triage, and collaboration dispatch
 - **Existing**: Skills Hub: Skills and grounded guidance federation
@@ -483,7 +501,7 @@ Client["Client"]
 GW["Tool Gateway"]
 IDB["Identity Broker"]
 AP["Agent Platform"]
-OP["Operator Portal (React/Vite)"]
+OP["Operator Portal (React/Vite + Live Sync)"]
 AS["Audit Service"]
 IS["Incident Service"]
 RDS["Redis"]
@@ -506,6 +524,8 @@ IS --> RDS
 [No sources needed since this diagram shows conceptual architecture]
 
 ## Conclusion
-You now have the essential information to install, configure, and operate the Luban AIOps Platform for both local development and production. Version 0.5.0 introduces coordinated versioning across all seven platform components, ensuring consistent releases and simplified maintenance. The operator portal has been modernized with a Vite/React/TypeScript stack, providing an enhanced user experience with better performance and developer productivity. Use the provided scripts and overlays to manage deployments, secrets, and runtime profiles. For deeper exploration, consult the product READMEs and GitOps assets. If you encounter issues, refer to the troubleshooting guide and leverage Kubernetes diagnostics.
+You now have the essential information to install, configure, and operate the Luban AIOps Platform for both local development and production. Version 0.14.0 introduces enhanced coordinated versioning across all seven platform components, ensuring consistent releases and simplified maintenance. The operator portal has been modernized with a Vite/React/TypeScript stack, providing an enhanced user experience with better performance and developer productivity. The new live decision sync capabilities significantly improve the operator experience by providing real-time updates when approval decisions are made from other sessions or interfaces.
 
-**Updated** The coordinated version management system in version 0.5.0 provides enhanced reliability and simplifies multi-component releases across the entire platform ecosystem, while the modernized frontend stack offers improved performance and developer experience.
+**Updated** The coordinated version management system in version 0.14.0 provides enhanced reliability and simplifies multi-component releases across the entire platform ecosystem, while the modernized frontend stack offers improved performance and developer experience. The addition of live decision sync capabilities addresses critical gaps identified during v0.13.1 live validation, ensuring that operators can trust the approval workflow visibility across all user interfaces.
+
+Use the provided scripts and overlays to manage deployments, secrets, and runtime profiles. For deeper exploration, consult the product READMEs and GitOps assets. If you encounter issues, refer to the troubleshooting guide and leverage Kubernetes diagnostics.

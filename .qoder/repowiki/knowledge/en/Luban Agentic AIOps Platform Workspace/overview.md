@@ -1,1 +1,1 @@
-Monorepo workspace for an enterprise agentic AIOps platform, orchestrating multiple Python microservices (agent runtime, gateways, identity, audit, incidents, skills) plus a web portal and shared contracts.
+Multi-product workspace for the Luban agentic AIOps platform, coordinating agent runtime, identity broker, platform gateway, tool gateway, skills hub, audit service, incident service, and operator portal behind shared contracts.

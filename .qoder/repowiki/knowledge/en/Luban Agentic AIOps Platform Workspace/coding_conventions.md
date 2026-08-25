@@ -1,6 +1,6 @@
-- Each product follows a uniform internal layout: `src/<service_name>/` split into `api/` (routes + router), `core/` (config, metrics, observability, request context, telemetry, runtime), `schemas/`, `services/`, plus top-level `app.py`, `main.py`, and `metadata.py`.
-- Every Python product ships its own `Dockerfile`, `Makefile`, `pyproject.toml`, `uv.lock`, and `tests/` directory so it can be built, tested, and released independently.
-- Cross-product API and event shapes are declared once as JSON Schema files under `shared/shared-contracts/schemas/` and validated at build time rather than imported as code.
-- Policy decisions are centralized in a canonical YAML bundle under `shared/shared-contracts/policies/` and copied into each consuming product via `make sync-policy`.
-- Build artifacts use a coordinated semver tag computed from the root `VERSION` file, applied uniformly across all product images and persisted in `.images.env` for the deploy step.
-- Per-product Makefiles delegate to shared fragments in `mk/` (`defaults.mk`, `image.mk`, `python.mk`) so lint, test, and image targets stay consistent across services.
+- Each product exposes a consistent package layout of `api/routes`, `services`, `schemas`, `core`, and `__init__.py` entrypoints so new services can be scaffolded by copying an existing product template.
+- Inter-service contracts are defined as JSON Schema files in `shared/shared-contracts/schemas/` and referenced by all producers and consumers rather than duplicated inline.
+- Policy rules are authored once as `policy-default.yaml` in `shared/shared-contracts/policies/` and copied into each consuming product's `policies/` directory via `make sync-policy`.
+- Every Python product pins its interpreter in a local `.python-version` file and uses `uv` for dependency resolution, with per-product `pyproject.toml` and `uv.lock`.
+- Services share common cross-cutting modules (`config`, `metrics`, `observability`, `request_context`, `telemetry`, `runtime`) under a `core/` subpackage to standardize logging, tracing, and configuration access.
+- Container images are built with a coordinated tag derived from the root `VERSION` file plus git SHA and profile, written into a shared `.images.env` state file consumed by the deploy pipeline.
