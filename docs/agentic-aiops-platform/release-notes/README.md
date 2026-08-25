@@ -7,6 +7,14 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-25-owner-side-live-decision-sync.md`
+  - delivers SPEC-032 (v0.14.0): the owner's open chat window syncs
+    externally made decisions live — a bounded, change-gated
+    poll-while-pending on the session-detail surface (5s, torn down
+    when no card is pending or any stream is active, settle window for
+    the trailing resumed-turn content) flips the card with decider
+    attribution and surfaces the resumed turn without a refresh;
+    portal-only, no backend/contract/policy changes
 - `2026-08-25-confirmation-race-and-restart-sweep-patch.md`
   - closes v0.13.1: SPEC-031 review remediations — the confirm route
     persists the durable outcome at claim time (racing approvers get

@@ -1,6 +1,6 @@
 [project]
 name = "tool-gateway"
-version = "0.13.1"
+version = "0.14.0"
 description = "API gateway for Luban AIOps."
 requires-python = ">=3.11"
 dependencies = [

@@ -13,6 +13,31 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.14.0 — 2026-08-25
+
+### Added
+
+- **Owner-side live decision sync (SPEC-032)**: the owner's open chat
+  window now learns about decisions made elsewhere (the approver inbox,
+  a second browser session) without a manual refresh. While a
+  confirmation card is pending, the chat view polls the session-detail
+  surface on a short interval (5s) and re-seeds the turn timeline the
+  moment the state moves — the card flips to its resolution with decider
+  attribution and the resumed turn's content becomes visible. The poll
+  is bounded and change-gated: it runs only while a card is pending
+  (plus a short settle window for the trailing resumed-turn content),
+  never while any chat stream is active, stops on its own once the last
+  card resolves, and identical responses never rebuild the timeline.
+  Portal-only — no backend, contract, or policy changes; the
+  `confirmation_result` frame still rides the answering stream as
+  before.
+
+### Changed
+
+- Version lockstep bumped to 0.14.0 and per-product `uv.lock` files
+  refreshed; `approval-and-hitl.md` and `portal-user-guide.md` document
+  the live owner-side sync.
+
 ## 0.13.1 — 2026-08-25
 
 ### Fixed
