@@ -1,1 +1,0 @@
-Python services built with FastAPI and managed via `uv` (environment + package manager); container images based on a shared `base-uv` image; Kubernetes deployment via Kustomize overlays under `shared/platform-ops/gitops`; end-to-end testing against a kind cluster; schema-driven API contracts in `shared/shared-contracts/schemas/*.schema.json` validated at build time.

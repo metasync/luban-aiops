@@ -1,0 +1,1 @@
+Monorepo that composes a platform gateway, agent runtime, identity broker, audit/incident/skills/tool services, and an operator portal around shared JSON schemas and policy contracts.

@@ -1,0 +1,1 @@
+React with hooks (`useReducer`, `useCallback`, `useRef`, `useState`), Ant Design + @ant-design/x components for the bubble/chat UI, Web Speech API for voice input, dayjs for relative timestamps, and custom SSE transport (`openStream`/`consumeStream`) over `/api/v1/chat` endpoints.

@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: ""
-title: Luban Agentic AIOps Platform Workspace
+title: Agentic AIOps Platform Monorepo
 scope: []
 source_files: []
 depends_on: []

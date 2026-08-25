@@ -1,6 +1,0 @@
-- Each product exposes a consistent package layout of `api/routes`, `services`, `schemas`, `core`, and `__init__.py` entrypoints so new services can be scaffolded by copying an existing product template.
-- Inter-service contracts are defined as JSON Schema files in `shared/shared-contracts/schemas/` and referenced by all producers and consumers rather than duplicated inline.
-- Policy rules are authored once as `policy-default.yaml` in `shared/shared-contracts/policies/` and copied into each consuming product's `policies/` directory via `make sync-policy`.
-- Every Python product pins its interpreter in a local `.python-version` file and uses `uv` for dependency resolution, with per-product `pyproject.toml` and `uv.lock`.
-- Services share common cross-cutting modules (`config`, `metrics`, `observability`, `request_context`, `telemetry`, `runtime`) under a `core/` subpackage to standardize logging, tracing, and configuration access.
-- Container images are built with a coordinated tag derived from the root `VERSION` file plus git SHA and profile, written into a shared `.images.env` state file consumed by the deploy pipeline.

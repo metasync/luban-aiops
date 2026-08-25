@@ -1,0 +1,1 @@
+React chat workspace that streams operator-agent conversations via SSE, renders tool evidence and human-in-the-loop confirmation cards, and manages per-session transcript caching.

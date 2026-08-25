@@ -1,0 +1,1 @@
+Each product under `products/*` has its own `Makefile` (build/test/image), `.python-version`, and `pyproject.toml` managed by `uv`; the top-level `Makefile` and `mk/*.mk` provide shared defaults, image building, and Python helpers used across products.

@@ -1,0 +1,1 @@
+Python FastAPI services with uv-managed dependencies; shared JSON Schema contracts and YAML policy matrices; React + Vite operator portal; Kustomize-based GitOps deployments under `shared/platform-ops/gitops`; Docker images built per product with a common base image in `shared/base-images/base-uv`.
