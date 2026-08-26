@@ -39,7 +39,7 @@ import {
 } from "../stream/useChatStream";
 import { renderMarkdown } from "./markdown";
 import { ComposerSelectionBar } from "./ComposerSelectionBar";
-import { detectArrivalSpan, transcriptToTurns, type ArrivalSpan } from "./transcript";
+import { detectArrivalSpan, seedRevealDelay, seedRevealIndex, transcriptToTurns, type ArrivalSpan } from "./transcript";
 import { usePendingDecisionPoll } from "./usePendingDecisionPoll";
 import {
   VOICE_LANGUAGES,
@@ -362,6 +362,7 @@ function TurnGroup({
   onDecide,
   justArrived,
   revealFromChars,
+  revealDelayMs,
 }: {
   turn: ChatTurn;
   canDecide: boolean;
@@ -372,6 +373,9 @@ function TurnGroup({
   // char offset so the operator watches the new content land instead of
   // meeting a silent wall of text. Evidence and cards render at once.
   revealFromChars?: number;
+  // SPEC-036 R-1: the cold-seed cascade staggers each turn's typewriter
+  // by this delay so the transcript reveals top-to-bottom.
+  revealDelayMs?: number;
 }) {
   // Legacy parity: a finished turn with no text and no parked confirmation
   // shows the "(no response received)" placeholder.
@@ -402,13 +406,26 @@ function TurnGroup({
       Math.ceil(remaining / (ARRIVAL_WINDOW_MS / REVEAL_TICK_MS)),
     );
     let shown = revealFromChars;
-    const timer = window.setInterval(() => {
-      shown = Math.min(turn.replyText.length, shown + chunk);
-      setRevealedChars(shown >= turn.replyText.length ? null : shown);
-      if (shown >= turn.replyText.length) window.clearInterval(timer);
-    }, REVEAL_TICK_MS);
-    return () => window.clearInterval(timer);
-  }, [revealFromChars, turn.replyText]);
+    let timer: number | undefined;
+    const start = () => {
+      timer = window.setInterval(() => {
+        shown = Math.min(turn.replyText.length, shown + chunk);
+        setRevealedChars(shown >= turn.replyText.length ? null : shown);
+        if (shown >= turn.replyText.length && timer !== undefined) {
+          window.clearInterval(timer);
+        }
+      }, REVEAL_TICK_MS);
+    };
+    const delayTimer =
+      revealDelayMs && revealDelayMs > 0
+        ? window.setTimeout(start, revealDelayMs)
+        : undefined;
+    if (delayTimer === undefined) start();
+    return () => {
+      if (delayTimer !== undefined) window.clearTimeout(delayTimer);
+      if (timer !== undefined) window.clearInterval(timer);
+    };
+  }, [revealFromChars, revealDelayMs, turn.replyText]);
   const displayReply =
     revealedChars === null ? reply : turn.replyText.slice(0, revealedChars);
   const loading = !turn.completed && !turn.confirmationPending && !turn.error;
@@ -620,6 +637,12 @@ export default function ChatView({
   // cleared when the arrival window lapses.
   const [arrival, setArrival] = useState<ArrivalSpan | null>(null);
   const arrivalTimerRef = useRef<number | undefined>(undefined);
+  // SPEC-036 R-1: a cold-seeded transcript cascades its replies with
+  // the same typewriter as arrivals — without the flash (nothing new
+  // arrived); the state holds the index of the last revealed turn and
+  // clears when the cascade lapses or the session switches.
+  const [seedReveal, setSeedReveal] = useState<number | null>(null);
+  const seedRevealTimerRef = useRef<number | undefined>(undefined);
 
   const canDecide = hasAnyRole(roles, CHAT_CONFIRM_ROLES);
   const { setSession } = chat;
@@ -688,6 +711,10 @@ export default function ChatView({
     }
     if (catchingUpRef.current) return;
     setTranscriptNote(null);
+    // SPEC-036 R-1: a session switch cancels any in-flight seed reveal
+    // so the old session's index never retypes the new session's text.
+    setSeedReveal(null);
+    window.clearTimeout(seedRevealTimerRef.current);
     if (!activeSessionId) {
       setSession(null);
       return;
@@ -723,16 +750,30 @@ export default function ChatView({
         } else {
           setSelectedModel(catalog?.default ?? null);
         }
+        const seeded = transcriptToTurns(
+          detail.transcript ?? [],
+          detail.evidence_turns,
+          detail.confirmations,
+        );
         setSession(
           target,
           // SPEC-031 R-2: durable confirmation cards ride the session
           // detail, so parked/decided cards survive a re-login.
-          transcriptToTurns(
-            detail.transcript ?? [],
-            detail.evidence_turns,
-            detail.confirmations,
-          ),
+          seeded,
         );
+        // SPEC-036 R-1: cascade the seeded replies top-to-bottom so
+        // opening a session cold reads like a live stream instead of
+        // one silent pop-in. Cache-restore switches never reach this
+        // branch, so a revisited session does not replay the reveal.
+        const revealIndex = seedRevealIndex(seeded);
+        if (revealIndex !== null) {
+          setSeedReveal(revealIndex);
+          window.clearTimeout(seedRevealTimerRef.current);
+          seedRevealTimerRef.current = window.setTimeout(
+            () => setSeedReveal(null),
+            ARRIVAL_WINDOW_MS + seedRevealDelay(revealIndex, revealIndex),
+          );
+        }
       })
       .catch((error) => {
         if (controller.signal.aborted) return;
@@ -934,12 +975,24 @@ export default function ChatView({
                 canDecide={canDecide}
                 busy={chat.streaming}
                 justArrived={arrival !== null && index >= arrival.from}
-                // Only the span's start group re-types its reply (from the
-                // already-seen offset); later groups arrive complete under
-                // the flash so one reveal never buries the next.
+                // Only the span's start group re-types its reply (from
+                // the already-seen offset); later groups arrive complete
+                // under the flash so one reveal never buries the next.
+                // A cold-seeded transcript cascades every reply from
+                // zero, staggered top-to-bottom (SPEC-036 R-1), unless
+                // an arrival owns the presentation.
                 revealFromChars={
                   arrival !== null && index === arrival.from
                     ? arrival.prevReplyChars
+                    : seedReveal !== null && index <= seedReveal
+                      ? 0
+                      : undefined
+                }
+                revealDelayMs={
+                  seedReveal !== null &&
+                  index <= seedReveal &&
+                  !(arrival !== null && index === arrival.from)
+                    ? seedRevealDelay(index, seedReveal)
                     : undefined
                 }
                 onDecide={(confirmId, decision) =>

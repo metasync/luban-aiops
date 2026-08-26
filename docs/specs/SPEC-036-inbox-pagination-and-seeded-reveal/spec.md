@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-26
 - release slice: R4 — Approval-Gated Bounded Actions
@@ -32,7 +32,8 @@ most recent reply instead of popping it in fully formed.
   session opened cold (first load in a tab) renders its whole
   transcript at once. The operator asked for the same progressive
   reveal there for presentation consistency: the eye should follow the
-  most recent reply being re-typed, not catch a wall of text appearing
+  seeded replies being re-typed — across the whole transcript, not
+  just the last one — instead of catching a wall of text appearing
   instantly.
 
 ## Requirements
@@ -44,9 +45,11 @@ testable acceptance signals.
 
 When a session's transcript is cold-seeded from the session detail
 (first fetch in this tab — not a cache-restore switch and not an
-arrival reseed), the most recent turn with reply text reveals
-progressively using the same typewriter mechanism as arrivals: bounded
-total duration (~6 s), chunk size scaling with length, and
+arrival reseed), every seeded reply reveals progressively using the
+same typewriter mechanism as arrivals: the cascade runs top-to-bottom
+with a per-turn stagger (≤150 ms, compressed so the whole cascade
+starts within ~3 s regardless of transcript length), each turn bounded
+to ~6 s with chunk size scaling with length, and
 `prefers-reduced-motion` degradation to instant render. The reveal
 carries no arrival flash (nothing new arrived) and does not hijack
 scrolling (the standard scroll-to-bottom applies). Switching sessions
@@ -54,12 +57,13 @@ cancels any in-flight reveal.
 
 Acceptance signals:
 
-- A pure helper reports the index of the last turn with non-empty
-  reply text (null for empty or reply-less transcripts); unit tests
-  pin the behavior.
-- ChatView wires the helper into the cold-seed path only, clears the
-  reveal when the window lapses or the session switches, and never
-  applies it on top of an active arrival.
+- Pure helpers report the index of the last turn with non-empty reply
+  text (null for empty or reply-less transcripts) and the per-turn
+  stagger delay (first turn starts immediately; stagger compresses under
+  the total budget for long transcripts); unit tests pin both.
+- ChatView wires the cascade into the cold-seed path only, clears it
+  when the window lapses or the session switches, and never applies it
+  on top of an active arrival.
 
 ### R-2: Split inbox store queries
 
@@ -130,8 +134,6 @@ Acceptance signals:
 - Cross-owner session review, shift-summary artifacts, or session
   inheritance — separate future specs.
 - Any change to pending-record behavior, retention windows, or caps.
-- Revealing historical turns other than the most recent reply on
-  cold-seed.
 
 ## Open Questions
 
@@ -147,4 +149,10 @@ Acceptance signals:
 
 ## Change Log
 
+- 2026-08-26: delivered in the 0.18.0 train (portal 160/160 +
+  agent-platform 474 + gateway 228 green; `make verify` green at
+  lockstep 0.18.0; inbox shape smoke-verified through the gateway).
+- 2026-08-26: R-1 refined with operator sign-off — the cold-seed
+  reveal cascades across every seeded reply (staggered top-to-bottom,
+  budget-compressed) instead of only the most recent one.
 - 2026-08-26: drafted from the v0.17.0 post-release review.

@@ -8,24 +8,32 @@ together).
 
 ## R-1 seeded-transcript reveal (portal)
 
-- `src/chat/transcript.ts`: new pure helper
-  `seedRevealIndex(turns: ChatTurn[]): number | null` — the index of
-  the last turn with non-empty `replyText`, null otherwise.
+- `src/chat/transcript.ts`: pure helpers —
+  `seedRevealIndex(turns: ChatTurn[]): number | null` (the index of
+  the last turn with non-empty `replyText`, null otherwise) and
+  `seedRevealDelay(index, lastIndex)` (per-turn stagger, capped at
+  `SEED_STAGGER_MS` and compressed under `SEED_STAGGER_BUDGET_MS` so
+  long transcripts stay bounded).
 - `src/chat/ChatView.tsx`:
-  - new `seedReveal` state + timer ref, cleared on session switch and
-    after `ARRIVAL_WINDOW_MS`;
+  - new `seedReveal` state + timer ref (holds the last revealed turn
+    index), cleared on session switch and after
+    `ARRIVAL_WINDOW_MS + seedRevealDelay(last, last)`;
   - in the cold-seed branch of the session-switch effect (the
     `getSession(...).then` path — never the cache-restore or
     missing-session branches), compute the index over the seeded turns
-    and arm the reveal;
-  - render: `revealFromChars={0}` on the seeded index unless an
-    arrival is active (arrival wins); no `justArrived` flash, no
-    scroll hijack — the existing scroll-to-bottom effect applies.
+    and arm the cascade;
+  - render: `revealFromChars={0}` plus the staggered
+    `revealDelayMs` on every turn up to the seeded index, unless an
+    arrival is active (arrival wins at its start turn); no
+    `justArrived` flash, no scroll hijack — the existing
+    scroll-to-bottom effect applies.
   - TurnGroup's existing reveal machinery (chunk sizing, reduced
-    motion) is reused unchanged.
+    motion) is reused; a `revealDelayMs` prop postpones the typewriter
+    start so turns cascade top-to-bottom.
 - Tests: `transcript.test.ts` — `seedRevealIndex` last-reply index,
   null for empty / reply-less transcripts, skips trailing user-only
-  turns.
+  turns; `seedRevealDelay` first-turn zero, base stagger, budget
+  compression, index clamping.
 
 ## R-2 split inbox store queries (agent-service)
 

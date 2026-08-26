@@ -1,7 +1,10 @@
 // Approvals view layout tests (SPEC-034 R-3/R-4/R-5): Pending/History
 // tabs with counts, separated entries with structured provenance headers,
-// and the expiry rule in the banner.
+// and the expiry rule in the banner. SPEC-036 R-5: the History tab is
+// server-paged, so pagination tests render the view through a harness
+// that simulates the offset refetch.
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import {
   afterEach,
   beforeAll,
@@ -69,14 +72,21 @@ const historyRecord: ConfirmationRecord = {
 };
 
 function inboxOf(records: ConfirmationRecord[]): ApprovalsInboxState {
+  // SPEC-036 R-5: pending arrives complete while history is a server
+  // page; the fixture derives both from one record list.
+  const pending = records.filter((record) => record.status === "pending");
+  const history = records.filter((record) => record.status !== "pending");
   return {
-    records,
+    pending,
+    history,
+    historyTotal: history.length,
+    historyOffset: 0,
     loading: false,
     error: null,
-    pendingCount: records.filter((record) => record.status === "pending")
-      .length,
+    pendingCount: pending.length,
     busyConfirmId: null,
     refresh: vi.fn(async () => {}),
+    setPageOffset: vi.fn(),
     decide: vi.fn(async () => {}),
   };
 }
@@ -148,7 +158,9 @@ describe("ApprovalsView banner (SPEC-034 R-5 / SPEC-035 R-6)", () => {
   });
 });
 
-// SPEC-035 R-7: the 30-day history paginates so the tab stays legible.
+// SPEC-035 R-7 / SPEC-036 R-5: the 30-day history paginates so the tab
+// stays legible — server-side now, so page navigation refetches the
+// requested offset instead of slicing a local list.
 function historyRecordOf(index: number): ConfirmationRecord {
   return {
     ...historyRecord,
@@ -157,22 +169,49 @@ function historyRecordOf(index: number): ConfirmationRecord {
   };
 }
 
-describe("ApprovalsView history pagination (SPEC-035 R-7)", () => {
+// Simulates the hook's offset-aware refetch: page navigation swaps the
+// history prop for the requested server page.
+function ServerPagedHarness({
+  records,
+}: {
+  records: ConfirmationRecord[];
+}) {
+  const [offset, setOffset] = useState(0);
+  return (
+    <ApprovalsView
+      inbox={{
+        pending: [],
+        history: records.slice(offset, offset + 10),
+        historyTotal: records.length,
+        historyOffset: offset,
+        loading: false,
+        error: null,
+        pendingCount: 0,
+        busyConfirmId: null,
+        refresh: vi.fn(async () => {}),
+        setPageOffset: setOffset,
+        decide: vi.fn(async () => {}),
+      }}
+    />
+  );
+}
+
+describe("ApprovalsView history pagination (SPEC-035 R-7 / SPEC-036 R-5)", () => {
   it("shows ten entries per page with a pager past one page", () => {
     const records = Array.from({ length: 23 }, (_, index) =>
       historyRecordOf(index),
     );
-    const { container } = render(<ApprovalsView inbox={inboxOf(records)} />);
+    const { container } = render(<ServerPagedHarness records={records} />);
     fireEvent.click(screen.getByText("History (23)"));
     expect(screen.getAllByText(/^Session \d+$/)).toHaveLength(10);
     expect(container.querySelector(".ant-pagination")).toBeTruthy();
   });
 
-  it("navigates to the last page and clamps a short tail", () => {
+  it("refetches the requested offset page and clamps a short tail", () => {
     const records = Array.from({ length: 23 }, (_, index) =>
       historyRecordOf(index),
     );
-    const { container } = render(<ApprovalsView inbox={inboxOf(records)} />);
+    const { container } = render(<ServerPagedHarness records={records} />);
     fireEvent.click(screen.getByText("History (23)"));
     const pageThree = container.querySelector('li[title="3"]');
     expect(pageThree).toBeTruthy();
@@ -184,7 +223,7 @@ describe("ApprovalsView history pagination (SPEC-035 R-7)", () => {
     const records = Array.from({ length: 10 }, (_, index) =>
       historyRecordOf(index),
     );
-    const { container } = render(<ApprovalsView inbox={inboxOf(records)} />);
+    const { container } = render(<ServerPagedHarness records={records} />);
     fireEvent.click(screen.getByText("History (10)"));
     expect(screen.getAllByText(/^Session \d+$/)).toHaveLength(10);
     expect(container.querySelector(".ant-pagination")).toBeNull();

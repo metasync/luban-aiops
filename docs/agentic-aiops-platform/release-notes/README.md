@@ -7,6 +7,13 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-26-server-inbox-pagination-and-seeded-reveal.md`
+  - delivers SPEC-036 (v0.18.0): the approvals History tab moves to
+    server-side pagination (split store queries with a windowed total,
+    paginated inbox API, gateway pass-through, server-driven portal
+    tab) so decisions past the old 100-row payload cap stay reachable,
+    and the typewriter reveal cascades across every reply of a
+    cold-seeded transcript instead of only the most recent one
 - `2026-08-26-decision-sync-arrival-polish.md`
   - delivers SPEC-035 (v0.17.0): the four v0.16.0 live-test findings —
     transcript segment boundaries (agent-service block join +

@@ -227,3 +227,33 @@ export function detectArrivalSpan(
   }
   return null;
 }
+
+// SPEC-036 R-1: a cold-seeded transcript reveals its replies
+// progressively (same typewriter as arrivals) so opening a session
+// reads like a live stream instead of one silent pop-in. Returns the
+// index of the last turn with reply text, or null when nothing has a
+// reply yet (empty transcript, or a trailing unanswered request).
+export function seedRevealIndex(turns: ChatTurn[]): number | null {
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    if (turns[i].replyText.length > 0) return i;
+  }
+  return null;
+}
+
+// SPEC-036 R-1: the cascade reveals every seeded turn top-to-bottom,
+// each typewriter staggered after the previous one so the eye follows
+// the transcript in reading order. The stagger compresses on long
+// transcripts so the whole cascade starts within the budget no matter
+// how many turns the session carries.
+export const SEED_STAGGER_MS = 150;
+export const SEED_STAGGER_BUDGET_MS = 3000;
+
+// Start delay for turn `index` of a cascade ending at `lastIndex`.
+export function seedRevealDelay(index: number, lastIndex: number): number {
+  if (index <= 0 || lastIndex <= 0) return 0;
+  const stagger = Math.min(
+    SEED_STAGGER_MS,
+    SEED_STAGGER_BUDGET_MS / lastIndex,
+  );
+  return Math.round(Math.min(index, lastIndex) * stagger);
+}

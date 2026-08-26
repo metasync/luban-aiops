@@ -13,6 +13,29 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.18.0 — 2026-08-26
+
+### Added
+
+- **Server inbox pagination and seeded transcript reveal (SPEC-036)**:
+  two follow-ups from the v0.17.0 review. The approvals inbox History
+  tab moves to server-side pagination: the store splits into an
+  always-complete pending queue and an offset-paginated history page
+  with its retention-window total, `GET /api/v2/confirmations` accepts
+  `history_limit`/`history_offset` and returns
+  `{ confirmations, history, history_total }`, the gateway forwards
+  both params verbatim, and the portal History tab renders the server
+  page (offset navigation, total-labeled tab, poll re-reads the current
+  page, decided cards land on page one locally). The old combined
+  payload's 100-row cap — which silently dropped older decisions as
+  volume grew — is gone.
+- The progressive typewriter reveal now cascades across every reply of
+  a cold-seeded transcript (first fetch of a session in a tab):
+  staggered top-to-bottom (≤ 150 ms, compressed under a ~3 s start
+  budget on long transcripts), each turn bounded to ~6 s, no arrival
+  flash, no scroll hijack, `prefers-reduced-motion` degrades to
+  instant render, and session switches cancel an in-flight cascade.
+
 ## 0.17.0 — 2026-08-26
 
 ### Added

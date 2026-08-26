@@ -60,6 +60,20 @@ function recordOf(
   };
 }
 
+// SPEC-036 R-3 shape: the pending queue and the (server-paginated)
+// history page arrive as separate arrays plus the retention total.
+function inboxPayload(
+  confirmations: ConfirmationRecord[],
+  history: ConfirmationRecord[] = [],
+  historyTotal?: number,
+) {
+  return {
+    confirmations,
+    history,
+    history_total: historyTotal ?? history.length,
+  };
+}
+
 function Harness() {
   const inbox = useApprovalsInbox(true);
   return <ApprovalsView inbox={inbox} />;
@@ -84,17 +98,21 @@ afterEach(() => {
 
 describe("ApprovalsView (SPEC-031 R-5)", () => {
   it("keeps pending on the default tab and history on its own tab", async () => {
-    mockGetInbox.mockResolvedValue([
-      recordOf(),
-      recordOf({
-        confirm_id: "cf-0",
-        status: "approved",
-        decider_user_id: "luban-approver",
-        decision: "approve",
-        decided_at: "2026-08-24T09:00:00Z",
-        parked_at: "2026-08-24T08:00:00Z",
-      }),
-    ]);
+    mockGetInbox.mockResolvedValue(
+      inboxPayload(
+        [recordOf()],
+        [
+          recordOf({
+            confirm_id: "cf-0",
+            status: "approved",
+            decider_user_id: "luban-approver",
+            decision: "approve",
+            decided_at: "2026-08-24T09:00:00Z",
+            parked_at: "2026-08-24T08:00:00Z",
+          }),
+        ],
+      ),
+    );
 
     render(<Harness />);
 
@@ -122,7 +140,7 @@ describe("ApprovalsView (SPEC-031 R-5)", () => {
   });
 
   it("shows the empty states when the inbox has no records", async () => {
-    mockGetInbox.mockResolvedValue([]);
+    mockGetInbox.mockResolvedValue(inboxPayload([], []));
     render(<Harness />);
     expect(
       await screen.findByText(
@@ -143,7 +161,9 @@ describe("ApprovalsView (SPEC-031 R-5)", () => {
       decision: "approve",
       decided_at: "2026-08-25T10:05:00Z",
     });
-    mockGetInbox.mockResolvedValueOnce([pending]).mockResolvedValue([approved]);
+    mockGetInbox
+      .mockResolvedValueOnce(inboxPayload([pending]))
+      .mockResolvedValue(inboxPayload([], [approved]));
     mockOpenStream.mockResolvedValue({ requestId: "req-1", chunks: [] });
     mockConsumeStream.mockImplementation(
       async (_chunks: unknown, onEvent: (event: unknown) => void) => {
@@ -190,7 +210,7 @@ describe("ApprovalsView (SPEC-031 R-5)", () => {
   it("flips a race-loser card to the winner's outcome on the 409", async () => {
     const { StreamOpenError } =
       await import("../../stream/transport");
-    mockGetInbox.mockResolvedValue([recordOf()]);
+    mockGetInbox.mockResolvedValue(inboxPayload([recordOf()]));
     mockOpenStream.mockRejectedValue(
       new StreamOpenError(409, undefined, {
         detail: {
@@ -223,11 +243,12 @@ describe("ApprovalsView (SPEC-031 R-5)", () => {
 
 describe("useApprovalsInbox (SPEC-031 R-5)", () => {
   it("exposes the pending count for the sidebar badge", async () => {
-    mockGetInbox.mockResolvedValue([
-      recordOf(),
-      recordOf({ confirm_id: "cf-2" }),
-      recordOf({ confirm_id: "cf-0", status: "denied" }),
-    ]);
+    mockGetInbox.mockResolvedValue(
+      inboxPayload(
+        [recordOf(), recordOf({ confirm_id: "cf-2" })],
+        [recordOf({ confirm_id: "cf-0", status: "denied" })],
+      ),
+    );
     const { result } = renderHook(() => useApprovalsInbox(true));
     await waitFor(() => {
       expect(result.current.pendingCount).toBe(2);
@@ -236,7 +257,8 @@ describe("useApprovalsInbox (SPEC-031 R-5)", () => {
 
   it("stays idle and makes no requests when disabled (non-decider)", async () => {
     const { result } = renderHook(() => useApprovalsInbox(false));
-    expect(result.current.records).toEqual([]);
+    expect(result.current.pending).toEqual([]);
+    expect(result.current.history).toEqual([]);
     expect(result.current.pendingCount).toBe(0);
     // Give any stray effect a tick; the disabled hook never fetches.
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -245,14 +267,57 @@ describe("useApprovalsInbox (SPEC-031 R-5)", () => {
 
   it("keeps the last good list when a poll fails", async () => {
     mockGetInbox
-      .mockResolvedValueOnce([recordOf()])
+      .mockResolvedValueOnce(inboxPayload([recordOf()]))
       .mockRejectedValueOnce(new Error("gateway 502"));
     const { result } = renderHook(() => useApprovalsInbox(true));
     await waitFor(() => {
-      expect(result.current.records).toHaveLength(1);
+      expect(result.current.pending).toHaveLength(1);
     });
     await result.current.refresh();
-    expect(result.current.records).toHaveLength(1);
+    expect(result.current.pending).toHaveLength(1);
     expect(result.current.error).toContain("gateway 502");
+  });
+
+  // SPEC-036 R-5: page navigation refetches with the new offset.
+  it("forwards the page offset to the inbox API", async () => {
+    mockGetInbox.mockResolvedValue(inboxPayload([], [], 25));
+    const { result } = renderHook(() => useApprovalsInbox(true));
+    await waitFor(() => {
+      expect(result.current.historyTotal).toBe(25);
+    });
+    result.current.setPageOffset(20);
+    await waitFor(() => {
+      expect(result.current.historyOffset).toBe(20);
+    });
+    expect(mockGetInbox).toHaveBeenLastCalledWith(
+      expect.objectContaining({ historyLimit: 10, historyOffset: 20 }),
+    );
+  });
+
+  // SPEC-036 R-5: a decision leaves the pending queue and appears on
+  // the first history page immediately, ahead of the server resync.
+  it("moves a decided record onto the first history page", async () => {
+    mockGetInbox.mockResolvedValue(inboxPayload([recordOf()], [], 0));
+    mockOpenStream.mockResolvedValue({ requestId: "req-1", chunks: [] });
+    mockConsumeStream.mockImplementation(
+      async (_chunks: unknown, onEvent: (event: unknown) => void) => {
+        onEvent({
+          frame: {
+            kind: "confirmation_result",
+            confirmId: "cf-1",
+            status: "approved",
+          },
+        });
+      },
+    );
+    const { result } = renderHook(() => useApprovalsInbox(true));
+    await waitFor(() => {
+      expect(result.current.pendingCount).toBe(1);
+    });
+    await result.current.decide("cf-1", "approve");
+    expect(result.current.pendingCount).toBe(0);
+    expect(result.current.history[0]?.confirm_id).toBe("cf-1");
+    expect(result.current.history[0]?.status).toBe("approved");
+    expect(result.current.historyTotal).toBe(1);
   });
 });

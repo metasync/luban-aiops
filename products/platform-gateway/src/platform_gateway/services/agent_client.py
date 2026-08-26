@@ -285,18 +285,25 @@ async def fetch_approvals_inbox(
     settings: PlatformGatewaySettings,
     request_id: str,
     user_id: str,
+    history_limit: int = 10,
+    history_offset: int = 0,
 ) -> dict:
     """Cross-session confirmation inbox (SPEC-031 R-3).
 
     Authorization is enforced by the gateway route (`approvals:list`);
     agent-service serves the durable records. Transport failures and
     upstream 5xx raise so the route answers 502 rather than an empty
-    inbox that would hide parked work.
+    inbox that would hide parked work. SPEC-036 R-4: history pagination
+    params forward as query params; the pending queue is never paginated.
     """
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(
             f"{settings.agent_service_url}/api/v2/confirmations",
             headers=_headers(request_id, user_id),
+            params={
+                "history_limit": history_limit,
+                "history_offset": history_offset,
+            },
         )
     response.raise_for_status()
     return response.json()

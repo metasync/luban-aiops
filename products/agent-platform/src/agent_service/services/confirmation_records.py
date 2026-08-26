@@ -107,7 +107,11 @@ class ConfirmationRecordStore(Protocol):
 
     def load_pending_for_session(self, session_id: str) -> dict[str, Any] | None: ...
 
-    def load_inbox(self) -> list[dict[str, Any]]: ...
+    def load_pending_inbox(self) -> list[dict[str, Any]]: ...
+
+    def load_inbox_history(
+        self, limit: int, offset: int
+    ) -> tuple[list[dict[str, Any]], int]: ...
 
     def delete_session(self, session_id: str) -> bool: ...
 
@@ -179,23 +183,37 @@ class InMemoryConfirmationRecordStore:
                 return record
         return None
 
-    def load_inbox(self) -> list[dict[str, Any]]:
+    def load_pending_inbox(self) -> list[dict[str, Any]]:
+        rows = [
+            dict(record)
+            for record in self._by_confirm_id.values()
+            if record["status"] == "pending"
+        ]
+        rows.sort(key=lambda record: record["parked_at"], reverse=True)
+        return rows[:INBOX_LIMIT]
+
+    def load_inbox_history(
+        self, limit: int, offset: int
+    ) -> tuple[list[dict[str, Any]], int]:
         cutoff = datetime.now(timezone.utc) - timedelta(days=HISTORY_WINDOW_DAYS)
         rows = []
         for record in self._by_confirm_id.values():
-            if record["status"] != "pending":
-                decided = record.get("decided_at") or ""
-                try:
-                    stamp = datetime.fromisoformat(
-                        decided.replace("Z", "+00:00")
-                    )
-                except ValueError:
-                    continue
-                if stamp < cutoff:
-                    continue
+            if record["status"] == "pending":
+                continue
+            decided = record.get("decided_at") or ""
+            try:
+                stamp = datetime.fromisoformat(decided.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if stamp < cutoff:
+                continue
             rows.append(dict(record))
-        rows.sort(key=lambda record: record["parked_at"], reverse=True)
-        return rows[:INBOX_LIMIT]
+        # Newest first with a confirm_id tiebreak so paging is stable.
+        rows.sort(
+            key=lambda record: (record["parked_at"], record["confirm_id"]),
+            reverse=True,
+        )
+        return rows[offset : offset + limit], len(rows)
 
     def delete_session(self, session_id: str) -> bool:
         doomed = [
@@ -316,15 +334,36 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
  LIMIT 1
 """
 
-_LOAD_INBOX = """
+# SPEC-036 R-2: the inbox splits into an always-complete pending queue
+# (hiding parked work must stay impossible) and an offset-paginated
+# history page with its total. Offset paging is safe here: the window is
+# retention-bounded and the sweep only deletes rows aging out of it.
+_LOAD_INBOX_PENDING = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
        turn_index
   FROM confirmation_records
  WHERE status = 'pending'
-    OR decided_at >= now() - make_interval(days => %(history_days)s)
  ORDER BY parked_at DESC
  LIMIT %(limit)s
+"""
+
+_LOAD_INBOX_HISTORY = """
+SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
+       status, parked_at, decider_user_id, decision, decided_at,
+       turn_index
+  FROM confirmation_records
+ WHERE status <> 'pending'
+   AND decided_at >= now() - make_interval(days => %(history_days)s)
+ ORDER BY parked_at DESC, confirm_id DESC
+ LIMIT %(limit)s OFFSET %(offset)s
+"""
+
+_COUNT_INBOX_HISTORY = """
+SELECT COUNT(*)
+  FROM confirmation_records
+ WHERE status <> 'pending'
+   AND decided_at >= now() - make_interval(days => %(history_days)s)
 """
 
 _DELETE_SESSION = """
@@ -533,16 +572,38 @@ class PostgresConfirmationRecordStore:
             conn.commit()
         return _row_to_record(row) if row is not None else None
 
-    def load_inbox(self) -> list[dict[str, Any]]:
+    def load_pending_inbox(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    _LOAD_INBOX,
-                    {"history_days": HISTORY_WINDOW_DAYS, "limit": INBOX_LIMIT},
+                    _LOAD_INBOX_PENDING, {"limit": INBOX_LIMIT}
                 )
                 rows = cur.fetchall()
             conn.commit()
         return [_row_to_record(row) for row in rows]
+
+    def load_inbox_history(
+        self, limit: int, offset: int
+    ) -> tuple[list[dict[str, Any]], int]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    _LOAD_INBOX_HISTORY,
+                    {
+                        "history_days": HISTORY_WINDOW_DAYS,
+                        "limit": limit,
+                        "offset": offset,
+                    },
+                )
+                rows = cur.fetchall()
+                cur.execute(
+                    _COUNT_INBOX_HISTORY,
+                    {"history_days": HISTORY_WINDOW_DAYS},
+                )
+                total_row = cur.fetchone()
+            conn.commit()
+        total = int(total_row[0]) if total_row is not None else 0
+        return [_row_to_record(row) for row in rows], total
 
     def delete_session(self, session_id: str) -> bool:
         with self._connect() as conn:

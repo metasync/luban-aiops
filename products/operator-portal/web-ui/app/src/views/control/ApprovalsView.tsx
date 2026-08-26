@@ -27,7 +27,9 @@ dayjs.extend(relativeTime);
 
 const POLL_INTERVAL_MS = 30_000;
 
-// SPEC-035 R-7: entries per page in the History tab.
+// SPEC-035 R-7 / SPEC-036 R-5: entries per page in the History tab.
+// The page size rides the API as history_limit; the history itself
+// paginates server-side (offset + total).
 const HISTORY_PAGE_SIZE = 10;
 
 function recordStatus(raw: string | undefined): ConfirmationRecord["status"] | undefined {
@@ -40,12 +42,16 @@ function recordStatus(raw: string | undefined): ConfirmationRecord["status"] | u
 }
 
 export interface ApprovalsInboxState {
-  records: ConfirmationRecord[];
+  pending: ConfirmationRecord[];
+  history: ConfirmationRecord[];
+  historyTotal: number;
+  historyOffset: number;
   loading: boolean;
   error: string | null;
   pendingCount: number;
   busyConfirmId: string | null;
   refresh: () => Promise<void>;
+  setPageOffset: (offset: number) => void;
   decide: (confirmId: string, decision: ConfirmationDecision) => Promise<void>;
 }
 
@@ -56,28 +62,41 @@ export interface ApprovalsInboxState {
 // SPEC-034 R-2: onDecisionApplied fires the moment a decision becomes
 // true (successful decide or a 409 race patch) so App can refresh the
 // session panel immediately instead of at the next 30s poll tick.
+//
+// SPEC-036 R-5: the pending queue arrives complete; the resolved
+// history pages server-side, and refresh re-reads the page currently on
+// screen so polling never snaps the browser back to page one.
 export function useApprovalsInbox(
   enabled: boolean,
   onDecisionApplied?: () => void,
 ): ApprovalsInboxState {
   const { username } = useAuth();
-  const [records, setRecords] = useState<ConfirmationRecord[]>([]);
+  const [pending, setPending] = useState<ConfirmationRecord[]>([]);
+  const [history, setHistory] = useState<ConfirmationRecord[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyOffset, setHistoryOffset] = useState(0);
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
   const [busyConfirmId, setBusyConfirmId] = useState<string | null>(null);
-  const recordsRef = useRef<ConfirmationRecord[]>([]);
-  recordsRef.current = records;
+  const pendingRef = useRef<ConfirmationRecord[]>([]);
+  pendingRef.current = pending;
+  const historyOffsetRef = useRef(0);
   const loadedOnceRef = useRef(false);
   const decisionAppliedRef = useRef(onDecisionApplied);
   decisionAppliedRef.current = onDecisionApplied;
 
   const refresh = useCallback(async () => {
     try {
-      const items = await getApprovalsInbox();
-      setRecords(items);
+      const data = await getApprovalsInbox({
+        historyLimit: HISTORY_PAGE_SIZE,
+        historyOffset: historyOffsetRef.current,
+      });
+      setPending(data.confirmations);
+      setHistory(data.history);
+      setHistoryTotal(data.history_total);
       setError(null);
     } catch (err) {
-      // Keep the last good list on transient failures; a transport
+      // Keep the last good lists on transient failures; a transport
       // error can never mean "inbox empty" (gateway maps that to 502).
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -88,7 +107,11 @@ export function useApprovalsInbox(
 
   useEffect(() => {
     if (!enabled) {
-      setRecords([]);
+      setPending([]);
+      setHistory([]);
+      setHistoryTotal(0);
+      historyOffsetRef.current = 0;
+      setHistoryOffset(0);
       setLoading(false);
       return;
     }
@@ -102,20 +125,37 @@ export function useApprovalsInbox(
     };
   }, [enabled, refresh]);
 
-  const patchRecord = useCallback(
-    (confirmId: string, patch: Partial<ConfirmationRecord>) => {
-      setRecords((current) =>
-        current.map((record) =>
-          record.confirm_id === confirmId ? { ...record, ...patch } : record,
+  const setPageOffset = useCallback(
+    (offset: number) => {
+      historyOffsetRef.current = offset;
+      setHistoryOffset(offset);
+      void refresh();
+    },
+    [refresh],
+  );
+
+  // A resolved card leaves the pending queue and appears on the first
+  // history page immediately; the follow-up refresh normalizes both
+  // lists against the server's truth.
+  const moveDecidedToHistory = useCallback(
+    (record: ConfirmationRecord, patch: Partial<ConfirmationRecord>) => {
+      const updated = { ...record, ...patch };
+      setPending((current) =>
+        current.map((entry) =>
+          entry.confirm_id === record.confirm_id ? updated : entry,
         ),
       );
+      if (historyOffsetRef.current === 0) {
+        setHistory((current) => [updated, ...current]);
+        setHistoryTotal((current) => current + 1);
+      }
     },
     [],
   );
 
   const decide = useCallback(
     async (confirmId: string, decision: ConfirmationDecision) => {
-      const record = recordsRef.current.find(
+      const record = pendingRef.current.find(
         (entry) =>
           entry.confirm_id === confirmId && entry.status === "pending",
       );
@@ -139,7 +179,7 @@ export function useApprovalsInbox(
             outcome = frame.status;
           }
         });
-        patchRecord(confirmId, {
+        moveDecidedToHistory(record, {
           status:
             recordStatus(outcome) && recordStatus(outcome) !== "pending"
               ? (recordStatus(outcome) as ConfirmationRecord["status"])
@@ -160,7 +200,7 @@ export function useApprovalsInbox(
           // the winner's outcome instead of leaving a doomed retry.
           const race = alreadyResolvedDetail(err.detail);
           if (race) {
-            patchRecord(confirmId, {
+            moveDecidedToHistory(record, {
               status: recordStatus(race.status) ?? "expired",
               decider_user_id: race.decider_user_id ?? null,
               decision: race.decision ?? null,
@@ -171,7 +211,7 @@ export function useApprovalsInbox(
             setError(`Confirm request failed (409).`);
           }
         } else if (err instanceof StreamOpenError && err.status === 410) {
-          patchRecord(confirmId, { status: "expired" });
+          moveDecidedToHistory(record, { status: "expired" });
         } else if (err instanceof StreamOpenError && err.status === 401) {
           setError("Not authenticated. Please sign in from the sidebar first.");
         } else if (!(err instanceof Error && err.name === "AbortError")) {
@@ -181,17 +221,21 @@ export function useApprovalsInbox(
         setBusyConfirmId(null);
       }
     },
-    [busyConfirmId, patchRecord, refresh, username],
+    [busyConfirmId, moveDecidedToHistory, refresh, username],
   );
 
   return {
-    records,
+    pending,
+    history,
+    historyTotal,
+    historyOffset,
     loading: loading && !loadedOnceRef.current,
     error,
-    pendingCount: records.filter((record) => record.status === "pending")
+    pendingCount: pending.filter((record) => record.status === "pending")
       .length,
     busyConfirmId,
     refresh,
+    setPageOffset,
     decide,
   };
 }
@@ -260,21 +304,28 @@ export default function ApprovalsView({
 }) {
   const { roles } = useAuth();
   const canDecide = hasAnyRole(roles, CHAT_CONFIRM_ROLES);
-  const pending = inbox.records.filter((record) => record.status === "pending");
-  const history = inbox.records.filter(
-    (record) => record.status !== "pending",
+  const pending = inbox.pending.filter(
+    (record) => record.status === "pending",
   );
-  // SPEC-035 R-7: the 30-day decision history is paginated client-side —
-  // the server already caps the payload, this only keeps the tab legible
-  // as the record count grows. The page clamps when the list shrinks
-  // (e.g. retention eviction lands on a refresh).
-  const [historyPage, setHistoryPage] = useState(1);
-  const historyPages = Math.max(1, Math.ceil(history.length / HISTORY_PAGE_SIZE));
-  const clampedPage = Math.min(historyPage, historyPages);
-  const historySlice = history.slice(
-    (clampedPage - 1) * HISTORY_PAGE_SIZE,
-    clampedPage * HISTORY_PAGE_SIZE,
+  // SPEC-036 R-5: the History tab renders the server page; the label
+  // and pager derive from the retention-window total, so entries past
+  // the old payload cap stay reachable.
+  const historyPages = Math.max(
+    1,
+    Math.ceil(inbox.historyTotal / HISTORY_PAGE_SIZE),
   );
+  const currentPage = Math.min(
+    Math.floor(inbox.historyOffset / HISTORY_PAGE_SIZE) + 1,
+    historyPages,
+  );
+  // Clamp when retention eviction shrinks the list below the page the
+  // browser is on (the server page would render empty otherwise).
+  useEffect(() => {
+    const maxOffset = (historyPages - 1) * HISTORY_PAGE_SIZE;
+    if (inbox.historyOffset > maxOffset) {
+      inbox.setPageOffset(maxOffset);
+    }
+  }, [historyPages, inbox]);
 
   return (
     <div>
@@ -345,9 +396,9 @@ export default function ApprovalsView({
             },
             {
               key: "history",
-              label: `History (${history.length})`,
+              label: `History (${inbox.historyTotal})`,
               children:
-                history.length === 0 ? (
+                inbox.historyTotal === 0 ? (
                   <div style={{ padding: "8px 0" }}>
                     <Typography.Text type="secondary">
                       No decisions in the last 30 days.
@@ -355,7 +406,7 @@ export default function ApprovalsView({
                   </div>
                 ) : (
                   <>
-                    {historySlice.map((record) => (
+                    {inbox.history.map((record) => (
                       <InboxEntry
                         key={record.confirm_id}
                         record={record}
@@ -367,11 +418,13 @@ export default function ApprovalsView({
                       <div style={{ display: "flex", justifyContent: "flex-end" }}>
                         <Pagination
                           size="small"
-                          current={clampedPage}
+                          current={currentPage}
                           pageSize={HISTORY_PAGE_SIZE}
-                          total={history.length}
+                          total={inbox.historyTotal}
                           showSizeChanger={false}
-                          onChange={(page) => setHistoryPage(page)}
+                          onChange={(page) =>
+                            inbox.setPageOffset((page - 1) * HISTORY_PAGE_SIZE)
+                          }
                           aria-label="Decision history pages"
                         />
                       </div>

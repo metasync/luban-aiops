@@ -359,16 +359,19 @@ async def approvals_inbox(
     settings: PlatformGatewaySettings,
     request_id: str,
     user_id: str,
+    history_limit: int = 10,
+    history_offset: int = 0,
 ) -> dict:
     """Proxy the approver's cross-session confirmation inbox (SPEC-031 R-3).
 
     Same posture as the session-list proxy: upstream 4xx passes through
     unchanged; transport failures and upstream 5xx map to 502 so an
-    outage can never masquerade as an empty inbox.
+    outage can never masquerade as an empty inbox. SPEC-036 R-4: the
+    history pagination params forward verbatim.
     """
     try:
         return await agent_client.fetch_approvals_inbox(
-            settings, request_id, user_id
+            settings, request_id, user_id, history_limit, history_offset
         )
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code

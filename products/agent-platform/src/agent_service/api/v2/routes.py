@@ -14,7 +14,7 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Literal
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from agent_service.core.metrics import record_chat_request
@@ -668,27 +668,41 @@ async def delete_session_route(
 
 @router.get("/confirmations")
 async def list_confirmations(
+    history_limit: int = Query(default=10, ge=1, le=50),
+    history_offset: int = Query(default=0, ge=0),
     x_user_id: str | None = Header(None),
 ) -> dict:
     """Cross-session confirmation inbox for designated approvers.
 
     Authorization lives in the platform-gateway (`approvals:list` is
     granted to decider roles only); this endpoint serves the durable
-    records — pending items plus history within the retention window,
-    most recent first — with metadata only, never the owner's transcript
-    text (SPEC-030 Q-1 posture).
+    records with metadata only, never the owner's transcript text
+    (SPEC-030 Q-1 posture). SPEC-036 R-3: the pending queue is always
+    complete (hiding parked work must stay impossible) while the
+    resolved history pages server-side — the combined payload's old
+    100-row cap silently dropped older decisions as volume grew.
     """
     _user_id(x_user_id)
-    items = []
-    for record in CONFIRMATION_RECORD_STORE.load_inbox():
+
+    def _shape(record: dict) -> dict:
         session = SESSION_STORE.get_session(record["session_id"])
-        items.append(
-            ConfirmationRecordModel(
-                **record,
-                session_title=session.title if session is not None else None,
-            ).model_dump()
-        )
-    return {"confirmations": items}
+        return ConfirmationRecordModel(
+            **record,
+            session_title=session.title if session is not None else None,
+        ).model_dump()
+
+    pending = [
+        _shape(record)
+        for record in CONFIRMATION_RECORD_STORE.load_pending_inbox()
+    ]
+    history_rows, history_total = CONFIRMATION_RECORD_STORE.load_inbox_history(
+        history_limit, history_offset
+    )
+    return {
+        "confirmations": pending,
+        "history": [_shape(record) for record in history_rows],
+        "history_total": history_total,
+    }
 
 
 # --- Model discovery (SPEC-024 R-2) ---

@@ -154,7 +154,7 @@ class TestInMemoryStore:
         assert store.load_for_session("ses-1") == []
         assert len(store.load_for_session("ses-2")) == 1
 
-    def test_inbox_keeps_pending_and_recent_history_only(self) -> None:
+    def test_inbox_split_keeps_pending_and_recent_history_only(self) -> None:
         store = InMemoryConfirmationRecordStore()
         now = datetime.now(timezone.utc)
         store.save_parked(_record("cf-pending", parked_at=now))
@@ -175,12 +175,18 @@ class TestInMemoryStore:
         store._by_confirm_id["cf-aged"]["decided_at"] = _iso(
             now - timedelta(days=HISTORY_WINDOW_DAYS + 1)
         )
-        ids = [row["confirm_id"] for row in store.load_inbox()]
+        # SPEC-036 R-2: pending and resolved history are separate
+        # queries; the pending queue holds parked work only.
+        pending_ids = [row["confirm_id"] for row in store.load_pending_inbox()]
+        assert pending_ids == ["cf-pending"]
+        history, total = store.load_inbox_history(50, 0)
+        history_ids = [row["confirm_id"] for row in history]
         # Retention is decided_at-based: cf-stale was decided just now, so
         # it stays despite its old park; cf-aged fell out of the window.
-        assert ids == ["cf-pending", "cf-recent", "cf-stale"]
+        assert history_ids == ["cf-recent", "cf-stale"]
+        assert total == 2
 
-    def test_inbox_caps_at_limit_most_recent_first(self) -> None:
+    def test_pending_inbox_caps_at_limit_most_recent_first(self) -> None:
         store = InMemoryConfirmationRecordStore()
         now = datetime.now(timezone.utc)
         for index in range(INBOX_LIMIT + 10):
@@ -192,9 +198,38 @@ class TestInMemoryStore:
                     parked_at=now + timedelta(seconds=index),
                 )
             )
-        rows = store.load_inbox()
+        rows = store.load_pending_inbox()
         assert len(rows) == INBOX_LIMIT
         assert rows[0]["confirm_id"] == f"cf-{INBOX_LIMIT + 9:03d}"
+
+    def test_inbox_history_paginates_with_total(self) -> None:
+        """SPEC-036 R-2: offset paging with the windowed total."""
+        store = InMemoryConfirmationRecordStore()
+        now = datetime.now(timezone.utc)
+        for index in range(15):
+            session_id = f"ses-{index:02d}"
+            store.save_parked(
+                _record(
+                    f"cf-{index:02d}",
+                    session_id=session_id,
+                    parked_at=now + timedelta(seconds=index),
+                )
+            )
+            store.mark_resolved(
+                session_id, f"cf-{index:02d}", "approved", "bob", "approve"
+            )
+        page_one, total = store.load_inbox_history(10, 0)
+        assert total == 15
+        assert len(page_one) == 10
+        # Newest park first.
+        assert page_one[0]["confirm_id"] == "cf-14"
+        page_two, total_two = store.load_inbox_history(10, 10)
+        assert total_two == 15
+        assert len(page_two) == 5
+        seen = {row["confirm_id"] for row in page_one} | {
+            row["confirm_id"] for row in page_two
+        }
+        assert len(seen) == 15
 
     def test_is_ready(self) -> None:
         assert InMemoryConfirmationRecordStore().is_ready() is True
@@ -360,6 +395,35 @@ class TestPostgresStore:
             db_url="postgresql://fake", connect=_fake_connect(calls)
         )
         assert empty.delete_session("ses-1") is False
+
+    def test_load_inbox_split_queries_carry_pagination_params(self) -> None:
+        """SPEC-036 R-2: the pending queue and the history page are
+        separate statements; the page carries limit/offset and the
+        retention window, and the total counts the same window."""
+        calls: list[dict] = []
+        store = PostgresConfirmationRecordStore(
+            db_url="postgresql://fake", connect=_fake_connect(calls)
+        )
+        assert store.load_pending_inbox() == []
+        history, total = store.load_inbox_history(10, 20)
+        assert history == []
+        assert total == 0
+        sqls = [call for call in calls if "sql" in call]
+        pending_call = sqls[0]
+        assert "status = 'pending'" in pending_call["sql"]
+        assert pending_call["params"] == {"limit": INBOX_LIMIT}
+        history_call = next(
+            call
+            for call in sqls
+            if "LIMIT %(limit)s OFFSET %(offset)s" in call["sql"]
+        )
+        assert history_call["params"] == {
+            "history_days": HISTORY_WINDOW_DAYS,
+            "limit": 10,
+            "offset": 20,
+        }
+        count_call = next(call for call in sqls if "COUNT(*)" in call["sql"])
+        assert count_call["params"] == {"history_days": HISTORY_WINDOW_DAYS}
 
     def test_is_ready_false_on_connection_failure(self) -> None:
         store = PostgresConfirmationRecordStore(
@@ -647,7 +711,8 @@ def test_session_detail_confirmations_empty_for_clean_session() -> None:
 
 
 def test_inbox_lists_pending_and_history_with_session_titles() -> None:
-    """SPEC-031 R-3: cross-session discovery, metadata only."""
+    """SPEC-031 R-3 / SPEC-036 R-3: cross-session discovery, metadata
+    only, split into a complete pending queue and a paged history."""
     client = _client()
     first = client.post("/api/v2/sessions", headers={"X-User-ID": "alice"})
     second = client.post("/api/v2/sessions", headers={"X-User-ID": "carol"})
@@ -667,15 +732,52 @@ def test_inbox_lists_pending_and_history_with_session_titles() -> None:
         "/api/v2/confirmations", headers={"X-User-ID": "bob-approver"}
     )
     assert response.status_code == 200
-    items = response.json()["confirmations"]
-    by_id = {item["confirm_id"]: item for item in items}
-    assert set(by_id) == {"cf-old", "cf-live"}
+    body = response.json()
+    pending = body["confirmations"]
+    history = body["history"]
+    assert {item["confirm_id"] for item in pending} == {"cf-live"}
+    assert {item["confirm_id"] for item in history} == {"cf-old"}
+    assert body["history_total"] == 1
     # No transcript text leaks — metadata fields only.
-    assert "transcript" not in items[0]
-    live = by_id["cf-live"]
+    assert "transcript" not in pending[0]
+    live = pending[0]
     assert live["owner_user_id"] == "carol"
     assert live["status"] == "pending"
     assert "session_title" in live
+    assert "session_title" in history[0]
+
+
+def test_inbox_history_pagination_params_page_the_results() -> None:
+    """SPEC-036 R-3: history_limit/history_offset shift the page while
+    the total counts the whole retention window."""
+    client = _client()
+    session = client.post("/api/v2/sessions", headers={"X-User-ID": "alice"})
+    session_id = session.json()["session_id"]
+    for index in range(5):
+        _seed_resolved(
+            f"cf-{index}", session_id, "approved", "bob-approver", "approve"
+        )
+    headers = {"X-User-ID": "bob-approver"}
+    first = client.get(
+        "/api/v2/confirmations?history_limit=2&history_offset=0",
+        headers=headers,
+    )
+    second = client.get(
+        "/api/v2/confirmations?history_limit=2&history_offset=2",
+        headers=headers,
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_page = first.json()
+    second_page = second.json()
+    assert len(first_page["history"]) == 2
+    assert len(second_page["history"]) == 2
+    assert first_page["history_total"] == 5
+    assert second_page["history_total"] == 5
+    first_ids = {item["confirm_id"] for item in first_page["history"]}
+    second_ids = {item["confirm_id"] for item in second_page["history"]}
+    assert first_ids.isdisjoint(second_ids)
+    assert first_page["confirmations"] == []
 
 
 def test_delete_session_cascades_confirmation_records() -> None:
@@ -689,6 +791,8 @@ def test_delete_session_cascades_confirmation_records() -> None:
     assert deleted.status_code in (200, 204)
     assert CONFIRMATION_RECORD_STORE.load_for_session(session_id) == []
     inbox = client.get("/api/v2/confirmations", headers={"X-User-ID": "bob"})
+    body = inbox.json()
     assert all(
-        item["confirm_id"] != "cf-gone" for item in inbox.json()["confirmations"]
+        item["confirm_id"] != "cf-gone"
+        for item in body["confirmations"] + body["history"]
     )

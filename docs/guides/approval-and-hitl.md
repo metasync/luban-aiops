@@ -247,8 +247,12 @@ the record store:
   decider roles only) lists pending confirmations across all sessions plus
   decisions from the last 30 days, most recent first. The view splits the
   two queues into tabs — **Pending** (default) and **History** with
-  per-tab counts (History paginates ten entries per page, SPEC-035) —
-  and each entry renders as a separated card whose
+  per-tab counts — and History paginates server-side (SPEC-036): the
+  API accepts `history_limit`/`history_offset` and returns the page
+  with a `history_total`, the tab label carries the total, the pager
+  (ten per page, hidden while one page suffices) navigates by offset,
+  and polling re-reads the page you are on rather than snapping back
+  to page one. Each entry renders as a separated card whose
   header carries the session title, owner, and parked/decided relative
   times (SPEC-034). Items are
   **metadata only** — session id/title, owner, parked calls, outcome — and
