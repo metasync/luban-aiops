@@ -147,3 +147,4 @@ Mechanical enforcement:
 | `SPEC-031` | Approval inbox and persistent confirmation cards — durable confirmation records, owner-side cards surviving re-login, decider-scoped approvals inbox with history, race-resilient `already_resolved` semantics (extends SPEC-020/022/030) | `delivered` |
 | `SPEC-032` | Owner-side live decision sync — poll-while-pending chat view surfaces external decisions and the resumed turn without refresh (extends SPEC-031) | `delivered` |
 | `SPEC-033` | Confirmation card turn anchoring — parked records persist their turn ordinal and seeded cards anchor under the exchange that parked them (extends SPEC-031) | `delivered` |
+| `SPEC-034` | Approval & owner chat UX polish — arrival highlight for post-decision content, instant session-list refresh, Pending/History tabs, separated inbox entries, expiry banner note (extends SPEC-031/SPEC-032) | `draft` |

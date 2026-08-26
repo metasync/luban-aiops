@@ -311,6 +311,7 @@ promotion; until then they stay here.
 | Approval inbox and persistent confirmation cards | Delivered 2026-08-25 (0.13.0) as `SPEC-031-approval-inbox-persistent-confirmation`, drafted directly from the SPEC-030 live-cluster validation (no spike memo — the validation itself was the evidence base): durable confirmation lifecycle records on the shared Postgres posture (cap 50 per session, TTL-scoped startup expiry), an additive owner-transcript `confirmations` surface so cards survive re-login and pod restarts, a decider-scoped `GET /api/v1/approvals/inbox` behind a new `approvals:list` policy action (metadata-only, pending + 30-day history incl. expired), structured `409 already_resolved` race responses, and a portal Approvals view with pending-count badge plus persistent owner-side cards. | `docs/specs/SPEC-031-approval-inbox-persistent-confirmation/` |
 | Owner-side live decision sync | Delivered 2026-08-25 (0.14.0) as `SPEC-032-owner-side-live-decision-sync`, drafted directly from the v0.13.1 live validation finding that the owner's open chat window never learned about a decision made from the approver inbox: a bounded, change-gated poll-while-pending on the existing session-detail surface (5s, torn down when no card is pending or any stream is active, settle window for the trailing resumed-turn content) re-seeds the turn timeline so the decided card with attribution and the resumed turn appear without a refresh. Portal-only — no backend, contract, or policy changes. | `docs/specs/SPEC-032-owner-side-live-decision-sync/` |
 | Confirmation card turn anchoring | Delivered 2026-08-26 (0.15.0) as `SPEC-033-confirmation-card-turn-anchoring` from the v0.14.1 live validation finding that a multi-park session stacks every confirmation card under the newest turn: parked records persist their parking turn ordinal (the same `_count_user_turns` convention SPEC-025 evidence uses, additive column with in-place migration), the session-detail surface carries it additively, and transcript seeding anchors each card under the exchange that parked it. Legacy rows fall back to today's anchoring. | `docs/specs/SPEC-033-confirmation-card-turn-anchoring/` |
+| Approval & owner chat UX polish | Drafted 2026-08-26 as `SPEC-034-approval-owner-ux-polish` from the v0.15.0 live approval-test feedback: portal-only — owner-window arrival highlight for post-decision content, instant session-list refresh on applied decisions, Pending/History tabs in the Approvals view, separated inbox entries with structured provenance headers, and a banner note on pending-request expiry. | `docs/specs/SPEC-034-approval-owner-ux-polish/` |
 
 Promotion rule: a spike lands its findings as a short memo (workspace docs);
 only then does the item get a SPEC number. SPEC-018 (kernel middleware
@@ -331,7 +332,10 @@ evidence-base departure — and delivered the same day in the 0.14.0 train.
 SPEC-033 (confirmation card turn anchoring) was drafted on 2026-08-26 from
 the v0.14.1 live validation finding (multi-park sessions stack every card
 under the newest turn) — the same memo-free evidence-base departure — and
-delivered the same day in the 0.15.0 train.
+delivered the same day in the 0.15.0 train. SPEC-034 (approval & owner
+chat UX polish) was drafted the same day from the v0.15.0 live
+approval-test feedback (five portal usability enhancements) — the same
+memo-free evidence-base departure.
 
 ## Validation Model Per Release
 
