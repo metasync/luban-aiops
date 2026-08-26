@@ -3,24 +3,12 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-08-26T16:40:57Z"
+exported_at: "2026-08-26T18:10:50Z"
 modules:
     "":
-        dir_name: Agentic AIOps Platform Monorepo
-        title: Agentic AIOps Platform Monorepo
+        dir_name: Agentic AIOps Platform Workspace
+        title: Agentic AIOps Platform Workspace
         scope: []
-        source_files: []
-        children:
-            - operator_portal_web_ui
-        depends_on: []
-        related_to: []
-    operator_portal_web_ui:
-        dir_name: Operator Chat View & SSE Stream Hook
-        title: Operator Chat View & SSE Stream Hook
-        scope:
-            - products/operator-portal/web-ui/app/src/chat/ChatView.tsx
-            - products/operator-portal/web-ui/app/src/stream/useChatStream.ts
-            - products/operator-portal/web-ui/app/src/stream/__tests__/useChatStreamReseed.test.ts
         source_files: []
         children: []
         depends_on: []

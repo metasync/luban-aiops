@@ -1,1 +1,0 @@
-Tests run under Vitest (`@testing-library/react`'s `renderHook`) and exercise the hook directly without a DOM; the re-seed test validates SPEC-032 behavior where `setSession` on the active session stashes then restores cached turns, requiring `reseedTurns` as the authoritative update path.

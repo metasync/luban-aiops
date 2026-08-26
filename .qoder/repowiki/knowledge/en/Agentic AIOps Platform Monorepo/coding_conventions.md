@@ -1,6 +1,0 @@
-- Every service exposes a FastAPI app via `app.py` and a CLI entrypoint `main.py`, with routes, core config, schemas, and services organized under `src/<service>/api`, `core`, `schemas`, and `services`.
-- Cross-service data exchange is validated against JSON Schema files published in `shared/shared-contracts/schemas/`, and services import those schemas rather than redefining types locally.
-- Access control and routing decisions go through a policy engine that loads YAML rules from `policies/` (with a `policy-default.yaml` baseline) and evaluates them before invoking downstream services.
-- Observability is standardized per service: each `core/` module provides `metrics`, `observability`, `request_context`, and `telemetry` modules that emit structured logs, traces, and metrics consistently across all products.
-- Audit events emitted by services conform to `audit-event.schema.json` and are ingested by the dedicated audit-service for durable retention.
-- Feature work is tracked through spec documents under `docs/specs/SPEC-NNN-*/` (plan/spec/tasks) and architectural decisions recorded as ADRs under `docs/adr/`, which drive implementation in the corresponding product.

@@ -11,17 +11,21 @@
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
+- [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
-- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [app.py](file://products/tool-gateway/src/tool_gateway/app.py)
+- [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [sync-skills-secrets.sh](file://shared/platform-ops/gitops/sync-skills-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
@@ -33,18 +37,20 @@
 - [README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
 - [spec.md](file://docs/specs/SPEC-019-portal-transparency-navigation/spec.md)
 - [spec.md](file://docs/specs/SPEC-027-live-model-discovery/spec.md)
+- [spec.md](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
 - [approval-and-hitl.md](file://docs/guides/approval-and-hitl.md)
 - [tool-configuration.md](file://docs/guides/tool-configuration.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new live model discovery feature controlled by AGENT_MODEL_DISCOVERY_ENABLED, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS, and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS environment variables
-- Updated configuration reference to include model discovery settings with their defaults, validation rules, and behavioral impact
-- Enhanced agent platform section with detailed guidance on model discovery configuration and troubleshooting
-- Added new section documenting the live model discovery architecture and fail-soft ladder mechanism
-- Updated environment-specific settings with recommendations for model discovery tuning across different environments
-- Integrated model discovery considerations into deployment examples and security best practices
+- Added comprehensive documentation for execution signing configuration including AGENT_EXECUTION_SIGNING_KEY environment variable and HMAC-SHA256 signing mechanism
+- Updated audit service integration via AGENT_AUDIT_SERVICE_URL with fire-and-forget emission pattern
+- Documented execution record persistence settings using AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL
+- Enhanced agent platform section with detailed guidance on signed execution requests and durable audit trails
+- Added new sections documenting execution signing architecture, audit emission patterns, and execution record lifecycle
+- Updated environment-specific settings with recommendations for execution signing and audit configuration across different environments
+- Integrated execution signing considerations into deployment examples and security best practices
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -61,10 +67,10 @@
 ## Introduction
 This document explains how the Platform Gateway Service manages configuration and environment setup across layers: environment variables, configuration files, and runtime overrides. It details available options, defaults, validation rules, and deployment-specific settings for development, staging, and production. It also provides examples for Docker and Kubernetes (ConfigMaps/Secrets), and outlines security best practices for secrets management and consistent configuration across environments.
 
-**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations, risk-tier admission gates for mutating tools via GATEWAY_MUTATING_TOOLS_ENABLED, configurable HITL confirmation timeouts through AGENT_HITL_CONFIRM_TIMEOUT, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, the new mutating-dev kustomize profile that provides a committed, environment-scoped development posture for enabling mutating tools safely with bounded RBAC permissions while preserving configuration across LLM provider switches, and the new live model discovery feature controlled by AGENT_MODEL_DISCOVERY_ENABLED, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS, and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS that enables automatic model catalog updates from provider endpoints with fail-soft fallback mechanisms.
+**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations, risk-tier admission gates for mutating tools via GATEWAY_MUTATING_TOOLS_ENABLED, configurable HITL confirmation timeouts through AGENT_HITL_CONFIRM_TIMEOUT, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, the new mutating-dev kustomize profile that provides a committed, environment-scoped development posture for enabling mutating tools safely with bounded RBAC permissions while preserving configuration across LLM provider switches, the live model discovery feature controlled by AGENT_MODEL_DISCOVERY_ENABLED, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS, and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS that enables automatic model catalog updates from provider endpoints with fail-soft fallback mechanisms, and the new execution signing system with AGENT_EXECUTION_SIGNING_KEY that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions via AGENT_AUDIT_SERVICE_URL, and durable execution record persistence using AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL settings.
 
 ## Project Structure
-The Platform Gateway Service is implemented under products/platform-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/platform-gateway. The service includes workspace resource integration features that proxy requests to tool-gateway and skills-hub services for read-only inventory access, plus enhanced OpenTelemetry configuration with durable secret management. The new mutating-dev profile provides a dedicated development posture for enabling mutating tools with appropriate RBAC controls. The agent platform component now includes live model discovery capabilities that automatically refresh model catalogs from provider endpoints.
+The Platform Gateway Service is implemented under products/platform-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/platform-gateway. The service includes workspace resource integration features that proxy requests to tool-gateway and skills-hub services for read-only inventory access, plus enhanced OpenTelemetry configuration with durable secret management. The new mutating-dev profile provides a dedicated development posture for enabling mutating tools with appropriate RBAC controls. The agent platform component now includes live model discovery capabilities that automatically refresh model catalogs from provider endpoints, along with execution signing and audit trail capabilities for tamper-evident execution records.
 
 ```mermaid
 graph TB
@@ -87,73 +93,91 @@ M["Risk Tier Enforcement"]
 N["Model Discovery Service"]
 O["AGENT_MODEL_DISCOVERY_*"]
 P["Fail-Soft Ladder"]
+Q["Execution Signing Service"]
+R["AGENT_EXECUTION_SIGNING_KEY"]
+S["Audit Emitter"]
+T["AGENT_AUDIT_SERVICE_URL"]
+U["Execution Records Store"]
+V["AGENT_STATE_STORE_BACKEND"]
+W["AGENT_STATE_DB_URL"]
 end
 subgraph "Tool Gateway Risk Control"
-Q["tool-gateway config.py"]
-R["registry.py"]
-S["GATEWAY_MUTATING_TOOLS_ENABLED"]
-T["Risk-Tier Admission Gate"]
-U["Policy Enforcement"]
+X["tool-gateway config.py"]
+Y["registry.py"]
+Z["GATEWAY_MUTATING_TOOLS_ENABLED"]
+AA["Risk-Tier Admission Gate"]
+AB["Policy Enforcement"]
 end
 subgraph "Workspace Resource Integration"
-V["tool_gateway_url"]
-W["skills_hub_url"]
-X["skills_client_id"]
-Y["skills_client_secret"]
-Z["Delegated Token Flow"]
-AA["Basic Auth Flow"]
+AC["tool_gateway_url"]
+AD["skills_hub_url"]
+AE["skills_client_id"]
+AF["skills_client_secret"]
+AG["Delegated Token Flow"]
+AH["Basic Auth Flow"]
 end
 subgraph "Enhanced OTel Secret Management"
-AB["sync-otel-secrets.sh"]
-AC["OTEL_EXPORTER_OTLP_HEADERS"]
-AD["Cluster Secret Merge"]
-AE["Local File Preservation"]
-AF["Sibling Script Hooks"]
+AI["sync-otel-secrets.sh"]
+AJ["OTEL_EXPORTER_OTLP_HEADERS"]
+AK["Cluster Secret Merge"]
+AL["Local File Preservation"]
+AM["Sibling Script Hooks"]
 end
 subgraph "Mutating Dev Profile"
-AG["dev-k8s/kustomization.yaml"]
-AH["runtime-profiles/mutating-dev/"]
-AI["mutating.env"]
-AJ["tool-gateway-pod-delete.yaml"]
-AK["RBAC Role/RoleBinding"]
-AL["ConfigMap Merge"]
+AN["dev-k8s/kustomization.yaml"]
+AO["runtime-profiles/mutating-dev/"]
+AP["mutating.env"]
+AQ["tool-gateway-pod-delete.yaml"]
+AR["RBAC Role/RoleBinding"]
+AS["ConfigMap Merge"]
 end
-subgraph "Kubernetes Base (dev)"
-AM["base/platform-gateway/runtime-config.env"]
-AN["base/platform-gateway/platform-gateway-deployment.yaml"]
-AO["base/platform-gateway/runtime-secrets.example.env"]
-AP["base/shared/runtime.env"]
-AQ["base/agent-platform/runtime-config.env"]
-AR["base/tool-gateway/runtime-config.env"]
-AS["base/tool-gateway/rbac.yaml"]
+subgraph "Execution Signing & Audit"
+AT["sync-execution-signing-secret.sh"]
+AU["execution-signing-secret"]
+AV["HMAC-SHA256 Signing"]
+AW["Durable Audit Trail"]
+AX["Fire-and-Forget Emission"]
+AY["Postgres Persistence"]
+AZ["Retention Scanning"]
 end
 A --> AM
 B --> AN
-C --> AB
+C --> AI
 D --> F
 E --> G
-F --> V
-G --> W
+F --> AC
+G --> AD
 AM --> AN
-AO --> AN
-AP --> AN
+AO --> AP
+AP --> AQ
+AQ --> AR
+AR --> AS
+AS --> AT
+AT --> AU
+AU --> AV
+AV --> AW
+AW --> AX
+AX --> AY
+AY --> AZ
 H --> K
 I --> L
 J --> M
 N --> O
 N --> P
-Q --> S
-R --> T
-S --> U
-AB --> AD
-AB --> AE
-AB --> AF
+Q --> R
+S --> T
+U --> V
+U --> W
+X --> Z
+Y --> AA
+Z --> AB
+AC --> AD
+AE --> AF
 AG --> AH
-AH --> AI
-AH --> AJ
-AI --> AL
+AI --> AJ
 AJ --> AK
-AS --> AS
+AK --> AL
+AL --> AM
 ```
 
 **Diagram sources**
@@ -164,18 +188,22 @@ AS --> AS
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
+- [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
 - [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
@@ -190,18 +218,22 @@ AS --> AS
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
+- [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
 - [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
@@ -220,6 +252,9 @@ AS --> AS
 - **New**: Enhanced agent auto-allow list with read-only enforcement and misconfiguration logging.
 - **New**: Mutating-dev kustomize profile providing committed development posture for enabling mutating tools with appropriate RBAC controls.
 - **New**: Live model discovery service controlled by AGENT_MODEL_DISCOVERY_* environment variables with fail-soft fallback mechanisms.
+- **New**: Execution signing service with HMAC-SHA256 signing for tamper-evident execution requests and receipts.
+- **New**: Audit service integration with fire-and-forget emission pattern for durable audit trails.
+- **New**: Execution record persistence with Postgres backend and retention scanning for compliance requirements.
 
 Key responsibilities:
 - Provide a single source of truth for configuration via typed models.
@@ -233,8 +268,11 @@ Key responsibilities:
 - **New**: Maintain durable OpenTelemetry authentication headers across all deployment operations through cluster-side secret merging and local file preservation.
 - **New**: Provide committed development posture through mutating-dev profile that safely enables mutating tools with bounded RBAC permissions.
 - **New**: Enable live model discovery with configurable refresh cadence and timeout controls, implementing a fail-soft ladder that falls back through live → memory → Postgres → curated series.
+- **New**: Implement execution signing with HMAC-SHA256 to provide tamper-evident execution records that bind approved actions to their actual execution.
+- **New**: Integrate audit service emissions with fire-and-forget pattern that never degrades the chat stream while maintaining durable audit trails.
+- **New**: Persist execution records with Postgres backend and retention scanning to ensure compliance requirements are met without impacting performance.
 
-**Updated** Enhanced core components to include comprehensive workspace resource integration capabilities with read-only proxies for tools catalog and skills inventory, supporting both delegated token flow for tools and Basic authentication for skills, risk-tier admission gates for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus durable OpenTelemetry secret provisioning that persists authentication headers across deployment operations, the new mutating-dev kustomize profile that provides a safe, committed development posture for enabling mutating tools with appropriate RBAC controls, and the live model discovery service that automatically refreshes model catalogs from provider endpoints with robust fallback mechanisms.
+**Updated** Enhanced core components to include comprehensive workspace resource integration capabilities with read-only proxies for tools catalog and skills inventory, supporting both delegated token flow for tools and Basic authentication for skills, risk-tier admission gates for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus durable OpenTelemetry secret provisioning that persists authentication headers across deployment operations, the new mutating-dev kustomize profile that provides a safe, committed development posture for enabling mutating tools with appropriate RBAC controls, the live model discovery service that automatically refreshes model catalogs from provider endpoints with robust fallback mechanisms, and the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions, and durable execution record persistence with retention scanning.
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -244,6 +282,9 @@ Key responsibilities:
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
+- [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
@@ -252,7 +293,7 @@ Key responsibilities:
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 
 ## Architecture Overview
-The configuration system follows a layered approach with enhanced workspace resource integration, risk-tier admission gates, durable secret management, and live model discovery:
+The configuration system follows a layered approach with enhanced workspace resource integration, risk-tier admission gates, durable secret management, live model discovery, and execution signing capabilities:
 - Defaults: defined in code or default YAML policies.
 - Config files: loaded from container filesystem or mounted volumes.
 - Environment variables: injected at runtime via platform orchestration (e.g., Kubernetes).
@@ -265,6 +306,9 @@ The configuration system follows a layered approach with enhanced workspace reso
 - **New**: Durable OTel secret provisioning: cluster-side merging ensures authentication headers persist across all deployment operations.
 - **New**: Mutating-dev profile: committed development posture that safely enables mutating tools with bounded RBAC permissions.
 - **New**: Live model discovery: automatic catalog updates from provider endpoints with fail-soft fallback ladder.
+- **New**: Execution signing: HMAC-SHA256 signing for tamper-evident execution requests and receipts.
+- **New**: Audit service integration: fire-and-forget emission pattern for durable audit trails.
+- **New**: Execution record persistence: Postgres-backed storage with retention scanning for compliance.
 
 ```mermaid
 sequenceDiagram
@@ -279,8 +323,14 @@ participant Policy as "Policy Engine"
 participant Secrets as "Secret Manager"
 participant MutDev as "Mutating Dev Profile"
 participant ModelDisc as "Model Discovery Service"
+participant ExecSign as "Execution Signing Service"
+participant Audit as "Audit Service"
+participant ExecStore as "Execution Record Store"
 Note over Portal,Agent : Agent Auto-Allow List & HITL Timeout
 Note over Agent,ModelDisc : Live Model Discovery
+Note over Agent,ExecSign : Execution Signing
+Note over Agent,Audit : Audit Emission
+Note over Agent,ExecStore : Execution Record Persistence
 Portal->>Agent : Tool Call Request
 Agent->>Agent : Check Auto-Allow List
 Agent->>Agent : Apply HITL Timeout
@@ -294,19 +344,25 @@ ToolGW->>Policy : enforce_policy(tools : mutate)
 Policy-->>ToolGW : Allow/Deny
 ToolGW-->>Gateway : Tool Result
 Gateway-->>Agent : Response
-Agent-->>Portal : Result with Evidence
-Note over Gateway,OTel : Durable OTel Secret Provisioning
-Gateway->>Secrets : Read OTEL_EXPORTER_OTLP_HEADERS
-Secrets-->>Gateway : Authenticated Headers
-Gateway->>OTel : Export traces/metrics/logs (authenticated)
-OTel-->>Gateway : Success/Failure (fail-open)
-Note over Agent,ModelDisc : Model Discovery Process
+Agent->>ExecSign : Sign Execution Request (if mutating)
+ExecSign->>ExecStore : Save Execution Record
+ExecSign->>Audit : Emit execution_requested event
 Agent->>ModelDisc : Initialize Discovery Service
 ModelDisc->>ModelDisc : Start Periodic Refresh Loop
 ModelDisc->>Provider : GET /models (with timeout)
 Provider-->>ModelDisc : Model List or Error
 ModelDisc->>ModelDisc : Apply Fail-Soft Ladder
 ModelDisc->>Agent : Update Catalog (atomic swap)
+Note over Gateway,OTel : Durable OTel Secret Provisioning
+Gateway->>Secrets : Read OTEL_EXPORTER_OTLP_HEADERS
+Secrets-->>Gateway : Authenticated Headers
+Gateway->>OTel : Export traces/metrics/logs (authenticated)
+OTel-->>Gateway : Success/Failure (fail-open)
+Note over Agent,Audit : Fire-and-Forget Audit Emission
+Agent->>Audit : Emit audit events (non-blocking)
+Audit-->>Agent : Acknowledged (or failed silently)
+Note over ExecStore : Retention Scanning
+ExecStore->>ExecStore : Sweep expired records (30 days)
 ```
 
 **Diagram sources**
@@ -314,6 +370,9 @@ ModelDisc->>Agent : Update Catalog (atomic swap)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
+- [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
@@ -324,6 +383,7 @@ ModelDisc->>Agent : Update Catalog (atomic swap)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [spec.md](file://docs/specs/SPEC-019-portal-transparency-navigation/spec.md)
 - [spec.md](file://docs/specs/SPEC-027-live-model-discovery/spec.md)
+- [spec.md](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
 
 ## Detailed Component Analysis
 
@@ -334,7 +394,7 @@ ModelDisc->>Agent : Update Catalog (atomic swap)
 - Error handling: Aggregates validation errors and surfaces actionable messages.
 - Service discovery: Uses DNS-based resolution for inter-service communication.
 
-**Updated** Enhanced to support workspace resource integration with new configuration fields for tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret, enabling read-only proxies for tools catalog and skills inventory, plus risk-tier admission gate configuration for mutating tools, integration with the mutating-dev profile, and live model discovery configuration through AGENT_MODEL_DISCOVERY_* environment variables.
+**Updated** Enhanced to support workspace resource integration with new configuration fields for tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret, enabling read-only proxies for tools catalog and skills inventory, plus risk-tier admission gate configuration for mutating tools, integration with the mutating-dev profile, live model discovery configuration through AGENT_MODEL_DISCOVERY_* environment variables, and execution signing configuration through AGENT_EXECUTION_SIGNING_KEY and audit service configuration through AGENT_AUDIT_SERVICE_URL.
 
 ```mermaid
 flowchart TD
@@ -355,6 +415,117 @@ Expose --> End
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+
+### Execution Signing Service
+- Purpose: Provides HMAC-SHA256 signing for execution requests and receipts to ensure tamper-evident execution records.
+- Configuration: Controlled by AGENT_EXECUTION_SIGNING_KEY environment variable provisioned via execution-signing-secret.
+- Security: A missing key fails closed with signing_unavailable rejection - never degrades to unsigned execution.
+- Canonicalization: Uses sorted keys and no insignificant whitespace for consistent JSON serialization.
+- Signing Process: Signs execution envelopes excluding signature field, verifies argument digests match parked parameters.
+- Receipt Generation: Creates signed receipts with outcome digests for completed executions.
+- Rejection Handling: Marks rejected executions with reason codes (signing_unavailable, args_digest_mismatch, request_missing).
+
+**New Section** Comprehensive execution signing implementation with HMAC-SHA256 signing for tamper-evident execution records and receipt generation.
+
+```mermaid
+flowchart TD
+Approval["Approved Execution Request"] --> CheckKey{"AGENT_EXECUTION_SIGNING_KEY set?"}
+CheckKey --> |no| Reject["Reject with signing_unavailable"]
+CheckKey --> |yes| BuildEnvelope["Build Execution Envelope"]
+BuildEnvelope --> CanonicalJSON["Canonical JSON (sorted keys, no whitespace)"]
+CanonicalJSON --> ComputeDigest["Compute args_digest from parked parameters"]
+ComputeDigest --> SignEnvelope["HMAC-SHA256 Sign Envelope"]
+SignEnvelope --> SaveRecord["Save Execution Record"]
+SaveRecord --> EmitEvent["Emit execution_requested audit event"]
+EmitEvent --> ExecuteTool["Execute Tool Call"]
+ExecuteTool --> VerifyArgs["Verify executed args match parked args"]
+VerifyArgs --> ArgsMatch{"Args Match?"}
+ArgsMatch --> |no| RejectMismatch["Reject with args_digest_mismatch"]
+ArgsMatch --> |yes| BuildReceipt["Build Signed Receipt"]
+BuildReceipt --> SaveReceipt["Save Receipt with Outcome Digest"]
+SaveReceipt --> EmitCompleted["Emit execution_completed audit event"]
+EmitCompleted --> Complete["Execution Complete"]
+Reject --> End(["End"])
+RejectMismatch --> End
+Complete --> End
+```
+
+**Diagram sources**
+- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
+
+**Section sources**
+- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
+
+### Audit Service Integration
+- Purpose: Provides fire-and-forget audit event emission to the durable audit service for execution tracking.
+- Configuration: Controlled by AGENT_AUDIT_SERVICE_URL, AGENT_AUDIT_CLIENT_ID, and AGENT_AUDIT_CLIENT_SECRET environment variables.
+- Behavior: Non-blocking daemon thread delivery with 2-second timeout; failures are logged but never degrade the chat stream.
+- Event Types: Supports execution_requested, execution_completed, and execution_rejected events with standardized schema.
+- Authentication: Uses Basic authentication with client credentials for audit service ingestion endpoint.
+- Metrics: Tracks audit emit success/failure rates for monitoring and observability.
+- Default Behavior: Unset AGENT_AUDIT_SERVICE_URL maintains historical log-only behavior byte-for-byte.
+
+**New Section** Comprehensive audit service integration with fire-and-forget emission pattern for durable audit trails.
+
+```mermaid
+flowchart TD
+Event["Audit Event Created"] --> CheckURL{"AGENT_AUDIT_SERVICE_URL set?"}
+CheckURL --> |no| LogOnly["Log event only (historical behavior)"]
+CheckURL --> |yes| CreateThread["Create Daemon Thread"]
+CreateThread --> BuildPayload["Build Audit Payload"]
+BuildPayload --> HTTPClient["HTTP Client with 2s timeout"]
+HTTPClient --> IngestEndpoint["POST /api/v1/audit/events"]
+IngestEndpoint --> Auth["Basic Auth with client credentials"]
+Auth --> Response{"Status Code"}
+Response --> |2xx| Success["Record success metric"]
+Response --> |4xx| ClientError["Log client error"]
+Response --> |5xx| ServerError["Log server error"]
+Success --> End(["Event Emitted"])
+ClientError --> End
+ServerError --> End
+LogOnly --> End
+```
+
+**Diagram sources**
+- [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
+
+**Section sources**
+- [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
+
+### Execution Record Persistence
+- Purpose: Persists execution request/receipt lifecycle for tamper-evident audit trails with retention scanning.
+- Configuration: Uses AGENT_STATE_STORE_BACKEND (memory/postgres) and AGENT_STATE_DB_URL for Postgres connectivity.
+- Backends: In-memory backend for development/CI, Postgres backend for production with table creation on first use.
+- Lifecycle: Tracks requested → succeeded/failed/timeout/rejected states with digest match verification.
+- Retention: 30-day retention window with automated sweep operations to prevent unbounded growth.
+- Failure Mode: Best-effort durability - store failures degrade audit completeness but never impact chat stream.
+- Schema: Stores confirm_id, call_id, session_id, execution_id, tool_name, timestamps, status, and receipt data.
+
+**New Section** Comprehensive execution record persistence with Postgres backend and retention scanning for compliance requirements.
+
+```mermaid
+flowchart TD
+Request["Execution Request"] --> Backend{"Backend Type"}
+Backend --> |memory| MemoryStore["In-Memory Storage"]
+Backend --> |postgres| PostgresStore["Postgres Storage"]
+MemoryStore --> SaveRequest["Save Request Record"]
+PostgresStore --> CreateTable["Create Table if Not Exists"]
+CreateTable --> SaveRequest
+SaveRequest --> StatusTracking["Track Status Changes"]
+StatusTracking --> Receipt["Save Receipt on Completion"]
+Receipt --> MarkRejected["Mark Rejected on Failure"]
+MarkRejected --> Sweep["Sweep Expired Records (30 days)"]
+Sweep --> Query["Query for Session Details"]
+Query --> End(["Records Available"])
+```
+
+**Diagram sources**
+- [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
+
+**Section sources**
+- [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 
 ### Live Model Discovery Service
 - Purpose: Automatically refresh model catalogs from provider endpoints with fail-soft fallback mechanisms.
@@ -720,8 +891,10 @@ SkillsHubClient --> PlatformGatewaySettings
 - **New**: Enhanced secret management with durable OTel header provisioning through cluster-side merging.
 - **New**: Mutating-dev profile integration that merges GATEWAY_MUTATING_TOOLS_ENABLED=true into the runtime configuration.
 - **New**: Live model discovery configuration through AGENT_MODEL_DISCOVERY_* environment variables.
+- **New**: Execution signing secret provisioning through execution-signing-secret with optional secretKeyRef.
+- **New**: Audit service configuration through AGENT_AUDIT_SERVICE_URL and related client credentials.
 
-**Updated** Enhanced deployment configuration with workspace resource integration, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list settings, plus durable OpenTelemetry secret provisioning that maintains authentication headers across deployment operations, the new mutating-dev profile that provides a committed development posture for enabling mutating tools safely, and live model discovery configuration for automatic catalog updates.
+**Updated** Enhanced deployment configuration with workspace resource integration, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list settings, plus durable OpenTelemetry secret provisioning that maintains authentication headers across deployment operations, the new mutating-dev profile that provides a committed development posture for enabling mutating tools safely, live model discovery configuration for automatic catalog updates, execution signing secret provisioning for tamper-evident execution records, and audit service configuration for durable audit trails.
 
 ```mermaid
 graph TB
@@ -733,8 +906,10 @@ DNS["Kubernetes DNS"] --> SVC["Service Names"]
 SVC --> APP
 Secrets["Secrets"] --> WorkspaceCreds["Workspace Resource Credentials"]
 Secrets --> OTelCreds["OTel Authentication Headers"]
+Secrets --> ExecSigning["Execution Signing Key"]
 WorkspaceCreds --> APP
 OTelCreds --> APP
+ExecSigning --> APP
 AppEnv["PLATFORM_GATEWAY_* Variables"] --> APP
 APP --> ToolsProxy["Tools Catalog Proxy"]
 APP --> SkillsProxy["Skills Inventory Proxy"]
@@ -748,32 +923,38 @@ AgentEnv["AGENT_* Variables"] --> Agent["Agent Platform"]
 Agent --> AutoAllow["Auto-Allow List"]
 Agent --> HITLTimeout["HITL Confirmation Timeout"]
 Agent --> ModelDisc["Model Discovery Service"]
+Agent --> ExecSign["Execution Signing Service"]
+Agent --> Audit["Audit Service"]
 ModelDisc --> ProviderEndpoints["Provider /models Endpoints"]
+ExecSign --> ExecStore["Execution Record Store"]
+Audit --> AuditBackend["Audit Service Backend"]
 MutDev["Mutating Dev Profile"] --> ConfigMerge["ConfigMap Merge"]
 ConfigMerge --> ToolGWEnv
+ExecSigning --> ExecSign
 ```
 
 **Diagram sources**
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
 
 **Section sources**
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 
 ## Dependency Analysis
 Configuration components depend on environment variables and files, while the runtime settings handle DNS-based service discovery. The Docker image encapsulates runtime dependencies, and Kubernetes manifests inject configuration at deployment time. Workspace resource integration adds dependencies on tool-gateway and skills-hub services with appropriate authentication mechanisms.
 
-**Updated** Added dependencies for workspace resource integration including tool-gateway delegation flow and skills-hub Basic authentication, risk-tier admission gate enforcement, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus enhanced OpenTelemetry secret provisioning dependencies that ensure authentication headers persist across deployment operations, the new mutating-dev profile dependencies that provide committed development posture for enabling mutating tools safely, and live model discovery dependencies that connect to provider endpoints with robust fallback mechanisms.
+**Updated** Added dependencies for workspace resource integration including tool-gateway delegation flow and skills-hub Basic authentication, risk-tier admission gate enforcement, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus enhanced OpenTelemetry secret provisioning dependencies that ensure authentication headers persist across deployment operations, the new mutating-dev profile dependencies that provide committed development posture for enabling mutating tools safely, live model discovery dependencies that connect to provider endpoints with robust fallback mechanisms, execution signing dependencies that require execution-signing-secret provisioning, audit service dependencies for durable audit trail emission, and execution record store dependencies for Postgres-backed persistence with retention scanning.
 
 ```mermaid
 graph TB
@@ -800,13 +981,21 @@ TELEMETRY --> BACKEND["OpenObserve Backend"]
 Agent["kernel_middleware.py"] --> AutoAllow["Auto-Allow List"]
 Agent --> HITL["HITL Timeout"]
 Agent --> ModelDisc["Model Discovery"]
+Agent --> ExecSign["Execution Signing"]
+Agent --> Audit["Audit Emitter"]
 ModelDisc --> Providers["Provider Endpoints"]
+ExecSign --> ExecStore["Execution Record Store"]
+ExecSign --> Audit
+Audit --> AuditBackend["Audit Service"]
+ExecStore --> Postgres["Postgres Database"]
 ToolGW["tool-gateway config.py"] --> RiskGate["Risk-Tier Gate"]
 RiskGate --> Policy["Policy Enforcement"]
 MutDev["mutating-dev profile"] --> ConfigMerge["ConfigMap Merge"]
 MutDev --> RBAC["RBAC Role/RoleBinding"]
 ConfigMerge --> ToolGW
 RBAC --> ToolGW
+ExecSigning["sync-execution-signing-secret.sh"] --> ExecSigningSecret["execution-signing-secret"]
+ExecSigningSecret --> ExecSign
 ```
 
 **Diagram sources**
@@ -817,13 +1006,18 @@ RBAC --> ToolGW
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
+- [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
 
@@ -835,13 +1029,18 @@ RBAC --> ToolGW
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
+- [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 
 ## Performance Considerations
 - Minimize configuration lookups by caching validated configuration at startup.
@@ -865,6 +1064,11 @@ RBAC --> ToolGW
 - **New**: Model discovery implements fail-soft ladder to minimize network calls and leverage caches.
 - **New**: Discovery refresh intervals are configurable to balance freshness with performance.
 - **New**: Provider endpoint timeouts prevent slow responses from affecting overall performance.
+- **New**: Execution signing uses constant-time HMAC comparison for security without performance impact.
+- **New**: Audit emissions run on daemon threads with short timeouts to prevent blocking.
+- **New**: Execution record writes are best-effort with automatic fallback to in-memory storage.
+- **New**: Postgres execution records use connection pooling and retention scanning to manage storage growth.
+- **New**: Canonical JSON serialization optimizes signing performance through sorted keys and compact formatting.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -900,8 +1104,19 @@ Common issues and resolutions:
 - **New**: Model discovery refresh too frequent: Increase AGENT_MODEL_DISCOVERY_REFRESH_SECONDS to reduce provider load; monitor provider rate limits.
 - **New**: Model discovery falling back to curated series: Check if provider endpoints are failing; verify credentials are valid; examine discovery failure logs.
 - **New**: Model discovery validation errors: Ensure AGENT_MODEL_DISCOVERY_REFRESH_SECONDS >= 1 and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS > 0.
+- **New**: Execution signing failures: Verify execution-signing-secret exists and contains AGENT_EXECUTION_SIGNING_KEY; check sync-execution-signing-secret.sh was run successfully.
+- **New**: Mutating resumes blocked: Check if AGENT_EXECUTION_SIGNING_KEY is present; absence causes signing_unavailable rejections.
+- **New**: Argument digest mismatch: Verify executed arguments match parked arguments exactly; check for parameter transformation issues.
+- **New**: Audit service connection failures: Check AGENT_AUDIT_SERVICE_URL configuration; verify audit service is running and accessible.
+- **New**: Audit emission failures: Check AGENT_AUDIT_CLIENT_SECRET configuration; verify audit service authentication is working.
+- **New**: Execution record store failures: Verify AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL configuration; check Postgres connectivity.
+- **New**: Execution records not persisting: Check if Postgres backend is available; failures fall back to in-memory storage.
+- **New**: Retention scanning not working: Verify Postgres connectivity; check retention window configuration (30 days default).
+- **New**: Execution signing secret not found: Run sync-execution-signing-secret.sh to provision the execution-signing-secret; check namespace configuration.
+- **New**: Audit service URL incorrect: Verify AGENT_AUDIT_SERVICE_URL points to correct audit service endpoint; check DNS resolution.
+- **New**: Execution record database schema missing: Postgres backend creates table on first use; verify database connectivity and permissions.
 
-**Updated** Added comprehensive troubleshooting guidance for workspace resource integration including proxy configuration, authentication issues, and downstream service connectivity problems, risk-tier admission gate configuration issues, HITL confirmation timeout problems, enhanced agent auto-allow list misconfiguration detection, plus detailed guidance for OpenTelemetry secret provisioning and authentication issues, new troubleshooting steps for the mutating-dev profile integration including profile activation, RBAC verification, and triple-gate enforcement issues, and comprehensive guidance for live model discovery configuration, provider connectivity, and fallback behavior troubleshooting.
+**Updated** Added comprehensive troubleshooting guidance for workspace resource integration including proxy configuration, authentication issues, and downstream service connectivity problems, risk-tier admission gate configuration issues, HITL confirmation timeout problems, enhanced agent auto-allow list misconfiguration detection, plus detailed guidance for OpenTelemetry secret provisioning and authentication issues, new troubleshooting steps for the mutating-dev profile integration including profile activation, RBAC verification, and triple-gate enforcement issues, comprehensive guidance for live model discovery configuration, provider connectivity, and fallback behavior troubleshooting, and new troubleshooting steps for execution signing including secret provisioning, signing failures, argument digest mismatches, audit service connectivity, and execution record persistence issues.
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -911,28 +1126,33 @@ Common issues and resolutions:
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
+- [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 
 ## Conclusion
 The Platform Gateway Service employs a robust, layered configuration system that integrates environment variables, configuration files, and runtime overrides with strict validation. By following the outlined best practices for Docker and Kubernetes deployments, teams can maintain secure, consistent configurations across environments while ensuring reliability and performance. The architectural shift to DNS-based service discovery eliminates service-link conflicts and provides more reliable inter-service communication patterns. The addition of workspace resource integration enables operators to gain self-service visibility into their workspace resources through read-only proxies for tools catalog and skills inventory, enhancing operational transparency and reducing dependency on agent-mediated resource discovery.
 
-**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive workspace resource integration capabilities that provide operators with direct visibility into their workspace resources, risk-tier admission gates that provide fine-grained control over mutating tool access, configurable HITL confirmation timeouts that balance operational efficiency with safety requirements, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, plus durable OpenTelemetry secret provisioning that ensures authentication headers persist across all deployment operations, maintaining consistent telemetry collection regardless of deployment sequence or environment regeneration, the new mutating-dev kustomize profile that provides a committed, safe development posture for enabling mutating tools with appropriate RBAC controls and triple-gate security enforcement, and the live model discovery service that automatically keeps model catalogs current through periodic provider endpoint polling with robust fail-soft fallback mechanisms.
+**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive workspace resource integration capabilities that provide operators with direct visibility into their workspace resources, risk-tier admission gates that provide fine-grained control over mutating tool access, configurable HITL confirmation timeouts that balance operational efficiency with safety requirements, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, plus durable OpenTelemetry secret provisioning that ensures authentication headers persist across all deployment operations, maintaining consistent telemetry collection regardless of deployment sequence or environment regeneration, the new mutating-dev kustomize profile that provides a committed, safe development posture for enabling mutating tools with appropriate RBAC controls and triple-gate security enforcement, the live model discovery service that automatically keeps model catalogs current through periodic provider endpoint polling with robust fail-soft fallback mechanisms, and the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions for durable audit trails, and execution record persistence with retention scanning for compliance requirements.
 
 ## Appendices
 
 ### Environment-Specific Settings
-- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable workspace resource proxies with local tool-gateway and skills-hub instances, configure OTel with dev OpenObserve credentials, set GATEWAY_MUTATING_TOOLS_ENABLED=false for safety, configure AGENT_HITL_CONFIRM_TIMEOUT=600 for reasonable confirmation windows, enable enhanced agent auto-allow list with vetted read-only tools, **new**: Include the mutating-dev profile permanently for safe development access to mutating tools with bounded RBAC permissions, **new**: Enable live model discovery with shorter refresh intervals (e.g., 300 seconds) for rapid testing of new provider models.
-- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure workspace resource proxies with staging backend services, provision OTel secrets with staging OpenObserve credentials, carefully evaluate GATEWAY_MUTATING_TOOLS_ENABLED for testing scenarios, tune AGENT_HITL_CONFIRM_TIMEOUT for staging workflows, monitor auto-allow list effectiveness, **new**: Consider including mutating-dev profile selectively for staging testing scenarios with appropriate RBAC scoping, **new**: Configure model discovery with moderate refresh intervals (e.g., 900 seconds) to balance freshness with stability.
-- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure workspace resource proxies with production backend services and proper authentication, ensure OTel secrets are provisioned with production OpenObserve credentials, keep GATEWAY_MUTATING_TOOLS_ENABLED=false unless absolutely necessary, set AGENT_HITL_CONFIRM_TIMEOUT appropriately for production SLAs, audit auto-allow list regularly for security compliance, **new**: Never include mutating-dev profile in production deployments; use separate controlled overlays if mutating tools are absolutely required, **new**: Configure model discovery with conservative refresh intervals (e.g., 1800 seconds) and longer timeouts to minimize provider load and ensure stability.
+- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable workspace resource proxies with local tool-gateway and skills-hub instances, configure OTel with dev OpenObserve credentials, set GATEWAY_MUTATING_TOOLS_ENABLED=false for safety, configure AGENT_HITL_CONFIRM_TIMEOUT=600 for reasonable confirmation windows, enable enhanced agent auto-allow list with vetted read-only tools, **new**: Include the mutating-dev profile permanently for safe development access to mutating tools with bounded RBAC permissions, **new**: Enable live model discovery with shorter refresh intervals (e.g., 300 seconds) for rapid testing of new provider models, **new**: Provision execution signing secret for testing tamper-evident execution records, **new**: Configure audit service URL for durable audit trail testing.
+- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure workspace resource proxies with staging backend services, provision OTel secrets with staging OpenObserve credentials, carefully evaluate GATEWAY_MUTATING_TOOLS_ENABLED for testing scenarios, tune AGENT_HITL_CONFIRM_TIMEOUT for staging workflows, monitor auto-allow list effectiveness, **new**: Consider including mutating-dev profile selectively for staging testing scenarios with appropriate RBAC scoping, **new**: Configure model discovery with moderate refresh intervals (e.g., 900 seconds) to balance freshness with stability, **new**: Enable execution signing with staging audit service for end-to-end testing of tamper-evident execution records.
+- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure workspace resource proxies with production backend services and proper authentication, ensure OTel secrets are provisioned with production OpenObserve credentials, keep GATEWAY_MUTATING_TOOLS_ENABLED=false unless absolutely necessary, set AGENT_HITL_CONFIRM_TIMEOUT appropriately for production SLAs, audit auto-allow list regularly for security compliance, **new**: Never include mutating-dev profile in production deployments; use separate controlled overlays if mutating tools are absolutely required, **new**: Configure model discovery with conservative refresh intervals (e.g., 1800 seconds) and longer timeouts to minimize provider load and ensure stability, **new**: Always provision execution signing secret for production tamper-evident execution records, **new**: Configure audit service integration for comprehensive audit trail compliance.
 
-**Updated** Added guidance for workspace resource proxy configuration across environments, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration recommendations, HITL confirmation timeout tuning guidelines, enhanced agent auto-allow list configuration, plus comprehensive OTel secret provisioning requirements for each environment, new guidance for the mutating-dev profile usage patterns across different deployment environments, and detailed recommendations for live model discovery configuration including refresh intervals, timeout settings, and monitoring strategies across different deployment environments.
+**Updated** Added guidance for workspace resource proxy configuration across environments, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration recommendations, HITL confirmation timeout tuning guidelines, enhanced agent auto-allow list configuration, plus comprehensive OTel secret provisioning requirements for each environment, new guidance for the mutating-dev profile usage patterns across different deployment environments, detailed recommendations for live model discovery configuration including refresh intervals, timeout settings, and monitoring strategies across different deployment environments, and comprehensive guidance for execution signing and audit service configuration across development, staging, and production environments.
 
 ### Security and Secrets Management
 - Store secrets in Kubernetes Secrets or external vaults; never hardcode.
@@ -964,11 +1184,19 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - **New**: Monitor model discovery endpoint access patterns and implement rate limiting where appropriate.
 - **New**: Validate model discovery configuration to prevent excessive provider endpoint polling.
 - **New**: Audit model discovery fallback behavior to ensure graceful degradation under provider failures.
+- **New**: Protect execution signing secret (execution-signing-secret) with appropriate RBAC and access controls.
+- **New**: Rotate execution signing keys regularly and monitor for unauthorized key usage.
+- **New**: Audit execution signing events and verify tamper-evident execution records integrity.
+- **New**: Secure audit service credentials (AGENT_AUDIT_CLIENT_SECRET) with proper RBAC and access controls.
+- **New**: Monitor audit service connectivity and authentication failures for security incidents.
+- **New**: Audit execution record persistence and verify retention scanning operates correctly.
+- **New**: Implement alerts for execution signing failures and audit service connectivity issues.
+- **New**: Regularly review execution record retention policies and compliance requirements.
 
-**Updated** Enhanced security guidance with workspace resource integration security considerations, including credential management, authentication monitoring, and access pattern auditing, risk-tier admission gate security controls, HITL confirmation timeout security implications, enhanced agent auto-allow list security enforcement, plus comprehensive OpenTelemetry secret management security practices, new security considerations for the mutating-dev profile including profile integrity, RBAC scoping, and triple-gate enforcement monitoring, and comprehensive security guidance for live model discovery including provider credential management, endpoint access monitoring, and fallback behavior auditing.
+**Updated** Enhanced security guidance with workspace resource integration security considerations, including credential management, authentication monitoring, and access pattern auditing, risk-tier admission gate security controls, HITL confirmation timeout security implications, enhanced agent auto-allow list security enforcement, plus comprehensive OpenTelemetry secret management security practices, new security considerations for the mutating-dev profile including profile integrity, RBAC scoping, and triple-gate enforcement monitoring, comprehensive security guidance for live model discovery including provider credential management, endpoint access monitoring, and fallback behavior auditing, and comprehensive security guidance for execution signing including secret protection, key rotation, tamper-evident record verification, audit service credential management, and execution record retention compliance.
 
 ### Complete Environment Variables Reference
-**Updated** Comprehensive reference including workspace resource integration variables for tools catalog and skills inventory access, risk-tier admission gate configuration, HITL confirmation timeout settings, enhanced agent auto-allow list configuration, plus enhanced OpenTelemetry configuration variables, new variables related to the mutating-dev profile integration, and comprehensive live model discovery configuration variables.
+**Updated** Comprehensive reference including workspace resource integration variables for tools catalog and skills inventory access, risk-tier admission gate configuration, HITL confirmation timeout settings, enhanced agent auto-allow list configuration, plus enhanced OpenTelemetry configuration variables, new variables related to the mutating-dev profile integration, comprehensive live model discovery configuration variables, and execution signing and audit service configuration variables.
 
 #### Core Configuration
 - `AGENT_SERVICE_URL`: Agent service endpoint URL (DNS-based)
@@ -1017,11 +1245,25 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - `AGENT_MODEL_DISCOVERY_REFRESH_SECONDS`: Discovery refresh interval in seconds (must be >= 1, default: 1800)
 - `AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS`: Per-provider /models fetch timeout in seconds (must be > 0, default: 5)
 
+#### Execution Signing Configuration
+- `AGENT_EXECUTION_SIGNING_KEY`: HMAC-SHA256 key for signing execution requests and receipts (provisioned via execution-signing-secret)
+- **Note**: Absent key causes mutating resumes to fail closed with signing_unavailable rejection
+
+#### Audit Service Integration
+- `AGENT_AUDIT_SERVICE_URL`: Audit service URL for execution event emissions (default: http://audit-service:8000)
+- `AGENT_AUDIT_CLIENT_ID`: Audit service client ID (default: "agent-service")
+- `AGENT_AUDIT_CLIENT_SECRET`: Audit service client secret (stored in agent-platform-runtime-secrets)
+
 #### Enhanced OpenTelemetry Configuration
 - `OTEL_ENABLED`: Enable/disable OTel push pipeline (default: false)
 - `OTEL_EXPORTER_OTLP_ENDPOINT`: OTLP endpoint for traces/metrics/logs (e.g., http://openobserve:5080)
 - `OTEL_EXPORTER_OTLP_HEADERS`: Authentication headers for OTLP endpoint (provisioned by sync-otel-secrets.sh)
 - `OTEL_SERVICE_NAME`: Service name for telemetry (default: derived from service)
+
+#### Execution Record Persistence
+- `AGENT_STATE_STORE_BACKEND`: Backend for execution records (memory/postgres, default: memory)
+- `AGENT_STATE_DB_URL`: Postgres DSN for execution records (required for postgres backend)
+- **Note**: Shares configuration with agent state store for unified persistence strategy
 
 #### Mutating Dev Profile Configuration
 - **Note**: The mutating-dev profile automatically sets `GATEWAY_MUTATING_TOOLS_ENABLED=true` through kustomize ConfigMap merge in the dev-k8s overlay
@@ -1031,16 +1273,123 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
 - [runtime.py](file://products/platform-gateway/src/platform_gateway/core/runtime.py)
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
-- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
+- [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
+- [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
+
+### Execution Signing and Audit Integration Guide
+**New Section** Comprehensive guide for configuring and managing execution signing and audit service integration for tamper-evident execution records.
+
+#### Prerequisites
+- Execution signing secret provisioned via sync-execution-signing-secret.sh
+- Audit service deployed and accessible
+- Proper RBAC permissions for secret access
+- Network connectivity to audit service endpoint
+
+#### Configuration Steps
+1. Provision execution signing secret: `shared/platform-ops/gitops/sync-execution-signing-secret.sh`
+2. Configure AGENT_EXECUTION_SIGNING_KEY in agent-service deployment via secretKeyRef
+3. Set AGENT_AUDIT_SERVICE_URL to point to audit service endpoint
+4. Configure AGENT_AUDIT_CLIENT_SECRET in agent-platform-runtime-secrets
+5. Deploy agent-service with execution signing enabled
+6. Verify execution signing by testing mutating tool approvals
+7. Monitor audit trail for execution events
+
+#### Example Configuration
+```yaml
+apiVersion: v1
+kind: Deployment
+metadata:
+  name: agent-service
+spec:
+  template:
+    spec:
+      containers:
+        - name: agent-service
+          env:
+            - name: AGENT_EXECUTION_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: execution-signing-secret
+                  key: AGENT_EXECUTION_SIGNING_KEY
+                  optional: true
+            - name: AGENT_AUDIT_SERVICE_URL
+              value: "http://audit-service:8000"
+            - name: AGENT_AUDIT_CLIENT_ID
+              value: "agent-service"
+          envFrom:
+            - secretRef:
+                name: agent-platform-runtime-secrets
+                optional: true
+```
+
+#### Security Considerations
+- Never commit execution signing keys to version control
+- Rotate signing keys regularly using sync-execution-signing-secret.sh
+- Monitor execution signing failures and audit service connectivity
+- Implement proper RBAC for secret access and audit service authentication
+- Audit execution records for compliance requirements
+
+#### Monitoring and Diagnostics
+- Check execution signing metrics and audit emission rates
+- Monitor execution record persistence and retention scanning
+- Verify audit trail completeness and correlation
+- Alert on execution signing failures and audit service connectivity issues
+
+**Section sources**
+- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
+- [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
+- [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
+- [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
+
+### Enhanced Secret Provisioning Guide
+**New Section** Comprehensive guide for managing OpenTelemetry secret provisioning and maintenance, including execution signing secret management.
+
+#### Prerequisites
+- OpenObserve root credentials (OO_ROOT_USER_EMAIL, OO_ROOT_USER_PASSWORD)
+- Access to Kubernetes cluster with kubectl configured
+- Network connectivity to OpenObserve backend
+
+#### Provisioning Steps
+1. Export OpenObserve credentials: `export OO_ROOT_USER_EMAIL=your-email@example.com`
+2. Export password: `export OO_ROOT_USER_PASSWORD=your-password`
+3. Run provisioning script: `shared/platform-ops/gitops/sync-otel-secrets.sh`
+4. Verify all secrets were updated: `kubectl get secrets -o custom-columns=NAME:.metadata.name,KEYS:.data | grep OTEL`
+5. Check rollout status: `kubectl rollout status deployment/platform-gateway`
+
+#### Execution Signing Secret Provisioning
+1. Run execution signing secret provisioning: `shared/platform-ops/gitops/sync-execution-signing-secret.sh`
+2. Verify secret creation: `kubectl get secret execution-signing-secret -o yaml`
+3. Check agent-service deployment references the secret
+4. Verify agent-service can access the signing key
+
+#### Maintenance Operations
+- **Rotate credentials**: Re-run sync-otel-secrets.sh with new credentials
+- **Rotate signing key**: Re-run sync-execution-signing-secret.sh to generate new key
+- **Verify headers**: Check pod environment variables for OTEL_EXPORTER_OTLP_HEADERS
+- **Monitor exports**: Verify telemetry is flowing to OpenObserve backend
+- **Troubleshoot failures**: Check pod logs for authentication errors
+
+#### Security Considerations
+- Never commit OpenObserve credentials to version control
+- Restrict access to sync-otel-secrets.sh script
+- Monitor secret rotation events and authentication failures
+- Implement proper RBAC for secret management operations
+- Protect execution signing secret with appropriate access controls
+- Audit execution signing key usage and rotation events
+
+**Section sources**
+- [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 
 ### Workspace Resource Integration Guide
 **New Section** Step-by-step guide for configuring workspace resource integration with tools catalog and skills inventory proxies.
@@ -1092,41 +1441,9 @@ stringData:
 
 **Section sources**
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
-
-### Enhanced Secret Provisioning Guide
-**New Section** Comprehensive guide for managing OpenTelemetry secret provisioning and maintenance.
-
-#### Prerequisites
-- OpenObserve root credentials (OO_ROOT_USER_EMAIL, OO_ROOT_USER_PASSWORD)
-- Access to Kubernetes cluster with kubectl configured
-- Network connectivity to OpenObserve backend
-
-#### Provisioning Steps
-1. Export OpenObserve credentials: `export OO_ROOT_USER_EMAIL=your-email@example.com`
-2. Export password: `export OO_ROOT_USER_PASSWORD=your-password`
-3. Run provisioning script: `shared/platform-ops/gitops/sync-otel-secrets.sh`
-4. Verify all secrets were updated: `kubectl get secrets -o custom-columns=NAME:.metadata.name,KEYS:.data | grep OTEL`
-5. Check rollout status: `kubectl rollout status deployment/platform-gateway`
-
-#### Maintenance Operations
-- **Rotate credentials**: Re-run sync-otel-secrets.sh with new credentials
-- **Verify headers**: Check pod environment variables for OTEL_EXPORTER_OTLP_HEADERS
-- **Monitor exports**: Verify telemetry is flowing to OpenObserve backend
-- **Troubleshoot failures**: Check pod logs for authentication errors
-
-#### Security Considerations
-- Never commit OpenObserve credentials to version control
-- Restrict access to sync-otel-secrets.sh script
-- Monitor secret rotation events and authentication failures
-- Implement proper RBAC for secret management operations
-
-**Section sources**
-- [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
-- [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-secrets.example.env)
 
 ### Mutating Dev Profile Configuration Guide
 **New Section** Comprehensive guide for understanding and managing the mutating-dev kustomize profile that provides a committed development posture for enabling mutating tools safely.
@@ -1354,21 +1671,6 @@ data:
 - **Model discovery refresh too frequent**: Increase AGENT_MODEL_DISCOVERY_REFRESH_SECONDS to reduce provider load; monitor provider rate limits
 - **Model discovery falling back to curated series**: Check if provider endpoints are failing; verify credentials are valid; examine discovery failure logs
 - **Model discovery validation errors**: Ensure AGENT_MODEL_DISCOVERY_REFRESH_SECONDS >= 1 and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS > 0
-
-#### Monitoring and Diagnostics
-- Check platform-gateway logs for workspace resource proxy errors
-- Monitor delegated token acquisition success rates
-- Track skills authentication attempt success/failure ratios
-- Verify workspace resource proxy endpoint availability and response times
-- Monitor OTel export success/failure rates and authentication errors
-- Check secret provisioning logs for sync-otel-secrets.sh execution results
-- Monitor risk-tier admission gate policy decisions
-- Track auto-allow list usage and warning logs
-- Analyze HITL confirmation timeout patterns
-- Monitor mutating-dev profile activation status and RBAC permissions
-- Monitor model discovery refresh cycles and fallback behavior
-- Track provider endpoint connectivity and response times
-- Verify discovery cache utilization and effectiveness
 
 **Section sources**
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
