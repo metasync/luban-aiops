@@ -13,6 +13,32 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.16.0 — 2026-08-26
+
+### Added
+
+- **Approval & owner chat UX polish (SPEC-034)**: five portal usability
+  enhancements from the v0.15.0 live approval test. The owner window now
+  flashes a transient arrival highlight over every turn group that gained
+  content when the decision-sync poll reseeds the transcript, so resumed
+  agent messages are visible at a glance. The session panel refreshes the
+  moment a decision applies (from the poll or the approvals inbox)
+  instead of at the next 30-second tick, so the "awaiting approval" tag
+  clears with the decision.
+
+### Changed
+
+- The Approvals view splits into **Pending** (default) and **History**
+  tabs with per-tab record counts, keeping the actionable queue clean.
+- Inbox entries render as separated cards with a structured provenance
+  header: session title first, then owner and parked/decided relative
+  times, with a status tag on history entries.
+- The Approvals banner now also states that unanswered requests expire
+  after the confirmation timeout (`AGENT_HITL_CONFIRM_TIMEOUT`, 10
+  minutes by default).
+- Version lockstep refreshed for the 0.16.0 train; a vitest jsdom setup
+  stubs `ResizeObserver` for antd layout components.
+
 ## 0.15.0 — 2026-08-26
 
 ### Added

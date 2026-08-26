@@ -255,6 +255,66 @@ body {
   gap: 8px;
 }
 
+/* SPEC-034 R-1: transient arrival flash for turn groups that gained
+   content after an external decision (poll reseed). The tint fades out
+   over the same 3s window the component holds the class. */
+.turn-group.turn-arrived {
+  border-radius: var(--radius);
+  animation: turn-arrive-flash 3s ease-out;
+}
+
+@keyframes turn-arrive-flash {
+  from {
+    background-color: color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-group.turn-arrived {
+    animation: none;
+    background-color: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+}
+
+/* SPEC-034 R-4: approvals inbox entries render as separated cards with a
+   two-line provenance header (session title, then owner/timing). */
+.approvals-entry {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.approvals-entry-header {
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.approvals-entry-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.approvals-entry-title .ant-typography {
+  margin-bottom: 0;
+}
+
+.approvals-entry-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 /* --- Markdown rendered content (ported from legacy styles.css) --- */
 .md-content h1, .md-content h2, .md-content h3,
 .md-content h4, .md-content h5, .md-content h6 {

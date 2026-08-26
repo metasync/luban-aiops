@@ -232,10 +232,17 @@ the record store:
   bounded interval (SPEC-032), so a decision made from the inbox or another
   window flips the card and surfaces the resumed turn without a refresh —
   the resolution frame only rides the answering stream, and this poll is
-  the owner's sync path for every other decision.
+  the owner's sync path for every other decision. Turn groups that gain
+  content from such a reseed flash a brief arrival highlight (SPEC-034),
+  and the session panel refreshes at the same moment, so the session's
+  "awaiting approval" tag clears with the decision.
 - **Approver inbox.** `GET /api/v1/approvals/inbox` (portal Approvals view,
   decider roles only) lists pending confirmations across all sessions plus
-  decisions from the last 30 days, most recent first. Items are
+  decisions from the last 30 days, most recent first. The view splits the
+  two queues into tabs — **Pending** (default) and **History** with
+  per-tab counts — and each entry renders as a separated card whose
+  header carries the session title, owner, and parked/decided relative
+  times (SPEC-034). Items are
   **metadata only** — session id/title, owner, parked calls, outcome — and
   never carry the owner's transcript text. Records are bounded (most recent
   50 per session, cascade-deleted with the session), and on startup a

@@ -39,7 +39,7 @@ import {
 } from "../stream/useChatStream";
 import { renderMarkdown } from "./markdown";
 import { ComposerSelectionBar } from "./ComposerSelectionBar";
-import { transcriptToTurns } from "./transcript";
+import { detectArrivalSpan, transcriptToTurns } from "./transcript";
 import { usePendingDecisionPoll } from "./usePendingDecisionPoll";
 import {
   VOICE_LANGUAGES,
@@ -350,16 +350,21 @@ export function ConfirmationCardView({
 
 // --- Turn rendering -------------------------------------------------------
 
+// SPEC-034 R-1: how long the post-decision arrival flash stays on screen.
+const ARRIVAL_FLASH_MS = 3000;
+
 function TurnGroup({
   turn,
   canDecide,
   busy,
   onDecide,
+  justArrived,
 }: {
   turn: ChatTurn;
   canDecide: boolean;
   busy: boolean;
   onDecide: (confirmId: string, decision: ConfirmationDecision) => void;
+  justArrived?: boolean;
 }) {
   // Legacy parity: a finished turn with no text and no parked confirmation
   // shows the "(no response received)" placeholder.
@@ -385,7 +390,7 @@ function TurnGroup({
     return () => observer.disconnect();
   }, [turn.userMessage]);
   return (
-    <div className="turn-group">
+    <div className={`turn-group${justArrived ? " turn-arrived" : ""}`}>
       {turn.userMessage ? (
         <div ref={userBubbleRef}>
           <Bubble placement="end" variant="filled" content={turn.userMessage} />
@@ -572,6 +577,11 @@ export default function ChatView({
   const catchingUpRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // SPEC-034 R-1: the arrival flash covers turn groups from this index
+  // onward after a poll reseed delivered new content; cleared on timeout.
+  const [arrivedFrom, setArrivedFrom] = useState<number | null>(null);
+  const arrivalTimerRef = useRef<number | undefined>(undefined);
+
   const canDecide = hasAnyRole(roles, CHAT_CONFIRM_ROLES);
   const { setSession } = chat;
   const { activeSessionId, setActiveSessionId, refresh } = workspace;
@@ -730,14 +740,27 @@ export default function ChatView({
     streaming: chat.streaming,
     applyDetail: (detail) => {
       if (!chat.sessionId) return;
-      chat.reseedTurns(
-        chat.sessionId,
-        transcriptToTurns(
-          detail.transcript ?? [],
-          detail.evidence_turns,
-          detail.confirmations,
-        ),
+      const reseeded = transcriptToTurns(
+        detail.transcript ?? [],
+        detail.evidence_turns,
+        detail.confirmations,
       );
+      // SPEC-034 R-1: a reseed that gained content (resumed reply or new
+      // turn) flashes an arrival highlight so the operator sees that the
+      // decision actually delivered new messages.
+      const arrived = detectArrivalSpan(chat.turns, reseeded);
+      chat.reseedTurns(chat.sessionId, reseeded);
+      if (arrived !== null) {
+        setArrivedFrom(arrived);
+        window.clearTimeout(arrivalTimerRef.current);
+        arrivalTimerRef.current = window.setTimeout(
+          () => setArrivedFrom(null),
+          ARRIVAL_FLASH_MS,
+        );
+      }
+      // SPEC-034 R-2: the session panel learns the decision at the same
+      // moment the transcript does, instead of at the next 30s poll tick.
+      void refresh();
     },
   });
 
@@ -830,12 +853,13 @@ export default function ChatView({
                 "Start a conversation with the operations agent. Each session keeps its own transcript and pending confirmations."}
             </div>
           ) : (
-            chat.turns.map((turn) => (
+            chat.turns.map((turn, index) => (
               <TurnGroup
                 key={turn.id}
                 turn={turn}
                 canDecide={canDecide}
                 busy={chat.streaming}
+                justArrived={arrivedFrom !== null && index >= arrivedFrom}
                 onDecide={(confirmId, decision) =>
                   void chat.decide(confirmId, decision)
                 }

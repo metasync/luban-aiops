@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-26
 - release slice: R4 — Approval-Gated Bounded Actions
@@ -149,3 +149,6 @@ implementer.
 ## Change Log
 
 - 2026-08-26: drafted from live-test feedback on v0.15.0 approval flow.
+- 2026-08-26: delivered in the 0.16.0 train — all five requirements
+  implemented portal-only; 142 portal tests green and `make verify`
+  green.

@@ -7,6 +7,13 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-26-approval-owner-ux-polish.md`
+  - delivers SPEC-034 (v0.16.0): five portal usability enhancements from
+    the v0.15.0 live approval test — arrival highlight for post-decision
+    content in the owner window, instant session-panel refresh on applied
+    decisions, Pending/History tabs in the Approvals view, separated
+    inbox entries with structured provenance headers, and a banner note
+    on unanswered-request expiry
 - `2026-08-26-confirmation-card-turn-anchoring.md`
   - delivers SPEC-033 (v0.15.0): the v0.14.1 live validation found a
     multi-park session stacking every confirmation card under the

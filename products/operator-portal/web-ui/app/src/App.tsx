@@ -281,9 +281,11 @@ export default function App() {
   // incident sessions into the chat panel (SPEC-023 R-3 deep links).
   const workspace = useSessionWorkspace(Boolean(username));
   // SPEC-031 R-5: one inbox poll per signed-in decider; the sidebar badge
-  // and the Approvals view share this state.
+  // and the Approvals view share this state. SPEC-034 R-2: a decision
+  // applied from the inbox refreshes the session panel immediately.
   const approvals = useApprovalsInbox(
     Boolean(username) && hasAnyRole(roles, APPROVAL_DECIDER_ROLES),
+    () => void workspace.refresh(),
   );
 
   const navigate = (view: ViewId) => {

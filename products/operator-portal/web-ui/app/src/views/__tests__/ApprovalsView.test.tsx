@@ -1,7 +1,7 @@
 // Approvals view tests (SPEC-031 R-5): the decider's inbox renders
-// pending items before history, decides through the shared confirm
-// surface, and flips race-losers to the winner's outcome on the
-// structured already_resolved 409.
+// pending items on the default Pending tab with history on its own tab,
+// decides through the shared confirm surface, and flips race-losers to
+// the winner's outcome on the structured already_resolved 409.
 import {
   cleanup,
   fireEvent,
@@ -83,7 +83,7 @@ afterEach(() => {
 });
 
 describe("ApprovalsView (SPEC-031 R-5)", () => {
-  it("renders pending items first and history below with provenance", async () => {
+  it("keeps pending on the default tab and history on its own tab", async () => {
     mockGetInbox.mockResolvedValue([
       recordOf(),
       recordOf({
@@ -101,15 +101,24 @@ describe("ApprovalsView (SPEC-031 R-5)", () => {
     // Pending card is actionable for a designated approver.
     expect(await screen.findByText("Approve")).toBeTruthy();
     expect(screen.getByText("Deny")).toBeTruthy();
-    // Provenance stays metadata-only (SPEC-030 Q-1): session, owner, age.
-    expect(screen.getAllByText("session: Restart API pods").length).toBe(2);
-    expect(screen.getAllByText("owner: luban-operator").length).toBe(2);
+    // SPEC-034 R-3: history stays out of the way until its tab opens.
+    expect(screen.queryByText("History (1)")).toBeTruthy();
+    expect(
+      screen.queryByText(
+        "Approved by luban-approver at 2026-08-24T09:00:00Z.",
+      ),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByText("History (1)"));
     // History card renders read-only with decider attribution.
     expect(
-      screen.getByText(
+      await screen.findByText(
         "Approved by luban-approver at 2026-08-24T09:00:00Z.",
       ),
     ).toBeTruthy();
+    // Provenance stays metadata-only (SPEC-030 Q-1): session, owner, age.
+    expect(screen.getAllByText("Restart API pods").length).toBe(2);
+    expect(screen.getAllByText("owner: luban-operator").length).toBe(2);
   });
 
   it("shows the empty states when the inbox has no records", async () => {
@@ -120,8 +129,9 @@ describe("ApprovalsView (SPEC-031 R-5)", () => {
         "No confirmations are waiting for a decision.",
       ),
     ).toBeTruthy();
+    fireEvent.click(screen.getByText("History (0)"));
     expect(
-      screen.getByText("No decisions in the last 30 days."),
+      await screen.findByText("No decisions in the last 30 days."),
     ).toBeTruthy();
   });
 
@@ -150,13 +160,17 @@ describe("ApprovalsView (SPEC-031 R-5)", () => {
     render(<Harness />);
     fireEvent.click(await screen.findByText("Approve"));
 
+    // The decided record leaves the Pending tab; its attributed card
+    // renders on the History tab once opened.
     await waitFor(() => {
-      expect(
-        screen.getByText(
-          "Approved by luban-approver at 2026-08-25T10:05:00Z.",
-        ),
-      ).toBeTruthy();
+      expect(screen.getByText("History (1)")).toBeTruthy();
     });
+    fireEvent.click(screen.getByText("History (1)"));
+    expect(
+      await screen.findByText(
+        "Approved by luban-approver at 2026-08-25T10:05:00Z.",
+      ),
+    ).toBeTruthy();
     // The decision rides the shared confirm surface with the parked ids.
     expect(mockOpenStream).toHaveBeenCalledWith(
       "/api/v1/chat/confirm",
@@ -193,13 +207,16 @@ describe("ApprovalsView (SPEC-031 R-5)", () => {
     fireEvent.click(await screen.findByText("Approve"));
 
     // The card flips to denied with the winner's attribution instead of
-    // staying pending (which would invite a doomed retry).
+    // staying pending (which would invite a doomed retry); the decided
+    // record lands on the History tab.
     await waitFor(() => {
-      expect(
-        screen.getByText("Denied by luban-admin at 2026-08-25T10:05:00Z."),
-      ).toBeTruthy();
+      expect(screen.getByText("History (1)")).toBeTruthy();
     });
-    expect(screen.getByText("Denied")).toBeTruthy();
+    fireEvent.click(screen.getByText("History (1)"));
+    expect(
+      await screen.findByText("Denied by luban-admin at 2026-08-25T10:05:00Z."),
+    ).toBeTruthy();
+    expect(screen.getByText("denied")).toBeTruthy();
     expect(screen.queryByText("Approve")).toBeNull();
   });
 });

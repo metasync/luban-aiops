@@ -8,7 +8,22 @@ import type {
   EvidenceTurn,
   TranscriptTurn,
 } from "../../api/sessions";
-import { transcriptToTurns } from "../transcript";
+import type { ChatTurn } from "../../stream/useChatStream";
+import { detectArrivalSpan, transcriptToTurns } from "../transcript";
+
+function turnOf(replyText: string, userMessage = "run it"): ChatTurn {
+  return {
+    id: `t-${replyText.length}`,
+    userMessage,
+    replyText,
+    completed: true,
+    confirmationPending: false,
+    toolCalls: [],
+    toolResults: [],
+    confirmations: [],
+    history: true,
+  };
+}
 
 describe("transcriptToTurns", () => {
   it("pairs a user turn with the following assistant reply", () => {
@@ -360,5 +375,49 @@ describe("transcriptToTurns card turn anchoring (SPEC-033 R-3)", () => {
       "cf-absent",
       "cf-stale",
     ]);
+  });
+});
+
+describe("detectArrivalSpan (SPEC-034 R-1)", () => {
+  it("returns null when the reseed changed no content", () => {
+    const previous = [turnOf("Done.")];
+    const next = [turnOf("Done.")];
+    expect(detectArrivalSpan(previous, next)).toBeNull();
+  });
+
+  it("returns null for a card-only flip (deny/expiry, no resumed reply)", () => {
+    const previous = [turnOf("Parked.")];
+    const next = [turnOf("Parked.")];
+    next[0].confirmations = [
+      {
+        confirmId: "cf-1",
+        message: "",
+        pendingCalls: [],
+        mutating: false,
+        status: "denied",
+        sessionId: "s-1",
+      },
+    ];
+    expect(detectArrivalSpan(previous, next)).toBeNull();
+  });
+
+  it("points at the turn whose reply grew after a resume", () => {
+    const previous = [turnOf("Asking for approval…")];
+    const next = [
+      turnOf("Asking for approval…\n\nRestarted the pod."),
+    ];
+    expect(detectArrivalSpan(previous, next)).toBe(0);
+  });
+
+  it("points at appended turns when the resume started a new exchange", () => {
+    const previous = [turnOf("First.")];
+    const next = [turnOf("First."), turnOf("Second.")];
+    expect(detectArrivalSpan(previous, next)).toBe(1);
+  });
+
+  it("points at the earliest changed turn when both grew", () => {
+    const previous = [turnOf("One."), turnOf("Two.")];
+    const next = [turnOf("One."), turnOf("Two. More."), turnOf("Three.")];
+    expect(detectArrivalSpan(previous, next)).toBe(1);
   });
 });

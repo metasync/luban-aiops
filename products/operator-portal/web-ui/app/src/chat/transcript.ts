@@ -201,3 +201,21 @@ export function transcriptToTurns(
   attachConfirmations(turns, confirmations ?? [], makeTurn);
   return turns;
 }
+
+// SPEC-034 R-1: compares the timeline on screen with a poll re-seed and
+// reports where new content arrived. Returns null when the reseed added
+// nothing (e.g. a deny/expiry card flip with no resumed reply) so no
+// highlight fires; otherwise returns the index of the first turn that
+// gained content — a reply that grew longer or an appended turn. The
+// caller highlights every turn group from that index onward.
+export function detectArrivalSpan(
+  previous: ChatTurn[],
+  next: ChatTurn[],
+): number | null {
+  for (let i = 0; i < next.length; i += 1) {
+    const before = previous[i];
+    if (!before) return i;
+    if (next[i].replyText.length > before.replyText.length) return i;
+  }
+  return null;
+}

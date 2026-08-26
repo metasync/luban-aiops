@@ -5,7 +5,7 @@
 // /api/v1/chat/confirm surface the chat uses, with the structured
 // already_resolved 409 flipping the card to the winner's outcome.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Spin, Typography } from "antd";
+import { Alert, Button, Spin, Tabs, Tag, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
@@ -49,7 +49,14 @@ export interface ApprovalsInboxState {
 // One inbox per signed-in decider: App owns the hook so the sidebar
 // badge and the view share a single poll (30s + window focus), and a
 // decision made in either surface stays consistent.
-export function useApprovalsInbox(enabled: boolean): ApprovalsInboxState {
+//
+// SPEC-034 R-2: onDecisionApplied fires the moment a decision becomes
+// true (successful decide or a 409 race patch) so App can refresh the
+// session panel immediately instead of at the next 30s poll tick.
+export function useApprovalsInbox(
+  enabled: boolean,
+  onDecisionApplied?: () => void,
+): ApprovalsInboxState {
   const { username } = useAuth();
   const [records, setRecords] = useState<ConfirmationRecord[]>([]);
   const [loading, setLoading] = useState(enabled);
@@ -58,6 +65,8 @@ export function useApprovalsInbox(enabled: boolean): ApprovalsInboxState {
   const recordsRef = useRef<ConfirmationRecord[]>([]);
   recordsRef.current = records;
   const loadedOnceRef = useRef(false);
+  const decisionAppliedRef = useRef(onDecisionApplied);
+  decisionAppliedRef.current = onDecisionApplied;
 
   const refresh = useCallback(async () => {
     try {
@@ -138,6 +147,7 @@ export function useApprovalsInbox(enabled: boolean): ApprovalsInboxState {
           decision,
           decided_at: new Date().toISOString(),
         });
+        decisionAppliedRef.current?.();
         // Resync with the durable store so attribution and ordering
         // follow the server's truth once it settles.
         void refresh();
@@ -153,6 +163,7 @@ export function useApprovalsInbox(enabled: boolean): ApprovalsInboxState {
               decision: race.decision ?? null,
               decided_at: race.decided_at ?? null,
             });
+            decisionAppliedRef.current?.();
           } else {
             setError(`Confirm request failed (409).`);
           }
@@ -182,8 +193,9 @@ export function useApprovalsInbox(enabled: boolean): ApprovalsInboxState {
   };
 }
 
-// One inbox entry: provenance line (metadata only — SPEC-030 Q-1) above
-// the shared confirmation card.
+// One inbox entry: a separated card with a structured provenance header
+// (SPEC-034 R-4) above the shared confirmation card. Metadata only —
+// SPEC-030 Q-1.
 function InboxEntry({
   record,
   inbox,
@@ -193,16 +205,40 @@ function InboxEntry({
   inbox: ApprovalsInboxState;
   canDecide: boolean;
 }) {
+  const decided = record.status !== "pending";
   return (
     <div className="approvals-entry">
-      <div className="approvals-entry-meta">
-        <span>
-          session: {record.session_title ?? record.session_id}
-        </span>
-        <span>owner: {record.owner_user_id}</span>
-        {record.parked_at ? (
-          <span>parked {dayjs(record.parked_at).fromNow()}</span>
-        ) : null}
+      <div className="approvals-entry-header">
+        <div className="approvals-entry-title">
+          <Typography.Text strong ellipsis>
+            {record.session_title ?? record.session_id}
+          </Typography.Text>
+          {decided ? (
+            <Tag
+              color={
+                record.status === "approved"
+                  ? "success"
+                  : record.status === "denied"
+                    ? "error"
+                    : "default"
+              }
+            >
+              {record.status}
+            </Tag>
+          ) : null}
+        </div>
+        <div className="approvals-entry-sub">
+          <span>owner: {record.owner_user_id}</span>
+          {record.parked_at ? (
+            <span>parked {dayjs(record.parked_at).fromNow()}</span>
+          ) : null}
+          {decided && record.decided_at ? (
+            <span>
+              decided {dayjs(record.decided_at).fromNow()}
+              {record.decider_user_id ? ` by ${record.decider_user_id}` : ""}
+            </span>
+          ) : null}
+        </div>
       </div>
       <ConfirmationCardView
         card={confirmationRecordToCard(record)}
@@ -247,9 +283,12 @@ export default function ApprovalsView({
         >
           Refresh
         </Button>
+        {/* SPEC-034 R-5: approvers must also see the expiry rule — the
+            timeout is AGENT_HITL_CONFIRM_TIMEOUT (600s default). */}
         <Typography.Text type="secondary">
-          Pending confirmations park here until decided; history keeps
-          decisions for 30 days.
+          Pending confirmations park here until decided — unanswered
+          requests expire after the confirmation timeout (10 minutes by
+          default). History keeps decisions for 30 days.
         </Typography.Text>
       </div>
       {inbox.error ? (
@@ -261,42 +300,55 @@ export default function ApprovalsView({
         />
       ) : null}
       <Spin spinning={inbox.loading}>
-        <Typography.Text strong>Pending</Typography.Text>
-        {pending.length === 0 ? (
-          <div style={{ padding: "8px 0" }}>
-            <Typography.Text type="secondary">
-              No confirmations are waiting for a decision.
-            </Typography.Text>
-          </div>
-        ) : (
-          pending.map((record) => (
-            <InboxEntry
-              key={record.confirm_id}
-              record={record}
-              inbox={inbox}
-              canDecide={canDecide}
-            />
-          ))
-        )}
-        <Typography.Text strong style={{ display: "block", marginTop: 16 }}>
-          History
-        </Typography.Text>
-        {history.length === 0 ? (
-          <div style={{ padding: "8px 0" }}>
-            <Typography.Text type="secondary">
-              No decisions in the last 30 days.
-            </Typography.Text>
-          </div>
-        ) : (
-          history.map((record) => (
-            <InboxEntry
-              key={record.confirm_id}
-              record={record}
-              inbox={inbox}
-              canDecide={canDecide}
-            />
-          ))
-        )}
+        {/* SPEC-034 R-3: Pending is the actionable queue and the default
+            tab; History holds decided records out of the way. */}
+        <Tabs
+          defaultActiveKey="pending"
+          items={[
+            {
+              key: "pending",
+              label: `Pending (${pending.length})`,
+              children:
+                pending.length === 0 ? (
+                  <div style={{ padding: "8px 0" }}>
+                    <Typography.Text type="secondary">
+                      No confirmations are waiting for a decision.
+                    </Typography.Text>
+                  </div>
+                ) : (
+                  pending.map((record) => (
+                    <InboxEntry
+                      key={record.confirm_id}
+                      record={record}
+                      inbox={inbox}
+                      canDecide={canDecide}
+                    />
+                  ))
+                ),
+            },
+            {
+              key: "history",
+              label: `History (${history.length})`,
+              children:
+                history.length === 0 ? (
+                  <div style={{ padding: "8px 0" }}>
+                    <Typography.Text type="secondary">
+                      No decisions in the last 30 days.
+                    </Typography.Text>
+                  </div>
+                ) : (
+                  history.map((record) => (
+                    <InboxEntry
+                      key={record.confirm_id}
+                      record={record}
+                      inbox={inbox}
+                      canDecide={canDecide}
+                    />
+                  ))
+                ),
+            },
+          ]}
+        />
       </Spin>
     </div>
   );
