@@ -17,12 +17,12 @@
 
 ## Update Summary
 **Changes Made**
-- Updated spec status to reflect current state after revert: R-1 (Seeded Transcript Reveal) was reverted in v0.18.1, while R-2 through R-5 remain delivered
-- Removed all references to seeded transcript reveal functionality from implementation sections
-- Updated architecture diagrams to reflect only the remaining inbox pagination features
-- Added comprehensive coverage of the revert decision and its impact
-- Updated component analysis to focus exclusively on the delivered inbox pagination requirements
-- Added release verification information for both the original delivery and subsequent revert
+- Enhanced documentation to reflect v0.18.1 live-check patch where R-1 seeded-transcript reveal feature was completely reverted
+- Added detailed analysis of removed components including `seedRevealIndex`, `seedRevealDelay` helpers, and cascade state management
+- Updated architecture diagrams to focus exclusively on delivered inbox pagination features (R-2 through R-5)
+- Clarified that while plan and tasks remain as historical records, the actual implementation no longer exists in codebase
+- Documented current state where typewriter functionality applies only to live arrivals per SPEC-035
+- Added comprehensive verification details showing complete removal of seeded reveal functionality
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -136,14 +136,26 @@ Gateway-->>Portal : Next page results
 ## Detailed Component Analysis
 
 ### Seeded Transcript Reveal (R-1) - Reverted
-**Status**: Reverted in v0.18.1 due to negative user feedback during live check.
+**Status**: Completely reverted in v0.18.1 due to negative user feedback during live check.
 
-The seeded transcript reveal feature was originally implemented but completely removed after operators reported that opening a session re-typed its history instead of showing it, which read as delay rather than polish. The following components were removed:
-- `seedRevealIndex` and `seedRevealDelay` helpers in transcript.ts
-- Cascade state management in ChatView.tsx
+The seeded transcript reveal feature was originally implemented but completely removed after operators reported that opening a session re-typed its history instead of showing it, which read as delay rather than polish. The following components were removed from the codebase:
+
+**Removed Components:**
+- `seedRevealIndex` helper function in `transcript.ts` - calculated the index of the last turn with non-empty reply text
+- `seedRevealDelay` helper function in `transcript.ts` - computed per-turn stagger delays with budget compression
+- Cascade state management in `ChatView.tsx` - managed `seedReveal` state, timers, and session switch cancellation
 - All related unit tests for seeded reveal functionality
 
-**Current State**: Cold-seeded transcripts now render instantly. The typewriter effect is reserved exclusively for live arrivals (SPEC-035).
+**Current State Verification:**
+- Codebase search confirms zero references to `seedReveal`, `seedRevealIndex`, or `seedRevealDelay`
+- Cold-seeded transcripts now render instantly without any typewriter effect
+- Typewriter functionality is reserved exclusively for live arrivals per SPEC-035
+- Plan and tasks files retain historical records of the original implementation intent
+
+**Impact Assessment:**
+- No functional impact on existing chat operations
+- Improved perceived performance for session loading
+- Maintains consistency with operator expectations for immediate content display
 
 **Section sources**
 - [spec.md:44-51](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/spec.md#L44-L51)
@@ -298,6 +310,7 @@ S --> SR["confirmation_records.py"]
 - Pending queue remains unpaginated to prevent hiding work; sanity cap prevents excessive payloads.
 - Reduced motion preference degrades to instant render for accessibility.
 - History tab maintains current page during polling to avoid disruptive reflows.
+- **Post-revert optimization**: Cold-seeded transcripts now render instantly, eliminating the previous typewriter delay that operators found frustrating.
 
 ## Troubleshooting Guide
 Common issues and checks:
@@ -305,6 +318,7 @@ Common issues and checks:
 - Incorrect totals: ensure history count query excludes pending rows and respects retention window.
 - Policy errors: validate `approvals:list` permission and upstream error mapping (4xx passthrough, 5xx/transport → 502).
 - Page navigation issues: verify offset state management and refetch logic in ApprovalsView hook.
+- **Post-revert considerations**: If experiencing unexpected delays in session loading, verify that no custom implementations are attempting to reintroduce seeded transcript reveal functionality.
 
 **Section sources**
 - [approvals.py:19-57](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L19-L57)
@@ -317,7 +331,7 @@ SPEC-036 has been partially delivered, with four out of five requirements succes
 - **Delivered**: R-2 through R-5 provide robust server-side pagination for the approvals inbox, eliminating silent truncation and enabling efficient browsing of historical decisions.
 - **Reverted**: R-1 (Seeded Transcript Reveal) was removed in v0.18.1 due to negative user feedback, with the typewriter effect reserved for live arrivals only.
 
-The delivered components improve reliability and usability for approvers by providing accurate, paginated access to approval history while maintaining the integrity of the pending queue.
+The delivered components improve reliability and usability for approvers by providing accurate, paginated access to approval history while maintaining the integrity of the pending queue. The revert of R-1 reflects successful user-centered design iteration, prioritizing immediate content availability over progressive reveal effects.
 
 **Delivery Status**: R-2 through R-5 completed in v0.18.0; R-1 reverted in v0.18.1 patch.
 
@@ -326,6 +340,7 @@ The delivered components improve reliability and usability for approvers by prov
 - Non-goals: keyset/cursor pagination, cross-owner session review, shift-summary artifacts, and any changes to pending-record behavior or retention windows.
 - Verification: Portal suite green; agent-platform suite green; gateway suite green; `make verify` green at lockstep 0.18.1.
 - Revert rationale: Live-check feedback indicated that seeded-transcript typewriter read as delay rather than polish, leading to its removal in v0.18.1.
+- **Codebase verification**: Complete removal confirmed through codebase search - zero references to `seedReveal`, `seedRevealIndex`, or `seedRevealDelay` functions remain in the codebase.
 
 **Section sources**
 - [spec.md:3-9](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/spec.md#L3-L9)
