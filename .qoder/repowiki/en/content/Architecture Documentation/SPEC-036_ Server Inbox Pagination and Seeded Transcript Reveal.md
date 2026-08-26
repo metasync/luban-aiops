@@ -12,15 +12,17 @@
 - [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
 - [approvals.ts](file://products/operator-portal/web-ui/app/src/api/approvals.ts)
 - [ApprovalsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx)
+- [live-check-patch.md](file://docs/agentic-aiops-platform/release-notes/2026-08-26-live-check-patch.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated spec status to `delivered` reflecting completed implementation
-- Enhanced architecture diagrams with actual implementation details from backend pagination endpoints, frontend UI enhancements, and platform gateway forwarding capabilities
-- Added comprehensive coverage of all five requirements (R-1 through R-5) with specific file references
-- Updated component analysis sections with detailed implementation evidence
-- Added release verification information and delivery confirmation
+- Updated spec status to reflect current state after revert: R-1 (Seeded Transcript Reveal) was reverted in v0.18.1, while R-2 through R-5 remain delivered
+- Removed all references to seeded transcript reveal functionality from implementation sections
+- Updated architecture diagrams to reflect only the remaining inbox pagination features
+- Added comprehensive coverage of the revert decision and its impact
+- Updated component analysis to focus exclusively on the delivered inbox pagination requirements
+- Added release verification information for both the original delivery and subsequent revert
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -35,30 +37,28 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-SPEC-036 introduces two operator-facing improvements to the approval workflow and session transcript experience:
+SPEC-036 introduced two operator-facing improvements to the approval workflow and session transcript experience:
 - Server-side pagination for the approvals inbox history, replacing a single combined query that silently truncated results.
 - Progressive typewriter reveal for cold-seeded transcripts so opening a session reads like a live stream instead of a sudden wall of text.
 
-The spec defines five requirements (R-1 through R-5) spanning the portal chat UI, agent-service confirmation store, agent-service v2 API, gateway proxy, and portal approvals view. The plan outlines implementation steps and tests; the tasks list breaks down deliverables by requirement.
+The spec defines five requirements (R-1 through R-5) spanning the portal chat UI, agent-service confirmation store, agent-service v2 API, gateway proxy, and portal approvals view. However, **R-1 (Seeded Transcript Reveal) was completely reverted in v0.18.1** due to negative user feedback during live check, where operators found the seeded-transcript typewriter read as delay rather than polish. The typewriter effect is now reserved exclusively for live arrivals (SPEC-035).
 
-**Status**: Delivered in v0.18.0 with full implementation across all components.
+**Current Status**: R-2 through R-5 delivered in v0.18.0; R-1 reverted in v0.18.1 patch.
 
 **Section sources**
 - [spec.md:3-9](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/spec.md#L3-L9)
-- [spec.md:11-37](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/spec.md#L11-L37)
-- [plan.md:1-7](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/plan.md#L1-L7)
+- [spec.md:44-51](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/spec.md#L44-L51)
+- [spec.md:157-165](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/spec.md#L157-L165)
 
 ## Project Structure
-This feature touches three products with complete implementation:
-- Operator Portal (React): transcript helpers and chat view wiring for seeded reveal and server-driven History tab.
+This feature touches three products with partial implementation:
+- Operator Portal (React): server-driven History tab and approvals view for pagination.
 - Agent Platform (Python): confirmation record store split into pending and paginated history, plus new v2 endpoint.
 - Platform Gateway (Python): forwards pagination parameters and logs counts separately.
 
 ```mermaid
 graph TB
 subgraph "Operator Portal"
-P_Transcript["transcript.ts<br/>seedRevealIndex + seedRevealDelay"]
-P_ChatView["ChatView.tsx<br/>Cold seed cascade"]
 P_ApprovalsAPI["approvals.ts<br/>getApprovalsInbox"]
 P_ApprovalsView["ApprovalsView.tsx<br/>Server-driven History tab"]
 end
@@ -69,8 +69,6 @@ end
 subgraph "Platform Gateway"
 G_Approvals["approvals.py<br/>Pagination pass-through"]
 end
-P_Transcript --> P_ChatView
-P_ChatView --> G_Approvals
 P_ApprovalsAPI --> P_ApprovalsView
 P_ApprovalsView --> G_Approvals
 G_Approvals --> A_Routes
@@ -78,8 +76,6 @@ A_Routes --> A_Store
 ```
 
 **Diagram sources**
-- [transcript.ts:231-260](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L231-L260)
-- [ChatView.tsx:705-776](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L705-L776)
 - [approvals.ts:21-37](file://products/operator-portal/web-ui/app/src/api/approvals.ts#L21-L37)
 - [ApprovalsView.tsx:69-241](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L69-L241)
 - [confirmation_records.py:186-216](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L186-L216)
@@ -93,13 +89,11 @@ A_Routes --> A_Store
 - Confirmation record store (agent-service): splits inbox queries into pending and history with offset paging and total count.
 - Paginated inbox API (agent-service v2): exposes `history_limit` and `history_offset`, returns separate pending/history arrays and total.
 - Gateway pass-through (platform-gateway): forwards pagination params, enforces policy, logs counts separately.
-- Seeded transcript reveal (portal): pure helpers compute last reply index and per-turn stagger delay; ChatView wires cascade on cold seed.
 - Server-driven History tab (portal): uses antd pagination with offset-based navigation and refresh-aware state management.
 
 Key behaviors:
 - Pending queue is never hidden or paginated; it remains complete up to its sanity cap.
 - History uses offset pagination within a retention window; ordering is stable using parked_at desc with confirm_id tiebreak.
-- Cold-seed reveal cascades top-to-bottom with budget-compressed staggering and respects reduced motion.
 - History tab maintains current page during polling without snapping back to page 1.
 
 **Section sources**
@@ -107,12 +101,10 @@ Key behaviors:
 - [confirmation_records.py:575-606](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L575-L606)
 - [routes.py:669-705](file://products/agent-platform/src/agent_service/api/v2/routes.py#L669-L705)
 - [approvals.py:19-57](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L19-L57)
-- [transcript.ts:231-260](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L231-L260)
-- [ChatView.tsx:705-776](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L705-L776)
 - [ApprovalsView.tsx:69-241](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L69-L241)
 
 ## Architecture Overview
-End-to-end flow for an approvals inbox request and a cold-seeded transcript reveal:
+End-to-end flow for an approvals inbox request with server-side pagination:
 
 ```mermaid
 sequenceDiagram
@@ -143,34 +135,21 @@ Gateway-->>Portal : Next page results
 
 ## Detailed Component Analysis
 
-### Seeded Transcript Reveal (R-1) - Implemented
-- Pure helpers implemented:
-  - `seedRevealIndex`: finds the last turn with non-empty reply text; null if none.
-  - `seedRevealDelay`: computes per-turn stagger capped at a budget so long transcripts start quickly.
-- ChatView integration:
-  - On cold seed path, compute reveal index and arm a timer to clear after the arrival window plus final stagger.
-  - Pass `revealFromChars={0}` and staggered `revealDelayMs` to each turn until the cascade completes.
-  - Arrival reveal wins over seeded reveal at its start turn; no flash or scroll hijack.
+### Seeded Transcript Reveal (R-1) - Reverted
+**Status**: Reverted in v0.18.1 due to negative user feedback during live check.
 
-```mermaid
-flowchart TD
-Start(["Cold seed turns"]) --> FindLast["Find last turn with replyText"]
-FindLast --> HasReply{"Any reply?"}
-HasReply -- "No" --> End(["No cascade"])
-HasReply -- "Yes" --> ArmTimer["Arm cascade timer<br/>clear after ARRIVAL_WINDOW_MS + delay(last,last)"]
-ArmTimer --> Cascade["For each turn i <= lastIndex:<br/>set revealDelayMs = seedRevealDelay(i,lastIndex)"]
-Cascade --> Done(["Cascade complete"])
-```
+The seeded transcript reveal feature was originally implemented but completely removed after operators reported that opening a session re-typed its history instead of showing it, which read as delay rather than polish. The following components were removed:
+- `seedRevealIndex` and `seedRevealDelay` helpers in transcript.ts
+- Cascade state management in ChatView.tsx
+- All related unit tests for seeded reveal functionality
 
-**Diagram sources**
-- [transcript.ts:231-260](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L231-L260)
-- [ChatView.tsx:705-776](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L705-L776)
+**Current State**: Cold-seeded transcripts now render instantly. The typewriter effect is reserved exclusively for live arrivals (SPEC-035).
 
 **Section sources**
-- [transcript.ts:231-260](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L231-L260)
-- [ChatView.tsx:705-776](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L705-L776)
+- [spec.md:44-51](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/spec.md#L44-L51)
+- [live-check-patch.md:50-58](file://docs/agentic-aiops-platform/release-notes/2026-08-26-live-check-patch.md#L50-L58)
 
-### Split Inbox Store Queries (R-2) - Implemented
+### Split Inbox Store Queries (R-2) - Delivered
 - Protocol change implemented:
   - `load_pending_inbox() -> list[pending]`
   - `load_inbox_history(limit, offset) -> tuple[list[resolved], int(total)]`
@@ -216,7 +195,7 @@ ConfirmationRecordStore <|.. PostgresConfirmationRecordStore
 - [confirmation_records.py:337-367](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L337-L367)
 - [confirmation_records.py:575-606](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L575-L606)
 
-### Paginated Inbox API (R-3) - Implemented
+### Paginated Inbox API (R-3) - Delivered
 - Endpoint fully implemented: `GET /api/v2/confirmations`
 - Query params validated:
   - `history_limit` (1–50, default 10)
@@ -228,10 +207,10 @@ Acceptance signals verified include default page behavior, explicit offset/limit
 
 **Section sources**
 - [plan.md:54-62](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/plan.md#L54-L62)
-- [spec.md:84-96](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/spec.md#L84-L96)
+- [spec.md:91-97](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/spec.md#L91-L97)
 - [routes.py:669-705](file://products/agent-platform/src/agent_service/api/v2/routes.py#L669-L705)
 
-### Gateway Pass-Through (R-4) - Implemented
+### Gateway Pass-Through (R-4) - Delivered
 - Route fully implemented: `GET /api/v1/approvals/inbox` accepts `history_limit` and `history_offset`.
 - Forwards params verbatim to agent service via `approvals_inbox`.
 - Policy gate (`approvals:list`) unchanged; error mapping unchanged.
@@ -257,7 +236,7 @@ GW->>GW : log_event(pending_count, history_count, history_total)
 - [approvals.py:19-57](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L19-L57)
 - [plan.md:64-74](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/plan.md#L64-L74)
 
-### Server-Driven History Tab (R-5) - Implemented
+### Server-Driven History Tab (R-5) - Delivered
 - API client fully implemented: `getApprovalsInbox({ historyLimit?, historyOffset?, signal? })` returns the new shape.
 - Hook state fully implemented: replaces flat `records` with `pending`, `history`, `historyTotal`, `historyOffset`, and `setPageOffset(offset)`.
 - Behavior fully implemented:
@@ -284,13 +263,11 @@ Refetch --> UpdateState["Update history, historyTotal, historyOffset"]
 
 **Section sources**
 - [plan.md:76-98](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/plan.md#L76-L98)
-- [spec.md:111-128](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/spec.md#L111-L128)
+- [spec.md:118-127](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/spec.md#L118-L127)
 - [ApprovalsView.tsx:69-241](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L69-L241)
 
 ## Dependency Analysis
 - Portal depends on:
-  - Transcript helpers for seeded reveal timing and indexing.
-  - ChatView effect wiring to start cascade on cold seed and cancel on switch.
   - Approvals API client for server-driven pagination.
 - Gateway depends on:
   - Policy engine for approvals:list.
@@ -300,17 +277,13 @@ Refetch --> UpdateState["Update history, historyTotal, historyOffset"]
 
 ```mermaid
 graph LR
-T["transcript.ts"] --> C["ChatView.tsx"]
-C --> G["approvals.py"]
+A["approvals.ts"] --> AV["ApprovalsView.tsx"]
+AV --> G["approvals.py"]
 G --> S["routes.py"]
 S --> SR["confirmation_records.py"]
-A["approvals.ts"] --> AV["ApprovalsView.tsx"]
-AV --> G
 ```
 
 **Diagram sources**
-- [transcript.ts:231-260](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L231-L260)
-- [ChatView.tsx:705-776](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L705-L776)
 - [approvals.ts:21-37](file://products/operator-portal/web-ui/app/src/api/approvals.ts#L21-L37)
 - [ApprovalsView.tsx:69-241](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L69-L241)
 - [approvals.py:19-57](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L19-L57)
@@ -323,7 +296,6 @@ AV --> G
 ## Performance Considerations
 - Inbox history pagination avoids loading entire histories; offset paging is bounded by retention window and sweep, minimizing drift risk.
 - Pending queue remains unpaginated to prevent hiding work; sanity cap prevents excessive payloads.
-- Seeded reveal uses budget-compressed staggering to ensure long transcripts start cascading quickly without overwhelming the UI thread.
 - Reduced motion preference degrades to instant render for accessibility.
 - History tab maintains current page during polling to avoid disruptive reflows.
 
@@ -331,7 +303,6 @@ AV --> G
 Common issues and checks:
 - Missing history data: verify `history_limit`/`history_offset` reach the agent service and that retention window includes decided rows.
 - Incorrect totals: ensure history count query excludes pending rows and respects retention window.
-- Stuck cascade: confirm seed reveal timer clears on session switch and after the arrival window plus final delay.
 - Policy errors: validate `approvals:list` permission and upstream error mapping (4xx passthrough, 5xx/transport → 502).
 - Page navigation issues: verify offset state management and refetch logic in ApprovalsView hook.
 
@@ -339,24 +310,25 @@ Common issues and checks:
 - [approvals.py:19-57](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L19-L57)
 - [routes.py:669-705](file://products/agent-platform/src/agent_service/api/v2/routes.py#L669-L705)
 - [confirmation_records.py:575-606](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L575-L606)
-- [ChatView.tsx:705-776](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L705-L776)
 - [ApprovalsView.tsx:88-135](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L88-L135)
 
 ## Conclusion
-SPEC-036 has been successfully delivered and implemented, improving reliability and usability for approvers and operators:
-- Inbox history is now safely paginated with accurate totals, eliminating silent truncation.
-- Cold-seeded transcripts reveal progressively, providing consistent presentation across arrivals and initial loads.
-- All five requirements (R-1 through R-5) are fully implemented with comprehensive testing and verification.
-- The changes are scoped to well-defined components with clear contracts, enabling incremental rollout and testing.
+SPEC-036 has been partially delivered, with four out of five requirements successfully implemented:
+- **Delivered**: R-2 through R-5 provide robust server-side pagination for the approvals inbox, eliminating silent truncation and enabling efficient browsing of historical decisions.
+- **Reverted**: R-1 (Seeded Transcript Reveal) was removed in v0.18.1 due to negative user feedback, with the typewriter effect reserved for live arrivals only.
 
-**Delivery Status**: Completed in v0.18.0 with green test suites and successful smoke verification through the gateway.
+The delivered components improve reliability and usability for approvers by providing accurate, paginated access to approval history while maintaining the integrity of the pending queue.
+
+**Delivery Status**: R-2 through R-5 completed in v0.18.0; R-1 reverted in v0.18.1 patch.
 
 ## Appendices
-- Spec status and release slice: delivered in R4 — Approval-Gated Bounded Actions.
+- Spec status and release slice: delivered in R4 — Approval-Gated Bounded Actions (with R-1 reverted).
 - Non-goals: keyset/cursor pagination, cross-owner session review, shift-summary artifacts, and any changes to pending-record behavior or retention windows.
-- Verification: Portal suite green; agent-platform suite green; gateway suite green; `make verify` green; version lockstep 0.18.0.
+- Verification: Portal suite green; agent-platform suite green; gateway suite green; `make verify` green at lockstep 0.18.1.
+- Revert rationale: Live-check feedback indicated that seeded-transcript typewriter read as delay rather than polish, leading to its removal in v0.18.1.
 
 **Section sources**
 - [spec.md:3-9](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/spec.md#L3-L9)
-- [spec.md:130-148](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/spec.md#L130-L148)
+- [spec.md:137-143](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/spec.md#L137-L143)
 - [tasks.md:36-45](file://docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/tasks.md#L36-L45)
+- [live-check-patch.md:50-58](file://docs/agentic-aiops-platform/release-notes/2026-08-26-live-check-patch.md#L50-L58)
