@@ -148,3 +148,4 @@ Mechanical enforcement:
 | `SPEC-032` | Owner-side live decision sync — poll-while-pending chat view surfaces external decisions and the resumed turn without refresh (extends SPEC-031) | `delivered` |
 | `SPEC-033` | Confirmation card turn anchoring — parked records persist their turn ordinal and seeded cards anchor under the exchange that parked them (extends SPEC-031) | `delivered` |
 | `SPEC-034` | Approval & owner chat UX polish — arrival highlight for post-decision content, instant session-list refresh, Pending/History tabs, separated inbox entries, expiry banner note (extends SPEC-031/SPEC-032) | `delivered` |
+| `SPEC-035` | Decision sync robustness and arrival polish — transcript segment boundaries, time-based settle window with visibility kick, progressive arrival reveal, session-tag park timing and stale-guard, approvals banner line and history pagination (extends SPEC-032/SPEC-034) | `draft` |
