@@ -2,6 +2,9 @@
 
 ## R-1 seeded-transcript reveal
 
+> Reverted in the 0.18.1 patch after live-check feedback; boxes below
+> remain ticked as the historical delivery record.
+
 - [x] `transcript.ts`: `seedRevealIndex` + `seedRevealDelay` helpers
       + unit tests.
 - [x] `ChatView.tsx`: cold-seed cascade state, timer, switch-cancel,

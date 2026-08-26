@@ -8,6 +8,11 @@ together).
 
 ## R-1 seeded-transcript reveal (portal)
 
+*(Reverted in the 0.18.1 patch after live-check feedback — the section
+below is retained as the delivered-then-reverted plan; the helpers and
+cascade state no longer exist in the code, and the typewriter applies
+to live arrivals only.)*
+
 - `src/chat/transcript.ts`: pure helpers —
   `seedRevealIndex(turns: ChatTurn[]): number | null` (the index of
   the last turn with non-empty `replyText`, null otherwise) and
