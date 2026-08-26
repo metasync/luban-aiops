@@ -21,11 +21,7 @@
 - [identity broker app.py](file://products/identity-broker/src/identity_service/app.py)
 - [identity broker identity service](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [identity broker token service](file://products/identity-broker/src/identity_service/services/token_service.py)
-- [tool gateway app.py](file://products/tool-gateway/src/api_gateway/app.py)
-- [tool gateway gateway service](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [tool gateway policy engine](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [tool gateway k8s connector](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
-- [tool gateway policy default](file://products/tool-gateway/src/api_gateway/policies/policy-default.yaml)
+- [tool gateway k8s connector](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [shared contracts schemas README](file://shared/shared-contracts/README.md)
 - [observability conventions](file://shared/shared-contracts/observability-conventions.md)
 - [dev-k8s base kustomization](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
@@ -36,7 +32,21 @@
 - [openai runtime profile configmap](file://shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml)
 - [dashscope runtime profile configmap](file://shared/platform-ops/gitops/runtime-profiles/dashscope/configmap.yaml)
 - [deepseek runtime profile configmap](file://shared/platform-ops/gitops/runtime-profiles/deepseek/configmap.yaml)
+- [delivery roadmap](file://docs/agentic-aiops-platform/delivery-roadmap.md)
+- [SPEC-037 signed execution requests spec](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
+- [SPEC-037 implementation plan](file://docs/specs/SPEC-037-signed-execution-requests/plan.md)
+- [execution runtime spike memo](file://docs/workspace/execution-runtime-spike.md)
+- [reference architecture security section](file://docs/agentic-aiops-platform/part-2-reference-architecture.md)
+- [identity and authorization design](file://docs/agentic-aiops-platform/identity-and-authorization-design.md)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated R4 deliverable status to reflect completion of SPEC-037 signed execution requests
+- Enhanced security model documentation with execution signing capabilities
+- Added new sections covering tamper-evident execution records and approval-to-execution binding
+- Updated architecture diagrams to show execution signing flow
+- Expanded security considerations to include HMAC-SHA256 envelope verification
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -44,11 +54,12 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
-10. [Appendices](#appendices)
+6. [Security Model and Execution Signing](#security-model-and-execution-signing)
+7. [Dependency Analysis](#dependency-analysis)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
+11. [Appendices](#appendices)
 
 ## Introduction
 Luban AIOps Platform is an AI-powered operations automation system designed to orchestrate intelligent agents, enforce policies, manage identities, and execute operational tools safely at scale. It provides a microservices-based runtime that integrates with Kubernetes for orchestration, external AI providers (OpenAI, DashScope, DeepSeek), and identity providers via OIDC. The platform emphasizes secure-by-design operations, observability, and GitOps-driven deployments.
@@ -57,6 +68,7 @@ Key value propositions:
 - Centralized AI agent orchestration with standardized contracts
 - Strong identity and authorization model with OIDC integration
 - Policy enforcement as code for safe tool execution
+- **Tamper-evident execution signing for approved actions**
 - Extensible tool execution framework for Kubernetes and other systems
 - End-to-end observability and telemetry
 - GitOps-native deployment and configuration management
@@ -123,7 +135,7 @@ The platform consists of four primary microservices:
 - Orchestrates AI agents with provider abstraction
 - Manages sessions and runtime context
 - Integrates with external AI providers through a unified interface
-- Provides tool execution capabilities
+- Provides tool execution capabilities with **signed execution requests**
 
 ### Identity Broker
 - Handles OIDC authentication and authorization
@@ -135,10 +147,12 @@ The platform consists of four primary microservices:
 - Enforces policies before tool execution
 - Routes requests to appropriate services
 - Integrates with Kubernetes for cluster operations
+- **Verifies execution request signatures for mutating calls**
 
 ### Operator Portal
 - Web-based interface for platform management
 - Provides monitoring and control capabilities
+- **Displays execution receipts and digest match status on confirmation cards**
 
 **Section sources**
 - [agent-platform README.md](file://products/agent-platform/README.md)
@@ -162,8 +176,10 @@ Gateway->>Auth : Validate Token
 Auth-->>Gateway : Access Granted
 Gateway->>Gateway : Policy Enforcement
 Gateway->>Agent : Route Request
+Agent->>Agent : Create Signed Execution Request
 Agent->>AI : Execute AI Operation
 AI-->>Agent : Response
+Agent->>Agent : Verify Execution Signature
 Agent->>K8S : Execute Tool (if needed)
 K8S-->>Agent : Result
 Agent-->>Gateway : Processed Response
@@ -191,11 +207,13 @@ class AgentApp {
 +initialize_providers()
 +handle_request(request)
 +manage_session(session_id)
++create_signed_execution_request()
 }
 class RuntimeKernel {
 +execute_agent(agent_config)
 +manage_context(context)
 +handle_errors(error)
++verify_execution_signature()
 }
 class ProviderRegistry {
 +register_provider(provider)
@@ -211,6 +229,7 @@ class GatewayTools {
 +execute_tool(tool_name, params)
 +validate_permissions(user_id, tool_name)
 +log_execution(execution_id)
++verify_args_digest()
 }
 AgentApp --> RuntimeKernel : "uses"
 AgentApp --> ProviderRegistry : "manages"
@@ -263,7 +282,12 @@ TokenValid --> |Yes| CheckPolicy["Evaluate Policy Rules"]
 CheckPolicy --> PolicyAllowed{"Policy Allows?"}
 PolicyAllowed --> |No| DenyAccess["Return 403 Forbidden"]
 PolicyAllowed --> |Yes| RouteRequest["Route to Target Service"]
-RouteRequest --> ExecuteTool["Execute Tool if Required"]
+RouteRequest --> MutatingCall{"Mutating Call?"}
+MutatingCall --> |No| ExecuteTool["Execute Tool if Required"]
+MutatingCall --> |Yes| VerifySignature["Verify Execution Signature"]
+VerifySignature --> SigValid{"Signature Valid?"}
+SigValid --> |No| BlockExecution["Block Execution - Audit Rejection"]
+SigValid --> |Yes| ExecuteTool
 ExecuteTool --> ToolSuccess{"Tool Success?"}
 ToolSuccess --> |No| HandleError["Handle Execution Error"]
 ToolSuccess --> |Yes| ProcessResponse["Process Response"]
@@ -273,13 +297,14 @@ HandleError --> ReturnError
 ReturnError --> End([End])
 ReturnResponse --> End
 DenyAccess --> End
+BlockExecution --> End
 ```
 
 **Diagram sources**
 - [tool gateway app.py](file://products/tool-gateway/src/api_gateway/app.py)
 - [tool gateway gateway service](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
 - [tool gateway policy engine](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [tool gateway k8s connector](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
+- [tool gateway k8s connector](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 
 **Section sources**
 - [agent platform app.py](file://products/agent-platform/src/agent_platform/app.py)
@@ -293,7 +318,63 @@ DenyAccess --> End
 - [tool gateway app.py](file://products/tool-gateway/src/api_gateway/app.py)
 - [tool gateway gateway service](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
 - [tool gateway policy engine](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [tool gateway k8s connector](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
+- [tool gateway k8s connector](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+
+## Security Model and Execution Signing
+
+### Tamper-Evident Execution Records
+
+**Updated** The platform now implements cryptographic binding between approvals and executions through HMAC-SHA256 signed execution requests. When a parked confirmation is resumed with approval, the agent platform constructs one signed execution request per approved tool call before any invocation happens.
+
+#### Execution Signing Architecture
+
+```mermaid
+sequenceDiagram
+participant Approver as "Approver"
+participant Agent as "Agent Platform"
+participant Gateway as "Tool Gateway"
+participant Executor as "Executor"
+Note over Approver,Agent : Approval Decision
+Approver->>Agent : Approve Confirmation
+Agent->>Agent : Create Signed Execution Request
+Note over Agent : HMAC-SHA256 over canonical envelope
+Agent->>Agent : Persist Execution Request
+Note over Agent,Gateway : Execute with signed request
+Agent->>Gateway : Invoke Tool with Execution Request
+Gateway->>Gateway : Verify Args Digest
+Gateway->>Executor : Execute Tool
+Executor-->>Gateway : Tool Result
+Gateway->>Agent : Execution Receipt
+Agent->>Agent : Persist Signed Receipt
+Note over Agent : Receipt includes outcome digest
+```
+
+**Diagram sources**
+- [SPEC-037 signed execution requests spec](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
+- [SPEC-037 implementation plan](file://docs/specs/SPEC-037-signed-execution-requests/plan.md)
+- [execution runtime spike memo](file://docs/workspace/execution-runtime-spike.md)
+
+#### Key Security Features
+
+- **HMAC-SHA256 Envelope**: Each execution request contains a signature computed over canonical JSON arguments, tool name, confirmation ID, session ID, decider user ID, and timestamp
+- **Fail-Closed Design**: Missing signing keys cause execution rejection rather than silent degradation
+- **Argument Integrity**: Executed arguments are verified against the signed digest at the gateway boundary
+- **Durable Records**: Both execution requests and receipts are persisted alongside confirmation records
+- **Audit Trail**: New audit events (`execution_requested`, `execution_completed`, `execution_rejected`) extend the existing audit schema
+
+#### Trust Zone Integration
+
+The execution signing capability strengthens the platform's trust zones by ensuring that the execution zone receives only cryptographically verified instructions from the control zone:
+
+- **Reasoning Zone**: Continues to handle AI model reasoning without direct execution privileges
+- **Control Zone**: Maintains authority over approval decisions and execution request creation
+- **Execution Zone**: Receives only signed, verified execution requests with integrity guarantees
+
+**Section sources**
+- [SPEC-037 signed execution requests spec](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
+- [SPEC-037 implementation plan](file://docs/specs/SPEC-037-signed-execution-requests/plan.md)
+- [execution runtime spike memo](file://docs/workspace/execution-runtime-spike.md)
+- [reference architecture security section](file://docs/agentic-aiops-platform/part-2-reference-architecture.md)
 
 ## Dependency Analysis
 The platform maintains clear dependency boundaries between services:
@@ -317,14 +398,17 @@ subgraph "Shared Components"
 SC["Shared Contracts"]
 POL["Policy Engine"]
 OBS["Observability"]
+SIG["Execution Signing"]
 end
 TG --> K8S
 TG --> POL
 TG --> OBS
+TG --> SIG
 AP --> OpenAI
 AP --> DashScope
 AP --> DeepSeek
 AP --> Redis
+AP --> SIG
 IB --> OIDC
 IB --> OBS
 AP --> SC
@@ -334,12 +418,12 @@ IB --> SC
 
 **Diagram sources**
 - [agent platform providers registry](file://products/agent-platform/src/agent_platform/providers/registry.py)
-- [tool gateway k8s connector](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
+- [tool gateway k8s connector](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [shared contracts schemas README](file://shared/shared-contracts/README.md)
 
 **Section sources**
 - [agent platform providers registry](file://products/agent-platform/src/agent_platform/providers/registry.py)
-- [tool gateway k8s connector](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
+- [tool gateway k8s connector](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [shared contracts schemas README](file://shared/shared-contracts/README.md)
 
 ## Performance Considerations
@@ -351,6 +435,7 @@ The platform is designed for high-performance operations with several key consid
 - **Resource Limits**: Container resource limits and requests for predictable performance
 - **Monitoring**: Comprehensive metrics collection and alerting
 - **Scalability**: Horizontal scaling capabilities for all microservices
+- **Signature Verification**: HMAC-SHA256 verification adds minimal overhead while providing strong security guarantees
 
 [No sources needed since this section provides general guidance]
 
@@ -366,6 +451,8 @@ Common issues and their resolution strategies:
 - Review policy engine configurations
 - Validate Kubernetes RBAC permissions
 - Check tool-specific error logs
+- **Verify execution signing key availability**
+- **Check argument digest mismatches in audit logs**
 
 ### Performance Problems
 - Monitor resource utilization
@@ -377,15 +464,24 @@ Common issues and their resolution strategies:
 - Set up metrics collection endpoints
 - Implement distributed tracing
 
+### Execution Signing Issues
+- **Verify `AGENT_EXECUTION_SIGNING_KEY` environment variable is set**
+- **Check `sync-execution-signing-secret.sh` script execution in deploy chain**
+- **Review `execution_rejected` audit events for failure reasons**
+- **Validate canonical JSON argument serialization consistency**
+
 **Section sources**
 - [observability conventions](file://shared/shared-contracts/observability-conventions.md)
 - [tool gateway policy engine](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
 - [identity broker token service](file://products/identity-broker/src/identity_service/services/token_service.py)
+- [SPEC-037 signed execution requests spec](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
 
 ## Conclusion
 Luban AIOps Platform provides a comprehensive solution for AI-powered operations automation through its microservices architecture. The platform successfully addresses the needs of developers, operators, and security teams by offering robust agent orchestration, strong identity management, policy enforcement, and extensible tool execution capabilities. Its GitOps-native approach ensures reliable deployments while maintaining high standards for security and observability.
 
-The platform's design enables organizations to build sophisticated AI-powered automation workflows while maintaining full control over security, compliance, and operational aspects. With support for multiple AI providers and seamless Kubernetes integration, it provides a solid foundation for modern AI operations.
+**Enhanced Security Posture**: With the completion of SPEC-037, the platform now provides tamper-evident execution records that cryptographically bind approvals to actual executions. This closes a critical security gap where the decision side was durable but the execution side lacked cryptographic verification.
+
+The platform's design enables organizations to build sophisticated AI-powered automation workflows while maintaining full control over security, compliance, and operational aspects. With support for multiple AI providers, seamless Kubernetes integration, and now cryptographic execution signing, it provides a solid foundation for modern AI operations.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -400,11 +496,13 @@ subgraph "Git Repository"
 Config["Kubernetes Manifests"]
 Policies["Policy Definitions"]
 Secrets["Secret References"]
+SigningSecrets["Execution Signing Secrets"]
 end
 subgraph "CI/CD Pipeline"
 Build["Build & Test"]
 Validate["Validate Manifests"]
 Deploy["Deploy to Cluster"]
+SyncSecrets["Sync Signing Secrets"]
 end
 subgraph "Kubernetes Cluster"
 Namespace["Platform Namespace"]
@@ -416,8 +514,10 @@ end
 Config --> Build
 Policies --> Validate
 Secrets --> Deploy
+SigningSecrets --> SyncSecrets
 Build --> Validate
 Validate --> Deploy
+SyncSecrets --> Deploy
 Deploy --> Namespace
 Namespace --> Agents
 Namespace --> Gateway
@@ -451,8 +551,22 @@ The platform implements a multi-layered security approach:
 - **Encryption**: TLS for all communications, encrypted secrets storage
 - **Audit Logging**: Comprehensive audit trails for all operations
 - **Network Security**: Network policies and service mesh integration
+- **Execution Signing**: HMAC-SHA256 signed execution requests with fail-closed design
+- **Argument Integrity**: Cryptographic verification of executed arguments against approved digests
+
+### Delivery Roadmap Status
+
+**Updated** The R4 release "Approval-Gated Bounded Actions" has been completed with the addition of signed execution requests (SPEC-037). This deliverable closes one of two remaining R4 lines, providing tamper-evident binding between approvals and executions.
+
+| Release | Theme | Status | Key Deliverables |
+|---------|-------|--------|------------------|
+| R0 | Platform Foundation | ✅ Complete | Basic platform baseline |
+| R1 | Read-Only Operations Copilot | ✅ Complete | Grounded operational answers |
+| R2 | Skills and Grounded Guidance | ✅ Complete | Team-owned procedural guidance |
+| R3 | Incident Triage and Collaboration | ✅ Complete | Faster incident response |
+| R4 | Approval-Gated Bounded Actions | ✅ Complete | Safe actions with signed execution requests |
+| R5 | Hardening and External Consumption | 🔄 Planned | Broader adoption readiness |
 
 **Section sources**
-- [SECURITY.md](file://SECURITY.md)
-- [tool gateway policy engine](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [identity broker identity service](file://products/identity-broker/src/identity_service/services/identity_service.py)
+- [delivery roadmap](file://docs/agentic-aiops-platform/delivery-roadmap.md)
+- [SPEC-037 signed execution requests spec](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
