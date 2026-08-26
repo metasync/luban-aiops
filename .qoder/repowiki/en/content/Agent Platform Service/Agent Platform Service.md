@@ -44,6 +44,9 @@
 - [test_model_discovery.py](file://products/agent-platform/tests/test_model_discovery.py)
 - [test_model_switching.py](file://products/agent-platform/tests/test_model_switching.py)
 - [test_confirmation_records.py](file://products/agent-platform/tests/test_confirmation_records.py)
+- [test_session_workspace.py](file://products/agent-platform/tests/test_session_workspace.py)
+- [spec.md](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md)
+- [decision-sync-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-26-decision-sync-arrival-polish.md)
 - [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
 - [pyproject.toml](file://products/agent-platform/pyproject.toml)
@@ -53,14 +56,14 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced confirmation record storage layer with turn_index field support for SPEC-033
-- Improved confirmation card anchoring to parking turns instead of stacking under newest turn
-- Added idempotent resolution and SQL-level guards for concurrent approval handling
-- Enhanced startup sweep scoping to prevent sibling replica interference during initialization
+- Enhanced session transcript reconstruction with blank-line block joining for proper markdown rendering (SPEC-035 R-1)
+- Improved decision sync robustness with time-based settle windows and visibility kicks (SPEC-035 R-3)
+- Added progressive arrival presentation for resumed turns after external decisions (SPEC-035 R-4)
+- Enhanced confirmation record storage layer with turn_index field support for precise card anchoring (SPEC-033)
+- Improved startup sweep scoping to prevent sibling replica interference during initialization
 - Better error handling for concurrent approval attempts with structured 409 responses
 - Added durable confirmation lifecycle records with cross-replica consistency guarantees
 - Implemented claim-time outcome persistence for race condition resilience
-- Enhanced HITL confirmation registry integration with persistent state management
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -70,7 +73,7 @@
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Multi-Session Operator Workspace](#multi-session-operator-workspace)
 7. [Session Store Enhancements](#session-store-enhancements)
-8. [Transcript Extraction Service](#transcript-extraction-service)
+8. [Enhanced Transcript Reconstruction](#enhanced-transcript-reconstruction)
 9. [HITL Confirmation Registry Integration](#hitl-confirmation-registry-integration)
 10. [Enhanced Streaming Architecture](#enhanced-streaming-architecture)
 11. [Voice Readiness Support](#voice-readiness-support)
@@ -80,16 +83,17 @@
 15. [Model Catalog Service](#model-catalog-service)
 16. [Live Model Discovery Service](#live-model-discovery-service)
 17. [Multi-Model Runtime Capability](#multi-model-runtime-capability)
-18. [Dependency Analysis](#dependency-analysis)
-19. [Performance Considerations](#performance-considerations)
-20. [Troubleshooting Guide](#troubleshooting-guide)
-21. [Conclusion](#conclusion)
-22. [Appendices](#appendices)
+18. [Decision Sync Robustness](#decision-sync-robustness)
+19. [Dependency Analysis](#dependency-analysis)
+20. [Performance Considerations](#performance-considerations)
+21. [Troubleshooting Guide](#troubleshooting-guide)
+22. [Conclusion](#conclusion)
+23. [Appendices](#appendices)
 
 ## Introduction
 The Agent Platform Service is the core orchestration engine of the Luban AIOps Platform. It provides a runtime kernel for agent execution, a provider registry for multi-model backends (OpenAI, DashScope, DeepSeek, and Luban), and robust session management with durable storage. The service exposes REST APIs for agent interactions, streaming responses, and configuration management, enabling scalable and observable AI operations across diverse model providers.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, and credential-gated model catalogs. The enhanced architecture supports dynamic model switching at runtime through a sophisticated resolution system that prioritizes explicit requests over pinned sessions, falling back to defaults when needed. Live model discovery runs as background tasks with fail-soft caching to ensure continuous availability even during provider outages. The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints such as Ollama, vLLM, and llama.cpp servers. **Additionally, the service now features an enhanced confirmation record storage layer with turn_index field support for SPEC-033, providing precise confirmation card anchoring to their parking turns, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts.**
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, and credential-gated model catalogs. The enhanced architecture supports dynamic model switching at runtime through a sophisticated resolution system that prioritizes explicit requests over pinned sessions, falling back to defaults when needed. Live model discovery runs as background tasks with fail-soft caching to ensure continuous availability even during provider outages. The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints such as Ollama, vLLM, and llama.cpp servers. **Additionally, the service now features enhanced decision sync robustness with time-based settle windows, improved session transcript reconstruction with blank-line block joining for proper markdown rendering, and an enhanced confirmation record storage layer with turn_index field support for precise confirmation card anchoring.**
 
 ## Project Structure
 The Agent Platform Service is implemented as a Python FastAPI application organized by feature layers:
@@ -101,7 +105,7 @@ The Agent Platform Service is implemented as a Python FastAPI application organi
 - Evidence store service with dual backend support
 - Model catalog service with live discovery capabilities
 - Background task management for model discovery
-- **Durable confirmation record storage with turn_index field support and idempotent resolution**
+- **Enhanced confirmation record storage with turn_index field support and idempotent resolution**
 - Tools and integrations
 - Core cross-cutting concerns (configuration, observability, metrics, telemetry, request context)
 
@@ -235,7 +239,7 @@ settings --> env
 - Runtime Kernel: Orchestrates agent lifecycle, conversation state, tool invocation, and provider dispatch with enhanced AgentScope 2.x toolkit registration, anti-hallucination guards, and model normalization support.
 - Provider Registry: Discovers and manages model providers (OpenAI, DashScope, DeepSeek, Luban) with pluggable interfaces using new AgentScope 2.x model construction patterns.
 - Session Management: Persists and restores conversations with durable storage, multi-session workspace support, and concurrency-safe access with model pinning.
-- **Durable Confirmation Records**: Provides persistent storage for HITL confirmation lifecycle with turn_index field support, idempotent resolution, startup sweep scoping, and cross-replica consistency guarantees.
+- **Enhanced Confirmation Records**: Provides persistent storage for HITL confirmation lifecycle with turn_index field support, idempotent resolution, startup sweep scoping, and cross-replica consistency guarantees.
 - Evidence Store: Provides persistent storage for tool execution evidence with dual backend support and size-capped retention policies.
 - Model Catalog: Manages credential-gated model discovery with multi-provider support, legacy alias resolution, and public schema compliance.
 - Live Model Discovery: Implements background task management with periodic refresh cycles, provider filtering, and atomic catalog updates.
@@ -247,7 +251,7 @@ Key responsibilities:
 - Lifecycle: Initialize, start, run, and shutdown agents safely with AgentScope 2.x compatibility.
 - Conversation: Maintain message history, context, and state per session with workspace organization.
 - Evidence Capture: Persist tool_call and tool_result frames with size caps and automatic eviction.
-- **Confirmation Record Management**: Persist parked confirmations with turn_index anchoring, idempotent resolution, startup sweep scoping, and cross-replica consistency.
+- **Enhanced Confirmation Record Management**: Persist parked confirmations with turn_index anchoring, idempotent resolution, startup sweep scoping, and cross-replica consistency.
 - Model Resolution: Normalize model IDs including legacy provider name aliases to concrete model entries.
 - **Multi-Model Selection**: Resolve models through priority hierarchy (explicit request > pinned session > default).
 - **Session Pinning**: Persist model selections per session with TTL-aware storage across all backends.
@@ -260,11 +264,11 @@ Key responsibilities:
 - Auto-Approval: Pre-approve vetted read-only tools to prevent headless stream stalls while maintaining security.
 - Voice Readiness: Support both text and voice input modalities with consistent policy enforcement and HITL workflows.
 - Workspace Management: Provide multi-session operator workspace with session listing, detail views, and owner-only deletion.
-- Transcript Reconstruction: Extract conversation history from kernel state snapshots for workspace UIs.
+- **Enhanced Transcript Reconstruction**: Extract conversation history from kernel state snapshots with proper markdown rendering and blank-line block joining.
 - HITL Integration: Support human-in-the-loop workflows with parked confirmation management and durable state.
 - Observability: Emit structured logs, metrics, and traces for each operation with per-request audit trails.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with bearer token authentication. **Additionally, the enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.**
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with bearer token authentication. **Additionally, the enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses. The service also features enhanced decision sync robustness with time-based settle windows and improved session transcript reconstruction with blank-line block joining for proper markdown rendering.**
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -288,7 +292,7 @@ The service follows a layered architecture with enhanced security and anti-hallu
 - Providers implement standardized interfaces to communicate with external model APIs using new model construction patterns.
 - Session service persists state using a configurable store with workspace bookkeeping and transcript extraction.
 - Evidence store provides persistent storage for tool execution evidence with dual backend support and size-capped retention.
-- **Confirmation record store provides durable HITL confirmation lifecycle management with turn_index field support, idempotent resolution, and cross-replica consistency.**
+- **Enhanced confirmation record store provides durable HITL confirmation lifecycle management with turn_index field support, idempotent resolution, and cross-replica consistency.**
 - Model catalog provides credential-gated discovery of available models with legacy alias resolution.
 - **Multi-model runtime resolves per-turn model selection through priority hierarchy with session-based pinning.**
 - **Live discovery service runs background tasks to periodically refresh model catalogs with fail-soft fallback ladder.**
@@ -394,7 +398,7 @@ The runtime kernel is the central orchestrator for agent execution with enhanced
 - Anti-hallucination guard system with NO_TOOLS_NOTICE injection
 - Auto-approval mechanism for vetted read-only tools to prevent headless stream stalls
 - Voice readiness support through input_modality parameter passthrough
-- **Durable confirmation management with turn_index field support, idempotent resolution, and cross-replica consistency**
+- **Enhanced durable confirmation management with turn_index field support, idempotent resolution, and cross-replica consistency**
 
 ```mermaid
 classDiagram
@@ -490,7 +494,7 @@ ProviderRegistry --> ModelProvider : "manages"
 GatewayTools --> ModelProvider : "secure invocation"
 ```
 
-**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, enhanced session management methods for multi-session workspace operations and model pinning, evidence capture and persistence for tool execution frames, model normalization for legacy provider name aliases, voice readiness support through input_modality parameter passthrough, **and durable confirmation management with turn_index field support, idempotent resolution, and cross-replica consistency guarantees.**
+**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, enhanced session management methods for multi-session workspace operations and model pinning, evidence capture and persistence for tool execution frames, model normalization for legacy provider name aliases, voice readiness support through input_modality parameter passthrough, **and enhanced durable confirmation management with turn_index field support, idempotent resolution, and cross-replica consistency guarantees.**
 
 **Diagram sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -807,7 +811,7 @@ Key features:
 - **Server-Minted Titles**: First user turn creates immutable session titles (80-char cap)
 - **Owner-Only Access**: Foreign session IDs return 404 (anti-enumeration pattern)
 - **HITL Integration**: Sessions with parked confirmations block deletion with 409
-- **Transcript Extraction**: Best-effort conversation history from kernel state snapshots
+- **Enhanced Transcript Extraction**: Best-effort conversation history from kernel state snapshots with proper markdown rendering
 - **Evidence Retrieval**: Load persisted tool execution evidence for session details
 - **Audit Trail**: All delete operations emit durable `session_deleted` audit events
 
@@ -871,47 +875,45 @@ Enhanced capabilities:
 - [session_store.py:176-320](file://products/agent-platform/src/agent_service/services/session_store.py#L176-L320)
 - [session_store.py:420-612](file://products/agent-platform/src/agent_service/services/session_store.py#L420-L612)
 
-### Transcript Extraction Service
-The transcript extraction service provides best-effort conversation history reconstruction from kernel state snapshots for workspace UIs.
+### Enhanced Transcript Reconstruction
 
+#### Overview
+The enhanced transcript reconstruction service provides best-effort conversation history reconstruction from kernel state snapshots with proper markdown rendering through blank-line block joining. This addresses SPEC-035 R-1 where assistant messages persisted as separate text blocks were previously joined without paragraph breaks, causing block markdown (headings, lists, rules) to render as raw text instead of proper markdown.
+
+#### Blank-Line Block Joining Implementation
 ```mermaid
-sequenceDiagram
-participant Client as "Client"
-participant API as "Session Detail Route"
-participant Transcript as "TranscriptExtractor"
-participant StateStore as "AgentStateStore"
-participant Parser as "ContentParser"
-Client->>API : GET /sessions/{sessionId}
-API->>Transcript : extract_transcript(sessionId)
-Transcript->>StateStore : load_state(sessionId)
-alt State Available
-StateStore-->>Transcript : JSON snapshot
-Transcript->>Parser : parse context messages
-Parser->>Parser : filter user/assistant roles only
-Parser->>Parser : extract text content from blocks
-Parser-->>Transcript : clean conversation turns
-Transcript-->>API : transcript_available=true, turns[]
-else State Missing/Corrupt
-StateStore-->>Transcript : null/error
-Transcript-->>API : transcript_available=false, []
-end
-API-->>Client : Session detail with transcript
+flowchart TD
+A["Assistant Message with Multiple Text Blocks"] --> B["Extract Text Blocks"]
+B --> C{"Multiple Blocks?"}
+C --> |Yes| D["Join with Blank Line (\\n\\n)"]
+C --> |No| E["Use Single Block"]
+D --> F["Preserve Markdown Formatting"]
+E --> F
+F --> G["Render Headings, Lists, Rules Properly"]
+G --> H["Display in Workspace UI"]
 ```
 
 **Diagram sources**
-- [session_transcript.py:30-64](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L64)
-- [routes.py:375-395](file://products/agent-platform/src/agent_service/api/v2/routes.py#L375-L395)
+- [session_transcript.py:67-87](file://products/agent-platform/src/agent_service/services/session_transcript.py#L67-L87)
+- [test_session_workspace.py:178-221](file://products/agent-platform/tests/test_session_workspace.py#L178-L221)
 
-Key characteristics:
-- **Best-Effort Design**: Missing snapshots degrade gracefully without errors
-- **Role Filtering**: Only extracts user and assistant messages (excludes system/tool frames)
-- **Content Flattening**: Converts block-structured content to plain text
-- **Timestamp Preservation**: Maintains original message creation times when available
-- **Error Resilience**: Corrupt JSON or unknown shapes return empty transcripts
-- **Security Boundary**: Never fabricates conversation history
+#### Key Improvements
+- **Proper Paragraph Boundaries**: Text blocks separated by tool calls now join with `\n\n` instead of empty string
+- **Markdown Rendering**: Segment-start headings like `## Pod Restart Summary` render as proper markdown instead of raw text
+- **Block Content Preservation**: Lists, rules, and other block elements maintain proper formatting
+- **Backward Compatibility**: Single-block messages remain unchanged
+- **Best-Effort Design**: Missing or corrupt snapshots degrade gracefully without errors
+
+#### Test Coverage
+The implementation includes comprehensive test coverage validating:
+- Multi-block assistant messages join with blank lines
+- Single-block messages remain unchanged  
+- Corrupt snapshots fall back gracefully
+- Markdown formatting is preserved in rendered output
 
 **Section sources**
-- [session_transcript.py:1-83](file://products/agent-platform/src/agent_service/services/session_transcript.py#L1-L83)
+- [session_transcript.py:1-87](file://products/agent-platform/src/agent_service/services/session_transcript.py#L1-L87)
+- [test_session_workspace.py:178-221](file://products/agent-platform/tests/test_session_workspace.py#L178-L221)
 
 ### HITL Confirmation Registry Integration
 The HITL (Human-In-The-Loop) confirmation registry manages parked tool confirmations for interactive workflows with enhanced durability and cross-replica consistency.
@@ -1014,7 +1016,7 @@ GatewayTools-->>Kernel : toolResult
 end
 ```
 
-**Updated** The tools integration now includes AgentScope 2.x toolkit registration pattern, per-request trace queues for audit trails, v3 streaming support with tool_call/tool_result frames, auto-approval mechanism for vetted read-only tools, HITL confirmation registry integration with durable storage for interactive workflows, evidence store integration for persistent tool execution records, **and confirmation record persistence with turn_index field support, idempotent resolution, and cross-replica consistency**. Voice readiness is maintained throughout the tool execution pipeline.
+**Updated** The tools integration now includes AgentScope 2.x toolkit registration pattern, per-request trace queues for audit trails, v3 streaming support with tool_call/tool_result frames, auto-approval mechanism for vetted read-only tools, HITL confirmation registry integration with durable storage for interactive workflows, evidence store integration for persistent tool execution records, **and enhanced confirmation record persistence with turn_index field support, idempotent resolution, and cross-replica consistency**. Voice readiness is maintained throughout the tool execution pipeline.
 
 **Diagram sources**
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
@@ -1037,7 +1039,7 @@ The multi-session operator workspace provides comprehensive session lifecycle ma
 - **Activity Tracking**: Last active timestamps for workspace sorting and monitoring
 - **Owner-Only Access**: Anti-enumeration pattern prevents session enumeration attacks
 - **HITL Integration**: Sessions with pending confirmations are properly flagged and protected
-- **Transcript Access**: Best-effort conversation history reconstruction for workspace UIs
+- **Enhanced Transcript Access**: Best-effort conversation history reconstruction with proper markdown rendering
 - **Evidence Retrieval**: Load persisted tool execution evidence for session details
 - **Audit Trail**: All workspace operations are logged for compliance and debugging
 
@@ -1056,7 +1058,7 @@ I --> J["Add pending_confirmation flags"]
 J --> K["Return session list"]
 D --> L["Get session by ID"]
 L --> M["Validate owner"]
-M --> N["Extract transcript"]
+M --> N["Extract transcript with blank-line joining"]
 M --> O["Load evidence turns"]
 N --> P["Build response with transcript"]
 O --> P
@@ -1152,74 +1154,62 @@ Service-->>Chat : continue processing
 - [session_store.py:176-320](file://products/agent-platform/src/agent_service/services/session_store.py#L176-L320)
 - [session_store.py:420-612](file://products/agent-platform/src/agent_service/services/session_store.py#L420-L612)
 
-## Transcript Extraction Service
+### Enhanced Transcript Extraction Service
+The enhanced transcript extraction service provides best-effort conversation history reconstruction from kernel state snapshots with proper markdown rendering through blank-line block joining.
 
-### Overview
-The transcript extraction service provides best-effort conversation history reconstruction from kernel state snapshots. This enables workspace UIs to display conversation context without requiring live stream replay or direct database access.
-
-### Extraction Process
 ```mermaid
-flowchart TD
-A["Load Kernel State Snapshot"] --> B{"Snapshot Valid?"}
-B --> |No| C["Return transcript_available=false, []"]
-B --> |Yes| D["Parse JSON Context Array"]
-D --> E{"Context is Array?"}
-E --> |No| C
-E --> |Yes| F["Filter Messages"]
-F --> G{"Message Has Role?"}
-G --> |No| H["Skip Message"]
-G --> |Yes| I{"Role is user/assistant?"}
-I --> |No| H
-I --> |Yes| J["Extract Text Content"]
-J --> K{"Content is String or Blocks?"}
-K --> |String| L["Use Direct Text"]
-K --> |Blocks| M["Flatten Text Blocks"]
-M --> N["Join Block Text"]
-L --> O["Create Turn Object"]
-N --> O
-O --> P["Add Created At (if present)"]
-P --> Q["Add to Turns Array"]
-Q --> R["Continue Processing"]
-R --> S{"More Messages?"}
-S --> |Yes| F
-S --> |No| T["Return transcript_available=true, turns[]"]
+sequenceDiagram
+participant Client as "Client"
+participant API as "Session Detail Route"
+participant Transcript as "Enhanced TranscriptExtractor"
+participant StateStore as "AgentStateStore"
+participant Parser as "ContentParser"
+Client->>API : GET /sessions/{sessionId}
+API->>Transcript : extract_transcript(sessionId)
+Transcript->>StateStore : load_state(sessionId)
+alt State Available
+StateStore-->>Transcript : JSON snapshot
+Transcript->>Parser : parse context messages
+Parser->>Parser : filter user/assistant roles only
+Parser->>Parser : extract text content from blocks
+Parser->>Parser : join blocks with blank line (\n\n)
+Parser-->>Transcript : clean conversation turns with proper markdown
+Transcript-->>API : transcript_available=true, turns[]
+else State Missing/Corrupt
+StateStore-->>Transcript : null/error
+Transcript-->>API : transcript_available=false, []
+end
+API-->>Client : Session detail with transcript
 ```
 
 **Diagram sources**
 - [session_transcript.py:30-64](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L64)
+- [routes.py:375-395](file://products/agent-platform/src/agent_service/api/v2/routes.py#L375-L395)
 
-### Key Characteristics
-- **Best-Effort Design**: Missing or corrupt snapshots degrade gracefully without errors
+Key characteristics:
+- **Best-Effort Design**: Missing snapshots degrade gracefully without errors
 - **Role Filtering**: Only extracts user and assistant messages (excludes system/tool frames)
-- **Content Flattening**: Converts block-structured content to plain text
+- **Enhanced Content Flattening**: Converts block-structured content to plain text with blank-line joining
 - **Timestamp Preservation**: Maintains original message creation times when available
+- **Error Resilience**: Corrupt JSON or unknown shapes return empty transcripts
 - **Security Boundary**: Never fabricates conversation history
-- **Error Resilience**: Handles various content formats and edge cases gracefully
-
-### Integration Points
-- **Session Detail Endpoint**: Provides transcript data alongside session metadata
-- **Workspace UI**: Enables conversation context display in operator interfaces
-- **Audit Trail**: Transcript availability status aids in debugging and monitoring
-- **Fallback Handling**: Graceful degradation when snapshots are unavailable
+- **Markdown Preservation**: Proper paragraph boundaries ensure block markdown renders correctly
 
 **Section sources**
-- [session_transcript.py:1-83](file://products/agent-platform/src/agent_service/services/session_transcript.py#L1-L83)
+- [session_transcript.py:1-87](file://products/agent-platform/src/agent_service/services/session_transcript.py#L1-L87)
 
-## HITL Confirmation Registry Integration
+### HITL Confirmation Registry Integration
+The HITL (Human-In-The-Loop) confirmation registry manages parked tool confirmations for interactive workflows with enhanced durability and cross-replica consistency.
 
-### Overview
-The HITL (Human-In-The-Loop) confirmation registry manages parked tool confirmations for interactive workflows with enhanced durability and cross-replica consistency. When AgentScope kernel encounters tools requiring user approval, it parks the reply and waits for operator confirmation before proceeding.
-
-### Confirmation Lifecycle
 ```mermaid
 stateDiagram-v2
-[*] --> Unparked : Initial State
+[*] --> Unparked
 Unparked --> Parked : RequireUserConfirmEvent
 Parked --> Claimed : claim(confirm_id)
 Claimed --> Resolved : resolve(confirm_id)
 Parked --> Expired : TTL exceeded
 Expired --> Resolved : expire_confirmation(confirm_id)
-Resolved --> [*] : Cleanup Complete
+Resolved --> [*]
 note right of Parked
 Single-flight guard prevents
 double-resumption of parked
@@ -1238,24 +1228,160 @@ end note
 
 **Diagram sources**
 - [hitl_confirmations.py:93-229](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L93-L229)
+- [routes.py:71-100](file://products/agent-platform/src/agent_service/api/v2/routes.py#L71-100)
 
-### Core Components
-- **PendingConfirmation**: Data structure holding parked tool call information with durable persistence
-- **ConfirmationRegistry**: In-memory registry managing confirmation lifecycle with SQL-level idempotency
-- **ConfirmationRecordStore**: Durable storage backend with turn_index field support, startup sweep scoping, and cross-replica consistency
-- **Risk Level Tracking**: Captures mutating tool risk levels for UI flagging
-- **TTL Management**: Automatic expiration of stale confirmations with startup sweep scoping
+Core functionality:
+- **Parked Confirmation Management**: Tracks tool calls awaiting user approval with durable persistence
+- **Single-Flight Guarantees**: Prevents duplicate confirmation processing with SQL-level guards
+- **TTL-Based Expiration**: Automatic cleanup of expired confirmations with startup sweep scoping
 - **Owner Validation**: Ensures only session owners can answer confirmations
-
-### Integration Patterns
-- **Chat Routes**: Check for parked confirmations before processing new messages with durable fallback
-- **Stream Events**: Surface confirmation requests to clients via SSE with structured error handling
-- **Confirmation Endpoint**: Handle operator decisions to resume parked workflows with idempotent resolution
-- **Session Protection**: Block deletion of sessions with pending confirmations with structured 409 responses
+- **Risk Level Tracking**: Captures mutating tool risk levels for UI flagging
+- **Integration Points**: Bridges AgentScope kernel events with platform workflows and durable storage
+- **Cross-Replica Consistency**: Durable records survive process restarts and replica boundaries
 
 **Section sources**
 - [hitl_confirmations.py:1-256](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L1-L256)
 - [routes.py:71-100](file://products/agent-platform/src/agent_service/api/v2/routes.py#L71-100)
+
+### API Endpoints
+The API layer exposes REST endpoints for agent interactions, session management, model discovery, and health checks. Requests are validated against schemas and routed to the runtime kernel with v3 streaming protocol support.
+
+Typical endpoints:
+- Chat: POST /chat with message, optional session ID, and delegated token
+- Sessions: GET/POST/DELETE /sessions for lifecycle management with evidence retrieval
+- Models: GET /models for credential-safe model discovery
+- Health: GET /health for readiness and liveness probes
+- Streaming: Server-sent events for incremental responses with v3 tool_call/tool_result frames
+- **Confirmations**: POST /chat/confirm for approval workflows with structured error handling
+
+Request/response validation uses Pydantic models defined in schemas with enhanced v3 streaming event types.
+
+**Updated** Chat endpoints now accept delegated tokens for secure tool execution and support v3 streaming protocol with tool_call/tool_result frames for comprehensive audit trails. Both POST /chat and GET /chat/stream endpoints accept input_modality parameters for voice-readiness parity. Session endpoints provide multi-session workspace operations with proper authorization, audit trails, and evidence turn retrieval. Model endpoints provide credential-safe enumeration of available models with public schema compliance. **Confirmation endpoints provide structured 409 responses for racing approvers with winner attribution and durable outcome persistence, plus turn_index field support for precise confirmation card anchoring.**
+
+**Section sources**
+- [routes.py:106-235](file://products/agent-platform/src/agent_service/api/v2/routes.py#L106-L235)
+- [routes.py:334-419](file://products/agent-platform/src/agent_service/api/v2/routes.py#L334-L419)
+- [routes.py:534-544](file://products/agent-platform/src/agent_service/api/v2/routes.py#L534-L544)
+- [api.py:8-18](file://products/agent-platform/src/agent_service/schemas/api.py#L8-L18)
+- [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
+
+### Tools Integration
+The service integrates with external tools through a gateway abstraction. Tools can be invoked during agent execution to perform actions like Kubernetes operations or data retrieval with enhanced AgentScope 2.x compatibility.
+
+```mermaid
+sequenceDiagram
+participant Kernel as "RuntimeKernel"
+participant GatewayTools as "GatewayTools"
+participant External as "External Tool"
+participant Trace as "TraceQueue"
+participant HITL as "ConfirmationRegistry"
+participant EvStore as "EvidenceStore"
+participant ConfirmStore as "ConfirmationRecordStore"
+Kernel->>GatewayTools : build_gateway_toolkit(definitions, bearerToken, traceQueue)
+GatewayTools->>External : discover_tools(bearerToken)
+External-->>GatewayTools : availableTools
+GatewayTools->>Trace : emit tool_call trace event
+GatewayTools->>HITL : check_auto_approval(tool_name)
+alt Tool requires confirmation
+HITL->>ConfirmStore : save_parked(record with turn_index)
+ConfirmStore-->>HITL : persisted confirmation with turn_index
+HITL-->>GatewayTools : ASK decision
+GatewayTools->>Kernel : stall until user confirms
+else Tool auto-approved
+HITL-->>GatewayTools : ALLOW decision
+GatewayTools->>External : invoke("k8s_connector", action, params, bearerToken)
+External-->>GatewayTools : result
+GatewayTools->>Trace : emit tool_result trace event
+Trace-->>Kernel : audit trail data
+Kernel->>EvStore : persist evidence frames
+EvStore-->>Kernel : evidence stored
+GatewayTools-->>Kernel : toolResult
+end
+```
+
+**Updated** The tools integration now includes AgentScope 2.x toolkit registration pattern, per-request trace queues for audit trails, v3 streaming support with tool_call/tool_result frames, auto-approval mechanism for vetted read-only tools, HITL confirmation registry integration with durable storage for interactive workflows, evidence store integration for persistent tool execution records, **and enhanced confirmation record persistence with turn_index field support, idempotent resolution, and cross-replica consistency**. Voice readiness is maintained throughout the tool execution pipeline.
+
+**Diagram sources**
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
+- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+
+**Section sources**
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+
+## Decision Sync Robustness
+
+### Overview
+The decision sync robustness improvements address critical issues exposed during live approval testing where resumed replies after external decisions could require manual browser refreshes to appear in the owner window. The enhancements include time-based settle windows, progressive arrival presentation, and improved markdown rendering for resumed content.
+
+### Time-Based Settle Window (SPEC-035 R-3)
+```mermaid
+sequenceDiagram
+participant Owner as "Owner Window"
+participant Poll as "Pending Decision Poll"
+participant Approver as "Approver Window"
+participant Kernel as "Runtime Kernel"
+Note over Owner,Poll : Decision Landing Process
+Approver->>Kernel : Submit decision (approve/deny)
+Kernel->>Kernel : Execute tool calls and generate summary
+Note over Poll : Old : 12 ticks × 5s = 60s budget<br/>New : 5-minute deadline with resets
+Poll->>Poll : Reset settle window on each change
+Poll->>Owner : Apply changes with typewriter reveal
+Note over Owner : Background tabs throttle timers,<br/>so deadline approach is more reliable
+```
+
+**Diagram sources**
+- [usePendingDecisionPoll.ts:1-23](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts#L1-L23)
+- [spec.md:87-99](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md#L87-L99)
+
+### Progressive Arrival Presentation (SPEC-035 R-4)
+When a reseed delivers new content after an external decision, the system now reveals it progressively instead of appearing in one silent jump:
+
+```mermaid
+flowchart TD
+A["External Decision Received"] --> B["Detect Changed Turns"]
+B --> C["Calculate Previous Reply Length"]
+C --> D["Start Typewriter Reveal"]
+D --> E["Apply Flash Highlight"]
+E --> F["Scroll Into View"]
+F --> G["Complete Progressive Display"]
+```
+
+**Diagram sources**
+- [spec.md:101-119](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md#L101-L119)
+
+### Enhanced Markdown Rendering
+The transcript reconstruction now properly joins text blocks with blank lines to preserve markdown formatting:
+
+```mermaid
+flowchart TD
+A["Assistant Message with Tool Calls"] --> B["Text Block 1: 'Checking controller...'"]
+A --> C["Tool Call Execution"]
+A --> D["Text Block 2: '## Pod Restart Summary'"]
+B --> E["Join with \\n\\n"]
+D --> E
+E --> F["Proper Markdown Rendering"]
+F --> G["Heading Renders Correctly"]
+```
+
+**Diagram sources**
+- [session_transcript.py:67-87](file://products/agent-platform/src/agent_service/services/session_transcript.py#L67-L87)
+- [test_session_workspace.py:178-221](file://products/agent-platform/tests/test_session_workspace.py#L178-L221)
+
+### Key Improvements
+- **Reliable Content Delivery**: Resumed turns now reach owner window without manual refresh
+- **Better Visual Feedback**: Progressive reveal makes arrived content noticeable
+- **Proper Markdown Rendering**: Headings, lists, and other block elements render correctly
+- **Robust Timing**: Time-based settle window works reliably even with background tab throttling
+- **Improved User Experience**: Stronger flash effects and scroll-to-view behavior
+
+**Section sources**
+- [spec.md:1-183](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md#L1-L183)
+- [decision-sync-release-notes.md:1-82](file://docs/agentic-aiops-platform/release-notes/2026-08-26-decision-sync-arrival-polish.md#L1-L82)
+- [session_transcript.py:67-87](file://products/agent-platform/src/agent_service/services/session_transcript.py#L67-L87)
+- [test_session_workspace.py:178-221](file://products/agent-platform/tests/test_session_workspace.py#L178-L221)
 
 ## Enhanced Streaming Architecture
 
@@ -1938,7 +2064,7 @@ The service has clear separation of concerns with minimal coupling between layer
 - Session service abstracts storage backend
 - Evidence store provides independent persistence layer with dual backend support
 - Model catalog provides credential-gated discovery with legacy alias resolution
-- **Confirmation record store provides durable HITL confirmation lifecycle management with turn_index field support and idempotent resolution**
+- **Enhanced confirmation record store provides durable HITL confirmation lifecycle management with turn_index field support and idempotent resolution**
 - **Live discovery service depends on model catalog, provider registry, and runtime settings**
 - **FastAPI lifespan manages discovery task lifecycle independently**
 - Cross-cutting concerns are injected into the application lifecycle
@@ -1959,7 +2085,7 @@ Base --> DashScope["DashScopeProvider"]
 Base --> DeepSeek["DeepSeekProvider"]
 Base --> Luban["LubanProvider"]
 Session --> Store["SessionStore"]
-Session --> Transcript["TranscriptExtractor"]
+Session --> Transcript["Enhanced TranscriptExtractor"]
 API --> HITL["ConfirmationRegistry"]
 API --> ConfirmStore
 API --> Metrics["Metrics"]
@@ -1977,7 +2103,7 @@ ModelDisc --> Metrics
 Lifespan["FastAPI Lifespan"] --> ModelDisc
 ```
 
-**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, confirmation record store with turn_index field support, idempotent resolution, and cross-replica consistency, model catalog service with credential-gated discovery and legacy alias resolution, live model discovery service with background task management, voice-readiness support through input_modality parameter passthrough, and the new Luban provider for self-hosted OpenAI-compatible endpoints.
+**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, enhanced confirmation record store with turn_index field support, idempotent resolution, and cross-replica consistency, model catalog service with credential-gated discovery and legacy alias resolution, live model discovery service with background task management, voice-readiness support through input_modality parameter passthrough, and the new Luban provider for self-hosted OpenAI-compatible endpoints.
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -2016,10 +2142,10 @@ Lifespan["FastAPI Lifespan"] --> ModelDisc
 - Per-request trace queues minimize memory footprint through efficient queue management
 - Anti-hallucination guards prevent unnecessary tool discovery when tools are unavailable
 - Auto-approval mechanism eliminates permission prompt overhead for vetted read-only tools
-- **Workspace Optimization**: Server-side sorting in Postgres backend for efficient session listing
+- **Enhanced Workspace Optimization**: Server-side sorting in Postgres backend for efficient session listing
 - **TTL-Aware Operations**: All workspace operations respect session TTL to prevent resource leaks
 - **Fail-Open Design**: Workspace bookkeeping failures don't impact core chat performance
-- **Transcript Extraction**: Best-effort design ensures degraded performance without errors
+- **Enhanced Transcript Extraction**: Best-effort design ensures degraded performance without errors
 - **Voice Readiness**: Input modality parameter adds minimal overhead as metadata-only processing
 - **Evidence Store Optimization**: Size-capped storage with automatic eviction prevents memory bloat
 - **Dual Backend Failover**: Postgres unavailability falls back to in-memory for resilience
@@ -2035,12 +2161,15 @@ Lifespan["FastAPI Lifespan"] --> ModelDisc
 - **Model Pinning**: TTL-aware storage prevents excessive writes while maintaining session affinity
 - **Error Handling**: Fast-fail model validation prevents unnecessary processing of invalid requests
 - **Luban Provider Optimization**: Self-hosted endpoints with strict bearer token requirements and no default base URL
-- **Confirmation Record Optimization**: SQL-level idempotency prevents race conditions and reduces database contention
+- **Enhanced Confirmation Record Optimization**: SQL-level idempotency prevents race conditions and reduces database contention
 - **Turn Index Optimization**: Efficient turn_index computation and storage for precise confirmation card anchoring
 - **Startup Sweep Scoping**: Scoped cleanup prevents sibling replica interference and reduces unnecessary database operations
 - **Cross-Replica Consistency**: Durable records ensure consistent state across process restarts and replica boundaries
+- **Decision Sync Robustness**: Time-based settle windows provide reliable content delivery even with background tab throttling
+- **Progressive Arrival Presentation**: Typewriter-style reveal improves user experience without significant performance impact
+- **Blank-Line Block Joining**: Efficient markdown rendering preserves formatting without additional processing overhead
 
-**Updated** Performance considerations now include multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, model catalog optimization with startup-derived catalog and efficient legacy alias resolution, live model discovery optimization with background task management, multi-tier caching strategies, atomic catalog updates with lock protection, multi-model runtime optimization with priority-based resolution and session-based caching, confirmation record optimization with turn_index field support, SQL-level idempotency, startup sweep scoping, cross-replica consistency guarantees, and Luban provider optimization for self-hosted OpenAI-compatible endpoints with strict security requirements.
+**Updated** Performance considerations now include enhanced multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, model catalog optimization with startup-derived catalog and efficient legacy alias resolution, live model discovery optimization with background task management, multi-tier caching strategies, atomic catalog updates with lock protection, multi-model runtime optimization with priority-based resolution and session-based caching, enhanced confirmation record optimization with turn_index field support, SQL-level idempotency, startup sweep scoping, cross-replica consistency guarantees, Luban provider optimization for self-hosted OpenAI-compatible endpoints with strict security requirements, decision sync robustness with time-based settle windows, progressive arrival presentation for improved user experience, and blank-line block joining for efficient markdown rendering.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -2056,8 +2185,8 @@ Common issues and resolutions:
 - Trace queue issues: Check per-request queue creation and event emission
 - Headless stream stalls: Verify auto-approval configuration for vetted read-only tools
 - Permission prompt issues: Check if tools are properly configured as read-only and on allow-list
-- **Workspace Issues**: Verify session store backend connectivity and workspace bookkeeping operations
-- **Transcript Problems**: Check kernel state snapshot availability and transcript extraction logs
+- **Enhanced Workspace Issues**: Verify session store backend connectivity and workspace bookkeeping operations
+- **Enhanced Transcript Problems**: Check kernel state snapshot availability and transcript extraction logs with blank-line joining
 - **HITL Issues**: Verify confirmation registry state and TTL configuration
 - **Session Listing**: Check user session filtering and workspace ordering logic
 - **Voice Readiness Issues**: Validate input_modality parameter acceptance and Literal type validation
@@ -2084,12 +2213,16 @@ Common issues and resolutions:
 - **Luban Provider Issues**: Verify LUBAN_BASE_URL configuration and bearer token authentication
 - **Self-Hosted Endpoint Problems**: Check network connectivity to self-hosted OpenAI-compatible servers
 - **Luban Model Discovery**: Validate family prefix filtering and non-chat modality exclusion
-- **Confirmation Record Issues**: Verify durable storage backend connectivity and idempotent resolution
+- **Enhanced Confirmation Record Issues**: Verify durable storage backend connectivity and idempotent resolution
 - **Turn Index Problems**: Check turn_index field persistence and confirmation card anchoring
 - **Startup Sweep Problems**: Check HITL confirmation TTL configuration and sweep scoping
 - **Concurrent Approval Issues**: Verify structured 409 responses and winner attribution
 - **Cross-Replica Consistency**: Validate durable record persistence and state synchronization
 - **Race Condition Debugging**: Check SQL-level guards and claim-time outcome persistence
+- **Decision Sync Issues**: Verify time-based settle window configuration and visibility kick behavior
+- **Markdown Rendering Problems**: Check blank-line block joining and proper paragraph boundaries
+- **Resumed Content Delivery**: Verify progressive arrival presentation and typewriter reveal functionality
+- **Background Tab Throttling**: Test time-based settle window reliability with background tabs
 
 Debugging utilities:
 - Health check endpoints for service status
@@ -2100,8 +2233,8 @@ Debugging utilities:
 - Tool schema inspection for verifying toolkit registration
 - Trace event monitoring for audit trail analysis
 - Environment variable inspection for auto-allow-list configuration
-- **Workspace Monitoring**: Check session store backend status and workspace operation metrics
-- **Transcript Debugging**: Verify kernel state snapshot availability and transcript extraction logs
+- **Enhanced Workspace Monitoring**: Check session store backend status and workspace operation metrics
+- **Enhanced Transcript Debugging**: Verify kernel state snapshot availability and transcript extraction logs with blank-line joining
 - **HITL Debugging**: Monitor confirmation registry state and parked confirmation lifecycle
 - **Session Audit**: Review audit trail for session workspace operations
 - **Voice Readiness Debugging**: Validate input_modality parameter handling and modality-specific behaviors
@@ -2117,12 +2250,14 @@ Debugging utilities:
 - **Error Handling Debugging**: Check 422 status codes and error message formatting for model validation
 - **Luban Provider Debugging**: Validate LUBAN_BASE_URL configuration and bearer token authentication flow
 - **Self-Hosted Endpoint Debugging**: Check network connectivity and OpenAI-compatible API responses
-- **Confirmation Record Debugging**: Verify SQL-level idempotency, turn_index field support, startup sweep scoping, and cross-replica consistency
+- **Enhanced Confirmation Record Debugging**: Verify SQL-level idempotency, turn_index field support, startup sweep scoping, and cross-replica consistency
 - **Turn Index Debugging**: Validate turn_index computation, persistence, and confirmation card anchoring behavior
 - **Race Condition Debugging**: Check structured 409 responses and winner attribution in concurrent approval scenarios
 - **Durable Storage Debugging**: Validate backend connectivity, idempotent resolution, and state synchronization
+- **Decision Sync Debugging**: Verify time-based settle window configuration, visibility kick behavior, and progressive arrival presentation
+- **Markdown Rendering Debugging**: Check blank-line block joining, paragraph boundaries, and proper markdown formatting in resumed content
 
-**Updated** Troubleshooting guide now includes multi-session workspace troubleshooting, transcript extraction debugging strategies, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification, plus live model discovery troubleshooting with background task monitoring, provider filtering validation, cache tier diagnostics, and discovery performance optimization, and multi-model runtime troubleshooting with model resolution debugging and session pinning diagnostics, confirmation record troubleshooting with turn_index field support, SQL-level idempotency validation, startup sweep scoping verification, and cross-replica consistency testing, and Luban provider troubleshooting with self-hosted endpoint configuration and bearer token authentication.
+**Updated** Troubleshooting guide now includes enhanced multi-session workspace troubleshooting, enhanced transcript extraction debugging strategies with blank-line block joining, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification, plus live model discovery troubleshooting with background task monitoring, provider filtering validation, cache tier diagnostics, and discovery performance optimization, and multi-model runtime troubleshooting with model resolution debugging and session pinning diagnostics, enhanced confirmation record troubleshooting with turn_index field support, SQL-level idempotency validation, startup sweep scoping verification, and cross-replica consistency testing, Luban provider troubleshooting with self-hosted endpoint configuration and bearer token authentication, decision sync robustness troubleshooting with time-based settle window validation, progressive arrival presentation debugging, and markdown rendering verification for resumed content.
 
 **Section sources**
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -2133,7 +2268,7 @@ Debugging utilities:
 ## Conclusion
 The Agent Platform Service provides a robust foundation for AI agent orchestration with multi-provider support, durable session management, and comprehensive observability. Its modular architecture enables easy customization and scaling while maintaining high performance and reliability.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict security requirements. **Additionally, the enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.** These enhancements strengthen the platform's flexibility, enable dynamic model management, provide detailed operational visibility, ensure cross-replica consistency for HITL workflows, and maintain the performance characteristics that make it suitable for production AI operations.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict security requirements. **Additionally, the enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses. The service also features enhanced decision sync robustness with time-based settle windows, improved session transcript reconstruction with blank-line block joining for proper markdown rendering, and progressive arrival presentation for resumed content.** These enhancements strengthen the platform's flexibility, enable dynamic model management, provide detailed operational visibility, ensure cross-replica consistency for HITL workflows, improve user experience with reliable content delivery, and maintain the performance characteristics that make it suitable for production AI operations.
 
 ## Appendices
 
@@ -2171,7 +2306,7 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 #### Multi-Session Workspace Operations
 - **Session Management**: Create, list, and delete sessions with proper authorization
 - **Workspace Organization**: Use server-minted titles and last_active_at timestamps for organization
-- **Transcript Access**: Retrieve conversation history from kernel state snapshots
+- **Enhanced Transcript Access**: Retrieve conversation history from kernel state snapshots with proper markdown rendering
 - **Evidence Retrieval**: Load persisted tool execution evidence for session details
 - **HITL Integration**: Handle parked confirmations and interactive workflows
 - **Audit Compliance**: Monitor workspace operations through audit trails
@@ -2224,7 +2359,7 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - **Security**: Confirm strict bearer token requirements are enforced
 - **Integration**: Test with popular self-hosted solutions like Ollama, vLLM, and llama.cpp
 
-#### Confirmation Record Store Configuration with Turn Index Support
+#### Enhanced Confirmation Record Store Configuration with Turn Index Support
 - **Backend Selection**: Configure AGENT_STATE_STORE_BACKEND for memory or postgres
 - **Database Setup**: Set AGENT_STATE_DB_URL for Postgres confirmation record persistence
 - **TTL Configuration**: Set AGENT_HITL_CONFIRM_TIMEOUT for confirmation expiration (default: 600 seconds)
@@ -2235,7 +2370,17 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - **Monitoring**: Track confirmation lifecycle metrics and sweep operations
 - **Card Anchoring**: Verify confirmation cards anchor under their specific parking turns instead of stacking under newest turn
 
-**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, live model discovery configuration with background task management, provider filtering mechanisms, cache tier optimization, atomic catalog updates with lock protection, multi-model runtime configuration with per-turn selection and session-based pinning, confirmation record store configuration with turn_index field support, idempotent resolution, startup sweep scoping, cross-replica consistency validation, and Luban provider configuration for self-hosted OpenAI-compatible endpoints with complete operator workflow management.
+#### Decision Sync Robustness Configuration
+- **Settle Window**: Configure time-based settle window for reliable content delivery
+- **Visibility Kick**: Ensure visibility/focus events trigger immediate polling
+- **Progressive Presentation**: Verify typewriter-style reveal for arrived content
+- **Markdown Rendering**: Test blank-line block joining for proper heading and list rendering
+- **Background Tab Testing**: Validate settle window reliability with background tab throttling
+- **Arrival Detection**: Verify detection of changed turns and previous reply length calculation
+- **Flash Effects**: Test stronger visual feedback for arrived content
+- **Scroll-to-View**: Verify automatic scrolling to first arrived group
+
+**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, live model discovery configuration with background task management, provider filtering mechanisms, cache tier optimization, atomic catalog updates with lock protection, multi-model runtime configuration with per-turn selection and session-based pinning, enhanced confirmation record store configuration with turn_index field support, idempotent resolution, startup sweep scoping, cross-replica consistency validation, Luban provider configuration for self-hosted OpenAI-compatible endpoints with complete operator workflow management, decision sync robustness configuration with time-based settle windows, progressive arrival presentation, and blank-line block joining for proper markdown rendering.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -2259,6 +2404,9 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [test_model_discovery.py](file://products/agent-platform/tests/test_model_discovery.py)
 - [test_model_switching.py](file://products/agent-platform/tests/test_model_switching.py)
 - [test_confirmation_records.py](file://products/agent-platform/tests/test_confirmation_records.py)
+- [test_session_workspace.py](file://products/agent-platform/tests/test_session_workspace.py)
+- [spec.md](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md)
+- [decision-sync-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-26-decision-sync-arrival-polish.md)
 - [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
 - [luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)

@@ -16,11 +16,10 @@
 
 ## Update Summary
 **Changes Made**
-- Updated delivery status to reflect completed implementation of all five requirements
-- Enhanced implementation details with specific code references and line numbers
-- Added comprehensive test coverage verification for all requirements
-- Updated architecture diagrams to reflect actual implementation patterns
-- Verified portal-only deployment with no backend changes
+- Updated to reflect dropped changes: underlying implementation rebased from commit 4472199d to 88c80a6b
+- Functional outcome remains unchanged - all five requirements still delivered as specified
+- Documentation updated to reflect current implementation status without modification to content scope
+- Verified all implementation files remain intact and functional after rebase
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -42,6 +41,8 @@ SPEC-034 is a portal-only polish pass for the approval and owner chat experience
 - An approvals banner that states the pending-request expiry rule.
 
 These changes do not modify backend contracts or schemas; they are implemented entirely within the operator portal UI with comprehensive test coverage.
+
+**Updated** This document reflects the dropped changes update where the underlying implementation was rebased from commit 4472199d to 88c80a6b, maintaining full functional parity while updating to current implementation status.
 
 ## Project Structure
 The implementation lives under the operator portal web UI:
@@ -331,3 +332,5 @@ SPEC-034 delivers focused, portal-only UX enhancements that make approval outcom
 - Approvers see the pending-request expiry rule prominently in the banner.
 
 All five requirements have been successfully implemented and delivered in v0.16.0 with comprehensive test coverage, maintaining the platform's goal of polished, operator-friendly workflows without requiring any backend changes.
+
+**Updated** This implementation has been rebased from commit 4472199d to 88c80a6b while maintaining full functional parity. All core components, tests, and user-facing behaviors remain unchanged, ensuring consistent delivery of the approved specification.
