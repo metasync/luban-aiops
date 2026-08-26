@@ -20,6 +20,7 @@ so the tools built here are plain ``FunctionTool`` instances.
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import uuid
@@ -176,7 +177,9 @@ def _verify_execution_request(
     request = requests.get(call_id) if call_id else None
     if request is None:
         return REASON_REQUEST_MISSING
-    if canonical_digest(parameters) != request.get("args_digest"):
+    if not hmac.compare_digest(
+        canonical_digest(parameters), request.get("args_digest") or ""
+    ):
         return REASON_ARGS_DIGEST_MISMATCH
     return None
 
