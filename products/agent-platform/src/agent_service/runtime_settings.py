@@ -158,6 +158,17 @@ class RuntimeSettings:
     model_discovery_enabled: bool = True
     model_discovery_refresh_seconds: int = 1800
     model_discovery_timeout_seconds: float = 5.0
+    # Signed execution requests (SPEC-037 R-2): HMAC-SHA256 key minted
+    # by sync-execution-signing-secret.sh. Unset fails mutating resumes
+    # closed (execution_rejected, reason signing_unavailable) — a
+    # missing key never degrades to unsigned execution.
+    execution_signing_key: str | None = None
+    # Durable audit trail emission (SPEC-037 R-5): fire-and-forget
+    # events to the audit-service. An unset URL keeps the historical
+    # log-only posture; emission never degrades the chat stream.
+    audit_service_url: str | None = None
+    audit_client_id: str = "agent-service"
+    audit_client_secret: str | None = None
 
     @staticmethod
     def default_provider_options(provider: RuntimeProvider) -> RuntimeProviderOptions:
@@ -366,6 +377,10 @@ class RuntimeSettings:
             model_discovery_timeout_seconds=float(
                 os.getenv("AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS", "5")
             ),
+            execution_signing_key=_optional_str("AGENT_EXECUTION_SIGNING_KEY"),
+            audit_service_url=_optional_str("AGENT_AUDIT_SERVICE_URL"),
+            audit_client_id=os.getenv("AGENT_AUDIT_CLIENT_ID", "agent-service"),
+            audit_client_secret=_optional_str("AGENT_AUDIT_CLIENT_SECRET"),
         )
 
     def is_configured(self) -> bool:

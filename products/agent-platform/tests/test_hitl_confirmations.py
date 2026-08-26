@@ -24,13 +24,23 @@ from agent_service.services.confirmation_records import (
     CONFIRMATION_RECORD_STORE,
     make_record,
 )
+from agent_service.services.execution_records import EXECUTION_RECORD_STORE
+from agent_service.services.execution_signing import (
+    canonical_digest,
+    verify_envelope,
+)
 from agent_service.services.hitl_confirmations import (
     CONFIRMATION_REGISTRY,
     ConfirmationExpired,
     ConfirmationNotFound,
     ConfirmationRegistry,
 )
+from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
 from agent_service.services.runtime_dependencies import get_runtime_kernel
+from agent_service.tools.gateway_tools import (
+    EXECUTION_REJECTION,
+    EXECUTION_REQUESTS,
+)
 
 TOOL_CALL = ToolCallBlock(
     id="call-1", name="k8s.restart_service", input='{"namespace": "ops"}'
@@ -47,10 +57,15 @@ def _clean_registry():
     records = getattr(CONFIRMATION_RECORD_STORE, "_by_confirm_id", None)
     if records is not None:
         records.clear()
+    executions = getattr(EXECUTION_RECORD_STORE, "_by_key", None)
+    if executions is not None:
+        executions.clear()
     yield
     CONFIRMATION_REGISTRY._by_session.clear()
     if records is not None:
         records.clear()
+    if executions is not None:
+        executions.clear()
 
 
 def _configured_kernel(**overrides) -> AgentKernel:
@@ -946,3 +961,227 @@ def test_confirm_request_rejects_invalid_decision() -> None:
         headers={"X-User-ID": "alice"},
     )
     assert response.status_code == 422
+
+
+# --- Kernel: signed execution requests and receipts (SPEC-037 R-2/R-4/R-5) ---
+
+SIGNING_KEY = "test-execution-key"
+
+
+class ExecutionCapturingAgent(FakeAgent):
+    """Records the execution context visible inside the resumed stream."""
+
+    def __init__(self, events=None):
+        super().__init__(events=events or [{"type": "REPLY_END"}])
+        self.observed_requests = "unset"
+        self.observed_rejection = "unset"
+
+    async def reply_stream(self, inputs):
+        self.observed_requests = EXECUTION_REQUESTS.get()
+        self.observed_rejection = EXECUTION_REJECTION.get()
+        async for event in super().reply_stream(inputs):
+            yield event
+
+
+class ToolResultAgent(FakeAgent):
+    """Pushes scripted tool_result frames onto the evidence sink."""
+
+    def __init__(self, tool_frames, events=None):
+        super().__init__(events=events or [{"type": "REPLY_END"}])
+        self.tool_frames = tool_frames
+
+    async def reply_stream(self, inputs):
+        sink = TOOL_EVIDENCE_SINK.get()
+        for frame in self.tool_frames:
+            sink.put_nowait(frame)
+        async for event in super().reply_stream(inputs):
+            yield event
+
+
+def _capture_execution_audits(monkeypatch) -> list:
+    events: list = []
+
+    def fake_emit(settings, event):
+        events.append(event)
+
+    monkeypatch.setattr("agent_service.runtime_kernel.emit_audit_event", fake_emit)
+    return events
+
+
+def _approve_parked(monkeypatch, kernel, agent, request_id="req-2"):
+    _patch_agent(monkeypatch, kernel, agent)
+    pending = CONFIRMATION_REGISTRY.register("s1", "alice", "reply-1", [TOOL_CALL], 600)
+    claimed = CONFIRMATION_REGISTRY.claim("s1", pending.confirm_id, 600)
+    return _drain(
+        kernel.resume_confirmation(
+            session_id="s1",
+            pending=claimed,
+            decision="approve",
+            user_name="alice",
+            request_id=request_id,
+            bearer_token="tok-alice",
+        )
+    )
+
+
+def test_resume_approval_signs_and_persists_one_request_per_call(monkeypatch):
+    """SPEC-037 R-2: one signed, persisted request per approved parked call."""
+    kernel = _configured_kernel(execution_signing_key=SIGNING_KEY)
+    agent = ExecutionCapturingAgent()
+    audits = _capture_execution_audits(monkeypatch)
+
+    frames = _approve_parked(monkeypatch, kernel, agent)
+    assert frames[0]["status"] == "approved"
+
+    requests = agent.observed_requests
+    assert agent.observed_rejection is None
+    assert set(requests) == {"call-1"}
+    request = requests["call-1"]
+    # The digest binds the parked arguments the approver saw.
+    assert request["args_digest"] == canonical_digest({"namespace": "ops"})
+    assert request["confirm_id"] == frames[0]["confirm_id"]
+    assert request["owner_user_id"] == "alice"
+    assert request["decider_user_id"] == "alice"
+    assert verify_envelope(request, request["signature"], SIGNING_KEY)
+
+    rows = EXECUTION_RECORD_STORE.load_for_session("s1")
+    assert [row["status"] for row in rows] == ["requested"]
+    assert rows[0]["execution_id"] == request["execution_id"]
+
+    requested = [a for a in audits if a["event_type"] == "execution_requested"]
+    assert len(requested) == 1
+    assert requested[0]["outcome"] == "success"
+    assert requested[0]["details"]["confirm_id"] == frames[0]["confirm_id"]
+    assert requested[0]["details"]["call_id"] == "call-1"
+    assert requested[0]["request_id"] == "req-2"
+    assert requested[0]["session_id"] == "s1"
+
+
+def test_resume_denial_constructs_no_execution_requests(monkeypatch):
+    kernel = _configured_kernel(execution_signing_key=SIGNING_KEY)
+    agent = ExecutionCapturingAgent()
+    audits = _capture_execution_audits(monkeypatch)
+    _patch_agent(monkeypatch, kernel, agent)
+    pending = CONFIRMATION_REGISTRY.register("s1", "alice", "reply-1", [TOOL_CALL], 600)
+    claimed = CONFIRMATION_REGISTRY.claim("s1", pending.confirm_id, 600)
+
+    frames = _drain(
+        kernel.resume_confirmation(
+            "s1", claimed, "deny", "alice", "req-2"
+        )
+    )
+    assert frames[0]["status"] == "denied"
+    assert agent.observed_requests is None
+    assert agent.observed_rejection is None
+    assert EXECUTION_RECORD_STORE.load_for_session("s1") == []
+    assert audits == []
+
+
+def test_resume_missing_signing_key_rejects_fail_closed(monkeypatch):
+    """SPEC-037 R-2: no key ⇒ batch rejected, audited signing_unavailable."""
+    kernel = _configured_kernel()
+    agent = ExecutionCapturingAgent()
+    audits = _capture_execution_audits(monkeypatch)
+
+    frames = _approve_parked(monkeypatch, kernel, agent)
+    # The confirmation itself applied; the rejection rides the tool boundary.
+    assert frames[0]["status"] == "approved"
+    assert agent.observed_requests is None
+    assert agent.observed_rejection == "signing_unavailable"
+    assert EXECUTION_RECORD_STORE.load_for_session("s1") == []
+
+    rejected = [a for a in audits if a["event_type"] == "execution_rejected"]
+    assert len(rejected) == 1
+    assert rejected[0]["outcome"] == "deny"
+    assert rejected[0]["details"]["reason"] == "signing_unavailable"
+    assert rejected[0]["details"]["call_id"] == "call-1"
+    assert rejected[0]["request_id"] == "req-2"
+
+
+def test_resume_receipt_closes_executed_call(monkeypatch):
+    """SPEC-037 R-4/R-5: a landed tool result signs the closing receipt."""
+    kernel = _configured_kernel(execution_signing_key=SIGNING_KEY)
+    tool_frame = {
+        "type": "tool_result",
+        "call_id": "call-1",
+        "tool_name": "k8s.restart_service",
+        "status": "success",
+        "output": {"restarted": True},
+    }
+    agent = ToolResultAgent([tool_frame])
+    audits = _capture_execution_audits(monkeypatch)
+
+    frames = _approve_parked(monkeypatch, kernel, agent)
+    confirm_id = frames[0]["confirm_id"]
+    assert any(f == {**tool_frame, "request_id": "req-2", "session_id": "s1"} for f in frames)
+
+    rows = EXECUTION_RECORD_STORE.load_for_session("s1")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["status"] == "succeeded"
+    assert row["digest_match"] is True
+    receipt = row["receipt"]
+    assert receipt["request_id"] == "req-2"
+    assert receipt["outcome_digest"] == canonical_digest(
+        {**tool_frame, "request_id": "req-2", "session_id": "s1"}
+    )
+    assert verify_envelope(receipt, receipt["signature"], SIGNING_KEY)
+
+    completed = [a for a in audits if a["event_type"] == "execution_completed"]
+    assert len(completed) == 1
+    assert completed[0]["outcome"] == "success"
+    assert completed[0]["details"]["status"] == "succeeded"
+    assert completed[0]["details"]["confirm_id"] == confirm_id
+    assert completed[0]["details"]["request_id"] == "req-2"
+    assert isinstance(completed[0]["details"]["duration_ms"], int)
+
+
+def test_resume_invocation_rejection_marks_record_without_receipt(monkeypatch):
+    """SPEC-037 R-3/R-4: an EXECUTION_REJECTED frame closes the row as
+    rejected; the audit already went out at the invocation boundary."""
+    kernel = _configured_kernel(execution_signing_key=SIGNING_KEY)
+    tool_frame = {
+        "type": "tool_result",
+        "call_id": "call-1",
+        "tool_name": "k8s.restart_service",
+        "status": "error",
+        "error": {
+            "code": "EXECUTION_REJECTED",
+            "message": "execution rejected",
+            "reason": "args_digest_mismatch",
+        },
+    }
+    agent = ToolResultAgent([tool_frame])
+    audits = _capture_execution_audits(monkeypatch)
+
+    _approve_parked(monkeypatch, kernel, agent)
+    rows = EXECUTION_RECORD_STORE.load_for_session("s1")
+    assert [row["status"] for row in rows] == ["rejected"]
+    assert rows[0]["reject_reason"] == "args_digest_mismatch"
+    assert rows[0]["digest_match"] is False
+    assert rows[0]["receipt"] is None
+    # The kernel never re-audits a rejection owned by the tool boundary.
+    assert not any(a["event_type"] == "execution_rejected" for a in audits)
+    assert not any(a["event_type"] == "execution_completed" for a in audits)
+
+
+def test_resume_timeout_result_signs_timeout_receipt(monkeypatch):
+    kernel = _configured_kernel(execution_signing_key=SIGNING_KEY)
+    tool_frame = {
+        "type": "tool_result",
+        "call_id": "call-1",
+        "tool_name": "k8s.restart_service",
+        "status": "error",
+        "error": {"code": "TIMEOUT", "message": "gateway timed out"},
+    }
+    agent = ToolResultAgent([tool_frame])
+    audits = _capture_execution_audits(monkeypatch)
+
+    _approve_parked(monkeypatch, kernel, agent)
+    rows = EXECUTION_RECORD_STORE.load_for_session("s1")
+    assert rows[0]["status"] == "timeout"
+    assert rows[0]["receipt"]["status"] == "timeout"
+    completed = [a for a in audits if a["event_type"] == "execution_completed"]
+    assert completed[0]["outcome"] == "error"
+    assert completed[0]["details"]["status"] == "timeout"
+

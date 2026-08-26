@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/agent-session.schema.json",
   "title": "Agent Session (v2)",
-  "description": "Session record returned by POST /api/v2/sessions and GET /api/v2/sessions/{id}. SPEC-022 R-1 adds workspace fields: server-minted title, last_active_at, parked-confirmation flag, and a best-effort transcript reconstructed from the kernel state snapshot. SPEC-025 R-2 adds the additive evidence_turns field carrying persisted tool evidence grouped by assistant turn. SPEC-024 R-3 adds the additive model field carrying the session's pinned model id. SPEC-031 R-2 adds the additive confirmations field carrying durable confirmation lifecycle cards.",
+  "description": "Session record returned by POST /api/v2/sessions and GET /api/v2/sessions/{id}. SPEC-022 R-1 adds workspace fields: server-minted title, last_active_at, parked-confirmation flag, and a best-effort transcript reconstructed from the kernel state snapshot. SPEC-025 R-2 adds the additive evidence_turns field carrying persisted tool evidence grouped by assistant turn. SPEC-024 R-3 adds the additive model field carrying the session's pinned model id. SPEC-031 R-2 adds the additive confirmations field carrying durable confirmation lifecycle cards. SPEC-037 R-4 adds the additive executions array under each confirmation card carrying signed execution request/receipt rows.",
   "type": "object",
   "additionalProperties": false,
   "required": ["session_id", "user_id", "created_at", "status"],
@@ -139,6 +139,54 @@
           },
           "decided_at": {
             "type": ["string", "null"]
+          },
+          "executions": {
+            "type": "array",
+            "description": "SPEC-037 R-4: signed execution rows for this confirmation, one per approved parked call, in requested_at order; empty for pending/denied/expired records and for decided rows that predate signed execution requests.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["execution_id", "call_id", "confirm_id", "session_id", "tool_name", "status"],
+              "properties": {
+                "execution_id": {
+                  "type": "string"
+                },
+                "call_id": {
+                  "type": "string"
+                },
+                "confirm_id": {
+                  "type": "string"
+                },
+                "session_id": {
+                  "type": "string"
+                },
+                "tool_name": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["requested", "succeeded", "failed", "timeout", "rejected"]
+                },
+                "requested_at": {
+                  "type": ["string", "null"]
+                },
+                "completed_at": {
+                  "type": ["string", "null"]
+                },
+                "digest_match": {
+                  "type": ["boolean", "null"],
+                  "description": "Whether the invoked arguments matched the signed request's argument digest; true for executed receipts, false on a digest-mismatch rejection, null when verification never ran."
+                },
+                "reject_reason": {
+                  "type": ["string", "null"],
+                  "description": "Invocation-boundary rejection reason (signing_unavailable, args_digest_mismatch, request_missing) when status is rejected."
+                },
+                "receipt": {
+                  "type": ["object", "null"],
+                  "description": "Signed execution receipt envelope per execution-receipt.schema.json once the execution closed; null while requested or rejected."
+                }
+              }
+            }
           }
         }
       }

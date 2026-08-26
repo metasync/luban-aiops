@@ -275,6 +275,51 @@ winner's outcome (status, decider, decision, decided-at), and the portal
 flips the loser's card to that outcome instead of offering a doomed retry.
 Unknown confirm ids still answer 404.
 
+### Signed execution requests and receipts (SPEC-037)
+
+An approval is only meaningful if the executed call is the one the
+approver saw. Since SPEC-037, every approved mutating resume carries a
+tamper-evident execution chain:
+
+- **Signed requests at resume.** When a claimed confirmation resumes
+  with `approve`, agent-service constructs one signed execution request
+  per approved tool call before any invocation: an HMAC-SHA256 envelope
+  over the tool name, a digest of the *parked* arguments, the confirm
+  id, the decider, and the session, keyed by
+  `AGENT_EXECUTION_SIGNING_KEY`. Denials construct no request. A
+  missing signing key **fails closed** — the resumed stream reports the
+  execution as rejected and audits `execution_rejected`
+  (`signing_unavailable`); a missing key never degrades to unsigned
+  execution.
+- **Digest verification at invocation.** Before the tool-gateway call
+  goes out, the invoked arguments' digest is recomputed against the
+  signed envelope. A mismatch audits `execution_rejected`
+  (`args_digest_mismatch`) and blocks the invocation — the kernel's
+  ALLOWED state alone never suffices for a mutating call. Read-only
+  tools carry no envelope and skip the check entirely.
+- **Durable records and signed receipts.** Each execution is recorded
+  beside its confirmation record (same Postgres posture, keyed
+  `confirm_id` + `call_id`); after the tool result lands, a signed
+  receipt — status (`succeeded` / `failed` / `timeout`), the resume's
+  `x-request-id`, and a digest of the executed result — closes the
+  record. The session detail carries an additive owner-scoped
+  `executions` array per decided card, and decided cards in the owner
+  transcript render a read-only receipt badge (status plus the
+  digest-match result). The approver inbox stays
+  decision-metadata-only — receipts are owner-visible through the
+  session surface.
+- **Audit correlation.** Three event types extend the durable trail —
+  `execution_requested`, `execution_completed`, `execution_rejected` —
+  emitted with `confirm_id` and forwarded `x-request-id`, so the trail
+  correlates `confirmation_decided` → `execution_requested` →
+  `tool_invoked` → `execution_completed` without a new audit
+  dimension.
+
+Execution still happens in-process under the confirmer's delegated
+token; the isolated `execution-runtime` worker is Phase 2 (own spec,
+after this slice is live-verified) and will inherit the same signed
+envelope contract.
+
 ### Voice-readiness: modality is never privilege (SPEC-022 R-2, SPEC-023 R-4)
 
 Chat requests may carry an optional `input_modality` (`text` | `voice`,
@@ -317,7 +362,9 @@ Two extraction targets already exist as boundary stubs:
 
 - **policy-center** — policy evaluation plus approval routing (`require_approval`,
   approval queue, separation of duties).
-- **execution-runtime** — signed, bounded execution of approved actions.
+- **execution-runtime** — signed, bounded execution of approved actions;
+  Phase 1 (the signed request/receipt contract, SPEC-037) ships
+  in-process today, the isolated worker is Phase 2.
 
 **Kernel ASK confirmation and policy-level approval are different layers.** The
 HITL confirmation card answers "does the session owner want the agent to run this
@@ -338,7 +385,7 @@ policy-center slice.
 | `approver` | granted | granted | Designated approver: decides tier_2 cards and works the cross-session Approvals inbox (`approvals:list`); the execution grant carries approved calls (resumed under the confirmer's token) — two-person control is enforced at the approval gate, not admission |
 | `developer` | denied | granted | Can confirm tier_1 cards; tier_2 approvals need a designated approver |
 | `read-only-observer` | denied | denied | Observation only; confirming is an act-on-the-system action |
-| `auditor` | denied | denied | Read the trail; `confirmation_decided` + `tool_invoked` events carry the full chain |
+| `auditor` | denied | denied | Read the trail; `confirmation_decided` + `execution_requested` / `execution_completed` + `tool_invoked` events carry the full chain |
 
 **Separation of duties (SPEC-030).** With the shipped `tier_2` rule on
 `tools:mutate`, the user whose chat turn parked a mutating batch cannot approve

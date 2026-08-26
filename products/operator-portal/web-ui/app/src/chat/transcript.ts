@@ -13,6 +13,7 @@ import type {
   TranscriptTurn,
 } from "../api/sessions";
 import type {
+  ExecutionReceipt,
   PendingCall,
   ToolCallFrame,
   ToolResultFrame,
@@ -130,6 +131,21 @@ export function confirmationRecordToCard(
   };
   if (record.status !== "pending") {
     card.note = attributionNote(record);
+    // SPEC-037 R-6: receipts ride decided cards only; legacy rows and
+    // inbox records (no executions field) keep the card unchanged.
+    const executions: ExecutionReceipt[] = (record.executions ?? []).map(
+      (row) => ({
+        executionId: row.execution_id,
+        callId: row.call_id,
+        toolName: row.tool_name,
+        status: row.status,
+        digestMatch: row.digest_match ?? null,
+        rejectReason: row.reject_reason ?? undefined,
+      }),
+    );
+    if (executions.length > 0) {
+      card.executions = executions;
+    }
   }
   return card;
 }

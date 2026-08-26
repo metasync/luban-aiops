@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-27
 - release slice: R4 — Approval-Gated Bounded Actions (closing slice)
@@ -199,6 +199,12 @@ approval.
 
 ## Changelog
 
+- 2026-08-27: delivered in v0.19.0 with no requirement changes. All
+  R-1–R-6 acceptance signals verified (unit suites + `make verify`);
+  the live check ran the `mutating-demo.sh` HITL leg on the
+  `mutating-dev` profile and observed the signed receipt on the
+  approved card plus the correlated `execution_requested` /
+  `execution_completed` audit chain.
 - 2026-08-27: approved by the operator with no changes to the drafted
   requirements; implementation proceeds in a fresh session.
 - 2026-08-27: created as `draft` from the execution-runtime spike memo

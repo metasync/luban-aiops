@@ -4,6 +4,7 @@ import logging
 from collections import OrderedDict
 from collections.abc import AsyncIterator
 from dataclasses import replace
+from datetime import datetime, timezone
 
 from agent_service.core.metrics import (
     record_agent_state_error,
@@ -12,6 +13,10 @@ from agent_service.core.metrics import (
 from agent_service.providers import get_provider
 from agent_service.runtime_settings import RuntimeSettings
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
+from agent_service.services.audit_emitter import (
+    build_audit_event,
+    emit_audit_event,
+)
 from agent_service.services.confirmation_records import (
     CONFIRMATION_RECORD_STORE,
     make_record as make_confirmation_record,
@@ -20,6 +25,16 @@ from agent_service.services.evidence_store import (
     EVIDENCE_FRAME_TYPES,
     EVIDENCE_STORE,
     prepare_frames,
+)
+from agent_service.services.execution_records import (
+    EXECUTION_RECORD_STORE,
+    make_execution_record,
+)
+from agent_service.services.execution_signing import (
+    REASON_ARGS_DIGEST_MISMATCH,
+    REASON_SIGNING_UNAVAILABLE,
+    build_receipt,
+    build_requests,
 )
 from agent_service.services.hitl_confirmations import (
     CONFIRMATION_REGISTRY,
@@ -1066,6 +1081,232 @@ class AgentKernel:
                 exc,
             )
 
+    # --- Signed execution requests and receipts (SPEC-037 R-2/R-4/R-5) ---
+
+    def _prepare_executions(
+        self,
+        pending: PendingConfirmation,
+        decider_user_id: str,
+        confirmed: bool,
+        request_id: str,
+        session_id: str,
+    ) -> tuple[dict[str, dict], str | None]:
+        """Build, persist, and audit the signed requests (SPEC-037 R-2).
+
+        Returns ``(requests_by_call_id, rejection_reason)``. Approved
+        batches with a provisioned key produce one signed request per
+        parked call; a missing key rejects the whole batch fail-closed
+        (the resumed stream reports the rejection through the tool
+        boundary) and audits ``execution_rejected``
+        (``signing_unavailable``). Denials construct nothing.
+        """
+        if not confirmed:
+            return {}, None
+        key = self.settings.execution_signing_key
+        if not key:
+            LOGGER.warning(
+                "mutating resume rejected: no execution signing key "
+                "provisioned (confirm_id=%s)",
+                pending.confirm_id,
+            )
+            for call in pending.pending_calls_payload():
+                self._emit_execution_event(
+                    "execution_rejected",
+                    "deny",
+                    {
+                        "confirm_id": pending.confirm_id,
+                        "call_id": call.get("call_id"),
+                        "tool_name": call.get("tool_name"),
+                        "reason": REASON_SIGNING_UNAVAILABLE,
+                    },
+                    request_id,
+                    session_id,
+                    decider_user_id,
+                )
+            return {}, REASON_SIGNING_UNAVAILABLE
+        requests_by_call: dict[str, dict] = {}
+        for request in build_requests(pending, decider_user_id, key):
+            requests_by_call[request["call_id"]] = request
+            self._persist_execution_request(request)
+            self._emit_execution_event(
+                "execution_requested",
+                "success",
+                {
+                    "confirm_id": request["confirm_id"],
+                    "execution_id": request["execution_id"],
+                    "call_id": request["call_id"],
+                    "tool_name": request["tool_name"],
+                    "args_digest": request["args_digest"],
+                    "decider_user_id": request["decider_user_id"],
+                    "owner_user_id": request["owner_user_id"],
+                },
+                request_id,
+                session_id,
+                decider_user_id,
+            )
+        return requests_by_call, None
+
+    def _persist_execution_request(self, request: dict) -> None:
+        """Best-effort durable request write (SPEC-037 R-4).
+
+        Same posture as the SPEC-031 claim-time writes: a store failure
+        degrades audit completeness, never the resumed stream.
+        """
+        try:
+            EXECUTION_RECORD_STORE.save_request(make_execution_record(request))
+        except Exception as exc:
+            LOGGER.warning(
+                "execution record request write failed for %s: %s",
+                request["execution_id"],
+                exc,
+            )
+
+    def _drain_trace_queue(
+        self,
+        trace_queue: asyncio.Queue,
+        request_id: str,
+        session_id: str,
+        evidence_frames: list[dict[str, object]],
+        execution_requests: dict[str, dict],
+    ) -> list[dict[str, object]]:
+        """Decorate queued trace frames and close any landed executions."""
+        frames: list[dict[str, object]] = []
+        while not trace_queue.empty():
+            trace = trace_queue.get_nowait()
+            decorated = {
+                **trace,
+                "request_id": request_id,
+                "session_id": session_id,
+            }
+            if decorated.get("type") in EVIDENCE_FRAME_TYPES:
+                evidence_frames.append(decorated)
+            self._observe_tool_result(decorated, execution_requests)
+            frames.append(decorated)
+        return frames
+
+    def _observe_tool_result(
+        self,
+        frame: dict[str, object],
+        execution_requests: dict[str, dict],
+    ) -> None:
+        """Close the signed execution when its tool result lands (SPEC-037 R-4/R-5).
+
+        A receipt closes a request that actually ran; an invocation-boundary
+        rejection (R-3) marks the row rejected without a receipt — the call
+        never reached the gateway. Requests are looked up by the parked
+        call id riding the evidence frame.
+        """
+        if frame.get("type") != "tool_result":
+            return
+        request = execution_requests.get(frame.get("call_id"))
+        key = self.settings.execution_signing_key
+        if request is None or not key:
+            return
+        error = frame.get("error")
+        error = error if isinstance(error, dict) else {}
+        if error.get("code") == "EXECUTION_REJECTED":
+            reason = error.get("reason") or "unknown"
+            digest_match = (
+                False if reason == REASON_ARGS_DIGEST_MISMATCH else None
+            )
+            try:
+                EXECUTION_RECORD_STORE.mark_rejected(
+                    request["confirm_id"],
+                    request["call_id"],
+                    reason,
+                    digest_match,
+                )
+            except Exception as exc:
+                LOGGER.warning(
+                    "execution record rejection write failed for %s: %s",
+                    request["execution_id"],
+                    exc,
+                )
+            # The rejection audit already went out at the invocation
+            # boundary (gateway_tools); nothing more to emit here.
+            return
+        if frame.get("status") == "success":
+            status = "succeeded"
+        elif error.get("code") == "TIMEOUT":
+            status = "timeout"
+        else:
+            status = "failed"
+        receipt = build_receipt(
+            request,
+            status,
+            frame,
+            str(frame.get("request_id") or ""),
+            key,
+        )
+        try:
+            EXECUTION_RECORD_STORE.save_receipt(
+                request["confirm_id"],
+                request["call_id"],
+                receipt,
+                True,
+            )
+        except Exception as exc:
+            LOGGER.warning(
+                "execution record receipt write failed for %s: %s",
+                request["execution_id"],
+                exc,
+            )
+        self._emit_execution_event(
+            "execution_completed",
+            "success" if status == "succeeded" else "error",
+            {
+                "confirm_id": request["confirm_id"],
+                "execution_id": request["execution_id"],
+                "call_id": request["call_id"],
+                "tool_name": request["tool_name"],
+                "status": status,
+                "duration_ms": self._execution_duration_ms(request),
+                "request_id": receipt["request_id"],
+            },
+            str(frame.get("request_id") or ""),
+            str(frame.get("session_id") or ""),
+            request["decider_user_id"],
+        )
+
+    @staticmethod
+    def _execution_duration_ms(request: dict) -> int:
+        """Whole-milliseconds between request signing and receipt close."""
+        try:
+            started = datetime.strptime(
+                request["requested_at"], "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=timezone.utc)
+        except (KeyError, ValueError):
+            return 0
+        elapsed = datetime.now(timezone.utc) - started
+        return max(int(elapsed.total_seconds() * 1000), 0)
+
+    def _emit_execution_event(
+        self,
+        event_type: str,
+        outcome: str,
+        details: dict,
+        request_id: str,
+        session_id: str,
+        decider_user_id: str,
+    ) -> None:
+        """Emit one execution audit event through the canonical emitter.
+
+        Fire-and-forget with ``confirm_id`` in details and the resume's
+        ``x-request-id`` forwarded, so the trail correlates
+        ``confirmation_decided`` → ``execution_requested`` →
+        ``tool_invoked`` → ``execution_completed`` (SPEC-037 R-5).
+        """
+        event = build_audit_event(
+            event_type,
+            request_id,
+            outcome,
+            details=details,
+            subject=decider_user_id,
+            username=decider_user_id,
+            session_id=session_id,
+        )
+        emit_audit_event(self.settings, event)
+
     @staticmethod
     def _toolkit_risk_map(toolkit: object | None) -> dict[str, str]:
         """Map sanitized tool names to gateway risk tiers (SPEC-021 R-3).
@@ -1120,7 +1361,12 @@ class AgentKernel:
         from agentscope.event import ConfirmResult, UserConfirmResultEvent
 
         from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
-        from agent_service.tools.gateway_tools import DELEGATED_TOKEN
+        from agent_service.tools.gateway_tools import (
+            DELEGATED_TOKEN,
+            EXECUTION_AUDIT_CONTEXT,
+            EXECUTION_REJECTION,
+            EXECUTION_REQUESTS,
+        )
 
         # Pass the session's pinned model (SPEC-024 R-3) so the resumed
         # stream rebuilds against the same model that parked it.
@@ -1141,9 +1387,31 @@ class AgentKernel:
             ],
         )
 
+        # SPEC-037 R-2: the signing envelope is built where the decision
+        # and the parked arguments are both in hand — one signed request
+        # per approved parked call, persisted and audited before any
+        # invocation. Denials construct nothing; a missing key rejects
+        # the whole batch fail-closed.
+        execution_requests, execution_rejection = self._prepare_executions(
+            pending, user_name, confirmed, request_id, session_id
+        )
+
         trace_queue: asyncio.Queue = asyncio.Queue()
         sink_var = TOOL_EVIDENCE_SINK.set(trace_queue)
         token_var = DELEGATED_TOKEN.set(bearer_token)
+        requests_var = EXECUTION_REQUESTS.set(execution_requests or None)
+        rejection_var = EXECUTION_REJECTION.set(execution_rejection)
+        audit_var = EXECUTION_AUDIT_CONTEXT.set(
+            {
+                "settings": self.settings,
+                "confirm_id": pending.confirm_id,
+                "session_id": session_id,
+                "request_id": request_id,
+                "decider_user_id": user_name,
+            }
+            if confirmed
+            else None
+        )
         try:
             yield {
                 "type": "confirmation_result",
@@ -1157,15 +1425,13 @@ class AgentKernel:
             }
             async for event in agent.reply_stream(confirm_event):
                 self.clear_error()
-                while not trace_queue.empty():
-                    trace = trace_queue.get_nowait()
-                    decorated = {
-                        **trace,
-                        "request_id": request_id,
-                        "session_id": session_id,
-                    }
-                    if decorated.get("type") in EVIDENCE_FRAME_TYPES:
-                        evidence_frames.append(decorated)
+                for decorated in self._drain_trace_queue(
+                    trace_queue,
+                    request_id,
+                    session_id,
+                    evidence_frames,
+                    execution_requests,
+                ):
                     yield decorated
                 # A resumed turn can park again on another ASK-gated tool.
                 frame = self._build_confirmation_frame(
@@ -1183,15 +1449,13 @@ class AgentKernel:
                     }
                     return
                 yield self.normalize_event(event, request_id, session_id)
-            while not trace_queue.empty():
-                trace = trace_queue.get_nowait()
-                decorated = {
-                    **trace,
-                    "request_id": request_id,
-                    "session_id": session_id,
-                }
-                if decorated.get("type") in EVIDENCE_FRAME_TYPES:
-                    evidence_frames.append(decorated)
+            for decorated in self._drain_trace_queue(
+                trace_queue,
+                request_id,
+                session_id,
+                evidence_frames,
+                execution_requests,
+            ):
                 yield decorated
         finally:
             # Covers both completion and re-park (the early return above):
@@ -1200,6 +1464,9 @@ class AgentKernel:
                 session_id, request_id, turn_index, evidence_frames
             )
             DELEGATED_TOKEN.reset(token_var)
+            EXECUTION_REQUESTS.reset(requests_var)
+            EXECUTION_REJECTION.reset(rejection_var)
+            EXECUTION_AUDIT_CONTEXT.reset(audit_var)
             TOOL_EVIDENCE_SINK.reset(sink_var)
             CONFIRMATION_REGISTRY.resolve(session_id, pending.confirm_id)
             # SPEC-031 R-1: idempotent safety net — the confirm route

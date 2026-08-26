@@ -29,6 +29,17 @@ spec:
             allowPrivilegeEscalation: false
             seccompProfile:
               type: RuntimeDefault
+          env:
+            # SPEC-037 R-2: signs approved execution requests at resume;
+            # verified at the invocation boundary. An absent secret/key
+            # fails closed (audited signing_unavailable rejection) — the
+            # platform never degrades to unsigned mutating execution.
+            - name: AGENT_EXECUTION_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: execution-signing-secret
+                  key: AGENT_EXECUTION_SIGNING_KEY
+                  optional: true
           envFrom:
             - configMapRef:
                 name: platform-runtime-config

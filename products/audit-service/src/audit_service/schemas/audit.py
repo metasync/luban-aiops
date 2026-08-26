@@ -24,6 +24,9 @@ EventType = Literal[
     "skill_searched",
     "skill_retrieved",
     "skills_synced",
+    "execution_requested",
+    "execution_completed",
+    "execution_rejected",
 ]
 
 Outcome = Literal["allow", "deny", "success", "error"]

@@ -30,7 +30,7 @@ import { getSession, type SessionSummary } from "../api/sessions";
 import { useAuth } from "../auth/AuthContext";
 import { CHAT_CONFIRM_ROLES, APPROVAL_DECIDER_ROLES, hasAnyRole } from "../roles";
 import type { SessionWorkspace } from "../sessions/useSessionWorkspace";
-import type { ToolResultFrame } from "../stream/models";
+import type { ExecutionReceipt, ToolResultFrame } from "../stream/models";
 import {
   useChatStream,
   type ChatTurn,
@@ -255,6 +255,34 @@ const CARD_STATUS: Record<string, { color: string; label: string }> = {
   error: { color: "error", label: "Error" },
 };
 
+// SPEC-037 R-6: read-only receipt states on decided cards; mirrors the
+// execution record store's five statuses.
+const EXECUTION_STATUS: Record<string, { color: string; label: string }> = {
+  requested: { color: "default", label: "requested" },
+  succeeded: { color: "success", label: "succeeded" },
+  failed: { color: "error", label: "failed" },
+  timeout: { color: "warning", label: "timeout" },
+  rejected: { color: "error", label: "rejected" },
+};
+
+function executionDigestNote(execution: ExecutionReceipt): string {
+  if (execution.status === "rejected") {
+    return execution.rejectReason
+      ? `rejected: ${execution.rejectReason}`
+      : "rejected";
+  }
+  if (execution.digestMatch === true) {
+    return "arguments matched the signed request";
+  }
+  if (execution.digestMatch === false) {
+    return "arguments did not match the signed request";
+  }
+  if (execution.status === "requested") {
+    return "signed request issued";
+  }
+  return "";
+}
+
 export function ConfirmationCardView({
   card,
   canDecide,
@@ -315,6 +343,24 @@ export function ConfirmationCardView({
           </pre>
         </div>
       ))}
+      {card.executions && card.executions.length > 0 ? (
+        <div className="confirm-executions">
+          {card.executions.map((execution) => {
+            const status =
+              EXECUTION_STATUS[execution.status] ?? EXECUTION_STATUS.requested;
+            const note = executionDigestNote(execution);
+            return (
+              <div className="confirm-execution" key={execution.executionId}>
+                <Tag color={status.color}>{status.label}</Tag>
+                <strong>{execution.toolName || execution.callId}</strong>
+                {note ? (
+                  <span className="confirm-execution-note">{note}</span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
       {card.status === "pending" ? (
         effectiveCanDecide ? (
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>

@@ -16,13 +16,14 @@ activate them. A feature is **active** when all required variables are set to no
 | **Token delegation** | `PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET` ↔ `IDENTITY_SERVICE_CLIENTS` | platform-gateway ↔ identity-service | **must be provisioned** |
 | **Kubernetes tools** | `GATEWAY_K8S_ENABLED=true`, `GATEWAY_K8S_NAMESPACE` | tool-gateway | enabled (`dev-luban-aiops`) |
 | **Mutating tools (`k8s.delete_pod`)** | `GATEWAY_MUTATING_TOOLS_ENABLED=true`, `GATEWAY_K8S_ENABLED=true`, `AGENT_HITL_CONFIRM_TIMEOUT>0`, `tools:mutate` policy grant, opt-in pod-delete RBAC | tool-gateway, agent-service, policy bundle | disabled (`false`) |
+| **Signed execution (SPEC-037)** | `AGENT_EXECUTION_SIGNING_KEY` ↔ `execution-signing-secret` | agent-service | **must be provisioned** (`sync-execution-signing-secret.sh`); absent key fails mutating resumes closed |
 | **Elastic observability** | `GATEWAY_ELASTIC_ENABLED=true`, `GATEWAY_ELASTIC_URL`, auth (`_API_KEY` or `_USERNAME`+`_PASSWORD`) | tool-gateway | disabled |
 | **Output redaction** | `GATEWAY_REDACTION_ENABLED` | tool-gateway | enabled (`true`) |
 | **Policy enforcement** | `GATEWAY_POLICY_PATH`, `PLATFORM_GATEWAY_POLICY_PATH` | tool-gateway, platform-gateway | `/etc/luban/policy/policy.yaml` |
 | **OpenTelemetry push** | `OTEL_ENABLED=true`, `OTEL_EXPORTER_OTLP_ENDPOINT`, auth `OTEL_EXPORTER_OTLP_HEADERS` | all services | enabled (OpenObserve; header via `sync-otel-secrets.sh`) |
 | **LLM runtime** | `AGENTSCOPE_PROVIDER`, `AGENTSCOPE_MODEL_NAME`, `AGENTSCOPE_API_KEY` | agent-service | via runtime profile |
 | **Workload identity** | `PLATFORM_GATEWAY_WORKLOAD_TOKEN_PATH`, `IDENTITY_WORKLOAD_ISSUER_URL`, `IDENTITY_WORKLOAD_CLIENTS` | platform-gateway, identity-service | disabled (dev) |
-| **Durable audit trail** | `*_AUDIT_SERVICE_URL`, `*_AUDIT_CLIENT_SECRET` ↔ `AUDIT_INGEST_CLIENTS` | audit-service, tool-gateway, platform-gateway, identity-service, incident-service, skills-hub | **must be provisioned** (`sync-audit-secrets.sh`) |
+| **Durable audit trail** | `*_AUDIT_SERVICE_URL`, `*_AUDIT_CLIENT_SECRET` ↔ `AUDIT_INGEST_CLIENTS` | audit-service, tool-gateway, platform-gateway, identity-service, incident-service, skills-hub, agent-service | **must be provisioned** (`sync-audit-secrets.sh`) |
 | **Skills and grounded guidance** | `SKILLS_SOURCES`, `GATEWAY_SKILLS_SERVICE_URL`, `GATEWAY_SKILLS_CLIENT_SECRET`, `PLATFORM_GATEWAY_SKILLS_HUB_URL`, `PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET` ↔ `SKILLS_QUERY_CLIENTS` | skills-hub, tool-gateway, platform-gateway | **must be provisioned** (`sync-skills-secrets.sh`) |
 | **Incident intake and triage** | `INCIDENT_WEBHOOK_TOKEN`, `PLATFORM_GATEWAY_INCIDENT_SERVICE_URL`, `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET` ↔ `INCIDENT_QUERY_CLIENTS` | incident-service, platform-gateway, tool-gateway | **must be provisioned** (`sync-incident-secrets.sh`) |
 | **Portal voice input** | *(none — browser Web Speech API; `input_modality` passes through gateway/agent and is audited only)* | operator-portal, platform-gateway, agent-service | enabled (browser-capability gated) |
@@ -111,7 +112,11 @@ requester; blocked attempts 403 and are audited, no new variables) →
 `tools:mutate` grant in the policy bundle. Turning on only the
 gateway flag is deliberately insufficient: without HITL bridging the agent cannot
 even offer the tool, and without the policy grant the invocation 403s at the
-gateway. See the [Approval and HITL Governance Guide](approval-and-hitl.md).
+gateway. Approved resumes additionally sign an execution request over the
+parked arguments' digest and verify it at invocation (SPEC-037); without
+`AGENT_EXECUTION_SIGNING_KEY` the mutating resume fails closed with an
+audited `signing_unavailable` rejection. See the
+[Approval and HITL Governance Guide](approval-and-hitl.md).
 
 ### Audit Ingestion Chain
 
@@ -119,7 +124,8 @@ Fire-and-forget audit delivery (SPEC-013). Unreachable audit-service degrades
 to log-only auditing; user-facing requests are never blocked.
 
 ```
-tool-gateway / platform-gateway / identity-service          audit-service
+tool-gateway / platform-gateway / identity-service /
+incident-service / skills-hub / agent-service               audit-service
 ┌─────────────────────────────────────────┐                 ┌──────────────────────┐
 │ *_AUDIT_SERVICE_URL                     │── POST events ──►│ listens on :8000     │
 │ = http://audit-service:8000             │                 │ AUDIT_INGEST_CLIENTS │
@@ -135,7 +141,12 @@ tool-gateway / platform-gateway / identity-service          audit-service
 
 **Provisioning:** `make deploy` calls `sync-audit-secrets.sh` which generates
 one random shared secret (or uses `AUDIT_INGEST_SECRET` if exported) and writes
-all four K8s secrets. `SKIP_AUDIT_SECRETS=true` opts out; unsetting an
+all K8s secrets, registering every emitter in `AUDIT_INGEST_CLIENTS`.
+agent-service (the SPEC-037 execution events) is the one exception to the
+per-service secret files: its `AGENT_AUDIT_CLIENT_SECRET` is upserted in
+place into the active runtime profile's `runtime-secrets.env`
+(`agent-platform-runtime-secrets`) so the LLM provider keys already
+provisioned there survive. `SKIP_AUDIT_SECRETS=true` opts out; unsetting an
 emitter's `*_AUDIT_SERVICE_URL` falls back to log-only auditing.
 
 **Known limitation (shared query credential):** the audit-service query API
@@ -293,6 +304,9 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime
 | `AGENTSCOPE_REPLY_INPUT_TOKEN_WEIGHT` | Input token weight for the reply budget (must be >= 0; `0` is valid) | `1.0` | code default |
 | `AGENTSCOPE_REPLY_OUTPUT_TOKEN_WEIGHT` | Output token weight for the reply budget (must be >= 0; `0` is valid) | `1.0` | code default |
 | `AGENTSCOPE_TASK_TOOLS_ENABLED` | Opt-in agentscope task tools (`TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate`; state-local, persisted via the agent state store) | `false` | code default |
+| `AGENT_AUDIT_SERVICE_URL` | Audit-service ingest URL for agent-service emissions (SPEC-037 execution events); unset degrades to log-only auditing | `http://audit-service:8000` | runtime-config |
+| `AGENT_AUDIT_CLIENT_ID` | Audit ingest client id for agent-service; must match an `AUDIT_INGEST_CLIENTS` entry | `agent-service` | runtime-config |
+| `AGENT_EXECUTION_SIGNING_KEY` | HMAC key for signed execution requests and receipts (SPEC-037); rides the `execution-signing-secret` via an optional `secretKeyRef` — an absent secret leaves it unset and mutating resumes fail closed (`signing_unavailable`) | **must be provisioned** | execution-signing-secret |
 | `AGENT_GATEWAY_TOOL_AUTO_ALLOW` | Comma-separated dotted gateway tool names auto-approved by the permission middleware when read-only (overrides the built-in vetted list); the allow-list is the only auto-approval surface — every other tool is answered with an explicit ASK and parks for operator confirmation (SPEC-020). Mutating tools are never auto-approved regardless of this setting (SPEC-021) | built-in vetted list | code default |
 | `AGENT_HITL_CONFIRM_TIMEOUT` | HITL confirmation timeout in seconds; an expired parked batch is closed via `UserInterruptEvent` on the next confirm attempt (410) or next chat turn. `0` disables HITL confirmation bridging entirely (SPEC-020) and excludes mutating tools from the agent toolkit (SPEC-021) | `600` | code default |
 | `AGENT_TOOL_DATA_SUMMARY_MAX_CHARS` | Serialized-size cap for the `data_summary` field on `tool_result` evidence frames; oversized payloads are truncated with a marker | `2000` | code default |
@@ -483,7 +497,14 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 | Key | Purpose | How to Provision |
 |---|---|---|
 | `AGENTSCOPE_API_KEY` | LLM provider API key | `sync-runtime-secret.sh <profile>` |
+| `AGENT_AUDIT_CLIENT_SECRET` | Audit ingest credential for the SPEC-037 execution events | `sync-audit-secrets.sh` |
 | `OTEL_EXPORTER_OTLP_HEADERS` | OTLP ingest auth (Basic) for the OTel push pipeline | `sync-otel-secrets.sh` |
+
+### `execution-signing-secret`
+
+| Key | Purpose | How to Provision |
+|---|---|---|
+| `AGENT_EXECUTION_SIGNING_KEY` | HMAC key signing execution requests and receipts (SPEC-037); the agent-service deployment reads it through an optional `secretKeyRef`, so an absent secret fails mutating resumes closed instead of degrading to unsigned execution | `sync-execution-signing-secret.sh` (generate → reuse ladder; `SKIP_EXECUTION_SIGNING_SECRET=true` opts out) |
 
 ### `platform-gateway-runtime-secrets`
 

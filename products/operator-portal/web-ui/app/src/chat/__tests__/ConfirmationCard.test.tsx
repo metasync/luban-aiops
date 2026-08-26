@@ -101,3 +101,100 @@ describe("ConfirmationCardView approval tiers (SPEC-030 R-5)", () => {
     ).toBeTruthy();
   });
 });
+
+describe("ConfirmationCardView execution receipts (SPEC-037 R-6)", () => {
+  function decidedCard(
+    executions: ConfirmationCard["executions"],
+  ): ConfirmationCard {
+    return {
+      ...cardOf([
+        {
+          callId: "c-1",
+          toolName: "k8s.restart_pod",
+          riskLevel: "write",
+          action: "tools:mutate",
+        },
+      ]),
+      status: "approved",
+      note: "Approved by luban-approver at 2026-08-27T10:05:00Z.",
+      deciderUserId: "luban-approver",
+      decidedAt: "2026-08-27T10:05:00Z",
+      executions,
+    };
+  }
+
+  it("renders the receipt badge and digest-match state on decided cards", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    renderCard(
+      decidedCard([
+        {
+          executionId: "exec-1",
+          callId: "c-1",
+          toolName: "k8s.restart_pod",
+          status: "succeeded",
+          digestMatch: true,
+        },
+      ]),
+    );
+    expect(screen.getByText("succeeded")).toBeTruthy();
+    expect(
+      screen.getByText("arguments matched the signed request"),
+    ).toBeTruthy();
+  });
+
+  it("shows failed and timeout receipts with their digest state", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    renderCard(
+      decidedCard([
+        {
+          executionId: "exec-1",
+          callId: "c-1",
+          toolName: "k8s.restart_pod",
+          status: "failed",
+          digestMatch: true,
+        },
+        {
+          executionId: "exec-2",
+          callId: "c-2",
+          toolName: "k8s.scale_deployment",
+          status: "timeout",
+          digestMatch: true,
+        },
+      ]),
+    );
+    expect(screen.getByText("failed")).toBeTruthy();
+    expect(screen.getByText("timeout")).toBeTruthy();
+  });
+
+  it("surfaces a rejection with its reason", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    renderCard(
+      decidedCard([
+        {
+          executionId: "exec-1",
+          callId: "c-1",
+          toolName: "k8s.restart_pod",
+          status: "rejected",
+          digestMatch: false,
+          rejectReason: "args_digest_mismatch",
+        },
+      ]),
+    );
+    expect(screen.getByText("rejected")).toBeTruthy();
+    expect(
+      screen.getByText("rejected: args_digest_mismatch"),
+    ).toBeTruthy();
+  });
+
+  it("renders legacy decided cards without receipts exactly as today", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const { container } = renderCard(decidedCard(undefined));
+    expect(container.querySelector(".confirm-executions")).toBeNull();
+    expect(screen.queryByText("succeeded")).toBeNull();
+    expect(screen.queryByText("rejected")).toBeNull();
+    // The decided attribution stays the card's only footnote.
+    expect(
+      screen.getByText(/Approved by luban-approver/),
+    ).toBeTruthy();
+  });
+});

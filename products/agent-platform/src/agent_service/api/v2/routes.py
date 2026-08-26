@@ -38,6 +38,7 @@ from agent_service.services.confirmation_records import (
     CONFIRMATION_RECORD_STORE,
 )
 from agent_service.services.evidence_store import EVIDENCE_STORE
+from agent_service.services.execution_records import EXECUTION_RECORD_STORE
 from agent_service.services.hitl_confirmations import (
     ConfirmationExpired,
     ConfirmationNotFound,
@@ -549,13 +550,12 @@ def _load_confirmation_cards(
     """Durable confirmation cards for the session detail (SPEC-031 R-2).
 
     ``None`` when the record store is unreadable — degrades like
-    ``evidence_turns``, never a 500.
+    ``evidence_turns``, never a 500. Approved-execution rows ride each
+    card under ``executions`` (SPEC-037 R-4); an unreadable execution
+    store degrades to empty rows, never a card failure.
     """
     try:
-        return [
-            ConfirmationRecordModel(**record)
-            for record in CONFIRMATION_RECORD_STORE.load_for_session(session_id)
-        ]
+        records = CONFIRMATION_RECORD_STORE.load_for_session(session_id)
     except Exception as exc:
         LOGGER.warning(
             "confirmation record store unreadable for session %s: %s",
@@ -563,6 +563,24 @@ def _load_confirmation_cards(
             exc,
         )
         return None
+    try:
+        executions = EXECUTION_RECORD_STORE.load_for_session(session_id)
+    except Exception as exc:
+        LOGGER.warning(
+            "execution record store unreadable for session %s: %s",
+            session_id,
+            exc,
+        )
+        executions = []
+    by_confirm: dict[str, list[dict]] = {}
+    for row in executions:
+        by_confirm.setdefault(row["confirm_id"], []).append(row)
+    return [
+        ConfirmationRecordModel(
+            **record, executions=by_confirm.get(record["confirm_id"], [])
+        )
+        for record in records
+    ]
 
 
 @router.post("/sessions", response_model=AgentSession, status_code=201)

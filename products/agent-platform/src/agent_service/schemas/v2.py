@@ -172,6 +172,31 @@ class EvidenceTurn(BaseModel):
     frames: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ExecutionRecordModel(BaseModel):
+    """Signed execution lifecycle row for one approved parked call (SPEC-037 R-4).
+
+    Rides the session-detail surface under its confirmation card:
+    request/receipt status plus the digest-match result, so decided
+    cards can render a read-only receipt badge. ``receipt`` is the
+    signed receipt envelope (execution-receipt.schema.json) once the
+    execution closed; rejected executions carry no receipt.
+    """
+
+    execution_id: str
+    call_id: str
+    confirm_id: str
+    session_id: str
+    tool_name: str
+    status: Literal["requested", "succeeded", "failed", "timeout", "rejected"] = (
+        "requested"
+    )
+    requested_at: str | None = None
+    completed_at: str | None = None
+    digest_match: bool | None = None
+    reject_reason: str | None = None
+    receipt: dict[str, Any] | None = None
+
+
 class ConfirmationRecordModel(BaseModel):
     """Durable confirmation lifecycle record (SPEC-031 R-1/R-2).
 
@@ -196,6 +221,10 @@ class ConfirmationRecordModel(BaseModel):
     decider_user_id: str | None = None
     decision: str | None = None
     decided_at: str | None = None
+    # SPEC-037 R-4: additive execution rows for this confirmation (one
+    # per approved parked call); empty for pending/denied/expired records
+    # and for decided rows that predate signed execution requests.
+    executions: list[ExecutionRecordModel] = Field(default_factory=list)
 
 
 class AgentSession(BaseModel):

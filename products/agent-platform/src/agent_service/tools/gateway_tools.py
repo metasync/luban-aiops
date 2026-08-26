@@ -42,6 +42,32 @@ DELEGATED_TOKEN: ContextVar[str | None] = ContextVar(
     default=None,
 )
 
+# Signed execution request state for the resumed stream (SPEC-037 R-2/R-3):
+# the kernel sets EXECUTION_REQUESTS (call_id -> signed request envelope)
+# around an approved resume; tool closures verify the invoked arguments
+# against the envelope before the gateway call goes out. A missing-key
+# resume sets EXECUTION_REJECTION instead, so every mutating invocation
+# fails closed with that reason. EXECUTION_AUDIT_CONTEXT carries the
+# correlation fields (settings, confirm_id, request id, identities) the
+# rejection audit needs. CURRENT_CALL_ID binds the in-flight invocation
+# to its parked call id (set by ToolEvidenceMiddleware).
+EXECUTION_REQUESTS: ContextVar[dict[str, dict[str, Any]] | None] = ContextVar(
+    "EXECUTION_REQUESTS",
+    default=None,
+)
+EXECUTION_REJECTION: ContextVar[str | None] = ContextVar(
+    "EXECUTION_REJECTION",
+    default=None,
+)
+EXECUTION_AUDIT_CONTEXT: ContextVar[dict[str, Any] | None] = ContextVar(
+    "EXECUTION_AUDIT_CONTEXT",
+    default=None,
+)
+CURRENT_CALL_ID: ContextVar[str | None] = ContextVar(
+    "CURRENT_CALL_ID",
+    default=None,
+)
+
 
 def _auth_headers(bearer_token: str | None) -> dict[str, str]:
     if bearer_token:
@@ -124,10 +150,103 @@ def _normalize_input_schema(schema: Any) -> dict:
     return normalized
 
 
+def _verify_execution_request(
+    parameters: dict[str, Any],
+    call_id: str | None,
+) -> str | None:
+    """Verify one mutating invocation against its signed request (SPEC-037 R-3).
+
+    Returns the rejection reason, or None when the call may proceed.
+    Read-only tools never reach this gate. The check fails closed: a
+    resume-wide rejection (missing signing key), an absent envelope, or a
+    digest mismatch all block the invocation before the gateway call goes
+    out — the kernel's ALLOWED state alone never suffices for a mutating
+    call.
+    """
+    from agent_service.services.execution_signing import (
+        REASON_ARGS_DIGEST_MISMATCH,
+        REASON_REQUEST_MISSING,
+        canonical_digest,
+    )
+
+    rejection = EXECUTION_REJECTION.get()
+    if rejection:
+        return rejection
+    requests = EXECUTION_REQUESTS.get() or {}
+    request = requests.get(call_id) if call_id else None
+    if request is None:
+        return REASON_REQUEST_MISSING
+    if canonical_digest(parameters) != request.get("args_digest"):
+        return REASON_ARGS_DIGEST_MISMATCH
+    return None
+
+
+def _rejection_result(
+    tool_name: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Structured error result for a blocked mutating invocation.
+
+    Same shape as the NO_CREDENTIAL error result: the stream stays alive,
+    the evidence middleware still emits the tool_result frame, and the
+    kernel's resumed-stream handling closes the execution record.
+    """
+    return {
+        "tool_name": tool_name,
+        "status": "error",
+        "request_id": str(uuid.uuid4()),
+        "error": {
+            "code": "EXECUTION_REJECTED",
+            "message": (
+                "execution request verification failed: "
+                "this mutating action was not executed"
+            ),
+            "reason": reason,
+        },
+    }
+
+
+def _audit_execution_rejected(
+    tool_name: str,
+    call_id: str | None,
+    reason: str,
+) -> None:
+    """Emit the execution_rejected audit event (SPEC-037 R-5).
+
+    Best-effort and inert outside a resumed stream: the correlation
+    context is only present while the kernel owns an approved resume.
+    """
+    context = EXECUTION_AUDIT_CONTEXT.get()
+    if not context:
+        return
+    from agent_service.services.audit_emitter import (
+        build_audit_event,
+        emit_audit_event,
+    )
+
+    event = build_audit_event(
+        "execution_rejected",
+        context.get("request_id"),
+        "deny",
+        details={
+            "confirm_id": context.get("confirm_id"),
+            "call_id": call_id,
+            "tool_name": tool_name,
+            "reason": reason,
+        },
+        subject=context.get("decider_user_id"),
+        username=context.get("decider_user_id"),
+        session_id=context.get("session_id"),
+    )
+    emit_audit_event(context.get("settings"), event)
+
+
 def _make_tool_fn(
     gateway_url: str,
     name: str,
     desc: str,
+    *,
+    is_read_only: bool = True,
 ):
     """Build the async gateway-invocation closure for one tool.
 
@@ -138,18 +257,54 @@ def _make_tool_fn(
     raw gateway result on its metadata so ``ToolEvidenceMiddleware`` can
     emit evidence frames without re-parsing the model-visible text
     (SPEC-018 R-2).
+
+    Mutating tools (``is_read_only`` False) verify their invoked arguments
+    against the signed execution request before the gateway call goes out
+    (SPEC-037 R-3); a failed verification returns a structured rejection
+    result and never reaches the gateway. Read-only tools never consult
+    the envelope.
     """
     from agentscope.message import TextBlock
     from agentscope.tool import ToolChunk
 
     async def tool_fn(**kwargs: Any) -> ToolChunk:
         """Invoke a platform tool via the tool-gateway."""
-        result = await invoke_gateway_tool(
-            gateway_url=gateway_url,
-            tool_name=name,
-            parameters=kwargs,
-            bearer_token=DELEGATED_TOKEN.get(),
-        )
+        if not is_read_only:
+            call_id = CURRENT_CALL_ID.get()
+            reason = _verify_execution_request(kwargs, call_id)
+            if reason is not None:
+                LOGGER.warning(
+                    "mutating invocation of %s rejected: %s",
+                    name,
+                    reason,
+                )
+                _audit_execution_rejected(name, call_id, reason)
+                result = _rejection_result(name, reason)
+                return ToolChunk(
+                    content=[TextBlock(text=json.dumps(result, default=str))],
+                    metadata={"gateway_result": result},
+                )
+        try:
+            result = await invoke_gateway_tool(
+                gateway_url=gateway_url,
+                tool_name=name,
+                parameters=kwargs,
+                bearer_token=DELEGATED_TOKEN.get(),
+            )
+        except httpx.TimeoutException:
+            # Surface the timeout as a structured result so the evidence
+            # frame (and the SPEC-037 receipt) can distinguish it from a
+            # gateway-reported failure.
+            result = {
+                "tool_name": name,
+                "status": "error",
+                "request_id": str(uuid.uuid4()),
+                "error": {
+                    "code": "TIMEOUT",
+                    "message": "tool invocation timed out before the "
+                    "gateway answered",
+                },
+            }
         return ToolChunk(
             content=[TextBlock(text=json.dumps(result, default=str))],
             metadata={"gateway_result": result},
@@ -192,7 +347,12 @@ def build_function_tools(
         tool_name = tool_def["name"]
         description = tool_def.get("description", "")
         try:
-            fn = _make_tool_fn(gateway_url, tool_name, description)
+            fn = _make_tool_fn(
+                gateway_url,
+                tool_name,
+                description,
+                is_read_only=(tool_def.get("risk_level") == "read"),
+            )
             tool = FunctionTool(
                 fn,
                 name=tool_name.replace(".", "_"),

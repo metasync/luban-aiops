@@ -378,6 +378,80 @@ describe("transcriptToTurns card turn anchoring (SPEC-033 R-3)", () => {
   });
 });
 
+// --- Signed-execution receipts on decided cards (SPEC-037 R-6) ---
+
+function executionOf(overrides = {}) {
+  return {
+    execution_id: "exec-1",
+    call_id: "c-1",
+    confirm_id: "cf-9",
+    session_id: "s-1",
+    tool_name: "k8s.restart_pod",
+    status: "succeeded" as const,
+    digest_match: true,
+    reject_reason: null,
+    ...overrides,
+  };
+}
+
+describe("transcriptToTurns execution receipts (SPEC-037 R-6)", () => {
+  it("maps session-detail executions onto decided cards", () => {
+    const card = transcriptToTurns(TWO_TURNS, null, [
+      recordOf({
+        status: "approved",
+        decider_user_id: "luban-approver",
+        decided_at: "2026-08-27T10:05:00Z",
+        executions: [
+          executionOf(),
+          executionOf({
+            execution_id: "exec-2",
+            status: "rejected",
+            digest_match: false,
+            reject_reason: "args_digest_mismatch",
+          }),
+        ],
+      }),
+    ])[1].confirmations[0];
+    expect(card.executions).toEqual([
+      {
+        executionId: "exec-1",
+        callId: "c-1",
+        toolName: "k8s.restart_pod",
+        status: "succeeded",
+        digestMatch: true,
+        rejectReason: undefined,
+      },
+      {
+        executionId: "exec-2",
+        callId: "c-1",
+        toolName: "k8s.restart_pod",
+        status: "rejected",
+        digestMatch: false,
+        rejectReason: "args_digest_mismatch",
+      },
+    ]);
+  });
+
+  it("keeps legacy decided rows and pending cards receipt-free", () => {
+    // Records predating the field (and inbox-shaped records) map to a
+    // card without an executions surface.
+    const legacy = transcriptToTurns(TWO_TURNS, null, [
+      recordOf({ status: "approved", decider_user_id: "luban-approver" }),
+    ])[1].confirmations[0];
+    expect(legacy.executions).toBeUndefined();
+
+    const pending = transcriptToTurns(TWO_TURNS, null, [
+      recordOf({ executions: [executionOf()] }),
+    ])[1].confirmations[0];
+    expect(pending.executions).toBeUndefined();
+
+    const emptyList = transcriptToTurns(TWO_TURNS, null, [
+      recordOf({ status: "approved", executions: [] }),
+    ])[1].confirmations[0];
+    expect(emptyList.executions).toBeUndefined();
+  });
+});
+
 describe("detectArrivalSpan (SPEC-034 R-1 / SPEC-035 R-4)", () => {
   it("returns null when the reseed changed no content", () => {
     const previous = [turnOf("Done.")];

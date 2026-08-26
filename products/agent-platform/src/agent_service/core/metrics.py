@@ -185,6 +185,20 @@ def record_evidence_frame_truncated(reason: str) -> None:
     EVIDENCE_FRAMES_TRUNCATED.labels(reason=reason).inc()
 
 
+# --- Audit emission observability (SPEC-037 R-5) ---
+
+AUDIT_EMITS = Counter(
+    "audit_emits_total",
+    "Audit event emission attempts to the audit service (SPEC-013).",
+    ["result"],
+)
+
+
+def record_audit_emit(result: str) -> None:
+    """Record an audit emission outcome (``ok`` or ``error``)."""
+    AUDIT_EMITS.labels(result=result).inc()
+
+
 # --- Model discovery observability (SPEC-027) ---
 
 MODEL_DISCOVERY_REFRESHES = Counter(

@@ -13,6 +13,32 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.19.0 — 2026-08-27
+
+### Added
+
+- **Signed execution requests and receipts (SPEC-037)**: approved
+  mutating calls now carry a tamper-evident execution chain (Phase 1 of
+  the execution-runtime spike; the isolated worker remains Phase 2).
+  On approval resume the kernel canonicalizes each parked call's
+  arguments, digests them, and signs an HMAC-SHA256 execution envelope
+  (missing signing key fails closed with a `signing_unavailable`
+  rejection audited at resume); at the invocation boundary the
+  tool layer recomputes the digest and rejects any mismatch
+  (`args_digest_mismatch`) without re-executing. Durable execution
+  records keyed `(confirm_id, call_id)` track
+  `requested|succeeded|failed|timeout|rejected`, and signed receipts —
+  binding the resume request id, outcome status, latency, and a digest
+  of the executed tool result — close only `requested` rows. The audit
+  trail gains `execution_requested` / `execution_completed` /
+  `execution_rejected` events correlated by `confirm_id` and
+  `x-request-id`, session detail attaches executions to their decided
+  confirmation cards, and the portal renders a receipt badge on decided
+  cards (status, digest-match note; inbox stays decision-metadata-only).
+  Deploys ship an `execution-signing-secret` (optional `secretKeyRef`,
+  absent key fails closed) plus the agent-service audit-ingest
+  credential wiring.
+
 ## 0.18.1 — 2026-08-26
 
 ### Fixed

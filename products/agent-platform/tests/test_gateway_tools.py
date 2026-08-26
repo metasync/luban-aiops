@@ -6,9 +6,14 @@ import os
 import unittest
 from unittest.mock import AsyncMock, patch, MagicMock
 
+from agent_service.services.execution_signing import canonical_digest
 from agent_service.services.kernel_middleware import AUTO_ALLOW_ENV
 from agent_service.tools.gateway_tools import (
+    CURRENT_CALL_ID,
     DELEGATED_TOKEN,
+    EXECUTION_AUDIT_CONTEXT,
+    EXECUTION_REJECTION,
+    EXECUTION_REQUESTS,
     _make_tool_fn,
     build_function_tools,
     build_gateway_toolkit,
@@ -437,3 +442,196 @@ class RuntimeSettingsToolGatewayTests(unittest.TestCase):
         with patch.dict("os.environ", {"TOOL_GATEWAY_URL": "http://gw:8080"}):
             settings = RuntimeSettings.from_env()
         self.assertEqual(settings.tool_gateway_url, "http://gw:8080")
+
+
+class ExecutionRequestVerificationTests(unittest.TestCase):
+    """SPEC-037 R-3: invoked-args digest verification at the gateway
+    boundary for mutating tools; read-only tools never consult the
+    envelope."""
+
+    def _request(self, parameters) -> dict:
+        return {
+            "execution_id": "exec-1",
+            "confirm_id": "cf-1",
+            "call_id": "call-1",
+            "session_id": "ses-1",
+            "owner_user_id": "alice",
+            "decider_user_id": "bob",
+            "tool_name": "k8s.delete_pod",
+            "args_digest": canonical_digest(parameters),
+            "requested_at": "2026-08-27T10:00:00Z",
+            "signature": "f" * 64,
+        }
+
+    def _mutating_fn(self):
+        return _make_tool_fn(
+            "http://gw:8080", "k8s.delete_pod", "d", is_read_only=False
+        )
+
+    def test_matching_arguments_proceed_to_gateway(self) -> None:
+        fn = self._mutating_fn()
+        with patch(
+            "agent_service.tools.gateway_tools.invoke_gateway_tool",
+            new_callable=AsyncMock,
+        ) as mock_invoke:
+            mock_invoke.return_value = {"status": "success"}
+            requests_var = EXECUTION_REQUESTS.set(
+                {"call-1": self._request({"name": "web-1"})}
+            )
+            call_var = CURRENT_CALL_ID.set("call-1")
+            try:
+                chunk = _run(fn(name="web-1"))
+            finally:
+                CURRENT_CALL_ID.reset(call_var)
+                EXECUTION_REQUESTS.reset(requests_var)
+        mock_invoke.assert_called_once()
+        self.assertEqual(chunk.metadata["gateway_result"]["status"], "success")
+
+    def test_reordered_arguments_still_match(self) -> None:
+        fn = self._mutating_fn()
+        signed = self._request({"force": True, "name": "web-1"})
+        with patch(
+            "agent_service.tools.gateway_tools.invoke_gateway_tool",
+            new_callable=AsyncMock,
+        ) as mock_invoke:
+            mock_invoke.return_value = {"status": "success"}
+            requests_var = EXECUTION_REQUESTS.set({"call-1": signed})
+            call_var = CURRENT_CALL_ID.set("call-1")
+            try:
+                _run(fn(name="web-1", force=True))
+            finally:
+                CURRENT_CALL_ID.reset(call_var)
+                EXECUTION_REQUESTS.reset(requests_var)
+        mock_invoke.assert_called_once()
+
+    def test_mutated_arguments_blocked_and_audited(self) -> None:
+        fn = self._mutating_fn()
+        audit_context = {
+            "settings": None,
+            "confirm_id": "cf-1",
+            "session_id": "ses-1",
+            "request_id": "req-2",
+            "decider_user_id": "bob",
+        }
+        with patch(
+            "agent_service.tools.gateway_tools.invoke_gateway_tool",
+            new_callable=AsyncMock,
+        ) as mock_invoke, patch(
+            "agent_service.services.audit_emitter.emit_audit_event"
+        ) as mock_emit:
+            requests_var = EXECUTION_REQUESTS.set(
+                {"call-1": self._request({"name": "web-1"})}
+            )
+            call_var = CURRENT_CALL_ID.set("call-1")
+            audit_var = EXECUTION_AUDIT_CONTEXT.set(audit_context)
+            try:
+                chunk = _run(fn(name="prod-1"))
+            finally:
+                EXECUTION_AUDIT_CONTEXT.reset(audit_var)
+                CURRENT_CALL_ID.reset(call_var)
+                EXECUTION_REQUESTS.reset(requests_var)
+        # The gateway never sees the mutated invocation.
+        mock_invoke.assert_not_called()
+        result = chunk.metadata["gateway_result"]
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error"]["code"], "EXECUTION_REJECTED")
+        self.assertEqual(result["error"]["reason"], "args_digest_mismatch")
+        # The rejection is audited with confirm_id correlation.
+        event = mock_emit.call_args[0][1]
+        self.assertEqual(event["event_type"], "execution_rejected")
+        self.assertEqual(event["outcome"], "deny")
+        self.assertEqual(event["details"]["reason"], "args_digest_mismatch")
+        self.assertEqual(event["details"]["confirm_id"], "cf-1")
+        self.assertEqual(event["details"]["call_id"], "call-1")
+        self.assertEqual(event["session_id"], "ses-1")
+
+    def test_absent_envelope_blocks_mutating_call(self) -> None:
+        """Fail closed: a mutating call with no signed request (a path
+        that bypassed resume) never reaches the gateway."""
+        fn = self._mutating_fn()
+        with patch(
+            "agent_service.tools.gateway_tools.invoke_gateway_tool",
+            new_callable=AsyncMock,
+        ) as mock_invoke:
+            chunk = _run(fn(name="web-1"))
+        mock_invoke.assert_not_called()
+        result = chunk.metadata["gateway_result"]
+        self.assertEqual(result["error"]["code"], "EXECUTION_REJECTED")
+        self.assertEqual(result["error"]["reason"], "request_missing")
+
+    def test_unknown_call_id_blocks_mutating_call(self) -> None:
+        fn = self._mutating_fn()
+        with patch(
+            "agent_service.tools.gateway_tools.invoke_gateway_tool",
+            new_callable=AsyncMock,
+        ) as mock_invoke:
+            requests_var = EXECUTION_REQUESTS.set(
+                {"call-1": self._request({"name": "web-1"})}
+            )
+            call_var = CURRENT_CALL_ID.set("call-other")
+            try:
+                chunk = _run(fn(name="web-1"))
+            finally:
+                CURRENT_CALL_ID.reset(call_var)
+                EXECUTION_REQUESTS.reset(requests_var)
+        mock_invoke.assert_not_called()
+        result = chunk.metadata["gateway_result"]
+        self.assertEqual(result["error"]["reason"], "request_missing")
+
+    def test_resume_wide_rejection_reason_wins(self) -> None:
+        """SPEC-037 R-2 fail-closed posture: a missing signing key sets a
+        resume-wide rejection that blocks every mutating call."""
+        fn = self._mutating_fn()
+        with patch(
+            "agent_service.tools.gateway_tools.invoke_gateway_tool",
+            new_callable=AsyncMock,
+        ) as mock_invoke:
+            requests_var = EXECUTION_REQUESTS.set(
+                {"call-1": self._request({"name": "web-1"})}
+            )
+            call_var = CURRENT_CALL_ID.set("call-1")
+            rejection_var = EXECUTION_REJECTION.set("signing_unavailable")
+            try:
+                chunk = _run(fn(name="web-1"))
+            finally:
+                EXECUTION_REJECTION.reset(rejection_var)
+                CURRENT_CALL_ID.reset(call_var)
+                EXECUTION_REQUESTS.reset(requests_var)
+        mock_invoke.assert_not_called()
+        result = chunk.metadata["gateway_result"]
+        self.assertEqual(result["error"]["reason"], "signing_unavailable")
+
+    def test_read_only_invocations_never_consult_envelope(self) -> None:
+        fn = _make_tool_fn(
+            "http://gw:8080", "k8s.list_pods", "d", is_read_only=True
+        )
+        with patch(
+            "agent_service.tools.gateway_tools.invoke_gateway_tool",
+            new_callable=AsyncMock,
+        ) as mock_invoke:
+            mock_invoke.return_value = {"status": "success"}
+            # Even with a resume-wide rejection set, read-only calls pass.
+            rejection_var = EXECUTION_REJECTION.set("signing_unavailable")
+            try:
+                chunk = _run(fn(namespace="ops"))
+            finally:
+                EXECUTION_REJECTION.reset(rejection_var)
+        mock_invoke.assert_called_once()
+        self.assertEqual(chunk.metadata["gateway_result"]["status"], "success")
+
+    def test_rejection_without_audit_context_still_blocks(self) -> None:
+        fn = self._mutating_fn()
+        with patch(
+            "agent_service.tools.gateway_tools.invoke_gateway_tool",
+            new_callable=AsyncMock,
+        ) as mock_invoke, patch(
+            "agent_service.services.audit_emitter.emit_audit_event"
+        ) as mock_emit:
+            chunk = _run(fn(name="web-1"))
+        mock_invoke.assert_not_called()
+        # No correlation context (outside a resume): no audit, block stands.
+        mock_emit.assert_not_called()
+        self.assertEqual(
+            chunk.metadata["gateway_result"]["error"]["code"],
+            "EXECUTION_REJECTED",
+        )

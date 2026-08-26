@@ -16,6 +16,12 @@ NAMESPACE=${NAMESPACE:-dev-luban-aiops}
 # Set SKIP_AUDIT_SECRETS=true when secrets are injected externally (e.g. CI).
 "$SCRIPT_DIR/../sync-audit-secrets.sh" "$NAMESPACE"
 
+# Provision the execution-request signing key (SPEC-037) unless skipped.
+# Set SKIP_EXECUTION_SIGNING_SECRET=true when secrets are injected
+# externally (e.g. CI). Without a key the platform fails closed on
+# approved mutating executions (audited signing_unavailable rejection).
+"$SCRIPT_DIR/../sync-execution-signing-secret.sh" "$NAMESPACE"
+
 # Provision skills query credentials (SPEC-014) unless skipped.
 # Set SKIP_SKILLS_SECRETS=true when secrets are injected externally (e.g. CI).
 "$SCRIPT_DIR/../sync-skills-secrets.sh" "$NAMESPACE"

@@ -141,6 +141,31 @@ def test_model_discovery_settings_read_env(monkeypatch):
     assert settings.model_discovery_timeout_seconds == 2.5
 
 
+def test_execution_signing_settings_defaults(monkeypatch):
+    """SPEC-037 R-2/R-5: unset signing key and audit emission knobs."""
+    monkeypatch.delenv("AGENT_EXECUTION_SIGNING_KEY", raising=False)
+    monkeypatch.delenv("AGENT_AUDIT_SERVICE_URL", raising=False)
+    monkeypatch.delenv("AGENT_AUDIT_CLIENT_ID", raising=False)
+    monkeypatch.delenv("AGENT_AUDIT_CLIENT_SECRET", raising=False)
+    settings = RuntimeSettings.from_env()
+    assert settings.execution_signing_key is None
+    assert settings.audit_service_url is None
+    assert settings.audit_client_id == "agent-service"
+    assert settings.audit_client_secret is None
+
+
+def test_execution_signing_settings_read_env(monkeypatch):
+    monkeypatch.setenv("AGENT_EXECUTION_SIGNING_KEY", "signing-key-1")
+    monkeypatch.setenv("AGENT_AUDIT_SERVICE_URL", "http://audit-service:8000")
+    monkeypatch.setenv("AGENT_AUDIT_CLIENT_ID", "agent-service")
+    monkeypatch.setenv("AGENT_AUDIT_CLIENT_SECRET", "ingest-secret")
+    settings = RuntimeSettings.from_env()
+    assert settings.execution_signing_key == "signing-key-1"
+    assert settings.audit_service_url == "http://audit-service:8000"
+    assert settings.audit_client_id == "agent-service"
+    assert settings.audit_client_secret == "ingest-secret"
+
+
 def test_model_discovery_settings_validation():
     with pytest.raises(ValueError, match="REFRESH_SECONDS must be >= 1"):
         RuntimeSettings(model_discovery_refresh_seconds=0)

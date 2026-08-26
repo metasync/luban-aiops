@@ -530,6 +530,24 @@ body {
   color: var(--text-muted);
 }
 
+/* Signed-execution receipts on decided cards (SPEC-037 R-6). */
+.confirm-executions {
+  margin-top: 8px;
+}
+
+.confirm-execution {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  padding: 2px 0;
+}
+
+.confirm-execution-note {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 /* Narrow viewports: fold the session panel away rather than squashing the
    transcript. Full responsive drawer parity lands with stage 5. */
 @media (max-width: 860px) {

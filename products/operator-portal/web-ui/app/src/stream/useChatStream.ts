@@ -7,6 +7,7 @@ import { currentAuthenticatedUser } from "../api/client";
 import type {
   ConfirmationStatus,
   DecodedEvent,
+  ExecutionReceipt,
   PendingCall,
   ToolCallFrame,
   ToolResultFrame,
@@ -35,6 +36,10 @@ export interface ConfirmationCard {
   // live undecided cards.
   deciderUserId?: string;
   decidedAt?: string;
+  // SPEC-037 R-6: receipts closing the approved calls, seeded from the
+  // session-detail execution rows; undefined on live cards, legacy
+  // decided rows, and inbox records (decision-metadata-only surface).
+  executions?: ExecutionReceipt[];
 }
 
 export interface ChatTurn {

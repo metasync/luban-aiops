@@ -9,6 +9,7 @@ from agent_service.schemas.api import SessionRecord
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
 from agent_service.services.confirmation_records import CONFIRMATION_RECORD_STORE
 from agent_service.services.evidence_store import EVIDENCE_STORE
+from agent_service.services.execution_records import EXECUTION_RECORD_STORE
 from agent_service.services.session_store import SESSION_STORE
 
 LOGGER = logging.getLogger(__name__)
@@ -149,5 +150,11 @@ def delete_session(session_id: str, user_id: str | None = None) -> bool:
         except Exception:
             # Confirmation records live and die with their session;
             # cleanup is best-effort once the session is gone.
+            pass
+        try:
+            EXECUTION_RECORD_STORE.delete_session(session_id)
+        except Exception:
+            # Execution records live and die with their session too
+            # (SPEC-037 R-4); cleanup is best-effort.
             pass
     return deleted

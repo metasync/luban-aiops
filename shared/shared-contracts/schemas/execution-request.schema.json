@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/execution-request.schema.json",
+  "title": "Execution Request (v1)",
+  "description": "Signed execution request constructed when a parked confirmation resumes with approval (SPEC-037 R-1). One envelope per approved parked tool call, built before any invocation happens. The signature is the HMAC-SHA256 hex over the canonical JSON of every other field in the envelope (sorted keys, no insignificant whitespace), keyed by the platform execution-signing key. args_digest is the SHA-256 hex of the canonical JSON of the parked arguments the approver saw on the confirmation card; the invocation boundary recomputes it from the executed arguments and blocks mismatches (SPEC-037 R-3).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "execution_id",
+    "confirm_id",
+    "call_id",
+    "session_id",
+    "owner_user_id",
+    "decider_user_id",
+    "tool_name",
+    "args_digest",
+    "requested_at",
+    "signature"
+  ],
+  "properties": {
+    "execution_id": {
+      "type": "string",
+      "description": "Fresh UUID minted per approved parked tool call; correlates the request with its receipt and the execution record."
+    },
+    "confirm_id": {
+      "type": "string",
+      "description": "The parked confirmation this execution was approved under (SPEC-031 record key)."
+    },
+    "call_id": {
+      "type": "string",
+      "description": "The parked tool call id the request binds to; the invocation boundary matches the executing call against it."
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Agent session that parked the confirmation."
+    },
+    "owner_user_id": {
+      "type": "string",
+      "description": "The session owner whose delegated token executes the call."
+    },
+    "decider_user_id": {
+      "type": "string",
+      "description": "The approver who resumed the confirmation (may differ from the owner for tier_2 approvals, SPEC-030 R-3)."
+    },
+    "tool_name": {
+      "type": "string",
+      "description": "Sanitized tool name of the parked call."
+    },
+    "args_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 hex of the canonical JSON of the parked arguments."
+    },
+    "requested_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp (RFC 3339) of request construction at resume time."
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "HMAC-SHA256 hex over the canonical JSON of the envelope excluding this field."
+    }
+  }
+}

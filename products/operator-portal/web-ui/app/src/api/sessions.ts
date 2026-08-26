@@ -70,6 +70,23 @@ export interface ConfirmationRecord {
   decider_user_id?: string | null;
   decision?: string | null;
   decided_at?: string | null;
+  // SPEC-037 R-6: signed-execution rows closing the approved calls; only
+  // the session-detail surface carries them (the inbox stays
+  // decision-metadata-only), and legacy records render an empty list.
+  executions?: ExecutionRecord[] | null;
+}
+
+export interface ExecutionRecord {
+  execution_id: string;
+  call_id: string;
+  confirm_id: string;
+  session_id: string;
+  tool_name: string;
+  status: "requested" | "succeeded" | "failed" | "timeout" | "rejected";
+  requested_at?: string | null;
+  completed_at?: string | null;
+  digest_match?: boolean | null;
+  reject_reason?: string | null;
 }
 
 export interface SessionSummary {

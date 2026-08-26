@@ -7,6 +7,17 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-27-signed-execution-requests.md`
+  - delivers SPEC-037 (v0.19.0): approved mutating calls gain a
+    tamper-evident execution chain — HMAC-signed execution requests
+    bound to the parked arguments' digest at approval resume (missing
+    signing key fails closed), argument-digest verification at the
+    invocation boundary, durable execution records and signed receipts
+    on the SPEC-031 Postgres posture, `execution_requested` /
+    `execution_completed` / `execution_rejected` audit events
+    correlated with the decision chain, a read-only receipt badge on
+    decided confirmation cards, and the `execution-signing-secret`
+    deploy wiring; the isolated execution worker stays Phase 2
 - `2026-08-26-live-check-patch.md`
   - v0.18.1 patch from the v0.18.0 live check: the chat markdown
     renderer gains nesting-aware list handling (indented sub-bullets

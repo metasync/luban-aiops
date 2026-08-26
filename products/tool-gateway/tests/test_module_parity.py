@@ -14,7 +14,8 @@ Families and their allowed divergence:
   settings class names (platform-gateway / tool-gateway).
 - ``services/audit_emitter.py``  — identical except docstrings and the
   package / settings class names (platform-gateway / tool-gateway /
-  identity-broker / skills-hub). incident-service also has an
+  identity-broker / skills-hub / agent-platform). incident-service also
+  has an
   ``audit_emitter.py`` but it
   is a different design (a triage ``AuditConnector``), intentionally excluded.
 - ``services/ingest_auth.py`` (audit-service) / ``services/query_auth.py``
@@ -154,6 +155,7 @@ class AuditEmitterParityTest(unittest.TestCase):
         "tool-gateway": ("tool_gateway", "GatewaySettings"),
         "identity-broker": ("identity_service", "IdentitySettings"),
         "skills-hub": ("skills_hub", "SkillsSettings"),
+        "agent-platform": ("agent_service", "RuntimeSettings"),
     }
 
     def test_fire_and_forget_emitters_match(self) -> None:

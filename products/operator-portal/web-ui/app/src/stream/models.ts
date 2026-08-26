@@ -109,3 +109,22 @@ export type ConfirmationStatus =
   | "denied"
   | "expired"
   | "error";
+
+// SPEC-037 R-6: read-only receipt view-model for one signed execution
+// closing an approved call; seeded from session-detail records, never
+// produced by the live stream.
+export type ExecutionReceiptStatus =
+  | "requested"
+  | "succeeded"
+  | "failed"
+  | "timeout"
+  | "rejected";
+
+export interface ExecutionReceipt {
+  executionId: string;
+  callId: string;
+  toolName: string;
+  status: ExecutionReceiptStatus;
+  digestMatch?: boolean | null;
+  rejectReason?: string;
+}

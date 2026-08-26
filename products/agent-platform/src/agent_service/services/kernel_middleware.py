@@ -257,46 +257,55 @@ class ToolEvidenceMiddleware(MiddlewareBase):
             return
 
         call_id = tool_call.id
-        await sink.put({
-            "type": "tool_call",
-            "tool_name": gateway_tool_name,
-            "call_id": call_id,
-            "parameters": self._parse_parameters(tool_call),
-        })
+        # SPEC-037 R-3: bind the in-flight invocation to its parked call
+        # id so the tool closure can match it against the signed execution
+        # request set by the resume path.
+        from agent_service.tools.gateway_tools import CURRENT_CALL_ID
 
-        gateway_result = None
-        async for item in next_handler(**input_kwargs):
-            if isinstance(item, ToolResponse):
-                gateway_result = (item.metadata or {}).get("gateway_result")
-            yield item
+        call_token = CURRENT_CALL_ID.set(call_id)
+        try:
+            await sink.put({
+                "type": "tool_call",
+                "tool_name": gateway_tool_name,
+                "call_id": call_id,
+                "parameters": self._parse_parameters(tool_call),
+            })
 
-        frame: dict[str, Any] = {
-            "type": "tool_result",
-            "tool_name": gateway_tool_name,
-            "call_id": call_id,
-        }
-        if isinstance(gateway_result, dict):
-            frame["status"] = gateway_result.get("status", "error")
-            evidence = gateway_result.get("evidence")
-            if evidence:
-                frame["evidence"] = evidence
-            frame["data_summary"] = _make_data_summary(
-                gateway_result.get("data"), self._max_chars,
-            )
-            full_data = _make_full_data(
-                gateway_result.get("data"), self._data_max_chars,
-            )
-            if full_data is not None:
-                frame["data"] = full_data
-            error = gateway_result.get("error")
-            if error:
-                frame["error"] = error
-        else:
-            # The tool failed before the gateway returned a result; keep the
-            # frame schema-valid.
-            frame["status"] = "error"
-            frame["data_summary"] = None
-        await sink.put(frame)
+            gateway_result = None
+            async for item in next_handler(**input_kwargs):
+                if isinstance(item, ToolResponse):
+                    gateway_result = (item.metadata or {}).get("gateway_result")
+                yield item
+
+            frame: dict[str, Any] = {
+                "type": "tool_result",
+                "tool_name": gateway_tool_name,
+                "call_id": call_id,
+            }
+            if isinstance(gateway_result, dict):
+                frame["status"] = gateway_result.get("status", "error")
+                evidence = gateway_result.get("evidence")
+                if evidence:
+                    frame["evidence"] = evidence
+                frame["data_summary"] = _make_data_summary(
+                    gateway_result.get("data"), self._max_chars,
+                )
+                full_data = _make_full_data(
+                    gateway_result.get("data"), self._data_max_chars,
+                )
+                if full_data is not None:
+                    frame["data"] = full_data
+                error = gateway_result.get("error")
+                if error:
+                    frame["error"] = error
+            else:
+                # The tool failed before the gateway returned a result; keep the
+                # frame schema-valid.
+                frame["status"] = "error"
+                frame["data_summary"] = None
+            await sink.put(frame)
+        finally:
+            CURRENT_CALL_ID.reset(call_token)
 
     @staticmethod
     def _resolve_tool(agent: Any, name: str) -> Any:

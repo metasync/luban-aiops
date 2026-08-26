@@ -35,8 +35,12 @@
 # SPEC-031 durability surfaces: the owner's session detail carries the
 # approved card with decider attribution, the approver's inbox lists
 # the decided item with its outcome, and a second approve of the same
-# confirmation answers the structured 409 already_resolved. The deny
-# path (leaves everything untouched) is covered by the
+# confirmation answers the structured 409 already_resolved. The leg
+# then asserts the SPEC-037 signed-execution surfaces: the approved
+# card carries the execution row with a signed receipt (digest match,
+# the portal badge's data source), and the durable trail carries the
+# correlated execution_requested and execution_completed events.
+# The deny path (leaves everything untouched) is covered by the
 # agent-platform/platform-gateway unit suites because a parked
 # confirmation is single-shot. The chat leg depends on the model
 # choosing the tool, so it is opt-in like the other demos' chat legs.
@@ -415,7 +419,10 @@ assert card.get('decider_user_id'), 'approved card carries no decider'" "$CONFIR
     || fail "approvals inbox fetch failed"
   printf '%s' "$INBOX" | python3 -c "
 import json, sys
-items = json.load(sys.stdin).get('confirmations') or []
+payload = json.load(sys.stdin)
+# SPEC-036 R-3: the pending queue and the resolved history are served
+# separately; a decided item lives in the history page.
+items = (payload.get('confirmations') or []) + (payload.get('history') or [])
 item = next((i for i in items if i.get('confirm_id') == sys.argv[1]), None)
 assert item is not None, 'inbox lacks the decided confirmation'
 assert item.get('status') == 'approved', \
@@ -440,6 +447,53 @@ assert 'transcript' not in item, 'inbox item leaked transcript text'" "$CONFIRM_
     || fail "second approve 409 carried no already_resolved reason: $(cat "$RACE_BODY")"
   rm -f "$RACE_BODY"
   echo "second approve answers 409 already_resolved (race-resilient resolution)"
+
+  echo "==> [SPEC-037] signed execution: receipt on the card, correlated audit chain"
+
+  # The approved card carries the execution row with a signed receipt;
+  # this is the surface the portal receipt badge renders from (R-6).
+  printf '%s' "$SESSION_DETAIL" | python3 -c "
+import json, sys
+detail = json.load(sys.stdin)
+cards = detail.get('confirmations') or []
+card = next((c for c in cards if c.get('confirm_id') == sys.argv[1]), None)
+assert card is not None, 'no card for the decided confirmation'
+executions = card.get('executions') or []
+assert executions, 'approved card carries no execution rows'
+row = executions[0]
+# The agent runtime sanitizes gateway tool names (dot -> underscore),
+# so the execution row names the sanitized identifier.
+assert row.get('tool_name') == 'k8s_delete_pod', \
+    'execution row names %r, expected k8s_delete_pod' % row.get('tool_name')
+assert row.get('status') in ('succeeded', 'failed', 'timeout'), \
+    'execution row status is %r, expected a closed receipt status' % row.get('status')
+assert row.get('digest_match') is True, \
+    'invoked arguments did not match the signed request'
+receipt = row.get('receipt') or {}
+assert receipt.get('execution_id'), 'receipt carries no execution_id'
+assert receipt.get('signature'), 'receipt carries no signature'
+assert receipt.get('outcome_digest'), 'receipt carries no outcome digest'" "$CONFIRM_ID" \
+    || fail "owner session detail lacks the signed execution receipt"
+  echo "approved card carries the execution row with a signed receipt"
+
+  AGENT_AUDIT_SECRET=$(printf '%s' "$AUDIT_CLIENTS" | tr ',' '\n' \
+    | grep '^agent-service=' | cut -d= -f2-)
+  [ -n "$AGENT_AUDIT_SECRET" ] \
+    || fail "agent-service entry missing from AUDIT_INGEST_CLIENTS"
+
+  REQUESTED_EVENTS=$(kubectl -n "$NAMESPACE" exec deployment/audit-service -- \
+    curl -fsS -u "agent-service:${AGENT_AUDIT_SECRET}" \
+    "http://localhost:8000/api/v1/audit/events?event_type=execution_requested&limit=50")
+  printf '%s' "$REQUESTED_EVENTS" | grep -q "$CONFIRM_ID" \
+    || fail "no execution_requested event for $CONFIRM_ID on the durable trail"
+  echo "execution_requested for $CONFIRM_ID is on the durable trail"
+
+  COMPLETED_EVENTS=$(kubectl -n "$NAMESPACE" exec deployment/audit-service -- \
+    curl -fsS -u "agent-service:${AGENT_AUDIT_SECRET}" \
+    "http://localhost:8000/api/v1/audit/events?event_type=execution_completed&limit=50")
+  printf '%s' "$COMPLETED_EVENTS" | grep -q "$CONFIRM_ID" \
+    || fail "no execution_completed event for $CONFIRM_ID on the durable trail"
+  echo "execution_completed for $CONFIRM_ID is on the durable trail"
 
   # Remove the scratch deployment (and whatever pod the controller
   # recreated after the approved delete).
