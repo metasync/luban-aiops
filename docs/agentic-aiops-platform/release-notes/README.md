@@ -7,6 +7,15 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-26-decision-sync-arrival-polish.md`
+  - delivers SPEC-035 (v0.17.0): the four v0.16.0 live-test findings —
+    transcript segment boundaries (agent-service block join +
+    live-stream paragraph break) so resumed headings render, a
+    time-based settle window with a visibility kick so slow resumed
+    turns land without refresh, progressive arrival reveal with a
+    stronger flash and scroll-into-view, session-tag park timing with a
+    stale-response guard, plus the approvals banner line and
+    History-tab pagination
 - `2026-08-26-approval-owner-ux-polish.md`
   - delivers SPEC-034 (v0.16.0): five portal usability enhancements from
     the v0.15.0 live approval test — arrival highlight for post-decision

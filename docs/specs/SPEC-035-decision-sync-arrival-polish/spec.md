@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-26
 - release slice: R4 — Approval-Gated Bounded Actions

@@ -13,6 +13,35 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.17.0 — 2026-08-26
+
+### Added
+
+- **Decision-sync robustness and arrival polish (SPEC-035)**: four fixes
+  from the v0.16.0 live test. The owner-side decision poll now keeps a
+  time-based settle window (five minutes, reset by every applied change)
+  with a visibility/focus kick, so a resumed turn whose tool run and
+  summary outlast the old 60-second budget still lands without a manual
+  refresh. Arrived reply text is revealed progressively (typewriter)
+  from where the old reply ended, with a stronger flash, an accent edge,
+  and scroll-into-view; `prefers-reduced-motion` degrades to instant
+  reveal with the static tint.
+- The session panel's "awaiting approval" tag now appears the moment a
+  request parks (not only when it clears), and stale in-flight session
+  list responses can no longer overwrite fresher ones (monotonic refresh
+  sequence).
+- The Approvals view's info banner sits on its own line under the title
+  row, and the History tab paginates ten entries per page.
+
+### Fixed
+
+- Reconstructed transcripts join the kernel's per-segment text blocks
+  with a blank line instead of gluing them, so block markdown at a
+  segment start (e.g. `## Pod Restart Summary` after a tool run) renders
+  as a heading; the live stream applies the same paragraph break after
+  tool frames.
+- Version lockstep refreshed for the 0.17.0 train.
+
 ## 0.16.0 — 2026-08-26
 
 ### Added
