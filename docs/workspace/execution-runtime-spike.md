@@ -128,4 +128,19 @@ is the right phase boundary?
 Promote to a SPEC-037 draft (Phase 1 scope only) once the operator signs
 off on the phased shape. Phase 2 gets its own spec number after Phase 1
 is live-verified, keeping each release one vertical slice per the roadmap
-principles. This memo satisfies the memo-first promotion rule.
+principles. This memo satisfies the memo-first promotion rule. Operator
+sign-off was given 2026-08-27; SPEC-037 drafting proceeds on Phase 1 scope.
+
+## 7. Relationship to the big-small LLM collaboration pattern (clarification)
+
+The execution runtime is unrelated to the big-small model collaboration
+pattern introduced by SPEC-028 — the two live on different layers. The
+big-small pattern decides *who thinks*: a small team-hosted model for
+pre-triage and redaction, the flagship model for tool-heavy agent turns
+(inference layer). The execution runtime decides *how the platform acts*
+after the decision is made (action layer) and never involves an LLM. The
+only indirect connection: as weaker edge models increasingly propose or
+pre-filter actions upstream, the invariant that nothing executes except
+via an approved, signed execution request becomes more valuable — the
+approval chain, not the worker, is what makes weaker-model proposals
+safe.
