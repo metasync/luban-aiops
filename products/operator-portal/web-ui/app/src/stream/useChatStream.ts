@@ -54,6 +54,12 @@ export interface ChatTurn {
   // replayed evidence with the audit trail.
   history?: boolean;
   requestId?: string;
+  // SPEC-035 R-2: a tool frame sets this flag so the next delta starts a
+  // new paragraph — each text segment between tool calls is one reasoning
+  // step, and without the break a segment-start heading glues onto the
+  // previous segment's last sentence (live parity with the transcript
+  // block join).
+  segmentBreak?: boolean;
 }
 
 export type ConfirmationDecision = "approve" | "deny";
@@ -158,12 +164,20 @@ export function useChatStream(): ChatStreamApi {
       if (!frame) return;
       switch (frame.kind) {
         case "delta":
+          // SPEC-035 R-2: the first delta after a tool frame opens a new
+          // paragraph so block markdown at a segment start still renders.
+          if (turn.segmentBreak && turn.replyText) {
+            turn.replyText += "\n\n";
+          }
+          turn.segmentBreak = false;
           turn.replyText += frame.text;
           break;
         case "tool_call":
+          turn.segmentBreak = true;
           turn.toolCalls.push(frame);
           break;
         case "tool_result":
+          turn.segmentBreak = true;
           turn.toolResults.push(frame);
           break;
         case "terminal":

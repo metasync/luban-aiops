@@ -378,7 +378,7 @@ describe("transcriptToTurns card turn anchoring (SPEC-033 R-3)", () => {
   });
 });
 
-describe("detectArrivalSpan (SPEC-034 R-1)", () => {
+describe("detectArrivalSpan (SPEC-034 R-1 / SPEC-035 R-4)", () => {
   it("returns null when the reseed changed no content", () => {
     const previous = [turnOf("Done.")];
     const next = [turnOf("Done.")];
@@ -401,23 +401,32 @@ describe("detectArrivalSpan (SPEC-034 R-1)", () => {
     expect(detectArrivalSpan(previous, next)).toBeNull();
   });
 
-  it("points at the turn whose reply grew after a resume", () => {
-    const previous = [turnOf("Asking for approval…")];
-    const next = [
-      turnOf("Asking for approval…\n\nRestarted the pod."),
-    ];
-    expect(detectArrivalSpan(previous, next)).toBe(0);
+  it("points at the turn whose reply grew, keeping the seen prefix", () => {
+    const parked = "Asking for approval…";
+    const previous = [turnOf(parked)];
+    const next = [turnOf(`${parked}\n\nRestarted the pod.`)];
+    // The reveal starts where the operator stopped reading.
+    expect(detectArrivalSpan(previous, next)).toEqual({
+      from: 0,
+      prevReplyChars: parked.length,
+    });
   });
 
   it("points at appended turns when the resume started a new exchange", () => {
     const previous = [turnOf("First.")];
     const next = [turnOf("First."), turnOf("Second.")];
-    expect(detectArrivalSpan(previous, next)).toBe(1);
+    expect(detectArrivalSpan(previous, next)).toEqual({
+      from: 1,
+      prevReplyChars: 0,
+    });
   });
 
   it("points at the earliest changed turn when both grew", () => {
     const previous = [turnOf("One."), turnOf("Two.")];
     const next = [turnOf("One."), turnOf("Two. More."), turnOf("Three.")];
-    expect(detectArrivalSpan(previous, next)).toBe(1);
+    expect(detectArrivalSpan(previous, next)).toEqual({
+      from: 1,
+      prevReplyChars: "Two.".length,
+    });
   });
 });

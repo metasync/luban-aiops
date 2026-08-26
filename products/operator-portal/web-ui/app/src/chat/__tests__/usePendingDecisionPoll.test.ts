@@ -2,13 +2,13 @@
 // about externally made decisions through a bounded, change-gated poll of
 // the session-detail surface — never while streaming, never when no card
 // is pending, and only past the settle window once the last card resolves.
-import { act, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfirmationRecord, SessionDetail } from "../../api/sessions";
 import type { ChatTurn } from "../../stream/useChatStream";
 import {
   PENDING_SYNC_INTERVAL_MS,
-  SETTLE_TICKS,
+  SETTLE_WINDOW_MS,
   usePendingDecisionPoll,
 } from "../usePendingDecisionPoll";
 
@@ -105,6 +105,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Vitest globals are off, so unmount explicitly: leftover hooks keep
+  // visibility/focus kick listeners that would count into later tests'
+  // shared fetch mock.
+  cleanup();
   vi.useRealTimers();
 });
 
@@ -206,11 +210,83 @@ describe("usePendingDecisionPoll (SPEC-032)", () => {
     await tick();
     expect(mockGetSession.mock.calls.length).toBe(callsAfterFlip + 1);
 
-    // Unchanged fingerprints count the window down until the poll stops.
-    for (let i = 0; i < SETTLE_TICKS; i += 1) await tick();
+    // Unchanged fingerprints past the deadline end the poll on its own.
+    const ticks = SETTLE_WINDOW_MS / PENDING_SYNC_INTERVAL_MS + 1;
+    for (let i = 0; i < ticks; i += 1) await tick();
     const settled = mockGetSession.mock.calls.length;
     await tick(3);
     expect(mockGetSession.mock.calls.length).toBe(settled);
+  });
+
+  it("applies a late resumed transcript that outlasts the old tick budget", async () => {
+    // SPEC-035 R-3: the resumed turn runs its tool and summarizes ~90s
+    // after the claim-time record flip — past the old 60s tick budget.
+    let current = detailOf();
+    mockGetSession.mockImplementation(() => Promise.resolve(current));
+
+    const applyDetail = vi.fn();
+    const { rerender } = renderPoll({ applyDetail });
+
+    await tick(); // baseline (pending)
+    current = detailOf({
+      pending_confirmation: false,
+      confirmations: [recordOf({ status: "approved", decision: "approve" })],
+    });
+    await tick(); // record flip applies, settle window opens
+    expect(applyDetail).toHaveBeenCalledTimes(1);
+    rerender({
+      sessionId: "s-1",
+      turns: [turnOf({ confirmationPending: false })],
+      streaming: false,
+    });
+
+    // 90 quiet seconds: the tool run is still in flight.
+    await tick(18);
+    expect(applyDetail).toHaveBeenCalledTimes(1);
+
+    // The summary lands; the next tick re-seeds it without a refresh.
+    current = detailOf({
+      pending_confirmation: false,
+      transcript: [
+        { role: "user", content: "restart the pod" },
+        { role: "assistant", content: "## Pod Restart Summary" },
+      ],
+      confirmations: [recordOf({ status: "approved", decision: "approve" })],
+    });
+    await tick();
+    expect(applyDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it("ticks immediately when the tab becomes visible again", async () => {
+    // SPEC-035 R-3: background tabs throttle setInterval, so a returning
+    // tab fetches at once instead of waiting out the interval.
+    const pending = detailOf();
+    const decided = detailOf({
+      pending_confirmation: false,
+      confirmations: [recordOf({ status: "approved", decision: "approve" })],
+    });
+    mockGetSession.mockResolvedValueOnce(pending).mockResolvedValue(decided);
+
+    const applyDetail = vi.fn();
+    const { rerender } = renderPoll({ applyDetail });
+    await tick(); // baseline
+    await tick(); // apply → settling
+    rerender({
+      sessionId: "s-1",
+      turns: [turnOf({ confirmationPending: false })],
+      streaming: false,
+    });
+    const callsBeforeKick = mockGetSession.mock.calls.length;
+
+    await act(async () => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: "visible",
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    // No timer advance — the kick alone triggered a fetch.
+    expect(mockGetSession.mock.calls.length).toBe(callsBeforeKick + 1);
   });
 
   it.each([

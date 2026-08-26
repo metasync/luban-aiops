@@ -68,7 +68,11 @@ def _extract_text(content: object) -> str:
     """Flatten a Msg content payload into plain chat text.
 
     Accepts the legacy string shape and the block list shape; only ``text``
-    blocks contribute (thinking/tool blocks are skipped).
+    blocks contribute (thinking/tool blocks are skipped). Blocks join with
+    a blank line (SPEC-035 R-1): each text block is one reasoning segment
+    between tool calls, and an empty-string join glued a segment-start
+    heading (``## Pod Restart Summary``) onto the previous segment's last
+    sentence so block markdown never rendered.
     """
     if isinstance(content, str):
         return content
@@ -78,5 +82,5 @@ def _extract_text(content: object) -> str:
             for block in content
             if isinstance(block, dict) and block.get("type") == "text"
         ]
-        return "".join(part for part in parts if part)
+        return "\n\n".join(part for part in parts if part)
     return ""

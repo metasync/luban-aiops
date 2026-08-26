@@ -202,20 +202,28 @@ export function transcriptToTurns(
   return turns;
 }
 
-// SPEC-034 R-1: compares the timeline on screen with a poll re-seed and
-// reports where new content arrived. Returns null when the reseed added
-// nothing (e.g. a deny/expiry card flip with no resumed reply) so no
-// highlight fires; otherwise returns the index of the first turn that
-// gained content — a reply that grew longer or an appended turn. The
-// caller highlights every turn group from that index onward.
+// SPEC-034 R-1 / SPEC-035 R-4: compares the timeline on screen with a
+// poll re-seed and reports where new content arrived. Returns null when
+// the reseed added nothing (e.g. a deny/expiry card flip with no resumed
+// reply) so no highlight fires; otherwise returns the first turn that
+// gained content plus how many reply chars were already on screen — the
+// caller reveals everything past that offset so the operator watches the
+// new words land instead of seeing a silent wall of text.
+export interface ArrivalSpan {
+  from: number;
+  prevReplyChars: number;
+}
+
 export function detectArrivalSpan(
   previous: ChatTurn[],
   next: ChatTurn[],
-): number | null {
+): ArrivalSpan | null {
   for (let i = 0; i < next.length; i += 1) {
     const before = previous[i];
-    if (!before) return i;
-    if (next[i].replyText.length > before.replyText.length) return i;
+    if (!before) return { from: i, prevReplyChars: 0 };
+    if (next[i].replyText.length > before.replyText.length) {
+      return { from: i, prevReplyChars: before.replyText.length };
+    }
   }
   return null;
 }

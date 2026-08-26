@@ -175,10 +175,100 @@ describe("useChatStream", () => {
       note: "Approved — the parked reply resumed.",
     });
     // Resumed frames attach to the same turn (parked-turn restoration).
-    expect(after?.replyText).toBe("Checking… Done.");
+    // SPEC-035 R-2: the resumed text opens a new paragraph after the
+    // tool frames so a segment-start heading still renders as markdown.
+    expect(after?.replyText).toBe("Checking… \n\nDone.");
     expect(after?.toolCalls).toHaveLength(1);
     expect(after?.toolResults).toHaveLength(1);
     expect(after?.completed).toBe(true);
+  });
+
+  // SPEC-035 R-2: text segments separated by tool frames accumulate with
+  // exactly one paragraph break at each boundary, so block markdown at a
+  // segment start (a `## Heading`) still renders as a heading live.
+  it("opens a new paragraph after tool frames in a running turn", async () => {
+    queueFetch(
+      okStream(
+        sse(
+          { type: "message_start", session_id: "s-1" },
+          {
+            type: "message_delta",
+            delta: "Checking the controller.",
+            session_id: "s-1",
+          },
+          {
+            type: "tool_call",
+            call_id: "c-1",
+            tool_name: "k8s.list_pods",
+            session_id: "s-1",
+          },
+          {
+            type: "tool_result",
+            call_id: "c-1",
+            tool_name: "k8s.list_pods",
+            status: "success",
+            session_id: "s-1",
+          },
+          {
+            type: "message_delta",
+            delta: "## Pod Restart Summary",
+            session_id: "s-1",
+          },
+          {
+            type: "message_delta",
+            delta: "\n\nAll pods restarted.",
+            session_id: "s-1",
+          },
+          { type: "message_end", session_id: "s-1" },
+        ),
+      ),
+    );
+
+    const { result } = renderHook(() => useChatStream());
+    await act(async () => {
+      await result.current.send("restart the pod", { userId: "amy" });
+    });
+
+    const turn = result.current.turns[0];
+    expect(turn?.replyText).toBe(
+      "Checking the controller.\n\n## Pod Restart Summary\n\nAll pods restarted.",
+    );
+    expect(turn?.toolCalls).toHaveLength(1);
+    expect(turn?.toolResults).toHaveLength(1);
+  });
+
+  it("never prefixes a break when tool frames precede any text", async () => {
+    // The segment break only separates two non-empty segments; a turn
+    // that opens with tool evidence must not start with blank lines.
+    queueFetch(
+      okStream(
+        sse(
+          { type: "message_start", session_id: "s-1" },
+          {
+            type: "tool_call",
+            call_id: "c-1",
+            tool_name: "k8s.list_pods",
+            session_id: "s-1",
+          },
+          {
+            type: "tool_result",
+            call_id: "c-1",
+            tool_name: "k8s.list_pods",
+            status: "success",
+            session_id: "s-1",
+          },
+          { type: "message_delta", delta: "Found three pods.", session_id: "s-1" },
+          { type: "message_end", session_id: "s-1" },
+        ),
+      ),
+    );
+
+    const { result } = renderHook(() => useChatStream());
+    await act(async () => {
+      await result.current.send("list pods", { userId: "amy" });
+    });
+
+    expect(result.current.turns[0]?.replyText).toBe("Found three pods.");
   });
 
   it("locks the card as expired on HTTP 410", async () => {

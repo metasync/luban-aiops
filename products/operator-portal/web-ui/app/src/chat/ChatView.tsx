@@ -39,7 +39,7 @@ import {
 } from "../stream/useChatStream";
 import { renderMarkdown } from "./markdown";
 import { ComposerSelectionBar } from "./ComposerSelectionBar";
-import { detectArrivalSpan, transcriptToTurns } from "./transcript";
+import { detectArrivalSpan, transcriptToTurns, type ArrivalSpan } from "./transcript";
 import { usePendingDecisionPoll } from "./usePendingDecisionPoll";
 import {
   VOICE_LANGUAGES,
@@ -350,8 +350,10 @@ export function ConfirmationCardView({
 
 // --- Turn rendering -------------------------------------------------------
 
-// SPEC-034 R-1: how long the post-decision arrival flash stays on screen.
-const ARRIVAL_FLASH_MS = 3000;
+// SPEC-035 R-4: the arrival window bounds both the typewriter reveal of
+// freshly landed reply text and the flash highlight around it.
+const ARRIVAL_WINDOW_MS = 6000;
+const REVEAL_TICK_MS = 25;
 
 function TurnGroup({
   turn,
@@ -359,12 +361,17 @@ function TurnGroup({
   busy,
   onDecide,
   justArrived,
+  revealFromChars,
 }: {
   turn: ChatTurn;
   canDecide: boolean;
   busy: boolean;
   onDecide: (confirmId: string, decision: ConfirmationDecision) => void;
   justArrived?: boolean;
+  // SPEC-035 R-4: when set, the reply bubble re-types itself from this
+  // char offset so the operator watches the new content land instead of
+  // meeting a silent wall of text. Evidence and cards render at once.
+  revealFromChars?: number;
 }) {
   // Legacy parity: a finished turn with no text and no parked confirmation
   // shows the "(no response received)" placeholder.
@@ -373,6 +380,37 @@ function TurnGroup({
     (turn.completed && !turn.confirmationPending
       ? "(no response received)"
       : "");
+  const [revealedChars, setRevealedChars] = useState<number | null>(null);
+  useEffect(() => {
+    // No active reveal: render the full reply. The guard also covers
+    // reduced-motion users, who get the content instantly (the static
+    // tint in global.css still marks the arrival).
+    if (
+      revealFromChars === undefined ||
+      revealFromChars >= turn.replyText.length ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      setRevealedChars(null);
+      return;
+    }
+    setRevealedChars(revealFromChars);
+    // Chunk size scales with the landed text so a short note and a long
+    // summary both finish inside the arrival window.
+    const remaining = turn.replyText.length - revealFromChars;
+    const chunk = Math.max(
+      1,
+      Math.ceil(remaining / (ARRIVAL_WINDOW_MS / REVEAL_TICK_MS)),
+    );
+    let shown = revealFromChars;
+    const timer = window.setInterval(() => {
+      shown = Math.min(turn.replyText.length, shown + chunk);
+      setRevealedChars(shown >= turn.replyText.length ? null : shown);
+      if (shown >= turn.replyText.length) window.clearInterval(timer);
+    }, REVEAL_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, [revealFromChars, turn.replyText]);
+  const displayReply =
+    revealedChars === null ? reply : turn.replyText.slice(0, revealedChars);
   const loading = !turn.completed && !turn.confirmationPending && !turn.error;
   // Sticky request banner: while this turn's user bubble has scrolled out
   // of the transcript viewport, a pinned one-liner restates the request so
@@ -409,7 +447,7 @@ function TurnGroup({
         placement="start"
         variant="outlined"
         loading={loading}
-        content={reply}
+        content={displayReply}
         contentRender={(content) => (
           // Safe by construction: renderMarkdown escapes every source
           // character (including quotes) before introducing markup and
@@ -577,9 +615,10 @@ export default function ChatView({
   const catchingUpRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // SPEC-034 R-1: the arrival flash covers turn groups from this index
-  // onward after a poll reseed delivered new content; cleared on timeout.
-  const [arrivedFrom, setArrivedFrom] = useState<number | null>(null);
+  // SPEC-034 R-1 / SPEC-035 R-4: after a poll reseed delivered new
+  // content, the span marks where the arrival reveal and flash start;
+  // cleared when the arrival window lapses.
+  const [arrival, setArrival] = useState<ArrivalSpan | null>(null);
   const arrivalTimerRef = useRef<number | undefined>(undefined);
 
   const canDecide = hasAnyRole(roles, CHAT_CONFIRM_ROLES);
@@ -745,17 +784,18 @@ export default function ChatView({
         detail.evidence_turns,
         detail.confirmations,
       );
-      // SPEC-034 R-1: a reseed that gained content (resumed reply or new
-      // turn) flashes an arrival highlight so the operator sees that the
-      // decision actually delivered new messages.
+      // SPEC-034 R-1 / SPEC-035 R-4: a reseed that gained content
+      // (resumed reply or new turn) reveals and flashes the arrival so
+      // the operator sees that the decision actually delivered new
+      // messages — the reveal starts where the old text ended.
       const arrived = detectArrivalSpan(chat.turns, reseeded);
       chat.reseedTurns(chat.sessionId, reseeded);
       if (arrived !== null) {
-        setArrivedFrom(arrived);
+        setArrival(arrived);
         window.clearTimeout(arrivalTimerRef.current);
         arrivalTimerRef.current = window.setTimeout(
-          () => setArrivedFrom(null),
-          ARRIVAL_FLASH_MS,
+          () => setArrival(null),
+          ARRIVAL_WINDOW_MS,
         );
       }
       // SPEC-034 R-2: the session panel learns the decision at the same
@@ -775,12 +815,46 @@ export default function ChatView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat.sessionId]);
 
-  // Keep the newest turn visible while streaming.
+  // SPEC-035 R-5: the panel's "awaiting approval" tag derives from the
+  // session list's pending_confirmation flag. Refresh at every pending
+  // transition of the live timeline (the parking moment of the owner's
+  // own stream; the decision moment already refreshes via applyDetail)
+  // instead of waiting for the 30s cadence — this is why the tag used
+  // to appear only after the next list poll.
+  const pendingCardCount = chat.turns.filter(
+    (turn) => turn.confirmationPending,
+  ).length;
+  const prevPendingCountRef = useRef(pendingCardCount);
+  useEffect(() => {
+    if (prevPendingCountRef.current === pendingCardCount) return;
+    prevPendingCountRef.current = pendingCardCount;
+    if (authenticated) void refresh();
+  }, [pendingCardCount, authenticated, refresh]);
+
+  // Keep the newest turn visible while streaming. While an arrival reveal
+  // is active the scroll-into-view effect below owns positioning, so this
+  // effect yields instead of fighting it.
   const lastTurn = chat.turns[chat.turns.length - 1];
   useEffect(() => {
+    if (arrival) return;
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [chat.turns.length, lastTurn?.replyText, historyLoading]);
+  }, [chat.turns.length, lastTurn?.replyText, historyLoading, arrival]);
+
+  // SPEC-035 R-4: bring the first arrived group into view so a decision
+  // outcome landing off-screen still catches the operator's eye.
+  useEffect(() => {
+    if (!arrival) return;
+    const target =
+      scrollRef.current?.querySelector<HTMLElement>(".turn-group.turn-arrived");
+    const reduced = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    target?.scrollIntoView({
+      block: "nearest",
+      behavior: reduced ? "auto" : "smooth",
+    });
+  }, [arrival]);
 
   // Pinned incident deep-links appear even before the server list catches
   // up (SPEC-023 R-3); the server entry replaces the pin on refresh.
@@ -859,7 +933,15 @@ export default function ChatView({
                 turn={turn}
                 canDecide={canDecide}
                 busy={chat.streaming}
-                justArrived={arrivedFrom !== null && index >= arrivedFrom}
+                justArrived={arrival !== null && index >= arrival.from}
+                // Only the span's start group re-types its reply (from the
+                // already-seen offset); later groups arrive complete under
+                // the flash so one reveal never buries the next.
+                revealFromChars={
+                  arrival !== null && index === arrival.from
+                    ? arrival.prevReplyChars
+                    : undefined
+                }
                 onDecide={(confirmId, decision) =>
                   void chat.decide(confirmId, decision)
                 }

@@ -175,6 +175,51 @@ def test_get_session_reconstructs_transcript_from_state_snapshot(workspace):
     jsonschema.validate(body, load_schema("agent-session.schema.json"))
 
 
+def test_get_session_joins_text_blocks_with_paragraph_break(workspace):
+    """SPEC-035 R-1: each text block is one reasoning segment between tool
+    calls; they must join with a blank line so a segment that starts with
+    block markdown (a heading, list, or rule) still renders as markdown
+    instead of gluing onto the previous segment's last sentence."""
+    session_store, state_store = workspace
+    record = session_store.create_session("alice")
+    state_store.save_state(
+        record.session_id,
+        _snapshot_json(
+            [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "restart the pod"}],
+                },
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "Checking the controller."},
+                        {
+                            "type": "tool_call",
+                            "name": "k8s.delete_pod",
+                            "input": "{}",
+                        },
+                        {"type": "tool_result", "output": "ok"},
+                        {"type": "text", "text": "## Pod Restart Summary"},
+                    ],
+                },
+            ]
+        ),
+    )
+
+    response = _client().get(
+        f"/api/v2/sessions/{record.session_id}", headers={"X-User-ID": "alice"}
+    )
+    body = response.json()
+    assert body["transcript"] == [
+        {"role": "user", "content": "restart the pod"},
+        {
+            "role": "assistant",
+            "content": "Checking the controller.\n\n## Pod Restart Summary",
+        },
+    ]
+
+
 def test_get_session_corrupt_snapshot_falls_back(workspace):
     session_store, state_store = workspace
     record = session_store.create_session("alice")

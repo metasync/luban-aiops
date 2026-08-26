@@ -8,6 +8,13 @@
 // lands at claim time, ahead of the resumed transcript content, SPEC-031
 // review fix) and never while a stream is active, so a poll can neither
 // abort nor interleave with a live stream.
+//
+// SPEC-035 R-3: the settle window is time-based (five minutes) instead of
+// a tick budget. A resumed turn that runs tools before summarizing can
+// outlast the old 60-second budget, and background tabs throttle
+// setInterval — so the window is a deadline, every applied change resets
+// it, and a visibility/focus kick ticks immediately when the tab returns
+// to the foreground.
 import { useEffect, useRef } from "react";
 import { getSession } from "../api/sessions";
 import type { SessionDetail } from "../api/sessions";
@@ -15,10 +22,12 @@ import type { ChatTurn } from "../stream/useChatStream";
 
 export const PENDING_SYNC_INTERVAL_MS = 5_000;
 
-// Ticks to keep polling after the last pending card resolves: the resumed
-// turn's transcript content lands when the resume stream ends, which can
-// trail the claim-time record write by a few seconds.
-export const SETTLE_TICKS = 12;
+// How long to keep polling after the last pending card resolves: the
+// resumed turn's transcript content lands when the resume stream ends,
+// which trails the claim-time record write by the tool run plus the
+// summary generation — comfortably inside five minutes, and every change
+// that lands resets the deadline.
+export const SETTLE_WINDOW_MS = 300_000;
 
 function hasPendingCard(turns: ChatTurn[]): boolean {
   return turns.some((turn) => turn.confirmationPending);
@@ -63,22 +72,25 @@ export function usePendingDecisionPoll({
   sessionRef.current = sessionId;
   const applyRef = useRef(applyDetail);
   applyRef.current = applyDetail;
-  const settleRef = useRef(0);
-  // The session the settle window belongs to: applying a decision re-seeds
-  // the turns (pending → false) and restarts this effect, so the window
-  // must survive that rerun — but it must never leak into another session.
+  // Deadline (epoch ms) of the settle window, 0 when inactive. Applying a
+  // decision re-seeds the turns (pending → false) and restarts this
+  // effect, so the window must survive that rerun — but it must never
+  // leak into another session, hence the session-scoped companion ref.
+  const settleUntilRef = useRef(0);
   const settleSessionRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!sessionId || streaming) return;
     const settling =
-      settleRef.current > 0 && settleSessionRef.current === sessionId;
+      settleUntilRef.current > Date.now() &&
+      settleSessionRef.current === sessionId;
     if (!pending && !settling) return;
     const capturedSession = sessionId;
     let stopped = false;
     // Baseline capture: the first tick records the current state without
     // applying, so only a genuine move re-seeds the timeline.
     let baseline: string | null = null;
+    let timer: number | undefined;
     const tick = async () => {
       if (stopped) return;
       if (streamingRef.current || sessionRef.current !== capturedSession) {
@@ -99,14 +111,16 @@ export function usePendingDecisionPoll({
           return;
         }
         if (fingerprint === baseline) {
-          // Nothing moved. While settling (no card pending anymore), the
-          // window counts down and the poll stops on its own.
-          if (!pending && settleRef.current > 0) {
-            settleRef.current -= 1;
-            if (settleRef.current === 0) {
-              stopped = true;
-              window.clearInterval(timer);
-            }
+          // Nothing moved. While settling (no card pending anymore), a
+          // lapsed window ends the poll on its own.
+          if (
+            !pending &&
+            settleUntilRef.current > 0 &&
+            Date.now() >= settleUntilRef.current
+          ) {
+            settleUntilRef.current = 0;
+            stopped = true;
+            if (timer !== undefined) window.clearInterval(timer);
           }
           return;
         }
@@ -116,12 +130,13 @@ export function usePendingDecisionPoll({
           (record) => record.status === "pending",
         );
         if (stillPending) {
-          settleRef.current = 0;
+          settleUntilRef.current = 0;
         } else {
           // The resumed turn's content lands when the resume stream ends,
-          // which trails the claim-time record write; keep polling through
-          // the settle window so it surfaces without a refresh.
-          settleRef.current = SETTLE_TICKS;
+          // which trails the claim-time record write; keep polling until
+          // the deadline. Every applied change resets it, so a slow tool
+          // run followed by a late summary still surfaces.
+          settleUntilRef.current = Date.now() + SETTLE_WINDOW_MS;
           settleSessionRef.current = capturedSession;
         }
       } catch {
@@ -129,13 +144,23 @@ export function usePendingDecisionPoll({
         // retries. A transport error never means "no decision happened".
       }
     };
-    const timer = window.setInterval(
+    timer = window.setInterval(
       () => void tick(),
       PENDING_SYNC_INTERVAL_MS,
     );
+    // Background tabs throttle setInterval (and freeze it after a while),
+    // which could starve the settle window while the operator watches the
+    // approver window; tick immediately whenever this tab comes back.
+    const kick = () => {
+      if (document.visibilityState === "visible") void tick();
+    };
+    document.addEventListener("visibilitychange", kick);
+    window.addEventListener("focus", kick);
     return () => {
       stopped = true;
-      window.clearInterval(timer);
+      if (timer !== undefined) window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", kick);
+      window.removeEventListener("focus", kick);
       // A new effect run starts from a fresh baseline; the settle window
       // deliberately survives (it continues on the pending → settled
       // rerun) and is scoped to its session via settleSessionRef.

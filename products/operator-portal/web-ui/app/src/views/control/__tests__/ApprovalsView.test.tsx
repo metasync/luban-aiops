@@ -2,7 +2,15 @@
 // tabs with counts, separated entries with structured provenance headers,
 // and the expiry rule in the banner.
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import type { ConfirmationRecord } from "../../../api/sessions";
 import ApprovalsView, {
   type ApprovalsInboxState,
@@ -10,6 +18,26 @@ import ApprovalsView, {
 
 const { mockUseAuth } = vi.hoisted(() => ({ mockUseAuth: vi.fn() }));
 vi.mock("../../../auth/AuthContext", () => ({ useAuth: mockUseAuth }));
+
+// jsdom lacks matchMedia, which antd's Pagination probes through the
+// responsive observer; shim it so the pager mounts (SPEC-035 R-7).
+beforeAll(() => {
+  if (!window.matchMedia) {
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: (query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }),
+    });
+  }
+});
 
 const pendingRecord: ConfirmationRecord = {
   confirm_id: "cf-pending",
@@ -96,7 +124,7 @@ describe("ApprovalsView entry header (SPEC-034 R-4)", () => {
   });
 });
 
-describe("ApprovalsView banner (SPEC-034 R-5)", () => {
+describe("ApprovalsView banner (SPEC-034 R-5 / SPEC-035 R-6)", () => {
   it("states the pending-request expiry rule and default timeout", () => {
     const { container } = render(
       <ApprovalsView inbox={inboxOf([pendingRecord])} />,
@@ -105,5 +133,60 @@ describe("ApprovalsView banner (SPEC-034 R-5)", () => {
     expect(text).toContain("unanswered requests expire");
     expect(text).toContain("10 minutes by default");
     expect(text).toContain("History keeps decisions for 30 days");
+  });
+
+  it("renders the banner on its own line under the title row", () => {
+    // SPEC-035 R-6: the title row keeps only the heading and the Refresh
+    // button; the info text is a block-level sibling below it.
+    render(<ApprovalsView inbox={inboxOf([pendingRecord])} />);
+    const banner = screen.getByText(/unanswered requests expire/);
+    expect((banner as HTMLElement).style.display).toBe("block");
+    const titleRow = screen
+      .getByRole("button", { name: "Refresh inbox" })
+      .closest("div");
+    expect(titleRow?.contains(banner)).toBe(false);
+  });
+});
+
+// SPEC-035 R-7: the 30-day history paginates so the tab stays legible.
+function historyRecordOf(index: number): ConfirmationRecord {
+  return {
+    ...historyRecord,
+    confirm_id: `cf-h-${index}`,
+    session_title: `Session ${index}`,
+  };
+}
+
+describe("ApprovalsView history pagination (SPEC-035 R-7)", () => {
+  it("shows ten entries per page with a pager past one page", () => {
+    const records = Array.from({ length: 23 }, (_, index) =>
+      historyRecordOf(index),
+    );
+    const { container } = render(<ApprovalsView inbox={inboxOf(records)} />);
+    fireEvent.click(screen.getByText("History (23)"));
+    expect(screen.getAllByText(/^Session \d+$/)).toHaveLength(10);
+    expect(container.querySelector(".ant-pagination")).toBeTruthy();
+  });
+
+  it("navigates to the last page and clamps a short tail", () => {
+    const records = Array.from({ length: 23 }, (_, index) =>
+      historyRecordOf(index),
+    );
+    const { container } = render(<ApprovalsView inbox={inboxOf(records)} />);
+    fireEvent.click(screen.getByText("History (23)"));
+    const pageThree = container.querySelector('li[title="3"]');
+    expect(pageThree).toBeTruthy();
+    fireEvent.click(pageThree as HTMLElement);
+    expect(screen.getAllByText(/^Session \d+$/)).toHaveLength(3);
+  });
+
+  it("hides the pager when the history fits on one page", () => {
+    const records = Array.from({ length: 10 }, (_, index) =>
+      historyRecordOf(index),
+    );
+    const { container } = render(<ApprovalsView inbox={inboxOf(records)} />);
+    fireEvent.click(screen.getByText("History (10)"));
+    expect(screen.getAllByText(/^Session \d+$/)).toHaveLength(10);
+    expect(container.querySelector(".ant-pagination")).toBeNull();
   });
 });

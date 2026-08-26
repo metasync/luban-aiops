@@ -255,17 +255,20 @@ body {
   gap: 8px;
 }
 
-/* SPEC-034 R-1: transient arrival flash for turn groups that gained
-   content after an external decision (poll reseed). The tint fades out
-   over the same 3s window the component holds the class. */
+/* SPEC-034 R-1 / SPEC-035 R-4: arrival highlight for turn groups that
+   gained content after an external decision (poll reseed). A 2px accent
+   edge stays for the whole arrival window while the background tint
+   fades out over the first 4s; the component pairs both with a
+   typewriter reveal of the new reply text. */
 .turn-group.turn-arrived {
   border-radius: var(--radius);
-  animation: turn-arrive-flash 3s ease-out;
+  animation: turn-arrive-flash 4s ease-out;
+  box-shadow: inset 2px 0 0 0 var(--accent);
 }
 
 @keyframes turn-arrive-flash {
   from {
-    background-color: color-mix(in srgb, var(--accent) 18%, transparent);
+    background-color: color-mix(in srgb, var(--accent) 28%, transparent);
   }
   to {
     background-color: transparent;

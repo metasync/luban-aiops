@@ -5,7 +5,7 @@
 // /api/v1/chat/confirm surface the chat uses, with the structured
 // already_resolved 409 flipping the card to the winner's outcome.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Spin, Tabs, Tag, Typography } from "antd";
+import { Alert, Button, Pagination, Spin, Tabs, Tag, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
@@ -26,6 +26,9 @@ import type { ConfirmationDecision } from "../../stream/useChatStream";
 dayjs.extend(relativeTime);
 
 const POLL_INTERVAL_MS = 30_000;
+
+// SPEC-035 R-7: entries per page in the History tab.
+const HISTORY_PAGE_SIZE = 10;
 
 function recordStatus(raw: string | undefined): ConfirmationRecord["status"] | undefined {
   return raw === "pending" ||
@@ -261,6 +264,17 @@ export default function ApprovalsView({
   const history = inbox.records.filter(
     (record) => record.status !== "pending",
   );
+  // SPEC-035 R-7: the 30-day decision history is paginated client-side —
+  // the server already caps the payload, this only keeps the tab legible
+  // as the record count grows. The page clamps when the list shrinks
+  // (e.g. retention eviction lands on a refresh).
+  const [historyPage, setHistoryPage] = useState(1);
+  const historyPages = Math.max(1, Math.ceil(history.length / HISTORY_PAGE_SIZE));
+  const clampedPage = Math.min(historyPage, historyPages);
+  const historySlice = history.slice(
+    (clampedPage - 1) * HISTORY_PAGE_SIZE,
+    clampedPage * HISTORY_PAGE_SIZE,
+  );
 
   return (
     <div>
@@ -269,7 +283,6 @@ export default function ApprovalsView({
           display: "flex",
           alignItems: "center",
           gap: 12,
-          marginBottom: 8,
         }}
       >
         <Typography.Title level={4} style={{ margin: 0 }}>
@@ -283,14 +296,18 @@ export default function ApprovalsView({
         >
           Refresh
         </Button>
-        {/* SPEC-034 R-5: approvers must also see the expiry rule — the
-            timeout is AGENT_HITL_CONFIRM_TIMEOUT (600s default). */}
-        <Typography.Text type="secondary">
-          Pending confirmations park here until decided — unanswered
-          requests expire after the confirmation timeout (10 minutes by
-          default). History keeps decisions for 30 days.
-        </Typography.Text>
       </div>
+      {/* SPEC-035 R-6: the info banner sits on its own line under the
+          title row instead of crowding it. The timeout is
+          AGENT_HITL_CONFIRM_TIMEOUT (600s default). */}
+      <Typography.Text
+        type="secondary"
+        style={{ display: "block", margin: "4px 0 12px" }}
+      >
+        Pending confirmations park here until decided — unanswered
+        requests expire after the confirmation timeout (10 minutes by
+        default). History keeps decisions for 30 days.
+      </Typography.Text>
       {inbox.error ? (
         <Alert
           type="warning"
@@ -337,14 +354,29 @@ export default function ApprovalsView({
                     </Typography.Text>
                   </div>
                 ) : (
-                  history.map((record) => (
-                    <InboxEntry
-                      key={record.confirm_id}
-                      record={record}
-                      inbox={inbox}
-                      canDecide={canDecide}
-                    />
-                  ))
+                  <>
+                    {historySlice.map((record) => (
+                      <InboxEntry
+                        key={record.confirm_id}
+                        record={record}
+                        inbox={inbox}
+                        canDecide={canDecide}
+                      />
+                    ))}
+                    {historyPages > 1 ? (
+                      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                        <Pagination
+                          size="small"
+                          current={clampedPage}
+                          pageSize={HISTORY_PAGE_SIZE}
+                          total={history.length}
+                          showSizeChanger={false}
+                          onChange={(page) => setHistoryPage(page)}
+                          aria-label="Decision history pages"
+                        />
+                      </div>
+                    ) : null}
+                  </>
                 ),
             },
           ]}

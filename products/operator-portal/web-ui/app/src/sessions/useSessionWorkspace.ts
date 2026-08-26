@@ -55,19 +55,26 @@ export function useSessionWorkspace(authenticated: boolean): SessionWorkspace {
     loadActiveSessionId(),
   );
   const aliveRef = useRef(true);
+  // SPEC-035 R-5: monotonic refresh sequence. A decision can trigger a
+  // refresh while a 30s-cadence fetch is still in flight; if the older
+  // response lands last it would overwrite the fresh pending-confirmation
+  // flags. Only the newest sequence may apply its result.
+  const refreshSeqRef = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!authenticated) {
       setSessions([]);
       return;
     }
+    refreshSeqRef.current += 1;
+    const seq = refreshSeqRef.current;
     try {
       const result = await listSessions();
-      if (!aliveRef.current) return;
+      if (!aliveRef.current || seq !== refreshSeqRef.current) return;
       setSessions(result);
       setError(null);
     } catch (err) {
-      if (!aliveRef.current) return;
+      if (!aliveRef.current || seq !== refreshSeqRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
     }
   }, [authenticated]);
