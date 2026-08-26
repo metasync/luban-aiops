@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: luban-platform-team
 - created: 2026-08-27
 - release slice: R4 — Approval-Gated Bounded Actions (closing slice)
@@ -199,5 +199,7 @@ approval.
 
 ## Changelog
 
+- 2026-08-27: approved by the operator with no changes to the drafted
+  requirements; implementation proceeds in a fresh session.
 - 2026-08-27: created as `draft` from the execution-runtime spike memo
   (Phase 1) after operator sign-off on the phased shape.
