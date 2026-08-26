@@ -76,6 +76,51 @@ describe("renderMarkdown", () => {
     expect(html).toContain("<td>1</td>");
   });
 
+  it("renders flat unordered bullets as one list", () => {
+    const html = renderMarkdown("- one\n- two");
+    expect(html).toBe("<ul><li>one</li><li>two</li></ul>");
+  });
+
+  it("nests indented sub-bullets instead of dropping them to plain text", () => {
+    // v0.18.1 live-check finding: indented bullets rendered as literal
+    // "- text" paragraphs at the left edge, without bullets or indent.
+    const html = renderMarkdown(
+      "- Next steps:\n  - Verify the new pod settles into a stable Running state\n  - Investigate the root cause of the restarts",
+    );
+    expect(html).toBe(
+      "<ul><li>Next steps:<ul>" +
+        "<li>Verify the new pod settles into a stable Running state</li>" +
+        "<li>Investigate the root cause of the restarts</li>" +
+        "</ul></li></ul>",
+    );
+  });
+
+  it("renders indented bullets without a parent item as a top-level list", () => {
+    const html = renderMarkdown(
+      "You can either:\n  - Restart the pod\n  - Pull the old pod logs",
+    );
+    expect(html).toContain("<ul><li>Restart the pod</li><li>Pull the old pod logs</li></ul>");
+    expect(html).toContain("<p>You can either:</p>");
+    expect(html).not.toContain("- Restart");
+  });
+
+  it("wraps ordered items in <ol> so numbering renders", () => {
+    const html = renderMarkdown("1. First step\n2. Second step");
+    expect(html).toBe("<ol><li>First step</li><li>Second step</li></ol>");
+  });
+
+  it("nests an unordered list under an ordered item", () => {
+    const html = renderMarkdown("1. Triage\n   - Check the pod status\n2. Report");
+    expect(html).toBe(
+      "<ol><li>Triage<ul><li>Check the pod status</li></ul></li><li>Report</li></ol>",
+    );
+  });
+
+  it("keeps list content escaped (no markup injection via items)", () => {
+    const html = renderMarkdown("- <script>alert(1)</script>");
+    expect(html).toContain("<li>&lt;script&gt;alert(1)&lt;/script&gt;</li>");
+  });
+
   it("returns empty string for empty input", () => {
     expect(renderMarkdown("")).toBe("");
   });

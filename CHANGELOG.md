@@ -13,6 +13,34 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.18.1 — 2026-08-26
+
+### Fixed
+
+- **Chat markdown list rendering**: indented sub-bullets previously
+  fell through the renderer's column-0-only list passes and rendered
+  as literal `- text` paragraphs at the left edge; ordered items were
+  never wrapped in `<ol>`, dropping their numbering. A single
+  nesting-aware block pass replaces both legacy passes: indented items
+  nest inside the previous item, equally indented blocks stay flat,
+  ordered and unordered markers may mix per level, and escaping is
+  unchanged (new regression tests pin all of it).
+- **Pod-log excerpts in chat replies**: the model used to quote the
+  `k8s.get_pod_logs` JSON payload verbatim, landing one serialized
+  string with escaped `\n` sequences in the reply. The default system
+  prompt now steers log/command-output quoting into fenced code blocks
+  with real line breaks (the evidence card keeps its audit-grade JSON),
+  and the portal bounds fenced blocks in replies to a fixed-height
+  scrollable box (280px, the evidence-expander bound) so long excerpts
+  never push the transcript out of view.
+
+### Reverted
+
+- **Seeded-transcript typewriter reveal (SPEC-036 R-1)**: the v0.18.0
+  live check found opening a session re-typed its history instead of
+  showing it. Cold-seeded transcripts render at once again; the
+  typewriter stays reserved for live arrivals (SPEC-035).
+
 ## 0.18.0 — 2026-08-26
 
 ### Added

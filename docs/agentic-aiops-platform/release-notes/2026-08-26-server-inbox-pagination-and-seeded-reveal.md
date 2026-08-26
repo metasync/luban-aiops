@@ -15,7 +15,9 @@ total, forwarded verbatim through the gateway and rendered
 server-driven in the portal. The progressive typewriter reveal extends
 from arrived content to cold-seeded transcripts: opening a session now
 cascades every seeded reply top-to-bottom instead of popping the whole
-transcript in at once.
+transcript in at once. *(The seeded-transcript reveal was reverted in
+v0.18.1 after live-check feedback — see the patch notes; the typewriter
+applies to live arrivals only.)*
 
 ## What Changed
 
@@ -56,6 +58,9 @@ transcript in at once.
   unchanged.
 
 ### Seeded-transcript reveal cascade (R-1)
+
+*(Reverted in v0.18.1 after live-check feedback; retained here as the
+shipped 0.18.0 record.)*
 
 - A cold-seeded transcript (first fetch of a session in a tab — never a
   cache-restore switch) reveals every reply with the same typewriter as

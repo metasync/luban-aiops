@@ -43,6 +43,13 @@ testable acceptance signals.
 
 ### R-1: Seeded-transcript reveal
 
+*(Reverted in the 0.18.1 patch after live-check feedback: opening a
+session re-typed its history instead of showing it, which read as
+delay rather than polish. Cold-seeded transcripts render at once
+again; the typewriter applies to live arrivals only (SPEC-035). The
+requirement text below is retained as the delivered-then-reverted
+record.)*
+
 When a session's transcript is cold-seeded from the session detail
 (first fetch in this tab — not a cache-restore switch and not an
 arrival reseed), every seeded reply reveals progressively using the
@@ -149,6 +156,10 @@ Acceptance signals:
 
 ## Change Log
 
+- 2026-08-26: R-1 reverted in the 0.18.1 patch train after the v0.18.0
+  live check — the operator found the seeded-transcript typewriter read
+  as delay; history now renders at once and the typewriter stays
+  reserved for live arrivals. R-2…R-5 are unaffected.
 - 2026-08-26: delivered in the 0.18.0 train (portal 160/160 +
   agent-platform 474 + gateway 228 green; `make verify` green at
   lockstep 0.18.0; inbox shape smoke-verified through the gateway).

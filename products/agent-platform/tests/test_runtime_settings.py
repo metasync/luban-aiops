@@ -27,6 +27,15 @@ def test_default_system_prompt_carries_skills_discipline(monkeypatch):
     assert settings.system_prompt == DEFAULT_SYSTEM_PROMPT
 
 
+def test_default_system_prompt_carries_log_quoting_discipline():
+    """0.18.1 live-check finding: replies quoted pod logs as one
+    JSON-serialized string; the default prompt steers the model to
+    fenced code blocks with real line breaks instead."""
+    assert "fenced code" in DEFAULT_SYSTEM_PROMPT
+    assert "real line breaks" in DEFAULT_SYSTEM_PROMPT
+    assert "JSON-serialized" in DEFAULT_SYSTEM_PROMPT
+
+
 def test_default_system_prompt_carries_triage_discipline(monkeypatch):
     """SPEC-015 R-3 (updated by SPEC-017 R-2): the default prompt teaches the
     triage discipline; delivery is format-neutral — the structured-output

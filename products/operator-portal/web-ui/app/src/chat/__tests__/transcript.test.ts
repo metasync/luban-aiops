@@ -9,7 +9,7 @@ import type {
   TranscriptTurn,
 } from "../../api/sessions";
 import type { ChatTurn } from "../../stream/useChatStream";
-import { detectArrivalSpan, seedRevealDelay, seedRevealIndex, transcriptToTurns } from "../transcript";
+import { detectArrivalSpan, transcriptToTurns } from "../transcript";
 
 function turnOf(replyText: string, userMessage = "run it"): ChatTurn {
   return {
@@ -428,49 +428,5 @@ describe("detectArrivalSpan (SPEC-034 R-1 / SPEC-035 R-4)", () => {
       from: 1,
       prevReplyChars: "Two.".length,
     });
-  });
-});
-
-describe("seedRevealIndex (SPEC-036 R-1)", () => {
-  it("points at the most recent turn with reply text", () => {
-    const turns = [turnOf("one."), turnOf("two."), turnOf("three.")];
-    expect(seedRevealIndex(turns)).toBe(2);
-  });
-
-  it("skips a trailing unanswered request", () => {
-    const turns = [turnOf("answered."), turnOf("", "waiting for a reply")];
-    expect(seedRevealIndex(turns)).toBe(0);
-  });
-
-  it("returns null for an empty transcript", () => {
-    expect(seedRevealIndex([])).toBeNull();
-  });
-
-  it("returns null when no turn has a reply yet", () => {
-    const turns = [turnOf("", "first"), turnOf("", "second")];
-    expect(seedRevealIndex(turns)).toBeNull();
-  });
-});
-
-describe("seedRevealDelay (SPEC-036 R-1)", () => {
-  it("starts the first turn immediately", () => {
-    expect(seedRevealDelay(0, 4)).toBe(0);
-  });
-
-  it("staggers each turn by the base stagger on short transcripts", () => {
-    // 3 turns → stagger stays at the 150 ms cap (3000 / 2 = 1500).
-    expect(seedRevealDelay(1, 2)).toBe(150);
-    expect(seedRevealDelay(2, 2)).toBe(300);
-  });
-
-  it("compresses the stagger so long cascades stay inside the budget", () => {
-    // 61 turns → stagger = 3000 / 60 = 50 ms; the last start lands
-    // exactly on the 3 s budget.
-    expect(seedRevealDelay(60, 60)).toBe(3000);
-    expect(seedRevealDelay(1, 60)).toBe(50);
-  });
-
-  it("clamps an out-of-range index to the cascade end", () => {
-    expect(seedRevealDelay(9, 2)).toBe(seedRevealDelay(2, 2));
   });
 });

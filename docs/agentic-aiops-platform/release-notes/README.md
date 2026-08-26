@@ -7,6 +7,14 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-26-live-check-patch.md`
+  - v0.18.1 patch from the v0.18.0 live check: the chat markdown
+    renderer gains nesting-aware list handling (indented sub-bullets
+    nest instead of rendering as literal "- text"; ordered items get
+    their `<ol>` back), the SPEC-036 seeded-transcript typewriter is
+    reverted (the reveal applies to live arrivals only), and pod-log
+    excerpts in replies move to fenced code blocks rendered in a
+    fixed-height scrollable box
 - `2026-08-26-server-inbox-pagination-and-seeded-reveal.md`
   - delivers SPEC-036 (v0.18.0): the approvals History tab moves to
     server-side pagination (split store queries with a windowed total,

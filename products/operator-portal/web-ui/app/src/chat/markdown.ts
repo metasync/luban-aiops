@@ -3,6 +3,77 @@
 // injected as HTML, so every source character passes through the escape
 // step (including quotes, which guard attribute contexts) before markup
 // is introduced, and links are restricted to http(s) targets.
+// One block of consecutive list lines becomes one (possibly nested)
+// list. The legacy column-0-only passes dropped indented sub-bullets to
+// literal "- text" paragraphs (v0.18.1 live-check finding) and never
+// wrapped ordered items in <ol>, so numbered lists lost their markers.
+// An indented item now nests inside the previous item (two spaces per
+// level, a tab counts as one level; over-indentation clamps instead of
+// opening empty wrappers), and each level's container follows its first
+// item's marker. Contents are already escaped by the time this runs.
+interface ListLevel {
+  ordered: boolean;
+  minIndent: number;
+  html: string;
+  itemOpen: boolean;
+}
+
+function renderListBlock(block: string): string {
+  const stack: ListLevel[] = [];
+  let result = "";
+
+  const closeItem = (level: ListLevel) => {
+    if (level.itemOpen) {
+      level.html += "</li>";
+      level.itemOpen = false;
+    }
+  };
+
+  const closeLevel = () => {
+    const level = stack.pop();
+    if (!level) return;
+    closeItem(level);
+    const tag = level.ordered ? "ol" : "ul";
+    const wrapped = `<${tag}>${level.html}</${tag}>`;
+    const parent = stack[stack.length - 1];
+    if (parent) {
+      // A nested list lives inside the parent item it indented under;
+      // the parent item stays open so further siblings or nested lists
+      // append inside it until something closes it.
+      parent.html += wrapped;
+    } else {
+      result = wrapped;
+    }
+  };
+
+  for (const line of block.split("\n")) {
+    const match = /^([ \t]*)([-*]|\d+\.)[ \t]+(.+)$/.exec(line);
+    if (!match) continue;
+    const indent = match[1].replace(/\t/g, "  ").length;
+    // Each level remembers the indent its first item carried, so equally
+    // indented items stay siblings even when the whole block (or a whole
+    // sub-list) sits indented under a plain paragraph.
+    while (stack.length > 0 && stack[stack.length - 1].minIndent > indent) {
+      closeLevel();
+    }
+    const top = stack[stack.length - 1];
+    const ordered = /^\d+\.$/.test(match[2]);
+    let level: ListLevel;
+    if (!top || indent > top.minIndent) {
+      // Deeper: nest under the still-open parent item.
+      level = { ordered, minIndent: indent, html: "", itemOpen: false };
+      stack.push(level);
+    } else {
+      level = top;
+      closeItem(level);
+    }
+    level.html += `<li>${match[3]}`;
+    level.itemOpen = true;
+  }
+  while (stack.length > 0) closeLevel();
+  return result;
+}
+
 export function renderMarkdown(text: string): string {
   if (!text) return "";
   let html = text;
@@ -57,12 +128,8 @@ export function renderMarkdown(text: string): string {
   // Blockquotes.
   html = html.replace(/^&gt;\s+(.+)$/gm, "<blockquote>$1</blockquote>");
 
-  // Unordered lists.
-  html = html.replace(/^[*-]\s+(.+)$/gm, "<li>$1</li>");
-  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, "<ul>$1</ul>");
-
-  // Ordered lists.
-  html = html.replace(/^\d+\.\s+(.+)$/gm, "<li>$1</li>");
+  // Lists: unordered and ordered, with nesting (see renderListBlock).
+  html = html.replace(/(?:^[ \t]*(?:[-*]|\d+\.)[ \t]+.+\n?)+/gm, renderListBlock);
 
   // Tables. A block of consecutive `| … |` lines becomes one <table>: the
   // first non-separator row is the header (<th>, inside <thead>), the rest

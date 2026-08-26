@@ -349,7 +349,11 @@ body {
   background: var(--code-bg);
   padding: 12px 16px;
   border-radius: var(--radius);
-  overflow-x: auto;
+  /* Long fenced blocks (pod-log excerpts, command output) stay in a
+     fixed-height scrollable box instead of pushing the transcript out
+     of view — the same 280px bound the evidence expanders use. */
+  max-height: 280px;
+  overflow: auto;
   margin: 10px 0;
   border: 1px solid var(--border);
 }
