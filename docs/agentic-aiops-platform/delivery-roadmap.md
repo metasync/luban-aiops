@@ -313,6 +313,7 @@ promotion; until then they stay here.
 | Confirmation card turn anchoring | Delivered 2026-08-26 (0.15.0) as `SPEC-033-confirmation-card-turn-anchoring` from the v0.14.1 live validation finding that a multi-park session stacks every confirmation card under the newest turn: parked records persist their parking turn ordinal (the same `_count_user_turns` convention SPEC-025 evidence uses, additive column with in-place migration), the session-detail surface carries it additively, and transcript seeding anchors each card under the exchange that parked it. Legacy rows fall back to today's anchoring. | `docs/specs/SPEC-033-confirmation-card-turn-anchoring/` |
 | Approval & owner chat UX polish | Delivered 2026-08-26 (0.16.0) as `SPEC-034-approval-owner-ux-polish` from the v0.15.0 live approval-test feedback: portal-only — owner-window arrival highlight for post-decision content, instant session-list refresh on applied decisions, Pending/History tabs in the Approvals view, separated inbox entries with structured provenance headers, and a banner note on pending-request expiry. | `docs/specs/SPEC-034-approval-owner-ux-polish/` |
 | Decision sync robustness and arrival polish | Delivered 2026-08-26 (0.17.0) as `SPEC-035-decision-sync-arrival-polish` from the v0.16.0 live approval-test feedback: transcript segment boundaries (agent-service block join + live-stream paragraph break), a time-based settle window with a visibility kick, progressive arrival reveal, session-tag park timing with a stale-response guard, approvals banner line, and History-tab pagination. | `docs/specs/SPEC-035-decision-sync-arrival-polish/` |
+| Server inbox pagination and seeded transcript reveal | In progress as `SPEC-036-inbox-pagination-and-seeded-reveal`, drafted from the v0.17.0 post-release review: the approvals History tab moves to server-side pagination (split store queries, paginated inbox API with totals, gateway pass-through, server-driven portal tab) because the combined payload's 100-row cap silently drops older decisions as volume grows, and the typewriter reveal extends to cold-seeded transcripts so opening a session re-types its most recent reply. | `docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/` |
 
 Promotion rule: a spike lands its findings as a short memo (workspace docs);
 only then does the item get a SPEC number. SPEC-018 (kernel middleware
@@ -342,7 +343,11 @@ drafted the same day from the v0.16.0 live approval-test feedback (a
 refresh-needed sync gap, broken resumed-heading markdown, an unnoticed
 arrival highlight, session-tag timing, and two approvals-view layout
 asks) — the same memo-free evidence-base departure — and delivered
-the same day in the 0.17.0 train.
+the same day in the 0.17.0 train. SPEC-036 (server inbox pagination and
+seeded transcript reveal) was drafted the same day from the v0.17.0
+post-release review (a growing-history truncation concern and a
+presentation-consistency ask) — the same memo-free evidence-base
+departure.
 
 ## Validation Model Per Release
 
