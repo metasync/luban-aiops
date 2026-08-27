@@ -1,4 +1,0 @@
-- Every spec folder contains exactly three sibling files: `plan.md`, `spec.md`, and `tasks.md`, mirroring the shared template structure.
-- Specs are globally unique and sequentially numbered starting at SPEC-001, with names using kebab-case after the numeric prefix.
-- Cross-references between specs use the `SPEC-NNN` identifier form rather than relative paths, keeping links stable across reordering.
-- Feature scope is bounded to a single concern per spec, with related changes grouped into thematic batches (e.g., approval inbox polish spanning SPEC-030–SPEC-036).

@@ -1,5 +1,0 @@
-- Each spec directory follows the fixed triple-file layout: `spec.md` (what/why), `plan.md` (how), `tasks.md` (execution), instantiated from the corresponding template under `templates/`.
-- Requirements are numbered `R-1`, `R-2`, ... and remain stable once a spec reaches `approved` status; tasks reference these IDs to maintain traceability from requirement to code.
-- Specs use the five-status lifecycle (`draft`, `approved`, `in-progress`, `delivered`, `superseded`) declared in the README header, and never rewrite a `delivered` spec — corrections go into the changelog or a new spec.
-- Concrete specs are named `SPEC-NNN-<kebab-slug>` with zero-padded sequential numbers and link back to related ADRs in the status block.
-- Delivery gates require updating living state docs listed in the spec's Impact section, adding a CHANGELOG entry referencing the spec ID, and refreshing the spec index table in `docs/specs/README.md`.

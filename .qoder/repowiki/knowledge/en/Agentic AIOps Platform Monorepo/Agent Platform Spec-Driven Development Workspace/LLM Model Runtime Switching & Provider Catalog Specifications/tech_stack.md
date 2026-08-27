@@ -1,1 +1,0 @@
-OpenAI-compatible LLM providers (DeepSeek, DashScope/Qwen, OpenAI, self-hosted Ollama/vLLM/llama.cpp); AgentScope runtime kernel; FastAPI lifespan tasks for background refresh; Postgres sessions DB (`model_discovery_cache` table) as persistence substrate for discovery results.

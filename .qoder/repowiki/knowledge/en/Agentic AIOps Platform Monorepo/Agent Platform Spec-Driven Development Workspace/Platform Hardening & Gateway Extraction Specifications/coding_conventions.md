@@ -1,5 +1,0 @@
-- Each spec follows a fixed tri-file structure with `spec.md` containing Status/Summary/Motivation/Requirements/Acceptance Criteria/Non-Goals/Impact/Open Questions/Changelog, paired with `plan.md` and `tasks.md` for execution tracking.
-- Requirements are numbered R-1, R-2, ... and each carries explicit, testable acceptance criteria rather than narrative goals.
-- Specs track a strict lifecycle through the `status` field (`draft` → `approved` → `in-progress` → `delivered`) and append dated entries to a Changelog section documenting decisions and delivery milestones.
-- Cross-product impact is enumerated explicitly under an Impact section listing touched products, contracts, trust-model changes, and living-state docs to update on delivery.
-- Open questions are recorded inline and resolved before approval, with resolutions captured in subsequent changelog entries rather than left dangling.

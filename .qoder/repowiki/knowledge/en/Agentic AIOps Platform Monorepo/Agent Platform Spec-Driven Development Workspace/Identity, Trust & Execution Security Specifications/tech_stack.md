@@ -1,1 +1,0 @@
-RSA-signed JWTs with JWKS (RFC 7517) verified via PyJWT/cryptography; HMAC-SHA256 signing for execution envelopes; JSON Schema validation for shared contracts; Kustomize overlays for secret provisioning (`IDENTITY_JWT_PRIVATE_KEY_PATH`, `AGENT_EXECUTION_SIGNING_KEY`).

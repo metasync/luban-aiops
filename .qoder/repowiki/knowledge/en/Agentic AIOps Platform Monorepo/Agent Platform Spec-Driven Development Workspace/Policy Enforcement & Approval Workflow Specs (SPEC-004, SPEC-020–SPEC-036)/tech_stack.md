@@ -1,1 +1,0 @@
-Python-based policy engines in platform-gateway and tool-gateway consuming YAML bundles validated against JSON Schema; Postgres-backed durable confirmation store in agent-platform; operator-portal web UI built with React/antd using SSE streams and polling; all wire formats versioned via `agent-stream-event.schema.json` v3→v5 and additive policy-schema revisions.

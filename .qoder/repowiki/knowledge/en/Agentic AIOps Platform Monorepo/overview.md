@@ -1,1 +1,0 @@
-Monorepo that composes the agent-platform runtime, gateway, execution, identity, audit, incident, skills, and tool-gateway services around shared JSON schemas and policy contracts.

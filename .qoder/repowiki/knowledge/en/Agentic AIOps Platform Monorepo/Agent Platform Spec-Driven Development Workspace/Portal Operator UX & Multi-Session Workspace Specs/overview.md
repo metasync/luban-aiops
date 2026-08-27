@@ -1,1 +1,0 @@
-Specification documents defining the operator portal's documentation, transparency navigation, multi-session workspace API, and React/Ant Design X framework rebuild.

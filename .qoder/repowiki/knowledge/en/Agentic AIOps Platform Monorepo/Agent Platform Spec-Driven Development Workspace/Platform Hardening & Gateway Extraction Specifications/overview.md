@@ -1,1 +1,0 @@
-Specification documents defining Release 1 platform hardening, pre-production credential redaction and workload-identity token exchange, and the extraction of portal-facing edge routes from tool-gateway into a new platform-gateway product.

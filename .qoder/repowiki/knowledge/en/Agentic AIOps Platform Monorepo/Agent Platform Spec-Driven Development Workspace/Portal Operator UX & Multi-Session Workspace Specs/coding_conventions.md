@@ -1,6 +1,0 @@
-- Each spec follows a fixed triple-file layout of `plan.md`, `spec.md`, and `tasks.md` under its own directory.
-- Specs declare status metadata (status, owner, created, release slice, related ADRs) at the top of `spec.md` and maintain a running changelog of draft → approved → delivered transitions.
-- Requirements are numbered R-1, R-2, … and each carries explicit acceptance criteria that map directly to testable behavior rather than prose goals.
-- Non-Goals sections explicitly enumerate out-of-scope items to prevent scope creep across specs.
-- New policy actions follow deny-by-default semantics: new routes require explicit `policy:read`, `skills:read`, `session:list`, `session:delete` rules added to `policy-default.yaml` and propagated via `make sync-policy`.
-- Deferred work is captured verbatim in an Appendix (e.g., SPEC-022 Appendix A handoff contract) so downstream specs can consume requirements without re-drafting.

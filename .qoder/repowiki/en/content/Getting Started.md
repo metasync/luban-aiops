@@ -48,15 +48,19 @@
 - [products/platform-gateway/src/platform_gateway/metadata.py](file://products/platform-gateway/src/platform_gateway/metadata.py)
 - [products/skills-hub/src/skills_hub/metadata.py](file://products/skills-hub/src/skills_hub/metadata.py)
 - [products/tool-gateway/src/tool_gateway/metadata.py](file://products/tool-gateway/src/tool_gateway/metadata.py)
+- [docs/guides/portal-user-guide.md](file://docs/guides/portal-user-guide.md)
+- [docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md](file://docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md)
+- [docs/specs/SPEC-039-operations-document-repository/spec.md](file://docs/specs/SPEC-039-operations-document-repository/spec.md)
+- [docs/specs/SPEC-040-shift-summary-handover-narrative/spec.md](file://docs/specs/SPEC-040-shift-summary-handover-narrative/spec.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated version information from v0.13.1 to v0.14.0 across all platform components
-- Added documentation for new live decision sync capabilities in the operator portal
-- Enhanced operator experience features with real-time approval status updates
-- Updated release notes and specifications for SPEC-032 owner-side live decision sync
-- Modified troubleshooting section to include new live sync validation steps
+- Added comprehensive documentation for the "Your first shift summary" walkthrough feature
+- Updated portal user guide references to reflect corrected deletion wording for published documents
+- Enhanced documentation with envelope-only listing behavior for document security
+- Integrated SPEC-039 operations document repository capabilities into getting started workflow
+- Updated troubleshooting section with new document-related issues and solutions
 
 ## Table of Contents
 1. Introduction
@@ -67,15 +71,16 @@
 6. Environment Configuration and Secrets
 7. Coordinated Version Management
 8. Initial Validation and First API Call
-9. Troubleshooting Guide
-10. Next Steps by Persona
-11. Architecture Overview
-12. Conclusion
+9. Operations Document Repository and Shift Summaries
+10. Troubleshooting Guide
+11. Next Steps by Persona
+12. Architecture Overview
+13. Conclusion
 
 ## Introduction
 This guide helps you get up and running with the Luban AIOps Platform for local development and production deployment. It covers prerequisites, installation steps, environment configuration, secret management, initial validation, and common troubleshooting tips. You will also find links to additional resources and next steps tailored for developers, operators, and security teams.
 
-**Updated** This document reflects the coordinated 0.14.0 release with synchronized versions across all seven platform components, plus enhanced live decision sync capabilities that improve the operator experience through real-time approval status updates in the chat interface.
+**Updated** This document reflects the coordinated 0.14.0 release with synchronized versions across all seven platform components, plus enhanced live decision sync capabilities that improve the operator experience through real-time approval status updates in the chat interface. The platform now includes a comprehensive operations document repository with shift summary capabilities for end-of-shift handovers.
 
 ## Prerequisites
 Ensure your environment meets the following requirements before proceeding:
@@ -92,6 +97,7 @@ Notes:
 - Runtime profiles are provided for OpenAI, DashScope, and DeepSeek; select one based on your needs.
 - **Updated**: Version 0.14.0 introduces live decision sync capabilities that require the updated operator portal for optimal operator experience.
 - **Updated**: The operator portal now includes enhanced real-time approval status updates through the usePendingDecisionPoll hook.
+- **New**: Operations document repository requires proper role assignments for document creation and access.
 
 **Section sources**
 - [products/operator-portal/web-ui/app/package.json:6-8](file://products/operator-portal/web-ui/app/package.json#L6-L8)
@@ -104,7 +110,7 @@ The repository is organized into product services and shared operational assets:
   - agent-platform: Agent runtime service and providers
   - identity-broker: Identity and token services
   - tool-gateway: API gateway, policy enforcement, and tool orchestration
-  - **Updated**: operator-portal: Modern React/TypeScript web UI built with Vite and Ant Design, featuring live decision sync
+  - **Updated**: operator-portal: Modern React/TypeScript web UI built with Vite and Ant Design, featuring live decision sync and operations document repository
   - **New**: audit-service: Durable audit trail service for authenticated event ingestion and retention
   - **New**: incident-service: Incident intake, triage, and collaboration dispatch
   - **Existing**: skills-hub: Skills and grounded guidance federation
@@ -119,7 +125,7 @@ subgraph "Products"
 AP["Agent Platform"]
 IB["Identity Broker"]
 TG["Tool Gateway"]
-OP["Operator Portal (Vite/React + Live Sync)"]
+OP["Operator Portal (Vite/React + Live Sync + Documents)"]
 AS["Audit Service"]
 IS["Incident Service"]
 SH["Skills Hub"]
@@ -280,6 +286,7 @@ Best practices:
 - **Updated**: Ensure version consistency across all components using the coordinated version validation system.
 - **Updated**: For frontend development, ensure Node.js 22+ is installed and dependencies are properly cached.
 - **New**: Test live decision sync functionality by creating approval workflows and verifying real-time status updates.
+- **New**: Configure proper roles for operations document repository access (platform-admin, approver, or operator).
 
 **Section sources**
 - [shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml)
@@ -372,6 +379,39 @@ Use curl or an HTTP client to test endpoints. Refer to service READMEs for endpo
 - [products/operator-portal/web-ui/app/src/App.tsx:150-154](file://products/operator-portal/web-ui/app/src/App.tsx#L150-L154)
 - [products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts:1-5](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts#L1-L5)
 
+## Operations Document Repository and Shift Summaries
+The platform now includes a comprehensive operations document repository that enables operators to create structured shift summaries for end-of-shift handovers.
+
+### Creating Your First Shift Summary
+The typical end-of-shift workflow follows these steps:
+
+1. **Navigate to Documents**: Open the **Documents** view in the Control section (requires platform-admin, approver, or operator role)
+2. **Create New Summary**: Click **New shift summary** to open the creation dialog
+3. **Configure Sessions**: 
+   - Enter a label that names the shift (e.g., *Night shift 2026-08-27*)
+   - Select your own sessions from the picker (up to 20 sessions)
+   - To include a colleague's session, ask them to copy its session id from their session panel and paste it into the foreign-id field
+   - Foreign sessions contribute metadata only and require approvals inbox role
+4. **Optional Prose Summary**: Switch on the prose summary option if you want AI-generated narrative
+5. **Review and Publish**: Submit to create a draft, review the digest, then click **Publish** for team visibility
+
+### Key Features
+- **Envelope-only listings**: Document listings return only metadata (no digest/prose content) for security
+- **Two-tier coverage**: Own sessions provide full coverage; foreign sessions provide metadata only
+- **Provenance anchoring**: Every fact in the digest is traced back to source records
+- **Role-based access**: Documents are accessible by role, not per-document permissions
+- **Audit trail**: Cross-owner document reads are logged for compliance
+
+### Security Considerations
+- **Document content protection**: Full document content is only available through audited single fetch
+- **Published document deletion**: Owners may delete their own published documents (they disappear for everyone)
+- **Immutable content**: Document content cannot be edited after creation; publishing only changes visibility
+
+**Section sources**
+- [docs/guides/portal-user-guide.md:170-223](file://docs/guides/portal-user-guide.md#L170-L223)
+- [docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md:20-44](file://docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md#L20-L44)
+- [docs/specs/SPEC-039-operations-document-repository/spec.md:14-25](file://docs/specs/SPEC-039-operations-document-repository/spec.md#L14-L25)
+
 ## Troubleshooting Guide
 Common issues and resolutions:
 
@@ -401,7 +441,19 @@ Common issues and resolutions:
   - Ensure all SERVICE_VERSION values match the root VERSION file
   - Verify pyproject.toml files have consistent version declarations
 
-- **New**: Live decision sync issues
+- **New**: Operations document repository issues
+  - Verify users have appropriate roles (platform-admin, approver, or operator) for document access
+  - Check that document listings return envelope-only data (no digest/prose content)
+  - Ensure cross-owner document reads trigger audit events
+  - Validate that published documents can be deleted by their owners
+
+- **New**: Shift summary creation problems
+  - Confirm session IDs are valid and accessible
+  - Verify foreign session inclusion requires approvals inbox role
+  - Check that prose generation doesn't exceed session limits (20 sessions max)
+  - Review digest construction for missing or unavailable data sources
+
+- **Updated**: Live decision sync issues
   - Check that the usePendingDecisionPoll hook is properly integrated in ChatView
   - Verify that session detail endpoints return expected confirmation state
   - Ensure polling intervals are functioning correctly (5-second intervals)
@@ -426,7 +478,8 @@ Useful commands:
 - **Updated**: make validate-version
 - **Updated**: npm run dev (for frontend development)
 - **Updated**: npm run build (for frontend production builds)
-- **New**: Test live decision sync by monitoring session detail endpoints during approval workflows
+- **New**: Test operations document repository by checking document list endpoints for envelope-only responses
+- **New**: Verify shift summary creation workflow through the portal interface
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
@@ -451,6 +504,7 @@ Useful commands:
   - **Updated**: Understand the coordinated versioning system and contribute to version updates.
   - **Updated**: Work with the modern React/TypeScript frontend stack using Vite for development and builds.
   - **New**: Implement and test live decision sync functionality using the usePendingDecisionPoll hook.
+  - **New**: Develop custom document types extending the operations document repository substrate.
 
 - Operators
   - Manage Kustomize overlays and secrets lifecycle.
@@ -458,7 +512,8 @@ Useful commands:
   - Configure monitoring, alerting, and log aggregation.
   - **Updated**: Monitor version consistency across all seven platform components.
   - **Updated**: Handle multi-stage Docker builds that compile frontend assets alongside backend services.
-  - **New**: Validate live decision sync capabilities in production environments to ensure smooth operator workflows.
+  - **New**: Utilize shift summaries for effective end-of-shift handovers and team collaboration.
+  - **New**: Configure proper roles and permissions for operations document repository access.
 
 - Security Teams
   - Review RBAC rules and policy definitions.
@@ -467,6 +522,7 @@ Useful commands:
   - **Updated**: Validate audit-service and incident-service security configurations.
   - **Updated**: Review frontend security headers and caching policies in nginx configuration.
   - **New**: Assess the security implications of live decision sync polling mechanisms.
+  - **New**: Verify operations document repository access controls and audit trails meet compliance requirements.
 
 Additional resources:
 - Repository README for high-level overview and links
@@ -474,7 +530,9 @@ Additional resources:
 - GitOps scripts and overlays for deployment automation
 - **Updated**: Version validation scripts and coordinated release processes
 - **Updated**: Vite documentation and React/TypeScript best practices for frontend development
-- **New**: SPEC-032 documentation for understanding live decision sync implementation
+- **New**: SPEC-039 documentation for understanding operations document repository implementation
+- **New**: SPEC-040 documentation for shift summary handover narrative features
+- **New**: Portal user guide for detailed operations document repository workflows
 
 **Section sources**
 - [README.md](file://README.md)
@@ -483,13 +541,15 @@ Additional resources:
 - [products/tool-gateway/README.md](file://products/tool-gateway/README.md)
 - [products/operator-portal/web-ui/app/package.json:15-34](file://products/operator-portal/web-ui/app/package.json#L15-L34)
 - [docs/specs/SPEC-032-owner-side-live-decision-sync/spec.md:1-124](file://docs/specs/SPEC-032-owner-side-live-decision-sync/spec.md#L1-L124)
+- [docs/specs/SPEC-039-operations-document-repository/spec.md:1-155](file://docs/specs/SPEC-039-operations-document-repository/spec.md#L1-L155)
+- [docs/specs/SPEC-040-shift-summary-handover-narrative/spec.md:1-52](file://docs/specs/SPEC-040-shift-summary-handover-narrative/spec.md#L1-L52)
 
 ## Architecture Overview
 The platform consists of several microservices orchestrated via Kubernetes and exposed through an API gateway. Core components include:
 - Tool Gateway: Central API entry point with policy enforcement and tool orchestration
 - Identity Broker: Authentication, authorization, and token management
 - Agent Platform: Agent runtime and provider integrations
-- **Updated**: Operator Portal: Modern React/TypeScript web UI built with Vite, served by nginx with optimized caching, featuring live decision sync capabilities
+- **Updated**: Operator Portal: Modern React/TypeScript web UI built with Vite, served by nginx with optimized caching, featuring live decision sync capabilities and operations document repository
 - **New**: Audit Service: Durable audit trail with authenticated event ingestion and retention
 - **New**: Incident Service: Incident intake, triage, and collaboration dispatch
 - **Existing**: Skills Hub: Skills and grounded guidance federation
@@ -501,7 +561,7 @@ Client["Client"]
 GW["Tool Gateway"]
 IDB["Identity Broker"]
 AP["Agent Platform"]
-OP["Operator Portal (React/Vite + Live Sync)"]
+OP["Operator Portal (React/Vite + Live Sync + Documents)"]
 AS["Audit Service"]
 IS["Incident Service"]
 RDS["Redis"]
@@ -526,6 +586,6 @@ IS --> RDS
 ## Conclusion
 You now have the essential information to install, configure, and operate the Luban AIOps Platform for both local development and production. Version 0.14.0 introduces enhanced coordinated versioning across all seven platform components, ensuring consistent releases and simplified maintenance. The operator portal has been modernized with a Vite/React/TypeScript stack, providing an enhanced user experience with better performance and developer productivity. The new live decision sync capabilities significantly improve the operator experience by providing real-time updates when approval decisions are made from other sessions or interfaces.
 
-**Updated** The coordinated version management system in version 0.14.0 provides enhanced reliability and simplifies multi-component releases across the entire platform ecosystem, while the modernized frontend stack offers improved performance and developer experience. The addition of live decision sync capabilities addresses critical gaps identified during v0.13.1 live validation, ensuring that operators can trust the approval workflow visibility across all user interfaces.
+**Updated** The coordinated version management system in version 0.14.0 provides enhanced reliability and simplifies multi-component releases across the entire platform ecosystem, while the modernized frontend stack offers improved performance and developer experience. The addition of live decision sync capabilities addresses critical gaps identified during v0.13.1 live validation, ensuring that operators can trust the approval workflow visibility across all user interfaces. The new operations document repository with shift summary capabilities provides operators with structured handover artifacts that improve team collaboration and knowledge transfer.
 
 Use the provided scripts and overlays to manage deployments, secrets, and runtime profiles. For deeper exploration, consult the product READMEs and GitOps assets. If you encounter issues, refer to the troubleshooting guide and leverage Kubernetes diagnostics.

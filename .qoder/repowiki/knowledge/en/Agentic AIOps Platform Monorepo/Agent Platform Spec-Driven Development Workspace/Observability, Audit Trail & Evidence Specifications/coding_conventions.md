@@ -1,6 +1,0 @@
-- Every spec uses a fixed header block (status, owner, created, release slice, related ADRs/specs) followed by Summary, Motivation, Requirements numbered R-N with Acceptance Criteria, Non-Goals, Impact, Open Questions, and Changelog sections.
-- Cross-service contracts are centralized under `shared/shared-contracts/schemas/` and enforced via contract tests that bind Pydantic models of both producers and consumers to the same JSON Schema.
-- Audit emission follows a fire-and-forget pattern: a daemon-thread delivery loop with a bounded timeout, never blocking the originating request, and degrading to log-only when the audit service is unreachable.
-- New audit event types are added additively to the closed `event_type` enum in `audit-event.schema.json` and mirrored in the audit-service `EventType` Literal, verified by an existing enum-parity test.
-- Service-to-service authentication reuses the SPEC-008/009 broker-mediated service-identity mechanisms (client registry + projected workload tokens) rather than introducing new credential schemes.
-- Feature toggles use environment variables with explicit defaults (e.g., `OTEL_ENABLED=false`, `GATEWAY_ELASTIC_ENABLED=false`, `AUDIT_STORE_BACKEND=memory`) so features are off-by-default and fail-open.

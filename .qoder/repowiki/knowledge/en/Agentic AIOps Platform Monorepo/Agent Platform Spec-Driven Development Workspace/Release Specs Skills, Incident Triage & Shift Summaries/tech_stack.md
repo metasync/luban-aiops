@@ -1,1 +1,0 @@
-FastAPI services (skills-hub, incident-service) on a shared base-uv image with psycopg v3 Postgres backends; JSON Schema contracts in `shared/shared-contracts/schemas`; dev-k8s overlays deployed via `make deploy`; e2e smoke scripts under `shared/platform-ops/e2e/`.

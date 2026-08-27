@@ -1,1 +1,0 @@
-Top-level `Makefile` and `mk/*.mk` provide unified build/image/test targets for all products; `shared/platform-ops/gitops/` contains deploy and secret-sync scripts (`sync-*-secret.sh`, `deploy-overlay.sh`, `select-runtime-profile.sh`) used to provision and reconcile each service's runtime configuration in dev-k8s clusters.

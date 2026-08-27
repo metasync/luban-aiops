@@ -13,7 +13,10 @@
 - [SPEC-008-service-to-service-identity/spec.md](file://docs/specs/SPEC-008-service-to-service-identity/spec.md)
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
-- [SPEC-013-durable-audit-trail/plan.md](file://docs/specs/SPEC-013-durable-audit-trail/plan.md)
+- [2026-08-27-document-read-audit-integrity.md](file://docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md)
+- [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
+- [documents.py](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py)
+- [test_documents.py](file://products/agent-platform/tests/test_documents.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [test_gateway_tools.py](file://products/agent-platform/tests/test_gateway_tools.py)
 - [auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
@@ -47,12 +50,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new audit trail security model with service-to-service authentication
-- Documented role-based access control for audit:read action enforcement through platform gateway
-- Detailed secure audit event ingestion with dual authentication paths (static credentials and workload identity)
-- Enhanced security architecture section to include audit service as a core component
-- Updated threat modeling to address audit trail integrity and unauthorized access prevention
-- Added configuration guidance for audit service authentication and authorization
+- Enhanced documentation for document read audit integrity with envelope-only listings
+- Updated security architecture section to include centralized single-document fetch endpoints
+- Added detailed explanation of cross-owner access auditing mechanisms
+- Updated threat modeling to address document content exposure prevention
+- Enhanced compliance requirements with document audit trail specifications
+- Updated troubleshooting guide with document read audit verification procedures
 
 ## Table of Contents
 1. Introduction
@@ -69,15 +72,15 @@
 ## Introduction
 This Security Guide documents the Luban AIOps Platform's enhanced security architecture, threat mitigation strategies, and compliance requirements. The platform now implements a sophisticated security model featuring audience-bound JWTs, delegated token flows, service-to-service identity patterns, deterministic tool output redaction, workload identity service tokens, explicit tool permission allow-listing, and a durable audit trail with secure service-to-service authentication. It covers identity and authorization design (OIDC integration, JWT token security, and role-based access control), the authorization matrix across services and resources, secure configuration and secrets management, network security, vulnerability assessment procedures, scanning and penetration testing guidelines, compliance and audit logging, incident response procedures, and secure development practices with security review processes.
 
-The platform has been significantly hardened with multiple security enhancements including explicit tool permission allow-listing to prevent unauthorized tool execution, deterministic redaction of tool outputs to prevent credential leakage to external model providers, workload identity service tokens that replace static client secrets with short-lived, Kubernetes-projected tokens validated against cluster OIDC issuers, and a comprehensive audit trail system that provides immutable records of all platform activities with strong authentication and authorization controls.
+The platform has been significantly hardened with multiple security enhancements including explicit tool permission allow-listing to prevent unauthorized tool execution, deterministic redaction of tool outputs to prevent credential leakage to external model providers, workload identity service tokens that replace static client secrets with short-lived, Kubernetes-projected tokens validated against cluster OIDC issuers, and a comprehensive audit trail system that provides immutable records of all platform activities with strong authentication and authorization controls. **Updated**: The platform now implements enhanced audit integrity for document read operations, ensuring cross-owner access to sensitive content is properly recorded through centralized single-document fetch endpoints rather than list endpoints, preventing unauthorized content exposure while maintaining comprehensive audit trails.
 
 ## Project Structure
 The platform is organized into multiple products and shared components with enhanced security boundaries:
 - Identity Broker: Centralized identity and token issuance/validation service supporting OIDC flows, audience-bound JWT lifecycle management, delegated token operations, and workload identity token validation.
 - Tool Gateway: API gateway enforcing authentication, authorization, policy decisions, secure tool execution orchestration, deterministic output redaction, and explicit tool permission allow-listing with service-to-service identity validation.
 - Audit Service: Durable audit trail storage with secure service-to-service authentication, role-based query access, and retention policies for compliance requirements.
-- Agent Platform: Runtime for agent services with session management, provider integrations, strict audience-scoped permissions, and vetted tool auto-approval mechanisms.
-- Operator Portal: Web UI for operators to manage platform resources with enhanced security controls.
+- Agent Platform: Runtime for agent services with session management, provider integrations, strict audience-scoped permissions, vetted tool auto-approval mechanisms, and enhanced document repository with envelope-only listings.
+- Operator Portal: Web UI for operators to manage platform resources with enhanced security controls and audited document access.
 - Shared Contracts and Schemas: Common data models and policy specifications used across services with enhanced security schemas.
 - GitOps and Kubernetes overlays: Declarative deployment configurations including RBAC, policies, and runtime environment variables with least-privilege defaults.
 
@@ -108,7 +111,7 @@ end
 - Tool Gateway performs request authentication, token verification with audience validation, policy evaluation, secure tool execution orchestration, deterministic output redaction, and routes requests to downstream services with proper identity propagation.
 - Audit Service provides durable audit trail storage with secure service-to-service authentication using both static credentials and workload identity, role-based query access control, and retention policies for compliance.
 - Policy Engine evaluates policies against requests and enforces RBAC and fine-grained permissions with service-to-service identity awareness.
-- Agent Platform manages sessions and runtime dependencies for agent workloads with strict audience-scoped permissions, least-privilege execution contexts, and explicit tool permission allow-listing.
+- Agent Platform manages sessions and runtime dependencies for agent workloads with strict audience-scoped permissions, least-privilege execution contexts, explicit tool permission allow-listing, and enhanced document repository with envelope-only listings and centralized fetch auditing.
 - Kubernetes RBAC and policy manifests define least-privilege access and runtime constraints with enhanced service identity management.
 
 Key responsibilities:
@@ -119,6 +122,7 @@ Key responsibilities:
 - Deterministic tool output redaction preventing credential leakage to external model providers.
 - Workload identity service tokens replacing static client secrets with short-lived, auditable credentials.
 - Comprehensive audit trail with secure ingestion, storage, and query capabilities with role-based access control.
+- **Enhanced document read audit integrity** ensuring cross-owner access to sensitive content is properly recorded through centralized single-document fetch endpoints.
 - Observability and audit logging for security events with enhanced service-to-service communication tracking.
 
 **Section sources**
@@ -132,7 +136,7 @@ Key responsibilities:
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 
 ## Architecture Overview
-The enhanced security architecture centers on a trust boundary at the Tool Gateway, which authenticates clients, verifies audience-bound tokens, enforces policies with service identity awareness, delegates tokens securely to internal services, applies deterministic redaction to prevent credential leakage, and enforces explicit tool permission allow-listing. The Identity Broker acts as the single source of truth for user and service identities, issuing OIDC-compliant tokens with audience scoping, validating workload identity tokens from Kubernetes, and providing introspection endpoints. The Audit Service provides durable, tamper-evident audit trails with secure service-to-service authentication and role-based query access. Policies are declarative and evaluated per-request, enabling dynamic authorization based on roles, scopes, resource attributes, and service identity relationships.
+The enhanced security architecture centers on a trust boundary at the Tool Gateway, which authenticates clients, verifies audience-bound tokens, enforces policies with service identity awareness, delegates tokens securely to internal services, applies deterministic redaction to prevent credential leakage, and enforces explicit tool permission allow-listing. The Identity Broker acts as the single source of truth for user and service identities, issuing OIDC-compliant tokens with audience scoping, validating workload identity tokens from Kubernetes, and providing introspection endpoints. The Audit Service provides durable, tamper-evident audit trails with secure service-to-service authentication and role-based query access. Policies are declarative and evaluated per-request, enabling dynamic authorization based on roles, scopes, resource attributes, and service identity relationships. **Updated**: The document repository architecture now ensures that sensitive document content is only accessible through centralized single-document fetch endpoints, with envelope-only listings preventing unauthorized content exposure while maintaining comprehensive audit trails for cross-owner access.
 
 ```mermaid
 sequenceDiagram
@@ -145,6 +149,7 @@ participant Delegation as "Delegation Service"
 participant Redaction as "Redaction Engine"
 participant AllowList as "Tool Permission Allow-List"
 participant AuditService as "Audit Service"
+participant DocStore as "Document Store"
 Client->>Gateway : "HTTP Request with Bearer Token"
 Gateway->>Broker : "Validate Audience-Bound Token"
 Broker-->>Gateway : "Token Claims + Audience Validation"
@@ -155,12 +160,15 @@ Delegation-->>Gateway : "Service-Specific Token"
 Gateway->>Agent : "Forward Request with Context"
 Agent->>AllowList : "Check Tool Permission (Vetted Allow-List)"
 AllowList-->>Agent : "Permission Decision"
+Agent->>DocStore : "List Documents (Envelope Only)"
+DocStore-->>Agent : "Envelopes (No Content)"
 Agent->>AuditService : "Emit Audit Event (Authenticated)"
 AuditService-->>Agent : "Acknowledgment"
 Agent-->>Gateway : "Response with Potential Credentials"
 Gateway->>Redaction : "Apply Deterministic Redaction"
 Redaction-->>Gateway : "Sanitized Response"
 Gateway-->>Client : "Final Response"
+Note over Agent,DocStore : Cross-owner reads trigger document_read audit events
 ```
 
 **Diagram sources**
@@ -176,6 +184,7 @@ Gateway-->>Client : "Final Response"
 - [exchange_service.py](file://products/identity-broker/src/identity_service/services/exchange_service.py)
 - [audit_emitter.py](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py)
 - [ingest.py](file://products/audit-service/src/audit_service/api/routes/ingest.py)
+- [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 
 **Section sources**
 - [SPEC-003-identity-trust-hardening/spec.md](file://docs/specs/SPEC-003-identity-trust-hardening/spec.md)
@@ -337,6 +346,39 @@ Authorized --> |No| Deny["Deny Access"]
 - [config.py](file://products/audit-service/src/audit_service/core/config.py)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env)
 
+### Enhanced Document Repository: Envelope-Only Listings and Centralized Fetch Auditing
+**Updated** The document repository has been significantly enhanced to ensure audit integrity for document read operations. The system now implements envelope-only listings that strip sensitive content (digest and prose) from list responses, ensuring that cross-owner access to sensitive content is properly recorded through centralized single-document fetch endpoints. This prevents unauthorized content exposure while maintaining comprehensive audit trails.
+
+Key aspects:
+- **Envelope-Only Listings**: Both `mine` and `published` document listing endpoints return metadata only, stripping `digest` and `prose` fields to prevent content exposure.
+- **Centralized Single-Document Fetch**: Full document content is only available through the single-document fetch endpoint (`GET /documents/{document_id}`), which serves as the audited surface.
+- **Cross-Owner Read Auditing**: When a user accesses another user's published document, a `document_read` audit event is emitted with owner attribution, while own-document reads remain unaudited.
+- **Foreign Draft Protection**: Foreign drafts are indistinguishable from unknown documents, returning 404 status codes to prevent enumeration attacks.
+- **Portal Integration**: The operator portal drawer now retrieves full documents through the audited single fetch endpoint, ensuring every cross-owner read is properly recorded.
+
+```mermaid
+flowchart TD
+ListRequest["Document List Request"] --> StripContent["Strip digest/prose Fields"]
+StripContent --> ReturnEnvelopes["Return Envelope-Only Results"]
+FetchRequest["Single Document Fetch"] --> CheckOwnership{"Cross-Owner Access?"}
+CheckOwnership --> |Yes| EmitAudit["Emit document_read Audit Event"]
+CheckOwnership --> |No| SkipAudit["Skip Audit (Own Read)"]
+EmitAudit --> ReturnFullDoc["Return Full Document"]
+SkipAudit --> ReturnFullDoc
+ReturnFullDoc --> End(["Response"])
+ReturnEnvelopes --> End
+```
+
+**Diagram sources**
+- [routes.py:858-882](file://products/agent-platform/src/agent_service/api/v2/routes.py#L858-L882)
+- [routes.py:885-915](file://products/agent-platform/src/agent_service/api/v2/routes.py#L885-L915)
+- [test_documents.py:250-266](file://products/agent-platform/tests/test_documents.py#L250-L266)
+
+**Section sources**
+- [routes.py:858-915](file://products/agent-platform/src/agent_service/api/v2/routes.py#L858-L915)
+- [test_documents.py:250-266](file://products/agent-platform/tests/test_documents.py#L250-L266)
+- [2026-08-27-document-read-audit-integrity.md](file://docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md)
+
 ### Explicit Tool Permission Allow-List System
 **Updated** The tool permission auto-approval system has been significantly hardened to address CWE-862 (Incorrect Authorization) vulnerability. Instead of automatically approving any read-only tool, the system now uses an explicit vetted allow-list controlled by the `AGENT_GATEWAY_TOOL_AUTO_ALLOW` environment variable. This ensures that only pre-approved, security-reviewed tools can bypass the interactive permission confirmation process.
 
@@ -450,7 +492,7 @@ Note over Gateway,Broker : Fallback to Static Secret if Workload Token Unavailab
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 
 ### Agent Platform: Enhanced Session and Runtime Security with Least-Privilege
-**Updated** The Agent Platform manages sessions and runtime dependencies for agent workloads with enhanced security controls including explicit tool permission allow-listing. It integrates with the identity system to ensure authenticated sessions with audience-scoped permissions and enforces runtime policies with least-privilege execution contexts.
+**Updated** The Agent Platform manages sessions and runtime dependencies for agent workloads with enhanced security controls including explicit tool permission allow-listing and enhanced document repository with envelope-only listings. It integrates with the identity system to ensure authenticated sessions with audience-scoped permissions and enforces runtime policies with least-privilege execution contexts.
 
 Key aspects:
 - Session creation and persistence with secure identifiers and audience validation.
@@ -458,6 +500,7 @@ Key aspects:
 - Telemetry and observability for security-relevant events with service identity tracking.
 - Runtime policy enforcement with audience-scoped permissions and service identity validation.
 - Explicit tool permission allow-listing preventing unauthorized tool execution.
+- **Enhanced document repository** with envelope-only listings and centralized fetch auditing.
 - Integration with AgentScope permission system for headless stream compatibility.
 
 **Section sources**
@@ -488,6 +531,7 @@ Security-critical dependencies include:
 - Pattern matching libraries for deterministic credential detection and redaction.
 - AgentScope permission system for tool permission management with explicit allow-listing.
 - Audit service client for secure audit event emission with authentication.
+- **Document store with envelope-only listing capability** for secure document content access.
 
 ```mermaid
 graph TB
@@ -506,7 +550,9 @@ RBAC["Kubernetes RBAC"] --> Gateway
 DelegationClient --> IdentityBroker
 RedactionEngine --> PatternMatching["Pattern Matching Library"]
 AgentPlatform --> AllowList["Tool Permission Allow-List"]
+AgentPlatform --> DocStore["Document Store (Envelope-Only)"]
 AllowList --> AgentScope["AgentScope Permission System"]
+DocStore --> AuditEmitter
 AuditEmitter --> AuditService["Audit Service"]
 AuditService --> AuditStore["Audit Store"]
 ```
@@ -522,6 +568,7 @@ AuditService --> AuditStore["Audit Store"]
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [audit_emitter.py](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py)
 - [ingest_auth.py](file://products/audit-service/src/audit_service/services/ingest_auth.py)
+- [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 
 **Section sources**
 - [SPEC-003-identity-trust-hardening/spec.md](file://docs/specs/SPEC-003-identity-trust-hardening/spec.md)
@@ -541,6 +588,8 @@ AuditService --> AuditStore["Audit Store"]
 - Workload token caching: Cache workload token validation results to reduce cluster OIDC issuer calls.
 - Tool permission checking: Minimal overhead for allow-list lookups using frozenset for O(1) membership testing.
 - Audit emission: Fire-and-forget audit delivery with non-blocking threads and timeout protection to prevent request path degradation.
+- **Document listing performance**: Envelope-only listings reduce payload size and improve response times while maintaining security.
+- **Cross-owner read auditing**: Audit event emission is optimized to minimize impact on document fetch performance.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -555,6 +604,8 @@ Common issues and resolutions:
 - **Headless stream stalls**: Ensure tools are properly configured as read-only and included in the vetted allow-list for automatic approval.
 - **Audit service connection failures**: Verify AUDIT_SERVICE_URL configuration and audit client credentials in emitter services.
 - **Audit query access denied**: Confirm user has auditor or platform-admin role and audit:read policy action is granted.
+- **Document content exposure**: Verify that document listings return envelope-only data and full content is only accessible through single-document fetch endpoints.
+- **Missing cross-owner read audits**: Check that document fetch endpoints properly emit `document_read` audit events for cross-owner access.
 
 Recommended diagnostics:
 - Enable verbose logging for auth and policy decisions with service identity context.
@@ -565,6 +616,8 @@ Recommended diagnostics:
 - Validate workload token configuration and cluster OIDC issuer connectivity.
 - **Inspect tool permission logs** to identify blocked tools and their permission decisions.
 - **Monitor audit service health and ingestion metrics** to ensure audit trail completeness.
+- **Verify document listing responses** to ensure they contain only envelope data without sensitive content.
+- **Audit document fetch events** to confirm cross-owner access is properly recorded.
 
 **Section sources**
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
@@ -574,7 +627,7 @@ Recommended diagnostics:
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 
 ## Conclusion
-The Luban AIOps Platform implements an enhanced robust security architecture centered on OIDC-based authentication, audience-bound JWT token security, policy-driven authorization with service identity awareness, explicit tool permission allow-listing, deterministic tool output redaction, workload identity service tokens, and a comprehensive audit trail system with secure service-to-service authentication. By enforcing least-privilege access through RBAC, audience-scoped permissions, declarative policies, and explicit tool permission controls, integrating comprehensive observability and audit logging for service-to-service communications, implementing fail-closed credential protection, and providing durable audit trails with role-based access control, the platform provides strong protection against common threats. The addition of delegated token flows, service-to-service identity patterns, explicit tool permission allow-listing, deterministic redaction, workload identity tokens, and secure audit trail capabilities further strengthens the security posture while maintaining operational efficiency. Continuous security scanning, penetration testing, and adherence to compliance standards further enhance the platform's security framework.
+The Luban AIOps Platform implements an enhanced robust security architecture centered on OIDC-based authentication, audience-bound JWT token security, policy-driven authorization with service identity awareness, explicit tool permission allow-listing, deterministic tool output redaction, workload identity service tokens, and a comprehensive audit trail system with secure service-to-service authentication. By enforcing least-privilege access through RBAC, audience-scoped permissions, declarative policies, and explicit tool permission controls, integrating comprehensive observability and audit logging for service-to-service communications, implementing fail-closed credential protection, and providing durable audit trails with role-based access control, the platform provides strong protection against common threats. The addition of delegated token flows, service-to-service identity patterns, explicit tool permission allow-listing, deterministic redaction, workload identity tokens, secure audit trail capabilities, and **enhanced document read audit integrity with envelope-only listings** further strengthens the security posture while maintaining operational efficiency. Continuous security scanning, penetration testing, and adherence to compliance standards further enhance the platform's security framework.
 
 ## Appendices
 
@@ -589,6 +642,7 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Review and approve tool permission allow-list changes** through formal change management processes.
 - **Ensure audit trail retention meets regulatory requirements** with configurable retention policies.
 - **Implement audit query access controls** to restrict sensitive audit data to authorized personnel only.
+- **Verify document read audit integrity** to ensure cross-owner access to sensitive content is properly recorded and documented.
 
 **Section sources**
 - [SECURITY.md](file://SECURITY.md)
@@ -606,6 +660,8 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Verify CWE-862 remediation** by attempting to execute non-vetted tools without proper authorization.
 - **Test audit service authentication** to ensure unauthorized services cannot ingest or query audit events.
 - **Validate audit trail integrity** by attempting to modify or delete stored audit records.
+- **Test document read audit integrity** by verifying that cross-owner access to sensitive content is properly recorded through centralized fetch endpoints.
+- **Verify envelope-only listings** to ensure document content cannot be accessed through list endpoints.
 - Document findings and remediation steps; track vulnerabilities to closure with security impact assessment.
 - Integrate security checks into CI/CD pipelines for continuous assurance with audience-bound token validation and redaction testing.
 
@@ -627,6 +683,8 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Implement security testing for tool permission controls** in CI/CD pipelines to catch permission bypass attempts.
 - **Test audit service authentication** to ensure only authorized services can emit or query audit events.
 - **Validate audit trail immutability** to ensure stored audit records cannot be tampered with.
+- **Ensure document repository security** by implementing envelope-only listings and centralized fetch auditing.
+- **Test cross-owner read auditing** to verify that sensitive document access is properly recorded.
 
 **Section sources**
 - [SPEC-003-identity-trust-hardening/spec.md](file://docs/specs/SPEC-003-identity-trust-hardening/spec.md)
@@ -636,7 +694,7 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 
 ### Threat Modeling Updates
-**Updated** The security hardening features address several critical attack vectors, with particular emphasis on tool permission vulnerabilities and audit trail integrity:
+**Updated** The security hardening features address several critical attack vectors, with particular emphasis on tool permission vulnerabilities, audit trail integrity, and document content exposure prevention:
 
 **Credential Leakage Prevention:**
 - Deterministic redaction prevents service-account JWTs, bearer tokens, and basic credentials from reaching external model providers.
@@ -654,6 +712,12 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Fail-safe defaults** ensure that unknown tools require explicit confirmation rather than automatic approval.
 - **Integration with existing policy framework** ensures tool permissions complement broader authorization controls.
 
+**Document Content Exposure Prevention:**
+- **Envelope-only listings prevent unauthorized content access** through document listing endpoints.
+- **Centralized single-document fetch ensures audited access** to sensitive document content.
+- **Cross-owner read auditing provides comprehensive audit trails** for document access patterns.
+- **Foreign draft protection prevents enumeration attacks** by treating foreign drafts as unknown documents.
+
 **Audit Trail Security:**
 - **Dual authentication paths** provide flexibility while maintaining security through static credentials or workload identity.
 - **Role-based query access** ensures only authorized users can view audit trails through platform gateway policy enforcement.
@@ -666,6 +730,7 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - Workload subject registration ensures only authorized service accounts can obtain delegated tokens.
 - **Explicit tool permission controls prevent unauthorized tool execution** even for read-only operations.
 - **Audit service authentication prevents unauthorized audit event ingestion** from untrusted services.
+- **Document repository security prevents content exposure** through unauthorized listing endpoints.
 
 **Section sources**
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
@@ -673,6 +738,7 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 - [SECURITY.md](file://SECURITY.md)
 - [gateway_tools.py:35-96](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L35-L96)
+- [routes.py:858-915](file://products/agent-platform/src/agent_service/api/v2/routes.py#L858-L915)
 
 ### Security Configuration Reference
 **Updated** The following environment variables control critical security behaviors:
@@ -704,6 +770,11 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - `<PREFIX>_AUDIT_CLIENT_ID`: Client ID for audit service authentication.
 - `<PREFIX>_AUDIT_CLIENT_SECRET`: Client secret for audit service authentication.
 
+**Document Repository Configuration:**
+- **Envelope-only listings are enforced by default** to prevent content exposure through listing endpoints.
+- **Cross-owner read auditing is automatically enabled** for all document fetch operations.
+- **Foreign draft protection prevents enumeration attacks** by returning 404 for unauthorized draft access.
+
 **Section sources**
 - [gateway_tools.py:46-61](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L46-L61)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
@@ -711,3 +782,4 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [config.py](file://products/audit-service/src/audit_service/core/config.py)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env)
+- [routes.py:858-915](file://products/agent-platform/src/agent_service/api/v2/routes.py#L858-L915)

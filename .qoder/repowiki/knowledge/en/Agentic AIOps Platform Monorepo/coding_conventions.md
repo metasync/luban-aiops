@@ -1,5 +1,0 @@
-- Each product under `products/` exposes a FastAPI application via an `app.py` entrypoint and a `main.py` bootstrap, paired with its own `Dockerfile`, `Makefile`, `pyproject.toml`, and `tests/` directory.
-- Cross-service request/response shapes are defined once as JSON Schema files in `shared/shared-contracts/schemas/` and referenced by consumers rather than re-declared locally.
-- Policy enforcement in gateways is driven by a `policies/policy-default.yaml` file loaded by a `services/policy_engine.py` module, keeping authorization rules data-driven.
-- Observability and telemetry are initialized through a shared `core/observability.py` and `core/telemetry.py` pattern present in every service, emitting metrics and traces consistently.
-- Feature work is initiated by creating a new `docs/specs/SPEC-NNN-<name>/` directory containing a plan.md, spec.md, and tasks.md following the templates in `docs/specs/templates/`.

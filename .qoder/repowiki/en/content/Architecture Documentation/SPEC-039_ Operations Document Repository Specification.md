@@ -12,7 +12,8 @@
 - [documents.py](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py)
 - [policy-default.yaml](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml)
 - [operation-document.schema.json](file://shared/shared-contracts/schemas/operation-document.schema.json)
-- [documents.ts](file://products/operator-portal/web-ui/app/src/api/documents.ts)
+- [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
+- [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/DocumentsView.tsx)
 </cite>
 
 ## Update Summary
@@ -23,6 +24,7 @@
 - Updated dependency analysis to show full cross-product integration between agent-platform, platform-gateway, and operator-portal
 - Added comprehensive troubleshooting guide covering all error scenarios and degradation paths
 - Updated conclusion to reflect delivery status and future extensibility
+- Integrated SPEC-040 context showing handover section support and prose generation defaults changes
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -67,11 +69,12 @@ E["documents.py"]
 F["policy-default.yaml"]
 end
 subgraph "Operator Portal"
-G["documents.ts"]
+G["DocumentsView.tsx"]
 H["Documents View UI"]
 end
 subgraph "Shared Contracts"
 I["operation-document.schema.json"]
+J["v2.py"]
 end
 D --> A
 D --> B
@@ -81,6 +84,7 @@ F --> E
 G --> E
 I --> D
 I --> G
+J --> D
 ```
 
 **Diagram sources**
@@ -90,8 +94,9 @@ I --> G
 - [routes.py:738-957](file://products/agent-platform/src/agent_service/api/v2/routes.py#L738-L957)
 - [documents.py:1-171](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L171)
 - [policy-default.yaml:251-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L251-L267)
-- [documents.ts:1-89](file://products/operator-portal/web-ui/app/src/api/documents.ts#L1-L89)
+- [DocumentsView.tsx:195-249](file://products/operator-portal/web-ui/app/src/views/control/DocumentsView.tsx#L195-L249)
 - [operation-document.schema.json:1-101](file://shared/shared-contracts/schemas/operation-document.schema.json#L1-L101)
+- [v2.py:335-367](file://products/agent-platform/src/agent_service/schemas/v2.py#L335-L367)
 
 **Section sources**
 - [plan.md:3-16](file://docs/specs/SPEC-039-operations-document-repository/plan.md#L3-L16)
@@ -370,3 +375,5 @@ Portal["Operator Portal"] --> Gateway
 
 ## Conclusion
 SPEC-039 introduces a robust, typed operations document repository with a clear separation between immutable digests and optional prose, enforced by role-based access and strong provenance. Phase 1 delivers the substrate, shift summaries, and portal support, while leaving room for future document types and integrations. All eight requirements have been successfully implemented and delivered in v0.21.0, providing operators with a complete solution for creating, managing, and sharing operational documentation across their teams.
+
+The system is now positioned to integrate with SPEC-040 capabilities, which will enhance the shift summaries with deterministic handover sections and improved prose generation defaults, further strengthening the operational handover workflow for relief operators.

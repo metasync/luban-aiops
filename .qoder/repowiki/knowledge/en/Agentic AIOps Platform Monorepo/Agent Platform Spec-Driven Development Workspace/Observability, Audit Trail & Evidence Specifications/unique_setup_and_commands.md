@@ -1,1 +1,0 @@
-Specs are evaluated against `make verify` suites per product (e.g., `agent-platform 122`, `audit-service 67`, `platform-gateway 92`, `tool-gateway 117`) and require both dev Kustomize overlay bases to render with `kustomize build`; delivery gates include policy bundle validation and `*_AUDIT_SERVICE_URL` / `OTEL_*` environment wiring in the dev-k8s overlays.

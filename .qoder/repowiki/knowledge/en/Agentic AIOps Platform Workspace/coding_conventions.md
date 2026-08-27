@@ -1,0 +1,6 @@
+- Each product mirrors a standard package layout (`src/<pkg>/api`, `core`, `services`, `schemas`, optional `tools`/`policies`) with its own `app.py`, `main.py`, and `metadata.py` entry points.
+- Inter-service boundaries are enforced exclusively through JSON schemas and YAML policies stored in `shared/shared-contracts`, so products communicate via HTTP APIs typed by those shared contracts rather than direct imports.
+- Every Python product ships its own `Dockerfile`, `Makefile`, `pyproject.toml`, `uv.lock`, and `tests/` directory, enabling independent build, test, and containerization.
+- Cross-cutting infrastructure (policy bundles, schema validators, version validator) lives in `shared/shared-contracts/scripts` and is invoked from the root Makefile targets instead of being duplicated per product.
+- Kubernetes deployment assets are organized as Kustomize overlays under `shared/platform-ops/gitops/<overlay>` and validated at verification time via `kustomize build --load-restrictor LoadRestrictionsNone`.
+- Feature work is tracked through spec-driven development artifacts in `docs/specs/SPEC-NNN-*` containing `plan.md`, `spec.md`, and `tasks.md`, with corresponding release notes authored under `docs/agentic-aiops-platform/release-notes/`.

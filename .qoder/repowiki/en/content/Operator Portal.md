@@ -3,6 +3,8 @@
 <cite>
 **Referenced Files in This Document**
 - [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
+- [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/DocumentsView.tsx)
+- [documents.ts](file://products/operator-portal/web-ui/app/src/api/documents.ts)
 - [global.css](file://products/operator-portal/web-ui/app/src/theme/global.css)
 - [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
 - [usePendingDecisionPoll.ts](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts)
@@ -50,10 +52,8 @@
 - [SkillsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SkillsView.tsx)
 - [ToolsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/ToolsView.tsx)
 - [ApprovalsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx)
-- [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/DocumentsView.tsx)
 - [approvals.ts](file://products/operator-portal/web-ui/app/src/api/approvals.ts)
 - [sessions.ts](file://products/operator-portal/web-ui/app/src/api/sessions.ts)
-- [documents.ts](file://products/operator-portal/web-ui/app/src/api/documents.ts)
 - [useSpeechRecognition.ts](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts)
 - [languages.ts](file://products/operator-portal/web-ui/app/src/voice/languages.ts)
 - [models.test.ts](file://products/operator-portal/web-ui/app/src/api/__tests__/models.test.ts)
@@ -66,11 +66,10 @@
 
 ## Update Summary
 **Changes Made**
-- Added complete Documents view interface (DocumentsView.tsx) providing session selection, document creation, publishing, and viewing capabilities for operations documents
-- Enhanced session management with inline renaming functionality via useSessionWorkspace hook
-- Added session ID reveal and copy functionality throughout the portal for improved collaboration workflows
-- Updated navigation to include Documents view in the Control section for designated approvers
-- Integrated document repository API client for shift summary creation and management
+- Moved Documents navigation from Control group to Workspace section reflecting semantic positioning as daily workflow artifacts
+- Enhanced document fetching workflow with separate API calls for full details using AbortController support
+- Improved loading states with abort controller support for better user experience during document detail retrieval
+- Updated navigation structure to reflect the repositioning of Documents view in the workspace section
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -239,7 +238,7 @@ end
 - [documents.ts:42-89](file://products/operator-portal/web-ui/app/src/api/documents.ts#L42-L89)
 - [ComposerSelectionBar.tsx:16-47](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx#L16-L47)
 - [ModelSelect.tsx:18-57](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L18-57)
-- [models.ts:20-30](file://products/operator-portal/web-ui/app/src/api/models.ts#L20-30)
+- [models.ts:20-30](file://products/operator-portal/web-ui/app/src/api/models.ts#L20-L30)
 - [transcript.ts:55-70](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L55-L70)
 - [sessions.ts:11-42](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L11-L42)
 - [useChatStream.ts:245-268](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L245-L268)
@@ -720,7 +719,6 @@ The navigation system organizes functions into logical sections with automatic v
 #### Control Section
 - **Incidents**: Incident triage and management interface with auto-refresh
 - **Enhanced Approvals**: Cross-session confirmation inbox for designated approvers with pending count badge and pagination
-- **Operations Documents**: Shift summary management with session selection, document creation, publishing, and viewing
 - **Audit Trail**: Durable audit event inspection with role-based access
 - **Permissions**: Live permission matrix display showing role-action relationships
 
@@ -728,6 +726,7 @@ The navigation system organizes functions into logical sections with automatic v
 - **Tools**: Read-only catalog of available tools with filtering capabilities
 - **Skills**: Browseable inventory of available skills with source and tag filtering
 - **Settings**: Read-only Session & Identity panel with operational insights
+- **Operations Documents**: Shift summary management with session selection, document creation, publishing, and viewing
 
 #### Automatic Section Visibility
 - **Dynamic Hiding**: Sections automatically hide when all their entries are hidden due to role restrictions
@@ -807,7 +806,7 @@ The navigation system implements comprehensive role-based access control:
 - **Server-Side Validation**: Gateway re-enforces permissions on every API request
 - **Graceful Fallback**: Users automatically redirected to chat if they lose required roles
 
-**Updated** The navigation system now provides enhanced mobile experience with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states with visual dividers instead of clipped text, and enhanced mobile drawer navigation with proper positioning and z-index management. The navigation system maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management. **Enhanced Feature**: The Enhanced Approvals view is integrated into the control section with pending count badge for decider roles, providing cross-session confirmation management capabilities with client-side pagination and improved arrival presentation. **Enhanced Feature**: The Operations Documents view is integrated into the control section, providing complete shift summary management with session selection, document creation, publishing, and viewing capabilities. **Enhanced Feature**: The Settings view is also integrated into the workspace section, providing read-only access to identity information, session details, and platform metadata for operational awareness.
+**Updated** The navigation system now provides enhanced mobile experience with a persistent 64px icon rail that maintains consistent layout anchoring across all views, improved responsive behavior with precise 992px breakpoint detection, better menu group title handling in collapsed states with visual dividers instead of clipped text, and enhanced mobile drawer navigation with proper positioning and z-index management. The navigation system maintains accessibility across all views while providing consistent layout anchoring through dynamic aria-labels and proper content spacing management. **Enhanced Feature**: The Enhanced Approvals view is integrated into the control section with pending count badge for decider roles, providing cross-session confirmation management capabilities with client-side pagination and improved arrival presentation. **Enhanced Feature**: The Operations Documents view has been moved to the workspace section, reflecting its semantic positioning as daily workflow artifacts for shift summary management with session selection, document creation, publishing, and viewing capabilities. **Enhanced Feature**: The Settings view is also integrated into the workspace section, providing read-only access to identity information, session details, and platform metadata for operational awareness.
 
 **Section sources**
 - [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-70)
@@ -1216,6 +1215,8 @@ The document repository implements comprehensive security measures:
 - **Error Handling**: Graceful error handling with user-friendly messages for various failure scenarios
 
 **New Feature**: The Operations Document Repository provides complete shift summary management with session selection, document creation, publishing, and viewing capabilities for operational documentation. The implementation includes modal dialog interfaces, tabbed document lists, structured digest rendering, and comprehensive permission enforcement for cross-session analysis and collaborative documentation workflows.
+
+**Updated** The Documents view has been moved from the Control group to the Workspace section, reflecting its semantic positioning as daily workflow artifacts for shift summary management. The enhanced document fetching workflow now uses separate API calls for full details with AbortController support for improved loading states and better user experience during document detail retrieval.
 
 **Section sources**
 - [DocumentsView.tsx:1-597](file://products/operator-portal/web-ui/app/src/views/control/DocumentsView.tsx#L1-L597)
@@ -1780,7 +1781,7 @@ The ComposerSelectionBar continues to provide several architectural advantages:
 
 **Section sources**
 - [ComposerSelectionBar.tsx:1-48](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx#L1-L48)
-- [ChatView.tsx:860-877](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L860-L877)
+- [ChatView.tsx:860-877](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L860-877)
 - [ComposerSelectionBar.test.tsx:1-115](file://products/operator-portal/web-ui/app/src/chat/__tests__/ComposerSelectionBar.test.tsx#L1-L115)
 - [global.css:234-250](file://products/operator-portal/web-ui/app/src/theme/global.css#L234-L250)
 

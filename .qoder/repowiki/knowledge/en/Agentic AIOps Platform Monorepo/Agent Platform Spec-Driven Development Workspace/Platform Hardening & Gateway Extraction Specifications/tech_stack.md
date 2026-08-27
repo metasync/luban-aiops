@@ -1,1 +1,0 @@
-FastAPI-based Python services (`tool-gateway`, `platform-gateway`, `agent-platform`, `identity-broker`); Kustomize overlays for dev-k8s deployment; GitHub Actions CI running `uv run pytest`; pydantic models bound to JSON Schema contracts in `shared/shared-contracts`; Kubernetes projected service-account tokens validated via OIDC issuer JWKS at the identity broker exchange.

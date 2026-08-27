@@ -1,1 +1,0 @@
-Specification documents defining the deny-by-default policy engine, HITL confirmation bridging, tiered approval semantics, persistent approval inbox, and iterative portal UX polish for approval-gated bounded actions.

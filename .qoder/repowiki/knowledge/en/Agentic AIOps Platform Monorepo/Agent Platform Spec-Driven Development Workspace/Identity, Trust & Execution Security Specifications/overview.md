@@ -1,1 +1,0 @@
-Specification documents defining the platform's identity trust model, broker-mediated service-to-service token delegation, and tamper-evident signed execution requests for approved mutating actions.

@@ -1,5 +1,0 @@
-- Each spec follows a fixed template: Status block (status, owner, created, release slice, related ADRs), Summary, Motivation, Requirements with numbered R-N labels and explicit Acceptance Criteria, Non-Goals, Impact matrix listing touched products/contracts/docs, Open Questions resolved inline, and a dated Changelog.
-- Requirements are expressed as verifiable acceptance criteria rather than implementation details, and new specs explicitly declare which prior spec they extend so changes are additive.
-- Credential gating is enforced uniformly: any provider without a resolvable API key contributes zero entries to the catalog and is never queried or exposed.
-- Model identity is decoupled from provider identity — catalog entries use model names as ids, with legacy provider-name aliases preserved for backward compatibility.
-- Discovery failures degrade gracefully through a documented fallback ladder (live fetch → in-memory cache → persisted cache → curated series) so chat traffic is never blocked by catalog operations.

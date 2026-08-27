@@ -1,1 +1,0 @@
-Specification documents defining the agent execution runtime: a read-only tool-gateway framework, kernel configuration and durability, middleware alignment, signed execution requests, and an isolated execution worker for approved mutating actions.

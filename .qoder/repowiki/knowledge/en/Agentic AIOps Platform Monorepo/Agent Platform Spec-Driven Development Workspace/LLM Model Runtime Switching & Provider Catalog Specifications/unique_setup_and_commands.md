@@ -1,1 +1,0 @@
-Specs reference `make verify` as the gate that renders overlays and validates configuration; runtime behavior is controlled via environment knobs such as `AGENTSCOPE_*`, `<PROVIDER>_BASE_URL`, `<PROVIDER>_MODELS`, `AGENT_MODEL_DISCOVERY_ENABLED`, `AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS`, and `AGENT_MODEL_DISCOVERY_REFRESH_SECONDS`.
