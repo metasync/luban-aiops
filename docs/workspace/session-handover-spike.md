@@ -1,6 +1,6 @@
 # Spike: Cross-Owner Session Review and Shift-Summary Artifacts
 
-Status: spike complete — operator sign-off granted 2026-08-27; Option B (shift-summary artifact) promoted to SPEC-039 draft the same day; Option A parked behind its recorded trigger
+Status: spike complete — operator sign-off granted 2026-08-27; Option B promoted to SPEC-039 the same day, then retargeted by operator review to the operations document repository (Phase 1: shift summaries, role-based access matrix); Option A parked behind its recorded trigger
 Date: 2026-08-27
 Roadmap home: exploration backlog rows "Cross-owner session review" and "Shift-summary artifacts" (paired candidates; promoted together per the SPEC-035 open question)
 Raised by: v0.16.0 live approval test (SPEC-035 open question); re-stated by SPEC-036 non-goals
@@ -163,9 +163,14 @@ operational need to read another operator's raw sessions that the
 shift-summary artifact cannot satisfy.
 
 **Resolved 2026-08-27:** operator sign-off granted; Option B promoted
-to `SPEC-039-shift-summary-artifacts` (draft) the same day with the
-memo's Q-1 through Q-4 resolved in the draft's Design Decisions
-section. Option A remains parked behind the trigger above.
+to `SPEC-039` (draft) the same day with the memo's Q-1 through Q-4
+resolved in the draft. The same-day operator review then generalized
+the scope: SPEC-039 was retargeted to
+`SPEC-039-operations-document-repository` — a typed-document
+substrate with a role-based access matrix (publishing replaces
+per-document grants), the shift summary as the first document type,
+and the memo's Q-1/Q-2 re-resolved for the repository in the draft's
+Design Decisions. Option A remains parked behind the trigger above.
 
 ## Changelog
 
@@ -175,3 +180,8 @@ section. Option A remains parked behind the trigger above.
   operator sign-off.
 - 2026-08-27: operator sign-off granted; Option B promoted to SPEC-039
   draft; promotion trigger marked resolved.
+- 2026-08-27: SPEC-039 retargeted to the operations document
+  repository per the operator review (role-based access matrix,
+  draft→publish lifecycle, shift summary as first type; skill
+  authoring export recorded as a separate backlog candidate, not a
+  document type).

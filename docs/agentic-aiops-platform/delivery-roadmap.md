@@ -324,7 +324,8 @@ promotion; until then they stay here.
 | In-portal help & onboarding | Spiked 2026-08-25 from the 2026-08-25 code/doc review (finding D6): tiered scope and a measurement plan are recorded in `docs/workspace/portal-help-onboarding-spike.md` — guide links (option A) are the cheap floor and prerequisite, the antd first-run tour (option B) follows on real onboarding friction, contextual hints and an in-app guide renderer stay deferred/rejected. The Settings view restoration (read-only Session & identity panel) was moved forward into SPEC-030 as add-on R-6 (memo addendum). Promote on the first onboarding friction signal, not before. | portal enhancement spec |
 | Shared-package extraction of duplicated service modules | Spiked 2026-08-25 from the 2026-08-25 code/doc review (finding M1): copy-with-parity retained — the memo (`docs/workspace/shared-sdk-extraction-spike.md`) measures the five parity families (~400 unique lines) against packaging, seven-lockfile ripple, and image-build coupling, rejects a `make sync` generator, and records three revisit triggers (sixth family / five copies of one family, 3+ behavioral changes to one family per quarter, shared-sdk needed for another reason). | own spec; revisit on the recorded triggers |
 | Cross-owner session review | Raised in the v0.16.0 live approval test (SPEC-035 open question) and re-stated by SPEC-036: incident review and 7x24 roster handover need a read-only view of another operator's sessions. Agreed direction: role-gated, read-only, audit-logged; session inheritance is discouraged (never-expiring sessions, ambiguous HITL ownership). Spiked 2026-08-27 in the paired memo (`docs/workspace/session-handover-spike.md`): parked behind a recorded trigger — promote on the first concrete need to read raw sessions the shift-summary artifact cannot satisfy; the artifact's provenance index doubles as its natural entry point. | portal + session-API spec |
-| Shift-summary artifacts | Paired candidate with cross-owner session review (SPEC-035 open question): can an agent-generated shift-summary artifact carry handover context instead of (or beside) full session review, and what is its audit posture? Spiked 2026-08-27 in the paired memo (`docs/workspace/session-handover-spike.md`); operator sign-off granted the same day and promoted to `SPEC-039-shift-summary-artifacts` (draft) — a deterministic digest assembled from the durable records (sessions, confirmations, executions, evidence) with two-tier own/metadata-only foreign coverage, an optional clearly-labeled digest-only prose layer, and provenance anchoring; the memo's Q-1–Q-4 resolved in the draft's Design Decisions. | `docs/specs/SPEC-039-shift-summary-artifacts/` |
+| Shift-summary artifacts | Paired candidate with cross-owner session review (SPEC-035 open question): can an agent-generated shift-summary artifact carry handover context instead of (or beside) full session review, and what is its audit posture? Spiked 2026-08-27 in the paired memo (`docs/workspace/session-handover-spike.md`); operator sign-off granted the same day and promoted to SPEC-039, then retargeted by the same-day operator review to the **operations document repository**: a typed-document substrate with a role-based access matrix (draft→publish replaces per-document grants), provenance anchoring, and document audit, shipping the shift-summary digest as the first type plus session-rename and session-id-copy add-ons; incident reports are the next type candidate, and skill authoring is tracked separately below. | `docs/specs/SPEC-039-operations-document-repository/` |
+| Skill authoring export from sessions | Raised in the 2026-08-27 operator review beside the document repository: turn a session's troubleshooting/triage into skill markdown that the operator contributes to their own team's Git skills repo (already ingestible through skills-hub's federated sources, SPEC-014 lineage). Deliberately not a document type — the artifact of record stays in Git-managed team knowledge; the authoring experience (session → validated markdown draft, digest-only generation posture) is the feature. Needs a spike on the draft/validate/export shape before a spec; promote on the first concrete operator ask. | skills-hub enhancement spec |
 | Approval-workflow extensions | SPEC-031 non-goals parked as future candidates: multi-approver quorum / N-of-M semantics (extending the SPEC-030 approval tiers), push notifications (webhook, email, browser push), cross-session bulk approve, and richer approver review context (owner-transcript exposure has its own decision). Promote on the first concrete governance or operational ask, not before. | approval-flow spec |
 | Numbered-list continuation across separated blocks | v0.18.1 live-check observation: when the model emits numbered steps as separate blocks (blank line or paragraph between items), the escape-first renderer produces separate `<ol>` elements and each restarts at 1. Cosmetic; decide renderer merge strategy vs prompt guidance if operators complain. | operator-portal markdown renderer / prompt guidance |
 | Isolated execution worker and signed execution requests | Spiked 2026-08-26 after the v0.18.1 consolidated live check declared the approval cluster stable: the memo (`docs/workspace/execution-runtime-spike.md`) verifies the approved mutating path still executes in-process under the confirmer's delegated token, weighs sign-and-record vs isolated-worker vs full-async-queue, and recommends a phased shape. Phase 1 (HMAC-signed execution requests/receipts bound to the parked args digest) was promoted to `SPEC-037-signed-execution-requests` on 2026-08-27 after operator sign-off and delivered the same day (0.19.0). The memo's promotion gate was then satisfied — Phase 1 live-verified on the `mutating-dev` profile — and Phase 2 (the isolated `execution-runtime` worker) was promoted to `SPEC-038-isolated-execution-worker` on 2026-08-27 with the memo's Q-1 (handoff service identity) and Q-2 (resume await timeout) resolved in the draft; the spec was approved the same day with one recorded condition — an R5 re-evaluation trigger: when more team members work simultaneously, concurrent approved actions contending on the single worker pod promote the queue/pool spec at that signal. Together they close the two remaining R4 deliverables. | SPEC-037 delivered; SPEC-038 delivered (0.20.0) |
@@ -414,15 +415,27 @@ promoting the shift-summary artifact first — a deterministic digest
 with an optional clearly-labeled prose layer and provenance anchoring
 — and parks raw cross-owner session review behind a recorded trigger,
 awaiting operator sign-off before spec promotion. Sign-off was granted
-the same day, and the shift-summary artifact was promoted to
-`SPEC-039-shift-summary-artifacts` (draft) under the memo-first
-lineage with the memo's Q-1 (artifact ownership/audience — requester
-owns; foreign facts only at the inbox's metadata-only posture), Q-2
-(audit — one `shift_summary_generated` event; own-record reads
-unaudited), Q-3 (prose guardrails — digest-only prompt contract,
-labeled rendering, fail-soft), and Q-4 (retention — immutable
-snapshot, cap 20, 30-day TTL aligned with the inbox history window)
-resolved in the draft's Design Decisions; it is the first R5 slice.
+the same day, and the shift-summary artifact was promoted to SPEC-039
+(draft) under the memo-first lineage with the memo's Q-1 (artifact
+ownership/audience), Q-2 (audit posture), Q-3 (prose guardrails —
+digest-only prompt contract, labeled rendering, fail-soft), and Q-4
+(retention — immutable snapshot, cap 20, 30-day TTL aligned with the
+inbox history window) resolved in the draft. The same-day operator
+review then generalized the scope — operators also need incident
+reports and reusable guidance, and per-document permission grants are
+the wrong operating model — so SPEC-039 was retargeted to
+`SPEC-039-operations-document-repository`: a typed-document substrate
+with a role-based access matrix (draft→publish lifecycle replaces
+per-document ACLs; creation/publishing behind `documents:create`,
+role-scoped reads behind `documents:read`, cross-owner reads
+audited), the shift summary as the first document type, and session
+rename plus session-id copy as add-ons supporting the sharing
+workflow. Incident reports become the next type candidate (their
+assembly reaches incident-service data), skill authoring export is
+recorded as a separate backlog candidate — explicitly not a document
+type, keeping Git-managed team knowledge (SPEC-014) the artifact of
+record — and cross-owner raw session review stays parked behind its
+recorded trigger. SPEC-039 remains the first R5 slice.
 
 ## Validation Model Per Release
 
