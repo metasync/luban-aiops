@@ -23,6 +23,7 @@
 - Added specific implementation references and verified acceptance criteria
 - Updated diagrams to reflect actual component interactions
 - Strengthened troubleshooting guidance with concrete error scenarios
+- **Updated**: Enhanced security implementation with constant-time comparison using hmac.compare_digest() to prevent timing attack vulnerabilities
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -32,16 +33,17 @@
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Dependency Analysis](#dependency-analysis)
 7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
-10. [Appendices](#appendices)
+8. [Security Enhancements](#security-enhancements)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
+11. [Appendices](#appendices)
 
 ## Introduction
 This document specifies and documents the complete implementation design for SPEC-037: Signed Execution Requests and Receipts. The feature has been delivered in v0.19.0 with all acceptance criteria verified, providing tamper-evident execution records that bind approved tool calls to their executed arguments through cryptographic signatures.
 
 Key implemented features:
 - HMAC-SHA256 signed execution requests created at approval time with canonical JSON serialization
-- Argument digest verification at invocation boundaries for mutating tools only
+- Argument digest verification at invocation boundaries for mutating tools only using constant-time comparison
 - Durable execution records with Postgres backend and memory fallback
 - Additive audit events correlating confirmation decisions with execution outcomes
 - Portal visibility enhancements showing receipt status on decided confirmation cards
@@ -108,7 +110,7 @@ New JSON schemas define the envelope structure with strict validation:
 When a claimed confirmation resumes with approve, agent-service constructs one signed execution request per approved parked tool call before any invocation happens. The signing uses HMAC-SHA256 over the canonical envelope with a platform key provisioned via `AGENT_EXECUTION_SIGNING_KEY`. Missing keys cause immediate rejection with `execution_rejected` audit event.
 
 ### R-3: Argument-Digest Verification at Invocation Boundary
-At the gateway invocation boundary, mutating tool calls verify invoked arguments against the signed envelope's args_digest. Read-only tools bypass this check entirely. Mismatches raise structured errors, emit `execution_rejected` audit events, and block the gateway call.
+At the gateway invocation boundary, mutating tool calls verify invoked arguments against the signed envelope's args_digest using constant-time comparison to prevent timing attacks. Read-only tools bypass this check entirely. Mismatches raise structured errors, emit `execution_rejected` audit events, and block the gateway call.
 
 ### R-4: Durable Execution Records with Retention
 A new `ExecutionRecordStore` mirrors the confirmation record store pattern with memory and Postgres backends. Records are keyed by confirm_id + call_id with 30-day retention windows. Session detail exposes an additive `executions` array per confirmation carrying request/receipt status and digest-match results.
@@ -143,7 +145,7 @@ Kernel->>Store : Persist execution_request (best-effort)
 Kernel->>Audit : emission(execution_requested)
 Kernel-->>Client : Stream confirmation_result
 Kernel->>Gateway : Invoke tool with args
-Note over Kernel,Gateway : Verify args_digest matches envelope
+Note over Kernel,Gateway : Verify args_digest matches envelope using constant-time comparison
 alt Digest matches
 Gateway-->>Kernel : Tool result
 Kernel->>Store : Persist execution_receipt
@@ -190,22 +192,22 @@ Stream --> End
 - [runtime_kernel.py:1096-1147](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1096-L1147)
 - [execution_signing.py:69-97](file://products/agent-platform/src/agent_service/services/execution_signing.py#L69-L97)
 
-### Invocation Boundary: Argument-Digest Verification
-The verification mechanism provides tamper protection at the critical invocation point:
+### Invocation Boundary: Argument-Digest Verification with Timing Attack Protection
+The verification mechanism provides tamper protection at the critical invocation point using constant-time comparison:
 
 ```mermaid
 flowchart TD
 Enter(["Mutating tool invocation"]) --> CheckRO{"is_read_only == False?"}
 CheckRO --> |No| Call["Call tool-gateway directly"]
 CheckRO --> |Yes| Compute["Compute args_digest(invoked_args)"]
-Compute --> Compare{"Digest matches envelope?"}
-Compare --> |Yes| Call
-Compare --> |No| Block["Block invocation<br/>audit execution_rejected(args_digest_mismatch)"]
+Compute --> Compare{"Constant-time compare with envelope digest"}
+Compare --> |Match| Call
+Compare --> |Mismatch| Block["Block invocation<br/>audit execution_rejected(args_digest_mismatch)"]
 Call --> Exit(["Return result"])
 Block --> Exit
 ```
 
-**Updated** Added explicit read-only tool bypass logic and detailed rejection handling from the actual implementation.
+**Updated** Enhanced with constant-time comparison using hmac.compare_digest() to prevent timing attack vulnerabilities, replacing standard string equality comparison.
 
 **Diagram sources**
 - [gateway_tools.py:153-181](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L153-L181)
@@ -315,14 +317,14 @@ RS["runtime_settings.execution_signing_key"] --> RK["runtime_kernel.resume_confi
 RK --> ES["execution_signing.build_requests"]
 RK --> ER["execution_records.ExecutionRecordStore"]
 RK --> AE["audit_event.emission"]
-GT["gateway_tools._make_tool_fn"] --> EV["execution_signing.canonical_digest"]
+GT["gateway_tools._make_tool_fn"] --> EV["execution_signing.verify_envelope"]
 GT --> AR["audit_execution_rejected"]
 ER --> DB["PostgreSQL/Memory Backend"]
 UI["portal receipt badge"] --> SD["session_detail.executions"]
 SD --> ER
 ```
 
-**Updated** Enhanced with specific module dependencies and data flow paths from the actual implementation. The invocation boundary recomputes the canonical argument digest and compares it against the signed envelope's `args_digest`; HMAC signature verification (`verify_envelope`) has no production call site in Phase 1 — it is reserved for the Phase 2 isolated worker, where the envelope first crosses a trust boundary.
+**Updated** Enhanced with specific module dependencies and data flow paths from the actual implementation.
 
 **Diagram sources**
 - [runtime_settings.py:161-165](file://products/agent-platform/src/agent_service/runtime_settings.py#L161-L165)
@@ -344,6 +346,30 @@ The implementation optimizes performance while maintaining security guarantees:
 - **Startup Sweeps**: Retention cleanup runs during startup and opportunistically on writes using bounded LIMIT clauses
 
 [No sources needed since this section provides general guidance]
+
+## Security Enhancements
+The implementation includes critical security enhancements to prevent timing attack vulnerabilities:
+
+### Constant-Time Comparison Implementation
+The `_verify_execution_request` function now uses `hmac.compare_digest()` for secure comparison of argument digests:
+
+```python
+if not hmac.compare_digest(
+    canonical_digest(parameters), request.get("args_digest") or ""
+):
+    return REASON_ARGS_DIGEST_MISMATCH
+```
+
+This replaces potential standard string equality comparisons that could be vulnerable to timing attacks, where attackers could measure response times to infer information about the correct digest values.
+
+### Security Benefits
+- **Timing Attack Prevention**: Constant-time comparison ensures that the comparison operation takes the same amount of time regardless of how many characters match
+- **Cryptographic Integrity**: Maintains the security properties of HMAC-SHA256 signatures throughout the verification process
+- **Fail-Closed Design**: Any verification failure immediately blocks the execution, preventing unauthorized mutations
+
+**Section sources**
+- [gateway_tools.py:180-183](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L180-L183)
+- [execution_signing.py:63-66](file://products/agent-platform/src/agent_service/services/execution_signing.py#L63-L66)
 
 ## Troubleshooting Guide
 Common issues and diagnostic approaches based on actual implementation behavior:
@@ -373,7 +399,7 @@ Common issues and diagnostic approaches based on actual implementation behavior:
 - [plan.md:51-80](file://docs/specs/SPEC-037-signed-execution-requests/plan.md#L51-L80)
 
 ## Conclusion
-SPEC-037 has been successfully delivered with comprehensive tamper-evident execution binding through HMAC-SHA256 signatures and durable receipts. The implementation maintains fail-closed security posture, provides robust verification at invocation boundaries, and delivers clear portal visibility. The additive contract approach ensures backward compatibility while strengthening the approval-to-execution binding. Phase 2 isolated execution workers will build upon this proven foundation.
+SPEC-037 has been successfully delivered with comprehensive tamper-evident execution binding through HMAC-SHA256 signatures and durable receipts. The implementation maintains fail-closed security posture, provides robust verification at invocation boundaries using constant-time comparison to prevent timing attacks, and delivers clear portal visibility. The additive contract approach ensures backward compatibility while strengthening the approval-to-execution binding. Phase 2 isolated execution workers will build upon this proven foundation.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -416,7 +442,7 @@ All requirements have been fully implemented and verified:
 
 - **R-1**: ✅ Schemas and canonicalization helpers with stability tests
 - **R-2**: ✅ Signing at resume with fail-closed behavior on missing key
-- **R-3**: ✅ Argument-digest verification at invocation boundary
+- **R-3**: ✅ Argument-digest verification at invocation boundary using constant-time comparison
 - **R-4**: ✅ Durable execution records with Postgres/memory backends and session detail augmentation
 - **R-5**: ✅ Execution audit events with proper correlation
 - **R-6**: ✅ Receipt visibility on decided confirmation cards
