@@ -2,9 +2,10 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: luban-platform-team
 - created: 2026-08-28
+- approved: 2026-08-28
 - release slice: R5 — Hardening and External Consumption (second R5 slice)
 - related ADRs: none (extends SPEC-039 operations document repository)
 
@@ -208,3 +209,5 @@ Acceptance criteria:
 - 2026-08-28: created as `draft` following operator feedback on the
   v0.21.0/0.21.1 shift-summary delivery (readability gap, Documents
   placement, offline export).
+- 2026-08-28: approved by the operator with no recorded conditions;
+  implementation proceeds as the second R5 slice (v0.22.0).
