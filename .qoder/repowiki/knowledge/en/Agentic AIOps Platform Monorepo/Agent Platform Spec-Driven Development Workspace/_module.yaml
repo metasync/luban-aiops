@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: specs
+title: Agent Platform Spec-Driven Development Workspace
+scope:
+    - docs/specs/
+source_files: []
+depends_on: []
+related_to: []

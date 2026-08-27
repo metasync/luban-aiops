@@ -1,0 +1,1 @@
+Plain Markdown with YAML-like front-matter fields (status, owner, created, release slice); no rendering or tooling beyond `make verify` which validates downstream GitOps overlays.

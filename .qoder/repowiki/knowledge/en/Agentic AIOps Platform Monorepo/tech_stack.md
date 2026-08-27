@@ -1,0 +1,1 @@
+Python/FastAPI services built on a shared uv + base-uv container image; cross-service contracts expressed as JSON Schema files under `shared/shared-contracts/schemas/`; policy enforcement via YAML policy files (`policies/policy-default.yaml`) consumed by both platform-gateway and tool-gateway; Kubernetes deployment managed through GitOps overlays in `shared/platform-ops/gitops/`.

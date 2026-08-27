@@ -3,19 +3,20 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-08-27T09:07:05Z"
+exported_at: "2026-08-27T14:50:16Z"
 modules:
     "":
-        dir_name: Agentic AIOps Platform Workspace
-        title: Agentic AIOps Platform Workspace
+        dir_name: Agentic AIOps Platform Monorepo
+        title: Agentic AIOps Platform Monorepo
         scope: []
         source_files: []
-        children: []
+        children:
+            - specs
         depends_on: []
         related_to: []
     specs:
-        dir_name: specs
-        title: specs
+        dir_name: Agent Platform Spec-Driven Development Workspace
+        title: Agent Platform Spec-Driven Development Workspace
         scope:
             - docs/specs/
         source_files: []
@@ -44,7 +45,9 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: specs/identity_security_trust
+            - path: specs/policy_approval_workflow
     specs/identity_security_trust:
         dir_name: Identity, Trust & Execution Security Specifications
         title: Identity, Trust & Execution Security Specifications
@@ -55,10 +58,12 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: specs/agent_runtime_execution
+            - path: specs/policy_approval_workflow
     specs/llm_model_integration:
-        dir_name: llm_model_integration
-        title: llm_model_integration
+        dir_name: LLM Model Runtime Switching & Provider Catalog Specifications
+        title: LLM Model Runtime Switching & Provider Catalog Specifications
         scope:
             - docs/specs/SPEC-024-runtime-llm-model-switching/
             - docs/specs/SPEC-026-multi-model-runtime-catalog/
@@ -80,7 +85,8 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: specs/policy_approval_workflow
     specs/platform_infrastructure:
         dir_name: Platform Hardening & Gateway Extraction Specifications
         title: Platform Hardening & Gateway Extraction Specifications
@@ -93,8 +99,8 @@ modules:
         depends_on: []
         related_to: []
     specs/policy_approval_workflow:
-        dir_name: policy_approval_workflow
-        title: policy_approval_workflow
+        dir_name: Policy Enforcement & Approval Workflow Specs (SPEC-004, SPEC-020–SPEC-036)
+        title: Policy Enforcement & Approval Workflow Specs (SPEC-004, SPEC-020–SPEC-036)
         scope:
             - docs/specs/SPEC-004-policy-enforcement/
             - docs/specs/SPEC-020-hitl-confirmation-bridging/
@@ -108,10 +114,13 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: specs/agent_runtime_execution
+            - path: specs/identity_security_trust
+            - path: specs/observability_audit
     specs/portal_operator_ux:
-        dir_name: portal_operator_ux
-        title: portal_operator_ux
+        dir_name: Portal Operator UX & Multi-Session Workspace Specs
+        title: Portal Operator UX & Multi-Session Workspace Specs
         scope:
             - docs/specs/SPEC-012-operator-guide/
             - docs/specs/SPEC-019-portal-transparency-navigation/
@@ -120,7 +129,8 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: specs/session_management
     specs/session_management:
         dir_name: 'Session Management Specifications (Durability, Postgres Backend & Multi-Session '
         title: Session Management Specifications (Durability, Postgres Backend & Multi-Session API)
@@ -131,10 +141,11 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: specs/portal_operator_ux
     specs/shared_templates_and_index:
-        dir_name: shared_templates_and_index
-        title: shared_templates_and_index
+        dir_name: Spec-Driven Development Templates & Index
+        title: Spec-Driven Development Templates & Index
         scope:
             - docs/specs/templates/
             - docs/specs/README.md
@@ -143,8 +154,8 @@ modules:
         depends_on: []
         related_to: []
     specs/skills_guidance_incidents:
-        dir_name: skills_guidance_incidents
-        title: skills_guidance_incidents
+        dir_name: Release Specs Skills, Incident Triage & Shift Summaries
+        title: 'Release Specs: Skills, Incident Triage & Shift Summaries'
         scope:
             - docs/specs/SPEC-014-skills-and-grounded-guidance/
             - docs/specs/SPEC-015-incident-triage-and-collaboration/

@@ -1,0 +1,1 @@
+Delivery gates use `make verify` (renders all overlays, validates policies, runs product suites including new platform-gateway matrix/proxy tests), `make sync-policy` to refresh packaged policy copies and dev-k8s ConfigMap, and `make validate-version` to assert `PLATFORM_VERSION` injected at build time from the root `VERSION` file.

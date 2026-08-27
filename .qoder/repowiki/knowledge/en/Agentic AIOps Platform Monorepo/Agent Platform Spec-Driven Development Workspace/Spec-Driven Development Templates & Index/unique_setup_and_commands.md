@@ -1,0 +1,1 @@
+Spec authoring follows the lifecycle enforced by review discipline: write `spec.md` first, get it to `approved`, then write `plan.md` before implementation, and derive `tasks.md` from the plan. Delivery requires updating the spec index table in `docs/specs/README.md` and setting status to `delivered`; verification runs via the root `make verify` gate.

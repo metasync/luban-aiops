@@ -1,0 +1,1 @@
+New features are created by copying the `templates/` trio into a new `SPEC-NNN-<name>/` directory and incrementing the next available number; status is tracked inline via the living index in `docs/specs/README.md`.

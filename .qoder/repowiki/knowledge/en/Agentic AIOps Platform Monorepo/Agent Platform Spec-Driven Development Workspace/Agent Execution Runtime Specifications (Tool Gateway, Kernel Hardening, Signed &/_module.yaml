@@ -1,0 +1,14 @@
+schema_version: 1
+module_path: specs/agent_runtime_execution
+title: Agent Execution Runtime Specifications (Tool Gateway, Kernel Hardening, Signed & Isolated Execution)
+scope:
+    - docs/specs/SPEC-007-tool-execution-framework/
+    - docs/specs/SPEC-017-agent-kernel-utilization-and-durability/
+    - docs/specs/SPEC-018-kernel-middleware-alignment/
+    - docs/specs/SPEC-037-signed-execution-requests/
+    - docs/specs/SPEC-038-isolated-execution-worker/
+source_files: []
+depends_on: []
+related_to:
+    - path: specs/identity_security_trust
+    - path: specs/policy_approval_workflow

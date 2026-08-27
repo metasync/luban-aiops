@@ -1,0 +1,1 @@
+Provides the reusable Markdown templates and living index for the workspace's spec-driven development workflow, defining how feature specs are structured, numbered, and tracked across draft through delivered status.

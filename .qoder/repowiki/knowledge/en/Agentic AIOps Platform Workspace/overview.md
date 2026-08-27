@@ -1,1 +1,0 @@
-Multi-product workspace for an enterprise agentic AIOps platform, coordinating agent runtime, identity broker, policy enforcement, tool and skill gateways, audit/incident services, and an operator portal behind a shared contract layer.

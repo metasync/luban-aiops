@@ -1,0 +1,6 @@
+- Every spec directory follows the identical triad of `plan.md`, `spec.md`, `tasks.md`, with `spec.md` structured as Status / Summary / Motivation / Requirements (numbered R-N with acceptance criteria) / Non-Goals / Impact / Open Questions / Changelog.
+- Requirements are written as testable acceptance criteria prefixed by `R-N:` and scoped to concrete artifacts (schema files, routes, config knobs, tests) rather than vague behavior.
+- Cross-cutting changes are funneled through `shared/shared-contracts` schemas or the default `policy-default.yaml` bundle, and each spec enumerates the exact contract paths it modifies.
+- New policy actions follow the `<resource>:<verb>` naming convention (e.g., `chat:confirm`, `approvals:list`, `tools:mutate`) and are gated by deny-by-default unless explicitly granted in the bundled rules.
+- Approval tiers are modeled as data-driven rule outcomes (`require_approval` with `tier_1`/`tier_2` and `decided_by_roles`) evaluated identically in both gateway engines, not as code branches.
+- Portal-only UX improvements are isolated to `products/operator-portal/web-ui` and explicitly declared as having no backend or wire-contract changes, preserving separation between governance surfaces and presentation polish.

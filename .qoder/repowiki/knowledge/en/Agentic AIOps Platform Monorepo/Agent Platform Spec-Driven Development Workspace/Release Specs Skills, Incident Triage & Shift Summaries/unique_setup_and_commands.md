@@ -1,0 +1,1 @@
+Each spec references a per-product Makefile with uv lockfiles, `make deploy` to stand up dev-k8s overlays, and `make verify` as the gate running all product suites and overlay renders; SPEC-014 and SPEC-015 also ship e2e demo scripts (`skills-demo.sh`, `incident-demo.sh`) asserting deterministic intake/search/triage outcomes after deployment.

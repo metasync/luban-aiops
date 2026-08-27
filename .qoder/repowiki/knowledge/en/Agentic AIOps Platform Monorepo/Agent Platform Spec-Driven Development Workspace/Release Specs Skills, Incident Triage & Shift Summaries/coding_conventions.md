@@ -1,0 +1,6 @@
+- New products follow the service-family convention: frozen dataclass settings loaded from environment variables, structured JSON logging, `/health` and `/metrics` endpoints, containerized non-root on the shared base-uv image.
+- Persistent state is abstracted behind a protocol interface (e.g. `SkillStore`, `IncidentStore`) with an InMemory implementation for tests/dev and a Postgres implementation selected via a `*_STORE_BACKEND` setting.
+- Cross-product data shapes are enforced by JSON Schema files in `shared/shared/contracts/schemas/` with contract tests binding Pydantic models to those schemas.
+- Tool access to new services goes exclusively through tool-gateway connectors registered with `risk_level="read"` and a distinct client credential registry, never forwarding user tokens.
+- Policy changes introduce new action verbs (e.g. `incident:read/create/triage`, `shifts:summarize`) added to both the default bundle and dev-k8s policy manifests kept in sync.
+- Specs use a uniform template of Status, Summary, Requirements with numbered R-N sections and acceptance criteria, Non-Goals, Impact, Open Questions, and Changelog entries tracking decisions.

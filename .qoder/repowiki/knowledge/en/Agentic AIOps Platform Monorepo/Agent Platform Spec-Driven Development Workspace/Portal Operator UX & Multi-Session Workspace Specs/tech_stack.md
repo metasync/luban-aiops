@@ -1,0 +1,1 @@
+React + Ant Design X + TypeScript built with Vite, served via nginx static assets with immutable hashed caching; platform-gateway SSE adapter translates v6 stream frames to typed models; Kustomize overlays for environment-scoped profiles; Keycloak OIDC auth preserved from the vanilla portal.

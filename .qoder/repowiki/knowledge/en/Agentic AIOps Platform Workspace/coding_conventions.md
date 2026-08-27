@@ -1,6 +1,0 @@
-- Each product follows a uniform layout: `src/<service_name>/` split into `api/`, `core/`, `schemas/`, `services/`, plus a sibling `tests/` directory, `app.py` + `main.py` entry points, and a `metadata.py` file.
-- Cross-product contracts are kept as JSON Schema files in `shared/shared-contracts/schemas/` and YAML policies in `shared/shared-contracts/policies/`, consumed by multiple products rather than duplicated.
-- Policy bundles are synchronized from a single canonical location (`shared/shared-contracts/policies/policy-default.yaml`) to consumers via the root `make sync-policy` target instead of ad-hoc copies.
-- Product versions are locked to the root `VERSION` file and validated at build time through `make validate-version`, which runs `shared/shared-contracts/scripts/validate_version.py`.
-- Every Python product pins its interpreter version in a local `.python-version` file so container builds honor the same target as the workspace root.
-- Spec-driven development is enforced by organizing feature work under `docs/specs/SPEC-NNN-<name>/` with mandatory `plan.md`, `spec.md`, and `tasks.md` files.

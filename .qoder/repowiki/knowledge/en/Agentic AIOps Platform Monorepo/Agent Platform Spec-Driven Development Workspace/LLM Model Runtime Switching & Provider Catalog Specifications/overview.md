@@ -1,0 +1,1 @@
+Specification documents defining the runtime LLM model catalog, per-session model switching, live provider model discovery, and a self-hosted Luban provider adapter for the agent platform.

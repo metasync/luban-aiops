@@ -1,0 +1,1 @@
+Markdown-based spec format driven by the shared `templates/` schema; numbering scheme (SPEC-001 through SPEC-039) provides stable cross-references between features.

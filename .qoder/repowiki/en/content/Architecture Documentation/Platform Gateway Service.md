@@ -10,6 +10,7 @@
 - [router.py](file://products/platform-gateway/src/platform_gateway/api/router.py)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [sessions.py](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py)
+- [documents.py](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py)
 - [incidents.py](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py)
 - [policy.py](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
@@ -29,16 +30,17 @@
 - [policy-default.yaml](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml)
 - [SPEC-010 spec.md](file://docs/specs/SPEC-010-platform-gateway-extraction/spec.md)
 - [SPEC-024 spec.md](file://docs/specs/SPEC-024-runtime-llm-model-switching/spec.md)
+- [SPEC-039 spec.md](file://docs/specs/SPEC-039-operations-document-repository/spec.md)
 - [ADR-0005](file://docs/adr/0005-platform-gateway-extraction.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced streaming chat audit system with robust handling for streams closing without message_end frames
-- Added new helper functions (_frame_type, _frame_session_id) for improved SSE frame parsing
-- Enhanced state tracking variables (saw_delta, parked, last_frame_session) for better stream state management
-- Updated _emit_stream_chat_completed to accept fallback_model parameter for complete audit coverage per SPEC-024 requirements
-- Improved error handling patterns across streaming operations with proper resource cleanup
+- Added document routing with policy enforcement for documents:create, documents:read, and session:update actions
+- Implemented trusted foreign-session coverage decisions computed by gateway and forwarded as X-Foreign-Coverage headers to agent service
+- Enhanced session workspace proxy routes with owner-only session rename capability behind session:update action
+- Updated policy engine with new protected actions and role-based access control for document operations
+- Added comprehensive audit trail coverage for document repository operations
 
 ## Table of Contents
 1. Introduction
@@ -52,20 +54,20 @@
 9. Conclusion
 
 ## Introduction
-The Platform Gateway Service is the portal-facing edge service for the Luban AIOps platform. It authenticates portal users via JWT verification, enforces deny-by-default action policies, proxies chat and session requests to the agent-platform service, mediates short-lived delegated tokens through the identity-broker for downstream tool access, provides unified API access to the incident service with policy enforcement for incident operations, exposes live permission matrix evaluation, offers workspace inventory discovery for tools and skills, handles human-in-the-loop (HITL) confirmations with durable audit trails, manages session workspace lifecycle with server-side scoping to caller's own sessions, and now provides credential-gated model catalog discovery with per-turn model selection passthrough to the agent service. It exposes health, metrics, and runtime endpoints and maintains request correlation across hops.
+The Platform Gateway Service is the portal-facing edge service for the Luban AIOps platform. It authenticates portal users via JWT verification, enforces deny-by-default action policies, proxies chat and session requests to the agent-platform service, mediates short-lived delegated tokens through the identity-broker for downstream tool access, provides unified API access to the incident service with policy enforcement for incident operations, exposes live permission matrix evaluation, offers workspace inventory discovery for tools and skills, handles human-in-the-loop (HITL) confirmations with durable audit trails, manages session workspace lifecycle with server-side scoping to caller's own sessions, provides credential-gated model catalog discovery with per-turn model selection passthrough to the agent service, and now implements operations document repository functionality with trusted foreign-session coverage decisions. It exposes health, metrics, and runtime endpoints and maintains request correlation across hops.
 
 Key responsibilities:
 - Verify portal bearer tokens (issuer/audience JWKS validation; audience bound to platform-gateway).
-- Enforce deny-by-default policy bundle on every portal-facing action (e.g., chat, sessions:*, incidents:*, policy:read, tools:list, skills:read, models:list, chat:confirm, session:list, session:delete).
+- Enforce deny-by-default policy bundle on every portal-facing action (e.g., chat, sessions:*, incidents:*, policy:read, tools:list, skills:read, models:list, chat:confirm, session:list, session:delete, documents:create, documents:read, session:update).
 - Proxy chat/session traffic to agent-platform, exchanging the portal token for a short-lived delegated token (aud = tool-gateway, act.sub = platform-gateway) via identity-broker before forwarding.
 - Handle HITL confirmations via POST /api/v1/chat/confirm with identity delegation and SSE streaming, emitting confirmation_decided audit events when decisions are applied.
 - Provide unified API access to incident-service with per-action policy enforcement (incident:read, incident:create, incident:triage) and Basic credential authentication upstream.
 - Serve live permission matrix via GET /api/v1/policy/matrix with role-scoped visibility (full vs own).
 - Proxy workspace inventory discovery to tool-gateway (tools:list) and skills-hub (skills:read) with appropriate authentication patterns.
-- **New**: Proxy model catalog discovery to agent-service (GET /api/v2/models) behind `models:list` policy action with credential gating.
-- **Enhanced**: Per-turn model selection passthrough to agent-service for chat operations with fail-closed validation against credential-gated catalog.
-- **Enhanced**: Enhanced chat streaming with robust audit trail coverage including fallback model attribution for streams closing without message_end frames.
-- Manage session workspace lifecycle (create, list, read, delete) with server-side scoping to caller's own sessions and deny-by-default policy enforcement.
+- Proxy model catalog discovery to agent-service (GET /api/v2/models) behind `models:list` policy action with credential gating.
+- **New**: Implement operations document repository with policy enforcement for documents:create, documents:read actions and trusted foreign-session coverage computation.
+- **Enhanced**: Session workspace management now includes owner-only session rename capability behind `session:update` action with server-side ownership verification.
+- Manage session workspace lifecycle (create, list, read, delete, update title) with server-side scoping to caller's own sessions and deny-by-default policy enforcement.
 - Relay auth/identity/runtime endpoints to identity-broker and agent-platform as needed.
 - Expose /health/live, /health/ready, and /metrics.
 
@@ -73,6 +75,7 @@ Key responsibilities:
 - [README.md:1-46](file://products/platform-gateway/README.md#L1-L46)
 - [SPEC-010 spec.md:1-170](file://docs/specs/SPEC-010-platform-gateway-extraction/spec.md#L1-L170)
 - [SPEC-024 spec.md:1-187](file://docs/specs/SPEC-024-runtime-llm-model-switching/spec.md#L1-L187)
+- [SPEC-039 spec.md:1-268](file://docs/specs/SPEC-039-operations-document-repository/spec.md#L1-L268)
 - [ADR-0005:1-47](file://docs/adr/0005-platform-gateway-extraction.md#L1-L47)
 
 ## Project Structure
@@ -94,6 +97,7 @@ subgraph "API"
 R["api/router.py"]
 RC["api/routes/chat.py"]
 RS["api/routes/sessions.py"]
+RD["api/routes/documents.py"]
 RI["api/routes/incidents.py"]
 RP["api/routes/policy.py"]
 RT["api/routes/tools.py"]
@@ -123,6 +127,7 @@ M --> A
 A --> R
 R --> RC
 R --> RS
+R --> RD
 R --> RI
 R --> RP
 R --> RT
@@ -130,6 +135,7 @@ R --> RK
 R --> RM
 RC --> GS
 RS --> GS
+RD --> GS
 RI --> IC
 RP --> PE
 RP --> PM
@@ -148,25 +154,26 @@ A --> RT
 **Diagram sources**
 - [main.py:1-9](file://products/platform-gateway/src/platform_gateway/main.py#L1-L9)
 - [app.py:1-44](file://products/platform-gateway/src/platform_gateway/app.py#L1-L44)
-- [router.py:1-31](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L31)
+- [router.py:1-35](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L35)
 - [chat.py:1-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L187)
 - [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
+- [documents.py:1-171](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L171)
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
 - [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
 - [models.py:1-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L1-L46)
-- [gateway_service.py:1-718](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L718)
-- [agent_client.py:1-275](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L275)
+- [gateway_service.py:1-1099](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L1099)
+- [agent_client.py:1-439](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L439)
 - [incident_client.py:1-193](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L1-L193)
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
 - [token_verifier.py:1-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L1-L99)
-- [policy_engine.py:1-262](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L262)
+- [policy_engine.py:1-405](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L405)
 - [policy_matrix.py:1-62](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L62)
 - [tool_gateway_client.py:1-76](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py#L1-L76)
 - [skills_hub_client.py:1-79](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L1-L79)
 - [audit_emitter.py:1-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L1-L99)
-- [policy-default.yaml:1-181](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L181)
+- [policy-default.yaml:1-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L267)
 - [config.py:1-117](file://products/platform-gateway/src/platform_gateway/core/config.py#L1-L117)
 - [runtime.py:1-30](file://products/platform-gateway/src/platform_gateway/core/runtime.py#L1-L30)
 
@@ -181,25 +188,26 @@ A --> RT
   - Run settings for host/port resolution.
 - API routes:
   - Chat and Sessions endpoints enforcing identity and policy, delegating to gateway service.
-  - Complete session workspace lifecycle management (create, list, read, delete) with server-side scoping to caller's own sessions.
-  - Session workspace proxy routes with deny-by-default policy actions (session:list, session:delete) and proper error handling.
+  - Complete session workspace lifecycle management (create, list, read, delete, update title) with server-side scoping to caller's own sessions.
+  - **New**: Operations document repository routes (create, list, fetch, publish, delete) with policy enforcement and trusted foreign-session coverage computation.
   - Incident proxy routes providing unified API access to incident-service with per-action policy enforcement.
   - Policy matrix endpoint serving live permission evaluation with role-scoped visibility.
   - Workspace proxy endpoints for tools catalog discovery and skills inventory listing.
-  - **New**: Model catalog proxy endpoint for credential-gated model discovery behind `models:list` policy action.
+  - Model catalog proxy endpoint for credential-gated model discovery behind `models:list` policy action.
 - Gateway service:
   - Identity resolution, policy enforcement, proxying to agent-platform, streaming chat support.
   - Session workspace proxy with proper error handling (upstream 4xx passthrough, transport failures map to 502).
   - Chat confirm handling with audit trail integration for confirmation_decided events.
+  - **New**: Document repository proxy with trusted foreign-session coverage decision computation and forwarding.
   - **Enhanced**: Enhanced streaming architecture with robust error propagation using improved state tracking and helper functions.
   - **Enhanced**: Model catalog proxy with consistent error handling patterns matching other proxy endpoints.
   - **Enhanced**: Chat streaming with comprehensive audit trail coverage including fallback model attribution for streams closing without message_end frames.
 - External clients:
   - Agent client for agent-platform v2 endpoints.
-  - New `open_chat_confirm_stream()` method for confirm stream handling with proper error mapping.
-  - Session workspace methods (list_sessions, delete_session, get_session) with proper error handling.
+  - New document repository methods (create_document, list_documents, fetch_document, publish_document, delete_document) with foreign coverage header support.
+  - Session workspace methods (list_sessions, delete_session, get_session, update_session_title) with proper error handling.
   - Renamed `stream_chat` to `open_chat_stream` with eager upstream status checking.
-  - **New**: `list_models()` method for credential-gated model catalog discovery.
+  - `list_models()` method for credential-gated model catalog discovery.
   - Incident client for incident-service with Basic credential authentication and error mapping.
   - Delegation client for broker-mediated token exchange with per-user cache and workload-token preference.
   - Tool gateway client for tool catalog discovery with delegated token forwarding.
@@ -208,39 +216,41 @@ A --> RT
   - Local JWT verification using JWKS with issuer/audience checks and actor extraction.
 - Policy engine:
   - Loads YAML bundle and evaluates actions against roles with deny-by-default semantics.
-  - **Updated**: Now includes new protected actions (policy:read, tools:list, skills:read, chat:confirm, session:list, session:delete, models:list) with appropriate role-based access control.
+  - **Updated**: Now includes new protected actions (policy:read, tools:list, skills:read, chat:confirm, session:list, session:delete, models:list, documents:create, documents:read, session:update) with appropriate role-based access control.
 - Policy matrix service:
   - Builds live permission matrix from loaded bundle with role-scoped visibility and metadata.
 - Audit emitter:
-  - Fire-and-forget delivery of audit events including confirmation_decided, session_deleted, and chat_completed events with non-blocking operation.
+  - Fire-and-forget delivery of audit events including confirmation_decided, session_deleted, document_created, document_published, document_deleted, and chat_completed events with non-blocking operation.
   - **Enhanced**: Chat completed events now include model attribution with fallback support for complete operational visibility.
+  - **New**: Document repository audit events with foreign-session coverage tracking.
 
 **Section sources**
 - [app.py:1-44](file://products/platform-gateway/src/platform_gateway/app.py#L1-L44)
 - [config.py:1-117](file://products/platform-gateway/src/platform_gateway/core/config.py#L1-L117)
 - [runtime.py:1-30](file://products/platform-gateway/src/platform_gateway/core/runtime.py#L1-L30)
-- [router.py:1-31](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L31)
+- [router.py:1-35](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L35)
 - [chat.py:1-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L187)
 - [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
+- [documents.py:1-171](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L171)
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
 - [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
 - [models.py:1-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L1-L46)
-- [gateway_service.py:1-718](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L718)
-- [agent_client.py:1-275](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L275)
+- [gateway_service.py:1-1099](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L1099)
+- [agent_client.py:1-439](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L439)
 - [incident_client.py:1-193](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L1-L193)
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
 - [token_verifier.py:1-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L1-L99)
-- [policy_engine.py:1-262](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L262)
+- [policy_engine.py:1-405](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L405)
 - [policy_matrix.py:1-62](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L62)
 - [tool_gateway_client.py:1-76](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py#L1-L76)
 - [skills_hub_client.py:1-79](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L1-L79)
 - [audit_emitter.py:1-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L1-L99)
-- [policy-default.yaml:1-181](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L181)
+- [policy-default.yaml:1-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L267)
 
 ## Architecture Overview
-The gateway sits between the portal and backend services. It authenticates users, authorizes actions, proxies requests, obtains delegated tokens for tool execution paths, serves live permission matrices, provides workspace inventory discovery, handles HITL confirmations with durable audit trails, manages session workspace lifecycle with server-side scoping, and now provides credential-gated model catalog discovery with per-turn model selection passthrough. The architecture includes comprehensive transparency features, workspace capability visibility, human-in-the-loop confirmation bridging, complete session workspace management, and enhanced audit trail coverage with model attribution for complete operational visibility.
+The gateway sits between the portal and backend services. It authenticates users, authorizes actions, proxies requests, obtains delegated tokens for tool execution paths, serves live permission matrices, provides workspace inventory discovery, handles HITL confirmations with durable audit trails, manages session workspace lifecycle with server-side scoping, provides credential-gated model catalog discovery with per-turn model selection passthrough, and now implements operations document repository functionality with trusted foreign-session coverage decisions. The architecture includes comprehensive transparency features, workspace capability visibility, human-in-the-loop confirmation bridging, complete session workspace management, enhanced audit trail coverage with model attribution for complete operational visibility, and secure document repository operations with cross-session coverage capabilities.
 
 ```mermaid
 sequenceDiagram
@@ -252,37 +262,32 @@ participant IS as "Incident Service"
 participant TG as "Tool Gateway"
 participant SH as "Skills Hub"
 participant AUD as "Audit Service"
-Note over Portal,AUD : Enhanced Streaming Chat with Fallback Attribution
-Portal->>GW : GET /api/v1/chat/stream?model=xxx
-GW->>GW : Resolve identity + enforce chat
-GW->>AG : GET /api/v2/chat/stream?model=xxx
-AG-->>GW : SSE stream with message_end or early close
-GW->>GW : Parse frames with _frame_type/_frame_session_id
-GW->>GW : Track saw_delta, parked, last_frame_session
-alt Stream completes with message_end
-GW->>AUD : Emit chat_completed with serving model
-else Stream closes without message_end
-GW->>AUD : Emit chat_completed with fallback_model
-end
-GW-->>Portal : SSE stream
+Note over Portal,AUD : Document Repository with Foreign Coverage
+Portal->>GW : POST /api/v1/documents
+GW->>GW : Resolve identity + enforce documents : create
+GW->>GW : Evaluate approvals : list for foreign coverage
+GW->>AG : POST /api/v2/documents with X-Foreign-Coverage header
+AG-->>GW : Document created with foreign session metadata
+GW->>AUD : Emit document_created with foreign_coverage
+GW-->>Portal : 201 Created
 ```
 
 **Diagram sources**
-- [gateway_service.py:485-524](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L485-L524)
-- [gateway_service.py:616-641](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L616-L641)
-- [gateway_service.py:644-681](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L644-L681)
-- [agent_client.py:137-198](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L137-L198)
+- [documents.py:29-69](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L29-L69)
+- [gateway_service.py:484-515](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L484-L515)
+- [agent_client.py:320-337](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L320-L337)
 
 ## Detailed Component Analysis
 
 ### API Router and Routes
-- The router aggregates health, runtime, auth, identity, sessions, chat, audit, incidents, newly added policy, tools, skills, and models routes.
+- The router aggregates health, runtime, auth, identity, sessions, chat, audit, incidents, newly added policy, tools, skills, models, approvals, and documents routes.
 - Chat, Sessions, and Incident routes enforce identity and policy before delegating to their respective service functions.
-- Complete session workspace lifecycle management with deny-by-default policy enforcement for all session operations.
+- Complete session workspace lifecycle management with deny-by-default policy enforcement for all session operations including owner-only rename.
+- **New**: Operations document repository routes provide create, list, fetch, publish, and delete functionality with policy enforcement and trusted foreign-session coverage computation.
 - Chat Confirm route for HITL confirmation bridging with identity delegation and SSE streaming.
 - Policy routes provide live permission matrix evaluation with role-scoped visibility.
 - Workspace proxy routes provide tools catalog discovery and skills inventory listing with appropriate authentication patterns.
-- **New**: Model catalog proxy route provides credential-gated model discovery behind `models:list` policy action.
+- Model catalog proxy route provides credential-gated model discovery behind `models:list` policy action.
 
 ```mermaid
 classDiagram
@@ -299,6 +304,8 @@ class Router {
 +include_router(tools)
 +include_router(skills)
 +include_router(models)
++include_router(approvals)
++include_router(documents)
 }
 class ChatRoutes {
 +POST /api/v1/chat
@@ -310,6 +317,14 @@ class SessionsRoutes {
 +GET /api/v1/sessions
 +GET /api/v1/sessions/{session_id}
 +DELETE /api/v1/sessions/{session_id}
++PATCH /api/v1/sessions/{session_id}/title
+}
+class DocumentsRoutes {
++POST /api/v1/documents
++GET /api/v1/documents
++GET /api/v1/documents/{document_id}
++POST /api/v1/documents/{document_id}/publish
++DELETE /api/v1/documents/{document_id}
 }
 class IncidentsRoutes {
 +GET /api/v1/incidents
@@ -332,6 +347,7 @@ class ModelsRoutes {
 }
 Router --> ChatRoutes : "includes"
 Router --> SessionsRoutes : "includes"
+Router --> DocumentsRoutes : "includes"
 Router --> IncidentsRoutes : "includes"
 Router --> PolicyRoutes : "includes"
 Router --> ToolsRoutes : "includes"
@@ -340,9 +356,10 @@ Router --> ModelsRoutes : "includes"
 ```
 
 **Diagram sources**
-- [router.py:1-31](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L31)
+- [router.py:1-35](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L35)
 - [chat.py:1-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L187)
 - [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
+- [documents.py:1-171](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L171)
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
@@ -350,14 +367,181 @@ Router --> ModelsRoutes : "includes"
 - [models.py:1-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L1-L46)
 
 **Section sources**
-- [router.py:1-31](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L31)
+- [router.py:1-35](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L35)
 - [chat.py:1-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L187)
 - [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
+- [documents.py:1-171](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L171)
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
 - [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
 - [models.py:1-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L1-L46)
+
+### Operations Document Repository
+**New** - Implements operations document repository functionality with policy enforcement and trusted foreign-session coverage decisions for creating, reading, publishing, and deleting operational documents.
+
+#### Document Creation with Foreign Coverage
+- **Endpoint**: POST /api/v1/documents
+- **Authentication**: Requires `documents:create` action enforcement with identity verification
+- **Foreign Coverage Computation**: Evaluates `approvals:list` capability to determine if user can cover foreign sessions
+- **Trusted Header**: Forwards `X-Foreign-Coverage: allowed|denied` to agent service
+- **Response**: Created document with digest containing session metadata based on coverage
+- **Audit Trail**: Emits `document_created` event with foreign coverage information
+
+#### Document Listing and Reading
+- **Endpoints**: GET /api/v1/documents (list), GET /api/v1/documents/{document_id} (fetch)
+- **Authentication**: Requires `documents:read` action enforcement with identity verification
+- **Scoping**: Supports `mine` (includes drafts) and `published` scopes
+- **Response**: Document list or single document with appropriate visibility
+- **Security**: Foreign draft reads return 404 for anti-enumeration protection
+
+#### Document Publishing and Deletion
+- **Endpoints**: POST /api/v1/documents/{document_id}/publish (publish), DELETE /api/v1/documents/{document_id} (delete)
+- **Authentication**: Requires `documents:create` action enforcement with identity verification
+- **Publishing**: One-way owner publish that exposes document to all `documents:read` holders
+- **Deletion**: Owner-only document deletion with anti-enumeration protection
+- **Audit Trail**: Emits `document_published` and `document_deleted` events
+
+Key capabilities:
+- Deny-by-default policy enforcement for document operations
+- Trusted foreign-session coverage computation prevents unauthorized access to foreign session data
+- Server-side visibility matrix enforcement ensures proper document access control
+- Consistent error handling: upstream 4xx passthrough, transport failures map to 502
+- Comprehensive audit trail coverage for document lifecycle events
+- Request correlation via x-request-id headers throughout the chain
+- Role-based access control restricted to platform-admin, approver, and operator roles
+
+```mermaid
+flowchart TD
+Start(["Document Create Request"]) --> ResolveId["Resolve Request Identity"]
+ResolveId --> AuthCheck{"Auth Required?"}
+AuthCheck --> |Yes & No Token| Deny401["HTTP 401"]
+AuthCheck --> |No Token & Optional| Synthetic["Create Synthetic Dev Identity"]
+AuthCheck --> |Has Token| Verify["Verify JWT Locally"]
+Verify --> Valid{"Valid?"}
+Valid --> |No| Deny401
+Valid --> |Yes| PolicyEnf["Enforce documents:create"]
+PolicyEnf --> Allowed{"Allowed?"}
+Allowed --> |No| Deny403["HTTP 403"]
+Allowed --> |Yes| ComputeCoverage["Evaluate approvals:list"]
+ComputeCoverage --> SetHeader["Set X-Foreign-Coverage header"]
+SetHeader --> Proxy["Proxy to Agent Service"]
+Proxy --> Response["Return Document"]
+Response --> Audit["Emit document_created audit"]
+Audit --> Return(["Return Response"])
+```
+
+**Diagram sources**
+- [documents.py:29-69](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L29-L69)
+- [gateway_service.py:484-515](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L484-L515)
+- [agent_client.py:320-337](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L320-L337)
+
+**Section sources**
+- [documents.py:1-171](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L171)
+- [gateway_service.py:484-627](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L484-L627)
+- [agent_client.py:320-402](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L320-L402)
+
+### Enhanced Session Workspace Proxy Routes
+**Updated** - Provides complete session workspace lifecycle management with deny-by-default policy enforcement, server-side scoping to caller's own sessions, and new owner-only session rename capability.
+
+#### Session Creation
+- **Endpoint**: POST /api/v1/sessions
+- **Authentication**: Requires `session:create` action enforcement with identity verification
+- **Request Body**: Session creation parameters
+- **Response**: Created session details with session_id
+- **Audit Trail**: Emits `session_created` audit event with success outcome
+
+#### Session Listing  
+- **Endpoint**: GET /api/v1/sessions
+- **Authentication**: Requires `session:list` action enforcement with identity verification
+- **Scoping**: Server-side filtering returns only caller's own sessions (SPEC-022 R-1)
+- **Response**: List of sessions belonging to the authenticated user
+- **Logging**: Tracks session count and user context
+- **Error Handling**: Upstream 4xx errors pass through unchanged, transport failures and upstream 5xx map to 502
+
+#### Session Reading
+- **Endpoint**: GET /api/v1/sessions/{session_id}
+- **Authentication**: Requires `session:read` action enforcement with identity verification
+- **Error Handling**: Upstream 4xx errors (unknown/foreign sessions) pass through unchanged for anti-enumeration
+- **Response**: Session details if accessible to caller
+- **Security**: Foreign session access results in 404 to prevent enumeration
+
+#### Session Deletion
+- **Endpoint**: DELETE /api/v1/sessions/{session_id}
+- **Authentication**: Requires `session:delete` action enforcement with identity verification
+- **Error Handling**: Upstream 4xx errors (unknown/foreign sessions, parked confirmations) pass through unchanged
+- **Audit Trail**: Emits `session_deleted` audit event with success outcome
+- **Security**: Owner-only deletion with server-side ownership verification
+
+#### Session Title Update (New)
+- **Endpoint**: PATCH /api/v1/sessions/{session_id}/title
+- **Authentication**: Requires `session:update` action enforcement with identity verification
+- **Ownership**: Server-side ownership verification ensures callers can only rename their own sessions
+- **Error Handling**: Upstream 4xx errors (blank/overlong titles, unknown/foreign sessions) pass through unchanged
+- **Security**: Anti-enumeration protection returns 404 for foreign/unknown sessions
+- **Scope**: Mirrors session:create grants across all roles with server-side scoping
+
+Key capabilities:
+- Deny-by-default policy enforcement for all session operations including owner rename
+- Server-side scoping ensures callers can only access and modify their own sessions
+- Consistent error handling: upstream 4xx passthrough, transport failures map to 502
+- Durable audit trail coverage for session lifecycle events
+- Request correlation via x-request-id headers throughout the chain
+- Owner-only session rename with validation and anti-enumeration protection
+
+```mermaid
+flowchart TD
+Start(["Session Request"]) --> Type{"Operation Type?"}
+Type --> |Create| CreateFlow["Create Session Flow"]
+Type --> |List| ListFlow["List Sessions Flow"]
+Type --> |Read| ReadFlow["Read Session Flow"]
+Type --> |Delete| DeleteFlow["Delete Session Flow"]
+Type --> |UpdateTitle| UpdateFlow["Update Session Title Flow"]
+subgraph CreateFlow
+C1["Enforce session:create"] --> C2["Resolve Identity"]
+C2 --> C3["Proxy to Agent Platform"]
+C3 --> C4["Emit session_created audit"]
+C4 --> CReturn(["Return Session"])
+end
+subgraph ListFlow
+L1["Enforce session:list"] --> L2["Resolve Identity"]
+L2 --> L3["List Caller's Sessions"]
+L3 --> LReturn(["Return Session List"])
+end
+subgraph ReadFlow
+R1["Enforce session:read"] --> R2["Resolve Identity"]
+R2 --> R3{"Upstream 4xx?"}
+R3 --> |Yes| RPass["Pass Through 4xx"]
+R3 --> |No| RProxy["Proxy to Agent Platform"]
+RProxy --> RReturn(["Return Session"])
+end
+subgraph DeleteFlow
+D1["Enforce session:delete"] --> D2["Resolve Identity"]
+D2 --> D3{"Upstream 4xx?"}
+D3 --> |Yes| DPass["Pass Through 4xx"]
+D3 --> |No| DProxy["Proxy to Agent Platform"]
+DProxy --> DAudit["Emit session_deleted audit"]
+DAudit --> DReturn(["Return Result"])
+end
+subgraph UpdateFlow
+U1["Enforce session:update"] --> U2["Resolve Identity"]
+U2 --> U3{"Upstream 4xx?"}
+U3 --> |Yes| UPass["Pass Through 4xx"]
+U3 --> |No| UProxy["Proxy to Agent Platform"]
+UProxy --> UReturn(["Return Updated Title"])
+end
+```
+
+**Diagram sources**
+- [sessions.py:29-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L29-L154)
+- [gateway_service.py:289-481](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L481)
+- [agent_client.py:32-89](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L32-L89)
+- [agent_client.py:405-420](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L405-L420)
+- [audit_emitter.py:1-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L1-L99)
+
+**Section sources**
+- [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
+- [gateway_service.py:289-481](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L481)
 
 ### Enhanced Streaming Chat Audit System
 **Enhanced** - Implements robust error handling for streaming chat with comprehensive state tracking and fallback model attribution for streams closing without message_end frames.
@@ -407,23 +591,27 @@ Cleanup --> Return(["Return Response"])
 ```
 
 **Diagram sources**
-- [gateway_service.py:485-524](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L485-L524)
+- [gateway_service.py:652-718](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L652-L718)
 - [gateway_service.py:616-641](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L616-L641)
 - [gateway_service.py:644-681](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L644-L681)
 
 **Section sources**
-- [gateway_service.py:485-524](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L485-L524)
+- [gateway_service.py:652-718](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L652-L718)
 - [gateway_service.py:616-641](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L616-L641)
 - [gateway_service.py:644-681](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L644-L681)
 
 ### Enhanced Agent Client
-**Updated** - Added new `open_chat_confirm_stream()` method, `list_models()` method, and enhanced session workspace methods for handling streams and proper error mapping. The `stream_chat` function has been renamed to `open_chat_stream` with improved error propagation.
+**Updated** - Added new document repository methods, session title update method, and enhanced error handling for all operations.
 
-- **Renamed Method**: `stream_chat` → `open_chat_stream` with eager upstream status checking
 - **New Methods**: 
-  - `open_chat_confirm_stream()` opens SSE stream to agent-platform's `/api/v2/chat/confirm` endpoint
-  - `list_models()` provides credential-gated model catalog discovery
+  - `create_document()` creates documents with trusted foreign-session coverage header
+  - `list_documents()` lists documents with scope filtering
+  - `fetch_document()` retrieves individual documents with anti-enumeration protection
+  - `publish_document()` publishes documents for broader visibility
+  - `delete_document()` deletes owner documents
+  - `update_session_title()` updates session titles with ownership verification
 - **Enhanced Methods**: `list_sessions()`, `delete_session()`, `get_session()` with proper error handling
+- **Renamed Method**: `stream_chat` → `open_chat_stream` with eager upstream status checking
 - **Error Handling**: Eager status checking prevents corrupt SSE streams by reading error responses before streaming
 - **Resource Management**: Proper cleanup of HTTP connections and async resources in finally blocks
 - **SSE Processing**: Filters and yields only data frames with proper SSE formatting
@@ -434,6 +622,7 @@ Key capabilities:
 - Connection cleanup in finally blocks to prevent resource leaks
 - SSE frame filtering to extract only relevant data frames
 - Session workspace methods with consistent error handling patterns
+- Document repository operations with trusted foreign-session coverage
 - Model catalog discovery with credential gating
 - Improved error propagation with proper HTTP status mapping
 
@@ -444,6 +633,12 @@ class AgentClient {
 +get_session(settings, request_id, session_id, user_id) dict
 +list_sessions(settings, request_id, user_id) dict
 +delete_session(settings, request_id, session_id, user_id) dict
++update_session_title(settings, request_id, session_id, user_id, title) dict
++create_document(settings, request_id, user_id, payload, foreign_coverage) dict
++list_documents(settings, request_id, user_id, scope) dict
++fetch_document(settings, request_id, document_id, user_id) dict
++publish_document(settings, request_id, document_id, user_id) dict
++delete_document(settings, request_id, document_id, user_id) dict
 +list_models(settings, request_id, user_id) dict
 +chat(settings, request_id, user_id, message, session_id, delegated_token) dict
 +open_chat_stream(settings, request_id, user_id, message, session_id, delegated_token, input_modality, model) AsyncIterator[str]
@@ -460,141 +655,10 @@ AgentClient --> ConfirmStream : "uses"
 ```
 
 **Diagram sources**
-- [agent_client.py:32-275](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L32-L275)
+- [agent_client.py:32-439](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L32-L439)
 
 **Section sources**
-- [agent_client.py:1-275](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L275)
-
-### Model Catalog Proxy Endpoint
-**New** - Provides credential-gated model catalog discovery by proxying to agent-service's `/api/v2/models` endpoint behind the `models:list` policy action.
-
-#### Model Discovery Flow
-- **Endpoint**: GET /api/v1/models
-- **Authentication**: Requires `models:list` action enforcement with identity verification
-- **Upstream**: Forwards to agent-service's `/api/v2/models` endpoint
-- **Response**: Credential-gated model catalog containing available models
-- **Audit Trail**: Emits `models_listed` audit event with model count and user context
-- **Security**: Discovery-safe payload construction (no credentials, no base URLs exposed)
-
-Key capabilities:
-- Deny-by-default policy enforcement for model catalog access
-- Credential-gated discovery ensures only authorized users can view available models
-- Consistent error handling: upstream 4xx passthrough, transport failures map to 502
-- Comprehensive audit trail coverage for model catalog operations
-- Request correlation via x-request-id headers throughout the chain
-- Role-based access control mirrors chat scope (operators + observers)
-
-```mermaid
-flowchart TD
-Start(["Model List Request"]) --> ResolveId["Resolve Request Identity"]
-ResolveId --> AuthCheck{"Auth Required?"}
-AuthCheck --> |Yes & No Token| Deny401["HTTP 401"]
-AuthCheck --> |No Token & Optional| Synthetic["Create Synthetic Dev Identity"]
-AuthCheck --> |Has Token| Verify["Verify JWT Locally"]
-Verify --> Valid{"Valid?"}
-Valid --> |No| Deny401
-Valid --> |Yes| PolicyEnf["Enforce models:list"]
-PolicyEnf --> Allowed{"Allowed?"}
-Allowed --> |No| Deny403["HTTP 403"]
-Allowed --> |Yes| Proxy["Proxy to Agent Service"]
-Proxy --> Response["Return Model Catalog"]
-Response --> Audit["Emit models_listed audit"]
-Audit --> Return(["Return Response"])
-```
-
-**Diagram sources**
-- [models.py:19-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L19-L46)
-- [gateway_service.py:357-382](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L357-L382)
-- [agent_client.py:76-88](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L76-L88)
-
-**Section sources**
-- [models.py:1-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L1-L46)
-- [gateway_service.py:357-382](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L357-L382)
-- [agent_client.py:76-88](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L76-L88)
-
-### Session Workspace Proxy Routes
-**Existing** - Provides complete session workspace lifecycle management with deny-by-default policy enforcement and server-side scoping to caller's own sessions.
-
-#### Session Creation
-- **Endpoint**: POST /api/v1/sessions
-- **Authentication**: Requires `session:create` action enforcement with identity verification
-- **Request Body**: Session creation parameters
-- **Response**: Created session details with session_id
-- **Audit Trail**: Emits `session_created` audit event with success outcome
-
-#### Session Listing  
-- **Endpoint**: GET /api/v1/sessions
-- **Authentication**: Requires `session:list` action enforcement with identity verification
-- **Scoping**: Server-side filtering returns only caller's own sessions (SPEC-022 R-1)
-- **Response**: List of sessions belonging to the authenticated user
-- **Logging**: Tracks session count and user context
-- **Error Handling**: Upstream 4xx errors pass through unchanged, transport failures and upstream 5xx map to 502
-
-#### Session Reading
-- **Endpoint**: GET /api/v1/sessions/{session_id}
-- **Authentication**: Requires `session:read` action enforcement with identity verification
-- **Error Handling**: Upstream 4xx errors (unknown/foreign sessions) pass through unchanged for anti-enumeration
-- **Response**: Session details if accessible to caller
-- **Security**: Foreign session access results in 404 to prevent enumeration
-
-#### Session Deletion
-- **Endpoint**: DELETE /api/v1/sessions/{session_id}
-- **Authentication**: Requires `session:delete` action enforcement with identity verification
-- **Error Handling**: Upstream 4xx errors (unknown/foreign sessions, parked confirmations) pass through unchanged
-- **Audit Trail**: Emits `session_deleted` audit event with success outcome
-- **Security**: Owner-only deletion with server-side ownership verification
-
-Key capabilities:
-- Deny-by-default policy enforcement for all session operations
-- Server-side scoping ensures callers can only access their own sessions
-- Consistent error handling: upstream 4xx passthrough, transport failures map to 502
-- Durable audit trail coverage for session lifecycle events
-- Request correlation via x-request-id headers throughout the chain
-
-```mermaid
-flowchart TD
-Start(["Session Request"]) --> Type{"Operation Type?"}
-Type --> |Create| CreateFlow["Create Session Flow"]
-Type --> |List| ListFlow["List Sessions Flow"]
-Type --> |Read| ReadFlow["Read Session Flow"]
-Type --> |Delete| DeleteFlow["Delete Session Flow"]
-subgraph CreateFlow
-C1["Enforce session:create"] --> C2["Resolve Identity"]
-C2 --> C3["Proxy to Agent Platform"]
-C3 --> C4["Emit session_created audit"]
-C4 --> CReturn(["Return Session"])
-end
-subgraph ListFlow
-L1["Enforce session:list"] --> L2["Resolve Identity"]
-L2 --> L3["List Caller's Sessions"]
-L3 --> LReturn(["Return Session List"])
-end
-subgraph ReadFlow
-R1["Enforce session:read"] --> R2["Resolve Identity"]
-R2 --> R3{"Upstream 4xx?"}
-R3 --> |Yes| RPass["Pass Through 4xx"]
-R3 --> |No| RProxy["Proxy to Agent Platform"]
-RProxy --> RReturn(["Return Session"])
-end
-subgraph DeleteFlow
-D1["Enforce session:delete"] --> D2["Resolve Identity"]
-D2 --> D3{"Upstream 4xx?"}
-D3 --> |Yes| DPass["Pass Through 4xx"]
-D3 --> |No| DProxy["Proxy to Agent Platform"]
-DProxy --> DAudit["Emit session_deleted audit"]
-DAudit --> DReturn(["Return Result"])
-end
-```
-
-**Diagram sources**
-- [sessions.py:29-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L29-L154)
-- [gateway_service.py:289-387](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L387)
-- [agent_client.py:32-89](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L32-L89)
-- [audit_emitter.py:1-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L1-L99)
-
-**Section sources**
-- [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
-- [gateway_service.py:289-387](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L387)
+- [agent_client.py:1-439](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L439)
 
 ### Chat Confirm Endpoint
 **Existing** - Provides Human-in-the-Loop (HITL) confirmation bridging for parked kernel confirmations with identity delegation and SSE streaming.
@@ -795,7 +859,7 @@ Proxy --> Return(["Return Response"])
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 
 ### Enhanced Gateway Service
-**Enhanced** - Enhanced with model catalog proxy functionality, enhanced chat streaming with robust state tracking and fallback model attribution, and improved error handling.
+**Enhanced** - Enhanced with document repository proxy functionality, session title update capability, enhanced chat streaming with robust state tracking and fallback model attribution, and improved error handling.
 
 - Identity resolution supports local JWT verification and synthetic dev identity when auth is optional.
 - Policy enforcement uses evaluate() from the policy engine; denies by default and records decisions.
@@ -803,6 +867,7 @@ Proxy --> Return(["Return Response"])
 - Provides streaming chat via StreamingResponse.
 - Session workspace proxy with proper error handling (upstream 4xx passthrough, transport failures map to 502).
 - Chat confirm handling with SSE streaming and confirmation_decided audit event emission.
+- **New**: Document repository proxy with trusted foreign-session coverage computation and forwarding.
 - **Enhanced**: Model catalog proxy with consistent error handling pattern matching other proxy endpoints.
 - **Enhanced**: Chat streaming with robust state tracking (saw_delta, parked, last_frame_session) and fallback model attribution for streams closing without message_end frames.
 - **Enhanced**: Enhanced streaming architecture with improved error propagation using helper functions (_frame_type, _frame_session_id).
@@ -823,24 +888,27 @@ Allowed --> |Yes| CheckType{"Operation Type?"}
 CheckType --> |Chat/Session| Delegate["Obtain Delegated Token"]
 CheckType --> |Confirm| Delegate
 CheckType --> |Session Workspace| Proxy["Proxy to Agent Platform"]
+CheckType --> |Documents| DocProxy["Proxy Document Operations"]
 CheckType --> |Stream| OpenStream["Open Chat Stream with State Tracking"]
 CheckType --> |Models| ModelProxy["Proxy Model Catalog"]
 Delegate --> Proxy
+DocProxy --> DocService["Document Service with Foreign Coverage"]
 OpenStream --> StreamProxy["Stream Proxy with Robust Audit Coverage"]
 ModelProxy --> Return(["Return Response/Stream"])
 StreamProxy --> Return
+DocService --> Return
 ```
 
 **Diagram sources**
-- [gateway_service.py:1-718](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L718)
+- [gateway_service.py:1-1099](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L1099)
 - [token_verifier.py:1-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L1-L99)
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
 
 **Section sources**
-- [gateway_service.py:1-718](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L718)
+- [gateway_service.py:1-1099](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L1099)
 
 ### Policy Engine and Default Bundle
-**Updated** - Enhanced with new model catalog action and role-based access control.
+**Updated** - Enhanced with new document repository and session update actions and role-based access control.
 
 - Loads YAML policy bundle and evaluates actions against roles with deny-by-default semantics.
 - Explicit deny overrides allow; higher priority rules win among allows; disabled rules ignored.
@@ -851,6 +919,8 @@ StreamProxy --> Return
   - `chat:confirm` restricted to operators, developers, approvers, and platform admins for HITL confirmations
   - `models:list` granted to operators and observers for model catalog discovery (mirrors chat scope)
   - `session:list` and `session:delete` mirror `session:create` grants with server-side scoping to caller's own sessions
+  - **New**: `documents:create` and `documents:read` granted to platform-admin, approver, and operator roles for document operations
+  - **New**: `session:update` mirrors session lifecycle grants with server-side ownership verification
 
 ```mermaid
 flowchart TD
@@ -863,12 +933,12 @@ Decision --> Record["Record Metrics & Log"]
 ```
 
 **Diagram sources**
-- [policy-default.yaml:1-181](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L181)
+- [policy-default.yaml:1-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L267)
 - [gateway_service.py:222-254](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L222-L254)
 - [policy_engine.py:25-55](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L25-L55)
 
 **Section sources**
-- [policy-default.yaml:1-181](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L181)
+- [policy-default.yaml:1-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L267)
 - [gateway_service.py:222-254](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L222-L254)
 - [policy_engine.py:25-55](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L25-L55)
 
@@ -896,26 +966,27 @@ MW-->>Uvicorn : response with logs/metrics
 **Diagram sources**
 - [main.py:1-9](file://products/platform-gateway/src/platform_gateway/main.py#L1-L9)
 - [app.py:1-44](file://products/platform-gateway/src/platform_gateway/app.py#L1-L44)
-- [router.py:1-31](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L31)
+- [router.py:1-35](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L35)
 
 **Section sources**
 - [main.py:1-9](file://products/platform-gateway/src/platform_gateway/main.py#L1-L9)
 - [app.py:1-44](file://products/platform-gateway/src/platform_gateway/app.py#L1-L44)
 
 ## Dependency Analysis
-**Enhanced** - Enhanced with new model catalog proxy dependencies and improved error handling patterns.
+**Enhanced** - Enhanced with new document repository dependencies and improved error handling patterns.
 
 High-level dependencies:
 - main.py depends on app.py and runtime settings.
 - app.py depends on router, metrics, observability, request context, telemetry, and metadata.
 - api routes depend on gateway_service, config, schemas, and delegation_client.
 - Sessions route depends on gateway_service for session workspace operations and audit_emitter for session lifecycle events.
+- **New**: Documents route depends on gateway_service for document repository operations and audit_emitter for document lifecycle events.
 - Chat confirm route depends on gateway_service for confirm handling and audit_emitter for confirmation_decided events.
 - Policy routes depend on policy_engine and policy_matrix for live permission evaluation.
 - Workspace proxy routes depend on tool_gateway_client and skills_hub_client for inventory discovery.
-- **New**: Models route depends on gateway_service for model catalog proxy and audit_emitter for models_listed events.
+- Model catalog route depends on gateway_service for model catalog proxy and audit_emitter for models_listed events.
 - gateway_service depends on agent_client, delegation_client, token_verifier, and policy_engine.
-- agent_client now includes open_chat_confirm_stream method, list_models method, and enhanced session workspace methods for confirm handling.
+- agent_client now includes document repository methods, session title update method, open_chat_confirm_stream method, list_models method, and enhanced session workspace methods for confirm handling.
 - incident_client depends on httpx and config for incident-service communication.
 - delegation_client depends on httpx, jwt, cryptography, and config.
 - token_verifier depends on jwt and PyJWKClient.
@@ -926,6 +997,7 @@ Main["main.py"] --> App["app.py"]
 App --> Router["api/router.py"]
 Router --> Chat["api/routes/chat.py"]
 Router --> Sessions["api/routes/sessions.py"]
+Router --> Documents["api/routes/documents.py"]
 Router --> Incidents["api/routes/incidents.py"]
 Router --> Policy["api/routes/policy.py"]
 Router --> Tools["api/routes/tools.py"]
@@ -933,6 +1005,7 @@ Router --> Skills["api/routes/skills.py"]
 Router --> Models["api/routes/models.py"]
 Chat --> GwSvc["services/gateway_service.py"]
 Sessions --> GwSvc
+Documents --> GwSvc
 Incidents --> IncClient["services/incident_client.py"]
 Policy --> PolEngine["services/policy_engine.py"]
 Policy --> PolMatrix["services/policy_matrix.py"]
@@ -952,25 +1025,26 @@ App --> Runtime["core/runtime.py"]
 **Diagram sources**
 - [main.py:1-9](file://products/platform-gateway/src/platform_gateway/main.py#L1-L9)
 - [app.py:1-44](file://products/platform-gateway/src/platform_gateway/app.py#L1-L44)
-- [router.py:1-31](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L31)
+- [router.py:1-35](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L35)
 - [chat.py:1-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L187)
 - [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
+- [documents.py:1-171](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L171)
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
 - [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
 - [models.py:1-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L1-L46)
-- [gateway_service.py:1-718](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L718)
+- [gateway_service.py:1-1099](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L1099)
 - [incident_client.py:1-193](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L1-L193)
-- [agent_client.py:1-275](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L275)
+- [agent_client.py:1-439](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L439)
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
 - [token_verifier.py:1-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L1-L99)
-- [policy_engine.py:1-262](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L262)
+- [policy_engine.py:1-405](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L405)
 - [policy_matrix.py:1-62](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L62)
 - [tool_gateway_client.py:1-76](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py#L1-L76)
 - [skills_hub_client.py:1-79](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L1-L79)
 - [audit_emitter.py:1-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L1-L99)
-- [policy-default.yaml:1-181](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L181)
+- [policy-default.yaml:1-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L267)
 - [config.py:1-117](file://products/platform-gateway/src/platform_gateway/core/config.py#L1-L117)
 - [runtime.py:1-30](file://products/platform-gateway/src/platform_gateway/core/runtime.py#L1-L30)
 
@@ -978,7 +1052,7 @@ App --> Runtime["core/runtime.py"]
 - [README.md:1-46](file://products/platform-gateway/README.md#L1-L46)
 
 ## Performance Considerations
-**Enhanced** - Enhanced with new model catalog proxy performance considerations and improved error handling efficiency.
+**Enhanced** - Enhanced with new document repository performance considerations and improved error handling efficiency.
 
 - JWKS client caching reduces repeated key fetches; lifespan controlled by environment.
 - Delegated token per-user cache avoids frequent broker exchanges; refresh fraction triggers early renewal.
@@ -995,16 +1069,21 @@ App --> Runtime["core/runtime.py"]
 - Workspace proxy endpoints use configurable timeouts (10 seconds) to prevent resource exhaustion.
 - Query parameter validation occurs before upstream calls to avoid unnecessary network overhead.
 - All proxy clients implement consistent error mapping to minimize retry storms.
-- **Enhanced**: Model catalog proxy uses efficient HTTP client with 10-second timeout for credential-gated discovery.
-- **Enhanced**: Model catalog operations benefit from deny-by-default policy enforcement to minimize unauthorized access attempts.
-- **Enhanced**: Chat streaming with robust state tracking adds minimal overhead through efficient frame parsing and state updates.
-- **Enhanced**: Fallback model attribution mechanism operates only when streams close without message_end frames, minimizing impact on normal flows.
-- **Enhanced**: Helper functions (_frame_type, _frame_session_id) provide best-effort parsing that gracefully handles malformed frames.
+- Model catalog proxy uses efficient HTTP client with 10-second timeout for credential-gated discovery.
+- Model catalog operations benefit from deny-by-default policy enforcement to minimize unauthorized access attempts.
+- Chat streaming with robust state tracking adds minimal overhead through efficient frame parsing and state updates.
+- Fallback model attribution mechanism operates only when streams close without message_end frames, minimizing impact on normal flows.
+- Helper functions (_frame_type, _frame_session_id) provide best-effort parsing that gracefully handles malformed frames.
+- **New**: Document repository operations use efficient HTTP client with 10-second timeouts for document operations.
+- **New**: Document listing operations benefit from server-side visibility matrix enforcement to minimize unnecessary data transfer.
+- **New**: Foreign-session coverage computation is performed once per document create request to minimize overhead.
+- **New**: Document operations benefit from deny-by-default policy enforcement to minimize unauthorized access attempts.
+- **New**: Session title update operations have minimal overhead due to simple ownership verification.
 
 [No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
-**Enhanced** - Enhanced with new model catalog proxy and enhanced chat streaming troubleshooting with specific guidance on error handling patterns.
+**Enhanced** - Enhanced with new document repository and session title update troubleshooting with specific guidance on error handling patterns.
 
 Common issues and diagnostics:
 - Authentication failures:
@@ -1014,7 +1093,7 @@ Common issues and diagnostics:
   - Actions not matching any allow rule are denied by default; check role membership and action names.
   - Session workspace actions require appropriate roles (session:list, session:delete mirror session:create grants).
   - `chat:confirm` action requires operator, developer, approver, or platform admin roles.
-  - New protected actions require appropriate roles (policy:read for observers, tools:list for operators/developers, skills:read for observers, **models:list for operators and observers**).
+  - New protected actions require appropriate roles (policy:read for observers, tools:list for operators/developers, skills:read for observers, models:list for operators and observers, **documents:create and documents:read for platform-admin, approver, and operator roles, session:update mirrors session lifecycle grants**).
 - Delegation failures:
   - If workload token is unavailable, falls back to static credentials; failures are logged and non-fatal, allowing tool-less operation.
   - Workspace proxy endpoints require successful delegation chains; missing delegated tokens result in 503 errors.
@@ -1026,28 +1105,31 @@ Common issues and diagnostics:
   - Transport failures and upstream 5xx errors map to 502 with appropriate detail messages.
   - `list_sessions()` function specifically implements consistent error handling with "agent service session list failed" detail for 502 errors, matching the behavior of get/delete proxies.
   - Server-side scoping ensures callers can only access their own sessions.
-  - Consistent error handling across all session operations (create, list, read, delete).
-- **Enhanced**: Model catalog proxy issues:
-  - Upstream 4xx errors (unauthorized model access) pass through unchanged for better error visibility.
-  - Transport failures and upstream 5xx errors map to 502 with "agent service model list failed" detail.
-  - Credential-gated discovery ensures only authorized users can view available models.
+  - Consistent error handling across all session operations (create, list, read, delete, update title).
+  - **New**: Session title update operations follow same error handling pattern with 4xx passthrough for blank/overlong titles and foreign/unknown sessions.
+- **New**: Document repository endpoint issues:
+  - Upstream 4xx errors (validation failures, foreign-session denial, unknown documents) pass through unchanged for better error visibility.
+  - Transport failures and upstream 5xx errors map to 502 with "agent service document [operation] failed" detail.
+  - Foreign-session coverage computation failures result in "denied" coverage being forwarded to agent service.
   - Consistent error handling pattern matches other proxy endpoints (4xx passthrough, 5xx mapping to 502).
+  - Document operations require platform-admin, approver, or operator roles for create/read actions.
 - **Enhanced**: Streaming chat error handling:
   - `open_chat_stream` method performs eager upstream status checking before any SSE frames are yielded.
   - Upstream 4xx errors (unknown sessions, parked conflicts, unknown models) pass through unchanged with proper HTTP status codes.
   - Upstream 5xx errors and transport failures map to 502 Bad Gateway with descriptive error messages.
   - Connection cleanup occurs in finally blocks to prevent resource leaks.
   - SSE stream filtering ensures only data frames are forwarded to clients.
-  - **Enhanced**: Model selection passthrough validates against credential-gated catalog (422 on invalid models).
-  - **Enhanced**: Model attribution in audit trails captured from message_end frames for complete operational visibility.
-  - **Enhanced**: Robust state tracking (saw_delta, parked, last_frame_session) ensures proper audit coverage even for streams closing without message_end frames.
-  - **Enhanced**: Helper functions (_frame_type, _frame_session_id) provide graceful handling of malformed SSE frames.
-  - **Enhanced**: Fallback model attribution mechanism ensures complete audit coverage per SPEC-024 requirements.
+  - Model selection passthrough validates against credential-gated catalog (422 on invalid models).
+  - Model attribution in audit trails captured from message_end frames for complete operational visibility.
+  - Robust state tracking (saw_delta, parked, last_frame_session) ensures proper audit coverage even for streams closing without message_end frames.
+  - Helper functions (_frame_type, _frame_session_id) provide graceful handling of malformed SSE frames.
+  - Fallback model attribution mechanism ensures complete audit coverage per SPEC-024 requirements.
 - Audit trail issues:
   - `session_created` and `session_deleted` events are emitted for session lifecycle operations.
   - `confirmation_decided` events are only emitted when confirmation_result frames are received from upstream.
-  - **Enhanced**: `chat_completed` events now include serving model attribution from message_end frames with fallback support.
-  - **Enhanced**: `models_listed` events capture model count and user context for catalog operations.
+  - `chat_completed` events now include serving model attribution from message_end frames with fallback support.
+  - `models_listed` events capture model count and user context for catalog operations.
+  - **New**: Document repository audit events (`document_created`, `document_published`, `document_deleted`) include foreign coverage information and user context.
   - Audit service connectivity failures are non-fatal and don't affect session or confirm operations.
   - Event emission uses fire-and-forget pattern to avoid blocking operations.
 - Policy matrix endpoint issues:
@@ -1073,15 +1155,20 @@ Operational tips:
 - Validate session workspace policy rules and role assignments for session management workflows.
 - Monitor `list_sessions()` function error rates and verify proper 4xx passthrough behavior matching get/delete proxies.
 - Monitor streaming chat error rates and verify proper status code mapping for upstream errors.
-- **Enhanced**: Monitor model catalog proxy performance and models_listed audit event volume.
-- **Enhanced**: Check model catalog policy rules and role assignments for model discovery workflows.
-- **Enhanced**: Monitor chat streaming error rates and verify proper model selection passthrough behavior.
-- **Enhanced**: Validate chat streaming model attribution in audit trails for complete operational visibility.
-- **Enhanced**: Monitor streaming chat state tracking (saw_delta, parked flags) for proper stream completion detection.
-- **Enhanced**: Check fallback model attribution events for streams closing without message_end frames.
-- **Enhanced**: Monitor chat confirm endpoint performance and confirmation_decided audit event volume.
-- **Enhanced**: Check audit service connectivity and event ingestion success rates.
-- **Enhanced**: Validate chat:confirm policy rules and role assignments for HITL workflows.
+- Monitor model catalog proxy performance and models_listed audit event volume.
+- Check model catalog policy rules and role assignments for model discovery workflows.
+- Monitor chat streaming error rates and verify proper model selection passthrough behavior.
+- Validate chat streaming model attribution in audit trails for complete operational visibility.
+- Monitor streaming chat state tracking (saw_delta, parked flags) for proper stream completion detection.
+- Check fallback model attribution events for streams closing without message_end frames.
+- Monitor chat confirm endpoint performance and confirmation_decided audit event volume.
+- Check audit service connectivity and event ingestion success rates.
+- Validate chat:confirm policy rules and role assignments for HITL workflows.
+- **New**: Monitor document repository endpoint performance and document lifecycle audit event volume.
+- **New**: Check document repository policy rules and role assignments for document operations.
+- **New**: Monitor foreign-session coverage computation and X-Foreign-Coverage header values in document operations.
+- **New**: Validate document repository upstream connectivity and error handling patterns.
+- **New**: Monitor session title update operations and verify proper ownership enforcement.
 
 **Section sources**
 - [gateway_service.py:159-254](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L159-L254)
@@ -1094,22 +1181,23 @@ Operational tips:
 - [skills.py:30-31](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L30-L31)
 - [models.py:36-44](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L36-L44)
 - [sessions.py:29-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L29-L154)
-- [gateway_service.py:289-387](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L387)
+- [documents.py:29-171](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L29-L171)
+- [gateway_service.py:289-627](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L627)
 - [chat.py:146-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L146-L187)
 - [gateway_service.py:503-563](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L503-L563)
 - [audit_emitter.py:68-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L68-L99)
 - [agent_client.py:137-198](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L137-L198)
 - [gateway_service.py:592-624](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L592-L624)
-- [gateway_service.py:485-524](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L485-L524)
+- [gateway_service.py:652-718](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L652-L718)
 - [gateway_service.py:616-641](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L616-L641)
 - [gateway_service.py:644-681](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L644-L681)
 
 ## Conclusion
-The Platform Gateway Service cleanly separates portal-facing security and control-plane concerns from tool execution capabilities. It enforces strong authentication and authorization, proxies to agent-platform securely with least-privilege delegated tokens, provides unified API access to the incident service with comprehensive policy enforcement and credential management, and now offers transparency through live permission matrix evaluation, workspace inventory discovery, Human-in-the-Loop confirmation bridging with durable audit trails, and credential-gated model catalog discovery. The addition of complete session workspace lifecycle management demonstrates the gateway's extensibility in supporting complex interactive workflows while maintaining consistent security patterns and operational visibility. The session workspace proxy routes implement deny-by-default policy enforcement with proper error handling, server-side scoping to caller's own sessions, and durable audit trail coverage for complete session lifecycle monitoring. These enhancements enable operators to manage sessions with full audit coverage, approve or deny pending tool executions with durable audit trails, discover available models with credential gating, and maintain comprehensive visibility into platform operations while ensuring strict security boundaries and least-privilege access controls.
+The Platform Gateway Service cleanly separates portal-facing security and control-plane concerns from tool execution capabilities. It enforces strong authentication and authorization, proxies to agent-platform securely with least-privilege delegated tokens, provides unified API access to the incident service with comprehensive policy enforcement and credential management, and now offers transparency through live permission matrix evaluation, workspace inventory discovery, Human-in-the-Loop confirmation bridging with durable audit trails, credential-gated model catalog discovery, and operations document repository functionality with trusted foreign-session coverage decisions. The addition of complete session workspace lifecycle management including owner-only session rename demonstrates the gateway's extensibility in supporting complex interactive workflows while maintaining consistent security patterns and operational visibility.
 
 The enhanced streaming architecture represents a significant improvement in error handling and reliability. The renaming of `stream_chat` to `open_chat_stream` reflects the more explicit nature of the function's purpose and its enhanced error propagation capabilities. By eagerly checking upstream status before any SSE frames are yielded, the gateway now properly distinguishes between client errors (4xx) and server errors (5xx), mapping them appropriately to HTTP status codes rather than returning empty streams. This change eliminates the previous issue where upstream errors would only be detected after the response had already been committed, resulting in confusing 200 responses with no content. The improved error handling ensures that clients receive meaningful HTTP status codes that accurately reflect the underlying conditions, making debugging and troubleshooting significantly more straightforward.
 
-The new model catalog proxy functionality extends the gateway's capabilities to provide credential-gated model discovery, enabling operators to view available models while maintaining security boundaries. The per-turn model selection passthrough allows flexible model routing while ensuring fail-closed validation against the credential-gated catalog. The enhanced audit trail coverage with model attribution provides complete operational visibility for streaming chat operations, capturing the serving model in `chat_completed` events for comprehensive auditing and monitoring.
+The new operations document repository functionality extends the gateway's capabilities to provide secure document management with trusted foreign-session coverage decisions. The gateway computes whether users have approval-listing capability and forwards this as a trusted internal header to the agent service, which then applies appropriate metadata-only treatment for foreign sessions. This approach ensures that sensitive session data is never exposed to unauthorized users while still enabling collaborative document creation across session boundaries. The per-turn model selection passthrough allows flexible model routing while ensuring fail-closed validation against the credential-gated catalog. The enhanced audit trail coverage with model attribution provides complete operational visibility for streaming chat operations, capturing the serving model in `chat_completed` events for comprehensive auditing and monitoring.
 
 The enhanced streaming chat audit system introduces robust state tracking and fallback mechanisms that ensure complete audit coverage regardless of how streams terminate. The new helper functions `_frame_type()` and `_frame_session_id()` provide best-effort SSE frame parsing that gracefully handles malformed frames, while the enhanced state tracking variables (`saw_delta`, `parked`, `last_frame_session`) enable sophisticated stream completion detection. The updated `_emit_stream_chat_completed()` function now accepts a `fallback_model` parameter, allowing it to attribute streams that close without message_end frames using the requested model, ensuring compliance with SPEC-024 R-4 requirements for complete audit coverage.
 
@@ -1117,6 +1205,4 @@ The new `open_chat_confirm_stream()` method extends the streaming pattern to con
 
 The enhanced error handling patterns ensure consistent behavior across all proxy endpoints, with proper distinction between client errors (4xx) and server errors (500+) for better debugging and operational clarity. The improved list_sessions() function now matches the error handling posture of get/delete proxies, passing through upstream 4xx errors unchanged instead of incorrectly surfacing them as 502 errors, providing consistent error handling across all session operations.
 
-These enhancements collectively demonstrate the platform's commitment to providing secure, observable, and reliable AI operations infrastructure while maintaining flexibility for evolving requirements and operational needs. The robust streaming audit system ensures that all chat operations are properly attributed and audited, regardless of how they terminate, providing operators with complete visibility into model usage and stream behavior for effective monitoring and troubleshooting.
-
-[No sources needed since this section summarizes without analyzing specific files]
+These enhancements collectively demonstrate the platform's commitment to providing secure, observable, and reliable AI operations infrastructure while maintaining flexibility for evolving requirements and operational needs. The robust streaming audit system ensures that all chat operations are properly attributed and audited, regardless of how they terminate, providing operators with complete visibility into model usage and stream behavior for effective monitoring and troubleshooting. The operations document repository with trusted foreign-session coverage enables secure collaborative documentation while protecting sensitive session data, and the enhanced session workspace management provides comprehensive session lifecycle control with proper ownership enforcement and audit coverage.

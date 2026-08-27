@@ -5,61 +5,65 @@ category: configuration_system
 scope:
     - '**'
 source_files:
-    - products/agent-platform/src/agent_service/runtime_settings.py
-    - products/agent-platform/src/agent_service/core/config.py
     - products/platform-gateway/src/platform_gateway/core/config.py
-    - products/tool-gateway/src/tool_gateway/core/config.py
-    - products/identity-broker/src/identity_service/core/config.py
     - products/audit-service/src/audit_service/core/config.py
-    - products/skills-hub/src/skills_hub/core/config.py
+    - products/execution-runtime/src/execution_runtime/core/config.py
     - products/incident-service/src/incident_service/core/config.py
+    - products/skills-hub/src/skills_hub/core/config.py
+    - products/tool-gateway/src/tool_gateway/core/config.py
+    - products/agent-platform/src/agent_service/runtime_settings.py
     - docs/guides/configuration-reference.md
     - shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env
-    - shared/shared-contracts/policies/policy-default.yaml
 ---
-
-# Configuration System
 
 ## What system/approach is used
 
-Each service in the platform implements its own configuration layer using **Python `dataclasses` decorated as frozen**, loaded exclusively from **environment variables** via `os.getenv`. There is no YAML/JSON config file loading at runtime (policy bundles are separate). A module-level `@lru_cache(maxsize=1)`-wrapped `get_settings()` function provides a singleton settings object per process. The agent-platform additionally uses a richer `RuntimeSettings` class in `runtime_settings.py` that parses provider-specific options and performs validation in `__post_init__`.
+Every service in the monorepo implements configuration through a uniform pattern: a `frozen` Python `dataclass` named `<Service>Settings` (e.g. `PlatformGatewaySettings`, `AuditSettings`, `ExecutionSettings`, `IncidentSettings`, `SkillsSettings`, `GatewaySettings`, `RuntimeSettings`) lives under `products/<service>/src/<service>/core/config.py`. Each settings class exposes a `from_env()` classmethod that reads values from environment variables via `os.getenv(...)` and a module-level `@lru_cache(maxsize=1) get_settings()` accessor that consumers call at runtime. There are no YAML/JSON/TOML config files loaded by the services at startup — configuration is purely environment-driven.
 
-Configuration values are injected into pods through Kustomize overlays under `shared/platform-ops/gitops/dev-k8s/base/<service>/runtime-config.env`, while secrets live in per-service `*-runtime-secrets` Kubernetes Secrets provisioned by scripts such as `sync-audit-secrets.sh`, `sync-delegation-secrets.sh`, `sync-skills-secrets.sh`, `sync-incident-secrets.sh`, and `sync-otel-secrets.sh`. A single authoritative cross-service variable map lives in `docs/guides/configuration-reference.md`.
+The agent-service (`agent-platform`) is the most complex, loading LLM provider options (`DashScopeOptions`, `DeepSeekOptions`, `OpenAIOptions`) dynamically based on `AGENTSCOPE_PROVIDER`, plus kernel tuning knobs, HITL bridging, evidence persistence caps, live model discovery, isolated execution worker handoff, and audit emission settings.
+
+Configuration values are injected into pods via Kustomize overlays under `shared/platform-ops/gitops/dev-k8s/base/<service>/runtime-config.env` (non-secret env) and per-service `runtime-secrets.example.env` / generated secrets mounted as Kubernetes Secrets. A single shared `shared/runtime.env` provides cross-cutting values like `OTEL_*` and `IDENTITY_SERVICE_URL`.
 
 ## Key files and packages
 
-- `products/agent-platform/src/agent_service/runtime_settings.py` — full runtime settings for the agent kernel, including LLM provider options, kernel tuning, HITL timeout, evidence caps, and typed boolean/int/float/choice parsers.
-- `products/agent-platform/src/agent_service/core/config.py` — thin `get_settings()` cache returning `RuntimeSettings.from_env()`.
-- `products/platform-gateway/src/platform_gateway/core/config.py` — `PlatformGatewaySettings` dataclass with defaults and `from_env()` mapping `PLATFORM_GATEWAY_*`, `AGENT_SERVICE_URL`, `IDENTITY_*`, audit/incident/skills URLs.
-- `products/tool-gateway/src/tool_gateway/core/config.py` — `GatewaySettings` dataclass covering K8s/Elastic/redaction/connectors/audit/skills/incidents.
-- `products/identity-broker/src/identity_service/core/config.py` — `IdentitySettings` with OIDC/Keycloak knobs, service client registry (`IDENTITY_SERVICE_CLIENTS`), workload identity mappings, and audit integration.
-- `products/audit-service/src/audit_service/core/config.py` — `AuditSettings` with `AUDIT_STORE_BACKEND`, `AUDIT_DB_URL`, `AUDIT_INGEST_CLIENTS`, workload identity, retention/eviction knobs.
-- `products/skills-hub/src/skills_hub/core/config.py` — `SkillsSettings` with JSON-parsed `SKILLS_SOURCES` (source_id/type/path/url/ref), `SKILLS_GIT_TOKENS`, query/workload client registries.
-- `products/incident-service/src/incident_service/core/config.py` — `IncidentSettings` with webhook token, query/workload clients, store backends, connectors, and audit connector.
-- `docs/guides/configuration-reference.md` — definitive cross-service environment variable dependency map, secret contracts, feature activation matrix, and per-service tables.
-- `shared/platform-ops/gitops/dev-k8s/base/<service>/runtime-config.env` — per-service ConfigMap env vars.
-- `shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env` — shared OTLP endpoint and identity broker URL.
-- `shared/shared-contracts/policies/policy-default.yaml` + `products/*/policies/policy-default.yaml` — policy bundle (separate concern, consumed via `*_POLICY_PATH`).
+- `products/*/src/*/core/config.py` — one frozen dataclass + `from_env()` + cached `get_settings()` per service
+- `products/agent-platform/src/agent_service/runtime_settings.py` — agent-service's richer settings with provider option parsing and validation
+- `docs/guides/configuration-reference.md` — authoritative cross-service environment variable map, dependency chains, secret contracts, and per-service tables
+- `shared/platform-ops/gitops/dev-k8s/base/<service>/runtime-config.env` — non-secret defaults for each pod
+- `shared/platform-ops/gitops/dev-k8s/base/<service>/runtime-secrets.example.env` — secret key names (values provisioned by scripts)
+- `shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env` — shared env across all pods
+- `shared/platform-ops/gitops/*.sh` — secret provisioning scripts (`sync-audit-secrets.sh`, `sync-delegation-secrets.sh`, `sync-skills-secrets.sh`, `sync-incident-secrets.sh`, `sync-execution-signing-secret.sh`, `sync-execution-handoff-secret.sh`, `sync-otel-secrets.sh`)
+- `shared/shared-contracts/policies/policy-default.yaml` — canonical policy bundle consumed by gateway services via `*_POLICY_PATH`
 
 ## Architecture and conventions
 
-1. **Per-service frozen dataclass**: Every service defines a single frozen `*Settings` dataclass whose fields are the configuration surface. Defaults encode sensible dev behavior; production overrides come from env.
-2. **Env-only loading**: `from_env()` reads every field via `os.getenv(key, default)`. Complex types (booleans, tuples, JSON lists/maps) are parsed inside dedicated helper functions (`parse_ingest_clients`, `parse_workload_clients`, `parse_sources`, `parse_query_clients`, `_parse_service_clients`, etc.).
-3. **Singleton access**: Each module exposes `get_settings()` cached with `functools.lru_cache(maxsize=1)` so callers import `settings = get_settings()` once at startup.
-4. **Typed parsing helpers** (agent-platform): `_optional_str`, `_optional_int`, `_optional_float`, `_optional_bool`, `_optional_choice` enforce value domains and raise `ValueError` on invalid input, causing startup failure.
-5. **Validation in `__post_init__` or `from_env`**: Invalid configuration fails fast during process start rather than at first use. Examples: `max_iters >= 1`, `context_trigger_ratio ∈ (0, 0.9)`, IANA timezone validation, provider must be one of `dashscope|deepseek|openai`, duplicate `source_id` detection, path traversal rejection in git source paths.
-6. **Cross-service secret contracts**: Many features require matching pairs across services (e.g., `PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET` ↔ `IDENTITY_SERVICE_CLIENTS`; `*_AUDIT_CLIENT_SECRET` ↔ `AUDIT_INGEST_CLIENTS`; `GATEWAY_SKILLS_CLIENT_SECRET` ↔ `SKILLS_QUERY_CLIENTS`; `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET` ↔ `INCIDENT_QUERY_CLIENTS`). These contracts are documented in `configuration-reference.md` and provisioned together by `make deploy` calling the corresponding `sync-*-secrets.sh` script.
-7. **Feature toggles via env**: Features are enabled by setting specific env vars to truthy values (`PLATFORM_GATEWAY_REQUIRE_AUTH=true`, `GATEWAY_K8S_ENABLED=true`, `GATEWAY_MUTATING_TOOLS_ENABLED=true`, `GATEWAY_ELASTIC_ENABLED=true`, `OTEL_ENABLED=true`). Unset optional URLs disable the corresponding capability (e.g., unset `PLATFORM_GATEWAY_TOOL_GATEWAY_URL` makes the portal Tools route return 503).
-8. **Policy bundles are external**: Policy enforcement reads a YAML file at `*_POLICY_PATH` (default `/etc/luban/policy/policy.yaml`); the canonical copy is `shared/shared-contracts/policies/policy-default.yaml` and is synced to consumer locations via `make sync-policy`.
-9. **Runtime profiles**: Agent LLM providers are selected via `AGENTSCOPE_PROVIDER` plus profile ConfigMaps under `shared/platform-ops/gitops/runtime-profiles/`; only one profile is active at a time, switched via `select-runtime-profile.sh`.
+**Per-service frozen settings objects.** Each service defines its own `Settings` dataclass with sensible defaults. Values are parsed from environment variables in `from_env()`, then validated in `__post_init__` (e.g. `ExecutionSettings` rejects unknown store backends or missing Postgres URL; `RuntimeSettings` validates kernel tuning bounds, IANA timezone, provider/options type matching). Unknown backend types fail startup rather than silently defaulting.
+
+**Cached singleton access.** Every settings module exports `@lru_cache(maxsize=1) get_settings()` so callers (FastAPI routes, app startup) import once and reuse the same instance. This avoids re-parsing env vars on every request.
+
+**Secrets vs config separation.** Non-sensitive configuration goes in `runtime-config.env` ConfigMaps; sensitive values go in per-service `*-runtime-secrets` Kubernetes Secrets. The reference doc documents which keys live where and how they are provisioned by `make deploy`-invoked sync scripts.
+
+**Cross-service secret contracts.** Configuration is not just per-service — many features require matching pairs of secrets across services:
+- Token delegation: `PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET` ↔ `IDENTITY_SERVICE_CLIENTS` entry
+- Audit ingestion: each emitter's `*_AUDIT_CLIENT_SECRET` ↔ `AUDIT_INGEST_CLIENTS` registry
+- Skills query: `GATEWAY_SKILLS_CLIENT_SECRET` ↔ `SKILLS_QUERY_CLIENTS`; portal uses `PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET` ↔ same registry
+- Incident query: `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET` / `GATEWAY_INCIDENTS_CLIENT_SECRET` ↔ `INCIDENT_QUERY_CLIENTS`
+- Execution signing/handoff: `AGENT_EXECUTION_SIGNING_KEY` ↔ `EXECUTION_SIGNING_KEY`; `AGENT_EXECUTION_HANDOFF_TOKEN` ↔ `EXECUTION_HANDOFF_TOKEN`
+
+**Feature flags via env booleans.** Boolean toggles accept `true/false/yes/no/1/0/on/off` after `.strip().lower()`. Features are disabled by default unless explicitly enabled (e.g. `GATEWAY_MUTATING_TOOLS_ENABLED=false`, `GATEWAY_ELASTIC_ENABLED=false`, `AGENTSCOPE_KERNEL_TRACING=False`).
+
+**Fail-closed vs degrade-to-log.** Missing optional secrets never crash the process — they cause feature-specific failure modes: unset `*_AUDIT_SERVICE_URL` degrades to log-only auditing; unset `TOOL_GATEWAY_URL` means tool tools are unregistered; unset `AGENT_EXECUTION_WORKER_URL` fails mutating resumes with an audited `worker_unavailable` rejection; unset `AGENT_EXECUTION_SIGNING_KEY` fails with `signing_unavailable`. Only required configuration (e.g. unknown store backend, invalid numeric bounds) raises during `__post_init__`.
+
+**Policy-as-code.** Policy bundles are YAML files (`policy-default.yaml`) maintained as a single source under `shared/shared-contracts/policies/` and synced to consumer locations. Consumers load them via `*_POLICY_PATH` env var (default `/etc/luban/policy/policy.yaml`). Validation is enforced via `make validate-policy` against a JSON schema.
 
 ## Conventions and constraints
 
-- **Every setting has a default**: Even security-sensitive fields like `*_CLIENT_SECRET` default to empty string; missing secrets simply disable the related feature rather than crashing.
-- **Boolean env parsing is uniform**: Values are accepted as `"1" | "true" | "yes" | "on"` (case-insensitive) and converted to `bool`; all other strings are treated as false.
-- **Comma-separated list parsing**: Multi-value configs (`INGEST_CLIENTS`, `WORKLOAD_CLIENTS`, `QUERY_CLIENTS`) use `key=value,key=value,...` format parsed by splitting on commas then `=`/`:`.
-- **JSON multi-value configs**: `SKILLS_SOURCES` and `SKILLS_GIT_TOKENS` are JSON arrays/objects parsed at load time with strict validation (unknown types, duplicates, malformed IDs, path traversal).
-- **Store backends are chosen via env**: `*_STORE_BACKEND` accepts `memory` or `postgres`; unknown values fail startup (documented for session/state stores).
-- **Secrets never live in Git**: All secrets are provisioned as Kubernetes Secrets via `sync-*` scripts; `.env` examples are committed but actual values are generated or supplied at deploy time.
-- **Cross-service dependencies are explicit**: The configuration reference documents every inter-service chain (token delegation, identity verification, tool relay, mutating action approval, audit ingestion, skills retrieval, incident intake) with exact variable names and required matches.
-- **Fail-closed by default**: Optional integrations (audit, skills, incidents, elastic, k8s tools) are disabled unless their enabling env var is set to a truthy value; unset URLs cause routes to fail closed (503) rather than proxying to nowhere.
+- **One settings file per service** under `core/config.py` with a frozen dataclass, `from_env()`, and cached `get_settings()` — observed consistently across all seven services.
+- **Environment variable naming**: service-scoped prefixes (`AGENTSCOPE_*`, `PLATFORM_GATEWAY_*`, `GATEWAY_*`, `AUDIT_*`, `SKILLS_*`, `INCIDENT_*`, `EXECUTION_*`) keep variables namespace-safe across the cluster.
+- **Store backends are enumerated**: `memory`/`postgres` (sometimes `redis` for sessions) are the only accepted values; unknown values raise at startup.
+- **Comma-separated lists use `key=value,key=value` tuples** parsed by helper functions (`parse_ingest_clients`, `parse_query_clients`, `parse_workload_clients`, `parse_connectors`), producing immutable tuples of typed sub-dataclasses.
+- **Complex multi-value configs use JSON env vars** (e.g. `SKILLS_SOURCES` as a JSON list of `{source_id, type, url, ref, path}` entries; `SKILLS_GIT_TOKENS` as a JSON map `source_id→token`). Parsing failures raise `SettingsError` at startup.
+- **Provider options are dynamic**: `RuntimeSettings._provider_options_from_env` selects the correct options dataclass based on `AGENTSCOPE_PROVIDER`, validating the choice against `SUPPORTED_RUNTIME_PROVIDERS = ("dashscope", "deepseek", "openai", "luban")`.
+- **Defaults mirror production posture**: booleans default to secure/disabled (`require_auth=true`, `mutating_tools_enabled=false`, `redaction_enabled=true`, `model_discovery_enabled=True`); opt-in features must be explicitly enabled.
+- **Secret provisioning is script-gated**: cross-service secrets are created by `sync-*.sh` scripts invoked from `make deploy`; exporting `SKIP_*_SECRETS=true` opts out of specific provisioning steps.
+- **Policy files must stay byte-identical** across consumer locations (`tool-gateway`, `platform-gateway`, dev-k8s overlay) — enforced by the sync workflow documented in the configuration reference.

@@ -35,6 +35,9 @@
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
+- [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
+- [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
+- [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
 - [models.py](file://products/platform-gateway/src/platform_gateway/api/routes/models.py)
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
@@ -51,9 +54,13 @@
 - [test_execution_worker_client.py](file://products/agent-platform/tests/test_execution_worker_client.py)
 - [test_execution_records.py](file://products/agent-platform/tests/test_execution_records.py)
 - [test_runtime_settings.py](file://products/agent-platform/tests/test_runtime_settings.py)
+- [test_operation_documents.py](file://products/agent-platform/tests/test_operation_documents.py)
+- [test_shift_summary.py](file://products/agent-platform/tests/test_shift_summary.py)
+- [test_document_prose.py](file://products/agent-platform/tests/test_document_prose.py)
 - [spec.md](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md)
 - [decision-sync-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-26-decision-sync-arrival-polish.md)
 - [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
+- [SPEC-039-operations-document-repository/spec.md](file://docs/specs/SPEC-039-operations-document-repository/spec.md)
 - [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
 - [pyproject.toml](file://products/agent-platform/pyproject.toml)
@@ -63,13 +70,14 @@
 
 ## Update Summary
 **Changes Made**
-- Added execution-runtime service integration through new execution_worker_client with fail-closed behavior and blocking handoff for approved actions
-- Updated runtime kernel to integrate with isolated execution worker for secure mutating tool execution
-- Enhanced gateway tools to route verified mutating calls through execution worker instead of in-process execution
-- Added execution record persistence for signed execution request/receipt lifecycle tracking
-- Updated runtime settings with execution worker configuration (URL, handoff token, timeout)
-- Integrated execution-runtime service endpoint for authenticated handoff with signature verification
-- Added comprehensive error handling for worker unavailability, timeouts, and transport failures
+- Added comprehensive document repository functionality with operation_documents.py service for persistent typed documents
+- Implemented shift_summary.py for deterministic digest assembly from multiple durable stores with role-based coverage
+- Added document_prose.py for optional AI-generated summaries with fail-soft behavior and prompt safety guarantees
+- Integrated new v2 API routes for document CRUD operations (POST /documents, GET /documents, GET /documents/{id}, POST /documents/{id}/publish, DELETE /documents/{id})
+- Enhanced session management with document provenance tracking and audit trail integration
+- Added support for draft/published document states with owner-only visibility and team-wide published access
+- Implemented bounded retention policies with automatic cleanup and capacity limits per owner
+- Added dual backend support (in-memory and Postgres) with graceful fallback mechanisms
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -77,30 +85,34 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Execution Worker Integration](#execution-worker-integration)
-7. [Multi-Session Operator Workspace](#multi-session-operator-workspace)
-8. [Session Store Enhancements](#session-store-enhancements)
-9. [Enhanced Transcript Reconstruction](#enhanced-transcript-reconstruction)
-10. [HITL Confirmation Registry Integration](#hitl-confirmation-registry-integration)
-11. [Enhanced Streaming Architecture](#enhanced-streaming-architecture)
-12. [Voice Readiness Support](#voice-readiness-support)
-13. [Per-Request Trace Queues](#per-request-trace-queues)
-14. [Delegated Token Management](#delegated-token-management)
-15. [Evidence Store Service](#evidence-store-service)
-16. [Model Catalog Service](#model-catalog-service)
-17. [Live Model Discovery Service](#live-model-discovery-service)
-18. [Multi-Model Runtime Capability](#multi-model-runtime-capability)
-19. [Decision Sync Robustness](#decision-sync-robustness)
-20. [Dependency Analysis](#dependency-analysis)
-21. [Performance Considerations](#performance-considerations)
-22. [Troubleshooting Guide](#troubleshooting-guide)
-23. [Conclusion](#conclusion)
-24. [Appendices](#appendices)
+6. [Document Repository Service](#document-repository-service)
+7. [Shift Summary Digest Assembly](#shift-summary-digest-assembly)
+8. [Optional Prose Generation](#optional-prose-generation)
+9. [Document API Endpoints](#document-api-endpoints)
+10. [Execution Worker Integration](#execution-worker-integration)
+11. [Multi-Session Operator Workspace](#multi-session-operator-workspace)
+12. [Session Store Enhancements](#session-store-enhancements)
+13. [Enhanced Transcript Reconstruction](#enhanced-transcript-reconstruction)
+14. [HITL Confirmation Registry Integration](#hitl-confirmation-registry-integration)
+15. [Enhanced Streaming Architecture](#enhanced-streaming-architecture)
+16. [Voice Readiness Support](#voice-readiness-support)
+17. [Per-Request Trace Queues](#per-request-trace-queues)
+18. [Delegated Token Management](#delegated-token-management)
+19. [Evidence Store Service](#evidence-store-service)
+20. [Model Catalog Service](#model-catalog-service)
+21. [Live Model Discovery Service](#live-model-discovery-service)
+22. [Multi-Model Runtime Capability](#multi-model-runtime-capability)
+23. [Decision Sync Robustness](#decision-sync-robustness)
+24. [Dependency Analysis](#dependency-analysis)
+25. [Performance Considerations](#performance-considerations)
+26. [Troubleshooting Guide](#troubleshooting-guide)
+27. [Conclusion](#conclusion)
+28. [Appendices](#appendices)
 
 ## Introduction
 The Agent Platform Service is the core orchestration engine of the Luban AIOps Platform. It provides a runtime kernel for agent execution, a provider registry for multi-model backends (OpenAI, DashScope, DeepSeek, and Luban), and robust session management with durable storage. The service exposes REST APIs for agent interactions, streaming responses, and configuration management, enabling scalable and observable AI operations across diverse model providers.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now integrates with the execution-runtime service through a new execution_worker_client that implements fail-closed behavior and blocking handoff for approved actions, providing isolated execution of mutating tools with signature verification and receipt tracking.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.**
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries, and role-based access controls.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.**
 
 ## Project Structure
 The Agent Platform Service is implemented as a Python FastAPI application organized by feature layers:
@@ -112,7 +124,10 @@ The Agent Platform Service is implemented as a Python FastAPI application organi
 - Evidence store service with dual backend support
 - Model catalog service with live discovery capabilities
 - Background task management for model discovery
-- **Execution worker client for isolated tool execution with fail-closed behavior**
+- **Document repository service with persistent typed documents and role-based access**
+- **Shift summary digest assembly from multiple durable stores**
+- **Optional prose generation with fail-soft behavior and prompt safety**
+- Execution worker client for isolated tool execution with fail-closed behavior
 - Execution record persistence for signed execution lifecycle tracking
 - Tools and integrations
 - Core cross-cutting concerns (configuration, observability, metrics, telemetry, request context)
@@ -148,6 +163,11 @@ sess_svc["services/session_service.py"]
 sess_store["services/session_store.py"]
 sess_transcript["services/session_transcript.py"]
 hitl_reg["services/hitl_confirmations.py"]
+end
+subgraph "Documents"
+op_docs["services/operation_documents.py"]
+shift_sum["services/shift_summary.py"]
+doc_prose["services/document_prose.py"]
 end
 subgraph "Execution"
 exec_worker["services/execution_worker_client.py"]
@@ -197,6 +217,9 @@ sess_svc --> sess_store
 sess_svc --> sess_transcript
 routes_v2 --> hitl_reg
 routes_v2 --> confirm_store
+routes_v2 --> op_docs
+routes_v2 --> shift_sum
+routes_v2 --> doc_prose
 kernel --> gw_tools
 kernel --> ev_store
 kernel --> model_cat
@@ -210,6 +233,9 @@ model_cat --> metrics
 model_disc --> metrics
 confirm_store --> metrics
 exec_records --> metrics
+op_docs --> metrics
+shift_sum --> metrics
+doc_prose --> metrics
 app --> metrics
 app --> obs
 app --> tel
@@ -245,6 +271,9 @@ settings --> env
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
+- [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
+- [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
+- [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
@@ -260,6 +289,9 @@ settings --> env
 - Runtime Kernel: Orchestrates agent lifecycle, conversation state, tool invocation, and provider dispatch with enhanced AgentScope 2.x toolkit registration, anti-hallucination guards, and model normalization support.
 - Provider Registry: Discovers and manages model providers (OpenAI, DashScope, DeepSeek, Luban) with pluggable interfaces using new AgentScope 2.x model construction patterns.
 - Session Management: Persists and restores conversations with durable storage, multi-session workspace support, and concurrency-safe access with model pinning.
+- **Document Repository**: Provides persistent storage for typed operation documents with draft/published states, owner-only visibility, and team-wide published access.
+- **Shift Summary Assembly**: Builds deterministic digests from multiple durable stores with role-based coverage and provenance tracking.
+- **Optional Prose Generation**: Generates AI-powered narratives from digests with fail-soft behavior and prompt safety guarantees.
 - **Execution Worker Client**: Provides isolated execution of approved mutating tools through the execution-runtime service with fail-closed behavior, signature verification, and receipt tracking.
 - **Execution Record Store**: Persists signed execution request/receipt lifecycle with durable storage and first-write-wins semantics for late arrivals.
 - Enhanced Confirmation Records: Provides persistent storage for HITL confirmation lifecycle with turn_index field support, idempotent resolution, startup sweep scoping, and cross-replica consistency guarantees.
@@ -267,13 +299,15 @@ settings --> env
 - Model Catalog: Manages credential-gated model discovery with multi-provider support, legacy alias resolution, and public schema compliance.
 - Live Model Discovery: Implements background task management with periodic refresh cycles, provider filtering, and atomic catalog updates.
 - **Multi-Model Runtime**: Provides per-turn model selection with session-based pinning and sophisticated resolution hierarchy.
-- API Layer: Exposes REST endpoints for chat, sessions, streaming events, model discovery, and health checks with v3 streaming protocol support.
+- API Layer: Exposes REST endpoints for chat, sessions, streaming events, model discovery, documents, and health checks with v3 streaming protocol support.
 - Cross-Cutting: Configuration, environment, metrics, observability, telemetry, and request-scoped context.
 
 Key responsibilities:
 - Lifecycle: Initialize, start, run, and shutdown agents safely with AgentScope 2.x compatibility.
 - Conversation: Maintain message history, context, and state per session with workspace organization.
 - Evidence Capture: Persist tool_call and tool_result frames with size caps and automatic eviction.
+- **Document Creation**: Generate typed operation documents with deterministic digests and optional prose summaries.
+- **Role-Based Access**: Enforce owner-only draft visibility and team-wide published document access.
 - **Isolated Execution**: Route approved mutating tool calls to execution-runtime service with signature verification and receipt tracking.
 - **Enhanced Confirmation Record Management**: Persist parked confirmations with turn_index anchoring, idempotent resolution, startup sweep scoping, and cross-replica consistency.
 - Model Resolution: Normalize model IDs including legacy provider name aliases to concrete model entries.
@@ -292,13 +326,16 @@ Key responsibilities:
 - HITL Integration: Support human-in-the-loop workflows with parked confirmation management and durable state.
 - Observability: Emit structured logs, metrics, and traces for each operation with per-request audit trails.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service integrates with the execution-runtime service through a new execution_worker_client that provides isolated execution of approved mutating tools with fail-closed behavior, signature verification, and receipt tracking. The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.**
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries, and role-based access controls with draft/published states.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.**
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
+- [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
+- [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
+- [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
@@ -318,6 +355,9 @@ The service follows a layered architecture with enhanced security and anti-hallu
 - Providers implement standardized interfaces to communicate with external model APIs using new model construction patterns.
 - Session service persists state using a configurable store with workspace bookkeeping and transcript extraction.
 - Evidence store provides persistent storage for tool execution evidence with dual backend support and size-capped retention.
+- **Document repository provides persistent storage for typed operation documents with role-based access controls and draft/published states.**
+- **Shift summary assembly builds deterministic digests from multiple durable stores with provenance tracking and role-based coverage.**
+- **Optional prose generation creates AI-powered narratives from digests with fail-soft behavior and prompt safety guarantees.**
 - **Execution worker client provides isolated execution of approved mutating tools through the execution-runtime service with fail-closed behavior and signature verification.**
 - **Execution record store persists signed execution request/receipt lifecycle with durable storage and first-write-wins semantics.**
 - Enhanced confirmation record store provides durable HITL confirmation lifecycle management with turn_index field support, idempotent resolution, and cross-replica consistency.
@@ -334,6 +374,9 @@ participant Gateway as "Platform Gateway"
 participant API as "FastAPI Routes"
 participant Kernel as "RuntimeKernel"
 participant Sess as "SessionService"
+participant DocStore as "OperationDocumentStore"
+participant ShiftSum as "ShiftSummary"
+participant DocProse as "DocumentProse"
 participant ExecWorker as "ExecutionWorkerClient"
 participant ExecRuntime as "ExecutionRuntime"
 participant ConfirmStore as "ConfirmationRecordStore"
@@ -346,44 +389,30 @@ participant Tools as "GatewayTools"
 participant Transcript as "TranscriptExtractor"
 participant HITL as "ConfirmationRegistry"
 participant Trace as "TraceQueue"
-Note over Client,HITL : Multi-Model Chat with Isolated Execution
-Client->>Gateway : POST /api/v1/chat {message, model, input_modality}
-Gateway->>API : Forward with model and input_modality metadata
-API->>Sess : ensure_session(sessionId, user_id)
-API->>API : _resolve_model(requested, pinned)
-alt Explicit model requested
-API->>ModelCat : validate model_id exists
-ModelCat-->>API : model entry or 422 error
-else Pinned model valid
-API->>ModelCat : get(pinned)
-ModelCat-->>API : pinned model or None
-else Fallback to default
-API->>ModelCat : default_entry()
-ModelCat-->>API : default model
+Note over Client,HITL : Document Creation with Shift Summary
+Client->>Gateway : POST /api/v2/documents {type, sessions, label}
+Gateway->>API : Forward with authorization headers
+API->>ShiftSum : build_digest(user_id, session_ids, can_view_foreign)
+ShiftSum->>Sess : load sessions and extract metadata
+ShiftSum->>EvStore : load evidence turns
+ShiftSum->>ConfirmStore : load confirmation records
+ShiftSum->>ExecRecords : load execution records
+ShiftSum-->>API : digest + provenance
+alt include_prose = true
+API->>DocProse : generate_prose(kernel, type, digest)
+DocProse->>Kernel : _build_model(None)
+Kernel-->>DocProse : model instance
+DocProse-->>API : prose + status
+else include_prose = false
+API-->>API : prose_status = not_requested
 end
-API->>Sess : pin_session_model(sessionId, resolved)
-API->>Sess : mark_session_turn(sessionId, message)
-Sess->>Store : set_session_title + touch_session + set_model
-Sess-->>API : session updated
-API->>Kernel : execute(message, sessionId, bearerToken, model_id)
-Kernel->>Kernel : normalize_model_id(model_id)
-Kernel->>Reg : resolveProvider(providerName)
-Reg-->>Kernel : Provider instance
-Kernel->>Tools : build_gateway_toolkit(definitions, bearerToken, traceQueue)
-Tools-->>Kernel : toolkit with v3 tool_call/tool_result support
-Kernel->>Prov : streamChat(messages, options, toolkit)
-Prov-->>Kernel : StreamEvent* + tool_call/tool_result frames
-alt Tool requires confirmation
-Kernel->>HITL : register_parked_confirmation(...)
-HITL->>ConfirmStore : save_parked(record with turn_index)
-ConfirmStore-->>HITL : persisted confirmation with turn_index
-Kernel->>EvStore : save_turn(frames, session_max_bytes)
-EvStore-->>Kernel : evidence persisted
-Kernel->>Trace : emit trace events
-Trace-->>Kernel : audit trail data
-Kernel-->>API : StreamEvent* with v3 frames
-API-->>Client : SSE/Streaming Response with tool_call/tool_result
-alt Approved mutating tool
+API->>DocStore : create(document with digest, provenance, prose)
+DocStore-->>API : persisted document
+API-->>Gateway : document response
+Gateway-->>Client : 201 Created with document
+Note over ExecWorker : Isolated Execution Flow
+Client->>API : Chat with approved mutating tool
+API->>Kernel : execute(message, sessionId, bearerToken)
 Kernel->>ExecWorker : handoff(envelope, arguments, delegated_token)
 ExecWorker->>ExecRuntime : POST /api/v1/executions/handoff
 ExecRuntime->>ExecRuntime : verify signature & digest
@@ -393,19 +422,9 @@ ExecWorker-->>Kernel : tool result
 Kernel->>ExecRecords : save_receipt(receipt)
 ExecRecords-->>Kernel : execution recorded
 end
-Kernel->>Sess : save(sessionId, updatedState)
-Sess->>Store : set(sessionId, updatedState)
-Note over Disc : Background Task Management
-Disc->>Disc : refresh_once() every N seconds
-Disc->>ModelCat : refresh_catalog(series_map)
-ModelCat-->>Disc : atomic catalog swap
-Note over ConfirmStore : Startup Sweep Scoping
-ConfirmStore->>ConfirmStore : initialize(stale_after_seconds)
-ConfirmStore->>ConfirmStore : _CLOSE_STALE_PENDING scoped to TTL
-end
 ```
 
-**Updated** The sequence diagram now shows the complete multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated validation, and the full model resolution hierarchy (request > pinned > default). **It also includes the execution worker integration for isolated tool execution with signature verification and receipt tracking, enhanced confirmation record storage layer with turn_index field support for precise confirmation card anchoring, idempotent resolution, startup sweep scoping to prevent sibling replica interference, and cross-replica consistency guarantees.**
+**Updated** The sequence diagram now shows the complete multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated validation, and the full model resolution hierarchy (request > pinned > default). **It also includes the document repository workflow with shift summary digest assembly, optional prose generation, and persistent document storage with role-based access controls.** **It also includes the execution worker integration for isolated tool execution with signature verification and receipt tracking, enhanced confirmation record storage layer with turn_index field support for precise confirmation card anchoring, idempotent resolution, startup sweep scoping to prevent sibling replica interference, and cross-replica consistency guarantees.**
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -413,6 +432,9 @@ end
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
+- [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
+- [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
+- [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
@@ -481,6 +503,29 @@ class SessionService {
 +mark_session_turn(session_id, message)
 +pin_session_model(session_id, model)
 }
+class OperationDocumentStore {
+<<interface>>
++backend_name : str
++create(document)
++publish(owner_user_id, document_id)
++load(document_id)
++list_for_owner(owner_user_id)
++list_published()
++delete(owner_user_id, document_id)
++is_ready()
+}
+class ShiftSummary {
++build_digest(requester_user_id, session_ids, can_view_foreign)
++validate_session_ids(session_ids)
++_owner_transcript_section(session_id)
++_owner_evidence_section(session_id)
++_confirmation_entry(record, metadata_only)
++_execution_entry(record)
+}
+class DocumentProse {
++generate_prose(kernel, document_type, digest)
++build_prose_prompt(document_type, digest)
+}
 class ExecutionWorkerClient {
 <<interface>>
 +backend_name : str
@@ -543,6 +588,9 @@ class GatewayTools {
 +invoke_gateway_tool(gateway_url, tool_name, parameters, bearer_token)
 }
 AgentKernel --> SessionService : "uses"
+AgentKernel --> OperationDocumentStore : "persists documents"
+AgentKernel --> ShiftSummary : "generates digests"
+AgentKernel --> DocumentProse : "generates prose"
 AgentKernel --> ExecutionWorkerClient : "routes approved mutations"
 AgentKernel --> ExecutionRecordStore : "persists execution records"
 AgentKernel --> ConfirmationRecordStore : "persists confirmations"
@@ -561,6 +609,9 @@ GatewayTools --> ExecutionWorkerClient : "isolated execution"
 **Diagram sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
+- [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
+- [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
+- [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
@@ -573,6 +624,155 @@ GatewayTools --> ExecutionWorkerClient : "isolated execution"
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+
+### Document Repository Service
+
+#### Overview
+The document repository service provides persistent storage for typed operation documents with role-based access controls, draft/published states, and comprehensive audit trails. It implements SPEC-039 R-1/R-2 with two-tier coverage (owner vs foreign sessions) and bounded retention policies.
+
+#### Key Features
+- **Typed Documents**: Supports `shift_summary` document type with extensible discriminator pattern
+- **Draft/Published States**: One-way transition from draft to published with owner-only actions
+- **Role-Based Access**: Owner-only draft visibility, team-wide published document access
+- **Bounded Storage**: PER_OWNER_CAP (20) limit per owner with oldest-first eviction
+- **Retention Policy**: RETENTION_DAYS (30) automatic cleanup with opportunistic sweeping
+- **Dual Backend Support**: In-memory for development/testing, Postgres for production with graceful fallback
+- **Provenance Tracking**: Complete source record references for audit and traceability
+- **Audit Trail Integration**: Fire-and-forget audit events for all document operations
+
+#### Document Lifecycle
+```mermaid
+flowchart TD
+A["Create Document"] --> B{"State: draft"}
+B --> C{"Owner Action Required"}
+C --> |Publish| D{"State: published"}
+D --> E{"Team-Wide Access"}
+E --> F{"Delete Allowed"}
+F --> G["Document Removed"]
+C --> |Delete| H["Document Removed"]
+B --> I{"Non-Owner Access"}
+I --> J{"404 Not Found"}
+E --> K{"Read Access"}
+K --> L["Document Returned"]
+```
+
+**Diagram sources**
+- [operation_documents.py:129-168](file://products/agent-platform/src/agent_service/services/operation_documents.py#L129-L168)
+- [routes.py:910-956](file://products/agent-platform/src/agent_service/api/v2/routes.py#L910-L956)
+
+#### Data Model
+Each document contains:
+- **Identity**: document_id, document_type, owner_user_id, label
+- **Lifecycle**: created_at, published_at, state (draft/published)
+- **Content**: provenance (source references), digest (assembled facts), prose (optional narrative)
+- **Metadata**: prose_status (included/failed/not_requested)
+
+#### Backend Implementations
+Both in-memory and Postgres backends support the complete document repository functionality:
+
+- **In-Memory Store**: Single-replica and non-persistent; suitable for development, CI, and as a fallback when Postgres is unreachable
+- **Postgres Store**: Production-grade with SQL-level idempotency, bounded opportunistic sweep, and startup sweep scoping
+
+**Section sources**
+- [operation_documents.py:1-531](file://products/agent-platform/src/agent_service/services/operation_documents.py#L1-L531)
+- [routes.py:738-956](file://products/agent-platform/src/agent_service/api/v2/routes.py#L738-L956)
+
+### Shift Summary Digest Assembly
+
+#### Overview
+The shift summary digest assembly builds deterministic digests from four durable stores: kernel state snapshot (turn counts only), evidence store, confirmation records, and execution records. Facts are copied verbatim with source record IDs for provenance anchors.
+
+#### Coverage Tiers
+- **Owner-Covered Sessions**: Full digest including title, turn counts, evidence counts per turn, confirmation decisions, execution receipts, and still-pending items
+- **Foreign Sessions**: Metadata-level digest only (when requester holds approvals:list): confirmation decisions, execution receipts, and record counts — never titles, transcript excerpts, or evidence content
+
+#### Key Features
+- **Deterministic Assembly**: Mechanical fact copying from durable stores with no fabrication
+- **Role-Based Filtering**: Foreign session access requires approvals:list capability
+- **Graceful Degradation**: Unreadable secondary stores report unavailable without 500 errors
+- **Input Validation**: Bounded session IDs (MAX_SESSION_IDS = 20) with deduplication
+- **Provenance Tracking**: Complete source record references for audit and traceability
+
+#### Digest Structure
+```mermaid
+flowchart TD
+A["Session IDs Input"] --> B{"Validate & Deduplicate"}
+B --> C{"Load Sessions"}
+C --> D{"Coverage Type?"}
+D --> |Owner| E["Full Digest Assembly"]
+D --> |Foreign| F["Metadata-Only Digest"]
+E --> G["Transcript Section"]
+E --> H["Evidence Section"]
+E --> I["Confirmation Entries"]
+E --> J["Execution Entries"]
+F --> K["Confirmation Decisions Only"]
+F --> L["Execution Receipts Only"]
+F --> M["Record Counts Only"]
+G --> N["Open Items Summary"]
+H --> N
+I --> N
+J --> N
+K --> O["Provenance Tracking"]
+L --> O
+M --> O
+N --> O
+O --> P["Final Digest + Provenance"]
+```
+
+**Diagram sources**
+- [shift_summary.py:77-90](file://products/agent-platform/src/agent_service/services/shift_summary.py#L77-L90)
+- [shift_summary.py:182-263](file://products/agent-platform/src/agent_service/services/shift_summary.py#L182-L263)
+- [shift_summary.py:266-322](file://products/agent-platform/src/agent_service/services/shift_summary.py#L266-L322)
+
+#### Error Handling
+- **DigestInputError**: Structural input violations (empty session IDs, too many sessions)
+- **UnknownSessionError**: Non-existent session IDs with offending IDs exposed
+- **ForeignSessionDenied**: Foreign coverage requested without approvals:list capability
+
+**Section sources**
+- [shift_summary.py:1-323](file://products/agent-platform/src/agent_service/services/shift_summary.py#L1-L323)
+
+### Optional Prose Generation
+
+#### Overview
+The optional prose generation service creates AI-powered narratives from digests with fail-soft behavior and strict prompt safety guarantees. It uses the runtime's default model with hard timeout protection.
+
+#### Safety Guarantees
+- **Prompt Contract**: Model receives digest JSON only — never raw transcripts, evidence payloads, or argument bodies
+- **Fail-Soft Behavior**: Any model error or timeout yields prose_status=failed and document ships digest-only
+- **Hard Timeout**: PROSE_TIMEOUT_SECONDS (30.0) prevents hung model from blocking create route
+- **No Fabrication**: Prompt explicitly instructs model to state only what facts contain, never invent details
+
+#### Key Features
+- **Digest-Only Input**: Strict separation between factual digest and generated narrative
+- **Type Adaptation**: document_type parameter allows future prompt customization per document type
+- **Streaming Support**: Handles both streaming and non-streaming model responses
+- **Empty Response Handling**: Validates non-empty responses and treats empty replies as failures
+
+#### Implementation Details
+```mermaid
+flowchart TD
+A["Generate Prose Request"] --> B["Build Prompt from Digest"]
+B --> C["Create Model Instance"]
+C --> D["Send Message with Prompt"]
+D --> E{"Response Type?"}
+E --> |Streaming| F["Drain Async Generator"]
+E --> |Non-Streaming| G["Extract Content Directly"]
+F --> H["Extract Text Content"]
+G --> H
+H --> I{"Text Empty?"}
+I --> |Yes| J["Raise RuntimeError"]
+I --> |No| K["Return Text + 'included'"]
+J --> L["Catch Exception"]
+L --> M["Log Warning + Return None + 'failed'"]
+```
+
+**Diagram sources**
+- [document_prose.py:44-56](file://products/agent-platform/src/agent_service/services/document_prose.py#L44-L56)
+- [document_prose.py:59-99](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L99)
+
+**Section sources**
+- [document_prose.py:1-100](file://products/agent-platform/src/agent_service/services/document_prose.py#L1-L100)
 
 ### Execution Worker Integration
 
@@ -963,7 +1163,7 @@ class InMemorySessionStore {
 +ttl_seconds : float
 +max_entries : int
 +_sessions : dict[str, SessionRecord]
-+_last_accessed : dict[str, float]
+-_last_accessed : dict[str, float]
 }
 class RedisSessionStore {
 +backend_name = "redis"
@@ -1082,23 +1282,25 @@ Core functionality:
 - [routes.py:71-100](file://products/agent-platform/src/agent_service/api/v2/routes.py#L71-100)
 
 ### API Endpoints
-The API layer exposes REST endpoints for agent interactions, session management, model discovery, and health checks. Requests are validated against schemas and routed to the runtime kernel with v3 streaming protocol support.
+The API layer exposes REST endpoints for agent interactions, session management, model discovery, documents, and health checks. Requests are validated against schemas and routed to the runtime kernel with v3 streaming protocol support.
 
 Typical endpoints:
 - Chat: POST /chat with message, optional session ID, and delegated token
 - Sessions: GET/POST/DELETE /sessions for lifecycle management with evidence retrieval
 - Models: GET /models for credential-safe model discovery
+- **Documents**: POST /documents for creation, GET /documents for listing, GET /documents/{id} for reading, POST /documents/{id}/publish for publishing, DELETE /documents/{id} for deletion
 - Health: GET /health for readiness and liveness probes
 - Streaming: Server-sent events for incremental responses with v3 tool_call/tool_result frames
 - **Confirmations**: POST /chat/confirm for approval workflows with structured error handling
 
 Request/response validation uses Pydantic models defined in schemas with enhanced v3 streaming event types.
 
-**Updated** Chat endpoints now accept delegated tokens for secure tool execution and support v3 streaming protocol with tool_call/tool_result frames for comprehensive audit trails. Both POST /chat and GET /chat/stream endpoints accept input_modality parameters for voice-readiness parity. Session endpoints provide multi-session workspace operations with proper authorization, audit trails, and evidence turn retrieval. Model endpoints provide credential-safe enumeration of available models with public schema compliance. **Confirmation endpoints provide structured 409 responses for racing approvers with winner attribution and durable outcome persistence, plus turn_index field support for precise confirmation card anchoring.**
+**Updated** Chat endpoints now accept delegated tokens for secure tool execution and support v3 streaming protocol with tool_call/tool_result frames for comprehensive audit trails. Both POST /chat and GET /chat/stream endpoints accept input_modality parameters for voice-readiness parity. Session endpoints provide multi-session workspace operations with proper authorization, audit trails, and evidence turn retrieval. Model endpoints provide credential-safe enumeration of available models with public schema compliance. **Document endpoints provide complete CRUD operations with role-based access controls, draft/published states, and audit trail integration. Confirmation endpoints provide structured 409 responses for racing approvers with winner attribution and durable outcome persistence, plus turn_index field support for precise confirmation card anchoring.**
 
 **Section sources**
 - [routes.py:106-235](file://products/agent-platform/src/agent_service/api/v2/routes.py#L106-L235)
 - [routes.py:334-419](file://products/agent-platform/src/agent_service/api/v2/routes.py#L334-L419)
+- [routes.py:738-956](file://products/agent-platform/src/agent_service/api/v2/routes.py#L738-L956)
 - [routes.py:534-544](file://products/agent-platform/src/agent_service/api/v2/routes.py#L534-L544)
 - [api.py:8-18](file://products/agent-platform/src/agent_service/schemas/api.py#L8-L18)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
@@ -1162,6 +1364,211 @@ end
 
 **Section sources**
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+
+## Document Repository Service
+
+### Overview
+The document repository service provides persistent storage for typed operation documents with role-based access controls, draft/published states, and comprehensive audit trails. It implements SPEC-039 R-1/R-2 with two-tier coverage (owner vs foreign sessions) and bounded retention policies.
+
+### Key Features
+- **Typed Documents**: Supports `shift_summary` document type with extensible discriminator pattern
+- **Draft/Published States**: One-way transition from draft to published with owner-only actions
+- **Role-Based Access**: Owner-only draft visibility, team-wide published document access
+- **Bounded Storage**: PER_OWNER_CAP (20) limit per owner with oldest-first eviction
+- **Retention Policy**: RETENTION_DAYS (30) automatic cleanup with opportunistic sweeping
+- **Dual Backend Support**: In-memory for development/testing, Postgres for production with graceful fallback
+- **Provenance Tracking**: Complete source record references for audit and traceability
+- **Audit Trail Integration**: Fire-and-forget audit events for all document operations
+
+### Document Lifecycle
+```mermaid
+flowchart TD
+A["Create Document"] --> B{"State: draft"}
+B --> C{"Owner Action Required"}
+C --> |Publish| D{"State: published"}
+D --> E{"Team-Wide Access"}
+E --> F{"Delete Allowed"}
+F --> G["Document Removed"]
+C --> |Delete| H["Document Removed"]
+B --> I{"Non-Owner Access"}
+I --> J{"404 Not Found"}
+E --> K{"Read Access"}
+K --> L["Document Returned"]
+```
+
+**Diagram sources**
+- [operation_documents.py:129-168](file://products/agent-platform/src/agent_service/services/operation_documents.py#L129-L168)
+- [routes.py:910-956](file://products/agent-platform/src/agent_service/api/v2/routes.py#L910-L956)
+
+### Data Model
+Each document contains:
+- **Identity**: document_id, document_type, owner_user_id, label
+- **Lifecycle**: created_at, published_at, state (draft/published)
+- **Content**: provenance (source references), digest (assembled facts), prose (optional narrative)
+- **Metadata**: prose_status (included/failed/not_requested)
+
+### Backend Implementations
+Both in-memory and Postgres backends support the complete document repository functionality:
+
+- **In-Memory Store**: Single-replica and non-persistent; suitable for development, CI, and as a fallback when Postgres is unreachable
+- **Postgres Store**: Production-grade with SQL-level idempotency, bounded opportunistic sweep, and startup sweep scoping
+
+**Section sources**
+- [operation_documents.py:1-531](file://products/agent-platform/src/agent_service/services/operation_documents.py#L1-L531)
+- [routes.py:738-956](file://products/agent-platform/src/agent_service/api/v2/routes.py#L738-L956)
+
+## Shift Summary Digest Assembly
+
+### Overview
+The shift summary digest assembly builds deterministic digests from four durable stores: kernel state snapshot (turn counts only), evidence store, confirmation records, and execution records. Facts are copied verbatim with source record IDs for provenance anchors.
+
+### Coverage Tiers
+- **Owner-Covered Sessions**: Full digest including title, turn counts, evidence counts per turn, confirmation decisions, execution receipts, and still-pending items
+- **Foreign Sessions**: Metadata-level digest only (when requester holds approvals:list): confirmation decisions, execution receipts, and record counts — never titles, transcript excerpts, or evidence content
+
+### Key Features
+- **Deterministic Assembly**: Mechanical fact copying from durable stores with no fabrication
+- **Role-Based Filtering**: Foreign session access requires approvals:list capability
+- **Graceful Degradation**: Unreadable secondary stores report unavailable without 500 errors
+- **Input Validation**: Bounded session IDs (MAX_SESSION_IDS = 20) with deduplication
+- **Provenance Tracking**: Complete source record references for audit and traceability
+
+### Digest Structure
+```mermaid
+flowchart TD
+A["Session IDs Input"] --> B{"Validate & Deduplicate"}
+B --> C{"Load Sessions"}
+C --> D{"Coverage Type?"}
+D --> |Owner| E["Full Digest Assembly"]
+D --> |Foreign| F["Metadata-Only Digest"]
+E --> G["Transcript Section"]
+E --> H["Evidence Section"]
+E --> I["Confirmation Entries"]
+E --> J["Execution Entries"]
+F --> K["Confirmation Decisions Only"]
+F --> L["Execution Receipts Only"]
+F --> M["Record Counts Only"]
+G --> N["Open Items Summary"]
+H --> N
+I --> N
+J --> N
+K --> O["Provenance Tracking"]
+L --> O
+M --> O
+N --> O
+O --> P["Final Digest + Provenance"]
+```
+
+**Diagram sources**
+- [shift_summary.py:77-90](file://products/agent-platform/src/agent_service/services/shift_summary.py#L77-L90)
+- [shift_summary.py:182-263](file://products/agent-platform/src/agent_service/services/shift_summary.py#L182-L263)
+- [shift_summary.py:266-322](file://products/agent-platform/src/agent_service/services/shift_summary.py#L266-L322)
+
+### Error Handling
+- **DigestInputError**: Structural input violations (empty session IDs, too many sessions)
+- **UnknownSessionError**: Non-existent session IDs with offending IDs exposed
+- **ForeignSessionDenied**: Foreign coverage requested without approvals:list capability
+
+**Section sources**
+- [shift_summary.py:1-323](file://products/agent-platform/src/agent_service/services/shift_summary.py#L1-L323)
+
+## Optional Prose Generation
+
+### Overview
+The optional prose generation service creates AI-powered narratives from digests with fail-soft behavior and strict prompt safety guarantees. It uses the runtime's default model with hard timeout protection.
+
+### Safety Guarantees
+- **Prompt Contract**: Model receives digest JSON only — never raw transcripts, evidence payloads, or argument bodies
+- **Fail-Soft Behavior**: Any model error or timeout yields prose_status=failed and document ships digest-only
+- **Hard Timeout**: PROSE_TIMEOUT_SECONDS (30.0) prevents hung model from blocking create route
+- **No Fabrication**: Prompt explicitly instructs model to state only what facts contain, never invent details
+
+### Key Features
+- **Digest-Only Input**: Strict separation between factual digest and generated narrative
+- **Type Adaptation**: document_type parameter allows future prompt customization per document type
+- **Streaming Support**: Handles both streaming and non-streaming model responses
+- **Empty Response Handling**: Validates non-empty responses and treats empty replies as failures
+
+### Implementation Details
+```mermaid
+flowchart TD
+A["Generate Prose Request"] --> B["Build Prompt from Digest"]
+B --> C["Create Model Instance"]
+C --> D["Send Message with Prompt"]
+D --> E{"Response Type?"}
+E --> |Streaming| F["Drain Async Generator"]
+E --> |Non-Streaming| G["Extract Content Directly"]
+F --> H["Extract Text Content"]
+G --> H
+H --> I{"Text Empty?"}
+I --> |Yes| J["Raise RuntimeError"]
+I --> |No| K["Return Text + 'included'"]
+J --> L["Catch Exception"]
+L --> M["Log Warning + Return None + 'failed'"]
+```
+
+**Diagram sources**
+- [document_prose.py:44-56](file://products/agent-platform/src/agent_service/services/document_prose.py#L44-L56)
+- [document_prose.py:59-99](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L99)
+
+**Section sources**
+- [document_prose.py:1-100](file://products/agent-platform/src/agent_service/services/document_prose.py#L1-L100)
+
+## Document API Endpoints
+
+### Overview
+The document API endpoints provide complete CRUD operations for typed operation documents with role-based access controls and comprehensive audit trails.
+
+### Available Endpoints
+- **POST /api/v2/documents**: Create a typed operation document with optional prose generation
+- **GET /api/v2/documents**: List documents with scope filtering (mine/published)
+- **GET /api/v2/documents/{document_id}**: Read a specific document with ownership validation
+- **POST /api/v2/documents/{document_id}/publish**: Publish a draft document (owner-only)
+- **DELETE /api/v2/documents/{document_id}**: Delete a document (owner-only)
+
+### Authorization Model
+- **documents:create**: Required for document creation (enforced by platform-gateway)
+- **X-Foreign-Coverage Header**: Trusted internal header for foreign session access control
+- **Owner Validation**: Draft documents visible only to creators, published documents team-wide
+- **Audit Trail**: All document operations emit audit events with correlation IDs
+
+### Request/Response Examples
+```mermaid
+sequenceDiagram
+participant Client as "Client"
+participant API as "Document API"
+participant ShiftSum as "Shift Summary"
+participant DocStore as "Document Store"
+Note over Client,DocStore : Document Creation Flow
+Client->>API : POST /api/v2/documents {type, sessions, label, include_prose}
+API->>ShiftSum : build_digest(user_id, session_ids, can_view_foreign)
+ShiftSum-->>API : digest + provenance
+alt include_prose = true
+API->>API : generate_prose(kernel, type, digest)
+API-->>API : prose + status
+else include_prose = false
+API-->>API : prose_status = not_requested
+end
+API->>DocStore : create(document)
+DocStore-->>API : persisted document
+API-->>Client : 201 Created + document
+```
+
+**Diagram sources**
+- [routes.py:763-855](file://products/agent-platform/src/agent_service/api/v2/routes.py#L763-L855)
+- [shift_summary.py:266-322](file://products/agent-platform/src/agent_service/services/shift_summary.py#L266-L322)
+- [operation_documents.py:488-531](file://products/agent-platform/src/agent_service/services/operation_documents.py#L488-L531)
+
+### Error Handling
+- **400 Bad Request**: Invalid label length, unknown session IDs, digest input errors
+- **403 Forbidden**: Foreign session coverage without approvals:list capability
+- **404 Not Found**: Document not found or foreign draft access
+- **409 Conflict**: Already published document
+- **Audit Events**: All operations emit structured audit events with correlation
+
+**Section sources**
+- [routes.py:738-956](file://products/agent-platform/src/agent_service/api/v2/routes.py#L738-L956)
+- [v2.py:335-367](file://products/agent-platform/src/agent_service/schemas/v2.py#L335-L367)
 
 ## Execution Worker Integration
 
@@ -1729,7 +2136,7 @@ The operator portal UI displays models grouped by provider with credential-gated
 
 **Section sources**
 - [model_catalog.py:1-331](file://products/agent-platform/src/agent_service/services/model_catalog.py#L1-L331)
-- [routes.py:534-544](file://products/agent-platform/src/agent_service/api/v2/routes.py#L534-L544)
+- [routes.py:534-544](file://products/agent-platform/src/agent_service/api/v2/routes.py#L534-544)
 - [models.py:19-45](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L19-L45)
 - [ModelSelect.tsx:20-71](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L20-L71)
 - [models.ts:1-30](file://products/operator-portal/web-ui/app/src/api/models.ts#L1-L30)
@@ -1973,6 +2380,9 @@ The service has clear separation of concerns with minimal coupling between layer
 - Session service abstracts storage backend
 - Evidence store provides independent persistence layer with dual backend support
 - Model catalog provides credential-gated discovery with legacy alias resolution
+- **Document repository provides persistent storage for typed operation documents with role-based access controls**
+- **Shift summary assembly builds deterministic digests from multiple durable stores with provenance tracking**
+- **Optional prose generation creates AI-powered narratives from digests with fail-soft behavior**
 - **Execution worker client provides isolated execution through execution-runtime service with fail-closed behavior**
 - **Execution record store provides durable persistence for signed execution lifecycle tracking**
 - **Enhanced confirmation record store provides durable HITL confirmation lifecycle management with turn_index field support and idempotent resolution**
@@ -2001,6 +2411,9 @@ Session --> Store["SessionStore"]
 Session --> Transcript["Enhanced TranscriptExtractor"]
 API --> HITL["ConfirmationRegistry"]
 API --> ConfirmStore
+API --> DocStore["OperationDocumentStore"]
+API --> ShiftSum["ShiftSummary"]
+API --> DocProse["DocumentProse"]
 API --> Metrics["Metrics"]
 API --> Obs["Observability"]
 API --> Tel["Telemetry"]
@@ -2016,14 +2429,20 @@ ModelDisc["ModelDiscovery"] --> ModelCat
 ModelDisc --> Registry
 ModelDisc --> Metrics
 Lifespan["FastAPI Lifespan"] --> ModelDisc
+DocStore --> Metrics
+ShiftSum --> Metrics
+DocProse --> Metrics
 ```
 
-**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, **execution worker integration for isolated tool execution with fail-closed behavior and signature verification, execution record persistence for signed execution lifecycle tracking, enhanced confirmation record store with turn_index field support, idempotent resolution, and cross-replica consistency, model catalog service with credential-gated discovery and legacy alias resolution, live model discovery service with background task management, voice-readiness support through input_modality parameter passthrough, and the new Luban provider for self-hosted OpenAI-compatible endpoints.**
+**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, **document repository integration with persistent typed documents and role-based access controls, shift summary assembly for deterministic digest generation, optional prose generation with fail-soft behavior, execution worker integration for isolated tool execution with fail-closed behavior and signature verification, execution record persistence for signed execution lifecycle tracking, enhanced confirmation record store with turn_index field support, idempotent resolution, and cross-replica consistency, model catalog service with credential-gated discovery and legacy alias resolution, live model discovery service with background task management, voice-readiness support through input_modality parameter passthrough, and the new Luban provider for self-hosted OpenAI-compatible endpoints.**
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
+- [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
+- [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
+- [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
@@ -2092,8 +2511,16 @@ Lifespan["FastAPI Lifespan"] --> ModelDisc
 - **Single-Flight Idempotency**: Worker executes each execution_id at most once, preventing redundant tool calls
 - **Timeout Handling**: Bounded timeouts prevent hung requests and resource exhaustion
 - **Structured Error Responses**: Specific error reasons enable targeted troubleshooting and monitoring
+- **Document Repository Optimization**: Bounded storage with PER_OWNER_CAP prevents unbounded growth and automatic cleanup
+- **Shift Summary Assembly**: Deterministic digest generation with graceful degradation for unreadable stores
+- **Prose Generation Timeout**: Hard timeout prevents hung model from blocking document creation
+- **Role-Based Access Control**: Efficient ownership validation and draft/published state filtering
+- **Audit Trail Integration**: Fire-and-forget audit events minimize performance impact
+- **Dual Backend Fallback**: Postgres unavailability gracefully falls back to in-memory for document operations
+- **Retention Policy Enforcement**: Opportunistic sweeping prevents excessive storage consumption
+- **Provenance Tracking**: Efficient source record reference management for audit and traceability
 
-**Updated** Performance considerations now include enhanced multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, model catalog optimization with startup-derived catalog and efficient legacy alias resolution, live model discovery optimization with background task management, multi-tier caching strategies, atomic catalog updates with lock protection, multi-model runtime optimization with priority-based resolution and session-based caching, enhanced confirmation record optimization with turn_index field support, SQL-level idempotency, startup sweep scoping, cross-replica consistency guarantees, Luban provider optimization for self-hosted OpenAI-compatible endpoints with strict security requirements, decision sync robustness with time-based settle windows, progressive arrival presentation for improved user experience, blank-line block joining for efficient markdown rendering, **execution worker optimization with fail-closed behavior preventing unnecessary network calls, signature verification efficiency with constant-time comparison, receipt tracking with first-write-wins semantics, single-flight idempotency preventing redundant executions, timeout handling with bounded budgets, and structured error responses for targeted troubleshooting.**
+**Updated** Performance considerations now include enhanced multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, model catalog optimization with startup-derived catalog and efficient legacy alias resolution, live model discovery optimization with background task management, multi-tier caching strategies, atomic catalog updates with lock protection, multi-model runtime optimization with priority-based resolution and session-based caching, enhanced confirmation record optimization with turn_index field support, SQL-level idempotency, startup sweep scoping, cross-replica consistency guarantees, Luban provider optimization for self-hosted OpenAI-compatible endpoints with strict security requirements, decision sync robustness with time-based settle windows, progressive arrival presentation for improved user experience, blank-line block joining for efficient markdown rendering, **document repository optimization with bounded storage, role-based access control efficiency, audit trail integration, dual backend fallback, retention policy enforcement, and provenance tracking efficiency, shift summary assembly optimization with deterministic digest generation and graceful degradation, optional prose generation optimization with hard timeout protection and fail-soft behavior, execution worker optimization with fail-closed behavior preventing unnecessary network calls, signature verification efficiency with constant-time comparison, receipt tracking with first-write-wins semantics, single-flight idempotency preventing redundant executions, timeout handling with bounded budgets, and structured error responses for targeted troubleshooting.**
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -2154,6 +2581,15 @@ Common issues and resolutions:
 - **Worker Rejections**: Check worker-side verification errors and structured rejection reasons
 - **Late Completions**: Monitor late completion metrics and handle first-write-wins scenarios
 - **Single-Flight Issues**: Verify execution_id uniqueness and concurrent duplicate handling
+- **Document Repository Issues**: Verify backend connectivity, ownership validation, and draft/published state management
+- **Shift Summary Problems**: Check session store connectivity, evidence store availability, and confirmation record access
+- **Prose Generation Failures**: Verify model availability, timeout configuration, and prompt contract adherence
+- **Document API Errors**: Validate authorization headers, label length constraints, and session ID existence
+- **Role-Based Access Issues**: Check X-Foreign-Coverage header configuration and approvals:list capability
+- **Audit Trail Problems**: Verify audit service connectivity and fire-and-forget event emission
+- **Retention Policy Issues**: Check retention days configuration and opportunistic sweep effectiveness
+- **Capacity Limit Problems**: Verify PER_OWNER_CAP enforcement and oldest-first eviction behavior
+- **Provenance Tracking Issues**: Validate source record references and citation counting
 
 Debugging utilities:
 - Health check endpoints for service status
@@ -2192,8 +2628,15 @@ Debugging utilities:
 - **Receipt Debugging**: Verify execution record store connectivity, first-write-wins semantics, and late completion handling
 - **Timeout Debugging**: Monitor worker timeout settings, adjust based on tool execution complexity, and handle structured timeout results
 - **Rejection Debugging**: Check worker-side verification errors, structured rejection reasons, and audit trail correlation
+- **Document Repository Debugging**: Verify backend connectivity, ownership validation, draft/published state management, and role-based access controls
+- **Shift Summary Debugging**: Check session store connectivity, evidence store availability, confirmation record access, and provenance tracking
+- **Prose Generation Debugging**: Verify model availability, timeout configuration, prompt contract adherence, and fail-soft behavior
+- **Document API Debugging**: Validate authorization headers, label length constraints, session ID existence, and audit trail integration
+- **Role-Based Access Debugging**: Check X-Foreign-Coverage header configuration, approvals:list capability, and draft/published state filtering
+- **Retention Policy Debugging**: Verify retention days configuration, opportunistic sweep effectiveness, and capacity limit enforcement
+- **Provenance Tracking Debugging**: Validate source record references, citation counting, and audit trail completeness
 
-**Updated** Troubleshooting guide now includes enhanced multi-session workspace troubleshooting, enhanced transcript extraction debugging strategies with blank-line block joining, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification, plus live model discovery troubleshooting with background task monitoring, provider filtering validation, cache tier diagnostics, and discovery performance optimization, and multi-model runtime troubleshooting with model resolution debugging and session pinning diagnostics, enhanced confirmation record troubleshooting with turn_index field support, SQL-level idempotency validation, startup sweep scoping verification, and cross-replica consistency testing, Luban provider troubleshooting with self-hosted endpoint configuration and bearer token authentication, decision sync robustness troubleshooting with time-based settle window validation, progressive arrival presentation debugging, and markdown rendering verification for resumed content, **execution worker troubleshooting with worker URL configuration validation, handoff token setup verification, signature verification debugging, receipt tracking diagnostics, timeout handling validation, and structured rejection reason analysis.**
+**Updated** Troubleshooting guide now includes enhanced multi-session workspace troubleshooting, enhanced transcript extraction debugging strategies with blank-line block joining, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification, plus live model discovery troubleshooting with background task monitoring, provider filtering validation, cache tier diagnostics, and discovery performance optimization, and multi-model runtime troubleshooting with model resolution debugging and session pinning diagnostics, enhanced confirmation record troubleshooting with turn_index field support, SQL-level idempotency validation, startup sweep scoping verification, and cross-replica consistency testing, Luban provider troubleshooting with self-hosted endpoint configuration and bearer token authentication, decision sync robustness troubleshooting with time-based settle window validation, progressive arrival presentation debugging, and markdown rendering verification for resumed content, **document repository troubleshooting with backend connectivity validation, ownership verification, draft/published state management, role-based access control testing, shift summary assembly debugging, provenance tracking validation, and audit trail verification, optional prose generation troubleshooting with model availability checking, timeout configuration validation, prompt contract adherence verification, and fail-soft behavior testing, execution worker troubleshooting with worker URL configuration validation, handoff token setup verification, signature verification debugging, receipt tracking diagnostics, timeout handling validation, and structured rejection reason analysis.**
 
 **Section sources**
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -2204,7 +2647,7 @@ Debugging utilities:
 ## Conclusion
 The Agent Platform Service provides a robust foundation for AI agent orchestration with multi-provider support, durable session management, and comprehensive observability. Its modular architecture enables easy customization and scaling while maintaining high performance and reliability.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service integrates with the execution-runtime service through a new execution_worker_client that provides isolated execution of approved mutating tools with fail-closed behavior, signature verification, and receipt tracking, significantly enhancing security posture by separating the execution boundary from the agent process.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict security requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses. The service also features enhanced decision sync robustness with time-based settle windows, improved session transcript reconstruction with blank-line block joining for proper markdown rendering, and progressive arrival presentation for resumed content.** These enhancements strengthen the platform's flexibility, enable dynamic model management, provide detailed operational visibility, ensure cross-replica consistency for HITL workflows, improve user experience with reliable content delivery, and maintain the performance characteristics that make it suitable for production AI operations.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries, and role-based access controls with draft/published states.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict security requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses. The service also features enhanced decision sync robustness with time-based settle windows, improved session transcript reconstruction with blank-line block joining for proper markdown rendering, and progressive arrival presentation for resumed content.** These enhancements strengthen the platform's flexibility, enable dynamic model management, provide detailed operational visibility, ensure cross-replica consistency for HITL workflows, improve user experience with reliable content delivery, and maintain the performance characteristics that make it suitable for production AI operations.
 
 ## Appendices
 
@@ -2327,7 +2770,36 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - **Flash Effects**: Test stronger visual feedback for arrived content
 - **Scroll-to-View**: Verify automatic scrolling to first arrived group
 
-**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, live model discovery configuration with background task management, provider filtering mechanisms, cache tier optimization, atomic catalog updates with lock protection, multi-model runtime configuration with per-turn selection and session-based pinning, enhanced confirmation record store configuration with turn_index field support, idempotent resolution, startup sweep scoping, cross-replica consistency validation, Luban provider configuration for self-hosted OpenAI-compatible endpoints with complete operator workflow management, **execution worker configuration with fail-closed behavior, signature verification, receipt tracking, and isolated tool execution**, decision sync robustness configuration with time-based settle windows, progressive arrival presentation, and blank-line block joining for proper markdown rendering.
+#### Document Repository Configuration
+- **Backend Selection**: Configure AGENT_STATE_STORE_BACKEND for memory or postgres
+- **Database Setup**: Set AGENT_STATE_DB_URL for Postgres document persistence
+- **Retention Policy**: Configure RETENTION_DAYS for automatic cleanup (default: 30 days)
+- **Capacity Limits**: Adjust PER_OWNER_CAP for per-owner document limits (default: 20)
+- **Authorization**: Configure documents:create permission for document creation
+- **Foreign Coverage**: Set X-Foreign-Coverage header for approvals:list capability
+- **Audit Trail**: Verify audit event emission for all document operations
+- **Provenance Tracking**: Validate source record references and citation counting
+- **Role-Based Access**: Test owner-only draft visibility and team-wide published access
+
+#### Shift Summary Configuration
+- **Session Coverage**: Configure MAX_SESSION_IDS for bounded input (default: 20)
+- **Label Length**: Set MAX_LABEL_LENGTH for document labeling (default: 120 characters)
+- **Foreign Access**: Validate approvals:list capability requirement for foreign session coverage
+- **Graceful Degradation**: Test unreadable store handling with unavailable status reporting
+- **Provenance Integrity**: Verify source record references and cited record tracking
+- **Coverage Tiers**: Test owner vs foreign session digest differences
+- **Error Handling**: Validate DigestInputError, UnknownSessionError, and ForeignSessionDenied scenarios
+
+#### Optional Prose Generation Configuration
+- **Timeout Settings**: Configure PROSE_TIMEOUT_SECONDS for model response timeout (default: 30.0)
+- **Model Availability**: Verify runtime default model is accessible for prose generation
+- **Fail-Soft Behavior**: Test model error handling with prose_status=failed fallback
+- **Prompt Safety**: Validate digest-only input contract and no fabrication guarantee
+- **Streaming Support**: Test both streaming and non-streaming model response handling
+- **Empty Response Handling**: Verify empty reply detection and error treatment
+- **Integration Testing**: Test prose generation with various digest structures and document types
+
+**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, live model discovery configuration with background task management, provider filtering mechanisms, cache tier optimization, atomic catalog updates with lock protection, multi-model runtime configuration with per-turn selection and session-based pinning, enhanced confirmation record store configuration with turn_index field support, idempotent resolution, startup sweep scoping, cross-replica consistency validation, Luban provider configuration for self-hosted OpenAI-compatible endpoints with complete operator workflow management, **document repository configuration with backend setup, retention policies, capacity limits, authorization configuration, foreign coverage handling, audit trail verification, provenance tracking, and role-based access control, shift summary configuration with session coverage limits, label length constraints, foreign access validation, graceful degradation testing, provenance integrity verification, coverage tier testing, and error scenario validation, optional prose generation configuration with timeout settings, model availability verification, fail-soft behavior testing, prompt safety validation, streaming support testing, empty response handling, and integration testing, execution worker configuration with fail-closed behavior, signature verification, receipt tracking, and isolated tool execution**, decision sync robustness configuration with time-based settle windows, progressive arrival presentation, and blank-line block joining for proper markdown rendering.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -2346,6 +2818,9 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
+- [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
+- [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
+- [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
 - [test_chat_stream_modality.py](file://products/agent-platform/tests/test_chat_stream_modality.py)
@@ -2358,9 +2833,13 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [test_execution_worker_client.py](file://products/agent-platform/tests/test_execution_worker_client.py)
 - [test_execution_records.py](file://products/agent-platform/tests/test_execution_records.py)
 - [test_runtime_settings.py](file://products/agent-platform/tests/test_runtime_settings.py)
+- [test_operation_documents.py](file://products/agent-platform/tests/test_operation_documents.py)
+- [test_shift_summary.py](file://products/agent-platform/tests/test_shift_summary.py)
+- [test_document_prose.py](file://products/agent-platform/tests/test_document_prose.py)
 - [spec.md](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md)
 - [decision-sync-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-26-decision-sync-arrival-polish.md)
 - [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
+- [SPEC-039-operations-document-repository/spec.md](file://docs/specs/SPEC-039-operations-document-repository/spec.md)
 - [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
 - [luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)

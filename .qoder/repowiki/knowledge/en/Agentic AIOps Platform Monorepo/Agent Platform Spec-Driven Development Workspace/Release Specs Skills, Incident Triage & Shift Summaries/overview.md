@@ -1,0 +1,1 @@
+Architectural specifications for Releases 2–5 covering team-owned skills ingestion, operator-driven incident triage with collaboration connectors, and deterministic shift-summary artifacts.
