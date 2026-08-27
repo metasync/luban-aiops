@@ -1,6 +1,6 @@
 # Spike: Cross-Owner Session Review and Shift-Summary Artifacts
 
-Status: spike complete — recommendation recorded; awaiting operator sign-off before spec promotion
+Status: spike complete — operator sign-off granted 2026-08-27; Option B (shift-summary artifact) promoted to SPEC-039 draft the same day; Option A parked behind its recorded trigger
 Date: 2026-08-27
 Roadmap home: exploration backlog rows "Cross-owner session review" and "Shift-summary artifacts" (paired candidates; promoted together per the SPEC-035 open question)
 Raised by: v0.16.0 live approval test (SPEC-035 open question); re-stated by SPEC-036 non-goals
@@ -162,9 +162,16 @@ recommendation. Option A stays parked: promote on the first concrete
 operational need to read another operator's raw sessions that the
 shift-summary artifact cannot satisfy.
 
+**Resolved 2026-08-27:** operator sign-off granted; Option B promoted
+to `SPEC-039-shift-summary-artifacts` (draft) the same day with the
+memo's Q-1 through Q-4 resolved in the draft's Design Decisions
+section. Option A remains parked behind the trigger above.
+
 ## Changelog
 
 - 2026-08-27: spike memo drafted from the SPEC-035 open question and
   the SPEC-036 restatement, verified against the 0.20.0 session
   workspace and approval surfaces; recommendation recorded pending
   operator sign-off.
+- 2026-08-27: operator sign-off granted; Option B promoted to SPEC-039
+  draft; promotion trigger marked resolved.
