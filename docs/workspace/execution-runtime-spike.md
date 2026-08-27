@@ -1,6 +1,6 @@
 # Spike: Isolated Execution Worker and Signed Execution Requests (SPEC-037 candidate)
 
-Status: spike complete — recommended shape below; promotion to a SPEC-037 draft attached to operator sign-off
+Status: spike complete — Phase 1 promoted to SPEC-037 (delivered in v0.19.0); Phase 2 promoted to SPEC-038 (drafted 2026-08-27)
 Date: 2026-08-26
 Roadmap home: delivery-roadmap R4 "Approval-Gated Bounded Actions" — "isolated execution worker" and "signed execution requests" are the two R4 deliverables not yet implemented
 Verified against: approval and execution path at 0.18.1 (SPEC-020/021/030/031 as delivered)
@@ -116,12 +116,21 @@ is the right phase boundary?
 - Q-1: does the worker need its own service identity for the internal
   handoff API, or does mTLS-free cluster-local trust (SPEC-008's current
   posture) suffice for the first slice?
+  Resolved by SPEC-038 R-2: the worker holds its own static, scope-limited
+  handoff credential (SPEC-008 R-3 posture — no user authority, K8s Secret
+  provisioned by the deploy chain); unauthenticated cluster-local trust was
+  rejected, projected workload identity stays the cross-service upgrade path.
 - Q-2: exact resume-stream timeout when awaiting Phase-2 worker
   completion — reuse the HITL timeout value or introduce a dedicated
   execution timeout knob?
+  Resolved by SPEC-038 R-4: a dedicated `AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS`
+  knob (default 60s) — the HITL timeout governs parked-confirmation
+  answerability, an unrelated concern.
 - Q-3: should receipts be retrievable through the approvals inbox API
   (decider-visible) or stay on the session-detail surface (owner-visible)
   — the exposure decision parallels SPEC-030 Q-1.
+  Resolved by SPEC-037 R-6: receipts stay owner-visible on the session
+  surface; the approver inbox stays decision-metadata-only.
 
 ## 6. Promotion recommendation
 
@@ -130,6 +139,16 @@ off on the phased shape. Phase 2 gets its own spec number after Phase 1
 is live-verified, keeping each release one vertical slice per the roadmap
 principles. This memo satisfies the memo-first promotion rule. Operator
 sign-off was given 2026-08-27; SPEC-037 drafting proceeds on Phase 1 scope.
+
+Promotion gate satisfied 2026-08-27: Phase 1 (SPEC-037) was delivered in
+v0.19.0 and live-verified on the `mutating-dev` profile (signed receipt on
+the approved card, correlated `execution_requested` / `execution_completed`
+audit chain). Phase 2 was promoted the same day to
+`SPEC-038-isolated-execution-worker` (`docs/specs/SPEC-038-isolated-execution-worker/`),
+which inherits §4.2's shape — the signed envelope contract verbatim, the
+authenticated internal handoff, the blocking bounded-timeout resume await,
+and `request_id`-keyed single-flight with no automatic re-execution — and
+resolves Q-1 and Q-2 in its R-2 and R-4.
 
 ## 7. Relationship to the big-small LLM collaboration pattern (clarification)
 
