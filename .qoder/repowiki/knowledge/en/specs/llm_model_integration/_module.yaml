@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: specs/llm_model_integration
+title: llm_model_integration
+scope:
+    - docs/specs/SPEC-024-runtime-llm-model-switching/
+    - docs/specs/SPEC-026-multi-model-runtime-catalog/
+    - docs/specs/SPEC-027-live-model-discovery/
+    - docs/specs/SPEC-028-luban-llm-provider/
+source_files: []
+depends_on: []
+related_to: []

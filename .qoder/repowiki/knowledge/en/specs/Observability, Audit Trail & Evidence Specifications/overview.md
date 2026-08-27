@@ -1,0 +1,1 @@
+Specification documents defining the platform's observability baseline, durable audit trail, operator evidence panels, and session-persisted tool-call traces across all services.

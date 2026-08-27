@@ -1,0 +1,1 @@
+Each spec is delivered as a self-contained slice verified by `make verify` (product suites, kustomize overlay renders, policy validation); deployment wiring uses `dev-k8s/base/*/runtime-config.env` overlays and deploy-chain scripts such as `sync-execution-signing-secret.sh` and `sync-execution-handoff-secret.sh` that honor `SKIP_*_SECRETS=true` for CI.

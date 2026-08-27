@@ -1,0 +1,5 @@
+- Specs follow a fixed top-level structure (Status, Summary, Requirements with R-N numbering, Non-Goals, Impact, Risks, Open Questions, Changelog) so reviewers can locate acceptance criteria consistently.
+- Backend selection is environment-driven via `SESSION_STORE_BACKEND` with a factory function returning the appropriate `SessionStore` implementation, defaulting to memory for fail-open startup.
+- Each requirement pairs a one-line statement with explicit acceptance criteria written as testable bullet points rather than prose paragraphs.
+- Observability is expressed uniformly: a `session_store_backend` info gauge, a `session_store_errors_total` counter per operation, and a `/health` field reporting active backend and readiness.
+- Deployment changes are scoped to Kustomize overlays and `runtime-config.env` files, keeping base manifests deny-by-default and opt-in behavior isolated in environment-specific profiles.

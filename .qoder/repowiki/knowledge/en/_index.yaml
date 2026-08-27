@@ -3,12 +3,152 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-08-27T07:43:08Z"
+exported_at: "2026-08-27T09:07:05Z"
 modules:
     "":
         dir_name: Agentic AIOps Platform Workspace
         title: Agentic AIOps Platform Workspace
         scope: []
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    specs:
+        dir_name: specs
+        title: specs
+        scope:
+            - docs/specs/
+        source_files: []
+        children:
+            - specs/agent_runtime_execution
+            - specs/identity_security_trust
+            - specs/llm_model_integration
+            - specs/observability_audit
+            - specs/platform_infrastructure
+            - specs/policy_approval_workflow
+            - specs/portal_operator_ux
+            - specs/session_management
+            - specs/shared_templates_and_index
+            - specs/skills_guidance_incidents
+        depends_on: []
+        related_to: []
+    specs/agent_runtime_execution:
+        dir_name: Agent Execution Runtime Specifications (Tool Gateway, Kernel Hardening, Signed &
+        title: Agent Execution Runtime Specifications (Tool Gateway, Kernel Hardening, Signed & Isolated Execution)
+        scope:
+            - docs/specs/SPEC-007-tool-execution-framework/
+            - docs/specs/SPEC-017-agent-kernel-utilization-and-durability/
+            - docs/specs/SPEC-018-kernel-middleware-alignment/
+            - docs/specs/SPEC-037-signed-execution-requests/
+            - docs/specs/SPEC-038-isolated-execution-worker/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    specs/identity_security_trust:
+        dir_name: Identity, Trust & Execution Security Specifications
+        title: Identity, Trust & Execution Security Specifications
+        scope:
+            - docs/specs/SPEC-003-identity-trust-hardening/
+            - docs/specs/SPEC-008-service-to-service-identity/
+            - docs/specs/SPEC-037-signed-execution-requests/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    specs/llm_model_integration:
+        dir_name: llm_model_integration
+        title: llm_model_integration
+        scope:
+            - docs/specs/SPEC-024-runtime-llm-model-switching/
+            - docs/specs/SPEC-026-multi-model-runtime-catalog/
+            - docs/specs/SPEC-027-live-model-discovery/
+            - docs/specs/SPEC-028-luban-llm-provider/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    specs/observability_audit:
+        dir_name: Observability, Audit Trail & Evidence Specifications
+        title: Observability, Audit Trail & Evidence Specifications
+        scope:
+            - docs/specs/SPEC-005-observability-baseline/
+            - docs/specs/SPEC-011-observability-and-evidence-panels/
+            - docs/specs/SPEC-013-durable-audit-trail/
+            - docs/specs/SPEC-025-evidence-persistence-in-transcripts/
+            - docs/specs/SPEC-029-skills-usage-audit-trail/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    specs/platform_infrastructure:
+        dir_name: Platform Hardening & Gateway Extraction Specifications
+        title: Platform Hardening & Gateway Extraction Specifications
+        scope:
+            - docs/specs/SPEC-001-release-1-platform-hardening/
+            - docs/specs/SPEC-009-pre-production-hardening/
+            - docs/specs/SPEC-010-platform-gateway-extraction/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    specs/policy_approval_workflow:
+        dir_name: policy_approval_workflow
+        title: policy_approval_workflow
+        scope:
+            - docs/specs/SPEC-004-policy-enforcement/
+            - docs/specs/SPEC-020-hitl-confirmation-bridging/
+            - docs/specs/SPEC-030-require-approval-policy-semantics/
+            - docs/specs/SPEC-031-approval-inbox-persistent-confirmation/
+            - docs/specs/SPEC-032-owner-side-live-decision-sync/
+            - docs/specs/SPEC-033-confirmation-card-turn-anchoring/
+            - docs/specs/SPEC-034-approval-owner-ux-polish/
+            - docs/specs/SPEC-035-decision-sync-arrival-polish/
+            - docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    specs/portal_operator_ux:
+        dir_name: portal_operator_ux
+        title: portal_operator_ux
+        scope:
+            - docs/specs/SPEC-012-operator-guide/
+            - docs/specs/SPEC-019-portal-transparency-navigation/
+            - docs/specs/SPEC-023-portal-framework-rebuild/
+            - docs/specs/SPEC-022-multi-session-operator-workspace/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    specs/session_management:
+        dir_name: 'Session Management Specifications (Durability, Postgres Backend & Multi-Session '
+        title: Session Management Specifications (Durability, Postgres Backend & Multi-Session API)
+        scope:
+            - docs/specs/SPEC-006-session-durability/
+            - docs/specs/SPEC-016-session-store-postgres-separation/
+            - docs/specs/SPEC-022-multi-session-operator-workspace/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    specs/shared_templates_and_index:
+        dir_name: shared_templates_and_index
+        title: shared_templates_and_index
+        scope:
+            - docs/specs/templates/
+            - docs/specs/README.md
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    specs/skills_guidance_incidents:
+        dir_name: skills_guidance_incidents
+        title: skills_guidance_incidents
+        scope:
+            - docs/specs/SPEC-014-skills-and-grounded-guidance/
+            - docs/specs/SPEC-015-incident-triage-and-collaboration/
+            - docs/specs/SPEC-039-shift-summary-artifacts/
         source_files: []
         children: []
         depends_on: []

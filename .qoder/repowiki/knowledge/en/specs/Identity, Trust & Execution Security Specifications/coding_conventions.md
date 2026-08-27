@@ -1,0 +1,5 @@
+- Each spec package follows a fixed triad of `spec.md` (status, requirements with R-N numbering and acceptance criteria), `plan.md`, and `tasks.md`.
+- Requirements are expressed as numbered R-N blocks with explicit testable acceptance criteria rather than prose-only descriptions.
+- Specs declare status transitions through a changelog section tracking draft → approved → in-progress → delivered milestones.
+- Cross-cutting contracts (JWT claims, audit events, schemas) are centralized under `shared/shared-contracts` and versioned (v1) rather than duplicated per product.
+- Security-sensitive configuration is provisioned via environment variables or K8s Secrets mounted at runtime (e.g. `IDENTITY_JWKS_URL`, `AGENT_EXECUTION_SIGNING_KEY`) instead of being committed to source.

@@ -1,0 +1,1 @@
+Specification documents defining the evolution of agent-platform session storage from in-memory to Redis and Postgres backends, plus the multi-session lifecycle API and voice-readiness contract.

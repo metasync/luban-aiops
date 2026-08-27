@@ -1,0 +1,1 @@
+Each spec is validated through the project-wide `make verify` harness referenced in the changelogs; deployment wiring uses a new `sync-execution-signing-secret.sh` script invoked by `deploy.sh`, with CI skipping via `SKIP_EXECUTION_SIGNING_SECRET=true` following the existing `SKIP_*_SECRETS` pattern.

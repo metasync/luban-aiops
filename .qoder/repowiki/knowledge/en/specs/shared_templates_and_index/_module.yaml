@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: specs/shared_templates_and_index
+title: shared_templates_and_index
+scope:
+    - docs/specs/templates/
+    - docs/specs/README.md
+source_files: []
+depends_on: []
+related_to: []

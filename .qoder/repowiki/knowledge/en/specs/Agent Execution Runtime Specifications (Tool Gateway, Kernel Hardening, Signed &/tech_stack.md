@@ -1,0 +1,1 @@
+Python-based specs referencing AgentScope 2.0.6 kernel (`MiddlewareBase`, `TracingMiddleware`, `ReplyBudgetControlMiddleware`), `kubernetes-client/python` for read-only K8s access, psycopg[binary] for Postgres-backed conversation state, HMAC-SHA256 for execution-request signing, and OpenTelemetry OTLP spans emitted via agentscope's tracing middleware.

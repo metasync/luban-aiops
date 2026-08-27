@@ -1,0 +1,1 @@
+Delivery gates are verified by `make verify`, which runs pytest suites across all four products (`agent-platform`, `identity-broker`, `platform-gateway`, `tool-gateway`) and renders every kustomize overlay; specs record passing test counts (e.g., 88+47+123 tests for SPEC-009, 88+47+74+83 for SPEC-010) as acceptance evidence.

@@ -1,0 +1,16 @@
+schema_version: 1
+module_path: specs/policy_approval_workflow
+title: policy_approval_workflow
+scope:
+    - docs/specs/SPEC-004-policy-enforcement/
+    - docs/specs/SPEC-020-hitl-confirmation-bridging/
+    - docs/specs/SPEC-030-require-approval-policy-semantics/
+    - docs/specs/SPEC-031-approval-inbox-persistent-confirmation/
+    - docs/specs/SPEC-032-owner-side-live-decision-sync/
+    - docs/specs/SPEC-033-confirmation-card-turn-anchoring/
+    - docs/specs/SPEC-034-approval-owner-ux-polish/
+    - docs/specs/SPEC-035-decision-sync-arrival-polish/
+    - docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/
+source_files: []
+depends_on: []
+related_to: []

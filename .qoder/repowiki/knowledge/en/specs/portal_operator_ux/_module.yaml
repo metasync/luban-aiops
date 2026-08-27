@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: specs/portal_operator_ux
+title: portal_operator_ux
+scope:
+    - docs/specs/SPEC-012-operator-guide/
+    - docs/specs/SPEC-019-portal-transparency-navigation/
+    - docs/specs/SPEC-023-portal-framework-rebuild/
+    - docs/specs/SPEC-022-multi-session-operator-workspace/
+source_files: []
+depends_on: []
+related_to: []
