@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: luban-platform-team
 - created: 2026-08-27
 - release slice: R5 — Hardening and External Consumption (first R5 slice)
@@ -293,3 +293,5 @@ Acceptance criteria:
   rename (R-7) and session-id copy (R-8) added as add-ons; skill
   authoring export recorded as a backlog candidate, explicitly not a
   document type.
+- 2026-08-27: approved by the operator with no recorded conditions;
+  implementation proceeds as the first R5 slice.
