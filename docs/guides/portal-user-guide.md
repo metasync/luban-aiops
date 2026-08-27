@@ -193,11 +193,33 @@ never by per-document permission grants.
   shows a warning instead and the digest stands alone.
 - Drafts can be **Published** (one-way — publishing cannot be undone, and
   a published document refuses re-publish) or **Deleted** while they are
-  yours; published documents are immutable.
+  yours. A document's content is never edited after creation; publishing
+  only changes visibility, and owners may still delete their own
+  published documents (they disappear for everyone).
 
 Document creation and publishing are the `documents:create` action and
 reading is `documents:read`; cross-owner reads are audited (`document_read`)
 while reading your own documents is not.
+
+**Your first shift summary** — the typical end-of-shift workflow:
+
+1. Open **Documents** and click **New shift summary**.
+2. Enter a label that names the shift (e.g. *Night shift 2026-08-27*).
+3. Select your own sessions from the picker (up to 20). To fold in a
+   colleague's session, ask them to copy its session id from their
+   session panel (see Sessions above) and paste it into the foreign-id
+   field — foreign sessions enter metadata-only, and only when your
+   roles hold the approvals inbox.
+4. Optionally switch on the prose summary; submit. The draft appears in
+   **Mine**.
+5. Review the digest on the document page. When it reads right, click
+   **Publish** — colleagues with a document role see it in
+   **Published** immediately, and every cross-owner read lands on the
+   audit trail.
+
+Reading a colleague's published document needs no request or grant —
+open it in the **Published** tab; the digest names its owner and anchors
+every fact to its source records.
 
 ## Incidents (Control)
 

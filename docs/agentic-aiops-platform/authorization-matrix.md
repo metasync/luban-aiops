@@ -384,7 +384,9 @@ SPEC-039 adds the operations document repository actions: `documents:create`
 document into the role-visible space — and foreign-session coverage inside
 a document digest is capped at the inbox's metadata-only posture by gating
 on the caller's own `approvals:list` grant. Cross-owner document reads are
-recorded as `document_read` audit events (own reads stay unaudited),
+recorded as `document_read` audit events (own reads stay unaudited);
+since v0.21.1 document listings are envelope-only, so the audited single
+fetch is the only path to a document's content. That audit sits
 alongside `document_created` / `document_published`. SPEC-039 also adds
 `session:update` (rename one's own session titles), granted exactly where
 `session:list` is granted — every chat-capable role — with server-side

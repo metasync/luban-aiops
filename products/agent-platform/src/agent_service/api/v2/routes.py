@@ -860,18 +860,26 @@ async def list_documents(
     scope: Literal["mine", "published"] = Query(default="mine"),
     x_user_id: str | None = Header(None),
 ) -> dict:
-    """List documents (SPEC-039 R-2).
+    """List document envelopes (SPEC-039 R-2).
 
     ``mine`` returns the caller's drafts and published documents;
     ``published`` returns the team-visible surface — drafts never
     appear there for anyone, including admins.
+
+    Rows are envelope-only: ``digest`` and ``prose`` are stripped so
+    the full content of someone else's document is only ever served
+    by the single fetch below, which is the audited surface (R-5).
     """
     user_id = _user_id(x_user_id)
     if scope == "mine":
         rows = OPERATION_DOCUMENT_STORE.list_for_owner(user_id)
     else:
         rows = OPERATION_DOCUMENT_STORE.list_published()
-    return {"documents": rows}
+    envelopes = [
+        {key: value for key, value in row.items() if key not in ("digest", "prose")}
+        for row in rows
+    ]
+    return {"documents": envelopes}
 
 
 @router.get("/documents/{document_id}")

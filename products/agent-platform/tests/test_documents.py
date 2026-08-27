@@ -207,6 +207,32 @@ class TestVisibilityMatrix:
         assert published_id in ids
         assert draft_id not in ids
 
+    def test_list_rows_are_envelope_only(self) -> None:
+        app_client = TestClient(create_app())
+        document_id = self._seed_published(app_client)
+        # Both scopes omit digest/prose: the full content is only
+        # served by the single fetch, which is the audited surface.
+        published_rows = app_client.get(
+            "/api/v2/documents",
+            params={"scope": "published"},
+            headers={"X-User-ID": "bob"},
+        ).json()["documents"]
+        mine_rows = app_client.get(
+            "/api/v2/documents",
+            params={"scope": "mine"},
+            headers={"X-User-ID": "alice"},
+        ).json()["documents"]
+        for rows in (published_rows, mine_rows):
+            assert [row["document_id"] for row in rows] == [document_id]
+            for row in rows:
+                assert "digest" not in row
+                assert "prose" not in row
+        # The single fetch still carries the full document.
+        full = app_client.get(
+            f"/api/v2/documents/{document_id}", headers={"X-User-ID": "alice"}
+        ).json()
+        assert "digest" in full
+
     def test_foreign_draft_is_indistinguishable_from_unknown(self) -> None:
         app_client = TestClient(create_app())
         session_id = _session(app_client, "alice")

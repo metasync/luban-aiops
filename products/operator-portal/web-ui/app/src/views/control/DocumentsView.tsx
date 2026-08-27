@@ -33,8 +33,10 @@ import { ApiError, currentAuthenticatedUser } from "../../api/client";
 import {
   createDocument,
   deleteDocument,
+  getDocument,
   listDocuments,
   publishDocument,
+  type DocumentListRow,
   type OperationDocument,
 } from "../../api/documents";
 import type { SessionWorkspace } from "../../sessions/useSessionWorkspace";
@@ -374,11 +376,13 @@ export default function DocumentsView({
   workspace: SessionWorkspace;
 }) {
   const [scope, setScope] = useState<"mine" | "published">("mine");
-  const [documents, setDocuments] = useState<OperationDocument[]>([]);
+  const [documents, setDocuments] = useState<DocumentListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<OperationDocument | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const username = currentAuthenticatedUser();
 
   const refresh = useCallback(async (activeScope: "mine" | "published") => {
@@ -398,9 +402,33 @@ export default function DocumentsView({
     void refresh(scope);
   }, [scope, refresh]);
 
-  const selected = documents.find((doc) => doc.document_id === selectedId) ?? null;
+  // List rows are envelope-only; the full document (digest + prose)
+  // comes from the single fetch, which is the audited read surface.
+  useEffect(() => {
+    if (selectedId === null) {
+      setSelected(null);
+      return;
+    }
+    const controller = new AbortController();
+    setDetailLoading(true);
+    getDocument(selectedId, controller.signal)
+      .then(setSelected)
+      .catch((err) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        message.error(err instanceof Error ? err.message : String(err));
+        setSelected(null);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setDetailLoading(false);
+        }
+      });
+    return () => controller.abort();
+  }, [selectedId]);
 
-  const publish = async (document: OperationDocument) => {
+  const publish = async (document: DocumentListRow) => {
     try {
       await publishDocument(document.document_id);
       message.success("Document published.");
@@ -415,7 +443,7 @@ export default function DocumentsView({
     }
   };
 
-  const remove = (document: OperationDocument) => {
+  const remove = (document: DocumentListRow) => {
     Modal.confirm({
       title: "Delete this document?",
       content: `“${document.label}” will be removed for everyone.`,
@@ -562,11 +590,15 @@ export default function DocumentsView({
       />
       <Drawer
         title={selected ? selected.label : "Document"}
-        open={selected !== null}
+        open={selectedId !== null}
         onClose={() => setSelectedId(null)}
         width={560}
       >
-        {selected ? (
+        {detailLoading || selected === null ? (
+          <div style={{ padding: 24, textAlign: "center" }}>
+            <Spin />
+          </div>
+        ) : (
           <div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
               <Tag>{selected.document_type.replace(/_/g, " ")}</Tag>
@@ -589,7 +621,7 @@ export default function DocumentsView({
             </Typography.Title>
             <ProsePanel document={selected} />
           </div>
-        ) : null}
+        )}
       </Drawer>
     </div>
   );

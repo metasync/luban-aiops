@@ -7,6 +7,13 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-27-document-read-audit-integrity.md`
+  - same-day patch on the SPEC-039 document repository (v0.21.1):
+    document listings are envelope-only (digest/prose omitted) and the
+    portal drawer loads full documents through the audited single
+    fetch, so cross-owner reads of published documents always emit
+    `document_read`; also corrects the guide's deletion wording and
+    adds the "Your first shift summary" get-started walkthrough
 - `2026-08-27-operations-document-repository.md`
   - delivers SPEC-039 (v0.21.0), the first R5 slice: a platform-owned
     operations document repository — typed substrate with a role-based

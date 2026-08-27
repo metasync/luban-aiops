@@ -10,7 +10,8 @@
 #   3. drafts are owner-only: the reader gets a 404 anti-enumeration
 #      before the owner publishes, and a 200 with owner attribution after
 #   4. publish is one-way: the second publish answers 409
-#   5. the reader sees the document in the published scope listing
+#   5. the reader sees the document in the published scope listing,
+#      envelope-only (digest/prose never leak through the listing)
 #   6. the durable trail carries document_created / document_published
 #      and the cross-owner document_read attributed to the reader
 #   7. session rename (R-7): owner renames (list/detail reflect it),
@@ -146,7 +147,14 @@ http "$GATEWAY_URL/api/v1/documents?scope=published" \
 [ "$HTTP_CODE" = "200" ] || fail "published listing answered $HTTP_CODE"
 printf '%s' "$HTTP_BODY" | grep -q "$DOCUMENT_ID" \
   || fail "published listing does not contain $DOCUMENT_ID"
-echo "reader reads the published document with owner attribution"
+printf '%s' "$HTTP_BODY" | python3 -c "
+import json, sys
+rows = json.load(sys.stdin).get('documents', [])
+assert rows, 'published listing is empty'
+for row in rows:
+    assert 'digest' not in row and 'prose' not in row, row.get('document_id')
+" || fail "published listing leaked digest/prose content"
+echo "reader reads the published document with owner attribution; listing is envelope-only"
 
 echo "==> [5/7] document audit on the durable trail"
 sleep 2  # audit emission is fire-and-forget; give the sink a beat
@@ -199,6 +207,7 @@ echo "Operations document repository live check passed:"
 echo "  - role matrix enforced (observer 403 on documents:create)"
 echo "  - draft created with digest + provenance anchor"
 echo "  - drafts owner-only (404) until publish; published readable by role"
+echo "  - listing is envelope-only; full content flows the audited fetch"
 echo "  - publish is one-way (409 on re-publish)"
 echo "  - document_created / document_published / cross-owner document_read durable"
 echo "  - session rename owner-only with anti-enumeration and role denial"

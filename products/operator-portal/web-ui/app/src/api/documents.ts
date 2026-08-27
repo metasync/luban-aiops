@@ -28,8 +28,13 @@ export interface OperationDocument {
   prose_status: ProseStatus;
 }
 
+// Listing rows are envelope-only: the agent strips digest and prose
+// so full document content is only ever retrieved through getDocument,
+// the read surface that carries the cross-owner audit.
+export type DocumentListRow = Omit<OperationDocument, "digest" | "prose">;
+
 export interface DocumentListResponse {
-  documents: OperationDocument[];
+  documents: DocumentListRow[];
 }
 
 export interface DocumentCreateRequest {
@@ -42,7 +47,7 @@ export interface DocumentCreateRequest {
 export async function listDocuments(
   scope: "mine" | "published",
   signal?: AbortSignal,
-): Promise<OperationDocument[]> {
+): Promise<DocumentListRow[]> {
   const response = await requestJson<DocumentListResponse>(
     `/api/v1/documents?scope=${scope}`,
     { signal },

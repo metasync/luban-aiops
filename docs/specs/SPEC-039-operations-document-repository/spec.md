@@ -301,3 +301,9 @@ Acceptance criteria:
   portal Documents view, session rename, session-id copy); see
   `CHANGELOG.md` and the
   `2026-08-27-operations-document-repository.md` release note.
+- 2026-08-27: hardened in v0.21.1 — document listings became
+  envelope-only (digest/prose omitted) and the portal drawer retrieves
+  full documents through the audited single fetch, closing the listing
+  path that could serve cross-owner content without a `document_read`
+  event; see the `2026-08-27-document-read-audit-integrity.md` release
+  note.

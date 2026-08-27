@@ -13,6 +13,25 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.21.1 — 2026-08-27
+
+### Fixed
+
+- **Document read audit integrity (SPEC-039)**: the document listing
+  (`GET /documents`, both scopes) returned full rows — digest and prose
+  included — so a `documents:read` holder could read a colleague's
+  published document content without ever triggering the cross-owner
+  `document_read` event, which only fires on the single fetch. Listings
+  now return envelope rows (digest and prose omitted) and the portal
+  drawer retrieves the full document through the single-fetch route,
+  making the audited fetch the only path to document content. Also
+  corrects the portal guide's deletion wording (owners may delete their
+  own published documents; document content is never edited after
+  creation) and adds the "Your first shift summary" get-started
+  walkthrough.
+
+## 0.21.0 — 2026-08-27
+
 ### Added
 
 - **Operations document repository (SPEC-039)**: the platform's first

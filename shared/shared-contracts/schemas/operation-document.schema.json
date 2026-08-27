@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/operation-document.schema.json",
   "title": "Operation Document (v1)",
-  "description": "Immutable typed operations document persisted by the agent service document repository (SPEC-039 R-1). Documents are snapshots: digest values are copied verbatim from the durable stores at assembly time, record ids are provenance anchors (never live references), and publishing is a one-way draft->published lifecycle. No model output appears outside the labeled prose section.",
+  "description": "Immutable typed operations document persisted by the agent service document repository (SPEC-039 R-1). Documents are snapshots: digest values are copied verbatim from the durable stores at assembly time, record ids are provenance anchors (never live references), and publishing is a one-way draft->published lifecycle. No model output appears outside the labeled prose section. This schema describes the full document as served by the single-document fetch (the audited read surface); list endpoints return envelope rows that omit digest and prose so full content is only ever retrieved through the audited fetch.",
   "type": "object",
   "additionalProperties": false,
   "required": [
