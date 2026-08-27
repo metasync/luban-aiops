@@ -7,10 +7,24 @@
 - [tasks.md](file://docs/specs/SPEC-038-isolated-execution-worker/tasks.md)
 - [execution-runtime-spike.md](file://docs/workspace/execution-runtime-spike.md)
 - [README.md](file://products/execution-runtime/README.md)
-- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [app.py](file://products/execution-runtime/src/execution_runtime/app.py)
+- [config.py](file://products/execution-runtime/src/execution_runtime/core/config.py)
+- [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
+- [executor.py](file://products/execution-runtime/src/execution_runtime/services/executor.py)
+- [single_flight.py](file://products/execution-runtime/src/execution_runtime/services/single_flight.py)
+- [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [test_gateway_tools.py](file://products/agent-platform/tests/test_gateway_tools.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated all sections to reflect the completed production-ready implementation of SPEC-038
+- Enhanced architecture diagrams with actual implementation details from the execution-runtime service
+- Added comprehensive coverage of authentication, signature verification, and execution management components
+- Updated deployment section with Kubernetes manifests and infrastructure isolation details
+- Added detailed component analysis based on actual code implementation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -25,9 +39,9 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document specifies the isolated execution worker for the platform, known as SPEC-038. It moves approved mutating actions out of the agent-service process into a dedicated, infrastructure-isolated worker that verifies signed execution envelopes, executes tool calls via the tool-gateway under the confirmer’s delegated identity, and authorizes receipts. The design preserves operator experience by blocking the resumed stream on a bounded timeout so results appear in the same turn.
+This document specifies the isolated execution worker for the platform, known as SPEC-038. The implementation is now complete and delivered in v0.20.0, moving approved mutating actions out of the agent-service process into a dedicated, infrastructure-isolated worker that verifies signed execution envelopes, executes tool calls via the tool-gateway under the confirmer's delegated identity, and authorizes receipts. The design preserves operator experience by blocking the resumed stream on a bounded timeout so results appear in the same turn.
 
-Key goals:
+Key goals achieved:
 - Enforce isolation boundaries at deployment time (own service, ClusterIP-only, no portal exposure).
 - Require fail-closed verification of handoff credentials and signed envelopes before any execution.
 - Guarantee single-flight idempotency per execution_id to prevent accidental re-execution.
@@ -45,6 +59,7 @@ graph TB
 subgraph "Agent Platform"
 AGT["agent-service<br/>tools/gateway_tools.py"]
 SIG["execution_signing.py"]
+CLIENT["execution_worker_client.py"]
 end
 subgraph "Execution Runtime (new)"
 HRD["handoff route<br/>POST /api/v1/executions/handoff"]
@@ -52,36 +67,41 @@ EXE["executor<br/>tool-gateway call"]
 REC["execution records store"]
 SF["single-flight registry"]
 AUD["audit emitter"]
+CFG["frozen config<br/>EXECUTION_* settings"]
 end
 subgraph "Platform Services"
 GW["tool-gateway"]
 PG["Postgres<br/>execution_records"]
 AUDS["audit-service"]
 end
-AGT --> HRD
+AGT --> CLIENT
+CLIENT --> HRD
 HRD --> EXE
 EXE --> GW
 HRD --> REC
 HRD --> AUD
 REC --> PG
 HRD --> SF
+HRD --> CFG
 ```
 
 **Diagram sources**
 - [plan.md:41-93](file://docs/specs/SPEC-038-isolated-execution-worker/plan.md#L41-L93)
 - [spec.md:58-236](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md#L58-L236)
+- [app.py:19-67](file://products/execution-runtime/src/execution_runtime/app.py#L19-L67)
+- [config.py:20-84](file://products/execution-runtime/src/execution_runtime/core/config.py#L20-L84)
 
 **Section sources**
 - [plan.md:12-169](file://docs/specs/SPEC-038-isolated-execution-worker/plan.md#L12-L169)
 - [tasks.md:5-44](file://docs/specs/SPEC-038-isolated-execution-worker/tasks.md#L5-L44)
 
 ## Core Components
-- Execution runtime worker product: A Python service with health endpoint, structured logging, frozen EXECUTION_* settings, and minimal inbound surface (internal handoff only).
-- Authenticated handoff: Constant-time token check, envelope signature verification, and args-digest re-computation before execution.
-- Executor and receipt authorship: Forwards the confirmer’s delegated token to the tool-gateway, writes signed receipts with first-write-wins semantics, and emits audit events.
-- Single-flight idempotency: In-process registry keyed by execution_id; concurrent duplicates join the same future; completed entries are evicted after retention.
-- Agent-platform integration: New runtime knobs and a handoff client; mutating resume paths block on the worker with a dedicated timeout; read-only paths remain untouched.
-- Deployment isolation: Own Deployment and ClusterIP Service, secrets mounted, no external routes, and deploy scripts to provision the handoff secret.
+- **Execution runtime worker product**: A Python FastAPI service with health endpoints, structured logging, frozen EXECUTION_* settings, and minimal inbound surface (internal handoff only).
+- **Authenticated handoff**: Constant-time token check, envelope signature verification, and args-digest re-computation before execution.
+- **Executor and receipt authorship**: Forwards the confirmer's delegated token to the tool-gateway, writes signed receipts with first-write-wins semantics, and emits audit events.
+- **Single-flight idempotency**: In-process registry keyed by execution_id; concurrent duplicates join the same future; completed entries are evicted after retention.
+- **Agent-platform integration**: New runtime knobs and a handoff client; mutating resume paths block on the worker with a dedicated timeout; read-only paths remain untouched.
+- **Deployment isolation**: Own Deployment and ClusterIP Service, secrets mounted, no external routes, and deploy scripts to provision the handoff secret.
 
 Acceptance signals are defined per requirement in the spec and tasks.
 
@@ -115,6 +135,7 @@ Agent-->>Client : Stream resumes with outcome
 **Diagram sources**
 - [plan.md:41-93](file://docs/specs/SPEC-038-isolated-execution-worker/plan.md#L41-L93)
 - [spec.md:119-184](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md#L119-L184)
+- [handoff.py:66-169](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py#L66-L169)
 
 ## Detailed Component Analysis
 
@@ -140,10 +161,12 @@ DigestCheck --> |Match| Proceed["Proceed to executor"]
 **Diagram sources**
 - [plan.md:47-65](file://docs/specs/SPEC-038-isolated-execution-worker/plan.md#L47-L65)
 - [spec.md:79-117](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md#L79-L117)
+- [handoff.py:71-157](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py#L71-L157)
 
 **Section sources**
 - [plan.md:41-65](file://docs/specs/SPEC-038-isolated-execution-worker/plan.md#L41-L65)
 - [spec.md:79-117](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md#L79-L117)
+- [handoff.py:66-169](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py#L66-L169)
 
 ### Executor and Receipt Authorship
 - Executes tool-gateway call with forwarded delegated bearer token; timeouts map to structured TIMEOUT result.
@@ -169,10 +192,12 @@ EmitAudit --> EEnd(["Return receipt + result"])
 **Diagram sources**
 - [plan.md:67-93](file://docs/specs/SPEC-038-isolated-execution-worker/plan.md#L67-L93)
 - [spec.md:119-147](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md#L119-L147)
+- [executor.py:23-131](file://products/execution-runtime/src/execution_runtime/services/executor.py#L23-L131)
 
 **Section sources**
 - [plan.md:67-93](file://docs/specs/SPEC-038-isolated-execution-worker/plan.md#L67-L93)
 - [spec.md:119-147](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md#L119-L147)
+- [executor.py:23-131](file://products/execution-runtime/src/execution_runtime/services/executor.py#L23-L131)
 
 ### Single-Flight Idempotency
 - In-process registry keyed by execution_id.
@@ -195,10 +220,12 @@ Executor --> SingleFlightRegistry : "wraps"
 **Diagram sources**
 - [plan.md:123-133](file://docs/specs/SPEC-038-isolated-execution-worker/plan.md#L123-L133)
 - [spec.md:186-206](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md#L186-L206)
+- [single_flight.py:35-107](file://products/execution-runtime/src/execution_runtime/services/single_flight.py#L35-L107)
 
 **Section sources**
 - [plan.md:123-133](file://docs/specs/SPEC-038-isolated-execution-worker/plan.md#L123-L133)
 - [spec.md:186-206](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md#L186-L206)
+- [single_flight.py:35-107](file://products/execution-runtime/src/execution_runtime/services/single_flight.py#L35-L107)
 
 ### Agent-Platform Integration (Blocking Handoff)
 - New runtime settings: execution_worker_url, execution_handoff_token, execution_worker_timeout_seconds (default 60s).
@@ -223,10 +250,14 @@ Tools-->>Kernel : ToolChunk/evidence-frame continues
 **Diagram sources**
 - [plan.md:95-122](file://docs/specs/SPEC-038-isolated-execution-worker/plan.md#L95-L122)
 - [spec.md:149-184](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md#L149-L184)
+- [gateway_tools.py:247-302](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L247-L302)
+- [execution_worker_client.py:54-145](file://products/agent-platform/src/agent_service/services/execution_worker_client.py#L54-L145)
 
 **Section sources**
 - [plan.md:95-122](file://docs/specs/SPEC-038-isolated-execution-worker/plan.md#L95-L122)
 - [spec.md:149-184](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md#L149-L184)
+- [gateway_tools.py:247-302](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L247-L302)
+- [execution_worker_client.py:54-145](file://products/agent-platform/src/agent_service/services/execution_worker_client.py#L54-L145)
 
 ### Signing and Envelope Contract
 - The worker uses a copy-with-parity signing module to ensure byte parity with agent-platform.
@@ -314,7 +345,7 @@ Common failure modes and diagnostics:
 - [plan.md:47-122](file://docs/specs/SPEC-038-isolated-execution-worker/plan.md#L47-L122)
 
 ## Conclusion
-SPEC-038 isolates approved mutating execution into a dedicated worker, enforcing fail-closed verification, single-flight idempotency, and infrastructure-level isolation while preserving the operator’s “approve and watch” experience. It builds directly on SPEC-037’s signed envelope contract and extends agent-platform with a thin handoff client. Delivery includes tests, overlays, and live validation on the mutating-dev profile.
+SPEC-038 isolates approved mutating execution into a dedicated worker, enforcing fail-closed verification, single-flight idempotency, and infrastructure-level isolation while preserving the operator's "approve and watch" experience. It builds directly on SPEC-037's signed envelope contract and extends agent-platform with a thin handoff client. Delivery includes tests, overlays, and live validation on the mutating-dev profile.
 
 [No sources needed since this section summarizes without analyzing specific files]
 

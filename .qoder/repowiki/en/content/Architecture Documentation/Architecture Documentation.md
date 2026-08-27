@@ -13,6 +13,8 @@
 - [identity-and-authorization-design.md](file://docs/agentic-aiops-platform/identity-and-authorization-design.md)
 - [agent-platform-runtime-options.md](file://docs/agentic-aiops-platform/agent-platform-runtime-options.md)
 - [policy-specification.md](file://docs/agentic-aiops-platform/policy-specification.md)
+- [delivery-roadmap.md](file://docs/agentic-aiops-platform/delivery-roadmap.md)
+- [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
 - [main.py](file://products/platform-gateway/src/platform_gateway/main.py)
 - [app.py](file://products/platform-gateway/src/platform_gateway/app.py)
 - [router.py](file://products/platform-gateway/src/platform_gateway/api/router.py)
@@ -34,6 +36,15 @@
 - [config.py](file://products/agent-platform/src/agent_service/core/config.py)
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
+- [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [main.py](file://products/execution-runtime/src/execution_runtime/main.py)
+- [app.py](file://products/execution-runtime/src/execution_runtime/app.py)
+- [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
+- [executor.py](file://products/execution-runtime/src/execution_runtime/services/executor.py)
+- [single_flight.py](file://products/execution-runtime/src/execution_runtime/services/single_flight.py)
+- [config.py](file://products/execution-runtime/src/execution_runtime/core/config.py)
 - [main.py](file://products/identity-broker/src/identity_service/main.py)
 - [app.py](file://products/identity-broker/src/identity_service/app.py)
 - [auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
@@ -53,18 +64,20 @@
 - [identity-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml)
 - [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
 - [web-ui-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-service.yaml)
+- [execution-runtime-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/execution-runtime/execution-runtime-deployment.yaml)
+- [execution-runtime-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/execution-runtime/execution-runtime-service.yaml)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
 - [deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated architecture overview to reflect the split of monolithic API gateway into two specialized services
-- Added detailed documentation for platform-gateway service responsible for portal-facing operations
-- Updated tool-gateway service documentation to focus exclusively on tool execution and connector management
-- Revised component analysis sections to document both gateway services separately
-- Updated deployment topology diagrams to show the new dual-gateway architecture
-- Enhanced dependency analysis to reflect the new service boundaries and communication patterns
+- Added comprehensive documentation for the new isolated execution worker service that fundamentally changes how approved mutating actions are executed
+- Updated architecture overview to reflect the shift from in-process execution to isolated worker execution model
+- Enhanced component analysis sections to document the execution-runtime worker and its integration with agent-platform
+- Updated deployment topology diagrams to show the new execution-runtime service alongside existing services
+- Revised security boundaries and isolation patterns to reflect the new worker-based execution model
+- Added detailed documentation of the handoff mechanism, signature verification, and single-flight idempotency
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -79,30 +92,32 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides a comprehensive architectural overview of the Luban AIOps Platform. It describes the microservices-based design, service boundaries, data flows, and integration points. The platform has undergone a major architectural evolution with the split of the monolithic API gateway into two specialized services: **platform-gateway** for portal-facing operations and **tool-gateway** for tool execution. It also documents key architectural decisions captured in Architectural Decision Records (ADRs), technology stack choices (FastAPI, Redis, Kubernetes, OIDC), system context diagrams, scalability considerations, deployment topology, infrastructure requirements, and cross-cutting concerns such as security, monitoring, logging, and error handling.
+This document provides a comprehensive architectural overview of the Luban AIOps Platform. It describes the microservices-based design, service boundaries, data flows, and integration points. The platform has undergone significant architectural evolution with the introduction of an **isolated execution worker service** that fundamentally changes how approved mutating actions are executed, shifting from in-process to isolated worker execution model. This change enhances security boundaries, reduces blast radius, and improves operational reliability. The platform now features a dual-gateway pattern (platform-gateway for portal-facing operations and tool-gateway for tool execution) combined with a dedicated execution-runtime worker for secure mutation execution. Key architectural decisions are captured in Architectural Decision Records (ADRs), technology stack choices include FastAPI, Redis, Kubernetes, and OIDC integration, along with system context diagrams showing external dependencies and internal service communication.
 
 ## Project Structure
 The repository is organized into product services, shared contracts, platform operations, and documentation:
 - Products:
   - **platform-gateway**: Portal-facing API edge with token verification, policy enforcement, chat/session proxying, and identity delegation.
   - **tool-gateway**: Tool execution framework with registry, connectors, redaction, and audit capabilities.
-  - agent-platform: Agent runtime kernel, session management, provider integrations, and observability.
+  - **execution-runtime**: Isolated worker service for secure execution of approved mutating actions with signature verification and single-flight idempotency.
+  - agent-platform: Agent runtime kernel, session management, provider integrations, and observability with execution worker client integration.
   - identity-broker: Identity and token services for OIDC integration and service-to-service trust.
   - operator-portal: Web UI for operators.
 - Shared:
-  - platform-ops: GitOps overlays and Kubernetes manifests for dev environment.
+  - platform-ops: GitOps overlays and Kubernetes manifests for dev environment including execution-runtime deployment.
   - shared-contracts: JSON schemas and policy definitions used across services.
   - shared-sdk: SDK reference (placeholder).
 - Docs:
   - adr: Architectural Decision Records.
   - agentic-aiops-platform: Reference architecture, identity/authorization design, policy specification, and runtime options.
-  - specs: Feature specifications and plans.
+  - specs: Feature specifications and plans including SPEC-038 for isolated execution worker.
 
 ```mermaid
 graph TB
 subgraph "Products"
 PG["Platform Gateway"]
 TG["Tool Gateway"]
+ERW["Execution Runtime Worker"]
 AP["Agent Platform"]
 IB["Identity Broker"]
 OP["Operator Portal"]
@@ -115,12 +130,14 @@ subgraph "External"
 OIDC["OIDC Provider"]
 K8S["Kubernetes Cluster"]
 REDIS["Redis"]
+POSTGRES["PostgreSQL"]
 end
 OP --> PG
 PG --> AP
 PG --> IB
-TG --> K8S
-TG --> SC
+AP --> ERW
+ERW --> TG
+ERW --> POSTGRES
 AP --> REDIS
 AP --> K8S
 IB --> OIDC
@@ -129,9 +146,11 @@ SC --> PG
 SC --> TG
 SC --> AP
 SC --> IB
+SC --> ERW
 ```
 
 **Diagram sources**
+- [execution-runtime-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/execution-runtime/execution-runtime-deployment.yaml)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
@@ -144,7 +163,7 @@ SC --> IB
 - [part-2-reference-architecture.md](file://docs/agentic-aiops-platform/part-2-reference-architecture.md)
 
 ## Core Components
-The platform now features two specialized gateway services that replaced the original monolithic API gateway:
+The platform now features three specialized services that replaced the original monolithic approach:
 
 ### Platform Gateway (Portal-Facing Edge)
 - **Responsibilities**: Token verification, deny-by-default policy enforcement, chat and session proxying to agent-platform, broker-mediated token delegation, and portal-facing routes (chat, sessions, auth, identity, runtime, health/metrics).
@@ -154,8 +173,12 @@ The platform now features two specialized gateway services that replaced the ori
 - **Responsibilities**: Tool registry management, connector standardization, tools:list/invoke endpoints, deterministic redaction, tool audit, and Kubernetes connector integration.
 - **Key Features**: Tool execution isolation, security-focused redaction choke point, and service-to-service trust via delegated tokens.
 
+### Execution Runtime Worker (Isolated Mutation Executor)
+- **Responsibilities**: Secure execution of approved mutating actions through authenticated handoff, signature verification, single-flight idempotency, and receipt authorship.
+- **Key Features**: Fail-closed verification, HMAC-signed execution requests/receipts, bounded timeout handling, and infrastructure-enforced isolation.
+
 ### Other Core Services
-- **Agent Platform**: Hosts the agent runtime kernel, manages sessions, integrates with AI providers, and exposes APIs for chat and session lifecycle. Uses Redis for durable sessions.
+- **Agent Platform**: Hosts the agent runtime kernel, manages sessions, integrates with AI providers, exposes APIs for chat and session lifecycle, and includes execution worker client for handing off approved mutations. Uses Redis for durable sessions.
 - **Identity Broker**: Handles OIDC flows, issues tokens, and validates identities for both user and service-to-service contexts.
 - **Operator Portal**: Web interface for operators to manage platform resources and configurations.
 
@@ -173,9 +196,14 @@ The platform now features two specialized gateway services that replaced the ori
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+- [main.py](file://products/execution-runtime/src/execution_runtime/main.py)
+- [app.py](file://products/execution-runtime/src/execution_runtime/app.py)
+- [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
+- [executor.py](file://products/execution-runtime/src/execution_runtime/services/executor.py)
+- [single_flight.py](file://products/execution-runtime/src/execution_runtime/services/single_flight.py)
 
 ## Architecture Overview
-The platform follows a microservices architecture with a **dual-gateway pattern**. Clients interact with the **platform-gateway** for portal-facing operations, which enforces policies and verifies tokens before delegating to the Agent Platform. The **tool-gateway** handles internal tool execution requests from agent services. The Agent Platform manages agent sessions and interacts with external AI providers and Kubernetes for tool execution. Identity Broker centralizes OIDC flows and token management. Redis provides session durability and caching.
+The platform follows a microservices architecture with a **triple-layer execution model**. Clients interact with the **platform-gateway** for portal-facing operations, which enforces policies and verifies tokens before delegating to the Agent Platform. The **execution-runtime worker** handles secure execution of approved mutating actions through an authenticated handoff mechanism, while the **tool-gateway** handles internal tool execution requests from agent services. The Agent Platform manages agent sessions and interacts with external AI providers and Kubernetes for tool execution. Identity Broker centralizes OIDC flows and token management. Redis provides session durability and caching, while PostgreSQL stores execution records and receipts.
 
 ```mermaid
 sequenceDiagram
@@ -184,25 +212,34 @@ participant Portal as "Platform Gateway"
 participant Auth as "Token Verifier"
 participant Policy as "Policy Engine"
 participant Agent as "Agent Platform"
+participant Worker as "Execution Runtime Worker"
 participant ToolGW as "Tool Gateway"
 participant K8S as "Kubernetes"
 participant Redis as "Redis"
+participant Postgres as "PostgreSQL"
 Client->>Portal : HTTP Request (Chat/Sessions)
 Portal->>Auth : Verify Token
 Auth-->>Portal : Validated Context
 Portal->>Policy : Enforce Policy
 Policy-->>Portal : Decision
 Portal->>Agent : Forward Request
-Agent->>ToolGW : Execute Tools (via delegated token)
+Agent->>Worker : Handoff Signed Execution (approved mutation)
+Worker->>Worker : Verify Signature & Digest
+Worker->>ToolGW : Execute Tool (with delegated token)
 ToolGW->>K8S : Execute Tool
 K8S-->>ToolGW : Execution Result
-ToolGW-->>Agent : Tool Result
+ToolGW-->>Worker : Tool Result
+Worker->>Postgres : Write Signed Receipt
+Worker-->>Agent : Execution Result
 Agent->>Redis : Load/Save Session
 Agent-->>Portal : Response
 Portal-->>Client : Final Response
 ```
 
 **Diagram sources**
+- [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
+- [executor.py](file://products/execution-runtime/src/execution_runtime/services/executor.py)
+- [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [token_verifier.py](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py)
@@ -215,6 +252,7 @@ Portal-->>Client : Final Response
 - [part-2-reference-architecture.md](file://docs/agentic-aiops-platform/part-2-reference-architecture.md)
 - [identity-and-authorization-design.md](file://docs/agentic-aiops-platform/identity-and-authorization-design.md)
 - [adr/0005-platform-gateway-extraction.md](file://docs/adr/0005-platform-gateway-extraction.md)
+- [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
 
 ## Detailed Component Analysis
 
@@ -311,25 +349,77 @@ Audit --> Return["Return Response"]
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 
+### Execution Runtime Worker (Isolated Mutation Executor)
+**New** - Dedicated service for secure execution of approved mutating actions
+
+**Responsibilities:**
+- Receives signed execution envelopes through authenticated handoff endpoint.
+- Performs fail-closed verification of signatures and argument digests.
+- Executes tools through tool-gateway with forwarded delegated tokens.
+- Maintains single-flight idempotency keyed by execution_id.
+- Authors signed receipts and emits audit events for completed executions.
+
+**Key modules:**
+- Handoff route with authentication and verification logic.
+- Executor service for tool invocation and result mapping.
+- Single-flight registry for idempotency protection.
+- Execution signing service for receipt authorship.
+- Configuration management with startup validation.
+
+```mermaid
+flowchart TD
+Start(["Handoff Request"]) --> Auth["Verify Handoff Token"]
+Auth --> ParseBody["Parse & Validate Body"]
+ParseBody --> VerifySig["Verify Execution Signature"]
+VerifySig --> CheckDigest["Recompute & Compare Argument Digest"]
+CheckDigest --> SingleFlight["Check Single Flight Registry"]
+SingleFlight --> Execute["Execute Tool via Gateway"]
+Execute --> SignReceipt["Sign & Write Receipt"]
+SignReceipt --> EmitAudit["Emit Audit Events"]
+EmitAudit --> Return["Return Receipt & Result"]
+```
+
+**Diagram sources**
+- [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
+- [executor.py](file://products/execution-runtime/src/execution_runtime/services/executor.py)
+- [single_flight.py](file://products/execution-runtime/src/execution_runtime/services/single_flight.py)
+- [config.py](file://products/execution-runtime/src/execution_runtime/core/config.py)
+
+**Section sources**
+- [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
+- [executor.py](file://products/execution-runtime/src/execution_runtime/services/executor.py)
+- [single_flight.py](file://products/execution-runtime/src/execution_runtime/services/single_flight.py)
+- [config.py](file://products/execution-runtime/src/execution_runtime/core/config.py)
+- [app.py](file://products/execution-runtime/src/execution_runtime/app.py)
+
 ### Agent Platform
+**Updated** - Enhanced with execution worker client integration
+
 **Responsibilities:**
 - Implements the agent runtime kernel and session management.
 - Integrates with multiple AI providers through a registry.
 - Persists sessions durably using Redis.
 - Provides observability and metrics.
+- Hands off approved mutating actions to execution-runtime worker.
 
 **Key modules:**
 - Runtime kernel for agent lifecycle and execution.
 - Session service and store for state management.
 - Configuration and observability utilities.
+- Execution worker client for blocking handoff with bounded timeout.
+- Gateway tools integration for mutation execution routing.
 
 ```mermaid
 flowchart TD
 Start(["Request Received"]) --> Validate["Validate Request"]
 Validate --> LoadSession["Load Session from Redis"]
 LoadSession --> KernelExec["Execute Agent Kernel"]
-KernelExec --> ProviderCall["Call AI Provider"]
+KernelExec --> MutatingCheck{"Mutating Action?"}
+MutatingCheck -- "No" --> ProviderCall["Call AI Provider"]
+MutatingCheck -- "Yes" --> Handoff["Handoff to Execution Worker"]
 ProviderCall --> UpdateSession["Update Session State"]
+Handoff --> WaitTimeout["Wait for Worker Response"]
+WaitTimeout --> UpdateSession
 UpdateSession --> Persist["Persist to Redis"]
 Persist --> ReturnResp["Return Response"]
 ```
@@ -338,6 +428,8 @@ Persist --> ReturnResp["Return Response"]
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
+- [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [config.py](file://products/agent-platform/src/agent_service/core/config.py)
 
 **Section sources**
@@ -346,6 +438,9 @@ Persist --> ReturnResp["Return Response"]
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
+- [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
+- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [config.py](file://products/agent-platform/src/agent_service/core/config.py)
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -387,13 +482,14 @@ IdentityBroker-->>Client : Token Status
 - [token_service.py](file://products/identity-broker/src/identity_service/services/token_service.py)
 
 ## Dependency Analysis
-**Updated** - Reflects the new dual-gateway architecture with clear separation of concerns
+**Updated** - Reflects the new triple-layer architecture with execution-runtime worker
 
 The platform exhibits clear separation of concerns with well-defined interfaces:
 - **Platform Gateway** depends on Token Verifier, Policy Engine, and Agent Client for portal operations.
 - **Tool Gateway** depends on Tool Registry, Policy Engine, and Kubernetes Connector for tool execution.
-- Agent Platform depends on Session Store (Redis) and AI Providers.
-- Identity Broker depends on OIDC Provider.
+- **Execution Runtime Worker** depends on Tool Gateway, Execution Signing, and PostgreSQL for record storage.
+- **Agent Platform** depends on Session Store (Redis), AI Providers, and Execution Worker Client.
+- **Identity Broker** depends on OIDC Provider.
 - All services share common schemas and observability conventions.
 
 ```mermaid
@@ -404,17 +500,25 @@ PG --> AC["Agent Client"]
 TG["Tool Gateway"] --> TR["Tool Registry"]
 TG --> PE2["Policy Engine"]
 TG --> KC["K8s Connector"]
+ERW["Execution Runtime Worker"] --> TG
+ERW --> ES["Execution Signing"]
+ERW --> PG2["PostgreSQL"]
 AP["Agent Platform"] --> RS["Redis"]
 AP --> PR["AI Providers"]
+AP --> EWC["Execution Worker Client"]
 IB["Identity Broker"] --> OIDC["OIDC Provider"]
 PG --> AP
 PG --> IB
-AP --> TG
+AP --> ERW
+ERW --> TG
 ```
 
 **Diagram sources**
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
+- [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
+- [executor.py](file://products/execution-runtime/src/execution_runtime/services/executor.py)
+- [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [token_verifier.py](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py)
 - [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
@@ -426,13 +530,16 @@ AP --> TG
 - [identity-and-authorization-design.md](file://docs/agentic-aiops-platform/identity-and-authorization-design.md)
 
 ## Performance Considerations
-- **Dual-gateway architecture** enables independent scaling of portal-facing and tool execution workloads.
+- **Triple-layer architecture** enables independent scaling of portal-facing, tool execution, and mutation execution workloads.
 - Stateless services enable horizontal scaling behind load balancers.
 - Redis provides fast session access and caching; consider clustering for high availability.
+- PostgreSQL provides durable execution record storage with first-write-wins semantics.
 - Kubernetes deployments allow auto-scaling based on CPU/memory or custom metrics.
+- Execution-runtime worker runs as single replica to maintain in-process single-flight idempotency.
 - Observability and metrics are integrated to monitor performance and identify bottlenecks.
 - Policy evaluation should be optimized to minimize latency; consider caching decisions when appropriate.
 - Tool execution isolation prevents resource contention between different tool types.
+- Bounded timeouts prevent resource exhaustion during worker unavailability scenarios.
 
 ## Troubleshooting Guide
 Common issues and strategies:
@@ -441,37 +548,45 @@ Common issues and strategies:
 - **Session loss**: check Redis connectivity and persistence settings.
 - **Tool execution errors**: review Kubernetes RBAC and tool specifications.
 - **Gateway routing issues**: verify platform-gateway proxies to correct endpoints.
-- **Observability gaps**: ensure metrics and logs are emitted consistently across both gateways.
+- **Execution worker failures**: check worker availability, signature verification, and handoff token configuration.
+- **Signature verification failures**: verify execution-signing-secret configuration and key consistency.
+- **Single-flight conflicts**: investigate concurrent execution attempts and replay scenarios.
+- **Observability gaps**: ensure metrics and logs are emitted consistently across all services.
 
 **Section sources**
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/rbac.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
+- [execution-runtime-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/execution-runtime/execution-runtime-deployment.yaml)
 
 ## Conclusion
-The Luban AIOps Platform has evolved to a robust microservices architecture centered around a **dual-gateway pattern**. The **platform-gateway** serves as the portal-facing edge with authentication, authorization, and agent interaction capabilities, while the **tool-gateway** specializes in secure tool execution and connector management. This architectural split improves security boundaries, ownership clarity, and scalability. The use of Redis for session durability, Kubernetes for orchestration, and OIDC for secure authentication ensures scalability, reliability, and security. Clear ADRs guide architectural evolution, while shared contracts and observability conventions promote consistency across services.
+The Luban AIOps Platform has evolved to a robust microservices architecture centered around a **triple-layer execution model**. The **platform-gateway** serves as the portal-facing edge with authentication, authorization, and agent interaction capabilities, the **tool-gateway** specializes in secure tool execution and connector management, and the **execution-runtime worker** provides isolated execution of approved mutating actions with tamper-evident signatures and single-flight idempotency. This architectural evolution significantly improves security boundaries, reduces blast radius, and enhances operational reliability. The use of Redis for session durability, PostgreSQL for execution records, Kubernetes for orchestration, and OIDC for secure authentication ensures scalability, reliability, and security. Clear ADRs guide architectural evolution, while shared contracts and observability conventions promote consistency across services.
 
 ## Appendices
 
 ### Deployment Topology and Infrastructure Requirements
-**Updated** - Reflects the new dual-gateway deployment architecture
+**Updated** - Reflects the new triple-layer deployment architecture with execution-runtime worker
 
 - Kubernetes cluster with RBAC enabled.
 - Redis instance or cluster for session storage.
+- PostgreSQL instance for execution records and receipts.
 - OIDC provider configured for identity broker.
 - GitOps overlays for consistent deployments across environments.
-- Separate ServiceAccounts and RBAC policies for each gateway service.
+- Separate ServiceAccounts and RBAC policies for each service.
+- Execution-runtime worker deployed as single replica with restricted security context.
 
 ```mermaid
 graph TB
 subgraph "Kubernetes Cluster"
 PGW["Platform Gateway Deployment"]
 TGW["Tool Gateway Deployment"]
+ERW["Execution Runtime Worker Deployment"]
 AG["Agent Platform Deployment"]
 ID["Identity Broker Deployment"]
 UI["Operator Portal Deployment"]
 REDIS["Redis Service"]
+POSTGRES["PostgreSQL Service"]
 end
 subgraph "External"
 OIDC["OIDC Provider"]
@@ -479,12 +594,16 @@ end
 UI --> PGW
 PGW --> AG
 PGW --> ID
-AG --> TGW
+AG --> ERW
 AG --> REDIS
+ERW --> TGW
+ERW --> POSTGRES
 TGW --> OIDC
 ```
 
 **Diagram sources**
+- [execution-runtime-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/execution-runtime/execution-runtime-deployment.yaml)
+- [execution-runtime-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/execution-runtime/execution-runtime-service.yaml)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 - [tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
@@ -497,13 +616,14 @@ TGW --> OIDC
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
 
 ### Architectural Decision Records (ADRs) Summary
-**Updated** - Includes the new platform gateway extraction ADR
+**Updated** - Includes the new execution-runtime worker and platform gateway extraction ADRs
 
 - Spec-driven development ensures contracts are defined before implementation.
 - Agentscope runtime kernel reaffirmed for agent execution stability.
 - Platform-owned agent service contract standardizes interfaces.
 - Broker-mediated token delegation enhances security and trust.
 - **New**: Platform gateway extraction separates portal-facing operations from tool execution for improved security and maintainability.
+- **New**: Isolated execution worker provides infrastructure-enforced isolation for approved mutating actions with tamper-evident signatures and single-flight idempotency.
 
 **Section sources**
 - [adr/0001-adopt-spec-driven-development.md](file://docs/adr/0001-adopt-spec-driven-development.md)
@@ -515,9 +635,12 @@ TGW --> OIDC
 ### Technology Stack Rationale
 - FastAPI: High-performance async web framework suitable for microservices.
 - Redis: Low-latency session storage and caching.
+- PostgreSQL: Durable execution record storage with first-write-wins semantics.
 - Kubernetes: Container orchestration with scaling and self-healing capabilities.
 - OIDC: Standardized identity and authorization flow.
 
 **Section sources**
 - [agent-platform-runtime-options.md](file://docs/agentic-aiops-platform/agent-platform-runtime-options.md)
 - [policy-specification.md](file://docs/agentic-aiops-platform/policy-specification.md)
+- [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
+- [delivery-roadmap.md](file://docs/agentic-aiops-platform/delivery-roadmap.md)
