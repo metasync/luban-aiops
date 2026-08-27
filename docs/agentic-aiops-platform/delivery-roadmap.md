@@ -233,6 +233,21 @@ Only after identity, evidence, grounding, and triage are stable should the platf
 
 Operations and governance teams agree that bounded actions are sufficiently trustworthy for controlled use.
 
+### Status
+
+Closed 2026-08-27 with the v0.20.0 delivery. All six deliverables are
+shipped — policy engine (SPEC-030), approval workflow (SPEC-031–036),
+approval queue and action cards (SPEC-031/033/034), first bounded
+operational actions (SPEC-021), signed execution requests (SPEC-037),
+and the isolated execution worker (SPEC-038). The completion signal
+was exercised end to end across the v0.13.1–v0.20.0 live approval-test
+campaign: every run drove the full request → `require_approval` →
+approver decision → isolated-worker execution → signed receipt →
+audit-chain path on the `mutating-dev` profile, and the final delivery
+gate verified the worker pod's handoff → invoke → audit chain directly.
+R4-adjacent candidates that remain deliberately parked are recorded on
+the exploration backlog with explicit promotion triggers.
+
 ## R5: Hardening and External Consumption
 
 ### Theme
@@ -308,8 +323,8 @@ promotion; until then they stay here.
 | Require-approval policy semantics | Delivered 2026-08-25 (0.12.0) as `SPEC-030-require-approval-policy-semantics`: `require_approval` becomes a first-class, enforced policy outcome with approval tiers — `tier_1` session-operator self-confirmation and `tier_2` designated-approver with self-approval blocked — evaluated in both gateway engines (deny > require_approval > allow) and bridged onto `chat:confirm` with structured 403s, blocked-attempt audit, and fail-closed parked-info fetch. The default bundle ships a `tier_2` rule on `tools:mutate` (decided by `approver` / `platform-admin`), the live matrix gains an additive `approval_requirements` third cell state, confirmation cards gain tier badges with read-only rendering for non-deciders, and the portal Settings view is restored as an extensible read-only Session & Identity panel (add-on R-6). | `docs/specs/SPEC-030-require-approval-policy-semantics/` |
 | In-portal help & onboarding | Spiked 2026-08-25 from the 2026-08-25 code/doc review (finding D6): tiered scope and a measurement plan are recorded in `docs/workspace/portal-help-onboarding-spike.md` — guide links (option A) are the cheap floor and prerequisite, the antd first-run tour (option B) follows on real onboarding friction, contextual hints and an in-app guide renderer stay deferred/rejected. The Settings view restoration (read-only Session & identity panel) was moved forward into SPEC-030 as add-on R-6 (memo addendum). Promote on the first onboarding friction signal, not before. | portal enhancement spec |
 | Shared-package extraction of duplicated service modules | Spiked 2026-08-25 from the 2026-08-25 code/doc review (finding M1): copy-with-parity retained — the memo (`docs/workspace/shared-sdk-extraction-spike.md`) measures the five parity families (~400 unique lines) against packaging, seven-lockfile ripple, and image-build coupling, rejects a `make sync` generator, and records three revisit triggers (sixth family / five copies of one family, 3+ behavioral changes to one family per quarter, shared-sdk needed for another reason). | own spec; revisit on the recorded triggers |
-| Cross-owner session review | Raised in the v0.16.0 live approval test (SPEC-035 open question) and re-stated by SPEC-036: incident review and 7x24 roster handover need a read-only view of another operator's sessions. Agreed direction: role-gated, read-only, audit-logged; session inheritance is discouraged (never-expiring sessions, ambiguous HITL ownership). Needs a spike on the exposure decision before a spec. | portal + session-API spec |
-| Shift-summary artifacts | Paired candidate with cross-owner session review (SPEC-035 open question): can an agent-generated shift-summary artifact carry handover context instead of (or beside) full session review, and what is its audit posture? Promote together with the cross-owner review spike. | follow-up to cross-owner session review |
+| Cross-owner session review | Raised in the v0.16.0 live approval test (SPEC-035 open question) and re-stated by SPEC-036: incident review and 7x24 roster handover need a read-only view of another operator's sessions. Agreed direction: role-gated, read-only, audit-logged; session inheritance is discouraged (never-expiring sessions, ambiguous HITL ownership). Spiked 2026-08-27 in the paired memo (`docs/workspace/session-handover-spike.md`): parked behind a recorded trigger — promote on the first concrete need to read raw sessions the shift-summary artifact cannot satisfy; the artifact's provenance index doubles as its natural entry point. | portal + session-API spec |
+| Shift-summary artifacts | Paired candidate with cross-owner session review (SPEC-035 open question): can an agent-generated shift-summary artifact carry handover context instead of (or beside) full session review, and what is its audit posture? Spiked 2026-08-27 in the paired memo (`docs/workspace/session-handover-spike.md`): recommended first — a deterministic digest assembled from the durable records (sessions, confirmations, executions, evidence) with an optional clearly-labeled LLM prose layer and provenance anchoring; awaiting operator sign-off before spec promotion. | follow-up to cross-owner session review |
 | Approval-workflow extensions | SPEC-031 non-goals parked as future candidates: multi-approver quorum / N-of-M semantics (extending the SPEC-030 approval tiers), push notifications (webhook, email, browser push), cross-session bulk approve, and richer approver review context (owner-transcript exposure has its own decision). Promote on the first concrete governance or operational ask, not before. | approval-flow spec |
 | Numbered-list continuation across separated blocks | v0.18.1 live-check observation: when the model emits numbered steps as separate blocks (blank line or paragraph between items), the escape-first renderer produces separate `<ol>` elements and each restarts at 1. Cosmetic; decide renderer merge strategy vs prompt guidance if operators complain. | operator-portal markdown renderer / prompt guidance |
 | Isolated execution worker and signed execution requests | Spiked 2026-08-26 after the v0.18.1 consolidated live check declared the approval cluster stable: the memo (`docs/workspace/execution-runtime-spike.md`) verifies the approved mutating path still executes in-process under the confirmer's delegated token, weighs sign-and-record vs isolated-worker vs full-async-queue, and recommends a phased shape. Phase 1 (HMAC-signed execution requests/receipts bound to the parked args digest) was promoted to `SPEC-037-signed-execution-requests` on 2026-08-27 after operator sign-off and delivered the same day (0.19.0). The memo's promotion gate was then satisfied — Phase 1 live-verified on the `mutating-dev` profile — and Phase 2 (the isolated `execution-runtime` worker) was promoted to `SPEC-038-isolated-execution-worker` on 2026-08-27 with the memo's Q-1 (handoff service identity) and Q-2 (resume await timeout) resolved in the draft; the spec was approved the same day with one recorded condition — an R5 re-evaluation trigger: when more team members work simultaneously, concurrent approved actions contending on the single worker pod promote the queue/pool spec at that signal. Together they close the two remaining R4 deliverables. | SPEC-037 delivered; SPEC-038 delivered (0.20.0) |
@@ -387,7 +402,18 @@ already resolved by SPEC-037 R-6. SPEC-038 was approved the same day
 with one recorded condition — the R5 re-evaluation trigger for
 concurrent-operator queueing on the single worker pod — and delivered
 the same day in the 0.20.0 train, closing the last two R4
-deliverables.
+deliverables. R4 was formally closed the same day: all six R4
+deliverables shipped and the Release Completion Signal exercised
+across the v0.13.1–v0.20.0 live approval-test campaign. Opening R5,
+the paired cross-owner session review / shift-summary candidates
+(raised in the SPEC-035 open question, re-stated by SPEC-036) were
+spiked together on 2026-08-27 under the memo-first rule
+(`docs/workspace/session-handover-spike.md`), verified against the
+0.20.0 session workspace and approval surfaces; the memo recommends
+promoting the shift-summary artifact first — a deterministic digest
+with an optional clearly-labeled prose layer and provenance anchoring
+— and parks raw cross-owner session review behind a recorded trigger,
+awaiting operator sign-off before spec promotion.
 
 ## Validation Model Per Release
 
