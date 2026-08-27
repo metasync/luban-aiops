@@ -7,6 +7,18 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-27-isolated-execution-worker.md`
+  - delivers SPEC-038 (v0.20.0) and closes R4: approved mutating calls
+    leave agent-service via an authenticated internal handoff to the
+    new `execution-runtime` worker, which independently re-verifies the
+    SPEC-037 envelope signature and parked-arguments digest, executes
+    through the tool-gateway under the forwarded confirmer token,
+    authors the signed receipt (first-write-wins), and emits the
+    correlated execution audit events; blocking bounded-timeout resume
+    await, `execution_id`-keyed single-flight idempotency on a pinned
+    single replica, fail-closed `worker_unavailable` posture with no
+    in-process fallback, and infrastructure-enforced isolation
+    (ClusterIP-only, no HTTPRoute, `execution-handoff-secret`)
 - `2026-08-27-signed-execution-requests.md`
   - delivers SPEC-037 (v0.19.0): approved mutating calls gain a
     tamper-evident execution chain — HMAC-signed execution requests

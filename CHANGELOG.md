@@ -13,6 +13,36 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.20.0 — 2026-08-27
+
+### Added
+
+- **Isolated execution worker (SPEC-038)**: approved mutating calls no
+  longer execute in-process in agent-service. A new
+  `products/execution-runtime` worker product receives the SPEC-037
+  signed envelope over an authenticated internal handoff
+  (`POST /api/v1/executions/handoff`, static handoff token compared
+  constant-time), independently re-verifies the envelope signature and
+  the parked-arguments digest, performs the tool-gateway call under the
+  forwarded confirmer delegated token, authors the signed receipt on the
+  shared `execution_records` table (first-write-wins close), and emits
+  `execution_completed` / `execution_rejected` with the same
+  `confirm_id` + `x-request-id` correlation. The resumed stream blocks
+  on the worker with a bounded
+  `AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS` budget (default 60s; expiry
+  lands as the structured timeout result and a `timeout` receipt);
+  single-flight idempotency keyed by `execution_id` makes re-execution
+  structurally impossible (single replica pinned). Every missing
+  credential fails closed: unset worker signing key or handoff token
+  rejects all handoffs; unset `AGENT_EXECUTION_WORKER_URL` /
+  `AGENT_EXECUTION_HANDOFF_TOKEN` on agent-service or any handoff
+  transport error rejects the mutating resume with an audited
+  `worker_unavailable` rejection — no in-process fallback. Isolation is
+  enforced at the infrastructure layer: own Deployment/ClusterIP
+  Service, its own `execution-handoff-secret`
+  (`sync-execution-handoff-secret.sh`), and no HTTPRoute or gateway
+  route.
+
 ## 0.19.0 — 2026-08-27
 
 ### Added

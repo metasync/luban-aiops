@@ -40,6 +40,16 @@ spec:
                   name: execution-signing-secret
                   key: AGENT_EXECUTION_SIGNING_KEY
                   optional: true
+            # SPEC-038 R-4: authenticates the internal handoff to the
+            # execution-runtime worker. An absent secret/token fails
+            # closed (audited worker_unavailable rejection) — there is
+            # no in-process fallback for mutating execution.
+            - name: AGENT_EXECUTION_HANDOFF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: execution-handoff-secret
+                  key: EXECUTION_HANDOFF_TOKEN
+                  optional: true
           envFrom:
             - configMapRef:
                 name: platform-runtime-config

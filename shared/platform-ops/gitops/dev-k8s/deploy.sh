@@ -22,6 +22,12 @@ NAMESPACE=${NAMESPACE:-dev-luban-aiops}
 # approved mutating executions (audited signing_unavailable rejection).
 "$SCRIPT_DIR/../sync-execution-signing-secret.sh" "$NAMESPACE"
 
+# Provision the execution handoff token (SPEC-038) unless skipped.
+# Set SKIP_EXECUTION_HANDOFF_SECRET=true when secrets are injected
+# externally (e.g. CI). Without a token mutating resumes fail closed
+# (audited worker_unavailable rejection).
+"$SCRIPT_DIR/../sync-execution-handoff-secret.sh" "$NAMESPACE"
+
 # Provision skills query credentials (SPEC-014) unless skipped.
 # Set SKIP_SKILLS_SECRETS=true when secrets are injected externally (e.g. CI).
 "$SCRIPT_DIR/../sync-skills-secrets.sh" "$NAMESPACE"

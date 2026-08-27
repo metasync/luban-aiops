@@ -163,6 +163,14 @@ class RuntimeSettings:
     # closed (execution_rejected, reason signing_unavailable) — a
     # missing key never degrades to unsigned execution.
     execution_signing_key: str | None = None
+    # Isolated execution worker (SPEC-038 R-4): approved mutating calls
+    # hand off to the execution-runtime worker instead of running
+    # in-process. An unset URL or handoff token fails mutating resumes
+    # closed (execution_rejected, reason worker_unavailable) — there is
+    # no in-process fallback.
+    execution_worker_url: str | None = None
+    execution_handoff_token: str | None = None
+    execution_worker_timeout_seconds: float = 60.0
     # Durable audit trail emission (SPEC-037 R-5): fire-and-forget
     # events to the audit-service. An unset URL keeps the historical
     # log-only posture; emission never degrades the chat stream.
@@ -230,6 +238,11 @@ class RuntimeSettings:
             raise ValueError("AGENT_MODEL_DISCOVERY_REFRESH_SECONDS must be >= 1.")
         if self.model_discovery_timeout_seconds <= 0:
             raise ValueError("AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS must be > 0.")
+        # Isolated execution worker validation (SPEC-038 R-4).
+        if self.execution_worker_timeout_seconds <= 0:
+            raise ValueError(
+                "AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS must be > 0."
+            )
         try:
             from zoneinfo import ZoneInfo
 
@@ -378,6 +391,13 @@ class RuntimeSettings:
                 os.getenv("AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS", "5")
             ),
             execution_signing_key=_optional_str("AGENT_EXECUTION_SIGNING_KEY"),
+            execution_worker_url=_optional_str("AGENT_EXECUTION_WORKER_URL"),
+            execution_handoff_token=_optional_str(
+                "AGENT_EXECUTION_HANDOFF_TOKEN"
+            ),
+            execution_worker_timeout_seconds=float(
+                os.getenv("AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS", "60")
+            ),
             audit_service_url=_optional_str("AGENT_AUDIT_SERVICE_URL"),
             audit_client_id=os.getenv("AGENT_AUDIT_CLIENT_ID", "agent-service"),
             audit_client_secret=_optional_str("AGENT_AUDIT_CLIENT_SECRET"),

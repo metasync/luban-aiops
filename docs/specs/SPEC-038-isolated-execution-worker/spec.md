@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-27
 - release slice: R4 — Approval-Gated Bounded Actions (R4 closing slice)
@@ -293,6 +293,15 @@ before approval.
 
 ## Changelog
 
+- 2026-08-27: delivered in the 0.20.0 train — all six requirements
+  implemented per plan; worker suite 64 passed, agent-platform suite
+  547 passed, `make verify` green (version lockstep 0.20.0, three
+  kustomize overlays, policy validation); approved mutating executions
+  now run in the `execution-runtime` worker behind the authenticated
+  handoff with the correlated cross-service audit chain and the receipt
+  badge on the decided card (live check on the `mutating-dev` profile).
+  The approval-condition R5 re-evaluation trigger stays recorded in the
+  Non-Goals and the roadmap backlog row.
 - 2026-08-27: approved by the operator with one recorded condition —
   the single-replica / no-queue posture carries an explicit R5
   re-evaluation trigger: concurrent approved actions from multiple team

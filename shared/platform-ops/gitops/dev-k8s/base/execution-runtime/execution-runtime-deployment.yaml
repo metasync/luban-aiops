@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: execution-runtime
+spec:
+  # SPEC-038 R-5: the single-flight idempotency registry is in-process,
+  # so the deployment pins exactly one replica; scaling requires a
+  # durable flight registry first.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: execution-runtime
+  template:
+    metadata:
+      labels:
+        app: execution-runtime
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8000"
+    spec:
+      # Service-link env vars (EXECUTION_RUNTIME_PORT=tcp://…) collide with
+      # the service's own port setting; service discovery uses DNS names.
+      enableServiceLinks: false
+      containers:
+        - name: execution-runtime
+          image: luban-aiops/execution-runtime:dev-local
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+          env:
+            # SPEC-038 R-2: verifies signed execution requests with the
+            # same key agent-service signs them with. An absent secret/key
+            # fails closed — every handoff rejects signature_invalid.
+            - name: EXECUTION_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: execution-signing-secret
+                  key: AGENT_EXECUTION_SIGNING_KEY
+                  optional: true
+            # SPEC-038 R-2: authenticates the internal handoff. An absent
+            # secret/token fails closed — every handoff rejects
+            # unauthorized; agent-service likewise refuses to hand off.
+            - name: EXECUTION_HANDOFF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: execution-handoff-secret
+                  key: EXECUTION_HANDOFF_TOKEN
+                  optional: true
+          envFrom:
+            - configMapRef:
+                name: platform-runtime-config
+            - secretRef:
+                name: execution-runtime-runtime-secrets
+                optional: true
+          ports:
+            - containerPort: 8000
+          # Probes need headroom beyond the 1s default: while the dev host
+          # is under load (e.g. after VM sleep/wake) healthy responses were
+          # taking 2-4s, which triggered needless liveness kills.
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 4

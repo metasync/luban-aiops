@@ -244,6 +244,63 @@ def _audit_execution_rejected(
     emit_audit_event(context.get("settings"), event)
 
 
+async def _handoff_execution(
+    tool_name: str,
+    call_id: str | None,
+    arguments: dict[str, Any],
+    delegated_token: str | None,
+) -> dict[str, Any]:
+    """Hand one verified mutating invocation to the execution worker.
+
+    SPEC-038 R-4: the resumed stream blocks on the worker with a bounded
+    timeout. A missing worker configuration or a transport failure
+    rejects with ``worker_unavailable`` (audited) — there is no
+    in-process fallback. A handoff timeout surfaces the structured
+    timeout result so the resumed-stream handling closes the record with
+    a ``timeout`` receipt (first-write-wins with the worker's close).
+    Worker-side verification rejections carry the worker's reason back to
+    the invocation boundary.
+    """
+    from agent_service.services.execution_worker_client import (
+        WorkerHandoffError,
+        WorkerHandoffTimeout,
+        handoff,
+    )
+
+    context = EXECUTION_AUDIT_CONTEXT.get() or {}
+    settings = context.get("settings")
+    requests_map = EXECUTION_REQUESTS.get() or {}
+    envelope = requests_map.get(call_id) if call_id else None
+    try:
+        return await handoff(
+            request=envelope,
+            arguments=arguments,
+            delegated_token=delegated_token,
+            settings=settings,
+            request_id=context.get("request_id"),
+        )
+    except WorkerHandoffTimeout:
+        LOGGER.warning(
+            "execution handoff for %s timed out", tool_name
+        )
+        return {
+            "tool_name": tool_name,
+            "status": "error",
+            "request_id": str(uuid.uuid4()),
+            "error": {
+                "code": "TIMEOUT",
+                "message": "execution handoff timed out before the "
+                "worker answered",
+            },
+        }
+    except WorkerHandoffError as exc:
+        LOGGER.warning(
+            "execution handoff for %s rejected: %s", tool_name, exc.reason
+        )
+        _audit_execution_rejected(tool_name, call_id, exc.reason)
+        return _rejection_result(tool_name, exc.reason)
+
+
 def _make_tool_fn(
     gateway_url: str,
     name: str,
@@ -262,10 +319,14 @@ def _make_tool_fn(
     (SPEC-018 R-2).
 
     Mutating tools (``is_read_only`` False) verify their invoked arguments
-    against the signed execution request before the gateway call goes out
+    against the signed execution request before anything goes out
     (SPEC-037 R-3); a failed verification returns a structured rejection
-    result and never reaches the gateway. Read-only tools never consult
-    the envelope.
+    result and never reaches the gateway. Verified mutating calls hand
+    off to the execution-runtime worker instead of calling the gateway
+    inline (SPEC-038 R-4): the worker performs the call, writes the
+    receipt, and returns the gateway result, which flows into the
+    ``ToolChunk`` unchanged. Read-only tools never consult the envelope
+    and never hand off.
     """
     from agentscope.message import TextBlock
     from agentscope.tool import ToolChunk
@@ -287,6 +348,13 @@ def _make_tool_fn(
                     content=[TextBlock(text=json.dumps(result, default=str))],
                     metadata={"gateway_result": result},
                 )
+            result = await _handoff_execution(
+                name, call_id, kwargs, DELEGATED_TOKEN.get()
+            )
+            return ToolChunk(
+                content=[TextBlock(text=json.dumps(result, default=str))],
+                metadata={"gateway_result": result},
+            )
         try:
             result = await invoke_gateway_tool(
                 gateway_url=gateway_url,

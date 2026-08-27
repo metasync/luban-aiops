@@ -315,10 +315,55 @@ tamper-evident execution chain:
   `tool_invoked` → `execution_completed` without a new audit
   dimension.
 
-Execution still happens in-process under the confirmer's delegated
-token; the isolated `execution-runtime` worker is Phase 2 (own spec,
-after this slice is live-verified) and will inherit the same signed
-envelope contract.
+Since SPEC-038 the approved call no longer executes in-process: agent-service
+hands the signed envelope to the isolated `execution-runtime` worker, which
+re-verifies it, performs the tool-gateway call, and returns the outcome —
+see the next section.
+
+### Isolated execution worker (SPEC-038)
+
+Approved mutating executions run in the dedicated `execution-runtime`
+worker, the only platform component that performs approved mutating tool
+invocations. It inherits the SPEC-037 envelope contract verbatim and adds a
+second, independent verification point:
+
+- **Authenticated internal handoff.** After the invocation-boundary digest
+  check passes, agent-service posts the signed request plus the invoked
+  arguments to the worker's `POST /api/v1/executions/handoff` under a static
+  handoff token (constant-time comparison, provisioned by
+  `sync-execution-handoff-secret.sh`). The worker then verifies the envelope
+  signature and recomputes the arguments digest itself — an approved call is
+  never executed on agent-service's word alone.
+- **Fail-closed on every missing credential.** An unset worker signing key
+  or handoff token rejects every handoff; an unset
+  `AGENT_EXECUTION_WORKER_URL` / `AGENT_EXECUTION_HANDOFF_TOKEN` on
+  agent-service, or any handoff transport error, rejects the mutating resume
+  with an audited `worker_unavailable` rejection. There is no fallback to
+  in-process execution.
+- **Unchanged identity posture.** The worker invokes the tool-gateway with
+  the forwarded confirmer delegated token; policy, risk tiers, and audit
+  attribution are evaluated exactly as before. The worker never retries and
+  never re-executes — single-flight idempotency keyed by `execution_id`
+  makes double execution structurally impossible.
+- **Blocking bounded await.** The resumed stream blocks until the worker
+  answers, bounded by `AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS` (default
+  60s): a handoff timeout lands as the structured timeout result and the
+  record closes with a `timeout` receipt. The worker authors the signed
+  receipt and closes the shared `execution_records` row first-write-wins;
+  the kernel's SPEC-037 close path stays as a no-op safety net.
+- **Infrastructure-enforced isolation.** The worker ships as its own
+  Deployment (`replicas: 1` — the in-process single-flight registry is
+  authoritative precisely because there is one replica) with a ClusterIP
+  Service, its own secrets, and no HTTPRoute or gateway route: it is
+  reachable only inside the cluster and exposes no portal or LLM surface.
+
+**Crash-window recovery query.** If an `execution_requested` event never
+gains a matching `execution_completed` (for example the agent pod died
+mid-handoff), correlate the `confirm_id` and forwarded `x-request-id` from
+`execution_requested` against tool-gateway `tool_invoked` events to
+determine whether the call actually reached the gateway. The worker has no
+retry path — the query is operator-run, and its answer decides whether the
+approved action needs a fresh confirmation.
 
 ### Voice-readiness: modality is never privilege (SPEC-022 R-2, SPEC-023 R-4)
 
@@ -363,8 +408,9 @@ Two extraction targets already exist as boundary stubs:
 - **policy-center** — policy evaluation plus approval routing (`require_approval`,
   approval queue, separation of duties).
 - **execution-runtime** — signed, bounded execution of approved actions;
-  Phase 1 (the signed request/receipt contract, SPEC-037) ships
-  in-process today, the isolated worker is Phase 2.
+  both phases are delivered: the signed request/receipt contract
+  (SPEC-037) and the isolated worker that executes approved calls
+  (SPEC-038).
 
 **Kernel ASK confirmation and policy-level approval are different layers.** The
 HITL confirmation card answers "does the session owner want the agent to run this

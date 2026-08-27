@@ -13,6 +13,7 @@ The platform consists of ten workloads deployed to a single Kubernetes namespace
 | **web-ui** | `luban-aiops/web-ui` | Static portal shell served by nginx; proxies `/api/` to platform-gateway |
 | **platform-gateway** | `luban-aiops/platform-gateway` | Portal-facing edge: JWT verification, action policy, chat/session proxying, token delegation, audit query proxy |
 | **agent-service** | `luban-aiops/agent-service` | AgentScope runtime kernel: LLM orchestration, session management, tool trace emission |
+| **execution-runtime** | `luban-aiops/execution-runtime` | Isolated worker executing approved mutating calls: authenticated handoff, envelope re-verification, signed receipts (SPEC-038) |
 | **tool-gateway** | `luban-aiops/tool-gateway` | Tool execution framework: connector dispatch, policy enforcement, output redaction |
 | **identity-service** | `luban-aiops/identity-service` | Enterprise identity: Keycloak OIDC login, JWT issuance, token exchange for delegation |
 | **audit-service** | `luban-aiops/audit-service` | Durable audit trail: authenticated ingest, retention-bounded store, query API (SPEC-013) |
@@ -34,6 +35,7 @@ graph TB
         WebUI[web-ui<br/>nginx :8080]
         PG[platform-gateway<br/>:8000]
         AS[agent-service<br/>:8000]
+        ER[execution-runtime<br/>:8000]
         TG[tool-gateway<br/>:8000]
         IB[identity-service<br/>:8000]
         Audit[audit-service<br/>:8000]
@@ -55,6 +57,9 @@ graph TB
     PG -->|chat/session relay| AS
     PG -->|token exchange| IB
     AS -->|tool discovery & invoke| TG
+    AS -->|approved-execution handoff| ER
+    ER -->|invoke, forwarded confirmer token| TG
+    ER -->|receipts| PGDB
     TG -->|read-only| K8sAPI
     TG -->|read-only| Elastic
     TG -->|skills.search / skills.get / skills.list| Skills
@@ -68,6 +73,7 @@ graph TB
     IB -->|OIDC| Keycloak
     AS -->|sessions + agent state| PGDB
     TG -.->|audit events| Audit
+    ER -.->|audit events| Audit
     PG -.->|audit events| Audit
     IB -.->|audit events| Audit
     Incident -.->|incident_triaged| Audit

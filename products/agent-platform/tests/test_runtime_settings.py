@@ -173,6 +173,32 @@ def test_model_discovery_settings_validation():
         RuntimeSettings(model_discovery_timeout_seconds=0.0)
 
 
+def test_execution_worker_settings_defaults(monkeypatch):
+    """SPEC-038 R-4: unset worker knobs keep the fail-closed posture."""
+    monkeypatch.delenv("AGENT_EXECUTION_WORKER_URL", raising=False)
+    monkeypatch.delenv("AGENT_EXECUTION_HANDOFF_TOKEN", raising=False)
+    monkeypatch.delenv("AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS", raising=False)
+    settings = RuntimeSettings.from_env()
+    assert settings.execution_worker_url is None
+    assert settings.execution_handoff_token is None
+    assert settings.execution_worker_timeout_seconds == 60.0
+
+
+def test_execution_worker_settings_read_env(monkeypatch):
+    monkeypatch.setenv("AGENT_EXECUTION_WORKER_URL", "http://execution-runtime:8000")
+    monkeypatch.setenv("AGENT_EXECUTION_HANDOFF_TOKEN", "handoff-secret")
+    monkeypatch.setenv("AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS", "45")
+    settings = RuntimeSettings.from_env()
+    assert settings.execution_worker_url == "http://execution-runtime:8000"
+    assert settings.execution_handoff_token == "handoff-secret"
+    assert settings.execution_worker_timeout_seconds == 45.0
+
+
+def test_execution_worker_timeout_validation():
+    with pytest.raises(ValueError, match="WORKER_TIMEOUT_SECONDS must be > 0"):
+        RuntimeSettings(execution_worker_timeout_seconds=0.0)
+
+
 def test_native_service_settings_reads_env(monkeypatch):
     monkeypatch.setenv("AGENTSCOPE_REDIS_HOST", "redis.internal")
     monkeypatch.setenv("AGENTSCOPE_REDIS_PORT", "6380")

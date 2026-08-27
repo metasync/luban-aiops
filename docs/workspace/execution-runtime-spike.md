@@ -1,8 +1,8 @@
 # Spike: Isolated Execution Worker and Signed Execution Requests (SPEC-037 candidate)
 
-Status: spike complete — Phase 1 promoted to SPEC-037 (delivered in v0.19.0); Phase 2 promoted to SPEC-038 (drafted 2026-08-27)
+Status: spike complete — Phase 1 promoted to SPEC-037 (delivered in v0.19.0); Phase 2 promoted to SPEC-038 (delivered in v0.20.0)
 Date: 2026-08-26
-Roadmap home: delivery-roadmap R4 "Approval-Gated Bounded Actions" — "isolated execution worker" and "signed execution requests" are the two R4 deliverables not yet implemented
+Roadmap home: delivery-roadmap R4 "Approval-Gated Bounded Actions" — "isolated execution worker" and "signed execution requests" are the two R4 deliverables, both delivered (SPEC-037 / SPEC-038)
 Verified against: approval and execution path at 0.18.1 (SPEC-020/021/030/031 as delivered)
 
 ## 1. Question

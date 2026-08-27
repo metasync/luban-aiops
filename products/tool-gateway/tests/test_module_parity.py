@@ -7,14 +7,15 @@ copy must change in the same commit or this suite fails.
 
 Families and their allowed divergence:
 
-- ``core/telemetry.py``        — byte-identical across all seven services.
+- ``core/telemetry.py``        — byte-identical across all eight services.
 - ``core/observability.py``    — identical except docstrings (each service
   names its own examples of what the audit trail contains).
 - ``services/token_verifier.py`` — identical except the service package and
   settings class names (platform-gateway / tool-gateway).
 - ``services/audit_emitter.py``  — identical except docstrings and the
   package / settings class names (platform-gateway / tool-gateway /
-  identity-broker / skills-hub / agent-platform). incident-service also
+  identity-broker / skills-hub / agent-platform / execution-runtime).
+  incident-service also
   has an
   ``audit_emitter.py`` but it
   is a different design (a triage ``AuditConnector``), intentionally excluded.
@@ -39,6 +40,7 @@ PRODUCTS_DIR = REPO_ROOT / "products"
 SERVICE_PACKAGES = {
     "agent-platform": "agent_service",
     "audit-service": "audit_service",
+    "execution-runtime": "execution_runtime",
     "identity-broker": "identity_service",
     "incident-service": "incident_service",
     "platform-gateway": "platform_gateway",
@@ -156,6 +158,7 @@ class AuditEmitterParityTest(unittest.TestCase):
         "identity-broker": ("identity_service", "IdentitySettings"),
         "skills-hub": ("skills_hub", "SkillsSettings"),
         "agent-platform": ("agent_service", "RuntimeSettings"),
+        "execution-runtime": ("execution_runtime", "ExecutionSettings"),
     }
 
     def test_fire_and_forget_emitters_match(self) -> None:

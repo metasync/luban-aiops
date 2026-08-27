@@ -7,6 +7,10 @@ import unittest
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from agent_service.services.execution_signing import canonical_digest
+from agent_service.services.execution_worker_client import (
+    WorkerHandoffError,
+    WorkerHandoffTimeout,
+)
 from agent_service.services.kernel_middleware import AUTO_ALLOW_ENV
 from agent_service.tools.gateway_tools import (
     CURRENT_CALL_ID,
@@ -468,41 +472,78 @@ class ExecutionRequestVerificationTests(unittest.TestCase):
             "http://gw:8080", "k8s.delete_pod", "d", is_read_only=False
         )
 
-    def test_matching_arguments_proceed_to_gateway(self) -> None:
+    def _worker_settings(self):
+        from agent_service.runtime_settings import RuntimeSettings
+
+        return RuntimeSettings(
+            execution_worker_url="http://execution-runtime:8000",
+            execution_handoff_token="handoff-secret",
+        )
+
+    def _worker_audit_context(self):
+        return {
+            "settings": self._worker_settings(),
+            "confirm_id": "cf-1",
+            "session_id": "ses-1",
+            "request_id": "req-1",
+            "decider_user_id": "bob",
+        }
+
+    def test_matching_arguments_hand_off_to_worker(self) -> None:
+        """SPEC-038 R-4: a verified mutating call hands the signed
+        envelope, parked arguments, and delegated token to the worker;
+        the gateway is never called inline."""
         fn = self._mutating_fn()
         with patch(
             "agent_service.tools.gateway_tools.invoke_gateway_tool",
             new_callable=AsyncMock,
-        ) as mock_invoke:
-            mock_invoke.return_value = {"status": "success"}
+        ) as mock_invoke, patch(
+            "agent_service.tools.gateway_tools._handoff_execution",
+            new_callable=AsyncMock,
+        ) as mock_handoff:
+            mock_handoff.return_value = {"status": "success"}
             requests_var = EXECUTION_REQUESTS.set(
                 {"call-1": self._request({"name": "web-1"})}
             )
             call_var = CURRENT_CALL_ID.set("call-1")
+            audit_var = EXECUTION_AUDIT_CONTEXT.set(self._worker_audit_context())
+            token_var = DELEGATED_TOKEN.set("confirmer-token")
             try:
                 chunk = _run(fn(name="web-1"))
             finally:
+                DELEGATED_TOKEN.reset(token_var)
+                EXECUTION_AUDIT_CONTEXT.reset(audit_var)
                 CURRENT_CALL_ID.reset(call_var)
                 EXECUTION_REQUESTS.reset(requests_var)
-        mock_invoke.assert_called_once()
+        mock_invoke.assert_not_called()
+        mock_handoff.assert_awaited_once_with(
+            "k8s.delete_pod", "call-1", {"name": "web-1"}, "confirmer-token"
+        )
         self.assertEqual(chunk.metadata["gateway_result"]["status"], "success")
 
     def test_reordered_arguments_still_match(self) -> None:
         fn = self._mutating_fn()
         signed = self._request({"force": True, "name": "web-1"})
         with patch(
-            "agent_service.tools.gateway_tools.invoke_gateway_tool",
+            "agent_service.tools.gateway_tools._handoff_execution",
             new_callable=AsyncMock,
-        ) as mock_invoke:
-            mock_invoke.return_value = {"status": "success"}
+        ) as mock_handoff:
+            mock_handoff.return_value = {"status": "success"}
             requests_var = EXECUTION_REQUESTS.set({"call-1": signed})
             call_var = CURRENT_CALL_ID.set("call-1")
+            audit_var = EXECUTION_AUDIT_CONTEXT.set(self._worker_audit_context())
             try:
                 _run(fn(name="web-1", force=True))
             finally:
+                EXECUTION_AUDIT_CONTEXT.reset(audit_var)
                 CURRENT_CALL_ID.reset(call_var)
                 EXECUTION_REQUESTS.reset(requests_var)
-        mock_invoke.assert_called_once()
+        # The canonical-digest match accepts reordered arguments, so the
+        # handoff receives the invoked kwargs.
+        mock_handoff.assert_awaited_once()
+        self.assertEqual(
+            mock_handoff.await_args[0][2], {"name": "web-1", "force": True}
+        )
 
     def test_mutated_arguments_blocked_and_audited(self) -> None:
         fn = self._mutating_fn()
@@ -635,3 +676,186 @@ class ExecutionRequestVerificationTests(unittest.TestCase):
             chunk.metadata["gateway_result"]["error"]["code"],
             "EXECUTION_REJECTED",
         )
+
+
+class WorkerHandoffRoutingTests(unittest.TestCase):
+    """SPEC-038 R-4: verified mutating calls hand off to the worker;
+    the fail-closed posture covers missing configuration, transport
+    failure, and handoff timeout."""
+
+    def _request(self, parameters) -> dict:
+        return {
+            "execution_id": "exec-1",
+            "confirm_id": "cf-1",
+            "call_id": "call-1",
+            "session_id": "ses-1",
+            "owner_user_id": "alice",
+            "decider_user_id": "bob",
+            "tool_name": "k8s.delete_pod",
+            "args_digest": canonical_digest(parameters),
+            "requested_at": "2026-08-27T10:00:00Z",
+            "signature": "f" * 64,
+        }
+
+    def _mutating_fn(self):
+        return _make_tool_fn(
+            "http://gw:8080", "k8s.delete_pod", "d", is_read_only=False
+        )
+
+    def _worker_settings(self):
+        from agent_service.runtime_settings import RuntimeSettings
+
+        return RuntimeSettings(
+            execution_worker_url="http://execution-runtime:8000",
+            execution_handoff_token="handoff-secret",
+        )
+
+    def _worker_audit_context(self):
+        return {
+            "settings": self._worker_settings(),
+            "confirm_id": "cf-1",
+            "session_id": "ses-1",
+            "request_id": "req-1",
+            "decider_user_id": "bob",
+        }
+
+    def _verified_context(self):
+        """Contextvars for one approved resume with a matching envelope."""
+        return (
+            EXECUTION_REQUESTS.set({"call-1": self._request({"name": "web-1"})}),
+            CURRENT_CALL_ID.set("call-1"),
+        )
+
+    @staticmethod
+    def _reset(*tokens_and_vars):
+        for var, token in tokens_and_vars:
+            var.reset(token)
+
+    def test_missing_worker_config_rejects_worker_unavailable(self) -> None:
+        """No in-process fallback: an unset worker URL or token rejects
+        before any handoff attempt."""
+        fn = self._mutating_fn()
+        with patch(
+            "agent_service.services.execution_worker_client.httpx.AsyncClient"
+        ) as mock_client_cls, patch(
+            "agent_service.services.audit_emitter.emit_audit_event"
+        ) as mock_emit:
+            requests_var, call_var = self._verified_context()
+            audit_var = EXECUTION_AUDIT_CONTEXT.set(
+                {
+                    "settings": None,
+                    "confirm_id": "cf-1",
+                    "session_id": "ses-1",
+                    "request_id": "req-1",
+                    "decider_user_id": "bob",
+                }
+            )
+            try:
+                chunk = _run(fn(name="web-1"))
+            finally:
+                self._reset(
+                    (EXECUTION_AUDIT_CONTEXT, audit_var),
+                    (CURRENT_CALL_ID, call_var),
+                    (EXECUTION_REQUESTS, requests_var),
+                )
+        mock_client_cls.assert_not_called()
+        result = chunk.metadata["gateway_result"]
+        self.assertEqual(result["error"]["code"], "EXECUTION_REJECTED")
+        self.assertEqual(result["error"]["reason"], "worker_unavailable")
+        event = mock_emit.call_args[0][1]
+        self.assertEqual(event["event_type"], "execution_rejected")
+        self.assertEqual(event["details"]["reason"], "worker_unavailable")
+
+    def test_handoff_timeout_yields_structured_timeout_result(self) -> None:
+        fn = self._mutating_fn()
+        with patch(
+            "agent_service.services.execution_worker_client.handoff",
+            new_callable=AsyncMock,
+        ) as mock_handoff:
+            mock_handoff.side_effect = WorkerHandoffTimeout("slow worker")
+            requests_var, call_var = self._verified_context()
+            audit_var = EXECUTION_AUDIT_CONTEXT.set(self._worker_audit_context())
+            try:
+                chunk = _run(fn(name="web-1"))
+            finally:
+                self._reset(
+                    (EXECUTION_AUDIT_CONTEXT, audit_var),
+                    (CURRENT_CALL_ID, call_var),
+                    (EXECUTION_REQUESTS, requests_var),
+                )
+        result = chunk.metadata["gateway_result"]
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error"]["code"], "TIMEOUT")
+        self.assertIn("worker", result["error"]["message"])
+
+    def test_transport_failure_rejects_worker_unavailable(self) -> None:
+        fn = self._mutating_fn()
+        with patch(
+            "agent_service.services.execution_worker_client.handoff",
+            new_callable=AsyncMock,
+        ) as mock_handoff:
+            mock_handoff.side_effect = WorkerHandoffError(
+                "worker_unavailable", "execution worker is unreachable"
+            )
+            requests_var, call_var = self._verified_context()
+            audit_var = EXECUTION_AUDIT_CONTEXT.set(self._worker_audit_context())
+            try:
+                chunk = _run(fn(name="web-1"))
+            finally:
+                self._reset(
+                    (EXECUTION_AUDIT_CONTEXT, audit_var),
+                    (CURRENT_CALL_ID, call_var),
+                    (EXECUTION_REQUESTS, requests_var),
+                )
+        result = chunk.metadata["gateway_result"]
+        self.assertEqual(result["error"]["code"], "EXECUTION_REJECTED")
+        self.assertEqual(result["error"]["reason"], "worker_unavailable")
+
+    def test_worker_verification_rejection_carries_reason(self) -> None:
+        fn = self._mutating_fn()
+        with patch(
+            "agent_service.services.execution_worker_client.handoff",
+            new_callable=AsyncMock,
+        ) as mock_handoff:
+            mock_handoff.side_effect = WorkerHandoffError(
+                "signature_invalid", "worker rejected the handoff (400)"
+            )
+            requests_var, call_var = self._verified_context()
+            audit_var = EXECUTION_AUDIT_CONTEXT.set(self._worker_audit_context())
+            try:
+                chunk = _run(fn(name="web-1"))
+            finally:
+                self._reset(
+                    (EXECUTION_AUDIT_CONTEXT, audit_var),
+                    (CURRENT_CALL_ID, call_var),
+                    (EXECUTION_REQUESTS, requests_var),
+                )
+        result = chunk.metadata["gateway_result"]
+        self.assertEqual(result["error"]["code"], "EXECUTION_REJECTED")
+        self.assertEqual(result["error"]["reason"], "signature_invalid")
+
+    def test_read_only_invocations_never_hand_off(self) -> None:
+        fn = _make_tool_fn(
+            "http://gw:8080", "k8s.list_pods", "d", is_read_only=True
+        )
+        with patch(
+            "agent_service.tools.gateway_tools.invoke_gateway_tool",
+            new_callable=AsyncMock,
+        ) as mock_invoke, patch(
+            "agent_service.tools.gateway_tools._handoff_execution",
+            new_callable=AsyncMock,
+        ) as mock_handoff:
+            mock_invoke.return_value = {"status": "success"}
+            requests_var, call_var = self._verified_context()
+            audit_var = EXECUTION_AUDIT_CONTEXT.set(self._worker_audit_context())
+            try:
+                chunk = _run(fn(name="web-1"))
+            finally:
+                self._reset(
+                    (EXECUTION_AUDIT_CONTEXT, audit_var),
+                    (CURRENT_CALL_ID, call_var),
+                    (EXECUTION_REQUESTS, requests_var),
+                )
+        mock_handoff.assert_not_awaited()
+        mock_invoke.assert_awaited_once()
+        self.assertEqual(chunk.metadata["gateway_result"]["status"], "success")

@@ -14,6 +14,7 @@ configMapGenerator:
       - audit-service/runtime-config.env
       - skills-hub/runtime-config.env
       - incident-service/runtime-config.env
+      - execution-runtime/runtime-config.env
   - name: platform-policy
     files:
       - shared/policy.yaml
@@ -65,3 +66,5 @@ resources:
   - skills-hub/skills-hub-service.yaml
   - incident-service/incident-service-deployment.yaml
   - incident-service/incident-service-service.yaml
+  - execution-runtime/execution-runtime-deployment.yaml
+  - execution-runtime/execution-runtime-service.yaml

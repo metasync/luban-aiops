@@ -19,7 +19,8 @@ extraction spike's revisit triggers govern any later consolidation.
   including `mk/python.mk` + `mk/image.mk` (image name
   `luban-aiops/execution-runtime`), `.python-version` (3.12).
 - `src/execution_runtime/`: `app.py` factory (FastAPI, structured JSON
-  logging with `x-request-id` propagation, `/healthz`), `core/config.py`
+  logging with `x-request-id` propagation, `/health/live` +
+  `/health/ready` per the house pattern), `core/config.py`
   frozen settings (`EXECUTION_*` prefix): `execution_signing_key`
   (`EXECUTION_SIGNING_KEY`), `handoff_token` (`EXECUTION_HANDOFF_TOKEN`),
   `tool_gateway_url` (`TOOL_GATEWAY_URL`),
@@ -60,7 +61,7 @@ extraction spike's revisit triggers govern any later consolidation.
   verifies under the worker copy and vice versa).
 - Missing `EXECUTION_SIGNING_KEY` or `EXECUTION_HANDOFF_TOKEN` → every
   handoff rejected at the corresponding check; the app still serves
-  `/healthz`.
+  its health endpoints.
 - Every rejection audits `execution_rejected` (reason, `confirm_id` from
   the envelope, forwarded `x-request-id`) through the canonical emitter.
 
@@ -138,7 +139,8 @@ extraction spike's revisit triggers govern any later consolidation.
   `execution-runtime-deployment.yaml` (non-root securityContext
   runAsUser 1000, seccomp RuntimeDefault, `enableServiceLinks: false`,
   env from `platform-runtime-config` + the two secrets, liveness/readiness
-  on `/healthz`, prometheus annotations parity), `execution-runtime-service.yaml`
+  on `/health/live` + `/health/ready`, prometheus annotations parity),
+  `execution-runtime-service.yaml`
   (ClusterIP, port 8000), `runtime-config.env`
   (`TOOL_GATEWAY_URL=http://tool-gateway:8000`, state backend pointed at
   the sessions Postgres). Wired into `base/kustomization.yaml` resources

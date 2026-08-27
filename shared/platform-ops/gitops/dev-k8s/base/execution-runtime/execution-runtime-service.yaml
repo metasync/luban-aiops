@@ -1,0 +1,13 @@
+# SPEC-038 R-6: internal ClusterIP only — no HTTPRoute and no
+# platform-gateway route reference this Service. The sole inbound path
+# is the authenticated handoff from agent-service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: execution-runtime
+spec:
+  selector:
+    app: execution-runtime
+  ports:
+    - port: 8000
+      targetPort: 8000

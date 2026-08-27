@@ -17,6 +17,7 @@ activate them. A feature is **active** when all required variables are set to no
 | **Kubernetes tools** | `GATEWAY_K8S_ENABLED=true`, `GATEWAY_K8S_NAMESPACE` | tool-gateway | enabled (`dev-luban-aiops`) |
 | **Mutating tools (`k8s.delete_pod`)** | `GATEWAY_MUTATING_TOOLS_ENABLED=true`, `GATEWAY_K8S_ENABLED=true`, `AGENT_HITL_CONFIRM_TIMEOUT>0`, `tools:mutate` policy grant, opt-in pod-delete RBAC | tool-gateway, agent-service, policy bundle | disabled (`false`) |
 | **Signed execution (SPEC-037)** | `AGENT_EXECUTION_SIGNING_KEY` ↔ `execution-signing-secret` | agent-service | **must be provisioned** (`sync-execution-signing-secret.sh`); absent key fails mutating resumes closed |
+| **Isolated execution worker (SPEC-038)** | `AGENT_EXECUTION_WORKER_URL` + `AGENT_EXECUTION_HANDOFF_TOKEN` ↔ `execution-handoff-secret` | agent-service, execution-runtime | **must be provisioned** (`sync-execution-handoff-secret.sh` + worker URL); absent config or any transport error fails mutating resumes closed (`worker_unavailable`) |
 | **Elastic observability** | `GATEWAY_ELASTIC_ENABLED=true`, `GATEWAY_ELASTIC_URL`, auth (`_API_KEY` or `_USERNAME`+`_PASSWORD`) | tool-gateway | disabled |
 | **Output redaction** | `GATEWAY_REDACTION_ENABLED` | tool-gateway | enabled (`true`) |
 | **Policy enforcement** | `GATEWAY_POLICY_PATH`, `PLATFORM_GATEWAY_POLICY_PATH` | tool-gateway, platform-gateway | `/etc/luban/policy/policy.yaml` |
@@ -115,7 +116,12 @@ even offer the tool, and without the policy grant the invocation 403s at the
 gateway. Approved resumes additionally sign an execution request over the
 parked arguments' digest and verify it at invocation (SPEC-037); without
 `AGENT_EXECUTION_SIGNING_KEY` the mutating resume fails closed with an
-audited `signing_unavailable` rejection. See the
+audited `signing_unavailable` rejection. Since SPEC-038 the verified call
+is handed off to the isolated `execution-runtime` worker, which re-verifies
+the envelope and executes under the forwarded confirmer token; without
+`AGENT_EXECUTION_WORKER_URL` + `AGENT_EXECUTION_HANDOFF_TOKEN` (or on any
+handoff transport error) the resume fails closed with an audited
+`worker_unavailable` rejection — there is no in-process fallback. See the
 [Approval and HITL Governance Guide](approval-and-hitl.md).
 
 ### Audit Ingestion Chain
@@ -307,11 +313,32 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime
 | `AGENT_AUDIT_SERVICE_URL` | Audit-service ingest URL for agent-service emissions (SPEC-037 execution events); unset degrades to log-only auditing | `http://audit-service:8000` | runtime-config |
 | `AGENT_AUDIT_CLIENT_ID` | Audit ingest client id for agent-service; must match an `AUDIT_INGEST_CLIENTS` entry | `agent-service` | runtime-config |
 | `AGENT_EXECUTION_SIGNING_KEY` | HMAC key for signed execution requests and receipts (SPEC-037); rides the `execution-signing-secret` via an optional `secretKeyRef` — an absent secret leaves it unset and mutating resumes fail closed (`signing_unavailable`) | **must be provisioned** | execution-signing-secret |
+| `AGENT_EXECUTION_WORKER_URL` | Internal `execution-runtime` worker endpoint for the authenticated handoff of approved mutating calls (SPEC-038); unset rejects mutating resumes with an audited `worker_unavailable` rejection — no in-process fallback | `http://execution-runtime:8000` (dev-k8s) | runtime-config |
+| `AGENT_EXECUTION_HANDOFF_TOKEN` | Static bearer token presented to the worker handoff (SPEC-038); rides the `execution-handoff-secret` via an optional `secretKeyRef` — absent secret fails mutating resumes closed (`worker_unavailable`) | **must be provisioned** | execution-handoff-secret |
+| `AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS` | Budget for the blocking worker handoff on the resumed stream (SPEC-038); expiry lands as the structured timeout result and a `timeout` receipt close. Must be > 0 | `60` | code default |
 | `AGENT_GATEWAY_TOOL_AUTO_ALLOW` | Comma-separated dotted gateway tool names auto-approved by the permission middleware when read-only (overrides the built-in vetted list); the allow-list is the only auto-approval surface — every other tool is answered with an explicit ASK and parks for operator confirmation (SPEC-020). Mutating tools are never auto-approved regardless of this setting (SPEC-021) | built-in vetted list | code default |
 | `AGENT_HITL_CONFIRM_TIMEOUT` | HITL confirmation timeout in seconds; an expired parked batch is closed via `UserInterruptEvent` on the next confirm attempt (410) or next chat turn. `0` disables HITL confirmation bridging entirely (SPEC-020) and excludes mutating tools from the agent toolkit (SPEC-021) | `600` | code default |
 | `AGENT_TOOL_DATA_SUMMARY_MAX_CHARS` | Serialized-size cap for the `data_summary` field on `tool_result` evidence frames; oversized payloads are truncated with a marker | `2000` | code default |
 | `AGENT_TOOL_DATA_MAX_CHARS` | Serialized-size cap for the full `data` field on `tool_result` evidence frames (stream schema v6); oversized payloads are omitted from the frame and stay in the audit trail only | `32000` | code default |
 | `TOOL_GATEWAY_URL` | Upstream tool-gateway URL | `http://tool-gateway:8000` | runtime-config |
+
+### execution-runtime
+
+Source: `products/execution-runtime/src/execution_runtime/core/config.py`
+Config fragment: `shared/platform-ops/gitops/dev-k8s/base/execution-runtime/runtime-config.env`
+
+| Variable | Purpose | Default | Source |
+|---|---|---|---|
+| `EXECUTION_SIGNING_KEY` | HMAC key verifying SPEC-037 envelopes and signing receipts (shared with agent-service); unset rejects every handoff | **must be provisioned** | execution-signing-secret |
+| `EXECUTION_HANDOFF_TOKEN` | Static credential authenticating the agent-service handoff (constant-time comparison); unset rejects every handoff | **must be provisioned** | execution-handoff-secret |
+| `TOOL_GATEWAY_URL` | tool-gateway endpoint for approved executions | `http://tool-gateway:8000` | runtime-config (merged ConfigMap) |
+| `EXECUTION_GATEWAY_TIMEOUT_SECONDS` | Budget for the tool-gateway invocation | `30` | code default |
+| `EXECUTION_STATE_STORE_BACKEND` | `memory` / `postgres` receipt store | `memory` | runtime-config (`postgres` in dev-k8s) |
+| `EXECUTION_STATE_DB_URL` | Sessions-database URL (postgres backend; shared `execution_records` table) | *(none)* | runtime-config |
+| `EXECUTION_AUDIT_SERVICE_URL` | audit-service ingest URL; unset degrades to log-only auditing | *(none)* | runtime-config |
+| `EXECUTION_AUDIT_CLIENT_ID` | Audit ingest client id; must match an `AUDIT_INGEST_CLIENTS` entry | `execution-runtime` | runtime-config |
+| `EXECUTION_AUDIT_CLIENT_SECRET` | Audit ingest client secret | *(none)* | **runtime-secrets** |
+| `EXECUTION_FLIGHT_RETENTION_SECONDS` | Completed single-flight cache retention (replay without re-execution) | `900` | code default |
 
 ### platform-gateway
 
@@ -505,6 +532,12 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 | Key | Purpose | How to Provision |
 |---|---|---|
 | `AGENT_EXECUTION_SIGNING_KEY` | HMAC key signing execution requests and receipts (SPEC-037); the agent-service deployment reads it through an optional `secretKeyRef`, so an absent secret fails mutating resumes closed instead of degrading to unsigned execution | `sync-execution-signing-secret.sh` (generate → reuse ladder; `SKIP_EXECUTION_SIGNING_SECRET=true` opts out) |
+
+### `execution-handoff-secret`
+
+| Key | Purpose | How to Provision |
+|---|---|---|
+| `EXECUTION_HANDOFF_TOKEN` | Static credential for the internal agent-service → execution-runtime handoff (SPEC-038). Both sides read the same secret: the worker requires it on every handoff (constant-time comparison), and agent-service maps it to `AGENT_EXECUTION_HANDOFF_TOKEN` via an optional `secretKeyRef` — an absent secret fails mutating resumes closed (`worker_unavailable`) instead of degrading to unauthenticated handoff | `sync-execution-handoff-secret.sh` (generate → reuse ladder; `SKIP_EXECUTION_HANDOFF_SECRET=true` opts out); wired into `dev-k8s/deploy.sh` |
 
 ### `platform-gateway-runtime-secrets`
 

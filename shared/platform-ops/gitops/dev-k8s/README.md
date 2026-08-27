@@ -8,6 +8,7 @@ This directory contains the development Kubernetes overlay for the platform base
 - `platform-gateway`
 - `tool-gateway`
 - `agent-service`
+- `execution-runtime`
 - `identity-service`
 - `audit-service`
 - `skills-hub`
@@ -42,6 +43,7 @@ The base deployment manifest uses neutral placeholder image tags:
 - `luban-aiops/platform-gateway:dev-local`
 - `luban-aiops/tool-gateway:dev-local`
 - `luban-aiops/agent-service:dev-local`
+- `luban-aiops/execution-runtime:dev-local`
 - `luban-aiops/identity-service:dev-local`
 - `luban-aiops/audit-service:dev-local`
 - `luban-aiops/skills-hub:dev-local`
@@ -57,6 +59,7 @@ The `platform-runtime-config` `ConfigMap` is assembled from product-scoped env f
 
 - `shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env`
 - `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env`
+- `shared/platform-ops/gitops/dev-k8s/base/execution-runtime/runtime-config.env`
 - `shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env`
 - `shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env`
 - `shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env`
@@ -64,7 +67,9 @@ The `platform-runtime-config` `ConfigMap` is assembled from product-scoped env f
 - `shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env`
 - `shared/platform-ops/gitops/dev-k8s/base/incident-service/runtime-config.env`
 
-Because the fragments merge into one `ConfigMap`, each key may appear only once: `IDENTITY_SERVICE_URL` lives in the shared fragment and is consumed by both gateways.
+Because the fragments merge into one `ConfigMap`, each key may appear only once: `IDENTITY_SERVICE_URL` lives in the shared fragment and is consumed by both gateways. The execution-runtime fragment likewise omits `TOOL_GATEWAY_URL` — it inherits the value from the agent-platform fragment.
+
+`execution-runtime` (SPEC-038) ships as an isolated worker: its own Deployment (`replicas: 1`) and ClusterIP Service, no HTTPRoute or gateway route, and two dedicated secrets — `execution-signing-secret` (`EXECUTION_SIGNING_KEY`, shared with agent-service) and `execution-handoff-secret` (`EXECUTION_HANDOFF_TOKEN`, also mapped to `AGENT_EXECUTION_HANDOFF_TOKEN` on agent-service). `deploy.sh` provisions the handoff token via `sync-execution-handoff-secret.sh`; approved mutating calls reach the worker only through the internal authenticated handoff from agent-service (`AGENT_EXECUTION_WORKER_URL`).
 
 The identity-broker config fragment defines the browser callback and logout redirect defaults for the `OIDC` flow. The committed baseline targets a **self-contained** `luban-aiops` realm on the shared development Keycloak, so live testing no longer depends on users from other applications:
 

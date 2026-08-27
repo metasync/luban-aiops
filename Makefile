@@ -12,9 +12,9 @@
 SHELL := /bin/sh
 
 # Products with a Python (uv) test suite.
-PYTHON_PRODUCTS := agent-platform audit-service identity-broker incident-service platform-gateway skills-hub tool-gateway
+PYTHON_PRODUCTS := agent-platform audit-service execution-runtime identity-broker incident-service platform-gateway skills-hub tool-gateway
 # Products with a container image.
-IMAGE_PRODUCTS := agent-platform audit-service identity-broker incident-service platform-gateway skills-hub tool-gateway operator-portal
+IMAGE_PRODUCTS := agent-platform audit-service execution-runtime identity-broker incident-service platform-gateway skills-hub tool-gateway operator-portal
 
 # GitOps overlays rendered as part of verification.
 GITOPS_DIR := shared/platform-ops/gitops
@@ -96,6 +96,7 @@ build: base-images ## Build all images (coordinated tag) and write .images.env f
 	@echo "AUDIT_SERVICE_IMAGE=luban-aiops/audit-service:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "SKILLS_HUB_IMAGE=luban-aiops/skills-hub:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "INCIDENT_SERVICE_IMAGE=luban-aiops/incident-service:$(IMAGE_TAG)" >> $(IMAGE_STATE)
+	@echo "EXECUTION_RUNTIME_IMAGE=luban-aiops/execution-runtime:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "WEB_UI_IMAGE=luban-aiops/web-ui:$(IMAGE_TAG)" >> $(IMAGE_STATE)
 	@echo "Built images with IMAGE_TAG=$(IMAGE_TAG); wrote $(IMAGE_STATE)"
 	@if [ "$(AUTO_LOAD_KIND)" = "true" ]; then \
@@ -110,7 +111,8 @@ build: base-images ## Build all images (coordinated tag) and write .images.env f
 			"luban-aiops/identity-service:$(IMAGE_TAG)" \
 			"luban-aiops/audit-service:$(IMAGE_TAG)" \
 			"luban-aiops/skills-hub:$(IMAGE_TAG)" \
-			"luban-aiops/incident-service:$(IMAGE_TAG)"; \
+			"luban-aiops/incident-service:$(IMAGE_TAG)" \
+			"luban-aiops/execution-runtime:$(IMAGE_TAG)"; \
 	fi
 
 .PHONY: push
