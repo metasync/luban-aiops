@@ -2,10 +2,11 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-28
 - approved: 2026-08-28
+- delivered: 2026-08-28 (v0.22.0)
 - release slice: R5 — Hardening and External Consumption (second R5 slice)
 - related ADRs: none (extends SPEC-039 operations document repository)
 
@@ -202,7 +203,7 @@ Acceptance criteria:
 
 ## Open Questions
 
-- none recorded yet — pending operator review of the draft.
+- none recorded.
 
 ## Changelog
 
@@ -211,3 +212,8 @@ Acceptance criteria:
   placement, offline export).
 - 2026-08-28: approved by the operator with no recorded conditions;
   implementation proceeds as the second R5 slice (v0.22.0).
+- 2026-08-28: delivered in v0.22.0 exactly as specified — deterministic
+  `handover` digest section, narrative default with the anchoring
+  prompt contract, Documents moved to Workspace, and client-side
+  Markdown export; verified by the full train (unit + portal suites,
+  make verify, extended documents-demo e2e, browser walkthrough).

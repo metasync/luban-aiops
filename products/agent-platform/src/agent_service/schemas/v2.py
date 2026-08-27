@@ -357,11 +357,13 @@ class DocumentCreateRequest(BaseModel):
         description="Owner-supplied human label for the document.",
     )
     include_prose: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "Request the optional generated narrative (SPEC-039 R-4). The "
-            "prompt sees the digest JSON only; a generation failure yields "
-            "a digest-only document (prose_status=failed)."
+            "Request the generated handover narrative (SPEC-039 R-4, "
+            "default since SPEC-040 R-2; pass false to opt out). The "
+            "prompt sees the digest JSON only and must stay anchored "
+            "to it; a generation failure yields a digest-only document "
+            "(prose_status=failed)."
         ),
     )
 

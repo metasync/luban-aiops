@@ -1,6 +1,7 @@
-// Documents view tests (SPEC-039 R-6): Mine/Published split with state
-// badges, cross-owner attribution, draft publish affordance, and the
-// create dialog. The API module is mocked; the gateway re-enforces the
+// Documents view tests (SPEC-039 R-6, Workspace placement per SPEC-040
+// R-3): Mine/Published split with state badges, cross-owner attribution,
+// draft publish affordance, the create dialog, and the Markdown export
+// (SPEC-040 R-4). The API module is mocked; the gateway re-enforces the
 // role matrix server-side regardless of these client gates.
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
@@ -14,15 +15,19 @@ import {
 } from "vitest";
 import type { OperationDocument } from "../../../api/documents";
 import type { SessionWorkspace } from "../../../sessions/useSessionWorkspace";
-import DocumentsView from "../DocumentsView";
+import DocumentsView, { buildDocumentMarkdown } from "../DocumentsView";
 
-const { mockListDocuments, mockCurrentUser } = vi.hoisted(() => ({
-  mockListDocuments: vi.fn(),
-  mockCurrentUser: vi.fn(),
-}));
+const { mockListDocuments, mockGetDocument, mockCurrentUser } = vi.hoisted(
+  () => ({
+    mockListDocuments: vi.fn(),
+    mockGetDocument: vi.fn(),
+    mockCurrentUser: vi.fn(),
+  }),
+);
 
 vi.mock("../../../api/documents", () => ({
   listDocuments: mockListDocuments,
+  getDocument: mockGetDocument,
   createDocument: vi.fn(),
   publishDocument: vi.fn(),
   deleteDocument: vi.fn(),
@@ -85,7 +90,23 @@ const foreignPublished: OperationDocument = {
       { session_id: "ses-9", coverage: "owner", cited_record_ids: [] },
     ],
   },
-  digest: { session_count: 1, sessions: [] },
+  digest: {
+    session_count: 1,
+    sessions: [],
+    // SPEC-040 R-1: the deterministic shift-story skeleton.
+    handover: {
+      covered_session_count: 1,
+      own_session_count: 1,
+      foreign_session_count: 0,
+      decision_count: 0,
+      execution_count: 0,
+      open_items: { pending_confirmations: 0, requested_executions: 0 },
+      open_sessions: [],
+      quiet: true,
+      decisions: [],
+      executions: [],
+    },
+  },
   prose: "All quiet during the day shift.",
   prose_status: "included",
 };
@@ -114,6 +135,12 @@ const workspaceStub = {
 
 beforeEach(() => {
   mockListDocuments.mockReset();
+  mockGetDocument.mockReset();
+  // The drawer fetches the full document through the audited single
+  // read (list rows are envelope-only); default resolves the owner draft.
+  mockGetDocument.mockImplementation(async (id: string) =>
+    id === "doc-2" ? foreignPublished : ownDraft,
+  );
   mockCurrentUser.mockReset();
   mockCurrentUser.mockReturnValue("luban-operator");
 });
@@ -167,17 +194,56 @@ describe("DocumentsView list (SPEC-039 R-6)", () => {
     expect(screen.getByText(/check the pods \(ses-1\)/)).toBeTruthy();
   });
 
-  it("labels the prose panel unmistakably in the document drawer", async () => {
+  it("labels the narrative panel unmistakably in the document drawer", async () => {
     mockListDocuments.mockResolvedValue([foreignPublished]);
     render(<DocumentsView workspace={workspaceStub} />);
     await flush();
     fireEvent.click(screen.getByText("View"));
+    await flush();
     expect(
-      screen.getByText(/AI-generated prose \(digest-only/),
+      screen.getByText(/AI-generated narrative — from this document's digest facts/),
     ).toBeTruthy();
     // Cross-owner attribution rides the list row and the drawer alike.
     expect(
       screen.getAllByText(/created by other\.operator/).length,
     ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("offers the Markdown export from the drawer (SPEC-040 R-4)", async () => {
+    mockListDocuments.mockResolvedValue([foreignPublished]);
+    render(<DocumentsView workspace={workspaceStub} />);
+    await flush();
+    fireEvent.click(screen.getByText("View"));
+    await flush();
+    // Export renders the already-fetched document client-side: no new
+    // gateway call beyond the audited single fetch.
+    expect(screen.getByText("Export .md")).toBeTruthy();
+    expect(mockGetDocument).toHaveBeenCalledWith("doc-2", expect.anything());
+    // SPEC-040 R-1: the handover skeleton leads the digest surface.
+    expect(screen.getByText("Handover")).toBeTruthy();
+    expect(screen.getByText(/covered_session_count/)).toBeTruthy();
+  });
+});
+
+describe("buildDocumentMarkdown (SPEC-040 R-4)", () => {
+  it("serializes metadata, provenance, digest, and narrative", () => {
+    const markdown = buildDocumentMarkdown(foreignPublished);
+    expect(markdown).toContain("# Day handover");
+    expect(markdown).toContain("`doc-2`");
+    expect(markdown).toContain("other.operator");
+    expect(markdown).toContain("`ses-9` — owner coverage");
+    expect(markdown).toContain("## Digest (deterministic facts)");
+    // The handover skeleton rides the exported digest JSON.
+    expect(markdown).toContain("\"covered_session_count\": 1");
+    expect(markdown).toContain("All quiet during the day shift.");
+    expect(markdown).toContain("Exported ");
+  });
+
+  it("exports the digest alone when narrative generation failed", () => {
+    const failed: OperationDocument = { ...ownDraft, prose_status: "failed" };
+    const markdown = buildDocumentMarkdown(failed);
+    expect(markdown).toContain("## Digest (deterministic facts)");
+    expect(markdown).toContain("Narrative generation failed");
+    expect(markdown).not.toContain("## Handover narrative");
   });
 });

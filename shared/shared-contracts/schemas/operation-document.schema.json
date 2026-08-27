@@ -85,7 +85,7 @@
     },
     "digest": {
       "type": "object",
-      "description": "Type-specific deterministic digest copied verbatim from the durable stores (shift_summary: sessions, confirmation decisions, execution receipts, evidence counts, open items). Never model output."
+      "description": "Type-specific deterministic digest copied verbatim from the durable stores (shift_summary: sessions, confirmation decisions, execution receipts, evidence counts, open items). Never model output. Since SPEC-040 R-1, shift-summary digests also carry a deterministic handover section (covered-session counts, decision/execution details for own coverage, counts-only for foreign coverage, open items, and a quiet flag for empty shifts) so the artifact tells the next operator what happened without a model in the loop."
     },
     "prose": {
       "type": ["string", "null"],

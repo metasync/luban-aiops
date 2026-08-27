@@ -1,9 +1,11 @@
-"""SPEC-039 R-4: optional clearly-labeled prose layer.
+"""SPEC-039 R-4: clearly-labeled narrative layer (default since SPEC-040 R-2).
 
 Covers the digest-only prompt contract (no transcript text, evidence
-payload, or argument body ever reaches the prompt) and the fail-soft
-degradation: a model error, timeout, or empty reply yields
-``prose_status=failed`` and the document ships digest-only.
+payload, or argument body ever reaches the prompt), the SPEC-040 R-2
+anchoring rules (every statement traces to a digest section; nothing
+absent from the digest may appear), and the fail-soft degradation: a
+model error, timeout, or empty reply yields ``prose_status=failed``
+and the document ships digest-only.
 """
 
 from __future__ import annotations
@@ -69,8 +71,12 @@ class TestPromptContract:
             )
             in prompt
         )
-        # The guardrail phrasing bounds the model to the facts.
-        assert "State only what the facts contain" in prompt
+        # The SPEC-040 R-2 anchoring rules bound the model to the digest:
+        # facts only, tied to their sections, no invented detail.
+        assert "state only facts present in the digest" in prompt
+        assert "never introduce record ids, causes, recommendations" in prompt
+        # A quiet shift must be reported honestly, not filled in.
+        assert "quiet=true" in prompt
 
     def test_prompt_never_receives_caller_supplied_text(self) -> None:
         # The signature only accepts the digest: there is no channel

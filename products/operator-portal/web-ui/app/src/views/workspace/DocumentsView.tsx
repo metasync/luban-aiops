@@ -1,8 +1,10 @@
-// Documents view (SPEC-039 R-6): create, manage, publish, and read
-// operations documents. The digest renders as the primary surface; the
-// AI prose panel stays collapsed by default and unmistakably labeled.
-// Cross-owner reads attribute the creator prominently (R-5 audit rides
-// the agent layer; the view only renders).
+// Documents view (SPEC-039 R-6, moved to Workspace per SPEC-040 R-3):
+// create, manage, publish, and read operations documents. The digest
+// renders as the primary surface; the AI narrative panel is labeled
+// unmistakably as digest-anchored (SPEC-040 R-2). Cross-owner reads
+// attribute the creator prominently (R-5 audit rides the agent layer;
+// the view only renders). Export (SPEC-040 R-4) serializes the
+// already-fetched document client-side — no new gateway call.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   Alert,
@@ -23,6 +25,7 @@ import {
 } from "antd";
 import {
   DeleteOutlined,
+  DownloadOutlined,
   FileTextOutlined,
   PlusOutlined,
   SendOutlined,
@@ -158,6 +161,11 @@ function DigestPanel({ document }: { document: OperationDocument }) {
   const sessions = Array.isArray((digest as Record<string, unknown>).sessions)
     ? ((digest as Record<string, unknown>).sessions as Record<string, unknown>[])
     : [];
+  const handover =
+    typeof (digest as Record<string, unknown>).handover === "object" &&
+    (digest as Record<string, unknown>).handover !== null
+      ? ((digest as Record<string, unknown>).handover as Record<string, unknown>)
+      : null;
   const coverageBySession = new Map(
     (document.provenance?.sessions ?? []).map((entry) => [
       entry.session_id,
@@ -174,6 +182,19 @@ function DigestPanel({ document }: { document: OperationDocument }) {
           Requested by {String(digest.requester_user_id ?? document.owner_user_id)}
         </Typography.Text>
       </div>
+      {handover ? (
+        // SPEC-040 R-1: the shift story leads the digest so the
+        // relieving operator sees what happened before the receipts.
+        <div style={{ marginBottom: 12 }}>
+          <Typography.Text
+            strong
+            style={{ display: "block", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}
+          >
+            Handover
+          </Typography.Text>
+          <DigestValue value={handover} />
+        </div>
+      ) : null}
       {sessions.map((entry, index) => {
         const sessionId = typeof entry.session_id === "string" ? entry.session_id : "";
         const coverage = coverageBySession.get(sessionId);
@@ -202,7 +223,7 @@ function ProsePanel({ document }: { document: OperationDocument }) {
             key: "prose",
             label: (
               <Typography.Text strong>
-                AI-generated prose (digest-only, may omit facts)
+                AI-generated narrative — from this document's digest facts
               </Typography.Text>
             ),
             children: (
@@ -220,8 +241,8 @@ function ProsePanel({ document }: { document: OperationDocument }) {
       <Alert
         type="warning"
         showIcon
-        message="Prose generation failed"
-        description="The digest above is the complete record; the optional narrative summary could not be generated."
+        message="Narrative generation failed"
+        description="The digest above is the complete record; the generated handover narrative could not be produced."
       />
     );
   }
@@ -257,7 +278,8 @@ function CreateShiftSummaryDialog({
   const [label, setLabel] = useState("");
   const [ownIds, setOwnIds] = useState<string[]>([]);
   const [foreignRaw, setForeignRaw] = useState("");
-  const [includeProse, setIncludeProse] = useState(false);
+  // Narrative is the default since SPEC-040 R-2; the switch is the opt-out.
+  const [includeProse, setIncludeProse] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -290,7 +312,7 @@ function CreateShiftSummaryDialog({
       setLabel("");
       setOwnIds([]);
       setForeignRaw("");
-      setIncludeProse(false);
+      setIncludeProse(true);
       onCreated();
       onClose();
     } catch (err) {
@@ -362,10 +384,98 @@ function CreateShiftSummaryDialog({
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <Switch checked={includeProse} onChange={setIncludeProse} />
-        <Typography.Text>Include AI prose (digest-only, labeled)</Typography.Text>
+        <Typography.Text>
+          Include AI handover narrative (anchored to the digest facts,
+          labeled)
+        </Typography.Text>
       </div>
     </Modal>
   );
+}
+
+// --- Export (SPEC-040 R-4) ---------------------------------------------------
+
+// Client-side Markdown serialization of the document the drawer already
+// fetched through the audited single-read surface. Export is a rendering
+// act, not a new read path: no gateway call, no policy action, and no
+// new audit event (the content access was audited at fetch time).
+
+function slugifyLabel(label: string): string {
+  const slug = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "document";
+}
+
+export function buildDocumentMarkdown(document: OperationDocument): string {
+  const lines: string[] = [];
+  lines.push(`# ${document.label}`);
+  lines.push("");
+  lines.push("| Field | Value |");
+  lines.push("| --- | --- |");
+  lines.push(`| Document id | \`${document.document_id}\` |`);
+  lines.push(`| Type | ${document.document_type.replace(/_/g, " ")} |`);
+  lines.push(`| State | ${document.state} |`);
+  lines.push(`| Owner | ${document.owner_user_id} |`);
+  lines.push(`| Created | ${document.created_at} |`);
+  if (document.published_at) {
+    lines.push(`| Published | ${document.published_at} |`);
+  }
+  lines.push("");
+  lines.push("## Provenance");
+  lines.push("");
+  for (const session of document.provenance?.sessions ?? []) {
+    lines.push(
+      `- \`${session.session_id}\` — ${session.coverage} coverage`,
+    );
+  }
+  if ((document.provenance?.sessions ?? []).length === 0) {
+    lines.push("- none recorded");
+  }
+  lines.push("");
+  lines.push("## Digest (deterministic facts)");
+  lines.push("");
+  lines.push("```json");
+  lines.push(JSON.stringify(document.digest ?? {}, null, 2));
+  lines.push("```");
+  if (document.prose_status === "included" && document.prose) {
+    lines.push("");
+    lines.push(
+      "## Handover narrative (AI-generated, anchored to the digest facts)",
+    );
+    lines.push("");
+    lines.push(document.prose);
+  } else if (document.prose_status === "failed") {
+    lines.push("");
+    lines.push(
+      "_Narrative generation failed for this document; the digest above " +
+        "is the complete record._",
+    );
+  }
+  lines.push("");
+  lines.push("---");
+  lines.push(
+    `Exported ${new Date().toISOString()} from the Luban AIOps operator ` +
+      `portal · document ${document.document_id}`,
+  );
+  return `${lines.join("\n")}\n`;
+}
+
+function downloadDocumentMarkdown(document: OperationDocument): void {
+  const shortId = document.document_id.slice(-6);
+  const filename = `${slugifyLabel(document.label)}-doc-${shortId}.md`;
+  const blob = new Blob([buildDocumentMarkdown(document)], {
+    type: "text/markdown;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = window.document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  window.document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 // --- View -------------------------------------------------------------------
@@ -593,6 +703,21 @@ export default function DocumentsView({
         open={selectedId !== null}
         onClose={() => setSelectedId(null)}
         width={560}
+        extra={
+          selected ? (
+            <Tooltip title="Download this document as Markdown for offline use">
+              <Button
+                icon={<DownloadOutlined />}
+                onClick={() => {
+                  downloadDocumentMarkdown(selected);
+                  message.success("Exported as Markdown.");
+                }}
+              >
+                Export .md
+              </Button>
+            </Tooltip>
+          ) : null
+        }
       >
         {detailLoading || selected === null ? (
           <div style={{ padding: 24, textAlign: "center" }}>

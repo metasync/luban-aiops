@@ -1,12 +1,14 @@
 #!/bin/sh
 
-# Operations document repository live check (SPEC-039 delivery gate).
+# Operations document repository live check (SPEC-039 delivery gate,
+# extended for the SPEC-040 handover section).
 #
 # Deterministic end-to-end assertions for the operations document
 # repository (Phase 1: shift summaries), runnable after `make deploy`:
 #   1. control check: a role without documents:create is rejected (403)
 #   2. an operator creates a session, then a shift-summary draft citing
-#      it (digest + provenance present, state=draft)
+#      it (digest + provenance present, state=draft, and the digest
+#      carries the deterministic handover section — SPEC-040 R-1)
 #   3. drafts are owner-only: the reader gets a 404 anti-enumeration
 #      before the owner publishes, and a 200 with owner attribution after
 #   4. publish is one-way: the second publish answers 409
@@ -110,7 +112,10 @@ SESSION_ID=$(json_field "$HTTP_BODY" session_id)
 http -X POST "$GATEWAY_URL/api/v1/documents" \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"document_type\": \"shift_summary\", \"session_ids\": [\"$SESSION_ID\"], \"label\": \"live check $RUN_SUFFIX\"}"
+  -d "{\"document_type\": \"shift_summary\", \"session_ids\": [\"$SESSION_ID\"], \"label\": \"live check $RUN_SUFFIX\", \"include_prose\": false}"
+# include_prose stays pinned off here: the live check asserts the
+# deterministic digest surface; the narrative path is fail-soft but
+# latency-bound (model call), and the portal walkthrough covers it.
 [ "$HTTP_CODE" = "201" ] || fail "document create answered $HTTP_CODE: $HTTP_BODY"
 DOCUMENT_ID=$(json_field "$HTTP_BODY" document_id)
 [ -n "$DOCUMENT_ID" ] || fail "document create returned no document_id"
@@ -119,7 +124,14 @@ DOCUMENT_ID=$(json_field "$HTTP_BODY" document_id)
   || fail "new document owner is not $OWNER_USER"
 [ "$(json_field "$HTTP_BODY" provenance.sessions.0.session_id)" = "$SESSION_ID" ] \
   || fail "provenance does not anchor the cited session"
-echo "draft $DOCUMENT_ID created citing session $SESSION_ID"
+# SPEC-040 R-1: the digest tells the shift story deterministically.
+[ "$(json_field "$HTTP_BODY" digest.handover.covered_session_count)" = "1" ] \
+  || fail "digest carries no handover section with covered_session_count=1"
+[ "$(json_field "$HTTP_BODY" digest.handover.own_session_count)" = "1" ] \
+  || fail "handover section lost the own-session count"
+[ "$(json_field "$HTTP_BODY" digest.handover.quiet)" = "True" ] \
+  || fail "a fresh session should report an honest quiet shift"
+echo "draft $DOCUMENT_ID created citing session $SESSION_ID (handover section present)"
 
 echo "==> [4/7] drafts are owner-only until publish; publish is one-way"
 http "$GATEWAY_URL/api/v1/documents/$DOCUMENT_ID" \
@@ -205,7 +217,7 @@ echo "session $SESSION_ID deleted (the published document stays immutable)"
 echo ""
 echo "Operations document repository live check passed:"
 echo "  - role matrix enforced (observer 403 on documents:create)"
-echo "  - draft created with digest + provenance anchor"
+echo "  - draft created with digest + provenance anchor + handover section"
 echo "  - drafts owner-only (404) until publish; published readable by role"
 echo "  - listing is envelope-only; full content flows the audited fetch"
 echo "  - publish is one-way (409 on re-publish)"

@@ -13,6 +13,39 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.22.0 — 2026-08-28
+
+### Added
+
+- **Shift-summary handover narrative and export (SPEC-040, second R5
+  slice)**: every shift-summary digest now carries a deterministic
+  `handover` section assembled from the durable stores — covered-session
+  counts, own-coverage decisions and execution outcomes (stable-sorted,
+  foreign sessions stay counts-only), still-open items, and an honest
+  `quiet` flag for empty shifts — so the next operator reads what
+  happened without a model in the loop.
+- The generated narrative is now the **default** on document creation
+  (`include_prose` defaults to true; the create dialog's switch is the
+  opt-out) under a tightened anchoring prompt contract: the model sees
+  the digest JSON only, every statement must trace to a digest section,
+  and nothing absent from the digest may appear. Fail-soft degradation
+  (`prose_status=failed` → digest-only document) is unchanged.
+- **Client-side Markdown export**: the portal document drawer gains
+  *Export .md*, serializing the already-fetched document (metadata,
+  provenance, digest, narrative) for offline handover. Export is a
+  rendering act — no new endpoint, no new policy action, and no new
+  audit event type.
+
+### Changed
+
+- The portal **Documents** entry moved from the Control section to
+  Workspace (SPEC-040 R-3): shift handover is an everyday workspace
+  artifact, not oversight. Role gating is unchanged.
+- The narrative panel is relabeled *AI-generated narrative — from this
+  document's digest facts* to match the anchoring contract.
+- Contract note: `operation-document.schema.json` documents the
+  `handover` digest section (additive; no schema break).
+
 ## 0.21.1 — 2026-08-27
 
 ### Fixed

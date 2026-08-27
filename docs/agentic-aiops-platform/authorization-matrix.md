@@ -386,7 +386,12 @@ a document digest is capped at the inbox's metadata-only posture by gating
 on the caller's own `approvals:list` grant. Cross-owner document reads are
 recorded as `document_read` audit events (own reads stay unaudited);
 since v0.21.1 document listings are envelope-only, so the audited single
-fetch is the only path to a document's content. That audit sits
+fetch is the only path to a document's content. Since v0.22.0 (SPEC-040)
+shift-summary digests additionally carry a deterministic `handover`
+section and the generated narrative defaults on under a digest-anchoring
+prompt contract; the portal's Markdown export serializes the document
+already fetched through that audited surface, so it introduces no new
+policy action and no new audit event type. That audit sits
 alongside `document_created` / `document_published`. SPEC-039 also adds
 `session:update` (rename one's own session titles), granted exactly where
 `session:list` is granted — every chat-capable role — with server-side

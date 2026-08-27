@@ -179,6 +179,107 @@ def _open_items(
     }
 
 
+def _handover(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """The shift story skeleton (SPEC-040 R-1).
+
+    Assembled deterministically from the per-session digest entries:
+    own-coverage sessions contribute decision and execution details,
+    foreign sessions contribute counts only (the metadata tier), and
+    ``quiet`` is the honest empty state when nothing was decided or
+    executed anywhere in the shift. Unavailable sources contribute
+    nothing — degradation rides the session sections as today.
+    """
+    own = [entry for entry in entries if entry.get("coverage") == "owner"]
+    foreign = [entry for entry in entries if entry.get("coverage") == "foreign"]
+
+    def _rows(entry: dict[str, Any], key: str) -> list[dict[str, Any]]:
+        rows = entry.get(key)
+        return rows if isinstance(rows, list) else []
+
+    decisions: list[dict[str, Any]] = []
+    executions: list[dict[str, Any]] = []
+    open_sessions: list[str] = []
+    pending_confirmations = 0
+    requested_executions = 0
+    decided_count = 0
+    for entry in own:
+        confirmations = _rows(entry, "confirmations")
+        executions_rows = _rows(entry, "executions")
+        for row in confirmations:
+            if row.get("status") == "pending":
+                pending_confirmations += 1
+            else:
+                decided_count += 1
+                decisions.append(
+                    {
+                        "session_id": entry.get("session_id"),
+                        "confirm_id": row.get("confirm_id"),
+                        "action": row.get("action"),
+                        "decision": row.get("decision"),
+                        "decider_user_id": row.get("decider_user_id"),
+                        "decided_at": row.get("decided_at"),
+                    }
+                )
+        for row in executions_rows:
+            if row.get("status") == "requested":
+                requested_executions += 1
+            executions.append(
+                {
+                    "session_id": entry.get("session_id"),
+                    "execution_id": row.get("execution_id"),
+                    "tool_name": row.get("tool_name"),
+                    "receipt_status": row.get("receipt_status"),
+                    "completed_at": row.get("completed_at"),
+                }
+            )
+        open_items = entry.get("open_items") or {}
+        if (open_items.get("pending_confirmations") or 0) + (
+            open_items.get("requested_executions") or 0
+        ) > 0:
+            open_sessions.append(entry.get("session_id"))
+
+    # Foreign sessions stay counts-only: never titles or details.
+    for entry in foreign:
+        confirmations = _rows(entry, "confirmation_decisions")
+        decided_count += sum(
+            1 for row in confirmations if row.get("status") != "pending"
+        )
+        pending_confirmations += sum(
+            1 for row in confirmations if row.get("status") == "pending"
+        )
+        requested_executions += sum(
+            1
+            for row in _rows(entry, "execution_receipts")
+            if row.get("status") == "requested"
+        )
+
+    decisions.sort(
+        key=lambda row: (row.get("decided_at") or "", row.get("confirm_id") or "")
+    )
+    executions.sort(
+        key=lambda row: (row.get("completed_at") or "", row.get("execution_id") or "")
+    )
+
+    execution_count = len(executions) + sum(
+        len(_rows(entry, "execution_receipts")) for entry in foreign
+    )
+    return {
+        "covered_session_count": len(entries),
+        "own_session_count": len(own),
+        "foreign_session_count": len(foreign),
+        "decision_count": decided_count,
+        "execution_count": execution_count,
+        "open_items": {
+            "pending_confirmations": pending_confirmations,
+            "requested_executions": requested_executions,
+        },
+        "open_sessions": open_sessions,
+        "quiet": decided_count == 0 and execution_count == 0,
+        "decisions": decisions,
+        "executions": executions,
+    }
+
+
 def _digest_own_session(record, session_id: str) -> tuple[dict[str, Any], list[str]]:
     confirmations = _safe_read(
         lambda: CONFIRMATION_RECORD_STORE.load_for_session(session_id)
@@ -318,5 +419,7 @@ def build_digest(
         "requester_user_id": requester_user_id,
         "session_count": len(entries),
         "sessions": entries,
+        # SPEC-040 R-1: the deterministic handover story skeleton.
+        "handover": _handover(entries),
     }
     return digest, {"sessions": provenance_sessions}

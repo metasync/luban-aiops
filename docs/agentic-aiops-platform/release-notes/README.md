@@ -7,6 +7,13 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-28-shift-summary-handover-narrative-export.md`
+  - delivers SPEC-040 (v0.22.0), the second R5 slice: a deterministic
+    `handover` digest section (decisions, execution outcomes, open
+    items, quiet flag), the generated narrative flipped to default
+    under a digest-anchoring prompt contract, Documents moved from
+    Control to Workspace, and client-side Markdown export for offline
+    handover — no new policy actions or audit event types
 - `2026-08-27-document-read-audit-integrity.md`
   - same-day patch on the SPEC-039 document repository (v0.21.1):
     document listings are envelope-only (digest/prose omitted) and the

@@ -2,8 +2,9 @@
 
 Covers the two-tier coverage model (owner-full vs foreign
 metadata-only behind approvals:list), bounded-input validation,
-structural rejection of unknown ids, per-source degradation, and the
-provenance block that anchors every cited record id.
+structural rejection of unknown ids, per-source degradation, the
+provenance block that anchors every cited record id, and the
+deterministic handover section (SPEC-040 R-1).
 """
 
 from __future__ import annotations
@@ -276,3 +277,93 @@ class TestDegradation:
         assert entry["open_items"]["requested_executions"] == 1
         # No cited confirmation ids leak into provenance.
         assert provenance["sessions"][0]["cited_record_ids"] == ["exec-call-1"]
+
+
+class TestHandoverSection:
+    """SPEC-040 R-1: the deterministic shift-story skeleton."""
+
+    def test_handover_carries_own_decisions_and_executions(self, stores) -> None:
+        session_id = _seed_owner_session(stores)
+        digest, _ = build_digest("alice", [session_id], False)
+        handover = digest["handover"]
+        assert handover["covered_session_count"] == 1
+        assert handover["own_session_count"] == 1
+        assert handover["foreign_session_count"] == 0
+        # cf-1 was approved; cf-2 stays pending and rides open items.
+        assert handover["decision_count"] == 1
+        [decision] = handover["decisions"]
+        assert decision == {
+            "session_id": session_id,
+            "confirm_id": "cf-1",
+            "action": "tools:mutate",
+            "decision": "approve",
+            "decider_user_id": "alice",
+            "decided_at": decision["decided_at"],
+        }
+        assert handover["execution_count"] == 1
+        [execution] = handover["executions"]
+        assert execution["execution_id"] == "exec-call-1"
+        assert execution["tool_name"] == "k8s.restart_service"
+        assert handover["open_items"] == {
+            "pending_confirmations": 1,
+            "requested_executions": 1,
+        }
+        assert handover["open_sessions"] == [session_id]
+        assert handover["quiet"] is False
+
+    def test_handover_is_deterministic(self, stores) -> None:
+        session_id = _seed_owner_session(stores)
+        first, _ = build_digest("alice", [session_id], False)
+        second, _ = build_digest("alice", [session_id], False)
+        # Same store state -> byte-identical handover skeleton.
+        assert first["handover"] == second["handover"]
+
+    def test_foreign_sessions_contribute_counts_only(self, stores) -> None:
+        own_id = _seed_owner_session(stores)
+        foreign_id = _seed_foreign_session(stores)
+        digest, _ = build_digest("alice", [own_id, foreign_id], True)
+        handover = digest["handover"]
+        assert handover["covered_session_count"] == 2
+        assert handover["foreign_session_count"] == 1
+        # Foreign denied decision and execution receipt count in the
+        # totals but never surface session-level details.
+        assert handover["decision_count"] == 2
+        assert handover["execution_count"] == 2
+        for row in handover["decisions"] + handover["executions"]:
+            assert row["session_id"] == own_id
+        # The foreign session never appears in open_sessions details.
+        assert foreign_id not in handover["open_sessions"]
+
+    def test_quiet_shift_reports_honest_empty_state(self, stores) -> None:
+        record = stores["sessions"].create_session(
+            user_id="alice", session_id="ses-quiet"
+        )
+        digest, _ = build_digest("alice", [record.session_id], False)
+        handover = digest["handover"]
+        assert handover["quiet"] is True
+        assert handover["decision_count"] == 0
+        assert handover["execution_count"] == 0
+        assert handover["decisions"] == []
+        assert handover["executions"] == []
+        assert handover["open_items"] == {
+            "pending_confirmations": 0,
+            "requested_executions": 0,
+        }
+
+    def test_degraded_source_keeps_handover_assembled(
+        self, stores, monkeypatch
+    ) -> None:
+        session_id = _seed_owner_session(stores)
+
+        def _explode(*args, **kwargs):
+            raise RuntimeError("confirmation store unreachable")
+
+        monkeypatch.setattr(
+            stores["confirmations"], "load_for_session", _explode
+        )
+        digest, _ = build_digest("alice", [session_id], False)
+        # The unavailable confirmation section contributes nothing, but
+        # the handover section still assembles from the rest.
+        handover = digest["handover"]
+        assert handover["execution_count"] == 1
+        assert handover["decisions"] == []

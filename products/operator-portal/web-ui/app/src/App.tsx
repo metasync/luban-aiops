@@ -41,7 +41,7 @@ import ApprovalsView, {
   useApprovalsInbox,
 } from "./views/control/ApprovalsView";
 import PermissionsView from "./views/control/PermissionsView";
-import DocumentsView from "./views/control/DocumentsView";
+import DocumentsView from "./views/workspace/DocumentsView";
 import SettingsView from "./views/control/SettingsView";
 import SkillsView from "./views/control/SkillsView";
 import ToolsView from "./views/control/ToolsView";
@@ -107,12 +107,14 @@ function SidebarContent({
     // The inbox is decider-only (client-side mirror of approvals:list;
     // the gateway re-enforces it on every request).
     approvals: signedIn && hasAnyRole(roles, APPROVAL_DECIDER_ROLES),
-    // Documents (SPEC-039 R-6): authoring-roles mirror of documents:read.
-    documents: signedIn && hasAnyRole(roles, DOCUMENT_ROLES),
     audit: hasAnyRole(roles, AUDIT_ROLES),
     permissions: signedIn,
   };
   const workspaceVisible = {
+    // Documents (SPEC-039 R-6, moved per SPEC-040 R-3): the shift
+    // handover workflow is a daily workspace artifact, not oversight.
+    // Authoring-roles mirror of documents:read.
+    documents: signedIn && hasAnyRole(roles, DOCUMENT_ROLES),
     tools: signedIn,
     skills: signedIn,
     settings: true,
@@ -141,13 +143,6 @@ function SidebarContent({
         ),
       });
     }
-    if (controlVisible.documents) {
-      controlItems.push({
-        key: "documents",
-        icon: <FileTextOutlined />,
-        label: "Documents",
-      });
-    }
     if (controlVisible.audit) {
       controlItems.push({
         key: "audit",
@@ -171,6 +166,13 @@ function SidebarContent({
       });
     }
     const workspaceItems: NonNullable<MenuProps["items"]> = [];
+    if (workspaceVisible.documents) {
+      workspaceItems.push({
+        key: "documents",
+        icon: <FileTextOutlined />,
+        label: "Documents",
+      });
+    }
     if (workspaceVisible.tools) {
       workspaceItems.push({
         key: "tools",

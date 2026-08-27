@@ -26,15 +26,24 @@ PROSE_TIMEOUT_SECONDS = 30.0
 # The guardrail is the prompt contract: the only input the model ever
 # sees is the assembled digest JSON, so it can paraphrase facts but
 # cannot fabricate from conversation content that never reaches it.
+# SPEC-040 R-2 tightens the contract with explicit anchoring rules:
+# every statement must trace to a digest section, and nothing absent
+# from the input (record ids, causes, recommendations) may appear.
 _PROMPT_TEMPLATE = """\
-You are writing an operational handover recap for a colleague.
+You are writing an operational handover recap for a colleague taking \
+over the next shift.
 
-Recap the facts in the JSON digest below for a teammate taking over. \
-State only what the facts contain: summarize sessions, confirmation \
-decisions, execution outcomes, and still-open items. Never invent \
-details, causes, or recommendations that the facts do not support. \
-Write plain prose in at most six short paragraphs. No headings, no \
-markdown.
+Recap the facts in the JSON digest below so the relieving operator \
+knows what happened and what they inherit. Lead with the handover \
+section when present (decisions made, execution outcomes, still-open \
+items), then cover the sessions. Anchoring rules: state only facts \
+present in the digest; tie each statement to the digest section it \
+comes from (handover, sessions, confirmations, executions, open \
+items); never introduce record ids, causes, recommendations, or any \
+detail the digest does not contain. If the handover section reports \
+quiet=true, say plainly that the shift had no recorded decisions or \
+executions. Write plain prose in at most six short paragraphs. No \
+headings, no markdown.
 
 JSON digest:
 {digest_json}

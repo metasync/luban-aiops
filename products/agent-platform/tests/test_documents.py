@@ -92,9 +92,47 @@ class TestCreateDocument:
         assert document["prose"] is None
         entry = document["digest"]["sessions"][0]
         assert entry["coverage"] == "owner"
+        # SPEC-040 R-1: the route-created document carries the
+        # deterministic handover skeleton alongside the sessions.
+        handover = document["digest"]["handover"]
+        assert handover["covered_session_count"] == 1
+        assert handover["own_session_count"] == 1
+        assert handover["quiet"] is True
         assert document["provenance"]["sessions"][0]["session_id"] == session_id
         # The envelope validates against the shared contract.
         jsonschema.validate(document, _load_schema("operation-document.schema.json"))
+
+    def test_narrative_defaults_on_without_include_prose(
+        self, monkeypatch
+    ) -> None:
+        # SPEC-040 R-2: omitting include_prose now requests the
+        # narrative; the generate boundary is exercised exactly once.
+        calls: list[tuple] = []
+
+        async def _fake_generate(kernel, document_type, digest):
+            calls.append((document_type, digest))
+            return "A quiet shift with no recorded decisions.", "included"
+
+        monkeypatch.setattr(v2_routes, "generate_prose", _fake_generate)
+        app_client = TestClient(create_app())
+        session_id = _session(app_client, "alice")
+        response = app_client.post(
+            "/api/v2/documents",
+            json={
+                "document_type": "shift_summary",
+                "session_ids": [session_id],
+                "label": "night shift",
+            },
+            headers={"X-User-ID": "alice"},
+        )
+        assert response.status_code == 201
+        document = response.json()
+        assert document["prose_status"] == "included"
+        assert document["prose"].startswith("A quiet shift")
+        assert len(calls) == 1
+        assert calls[0][0] == "shift_summary"
+        # The prompt contract's sole input: the assembled digest.
+        assert "handover" in calls[0][1]
 
     def test_create_emits_document_created_audit(self, _clean_stores) -> None:
         app_client = TestClient(create_app())
