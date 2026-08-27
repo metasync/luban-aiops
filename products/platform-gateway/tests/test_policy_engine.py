@@ -239,16 +239,19 @@ class ContractAlignmentTests(unittest.TestCase):
         # carries it (SPEC-021). session:list/session:delete complete the
         # session workspace lifecycle (SPEC-022 R-1). models:list guards
         # model catalog discovery (SPEC-024 R-2). approvals:list guards the
-        # approver confirmation inbox (SPEC-031 R-3).
+        # approver confirmation inbox (SPEC-031 R-3). documents:create/
+        # documents:read guard the operations document repository and
+        # session:update guards the owner rename (SPEC-039 R-2/R-7).
         self.assertEqual(
             PROTECTED_ACTIONS,
             frozenset({
                 "chat", "chat:confirm", "session:create", "session:read",
-                "session:list", "session:delete",
+                "session:list", "session:delete", "session:update",
                 "audit:read",
                 "incident:read", "incident:create", "incident:triage",
                 "policy:read", "tools:list", "tools:mutate", "skills:read",
                 "models:list", "approvals:list",
+                "documents:create", "documents:read",
             }),
         )
 

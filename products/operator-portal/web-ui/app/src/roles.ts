@@ -34,6 +34,16 @@ export const CHAT_CONFIRM_ROLES = new Set([
 // mirror of the shipped bundle's decided_by_roles.
 export const APPROVAL_DECIDER_ROLES = new Set(["approver", "platform-admin"]);
 
+// SPEC-039 R-2: documents:create/documents:read are granted to the
+// operational authoring roles only — developer and observer hold neither.
+// Client-side mirror of the allow-operators-documents bundle rule; the
+// gateway re-enforces both actions on every request.
+export const DOCUMENT_ROLES = new Set([
+  "platform-admin",
+  "approver",
+  "operator",
+]);
+
 export function hasAnyRole(roles: string[], allowed: Set<string>): boolean {
   return roles.some((role) => allowed.has(role));
 }

@@ -7,6 +7,18 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-27-operations-document-repository.md`
+  - delivers SPEC-039 (v0.21.0), the first R5 slice: a platform-owned
+    operations document repository — typed substrate with a role-based
+    access matrix (draft→publish replaces per-document grants), cap 20
+    per owner, 30-day TTL, provenance anchoring, and document audit
+    (`document_created` / `document_published` / cross-owner
+    `document_read`) behind new deny-by-default `documents:create` /
+    `documents:read` actions; Phase 1 ships the shift-summary type
+    (deterministic digest with two-tier own/metadata-only foreign
+    coverage gated on `approvals:list`, fail-soft digest-only prose
+    layer) plus the session-rename (`session:update`) and session-id
+    copy add-ons, and the portal Documents control view
 - `2026-08-27-isolated-execution-worker.md`
   - delivers SPEC-038 (v0.20.0) and closes R4: approved mutating calls
     leave agent-service via an authenticated internal handoff to the

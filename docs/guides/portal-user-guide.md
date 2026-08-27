@@ -89,6 +89,15 @@ relative last-active times.
   parked them.
 - **Deleting** a session asks for an in-UI confirm. A session with a
   pending confirmation refuses deletion — decide the card first.
+- **Renaming** (SPEC-039): each session entry carries an edit button that
+  opens an inline rename dialog (1–80 characters). Renames apply to your
+  own sessions only, update the panel instantly, and are deliberately not
+  audited — titles are cosmetic, not operational state.
+- **Copying the session id** (SPEC-039): every session entry shows its
+  truncated id (full value on hover) with a one-click copy button — a
+  check mark confirms the copy. The open session's header shows the same
+  id + copy pair. This is how you hand a colleague a session id to cite
+  in a shift summary (see below).
 
 ## Reading Tool Evidence
 
@@ -157,6 +166,38 @@ carries a badge with the number of pending items.
 
 Inbox access is the `approvals:list` action; the gateway re-enforces it,
 so non-deciders receive a 403 even if they call the API directly.
+
+## Documents (Control)
+
+The Documents view is the operations document repository (SPEC-039). It
+appears in the Control section only for signed-in users with a document
+role (`platform-admin`, `approver`, or `operator`) — access is by role,
+never by per-document permission grants.
+
+- **Mine** lists your drafts and published documents; **Published** lists
+  every published document visible to your roles, each attributed with
+  *created by …* when the owner is someone else.
+- **New shift summary** opens the creation dialog: pick your own sessions
+  from a selector, optionally add foreign session ids (copied from a
+  colleague's session panel — see Sessions above), set a label, and
+  optionally request an AI-written prose summary. The digest covers at
+  most 20 sessions.
+- **Coverage is two-tier**: your own sessions contribute full coverage;
+  foreign sessions contribute metadata only — and only if your roles also
+  hold the approvals inbox. The digest's provenance names every cited
+  session and record id, and foreign entries are tagged as such.
+- The document page is **digest-first**: the structured digest (sessions,
+  confirmations, executions, evidence counts) is the artifact of record.
+  When prose was requested it renders collapsed under the label *AI-
+  generated prose (digest-only, may omit facts)*; a failed generation
+  shows a warning instead and the digest stands alone.
+- Drafts can be **Published** (one-way — publishing cannot be undone, and
+  a published document refuses re-publish) or **Deleted** while they are
+  yours; published documents are immutable.
+
+Document creation and publishing are the `documents:create` action and
+reading is `documents:read`; cross-owner reads are audited (`document_read`)
+while reading your own documents is not.
 
 ## Incidents (Control)
 
@@ -231,14 +272,14 @@ from the gateway.
 
 ## What Your Roles Unlock
 
-| Role | Chat | Approve cards | Approvals inbox | Mutating tools | Incidents | Audit trail |
-|---|---|---|---|---|---|---|
-| `platform-admin` | yes | yes | yes | yes | full | yes |
-| `operator` | yes | yes | no | yes | full | no |
-| `approver` | yes | yes | yes | no | full | no |
-| `developer` | yes | yes | no | no | full | no |
-| `read-only-observer` | yes (read-only tools) | no | no | no | read | no |
-| `auditor` | no | no | no | no | no | yes |
+| Role | Chat | Approve cards | Approvals inbox | Documents | Mutating tools | Incidents | Audit trail |
+|---|---|---|---|---|---|---|---|
+| `platform-admin` | yes | yes | yes | yes | yes | full | yes |
+| `operator` | yes | yes | no | yes | yes | full | no |
+| `approver` | yes | yes | yes | yes | no | full | no |
+| `developer` | yes | yes | no | no | no | full | no |
+| `read-only-observer` | yes (read-only tools) | no | no | no | no | read | no |
+| `auditor` | no | no | no | no | no | no | yes |
 
 The authoritative answer is always the Permissions view — it reflects the
 deployed bundle, including any local grants your administrators added. See

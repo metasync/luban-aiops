@@ -27,6 +27,9 @@ EventType = Literal[
     "execution_requested",
     "execution_completed",
     "execution_rejected",
+    "document_created",
+    "document_published",
+    "document_read",
 ]
 
 Outcome = Literal["allow", "deny", "success", "error"]

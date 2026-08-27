@@ -5,6 +5,7 @@ from platform_gateway.api.routes import (
     audit,
     auth,
     chat,
+    documents,
     health,
     identity,
     incidents,
@@ -30,3 +31,4 @@ router.include_router(tools.router)
 router.include_router(skills.router)
 router.include_router(models.router)
 router.include_router(approvals.router)
+router.include_router(documents.router)

@@ -16,6 +16,7 @@ import {
   AuditOutlined,
   BulbOutlined,
   CheckSquareOutlined,
+  FileTextOutlined,
   LoginOutlined,
   LogoutOutlined,
   MenuOutlined,
@@ -30,6 +31,7 @@ import ChatView from "./chat/ChatView";
 import {
   APPROVAL_DECIDER_ROLES,
   AUDIT_ROLES,
+  DOCUMENT_ROLES,
   INCIDENT_VIEW_ROLES,
   hasAnyRole,
 } from "./roles";
@@ -39,6 +41,7 @@ import ApprovalsView, {
   useApprovalsInbox,
 } from "./views/control/ApprovalsView";
 import PermissionsView from "./views/control/PermissionsView";
+import DocumentsView from "./views/control/DocumentsView";
 import SettingsView from "./views/control/SettingsView";
 import SkillsView from "./views/control/SkillsView";
 import ToolsView from "./views/control/ToolsView";
@@ -49,6 +52,7 @@ export type ViewId =
   | "chat"
   | "incidents"
   | "approvals"
+  | "documents"
   | "audit"
   | "permissions"
   | "tools"
@@ -103,6 +107,8 @@ function SidebarContent({
     // The inbox is decider-only (client-side mirror of approvals:list;
     // the gateway re-enforces it on every request).
     approvals: signedIn && hasAnyRole(roles, APPROVAL_DECIDER_ROLES),
+    // Documents (SPEC-039 R-6): authoring-roles mirror of documents:read.
+    documents: signedIn && hasAnyRole(roles, DOCUMENT_ROLES),
     audit: hasAnyRole(roles, AUDIT_ROLES),
     permissions: signedIn,
   };
@@ -133,6 +139,13 @@ function SidebarContent({
             <span>Approvals</span>
           </Badge>
         ),
+      });
+    }
+    if (controlVisible.documents) {
+      controlItems.push({
+        key: "documents",
+        icon: <FileTextOutlined />,
+        label: "Documents",
       });
     }
     if (controlVisible.audit) {
@@ -356,6 +369,8 @@ export default function App() {
             <IncidentsView onOpenIncidentSession={openIncidentSession} />
           ) : active === "approvals" ? (
             <ApprovalsView inbox={approvals} />
+          ) : active === "documents" ? (
+            <DocumentsView workspace={workspace} />
           ) : active === "audit" ? (
             <AuditView />
           ) : active === "permissions" ? (

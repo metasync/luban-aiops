@@ -11,12 +11,14 @@ never inspects or signs it.
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from typing import Literal
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
+from agent_service.core.config import get_settings
 from agent_service.core.metrics import record_chat_request
 from agent_service.schemas.v2 import (
     AgentChatConfirmRequest,
@@ -31,12 +33,19 @@ from agent_service.schemas.v2 import (
     AgentSessionSummary,
     AgentStreamEvent,
     ConfirmationRecordModel,
+    DocumentCreateRequest,
     EvidenceTurn,
+    SessionTitleUpdateRequest,
 )
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
+from agent_service.services.audit_emitter import (
+    build_audit_event,
+    emit_audit_event,
+)
 from agent_service.services.confirmation_records import (
     CONFIRMATION_RECORD_STORE,
 )
+from agent_service.services.document_prose import generate_prose
 from agent_service.services.evidence_store import EVIDENCE_STORE
 from agent_service.services.execution_records import EXECUTION_RECORD_STORE
 from agent_service.services.hitl_confirmations import (
@@ -44,6 +53,10 @@ from agent_service.services.hitl_confirmations import (
     ConfirmationNotFound,
 )
 from agent_service.services.model_catalog import MODEL_CATALOG
+from agent_service.services.operation_documents import (
+    OPERATION_DOCUMENT_STORE,
+    make_document,
+)
 from agent_service.services.runtime_dependencies import (
     get_confirmation_registry,
     get_runtime_kernel,
@@ -56,9 +69,17 @@ from agent_service.services.session_service import (
     list_sessions,
     mark_session_turn,
     pin_session_model,
+    rename_session_title,
 )
 from agent_service.services.session_store import SESSION_STORE
 from agent_service.services.session_transcript import extract_transcript
+from agent_service.services.shift_summary import (
+    MAX_LABEL_LENGTH,
+    DigestInputError,
+    ForeignSessionDenied,
+    UnknownSessionError,
+    build_digest,
+)
 
 router = APIRouter(prefix="/api/v2")
 
@@ -679,6 +700,260 @@ async def delete_session_route(
     if not delete_session(session.session_id, user_id):
         raise HTTPException(status_code=404, detail="session not found")
     return {"session_id": session.session_id, "deleted": True}
+
+
+@router.patch("/sessions/{session_id}/title", response_model=AgentSession)
+async def rename_session_route(
+    session_id: str,
+    body: SessionTitleUpdateRequest,
+    x_user_id: str | None = Header(None),
+) -> AgentSession:
+    """Owner session rename (SPEC-039 R-7).
+
+    Supersedes the SPEC-022 server-minted set-once title: the rename
+    overwrites whatever title the session carries. 1–80 characters after
+    trimming; foreign or unknown ids answer 404 per the anti-enumeration
+    convention. Renames are not audited (owner-side cosmetic act on
+    one's own record; recorded design decision).
+    """
+    user_id = _user_id(x_user_id)
+    title = " ".join(body.title.split())
+    if not title or len(title) > 80:
+        raise HTTPException(
+            status_code=400,
+            detail="title must be 1-80 characters after trimming",
+        )
+    session = rename_session_title(session_id, title, user_id)
+    return AgentSession(
+        session_id=session.session_id,
+        user_id=session.user_id or user_id,
+        created_at=session.created_at,
+        status=session.status,  # type: ignore[arg-type]
+        title=session.title,
+        last_active_at=session.last_active_at,
+        model=session.model,
+    )
+
+
+# --- Operations document repository (SPEC-039) ---
+
+
+def _emit_document_audit(
+    event_type: str,
+    user_id: str,
+    request_id: str | None,
+    details: dict,
+) -> None:
+    """Fire-and-forget document audit event (SPEC-039 R-5).
+
+    Emission failures never block the document operation; an
+    unconfigured audit service keeps the historical log-only behavior.
+    """
+    event = build_audit_event(
+        event_type,
+        request_id,
+        "success",
+        details=details,
+        subject=user_id,
+        username=user_id,
+    )
+    emit_audit_event(get_settings(), event)
+
+
+@router.post("/documents", status_code=201)
+async def create_document(
+    body: DocumentCreateRequest,
+    x_user_id: str | None = Header(None),
+    x_request_id: str | None = Header(None),
+    x_foreign_coverage: str | None = Header(default=None),
+) -> dict:
+    """Create a typed operations document (SPEC-039 R-1/R-3).
+
+    Authorization (``documents:create``) is enforced by the
+    platform-gateway. ``X-Foreign-Coverage`` is the gateway-computed
+    ``approvals:list`` capability marker (trusted internal header,
+    same trust model as ``X-User-ID``); it fails closed — an absent or
+    unrecognized value denies foreign coverage.
+    """
+    user_id = _user_id(x_user_id)
+    label = " ".join(body.label.split())
+    if not label or len(label) > MAX_LABEL_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"label must be 1-{MAX_LABEL_LENGTH} characters after trimming",
+        )
+    can_view_foreign = (x_foreign_coverage or "").strip().lower() == "allowed"
+    try:
+        digest, provenance = build_digest(
+            user_id, list(body.session_ids), can_view_foreign
+        )
+    except UnknownSessionError as exc:
+        # Structural rejection; nothing about ownership is revealed.
+        raise HTTPException(
+            status_code=400, detail=f"unknown session ids: {exc.session_ids}"
+        ) from None
+    except ForeignSessionDenied as exc:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "foreign session coverage requires the approvals:list "
+                f"capability: {exc.session_ids}"
+            ),
+        ) from None
+    except DigestInputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    if body.include_prose:
+        prose, prose_status = await generate_prose(
+            get_runtime_kernel(), body.document_type, digest
+        )
+    else:
+        prose, prose_status = None, "not_requested"
+
+    document_id = f"doc-{uuid.uuid4()}"
+    document = make_document(
+        document_id=document_id,
+        document_type=body.document_type,
+        owner_user_id=user_id,
+        label=label,
+        provenance=provenance,
+        digest=digest,
+        prose=prose,
+        prose_status=prose_status,
+    )
+    OPERATION_DOCUMENT_STORE.create(document)
+    own_count = sum(
+        1 for row in provenance["sessions"] if row["coverage"] == "owner"
+    )
+    foreign_count = len(provenance["sessions"]) - own_count
+    cited_count = sum(
+        len(row["cited_record_ids"]) for row in provenance["sessions"]
+    )
+    _emit_document_audit(
+        "document_created",
+        user_id,
+        x_request_id,
+        {
+            "document_id": document_id,
+            "document_type": body.document_type,
+            "own_session_count": own_count,
+            "foreign_session_count": foreign_count,
+            "cited_record_count": cited_count,
+            "prose_status": prose_status,
+        },
+    )
+    LOGGER.info(
+        "operation document created",
+        extra={
+            "request_id": x_request_id,
+            "document_id": document_id,
+            "document_type": body.document_type,
+            "user_id": user_id,
+            "prose_status": prose_status,
+        },
+    )
+    return OPERATION_DOCUMENT_STORE.load(document_id) or document
+
+
+@router.get("/documents")
+async def list_documents(
+    scope: Literal["mine", "published"] = Query(default="mine"),
+    x_user_id: str | None = Header(None),
+) -> dict:
+    """List documents (SPEC-039 R-2).
+
+    ``mine`` returns the caller's drafts and published documents;
+    ``published`` returns the team-visible surface — drafts never
+    appear there for anyone, including admins.
+    """
+    user_id = _user_id(x_user_id)
+    if scope == "mine":
+        rows = OPERATION_DOCUMENT_STORE.list_for_owner(user_id)
+    else:
+        rows = OPERATION_DOCUMENT_STORE.list_published()
+    return {"documents": rows}
+
+
+@router.get("/documents/{document_id}")
+async def read_document(
+    document_id: str,
+    x_user_id: str | None = Header(None),
+    x_request_id: str | None = Header(None),
+) -> dict:
+    """Read one document; drafts stay owner-only (SPEC-039 R-2).
+
+    Cross-owner reads of published documents are the policed surface
+    and always emit ``document_read`` (SPEC-039 R-5); own reads are
+    not audited.
+    """
+    user_id = _user_id(x_user_id)
+    document = OPERATION_DOCUMENT_STORE.load(document_id)
+    # Foreign drafts are indistinguishable from unknown documents.
+    if document is None or (
+        document["state"] == "draft" and document["owner_user_id"] != user_id
+    ):
+        raise HTTPException(status_code=404, detail="document not found")
+    if document["owner_user_id"] != user_id:
+        _emit_document_audit(
+            "document_read",
+            user_id,
+            x_request_id,
+            {
+                "document_id": document_id,
+                "document_type": document["document_type"],
+                "owner_user_id": document["owner_user_id"],
+            },
+        )
+    return document
+
+
+@router.post("/documents/{document_id}/publish")
+async def publish_document(
+    document_id: str,
+    x_user_id: str | None = Header(None),
+    x_request_id: str | None = Header(None),
+) -> dict:
+    """Publish one's own draft (SPEC-039 R-1: one-way owner action)."""
+    user_id = _user_id(x_user_id)
+    document = OPERATION_DOCUMENT_STORE.load(document_id)
+    if document is None or document["owner_user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="document not found")
+    if document["state"] == "published":
+        raise HTTPException(
+            status_code=409, detail="document is already published"
+        )
+    if not OPERATION_DOCUMENT_STORE.publish(user_id, document_id):
+        raise HTTPException(
+            status_code=409, detail="document could not be published"
+        )
+    _emit_document_audit(
+        "document_published",
+        user_id,
+        x_request_id,
+        {
+            "document_id": document_id,
+            "document_type": document["document_type"],
+        },
+    )
+    return OPERATION_DOCUMENT_STORE.load(document_id)
+
+
+@router.delete("/documents/{document_id}")
+async def delete_document(
+    document_id: str,
+    x_user_id: str | None = Header(None),
+) -> dict:
+    """Delete one's own document (SPEC-039 R-1).
+
+    Published documents can be deleted by their owner but never edited;
+    own deletes are not audited (no cross-user surface is policed).
+    """
+    user_id = _user_id(x_user_id)
+    document = OPERATION_DOCUMENT_STORE.load(document_id)
+    if document is None or document["owner_user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="document not found")
+    OPERATION_DOCUMENT_STORE.delete(user_id, document_id)
+    return {"document_id": document_id, "deleted": True}
 
 
 # --- Approvals inbox (SPEC-031 R-3) ---

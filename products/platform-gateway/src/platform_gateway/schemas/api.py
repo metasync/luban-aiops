@@ -57,6 +57,25 @@ class CreateSessionRequest(BaseModel):
     user_id: str | None = None
 
 
+class SessionTitleUpdateRequest(BaseModel):
+    """Owner session rename body (SPEC-039 R-7); relayed verbatim to agent-service."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=80)
+
+
+class DocumentCreateRequest(BaseModel):
+    """Operations document create body (SPEC-039 R-1); relayed verbatim."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_type: Literal["shift_summary"]
+    session_ids: list[str] = Field(min_length=1, max_length=20)
+    label: str = Field(min_length=1, max_length=120)
+    include_prose: bool = False
+
+
 class ReportIncidentRequest(BaseModel):
     """Manual incident report (SPEC-015); mirrored to incident-service."""
 

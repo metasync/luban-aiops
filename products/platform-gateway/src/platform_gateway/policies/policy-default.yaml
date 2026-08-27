@@ -39,7 +39,9 @@
 #
 # session:list/session:delete (SPEC-022) mirror session:create's grants: the
 # API scopes both operations to the caller's own sessions server-side, so the
-# lifecycle actions share one posture across all roles.
+# lifecycle actions share one posture across all roles. session:update
+# (SPEC-039 R-7, owner session rename) joins them: it is likewise scoped
+# server-side to the caller's own sessions, so it rides the same grants.
 version: 1
 rules:
   - id: allow-operators-chat
@@ -49,7 +51,7 @@ rules:
     enabled: true
     match:
       roles_any: ["platform-admin", "approver", "operator", "developer"]
-      actions_any: ["chat", "session:create", "session:read", "session:list", "session:delete", "models:list"]
+      actions_any: ["chat", "session:create", "session:read", "session:list", "session:delete", "session:update", "models:list"]
     decision:
       outcome: allow
 
@@ -60,7 +62,7 @@ rules:
     enabled: true
     match:
       roles_any: ["read-only-observer"]
-      actions_any: ["chat", "session:create", "session:read", "session:list", "session:delete", "models:list"]
+      actions_any: ["chat", "session:create", "session:read", "session:list", "session:delete", "session:update", "models:list"]
     decision:
       outcome: allow
 
@@ -243,5 +245,22 @@ rules:
     match:
       roles_any: ["approver", "platform-admin"]
       actions_any: ["approvals:list"]
+    decision:
+      outcome: allow
+
+  # Operations document repository (SPEC-039 R-2): documents:create gates
+  # create/publish/delete of one's own documents; documents:read gates list/get.
+  # The agent layer enforces the visibility matrix (drafts owner-only, published
+  # to all readers), so no per-document grant surface exists. developer and
+  # read-only-observer are denied both by default — document production is an
+  # operational act; extending the grant is a deliberate bundle edit.
+  - id: allow-operators-documents
+    domain: action_authz
+    description: Platform admins, approvers, and operators may create and read operations documents.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator"]
+      actions_any: ["documents:create", "documents:read"]
     decision:
       outcome: allow

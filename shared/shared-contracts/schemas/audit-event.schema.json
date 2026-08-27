@@ -39,7 +39,10 @@
         "skills_synced",
         "execution_requested",
         "execution_completed",
-        "execution_rejected"
+        "execution_rejected",
+        "document_created",
+        "document_published",
+        "document_read"
       ],
       "description": "Closed vocabulary of audited event types."
     },
@@ -79,7 +82,7 @@
     },
     "details": {
       "type": "object",
-      "description": "Per-event-type payload. tool_invoked: tool_name, status, duration_ms, redacted_spans. policy_decision: action, decision, reason. token_exchange: audience, reason (rejections). session_created / session_deleted / chat_started / chat_completed: session-scoped metadata. confirmation_decided: session_id, confirm_id, tool_names, decision; approval_rule_id and approval_tier when the batch matched a require_approval rule (SPEC-030); tier-blocked approval attempts carry outcome deny with blocked=true and blocked_reason (not_a_designated_approver or self_approval). incident_triaged: incident envelope, severity_assessment, report_summary, next_steps titles, skills_cited. skill_searched: query, limit, result_count, skill_ids, optional source/tag filters. skill_retrieved: skill_id, source (hits) or reason (misses). skills_synced: source_id, source_type, ref, accepted, rejected (success) or error (failures). execution_requested (SPEC-037): confirm_id, execution_id, call_id, tool_name, args_digest, decider_user_id, owner_user_id. execution_completed: confirm_id, execution_id, call_id, tool_name, status (succeeded/failed/timeout), duration_ms, request_id. execution_rejected: confirm_id, call_id, tool_name, reason (signing_unavailable, args_digest_mismatch, request_missing).",
+      "description": "Per-event-type payload. tool_invoked: tool_name, status, duration_ms, redacted_spans. policy_decision: action, decision, reason. token_exchange: audience, reason (rejections). session_created / session_deleted / chat_started / chat_completed: session-scoped metadata. confirmation_decided: session_id, confirm_id, tool_names, decision; approval_rule_id and approval_tier when the batch matched a require_approval rule (SPEC-030); tier-blocked approval attempts carry outcome deny with blocked=true and blocked_reason (not_a_designated_approver or self_approval). incident_triaged: incident envelope, severity_assessment, report_summary, next_steps titles, skills_cited. skill_searched: query, limit, result_count, skill_ids, optional source/tag filters. skill_retrieved: skill_id, source (hits) or reason (misses). skills_synced: source_id, source_type, ref, accepted, rejected (success) or error (failures). execution_requested (SPEC-037): confirm_id, execution_id, call_id, tool_name, args_digest, decider_user_id, owner_user_id. execution_completed: confirm_id, execution_id, call_id, tool_name, status (succeeded/failed/timeout), duration_ms, request_id. execution_rejected: confirm_id, call_id, tool_name, reason (signing_unavailable, args_digest_mismatch, request_missing). document_created (SPEC-039): document_id, document_type, own_session_count, foreign_session_count, cited_record_count, prose_status. document_published: document_id, document_type. document_read additionally carries owner_user_id (the event fires on cross-owner reads, attributed to the reader).",
       "additionalProperties": true
     }
   },

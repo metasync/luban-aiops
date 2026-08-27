@@ -309,6 +309,117 @@ async def fetch_approvals_inbox(
     return response.json()
 
 
+async def create_document(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+    payload: dict,
+    foreign_coverage: str,
+) -> dict:
+    """Create an operations document (SPEC-039 R-1).
+
+    ``foreign_coverage`` carries the gateway-computed ``approvals:list``
+    capability as the trusted internal ``X-Foreign-Coverage`` header; the
+    agent layer fails closed on any value other than ``allowed``. The
+    timeout is generous because an opt-in prose pass makes one model call.
+    """
+    timeout = httpx.Timeout(60.0, connect=5.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            f"{settings.agent_service_url}/api/v2/documents",
+            headers={
+                **_headers(request_id, user_id),
+                "X-Foreign-Coverage": foreign_coverage,
+            },
+            json=payload,
+        )
+    response.raise_for_status()
+    return response.json()
+
+
+async def list_documents(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+    scope: str,
+) -> dict:
+    """List documents (SPEC-039 R-2): ``mine`` includes drafts, ``published`` does not."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            f"{settings.agent_service_url}/api/v2/documents",
+            headers=_headers(request_id, user_id),
+            params={"scope": scope},
+        )
+    response.raise_for_status()
+    return response.json()
+
+
+async def fetch_document(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    document_id: str,
+    user_id: str,
+) -> dict:
+    """Fetch one document; upstream 404 (unknown/foreign draft) passes through."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            f"{settings.agent_service_url}/api/v2/documents/{document_id}",
+            headers=_headers(request_id, user_id),
+        )
+    response.raise_for_status()
+    return response.json()
+
+
+async def publish_document(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    document_id: str,
+    user_id: str,
+) -> dict:
+    """One-way owner publish; upstream 404/409 pass through (SPEC-039 R-1)."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(
+            f"{settings.agent_service_url}/api/v2/documents/{document_id}/publish",
+            headers=_headers(request_id, user_id),
+        )
+    response.raise_for_status()
+    return response.json()
+
+
+async def delete_document(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    document_id: str,
+    user_id: str,
+) -> dict:
+    """Owner-only document delete; upstream 404 passes through (SPEC-039 R-1)."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.delete(
+            f"{settings.agent_service_url}/api/v2/documents/{document_id}",
+            headers=_headers(request_id, user_id),
+        )
+    response.raise_for_status()
+    return response.json()
+
+
+async def update_session_title(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    session_id: str,
+    user_id: str,
+    title: str,
+) -> dict:
+    """Owner session rename (SPEC-039 R-7); upstream 400/404 pass through."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.patch(
+            f"{settings.agent_service_url}/api/v2/sessions/{session_id}/title",
+            headers=_headers(request_id, user_id),
+            json={"title": title},
+        )
+    response.raise_for_status()
+    return response.json()
+
+
 async def runtime_metadata(settings: PlatformGatewaySettings) -> dict:
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(

@@ -58,6 +58,14 @@ ACTION_MODELS_LIST = "models:list"
 # designated approvers; the bundle grants it to the tier_2 decider roles
 # only, mirroring decided_by_roles by authoring.
 ACTION_APPROVALS_LIST = "approvals:list"
+# Operations document repository (SPEC-039 R-2): documents:create gates
+# create/publish/delete of one's own documents; documents:read gates
+# list/get. The agent layer enforces the visibility matrix server-side.
+ACTION_DOCUMENTS_CREATE = "documents:create"
+ACTION_DOCUMENTS_READ = "documents:read"
+# Owner session rename (SPEC-039 R-7): scoped server-side to the caller's
+# own sessions, mirroring session:list/session:delete grants.
+ACTION_SESSION_UPDATE = "session:update"
 PROTECTED_ACTIONS = frozenset(
     {
         ACTION_CHAT,
@@ -76,6 +84,9 @@ PROTECTED_ACTIONS = frozenset(
         ACTION_TOOLS_MUTATE,
         ACTION_MODELS_LIST,
         ACTION_APPROVALS_LIST,
+        ACTION_DOCUMENTS_CREATE,
+        ACTION_DOCUMENTS_READ,
+        ACTION_SESSION_UPDATE,
     }
 )
 

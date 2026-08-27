@@ -13,6 +13,37 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+### Added
+
+- **Operations document repository (SPEC-039)**: the platform's first
+  document-producing capability — a typed-document substrate where team
+  members generate durable documents from the platform's own records and
+  colleagues access them by role, not per-document grants. Phase 1 ships
+  the **shift summary** type: a deterministic digest over the cited
+  sessions' kernel snapshots, confirmation decisions, execution receipts,
+  and evidence counts with two-tier coverage (own sessions full,
+  foreign sessions metadata-only gated on the caller's `approvals:list`
+  grant), an optional clearly-labeled digest-only prose layer
+  (`prose_status` included|failed|not_requested, fail-soft), and
+  provenance anchors to every cited record id. Documents follow a
+  one-way draft→publish lifecycle (cap 20 per owner with oldest-eviction,
+  30-day TTL, immutable snapshots) behind new deny-by-default
+  `documents:create` / `documents:read` actions granted to
+  `platform-admin`, `approver`, and `operator`; the gateway forwards the
+  caller's foreign coverage as a trusted internal header and agent-service
+  fails closed on anything but `allowed`. Audit gains
+  `document_created` / `document_published` (always) and `document_read`
+  (cross-owner reads only — own reads stay unaudited), fire-and-forget
+  with forwarded `x-request-id`. The portal gains a Documents control view
+  (create dialog with own-session picker + foreign-id input + prose
+  toggle, Mine / Published tabs, digest-first detail with owner
+  attribution and collapsed labeled prose), inline session rename
+  (`PATCH …/sessions/{id}/title`, 1–80 chars, owner-only, 404
+  anti-enumeration, deliberately unaudited) under the new `session:update`
+  action granted everywhere `session:list` is, and session-id
+  reveal/copy on session-panel rows and the open-session header
+  (portal-only, truncated with full value on hover).
+
 ## 0.20.0 — 2026-08-27
 
 ### Added

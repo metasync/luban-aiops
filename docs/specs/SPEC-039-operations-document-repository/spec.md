@@ -2,9 +2,10 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-27
+- delivered: 2026-08-27 (v0.21.0)
 - release slice: R5 — Hardening and External Consumption (first R5 slice)
 - related ADRs: none (spike memo: `docs/workspace/session-handover-spike.md`)
 
@@ -295,3 +296,8 @@ Acceptance criteria:
   document type.
 - 2026-08-27: approved by the operator with no recorded conditions;
   implementation proceeds as the first R5 slice.
+- 2026-08-27: delivered in v0.21.0 — all eight requirements shipped
+  (substrate, role matrix, shift-summary digest, prose layer, audit,
+  portal Documents view, session rename, session-id copy); see
+  `CHANGELOG.md` and the
+  `2026-08-27-operations-document-repository.md` release note.

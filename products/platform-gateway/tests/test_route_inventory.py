@@ -27,6 +27,8 @@ EXPECTED_ROUTES = {
     ("GET", "/api/v1/sessions"),
     ("GET", "/api/v1/sessions/{session_id}"),
     ("DELETE", "/api/v1/sessions/{session_id}"),
+    # Owner session rename (SPEC-039 R-7): cosmetic metadata, unaudited.
+    ("PATCH", "/api/v1/sessions/{session_id}/title"),
     ("POST", "/api/v1/chat"),
     ("GET", "/api/v1/chat/stream"),
     # HITL confirmation bridging (SPEC-020): answers a parked kernel ASK.
@@ -49,6 +51,13 @@ EXPECTED_ROUTES = {
     # Approval inbox (SPEC-031 R-3): cross-session confirmation discovery
     # for the designated decider roles.
     ("GET", "/api/v1/approvals/inbox"),
+    # Operations document repository (SPEC-039 R-1/R-2): draft/publish
+    # lifecycle for typed documents, visibility matrix enforced upstream.
+    ("POST", "/api/v1/documents"),
+    ("GET", "/api/v1/documents"),
+    ("GET", "/api/v1/documents/{document_id}"),
+    ("POST", "/api/v1/documents/{document_id}/publish"),
+    ("DELETE", "/api/v1/documents/{document_id}"),
 }
 
 

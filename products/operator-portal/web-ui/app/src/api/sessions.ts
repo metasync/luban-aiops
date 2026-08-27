@@ -153,3 +153,16 @@ export async function deleteSession(sessionId: string): Promise<void> {
     method: "DELETE",
   });
 }
+
+// Owner rename (SPEC-039 R-7): supersedes the server-minted set-once
+// title. Throws ApiError 400 (blank/overlong after trim) or 404
+// (unknown/foreign — anti-enumeration). Renames are unaudited by design.
+export async function renameSession(
+  sessionId: string,
+  title: string,
+): Promise<SessionDetail> {
+  return requestJson<SessionDetail>(
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}/title`,
+    { method: "PATCH", body: { title } },
+  );
+}

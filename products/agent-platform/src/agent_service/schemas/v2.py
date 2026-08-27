@@ -25,6 +25,8 @@ __all__ = [
     "AgentModelCatalog",
     "AgentRuntimeMetadata",
     "AgentHealth",
+    "DocumentCreateRequest",
+    "SessionTitleUpdateRequest",
 ]
 
 
@@ -325,3 +327,46 @@ class AgentHealth(BaseModel):
     session_store_ready: bool | None = None
     agent_state: str | None = None
     agent_state_ready: bool | None = None
+
+
+# --- Operations document repository (SPEC-039) ---
+
+
+class DocumentCreateRequest(BaseModel):
+    """Creation request for a typed operations document (SPEC-039 R-1/R-3).
+
+    Phase 1 ships ``shift_summary`` only; the discriminator rides the
+    request so the next document type extends the enum, not the route.
+    """
+
+    document_type: Literal["shift_summary"] = Field(
+        description="Typed-document discriminator (shift_summary in Phase 1)."
+    )
+    session_ids: list[str] = Field(
+        min_length=1,
+        max_length=20,
+        description=(
+            "Covered sessions (bounded input). Own sessions contribute the "
+            "full digest; foreign sessions (owner != requester) contribute "
+            "metadata only, and only when the requester holds approvals:list."
+        ),
+    )
+    label: str = Field(
+        min_length=1,
+        max_length=120,
+        description="Owner-supplied human label for the document.",
+    )
+    include_prose: bool = Field(
+        default=False,
+        description=(
+            "Request the optional generated narrative (SPEC-039 R-4). The "
+            "prompt sees the digest JSON only; a generation failure yields "
+            "a digest-only document (prose_status=failed)."
+        ),
+    )
+
+
+class SessionTitleUpdateRequest(BaseModel):
+    """Owner session rename (SPEC-039 R-7): 1–80 chars after trimming."""
+
+    title: str = Field(min_length=1, max_length=80)

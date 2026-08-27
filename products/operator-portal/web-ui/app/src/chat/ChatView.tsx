@@ -6,6 +6,7 @@ import {
   Alert,
   Button,
   Collapse,
+  Input,
   Modal,
   Select,
   Spin,
@@ -17,7 +18,9 @@ import {
   AudioOutlined,
   CheckOutlined,
   CloseOutlined,
+  CopyOutlined,
   DeleteOutlined,
+  EditOutlined,
   PlusOutlined,
   SafetyCertificateOutlined,
 } from "@ant-design/icons";
@@ -529,6 +532,33 @@ function TurnGroup({
 
 // --- Session panel --------------------------------------------------------
 
+// SPEC-039 R-8: one-click session-id copy with a visible confirmation
+// state (icon flips to a check mark for a moment after copying).
+export function CopyIdButton({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    navigator.clipboard
+      .writeText(id)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {});
+  };
+  return (
+    <Tooltip title={copied ? "Copied" : "Copy session id"}>
+      <Button
+        type="text"
+        size="small"
+        icon={copied ? <CheckOutlined /> : <CopyOutlined />}
+        aria-label={`Copy session id ${id}`}
+        onClick={copy}
+      />
+    </Tooltip>
+  );
+}
+
 function SessionPanel({
   sessions,
   activeSessionId,
@@ -538,6 +568,7 @@ function SessionPanel({
   onSelect,
   onCreate,
   onDelete,
+  onRename,
 }: {
   sessions: SessionSummary[];
   activeSessionId: string | null;
@@ -547,6 +578,7 @@ function SessionPanel({
   onSelect: (sessionId: string) => void;
   onCreate: () => void;
   onDelete: (session: SessionSummary) => void;
+  onRename: (session: SessionSummary) => void;
 }) {
   return (
     <aside className="session-panel">
@@ -608,10 +640,25 @@ function SessionPanel({
                 <span className="session-item-meta">
                   {dayjs(session.last_active_at ?? session.created_at).fromNow()}
                 </span>
+                {/* SPEC-039 R-8: truncated id with full value on hover. */}
+                <span className="session-item-id">
+                  <code title={session.session_id}>{session.session_id}</code>
+                  <CopyIdButton id={session.session_id} />
+                </span>
               </div>
               {session.pending_confirmation ? (
                 <Tag color="warning">awaiting approval</Tag>
               ) : null}
+              <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined />}
+                aria-label={`Rename session ${session.title ?? session.session_id}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRename(session);
+                }}
+              />
               <Button
                 type="text"
                 size="small"
@@ -931,6 +978,36 @@ export default function ChatView({
     });
   };
 
+  // SPEC-039 R-7: inline owner rename. Cosmetic and unaudited by design;
+  // the server trims and bounds the title (1–80 chars).
+  const [renaming, setRenaming] = useState<SessionSummary | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renameBusy, setRenameBusy] = useState(false);
+
+  const startRename = (session: SessionSummary) => {
+    setRenaming(session);
+    setRenameDraft(session.title ?? "");
+    setRenameError(null);
+  };
+
+  const submitRename = async () => {
+    if (!renaming) return;
+    setRenameBusy(true);
+    const outcome = await workspace.rename(renaming.session_id, renameDraft);
+    setRenameBusy(false);
+    if (!outcome.ok) {
+      setRenameError(outcome.message ?? "Rename failed.");
+      return;
+    }
+    setRenaming(null);
+  };
+
+  // SPEC-039 R-8: the open session header carries the id for handoff.
+  const activeSummary =
+    mergedSessions.find((s) => s.session_id === workspace.activeSessionId) ??
+    null;
+
   const submitMessage = (message: string) => {
     const text = message.trim();
     if (!text || !authenticated || chat.streaming) return;
@@ -956,8 +1033,24 @@ export default function ChatView({
         onSelect={setActiveSessionId}
         onCreate={() => void workspace.createAndOpen()}
         onDelete={confirmDelete}
+        onRename={startRename}
       />
       <div className="chat-column">
+        {activeSummary ? (
+          <div className="chat-session-header">
+            <Typography.Text
+              strong
+              ellipsis
+              style={{ minWidth: 0, flex: "0 1 auto" }}
+            >
+              {activeSummary.title ?? activeSummary.session_id}
+            </Typography.Text>
+            <code title={activeSummary.session_id}>
+              {activeSummary.session_id}
+            </code>
+            <CopyIdButton id={activeSummary.session_id} />
+          </div>
+        ) : null}
         <div className="chat-messages" ref={scrollRef}>
           {!authenticated ? (
             <div className="chat-placeholder">
@@ -1081,6 +1174,35 @@ export default function ChatView({
           />
         </div>
       </div>
+      <Modal
+        title="Rename session"
+        open={renaming !== null}
+        okText="Save"
+        confirmLoading={renameBusy}
+        onOk={() => void submitRename()}
+        onCancel={() => setRenaming(null)}
+        destroyOnHidden
+      >
+        {renameError ? (
+          <Alert
+            type="error"
+            showIcon
+            message={renameError}
+            style={{ marginBottom: 12 }}
+          />
+        ) : null}
+        <Input
+          value={renameDraft}
+          maxLength={80}
+          autoFocus
+          placeholder="Session title (1–80 characters)"
+          onChange={(event) => setRenameDraft(event.target.value)}
+          onPressEnter={() => void submitRename()}
+        />
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          Renames apply to your own sessions only and are not audited.
+        </Typography.Text>
+      </Modal>
     </div>
   );
 }

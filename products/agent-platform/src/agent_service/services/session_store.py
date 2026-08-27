@@ -68,6 +68,14 @@ class SessionStore(Protocol):
         """Record the session title once; an existing title is never rewritten."""
         ...
 
+    def update_session_title(self, session_id: str, title: str) -> None:
+        """Overwrite the title (SPEC-039 R-7 owner rename).
+
+        Unlike ``set_session_title`` this rewrites an existing title;
+        ownership is asserted by the caller before reaching the store.
+        """
+        ...
+
     def set_session_model(self, session_id: str, model: str) -> None:
         """Pin the model that resolved for the turn (SPEC-024 R-3, Q-4).
 
@@ -167,6 +175,11 @@ class InMemorySessionStore:
     def set_session_title(self, session_id: str, title: str) -> None:
         record = self._sessions.get(session_id)
         if record is not None and record.title is None:
+            record.title = title
+
+    def update_session_title(self, session_id: str, title: str) -> None:
+        record = self._sessions.get(session_id)
+        if record is not None:
             record.title = title
 
     def set_session_model(self, session_id: str, model: str) -> None:
@@ -346,6 +359,21 @@ class RedisSessionStore:
             record_session_store_error("set_title")
             raise
 
+    def update_session_title(self, session_id: str, title: str) -> None:
+        try:
+            if self._client.get(self._session_key(session_id)) is None:
+                return
+            # SPEC-039 R-7: the owner rename overwrites the minted (or
+            # previously renamed) title unconditionally.
+            self._client.set(
+                self._title_key(session_id),
+                title,
+                ex=self.ttl_seconds,
+            )
+        except Exception:
+            record_session_store_error("update_title")
+            raise
+
     def set_session_model(self, session_id: str, model: str) -> None:
         # The pinned model rides the serialized blob (pydantic default
         # keeps legacy blobs readable); newest resolved selection wins.
@@ -466,6 +494,14 @@ _SET_SESSION_TITLE = f"""
 UPDATE sessions
    SET title = %(title)s
  WHERE session_id = %(session_id)s AND {_NOT_EXPIRED} AND title IS NULL
+"""
+
+# SPEC-039 R-7: the owner rename rewrites any existing title (minted or
+# previously renamed); ownership is asserted by the caller, not here.
+_UPDATE_SESSION_TITLE = f"""
+UPDATE sessions
+   SET title = %(title)s
+ WHERE session_id = %(session_id)s AND {_NOT_EXPIRED}
 """
 
 # SPEC-024 R-3: the pinned model follows the newest resolved selection
@@ -669,6 +705,23 @@ class PostgresSessionStore:
                 conn.commit()
         except Exception:
             record_session_store_error("set_title")
+            raise
+
+    def update_session_title(self, session_id: str, title: str) -> None:
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        _UPDATE_SESSION_TITLE,
+                        {
+                            "session_id": session_id,
+                            "title": title,
+                            **self._ttl_params(),
+                        },
+                    )
+                conn.commit()
+        except Exception:
+            record_session_store_error("update_title")
             raise
 
     def set_session_model(self, session_id: str, model: str) -> None:

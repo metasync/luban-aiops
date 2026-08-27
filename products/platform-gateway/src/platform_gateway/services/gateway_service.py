@@ -449,6 +449,184 @@ async def delete_session(
         ) from exc
 
 
+async def update_session_title(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    session_id: str,
+    user_id: str,
+    title: str,
+) -> dict:
+    """Proxy an owner session rename (SPEC-039 R-7).
+
+    Upstream 4xx (blank/overlong title, unknown/foreign session) passes
+    through unchanged; transport failures and upstream 5xx map to 502.
+    """
+    try:
+        return await agent_client.update_session_title(
+            settings, request_id, session_id, user_id, title
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail="agent service rejected the session rename",
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail="agent service session rename failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+
+async def create_document(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+    payload: dict,
+    foreign_coverage: str,
+) -> dict:
+    """Proxy a document create (SPEC-039 R-1).
+
+    ``foreign_coverage`` forwards the gateway-computed ``approvals:list``
+    capability to the agent as a trusted internal header. Upstream 4xx
+    (validation, foreign-session denial) passes through unchanged;
+    transport failures and upstream 5xx map to 502.
+    """
+    try:
+        return await agent_client.create_document(
+            settings, request_id, user_id, payload, foreign_coverage
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail="agent service rejected the document create",
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail="agent service document create failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+
+async def list_documents(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+    scope: str,
+) -> dict:
+    """Proxy the document list (SPEC-039 R-2); same posture as the other proxies."""
+    try:
+        return await agent_client.list_documents(
+            settings, request_id, user_id, scope
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail="agent service rejected the document list",
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail="agent service document list failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+
+async def fetch_document(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    document_id: str,
+    user_id: str,
+) -> dict:
+    """Proxy a document fetch (SPEC-039 R-2).
+
+    The anti-enumeration 404 for unknown/foreign drafts passes through
+    unchanged; transport failures and upstream 5xx map to 502.
+    """
+    try:
+        return await agent_client.fetch_document(
+            settings, request_id, document_id, user_id
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail="agent service rejected the document fetch",
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail="agent service document fetch failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+
+async def publish_document(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    document_id: str,
+    user_id: str,
+) -> dict:
+    """Proxy the one-way owner publish (SPEC-039 R-1); 4xx passes through."""
+    try:
+        return await agent_client.publish_document(
+            settings, request_id, document_id, user_id
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail="agent service rejected the document publish",
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail="agent service document publish failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+
+async def delete_document(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    document_id: str,
+    user_id: str,
+) -> dict:
+    """Proxy the owner-only document delete (SPEC-039 R-1); 4xx passes through."""
+    try:
+        return await agent_client.delete_document(
+            settings, request_id, document_id, user_id
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail="agent service rejected the document delete",
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail="agent service document delete failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+
 async def chat(
     settings: PlatformGatewaySettings,
     request_id: str,

@@ -72,6 +72,23 @@ def get_session(session_id: str, user_id: str | None = None) -> SessionRecord:
     return session
 
 
+def rename_session_title(
+    session_id: str, title: str, user_id: str | None = None
+) -> SessionRecord:
+    """Owner session rename (SPEC-039 R-7).
+
+    Supersedes the SPEC-022 server-minted set-once title: the rename
+    overwrites whatever title the session carries. Ownership is
+    asserted through ``get_session`` (foreign or unknown ids 404 per
+    the anti-enumeration convention); renames are not audited
+    (owner-side cosmetic act on one's own record).
+    """
+    session = get_session(session_id, user_id)
+    SESSION_STORE.update_session_title(session.session_id, title)
+    updated = SESSION_STORE.get_session(session.session_id)
+    return updated if updated is not None else session
+
+
 def list_sessions(user_id: str) -> list[SessionRecord]:
     """The caller's sessions, most-recently-active first (SPEC-022 R-1).
 

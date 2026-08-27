@@ -105,6 +105,43 @@ class AuditEventContractTests(unittest.TestCase):
             _load_schema(self.schema_name),
         )
 
+    def test_document_events_validate(self) -> None:
+        # SPEC-039 R-5: agent-service emits document_created /
+        # document_published / cross-owner document_read; the model must
+        # accept all three like the contract does.
+        for event_type, details in (
+            (
+                "document_created",
+                {
+                    "document_id": "doc-1",
+                    "document_type": "shift_summary",
+                    "own_session_count": 1,
+                    "foreign_session_count": 0,
+                    "cited_record_count": 3,
+                    "prose_status": "not_requested",
+                },
+            ),
+            (
+                "document_published",
+                {"document_id": "doc-1", "document_type": "shift_summary"},
+            ),
+            (
+                "document_read",
+                {
+                    "document_id": "doc-1",
+                    "document_type": "shift_summary",
+                    "owner_user_id": "alice",
+                },
+            ),
+        ):
+            event = _event(
+                event_type=event_type, service="agent-service", details=details
+            )
+            jsonschema.validate(
+                event.model_dump(mode="json", exclude_none=True),
+                _load_schema(self.schema_name),
+            )
+
     def test_model_rejects_unknown_event_type(self) -> None:
         with self.assertRaises(ValidationError):
             _event(event_type="not_a_type")

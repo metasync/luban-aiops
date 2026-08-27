@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/operation-document.schema.json",
+  "title": "Operation Document (v1)",
+  "description": "Immutable typed operations document persisted by the agent service document repository (SPEC-039 R-1). Documents are snapshots: digest values are copied verbatim from the durable stores at assembly time, record ids are provenance anchors (never live references), and publishing is a one-way draft->published lifecycle. No model output appears outside the labeled prose section.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "document_id",
+    "document_type",
+    "state",
+    "owner_user_id",
+    "label",
+    "created_at",
+    "provenance",
+    "digest",
+    "prose_status"
+  ],
+  "properties": {
+    "document_id": {
+      "type": "string",
+      "description": "Stable identifier of the document."
+    },
+    "document_type": {
+      "type": "string",
+      "enum": ["shift_summary"],
+      "description": "Typed-document discriminator; shift_summary ships in Phase 1 (SPEC-039 R-3). Future types extend this enum without touching the substrate."
+    },
+    "state": {
+      "type": "string",
+      "enum": ["draft", "published"],
+      "description": "Lifecycle state. Drafts are visible only to the owner; published documents are visible to every documents:read holder (SPEC-039 R-2)."
+    },
+    "owner_user_id": {
+      "type": "string",
+      "description": "The user who generated the document; the only identity that may edit (publish), delete, or see it while drafted."
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "Owner-supplied human label (e.g. 'Night shift 2026-08-27')."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp (RFC 3339) of document creation."
+    },
+    "published_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "UTC timestamp (RFC 3339) of publishing; null while drafted."
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessions"],
+      "properties": {
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["session_id", "coverage"],
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "description": "A covered session; the provenance index is the future entry point for cross-owner review."
+              },
+              "coverage": {
+                "type": "string",
+                "enum": ["owner", "foreign"],
+                "description": "owner: full digest tier; foreign: metadata-only tier behind approvals:list (SPEC-039 R-3)."
+              },
+              "cited_record_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Record ids copied into the digest (confirmation ids, execution ids); anchors, not live references."
+              }
+            }
+          }
+        }
+      },
+      "description": "Provenance block listing covered session ids and cited record ids."
+    },
+    "digest": {
+      "type": "object",
+      "description": "Type-specific deterministic digest copied verbatim from the durable stores (shift_summary: sessions, confirmation decisions, execution receipts, evidence counts, open items). Never model output."
+    },
+    "prose": {
+      "type": ["string", "null"],
+      "description": "Optional clearly-labeled generated narrative produced from the digest JSON alone (SPEC-039 R-4); null unless prose_status is included."
+    },
+    "prose_status": {
+      "type": "string",
+      "enum": ["included", "failed", "not_requested"],
+      "description": "Prose layer outcome; a model error or timeout yields failed and a digest-only document."
+    }
+  }
+}

@@ -8,6 +8,7 @@ import {
   createSession,
   deleteSession,
   listSessions,
+  renameSession,
   type SessionSummary,
 } from "../api/sessions";
 
@@ -15,6 +16,13 @@ const ACTIVE_SESSION_KEY = "luban.portal.activeSessionId";
 const POLL_INTERVAL_MS = 30_000;
 
 export interface DeleteOutcome {
+  ok: boolean;
+  message?: string;
+}
+
+// SPEC-039 R-7: owner rename outcome; the neutral 404 wording matches
+// the delete anti-enumeration message by design.
+export interface RenameOutcome {
   ok: boolean;
   message?: string;
 }
@@ -28,6 +36,7 @@ export interface SessionWorkspace {
   refresh: () => Promise<void>;
   createAndOpen: () => Promise<string | null>;
   remove: (sessionId: string) => Promise<DeleteOutcome>;
+  rename: (sessionId: string, title: string) => Promise<RenameOutcome>;
   // SPEC-023 R-3 deep links: incident sessions appear as extra panel
   // entries even before the server list catches up.
   pinned: SessionSummary[];
@@ -140,6 +149,33 @@ export function useSessionWorkspace(authenticated: boolean): SessionWorkspace {
     [activeSessionId, refresh, setActiveSessionId],
   );
 
+  const rename = useCallback(
+    async (sessionId: string, title: string): Promise<RenameOutcome> => {
+      try {
+        await renameSession(sessionId, title);
+        await refresh();
+        return { ok: true };
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          // Anti-enumeration: the neutral wording is deliberate.
+          await refresh();
+          return { ok: false, message: "Session not found." };
+        }
+        if (err instanceof ApiError && err.status === 400) {
+          return {
+            ok: false,
+            message: "Titles must be 1–80 characters after trimming.",
+          };
+        }
+        return {
+          ok: false,
+          message: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
+    [refresh],
+  );
+
   const pinIncidentSession = useCallback(
     (incidentId: string, sessionId?: string): string => {
       // The incident detail carries its triage session id; fall back to the
@@ -174,6 +210,7 @@ export function useSessionWorkspace(authenticated: boolean): SessionWorkspace {
     refresh,
     createAndOpen,
     remove,
+    rename,
     pinned,
     pinIncidentSession,
   };

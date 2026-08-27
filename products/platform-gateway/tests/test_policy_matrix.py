@@ -155,6 +155,22 @@ class PolicyMatrixScopingTests(PolicyMatrixBase):
         self.assertFalse(matrix["developer"]["approvals:list"])
         self.assertFalse(matrix["read-only-observer"]["approvals:list"])
         self.assertFalse(matrix["auditor"]["approvals:list"])
+        # SPEC-039 R-2: documents actions are granted to the operational
+        # authoring roles only — developer and observer stay read-only on
+        # sessions, so they hold neither documents action.
+        for action in ("documents:create", "documents:read"):
+            self.assertIn(action, payload["actions"])
+            for role in ("platform-admin", "approver", "operator"):
+                self.assertTrue(matrix[role][action], (role, action))
+            self.assertFalse(matrix["developer"][action])
+            self.assertFalse(matrix["read-only-observer"][action])
+            self.assertFalse(matrix["auditor"][action])
+        # SPEC-039 R-7: session rename mirrors session:list grants — every
+        # workspace role may rename its own sessions; auditor holds none.
+        self.assertIn("session:update", payload["actions"])
+        for role in ALL_ROLES:
+            self.assertTrue(matrix[role]["session:update"], role)
+        self.assertFalse(matrix["auditor"]["session:update"])
         # auditor exists in the bundle (audit:read) but holds nothing else.
         self.assertTrue(matrix["auditor"]["audit:read"])
         self.assertFalse(matrix["auditor"]["chat"])

@@ -375,7 +375,21 @@ gate, where tier_2 self-approval is blocked. SPEC-031 adds `approvals:list`
 decision history, metadata only), granted exactly to the tier_2 decider
 roles `approver` and `platform-admin`; every other role receives the
 standard audited policy 403, mirroring who may decide tier_2 approvals.
-The full approval model —
+SPEC-039 adds the operations document repository actions: `documents:create`
+(create, publish, and delete one's own documents) and `documents:read`
+(read drafts — own only — and published documents), both granted to
+`platform-admin`, `approver`, and `operator`; `developer`,
+`read-only-observer`, and `auditor` receive the standard audited policy
+403. Access is role-based with no per-document grants — publishing moves a
+document into the role-visible space — and foreign-session coverage inside
+a document digest is capped at the inbox's metadata-only posture by gating
+on the caller's own `approvals:list` grant. Cross-owner document reads are
+recorded as `document_read` audit events (own reads stay unaudited),
+alongside `document_created` / `document_published`. SPEC-039 also adds
+`session:update` (rename one's own session titles), granted exactly where
+`session:list` is granted — every chat-capable role — with server-side
+ownership scoping (anti-enumeration 404 for foreign sessions) and no new
+audit event; `auditor` holds none of the session actions. The full approval model —
 policy actions, risk-tier admission, the agent auto-allow list, and HITL
 confirmation — is documented in the
 [Approval and HITL Governance Guide](../guides/approval-and-hitl.md).

@@ -202,6 +202,43 @@ body {
   color: var(--text-muted);
 }
 
+/* SPEC-039 R-8: the session id rides each panel entry, truncated with
+   the full value on hover and one-click copy. */
+.session-item-id {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.session-item-id code {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 104px;
+}
+
+/* SPEC-039 R-8: open-session header above the transcript. */
+.chat-session-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+
+.chat-session-header code {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
 .chat-column {
   flex: 1;
   min-width: 0;
