@@ -317,14 +317,14 @@ RS["runtime_settings.execution_signing_key"] --> RK["runtime_kernel.resume_confi
 RK --> ES["execution_signing.build_requests"]
 RK --> ER["execution_records.ExecutionRecordStore"]
 RK --> AE["audit_event.emission"]
-GT["gateway_tools._make_tool_fn"] --> EV["execution_signing.canonical_digest"]
+GT["gateway_tools._make_tool_fn"] --> EV["execution_signing.verify_envelope"]
 GT --> AR["audit_execution_rejected"]
 ER --> DB["PostgreSQL/Memory Backend"]
 UI["portal receipt badge"] --> SD["session_detail.executions"]
 SD --> ER
 ```
 
-**Updated** Enhanced with specific module dependencies and data flow paths from the actual implementation. The invocation boundary recomputes the canonical argument digest and compares it against the signed envelope's `args_digest`; HMAC signature verification (`verify_envelope`) has no production call site in Phase 1 — it is reserved for the Phase 2 isolated worker, where the envelope first crosses a trust boundary.
+**Updated** Enhanced with specific module dependencies and data flow paths from the actual implementation.
 
 **Diagram sources**
 - [runtime_settings.py:161-165](file://products/agent-platform/src/agent_service/runtime_settings.py#L161-L165)

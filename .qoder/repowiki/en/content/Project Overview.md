@@ -10,6 +10,7 @@
 - [identity-broker README.md](file://products/identity-broker/README.md)
 - [operator-portal README.md](file://products/operator-portal/README.md)
 - [tool-gateway README.md](file://products/tool-gateway/README.md)
+- [execution-runtime README.md](file://products/execution-runtime/README.md)
 - [platform GitOps README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 - [runtime profiles README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
 - [agent platform app.py](file://products/agent-platform/src/agent_platform/app.py)
@@ -18,10 +19,12 @@
 - [agent platform runtime kernel](file://products/agent-platform/src/agent_platform/runtime_kernel.py)
 - [agent platform session service](file://products/agent-platform/src/agent_platform/services/session_service.py)
 - [agent platform gateway tools](file://products/agent-platform/src/agent_platform/tools/gateway_tools.py)
+- [agent platform execution signing](file://products/agent-platform/src/agent_service/services/execution_signing.py)
 - [identity broker app.py](file://products/identity-broker/src/identity_service/app.py)
 - [identity broker identity service](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [identity broker token service](file://products/identity-broker/src/identity_service/services/token_service.py)
 - [tool gateway k8s connector](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+- [sync execution signing secret](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [shared contracts schemas README](file://shared/shared-contracts/README.md)
 - [observability conventions](file://shared/shared-contracts/observability-conventions.md)
 - [dev-k8s base kustomization](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
@@ -35,6 +38,7 @@
 - [delivery roadmap](file://docs/agentic-aiops-platform/delivery-roadmap.md)
 - [SPEC-037 signed execution requests spec](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
 - [SPEC-037 implementation plan](file://docs/specs/SPEC-037-signed-execution-requests/plan.md)
+- [SPEC-038 isolated execution worker spec](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
 - [execution runtime spike memo](file://docs/workspace/execution-runtime-spike.md)
 - [reference architecture security section](file://docs/agentic-aiops-platform/part-2-reference-architecture.md)
 - [identity and authorization design](file://docs/agentic-aiops-platform/identity-and-authorization-design.md)
@@ -42,11 +46,12 @@
 
 ## Update Summary
 **Changes Made**
-- Updated R4 deliverable status to reflect completion of SPEC-037 signed execution requests
-- Enhanced security model documentation with execution signing capabilities
-- Added new sections covering tamper-evident execution records and approval-to-execution binding
-- Updated architecture diagrams to show execution signing flow
-- Expanded security considerations to include HMAC-SHA256 envelope verification
+- Updated R4 deliverable status to reflect completion of both SPEC-037 (delivered in v0.19.0) and SPEC-038 (approved)
+- Enhanced security model documentation with production-ready execution signing capabilities
+- Added detailed sections covering tamper-evident execution records and cryptographic approval-to-execution binding
+- Updated architecture diagrams to show the complete execution signing flow including the upcoming isolated worker
+- Expanded security considerations to include HMAC-SHA256 envelope verification and fail-closed design principles
+- Updated delivery roadmap to show R4 completion status
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -68,7 +73,8 @@ Key value propositions:
 - Centralized AI agent orchestration with standardized contracts
 - Strong identity and authorization model with OIDC integration
 - Policy enforcement as code for safe tool execution
-- **Tamper-evident execution signing for approved actions**
+- **Tamper-evident execution signing for approved actions (SPEC-037 delivered)**
+- **Isolated execution worker architecture (SPEC-038 approved)**
 - Extensible tool execution framework for Kubernetes and other systems
 - End-to-end observability and telemetry
 - GitOps-native deployment and configuration management
@@ -93,6 +99,7 @@ AP["Agent Platform"]
 IB["Identity Broker"]
 TG["Tool Gateway"]
 OP["Operator Portal"]
+ER["Execution Runtime<br/>(Approved - Phase 2)"]
 end
 subgraph "Shared"
 SC["Shared Contracts"]
@@ -112,12 +119,14 @@ IB --> IDP
 OPS --> AP
 OPS --> IB
 OPS --> TG
+OPS --> ER
 ```
 
 **Diagram sources**
 - [agent-platform README.md](file://products/agent-platform/README.md)
 - [identity-broker README.md](file://products/identity-broker/README.md)
 - [tool-gateway README.md](file://products/tool-gateway/README.md)
+- [execution-runtime README.md](file://products/execution-runtime/README.md)
 - [shared contracts schemas README](file://shared/shared-contracts/README.md)
 - [platform GitOps README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 
@@ -125,17 +134,18 @@ OPS --> TG
 - [agent-platform README.md](file://products/agent-platform/README.md)
 - [identity-broker README.md](file://products/identity-broker/README.md)
 - [tool-gateway README.md](file://products/tool-gateway/README.md)
+- [execution-runtime README.md](file://products/execution-runtime/README.md)
 - [shared contracts schemas README](file://shared/shared-contracts/README.md)
 - [platform GitOps README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 
 ## Core Components
-The platform consists of four primary microservices:
+The platform consists of five primary microservices:
 
 ### Agent Platform
 - Orchestrates AI agents with provider abstraction
 - Manages sessions and runtime context
 - Integrates with external AI providers through a unified interface
-- Provides tool execution capabilities with **signed execution requests**
+- Provides tool execution capabilities with **production-ready signed execution requests**
 
 ### Identity Broker
 - Handles OIDC authentication and authorization
@@ -154,11 +164,18 @@ The platform consists of four primary microservices:
 - Provides monitoring and control capabilities
 - **Displays execution receipts and digest match status on confirmation cards**
 
+### Execution Runtime (Approved - Phase 2)
+- **Upcoming isolated worker service** that will receive signed execution requests
+- Will provide process isolation for approved bounded actions
+- Inherits the SPEC-037 envelope contract verbatim
+- Currently in approved specification phase with placeholder implementation
+
 **Section sources**
 - [agent-platform README.md](file://products/agent-platform/README.md)
 - [identity-broker README.md](file://products/identity-broker/README.md)
 - [tool-gateway README.md](file://products/tool-gateway/README.md)
 - [operator-portal README.md](file://products/operator-portal/README.md)
+- [execution-runtime README.md](file://products/execution-runtime/README.md)
 
 ## Architecture Overview
 The platform implements a layered microservices architecture with clear separation of concerns:
@@ -169,6 +186,7 @@ participant Client as "Client Application"
 participant Gateway as "Tool Gateway"
 participant Auth as "Identity Broker"
 participant Agent as "Agent Platform"
+participant Worker as "Execution Runtime<br/>(Phase 2)"
 participant K8S as "Kubernetes API"
 participant AI as "AI Provider"
 Client->>Gateway : HTTP Request
@@ -177,11 +195,15 @@ Auth-->>Gateway : Access Granted
 Gateway->>Gateway : Policy Enforcement
 Gateway->>Agent : Route Request
 Agent->>Agent : Create Signed Execution Request
+Note over Agent : HMAC-SHA256 signature over canonical envelope
+Agent->>Worker : Handoff signed request (Phase 2)
+Worker->>Worker : Verify signature & args digest
+Worker->>K8S : Execute Tool (if needed)
+K8S-->>Worker : Result
+Worker->>Agent : Execution Receipt
+Agent->>Agent : Verify receipt signature
 Agent->>AI : Execute AI Operation
 AI-->>Agent : Response
-Agent->>Agent : Verify Execution Signature
-Agent->>K8S : Execute Tool (if needed)
-K8S-->>Agent : Result
 Agent-->>Gateway : Processed Response
 Gateway-->>Client : Final Response
 ```
@@ -190,6 +212,7 @@ Gateway-->>Client : Final Response
 - [tool gateway app.py](file://products/tool-gateway/src/api_gateway/app.py)
 - [identity broker app.py](file://products/identity-broker/src/identity_service/app.py)
 - [agent platform app.py](file://products/agent-platform/src/agent_platform/app.py)
+- [execution-runtime README.md](file://products/execution-runtime/README.md)
 
 **Section sources**
 - [tool gateway app.py](file://products/tool-gateway/src/api_gateway/app.py)
@@ -231,10 +254,17 @@ class GatewayTools {
 +log_execution(execution_id)
 +verify_args_digest()
 }
+class ExecutionSigning {
++sign_envelope(envelope, key)
++verify_envelope(envelope, signature, key)
++build_requests(pending, decider, key)
++build_receipt(request, status, outcome, key)
+}
 AgentApp --> RuntimeKernel : "uses"
 AgentApp --> ProviderRegistry : "manages"
 AgentApp --> SessionService : "coordinates"
 AgentApp --> GatewayTools : "executes"
+AgentApp --> ExecutionSigning : "creates signed requests"
 ```
 
 **Diagram sources**
@@ -243,6 +273,7 @@ AgentApp --> GatewayTools : "executes"
 - [agent platform providers registry](file://products/agent-platform/src/agent_platform/providers/registry.py)
 - [agent platform session service](file://products/agent-platform/src/agent_platform/services/session_service.py)
 - [agent platform gateway tools](file://products/agent-platform/src/agent_platform/tools/gateway_tools.py)
+- [agent platform execution signing](file://products/agent-platform/src/agent_service/services/execution_signing.py)
 
 ### Identity Management Flow
 The Identity Broker handles OIDC authentication and token management:
@@ -312,6 +343,7 @@ BlockExecution --> End
 - [agent platform providers registry](file://products/agent-platform/src/agent_platform/providers/registry.py)
 - [agent platform session service](file://products/agent-platform/src/agent_platform/services/session_service.py)
 - [agent platform gateway tools](file://products/agent-platform/src/agent_platform/tools/gateway_tools.py)
+- [agent platform execution signing](file://products/agent-platform/src/agent_service/services/execution_signing.py)
 - [identity broker app.py](file://products/identity-broker/src/identity_service/app.py)
 - [identity broker identity service](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [identity broker token service](file://products/identity-broker/src/identity_service/services/token_service.py)
@@ -324,7 +356,7 @@ BlockExecution --> End
 
 ### Tamper-Evident Execution Records
 
-**Updated** The platform now implements cryptographic binding between approvals and executions through HMAC-SHA256 signed execution requests. When a parked confirmation is resumed with approval, the agent platform constructs one signed execution request per approved tool call before any invocation happens.
+**Updated** The platform now implements production-ready cryptographic binding between approvals and executions through HMAC-SHA256 signed execution requests. When a parked confirmation is resumed with approval, the agent platform constructs one signed execution request per approved tool call before any invocation happens. This capability was delivered in v0.19.0 as part of SPEC-037.
 
 #### Execution Signing Architecture
 
@@ -361,6 +393,7 @@ Note over Agent : Receipt includes outcome digest
 - **Argument Integrity**: Executed arguments are verified against the signed digest at the gateway boundary
 - **Durable Records**: Both execution requests and receipts are persisted alongside confirmation records
 - **Audit Trail**: New audit events (`execution_requested`, `execution_completed`, `execution_rejected`) extend the existing audit schema
+- **Production Deployment**: Signing key provisioned via `sync-execution-signing-secret.sh` with automatic restart
 
 #### Trust Zone Integration
 
@@ -370,10 +403,25 @@ The execution signing capability strengthens the platform's trust zones by ensur
 - **Control Zone**: Maintains authority over approval decisions and execution request creation
 - **Execution Zone**: Receives only signed, verified execution requests with integrity guarantees
 
+#### Upcoming Isolated Execution Worker (SPEC-038)
+
+**New** The platform has an approved specification for an isolated execution worker that will further strengthen security boundaries. This Phase 2 component will:
+
+- Receive signed execution requests over an authenticated internal handoff
+- Verify signatures and argument digests independently
+- Perform tool-gateway calls with forwarded delegated tokens
+- Provide process isolation for approved bounded actions
+- Maintain single-flight idempotency keyed by execution ID
+
+The worker will inherit the SPEC-037 envelope contract verbatim and represent the first production consumer of the `execution_signing.verify_envelope` function, providing genuine independent verification of the approval-to-execution chain.
+
 **Section sources**
 - [SPEC-037 signed execution requests spec](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
 - [SPEC-037 implementation plan](file://docs/specs/SPEC-037-signed-execution-requests/plan.md)
+- [SPEC-038 isolated execution worker spec](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
 - [execution runtime spike memo](file://docs/workspace/execution-runtime-spike.md)
+- [agent platform execution signing](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [sync execution signing secret](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [reference architecture security section](file://docs/agentic-aiops-platform/part-2-reference-architecture.md)
 
 ## Dependency Analysis
@@ -393,6 +441,7 @@ subgraph "Platform Services"
 TG["Tool Gateway"]
 AP["Agent Platform"]
 IB["Identity Broker"]
+ER["Execution Runtime<br/>(Approved)"]
 end
 subgraph "Shared Components"
 SC["Shared Contracts"]
@@ -414,16 +463,19 @@ IB --> OBS
 AP --> SC
 TG --> SC
 IB --> SC
+ER --> SC
 ```
 
 **Diagram sources**
 - [agent platform providers registry](file://products/agent-platform/src/agent_platform/providers/registry.py)
 - [tool gateway k8s connector](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+- [execution-runtime README.md](file://products/execution-runtime/README.md)
 - [shared contracts schemas README](file://shared/shared-contracts/README.md)
 
 **Section sources**
 - [agent platform providers registry](file://products/agent-platform/src/agent_platform/providers/registry.py)
 - [tool gateway k8s connector](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+- [execution-runtime README.md](file://products/execution-runtime/README.md)
 - [shared contracts schemas README](file://shared/shared-contracts/README.md)
 
 ## Performance Considerations
@@ -436,6 +488,7 @@ The platform is designed for high-performance operations with several key consid
 - **Monitoring**: Comprehensive metrics collection and alerting
 - **Scalability**: Horizontal scaling capabilities for all microservices
 - **Signature Verification**: HMAC-SHA256 verification adds minimal overhead while providing strong security guarantees
+- **Execution Isolation**: Future isolated worker will provide process-level isolation for better blast radius containment
 
 [No sources needed since this section provides general guidance]
 
@@ -469,19 +522,23 @@ Common issues and their resolution strategies:
 - **Check `sync-execution-signing-secret.sh` script execution in deploy chain**
 - **Review `execution_rejected` audit events for failure reasons**
 - **Validate canonical JSON argument serialization consistency**
+- **Ensure signing key persistence across redeployments**
 
 **Section sources**
 - [observability conventions](file://shared/shared-contracts/observability-conventions.md)
 - [tool gateway policy engine](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
 - [identity broker token service](file://products/identity-broker/src/identity_service/services/token_service.py)
 - [SPEC-037 signed execution requests spec](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
+- [sync execution signing secret](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 
 ## Conclusion
 Luban AIOps Platform provides a comprehensive solution for AI-powered operations automation through its microservices architecture. The platform successfully addresses the needs of developers, operators, and security teams by offering robust agent orchestration, strong identity management, policy enforcement, and extensible tool execution capabilities. Its GitOps-native approach ensures reliable deployments while maintaining high standards for security and observability.
 
-**Enhanced Security Posture**: With the completion of SPEC-037, the platform now provides tamper-evident execution records that cryptographically bind approvals to actual executions. This closes a critical security gap where the decision side was durable but the execution side lacked cryptographic verification.
+**Enhanced Security Posture**: With the completion of SPEC-037, the platform now provides production-ready tamper-evident execution records that cryptographically bind approvals to actual executions. This closes a critical security gap where the decision side was durable but the execution side lacked cryptographic verification. The HMAC-SHA256 signing mechanism ensures that executed arguments match exactly what approvers saw on confirmation cards.
 
-The platform's design enables organizations to build sophisticated AI-powered automation workflows while maintaining full control over security, compliance, and operational aspects. With support for multiple AI providers, seamless Kubernetes integration, and now cryptographic execution signing, it provides a solid foundation for modern AI operations.
+**Future Enhancement**: The approved SPEC-038 introduces an isolated execution worker that will provide additional security through process isolation, independent signature verification, and enhanced blast radius containment. This represents the next evolution toward truly secure execution boundaries.
+
+The platform's design enables organizations to build sophisticated AI-powered automation workflows while maintaining full control over security, compliance, and operational aspects. With support for multiple AI providers, seamless Kubernetes integration, and now production-ready cryptographic execution signing, it provides a solid foundation for modern AI operations.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -510,6 +567,7 @@ Agents["Agent Pods"]
 Gateway["Gateway Pods"]
 Identity["Identity Pods"]
 Redis["Redis Cache"]
+Worker["Execution Worker<br/>(Phase 2)"]
 end
 Config --> Build
 Policies --> Validate
@@ -523,11 +581,13 @@ Namespace --> Agents
 Namespace --> Gateway
 Namespace --> Identity
 Namespace --> Redis
+Namespace --> Worker
 ```
 
 **Diagram sources**
 - [dev-k8s base kustomization](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
 - [platform GitOps README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
+- [execution-runtime README.md](file://products/execution-runtime/README.md)
 
 ### AI Provider Integration
 The platform supports multiple AI providers through a unified interface:
@@ -551,12 +611,13 @@ The platform implements a multi-layered security approach:
 - **Encryption**: TLS for all communications, encrypted secrets storage
 - **Audit Logging**: Comprehensive audit trails for all operations
 - **Network Security**: Network policies and service mesh integration
-- **Execution Signing**: HMAC-SHA256 signed execution requests with fail-closed design
+- **Execution Signing**: Production-ready HMAC-SHA256 signed execution requests with fail-closed design
 - **Argument Integrity**: Cryptographic verification of executed arguments against approved digests
+- **Process Isolation**: Approved specification for isolated execution worker (SPEC-038)
 
 ### Delivery Roadmap Status
 
-**Updated** The R4 release "Approval-Gated Bounded Actions" has been completed with the addition of signed execution requests (SPEC-037). This deliverable closes one of two remaining R4 lines, providing tamper-evident binding between approvals and executions.
+**Updated** The R4 release "Approval-Gated Bounded Actions" has been completed with both deliverables: signed execution requests (SPEC-037, delivered in v0.19.0) and isolated execution worker (SPEC-038, approved). These two components together close the R4 scope, providing both tamper-evident execution records and planned process isolation for approved actions.
 
 | Release | Theme | Status | Key Deliverables |
 |---------|-------|--------|------------------|
@@ -564,9 +625,10 @@ The platform implements a multi-layered security approach:
 | R1 | Read-Only Operations Copilot | ✅ Complete | Grounded operational answers |
 | R2 | Skills and Grounded Guidance | ✅ Complete | Team-owned procedural guidance |
 | R3 | Incident Triage and Collaboration | ✅ Complete | Faster incident response |
-| R4 | Approval-Gated Bounded Actions | ✅ Complete | Safe actions with signed execution requests |
+| R4 | Approval-Gated Bounded Actions | ✅ Complete | Safe actions with signed execution requests and isolated worker |
 | R5 | Hardening and External Consumption | 🔄 Planned | Broader adoption readiness |
 
 **Section sources**
 - [delivery roadmap](file://docs/agentic-aiops-platform/delivery-roadmap.md)
 - [SPEC-037 signed execution requests spec](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
+- [SPEC-038 isolated execution worker spec](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
