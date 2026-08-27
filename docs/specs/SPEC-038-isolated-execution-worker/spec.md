@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: luban-platform-team
 - created: 2026-08-27
 - release slice: R4 — Approval-Gated Bounded Actions (R4 closing slice)
@@ -239,7 +239,14 @@ Acceptance signals:
 
 - Async execution queues, retries, schedules — rejected in the spike
   memo; the approval-queue remainder stays parked as the R5-shaped
-  scope (SPEC-030 memo option C).
+  scope (SPEC-030 memo option C). Recorded re-evaluation trigger
+  (operator sign-off 2026-08-27): when more team members work
+  concurrently, simultaneous approved actions may contend on the single
+  worker pod — if that concurrent volume produces queueing pressure, R5
+  re-evaluates and promotes the queue/pool spec at that signal.
+- Multi-replica workers — single-flight is in-process; the deployment
+  pins `replicas: 1` and scaling requires a durable flight registry
+  (part of the same R5 re-evaluation).
 - Receipt exposure changes — receipts stay owner-visible on the session
   surface (the memo's Q-3, resolved by SPEC-037 R-6; the approver
   surface stays decision-metadata-only).
@@ -247,8 +254,6 @@ Acceptance signals:
   upgrade path applies once to all services, not bespoke here.
 - NetworkPolicy — no overlay uses one today; the no-route + ClusterIP +
   authenticated-handoff posture is the enforcement surface.
-- Multi-replica workers — single-flight is in-process; the deployment
-  pins `replicas: 1` and scaling requires a durable flight registry.
 - Any change to approval tiers, policy semantics, HITL timeout, or
   read-only tool paths.
 - New contracts — `execution-request.schema.json` and
@@ -288,6 +293,11 @@ before approval.
 
 ## Changelog
 
+- 2026-08-27: approved by the operator with one recorded condition —
+  the single-replica / no-queue posture carries an explicit R5
+  re-evaluation trigger: concurrent approved actions from multiple team
+  members working simultaneously (recorded in the Non-Goals and the
+  roadmap backlog row). Implementation proceeds in a fresh session.
 - 2026-08-27: created as `draft` from the execution-runtime spike memo
   (Phase 2) after the memo's promotion gate was satisfied — Phase 1
   (SPEC-037) delivered in v0.19.0 and live-verified on the
