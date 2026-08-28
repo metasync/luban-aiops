@@ -5,7 +5,8 @@
 - status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-28
-- approved: 2026-08-28
+- approved: 2026-08-28 (approval date; the lifecycle status above is
+  `delivered`)
 - delivered: 2026-08-28 (v0.24.0)
 - release slice: R5 — Hardening and External Consumption (fourth R5 slice)
 - related ADRs: none (extends the SPEC-023 portal framework rebuild's
@@ -301,6 +302,9 @@ Acceptance criteria:
   fastapi/uvicorn in-range floats, cryptography cap adjudication,
   redis/elasticsearch caps parked with reasons). Directory renamed
   `SPEC-042-portal-dependency-hygiene` → `SPEC-042-dependency-hygiene`.
+- 2026-08-28: approved by the operator (status `draft` → `approved`),
+  same day as drafting; delivery proceeded immediately under the
+  house train.
 - 2026-08-28: delivered as v0.24.0 (fourth R5 slice). Delivery notes:
   (a) R-1 migrated two `Drawer width` sites (the 230px figure in the
   approved inventory is `App.tsx`'s `Layout.Sider`, not a Drawer, and

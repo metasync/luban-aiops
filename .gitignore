@@ -23,6 +23,11 @@ __pycache__/
 
 *.log
 
+# Dot-prefixed per-session scratch logs (`.build-*.log`, `.deploy-*.log`,
+# `.pf-*.log`, ...) — `*.log` does not anchor them. Keeping them untracked
+# and ignored prevents the coordinated IMAGE_TAG from gaining `-dirty`.
+.*.log
+
 # Local verification screenshots captured by browser-based checks.
 *.png
 
