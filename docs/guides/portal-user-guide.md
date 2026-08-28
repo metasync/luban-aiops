@@ -316,11 +316,15 @@ A read-only panel over the portal's own state, visible to everyone
 - **Platform** — the platform version chip value, the API origin the
   portal talks to, and the most recent request id — quote these when
   reporting issues; they correlate directly with logs, traces, and audit
-  events. Below sits the **Key platform components** table: a live read
-  of the versions and readiness the gateway reports for the operator
-  portal, platform gateway, agent service, agent runtime (LLM provider
-  and model), session and agent-state stores, and the policy bundle.
-  Rows degrade to *unavailable* when a health probe fails.
+  events. Below sits the **Key platform components** table: every
+  component follows the platform version above, so the table lists the
+  tech stack underneath each one — framework/product (React · Ant
+  Design, FastAPI · Python, AgentScope · FastAPI, the LLM provider API,
+  PostgreSQL/Redis/In-memory store backends, JSON policy rules) and its
+  live version where applicable — read from the gateway's health
+  (`/health/ready`) and runtime (`/api/v1/runtime`) probes. Status uses
+  one vocabulary — *ready*, *degraded*, *not ready* — with *unavailable*
+  when a health probe fails and *checking…* while probes load.
 
 The view carries no mutable controls; authorization decisions always come
 from the gateway.

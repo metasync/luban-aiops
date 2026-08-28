@@ -43,6 +43,26 @@
     "agent_state_ready": {
       "type": "boolean",
       "description": "Whether the agent state store backend is reachable."
+    },
+    "python_version": {
+      "type": ["string", "null"],
+      "description": "Informational tech-stack version (v0.23.4); never affects readiness."
+    },
+    "fastapi_version": {
+      "type": ["string", "null"],
+      "description": "Informational tech-stack version (v0.23.4); never affects readiness."
+    },
+    "agentscope_version": {
+      "type": ["string", "null"],
+      "description": "Informational tech-stack version (v0.23.4); null in non-agentscope modes."
+    },
+    "session_store_version": {
+      "type": ["string", "null"],
+      "description": "Session store server version when available (e.g. PostgreSQL/Redis); informational only."
+    },
+    "agent_state_version": {
+      "type": ["string", "null"],
+      "description": "Agent state store server version when available (e.g. PostgreSQL); informational only."
     }
   }
 }

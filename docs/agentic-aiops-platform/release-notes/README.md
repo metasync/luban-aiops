@@ -7,6 +7,15 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-28-components-tech-stack-and-status.md`
+  - same-day follow-up polish (v0.23.4) on the Settings component
+    table: rows now list the **tech stack underneath** each component
+    (React · Ant Design, FastAPI · Python, AgentScope · FastAPI, the
+    LLM provider and model, store backends with their server versions,
+    policy rules) instead of the redundant component version, and the
+    status column adopts one vocabulary — *ready / degraded / not
+    ready / unavailable*; informational backend fields only, no new
+    actions or event types
 - `2026-08-28-platform-components-blurb-prose-voice.md`
   - same-day operator polish patch (v0.23.3): a live **Key platform
     components** table in Settings → Platform (versions and readiness

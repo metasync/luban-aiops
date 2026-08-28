@@ -327,6 +327,14 @@ class AgentHealth(BaseModel):
     session_store_ready: bool | None = None
     agent_state: str | None = None
     agent_state_ready: bool | None = None
+    # v0.23.4: tech-stack inventory for the portal's Settings table —
+    # the frameworks and servers underneath the component, not the
+    # component's own version (which follows the platform version).
+    python_version: str | None = None
+    fastapi_version: str | None = None
+    agentscope_version: str | None = None
+    session_store_version: str | None = None
+    agent_state_version: str | None = None
 
 
 # --- Operations document repository (SPEC-039) ---

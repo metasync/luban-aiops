@@ -11,10 +11,25 @@ const versionFile = fileURLToPath(
 );
 const platformVersion = `v${readFileSync(versionFile, "utf8").trim()}`;
 
+// v0.23.4: the Settings platform inventory names the tech stack under
+// the portal itself; the resolved (locked) dependency versions are
+// injected at build time so the table matches the shipped bundle.
+const lockFile = JSON.parse(
+  readFileSync(fileURLToPath(new URL("./package-lock.json", import.meta.url)), "utf8"),
+) as { packages?: Record<string, { version?: string }> };
+const manifest = JSON.parse(
+  readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8"),
+) as { dependencies?: Record<string, string> };
+const lockedVersion = (name: string): string =>
+  lockFile.packages?.[`node_modules/${name}`]?.version ??
+  (manifest.dependencies?.[name] || "unknown").replace(/^[\^~]/, "");
+
 export default defineConfig({
   plugins: [react()],
   define: {
     __PLATFORM_VERSION__: JSON.stringify(platformVersion),
+    __REACT_VERSION__: JSON.stringify(lockedVersion("react")),
+    __ANTD_VERSION__: JSON.stringify(lockedVersion("antd")),
   },
   build: {
     // The runtime stage serves web-ui/dist at / (nginx.conf); content-hash

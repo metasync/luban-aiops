@@ -13,6 +13,29 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.23.4 — 2026-08-28
+
+### Changed
+
+- **Components table shows the tech stack underneath**: every component
+  follows the platform version (already shown above the table), so the
+  Settings Platform pane now lists each component's tech stack instead —
+  Component / Technology / Version columns: React · Ant Design, FastAPI ·
+  Python, AgentScope · FastAPI, the LLM provider API and model,
+  PostgreSQL/Redis/In-memory store backends with their server versions,
+  and the JSON policy rules. The agent service health gains optional
+  Python/FastAPI/AgentScope and store-server versions and the gateway
+  readiness status gains Python/FastAPI versions — all informational,
+  readiness semantics unchanged. React/Ant Design versions are locked
+  from the portal's package-lock at build time.
+- **Unified component status vocabulary**: one word set across every
+  table row — *ready / degraded / not ready*, with *unavailable* when a
+  probe fails and *checking…* while loading — replaces the prior
+  ok/loaded/ready mix. The status column stays because the portal is a
+  static bundle: this page still renders with the gateway down or a
+  store unhealthy, and the column surfaces exactly those degraded
+  states before they appear as failed work.
+
 ## 0.23.3 — 2026-08-28
 
 ### Added

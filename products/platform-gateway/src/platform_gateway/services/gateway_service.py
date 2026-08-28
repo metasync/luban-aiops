@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import platform
 from collections.abc import AsyncIterator
 
+import fastapi
 import httpx
 from fastapi import HTTPException
 from fastapi import Request
@@ -41,6 +43,16 @@ def live_status(settings: PlatformGatewaySettings) -> dict[str, str]:
     }
 
 
+def _gateway_tech() -> dict[str, str]:
+    # v0.23.4: tech-stack versions underneath the gateway component, for
+    # the portal's Settings inventory; the gateway's own version follows
+    # the platform version and is already reported as ``version``.
+    return {
+        "python_version": platform.python_version(),
+        "fastapi_version": fastapi.__version__,
+    }
+
+
 async def ready_status(settings: PlatformGatewaySettings) -> dict[str, object]:
     """Readiness: the policy bundle must load and the agent service must respond."""
     try:
@@ -52,6 +64,7 @@ async def ready_status(settings: PlatformGatewaySettings) -> dict[str, object]:
             "version": SERVICE_VERSION,
             "agent_service": agent_health,
             "policy_rules": len(rules),
+            **_gateway_tech(),
         }
     except httpx.HTTPError as exc:
         return {
@@ -59,6 +72,7 @@ async def ready_status(settings: PlatformGatewaySettings) -> dict[str, object]:
             "service": SERVICE_NAME,
             "version": SERVICE_VERSION,
             "agent_service_error": str(exc),
+            **_gateway_tech(),
         }
     except PolicyLoadError as exc:
         return {
@@ -66,6 +80,7 @@ async def ready_status(settings: PlatformGatewaySettings) -> dict[str, object]:
             "service": SERVICE_NAME,
             "version": SERVICE_VERSION,
             "policy_error": str(exc),
+            **_gateway_tech(),
         }
 
 

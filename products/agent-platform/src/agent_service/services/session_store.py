@@ -86,6 +86,14 @@ class SessionStore(Protocol):
 
     def is_ready(self) -> bool: ...
 
+    def server_version(self) -> str | None:
+        """Backend server/product version for the platform inventory (v0.23.4).
+
+        Informational only — ``None`` when unknown or unreachable; a
+        failure here must never affect readiness or request handling.
+        """
+        ...
+
     def __len__(self) -> int: ...
 
 
@@ -189,6 +197,10 @@ class InMemorySessionStore:
 
     def is_ready(self) -> bool:
         return True
+
+    def server_version(self) -> str | None:
+        # No server behind an in-memory store.
+        return None
 
     def __len__(self) -> int:
         return len(self._sessions)
@@ -396,6 +408,14 @@ class RedisSessionStore:
             return bool(self._client.ping())
         except Exception:
             return False
+
+    def server_version(self) -> str | None:
+        try:
+            info = self._client.info("server")
+            value = info.get("redis_version")
+            return str(value) if value else None
+        except Exception:
+            return None
 
     def __len__(self) -> int:
         # Count session keys only (exclude user sorted sets and the
@@ -749,6 +769,17 @@ class PostgresSessionStore:
                     return cur.fetchone() is not None
         except Exception:
             return False
+
+    def server_version(self) -> str | None:
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT current_setting('server_version')")
+                    row = cur.fetchone()
+            value = row[0] if row else None
+            return str(value) if value else None
+        except Exception:
+            return None
 
     def __len__(self) -> int:
         try:

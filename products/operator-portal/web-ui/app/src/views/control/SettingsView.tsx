@@ -23,7 +23,7 @@ import {
 } from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import type { SessionWorkspace } from "../../sessions/useSessionWorkspace";
-import { PLATFORM_VERSION } from "../../version";
+import { PLATFORM_VERSION, REACT_VERSION, ANTD_VERSION } from "../../version";
 
 // --- Identity pane --------------------------------------------------------
 
@@ -104,10 +104,16 @@ function SessionPane({ workspace }: { workspace: SessionWorkspace }) {
 
 // --- Platform pane --------------------------------------------------------
 
-// v0.23.3: live component inventory. /health/ready and /api/v1/runtime
-// are unauthenticated by design (health probes and runtime metadata only),
-// so the pane can read them directly; every row degrades to "unavailable"
-// when a probe fails rather than showing stale or guessed values.
+// v0.23.3 live component inventory, reworked in v0.23.4: every component
+// follows the platform version (shown above), so the table instead names
+// the tech stack underneath each component — framework and server
+// versions. /health/ready and /api/v1/runtime are unauthenticated by
+// design (health probes and runtime metadata only), so the pane can read
+// them directly; every row degrades to "unavailable" when a probe fails
+// rather than showing stale or guessed values. Status uses one
+// vocabulary — ready / degraded / not ready / unavailable — because the
+// interesting cases are exactly the ones that leave this page loadable
+// (the portal is a static bundle) while breaking the actual work.
 
 interface AgentServiceHealth {
   status?: string;
@@ -116,6 +122,11 @@ interface AgentServiceHealth {
   session_store_ready?: boolean | null;
   agent_state?: string | null;
   agent_state_ready?: boolean | null;
+  python_version?: string | null;
+  fastapi_version?: string | null;
+  agentscope_version?: string | null;
+  session_store_version?: string | null;
+  agent_state_version?: string | null;
 }
 
 interface GatewayReadyStatus {
@@ -123,6 +134,8 @@ interface GatewayReadyStatus {
   version?: string;
   agent_service?: AgentServiceHealth;
   policy_rules?: number;
+  python_version?: string;
+  fastapi_version?: string;
 }
 
 interface RuntimeMetadata {
@@ -135,19 +148,27 @@ interface RuntimeMetadata {
 interface ComponentRow {
   key: string;
   component: string;
+  technology: string;
   version: string;
   status: ReactNode;
 }
 
 const TAG_FLAT = { margin: 0 };
 
-function readyTag(ready: boolean | null | undefined): ReactNode {
-  if (ready === true) {
+// One status vocabulary across every row.
+function statusTag(kind: "ready" | "degraded" | "not ready"): ReactNode {
+  if (kind === "ready") {
     return <Tag color="success" style={TAG_FLAT}>ready</Tag>;
   }
-  if (ready === false) {
-    return <Tag color="error" style={TAG_FLAT}>not ready</Tag>;
+  if (kind === "degraded") {
+    return <Tag color="warning" style={TAG_FLAT}>degraded</Tag>;
   }
+  return <Tag color="error" style={TAG_FLAT}>not ready</Tag>;
+}
+
+function readyStatus(ready: boolean | null | undefined): ReactNode {
+  if (ready === true) return statusTag("ready");
+  if (ready === false) return statusTag("not ready");
   return <Typography.Text type="secondary">unknown</Typography.Text>;
 }
 
@@ -157,6 +178,17 @@ function unavailable(): ReactNode {
 
 function checking(): ReactNode {
   return <Typography.Text type="secondary">checking…</Typography.Text>;
+}
+
+function backendLabel(backend: string | null | undefined): string {
+  if (backend === "postgres") return "PostgreSQL";
+  if (backend === "redis") return "Redis";
+  if (backend === "memory") return "In-memory";
+  return backend || "—";
+}
+
+function labeled(value: string | null | undefined): string {
+  return value ? value : "—";
 }
 
 function PlatformPane() {
@@ -190,89 +222,97 @@ function PlatformPane() {
     const agent = ready?.agent_service;
     const gatewayStatus = ready?.status;
     const runtimeState = runtime?.runtime_state;
+    const provider = runtime?.provider?.trim();
     return [
       {
         key: "portal",
         component: "Operator portal",
-        version: PLATFORM_VERSION,
-        status: <Tag color="success" style={TAG_FLAT}>loaded</Tag>,
+        technology: "React · Ant Design",
+        version: `React ${REACT_VERSION} · Ant Design ${ANTD_VERSION}`,
+        status: statusTag("ready"),
       },
       {
         key: "gateway",
         component: "Platform gateway",
-        version: ready?.version ?? "—",
+        technology: "FastAPI · Python",
+        version:
+          ready === null || readyFailed
+            ? "—"
+            : `FastAPI ${labeled(ready.fastapi_version)} · Python ${labeled(ready.python_version)}`,
         status:
-          readyFailed || gatewayStatus === undefined ? (
-            readyFailed ? unavailable() : checking()
-          ) : gatewayStatus === "ok" ? (
-            <Tag color="success" style={TAG_FLAT}>ok</Tag>
-          ) : (
-            <Tag color="warning" style={TAG_FLAT}>{gatewayStatus}</Tag>
-          ),
+          readyFailed || gatewayStatus === undefined
+            ? readyFailed
+              ? unavailable()
+              : checking()
+            : statusTag(gatewayStatus === "ok" ? "ready" : "degraded"),
       },
       {
         key: "agent-service",
         component: "Agent service",
-        version: agent?.runtime_mode ?? "—",
+        technology: "AgentScope · FastAPI",
+        version:
+          readyFailed || agent === undefined
+            ? "—"
+            : `AgentScope ${labeled(agent.agentscope_version)} · FastAPI ${labeled(agent.fastapi_version)}`,
         status:
-          readyFailed || agent === undefined ? (
-            readyFailed ? unavailable() : checking()
-          ) : agent.status === "ready" ? (
-            <Tag color="success" style={TAG_FLAT}>ready</Tag>
-          ) : (
-            <Tag color="error" style={TAG_FLAT}>not ready</Tag>
-          ),
+          readyFailed || agent === undefined
+            ? readyFailed
+              ? unavailable()
+              : checking()
+            : statusTag(agent.status === "ready" ? "ready" : "not ready"),
       },
       {
         key: "agent-runtime",
         component: "Agent runtime (LLM)",
-        version: runtime?.model_name ?? runtime?.provider ?? "—",
+        technology: provider
+          ? `${provider.charAt(0).toUpperCase()}${provider.slice(1)} API`
+          : "—",
+        version: runtime?.model_name ?? "—",
         status:
-          runtimeFailed || runtimeState === undefined ? (
-            runtimeFailed ? unavailable() : checking()
-          ) : runtimeState === "ready" ? (
-            <Tag color="success" style={TAG_FLAT}>ready</Tag>
-          ) : runtimeState === "provider_error" ? (
-            <Tag color="error" style={TAG_FLAT}>provider error</Tag>
-          ) : (
-            <Tag style={TAG_FLAT}>not configured</Tag>
-          ),
+          runtimeFailed || runtimeState === undefined
+            ? runtimeFailed
+              ? unavailable()
+              : checking()
+            : statusTag(runtimeState === "ready" ? "ready" : "not ready"),
       },
       {
         key: "session-store",
         component: "Session store",
-        version: agent?.session_store ?? "—",
+        technology: backendLabel(agent?.session_store),
+        version: readyFailed || agent === undefined ? "—" : labeled(agent.session_store_version),
         status:
           readyFailed || agent === undefined
             ? readyFailed
               ? unavailable()
               : checking()
-            : readyTag(agent.session_store_ready),
+            : readyStatus(agent.session_store_ready),
       },
       {
         key: "agent-state",
         component: "Agent state store",
-        version: agent?.agent_state ?? "—",
+        technology: backendLabel(agent?.agent_state),
+        version: readyFailed || agent === undefined ? "—" : labeled(agent.agent_state_version),
         status:
           readyFailed || agent === undefined
             ? readyFailed
               ? unavailable()
               : checking()
-            : readyTag(agent.agent_state_ready),
+            : readyStatus(agent.agent_state_ready),
       },
       {
         key: "policy",
         component: "Policy bundle",
+        technology: "JSON policy rules",
         version:
           ready?.policy_rules !== undefined
             ? `${ready.policy_rules} rule(s)`
             : "—",
         status:
-          readyFailed || ready === null ? (
-            readyFailed ? unavailable() : checking()
-          ) : (
-            <Tag color="success" style={TAG_FLAT}>loaded</Tag>
-          ),
+          readyFailed || ready === null
+            ? readyFailed
+              ? unavailable()
+              : checking()
+            : statusTag("ready"),
       },
     ];
   }, [ready, readyFailed, runtime, runtimeFailed]);
@@ -296,8 +336,9 @@ function PlatformPane() {
         Key platform components
       </Typography.Text>
       <Typography.Paragraph type="secondary" style={{ margin: "4px 0 8px" }}>
-        Live read from the gateway&apos;s health and runtime endpoints —
-        component versions and readiness at this moment.
+        All components follow the platform version above; this table lists
+        the tech stack underneath each one, read live from the
+        gateway&apos;s health and runtime endpoints.
       </Typography.Paragraph>
       <Table<ComponentRow>
         size="small"
@@ -305,6 +346,7 @@ function PlatformPane() {
         rowKey="key"
         columns={[
           { title: "Component", dataIndex: "component", key: "component" },
+          { title: "Technology", dataIndex: "technology", key: "technology" },
           { title: "Version", dataIndex: "version", key: "version" },
           { title: "Status", dataIndex: "status", key: "status" },
         ]}

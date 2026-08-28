@@ -1047,10 +1047,34 @@ async def runtime_metadata() -> AgentRuntimeMetadata:
 # --- Health (v2-conformant) ---
 
 
+def _tech_versions() -> dict[str, str | None]:
+    """Best-effort tech-stack versions for the platform inventory (v0.23.4).
+
+    Informational only — any lookup failure yields ``None`` for that
+    entry rather than disturbing the readiness contract.
+    """
+    import platform as _platform
+
+    def _pkg(name: str) -> str | None:
+        try:
+            from importlib.metadata import version as _v
+
+            return _v(name)
+        except Exception:
+            return None
+
+    return {
+        "python_version": _platform.python_version(),
+        "fastapi_version": _pkg("fastapi"),
+        "agentscope_version": _pkg("agentscope"),
+    }
+
+
 @router.get("/health", response_model=AgentHealth)
 async def health() -> AgentHealth:
     kernel = get_runtime_kernel()
     configured = kernel.is_configured()
+    tech = _tech_versions()
     return AgentHealth(
         status="ready" if configured else "not_ready",
         runtime_mode=kernel.mode(),
@@ -1061,4 +1085,9 @@ async def health() -> AgentHealth:
         session_store_ready=SESSION_STORE.is_ready(),
         agent_state=AGENT_STATE_STORE.backend_name,
         agent_state_ready=AGENT_STATE_STORE.is_ready(),
+        python_version=tech["python_version"],
+        fastapi_version=tech["fastapi_version"],
+        agentscope_version=tech["agentscope_version"],
+        session_store_version=SESSION_STORE.server_version(),
+        agent_state_version=AGENT_STATE_STORE.server_version(),
     )

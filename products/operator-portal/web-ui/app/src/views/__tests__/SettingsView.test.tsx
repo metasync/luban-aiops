@@ -190,23 +190,30 @@ describe("SettingsView (SPEC-030 R-6)", () => {
       {
         status: "ok",
         service: "platform-gateway",
-        version: "0.23.3",
+        version: "0.23.4",
+        python_version: "3.12.9",
+        fastapi_version: "0.139.2",
         agent_service: {
           status: "ready",
           runtime_mode: "agentscope",
           configured: true,
-          session_store: "redis",
+          session_store: "postgres",
           session_store_ready: true,
-          agent_state: "redis",
+          session_store_version: "16.4",
+          agent_state: "postgres",
           agent_state_ready: true,
+          agent_state_version: "16.4",
+          python_version: "3.12.9",
+          fastapi_version: "0.139.2",
+          agentscope_version: "2.0.6",
         },
         policy_rules: 12,
       },
       {
         runtime_mode: "agentscope",
         runtime_state: "ready",
-        provider: "luban-llm",
-        model_name: "qwen3-max",
+        provider: "deepseek",
+        model_name: "deepseek-v4-flash",
       },
     );
     render(<SettingsView workspace={workspaceOf()} />);
@@ -214,14 +221,20 @@ describe("SettingsView (SPEC-030 R-6)", () => {
 
     await screen.findByText("Key platform components");
     await waitFor(() => {
-      expect(screen.getByText("0.23.3")).toBeTruthy();
+      expect(screen.getByText("AgentScope 2.0.6 · FastAPI 0.139.2")).toBeTruthy();
     });
+    // v0.23.4: the table names the tech stack, not the component version.
     expect(screen.getByText("Platform gateway")).toBeTruthy();
-    expect(screen.getByText("Agent runtime (LLM)")).toBeTruthy();
-    expect(screen.getByText("qwen3-max")).toBeTruthy();
-    expect(screen.getByText("Session store")).toBeTruthy();
-    expect(screen.getByText("Agent state store")).toBeTruthy();
+    expect(screen.getByText("FastAPI · Python")).toBeTruthy();
+    expect(screen.getByText("FastAPI 0.139.2 · Python 3.12.9")).toBeTruthy();
+    expect(screen.getByText("AgentScope · FastAPI")).toBeTruthy();
+    expect(screen.getByText("Deepseek API")).toBeTruthy();
+    expect(screen.getByText("deepseek-v4-flash")).toBeTruthy();
+    expect(screen.getAllByText("PostgreSQL").length).toBe(2);
+    expect(screen.getAllByText("16.4").length).toBe(2);
     expect(screen.getByText("12 rule(s)")).toBeTruthy();
+    // One unified status vocabulary: every live row reports "ready".
+    expect(screen.getAllByText("ready").length).toBeGreaterThanOrEqual(7);
   });
 
   it("degrades the component table to unavailable when probes fail", async () => {

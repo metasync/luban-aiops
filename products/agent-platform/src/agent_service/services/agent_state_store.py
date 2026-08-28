@@ -49,6 +49,13 @@ class AgentStateStore(Protocol):
 
     def is_ready(self) -> bool: ...
 
+    def server_version(self) -> str | None:
+        """Backend server/product version for the platform inventory (v0.23.4).
+
+        Informational only — ``None`` when unknown or unreachable.
+        """
+        ...
+
 
 # ---------------------------------------------------------------------------
 # In-memory backend
@@ -78,6 +85,10 @@ class InMemoryAgentStateStore:
 
     def is_ready(self) -> bool:
         return True
+
+    def server_version(self) -> str | None:
+        # No server behind an in-memory store.
+        return None
 
     def __len__(self) -> int:
         return len(self._states)
@@ -236,6 +247,17 @@ class PostgresAgentStateStore:
                     return cur.fetchone() is not None
         except Exception:
             return False
+
+    def server_version(self) -> str | None:
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT current_setting('server_version')")
+                    row = cur.fetchone()
+            value = row[0] if row else None
+            return str(value) if value else None
+        except Exception:
+            return None
 
 
 # ---------------------------------------------------------------------------
