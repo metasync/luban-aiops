@@ -11,7 +11,7 @@
 - [audit-service/src/audit_service/core/metrics.py](file://products/audit-service/src/audit_service/core/metrics.py)
 - [skills-hub/src/skills_hub/core/metrics.py](file://products/skills_hub/src/skills_hub/core/metrics.py)
 - [agent-platform/src/agent_service/app.py](file://products/agent-platform/src/agent_service/app.py)
-- [identity-broker/src/identity_service/app.py](file://products/identity-broker/src/identity_service/app.py)
+- [identity-broker/src/identity_service/app.py](file://products/identity_broker/app.py)
 - [tool-gateway/src/tool_gateway/app.py](file://products/tool-gateway/src/tool_gateway/app.py)
 - [platform-gateway/src/platform_gateway/app.py](file://products/platform-gateway/src/platform_gateway/app.py)
 - [agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
@@ -19,14 +19,20 @@
 - [tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [platform-gateway/src/platform_gateway/core/telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [audit-service/src/audit_service/core/telemetry.py](file://products/audit-service/src/audit_service/core/telemetry.py)
-- [skills-hub/src/skills_hub/core/telemetry.py](file://products/skills_hub/core/telemetry.py)
+- [skills-hub/src/skills_hub/core/telemetry.py](file://products/skills_hub/src/skills_hub/core/telemetry.py)
 - [incident-service/src/incident_service/core/telemetry.py](file://products/incident-service/src/incident_service/core/telemetry.py)
 - [agent-platform/src/agent_service/services/evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [agent-platform/src/agent_service/services/model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [agent-platform/src/agent_service/services/model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [agent-platform/src/agent_service/runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [agent-platform/src/agent_service/providers/luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
-- [shared/shared-contracts/schemas/health-response.schema.json](file://shared/shared-contracts/schemas/health-response.schema.json)
+- [agent-platform/src/agent_service/api/v2/routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
+- [platform-gateway/src/platform_gateway/services/gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
+- [platform-gateway/src/platform_gateway/api/routes/health.py](file://products/platform-gateway/src/platform_gateway/api/routes/health.py)
+- [settings-view.tsx](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx)
+- [settings-view.test.tsx](file://products/operator-portal/web-ui/app/src/views/__tests__/SettingsView.test.tsx)
+- [health-response.schema.json](file://shared/shared-contracts/schemas/health-response.schema.json)
+- [agent-health.schema.json](file://shared/shared-contracts/schemas/agent-health.schema.json)
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
@@ -43,15 +49,17 @@
 - [tool-gateway/src/tool_gateway/services/token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
 - [audit-service/tests/test_ingest_auth.py](file://products/audit-service/tests/test_ingest_auth.py)
 - [incident-service/tests/test_query_auth.py](file://products/incident-service/tests/test_query_auth.py)
+- [2026-08-28-components-tech-stack-and-status.md](file://docs/agentic-aiops-platform/release-notes/2026-08-28-components-tech-stack-and-status.md)
+- [2026-08-28-platform-components-blurb-prose-voice.md](file://docs/agentic-aiops-platform/release-notes/2026-08-28-platform-components-blurb-prose-voice.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added drift-guard parity suite coverage for telemetry, observability, token verification, and audit emission patterns across seven services
-- Enhanced authentication parity between audit-service ingest-auth and incident-service query-auth with comprehensive test coverage
-- Improved test coverage from 80% to 95% for audit-service and 87% to 92% for incident-service
-- Updated monitoring documentation to reflect enhanced parity testing and authentication consistency
-- Added new sections covering drift-guard mechanisms and cross-service consistency validation
+- Enhanced observability with comprehensive technology stack visibility in Settings Platform pane
+- Standardized status vocabulary across all platform components (ready, degraded, not ready, unavailable, checking…)
+- Improved health endpoint responses with version information for better operational awareness and troubleshooting
+- Added backend version plumbing to agent service and gateway readiness endpoints
+- Updated operator portal to display unified component inventory with technology stack details
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -66,7 +74,7 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides comprehensive guidance for monitoring and observability across the Luban AIOps Platform. It consolidates the platform's metrics collection strategy using Prometheus with direct prometheus_client implementation, structured logging conventions, distributed tracing implementation with OpenObserve integration, health check endpoints, readiness/liveness probes configuration, alerting rules, dashboard templates, and incident response procedures. The platform includes a comprehensive OpenTelemetry push pipeline that exports traces, metrics, and logs to OpenObserve via OTLP HTTP/protobuf protocol, enabling end-to-end observability across all six platform services. **Updated**: The platform now features robust monitoring capabilities for multi-model runtime including evidence store operations, model discovery lifecycle, and comprehensive observability for the new multi-model runtime features with enhanced provider-specific metrics for the luban provider. Additionally, the platform implements comprehensive drift-guard parity suites ensuring consistency across telemetry, observability, token verification, and audit emission patterns across all seven services.
+This document provides comprehensive guidance for monitoring and observability across the Luban AIOps Platform. It consolidates the platform's metrics collection strategy using Prometheus with direct prometheus_client implementation, structured logging conventions, distributed tracing implementation with OpenObserve integration, health check endpoints, readiness/liveness probes configuration, alerting rules, dashboard templates, and incident response procedures. The platform includes a comprehensive OpenTelemetry push pipeline that exports traces, metrics, and logs to OpenObserve via OTLP HTTP/protobuf protocol, enabling end-to-end observability across all six platform services. **Updated**: The platform now features enhanced observability with comprehensive technology stack visibility in the Settings Platform pane, standardized status vocabulary (ready, degraded, not ready, unavailable, checking…), and improved health endpoint responses with version information for better operational awareness and troubleshooting. The platform also includes robust monitoring capabilities for multi-model runtime including evidence store operations, model discovery lifecycle, and comprehensive observability for the new multi-model runtime features with enhanced provider-specific metrics for the luban provider. Additionally, the platform implements comprehensive drift-guard parity suites ensuring consistency across telemetry, observability, token verification, and audit emission patterns across all seven services.
 
 ## Project Structure
 Observability is implemented consistently across all six services with standardized metrics collection using direct prometheus_client implementation and comprehensive OpenTelemetry telemetry:
@@ -80,6 +88,7 @@ Observability is implemented consistently across all six services with standardi
 - Kubernetes manifests configure probes and environment variables for observability components
 - **Enhanced**: Secret synchronization scripts ensure OTLP credentials persist across environment file regenerations
 - **New**: Drift-guard parity tests ensure byte-identical telemetry implementations across all services
+- **Updated**: Enhanced Settings Platform pane provides comprehensive technology stack visibility with standardized status indicators
 
 ```mermaid
 graph TB
@@ -91,6 +100,11 @@ PG["Platform Gateway<br/>prometheus_client + OpenTelemetry"]
 AS["Audit Service<br/>prometheus_client + OpenTelemetry"]
 SH["Skills Hub<br/>prometheus_client + OpenTelemetry"]
 IS["Incident Service<br/>prometheus_client + OpenTelemetry"]
+end
+subgraph "Enhanced Settings Platform Pane"
+SP["Settings View<br/>Technology Stack Visibility"]
+SV["Standardized Status<br/>ready/degraded/not ready/unavailable/checking…"]
+HV["Health Endpoints<br/>Version Information"]
 end
 subgraph "Drift-Guard Parity Suite"
 DP["Drift Guards<br/>Byte-Identical Telemetry"]
@@ -132,6 +146,8 @@ PG_T --> DP
 AS_T --> DP
 SH_T --> DP
 IS_T --> DP
+SP --> SV
+SP --> HV
 IA --> QA
 TV --> AE
 ES --> OTEL
@@ -142,10 +158,10 @@ EXPORTER --> OO
 ```
 
 **Diagram sources**
+- [settings-view.tsx:105-357](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L105-L357)
+- [gateway_service.py:46-84](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L46-L84)
+- [routes.py:1050-1093](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1050-L1093)
 - [test_module_parity.py:102-127](file://products/tool-gateway/tests/test_module_parity.py#L102-L127)
-- [test_module_parity.py:179-207](file://products/tool-gateway/tests/test_module_parity.py#L179-L207)
-- [test_module_parity.py:130-146](file://products/tool-gateway/tests/test_module_parity.py#L130-L146)
-- [test_module_parity.py:149-176](file://products/tool-gateway/tests/test_module_parity.py#L149-L176)
 
 **Section sources**
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
@@ -167,21 +183,28 @@ EXPORTER --> OO
   - Fail-open design ensures service continues operating if OpenObserve is unreachable
   - **New**: Robust OTLP credential management with durable secret synchronization
   - **New**: Byte-identical telemetry implementations across all services via drift guards
+- **Updated** Health Check Endpoints with Enhanced Version Information:
+  - Agent service `/api/v2/health` now includes five optional fields: `python_version`, `fastapi_version`, `agentscope_version`, `session_store_version`, `agent_state_version`
+  - Gateway `/health/ready` includes `python_version` and `fastapi_version` in all response branches
+  - Backend stores provide informational `server_version()` methods (PostgreSQL: `current_setting('server_version')`, Redis: `INFO server`, In-memory: `None`)
+  - All version lookups are best-effort failures yield `null` without affecting readiness contracts
+- **Updated** Standardized Status Vocabulary:
+  - Unified status terms across all platform components: **ready** (green), **degraded** (orange), **not ready** (red), **unavailable** (when probe fails), **checking…** (while probes are in flight)
+  - Replaces previous mixed terminology (*ok*, *loaded*) with consistent vocabulary
+  - Applied throughout the Settings Platform pane for clear operational awareness
 - Structured Logging Conventions:
   - All services call `configure_logging()` at startup to raise root logger from WARNING to INFO level
   - LOG_LEVEL environment variable supports per-deployment log level overrides (default: INFO)
   - Logs include consistent fields such as service name, version, request ID, and correlation IDs
   - Audit trail events (http_request, tool_invoked, policy decisions) are captured at INFO level
-- Health Check Endpoints:
-  - Services expose health endpoints conforming to shared schema definitions.
-  - Readiness and liveness probes are configured in Kubernetes deployments.
 - Alerting Rules and Dashboards:
-  - Alerting rules target key SLOs derived from metrics.
-  - Dashboard templates visualize core KPIs and operational health.
+  - Alerting rules target key SLOs derived from metrics
+  - Dashboard templates visualize core KPIs and operational health
 
 **Section sources**
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
+- [2026-08-28-components-tech-stack-and-status.md:35-57](file://docs/agentic-aiops-platform/release-notes/2026-08-28-components-tech-stack-and-status.md#L35-L57)
 
 ## Architecture Overview
 The observability architecture centers around dual pipelines: direct prometheus_client implementation for metrics collection and opt-in OpenTelemetry push pipeline for comprehensive observability:
@@ -191,6 +214,7 @@ The observability architecture centers around dual pipelines: direct prometheus_
 - **Enhanced**: Durable OTLP credential management via cluster-side secret merging
 - **New**: Multi-model runtime monitoring integrated into the metrics pipeline
 - **New**: Drift-guard parity suite ensures consistent telemetry implementations
+- **Updated**: Enhanced health endpoints provide comprehensive technology stack visibility
 - OTLP exporters send traces, metrics, and logs to OpenObserve via HTTP/protobuf
 - Kubernetes configurations inject environment variables and define probes
 - Prometheus scrapes metrics; logs are aggregated centrally; traces are exported to OpenObserve
@@ -198,7 +222,8 @@ The observability architecture centers around dual pipelines: direct prometheus_
 ```mermaid
 sequenceDiagram
 participant Client as "Client"
-participant Gateway as "Tool Gateway"
+participant Portal as "Settings Platform Pane"
+participant Gateway as "Platform Gateway"
 participant Agent as "Agent Platform"
 participant EvidenceStore as "Evidence Store"
 participant ModelDiscovery as "Model Discovery"
@@ -210,49 +235,89 @@ participant OpenObserve as "OpenObserve"
 participant Logger as "Log Aggregator"
 Note over DriftGuard : Cross-service parity validation
 Note over SecretSync : Cluster-side merge via kubectl patch
+Note over Portal : Technology stack visibility with standardized status
 DriftGuard->>DriftGuard : Validate telemetry parity
 DriftGuard->>DriftGuard : Validate observability parity
 DriftGuard->>DriftGuard : Validate auth parity
 SecretSync->>SecretSync : Generate Basic Auth Header
 SecretSync->>SecretSync : Patch Secrets (OTEL key only)
 SecretSync->>SecretSync : Restart Deployments
-Client->>Gateway : HTTP Request
-Gateway->>Gateway : configure_logging() + Record Metrics (prometheus_client)
-Gateway->>Gateway : setup_telemetry() (if OTEL_ENABLED)
-Gateway->>Agent : Agent Call (propagate trace_id)
-Agent->>EvidenceStore : Save Turn + Track Metrics
-EvidenceStore-->>Agent : Persistence Result + Truncation Metrics
-Agent->>ModelDiscovery : Refresh Models + Track Metrics
-ModelDiscovery->>LubanProvider : Query Models (if enabled)
-LubanProvider-->>ModelDiscovery : Model List (self-hosted)
-ModelDiscovery-->>Agent : Discovery Results + Model Count
-Agent-->>Gateway : Response
-Gateway->>Gateway : log_event("tool_invoked")
-Gateway->>Prometheus : Export metrics (prometheus_client)
+Portal->>Gateway : GET /health/ready (with tech versions)
+Gateway->>Gateway : _gateway_tech() (python/fastapi versions)
+Gateway->>Agent : GET /api/v2/health (with tech versions)
+Agent->>Agent : _tech_versions() (python/fastapi/agentscope)
+Agent->>EvidenceStore : server_version() (backend version)
+Agent->>ModelDiscovery : Background refresh loop
+ModelDiscovery->>LubanProvider : Query models (if enabled)
+LubanProvider-->>ModelDiscovery : Model list (self-hosted)
+ModelDiscovery-->>Agent : Discovery results + model count
+Agent-->>Gateway : Health response with tech versions
+Gateway-->>Portal : Ready status with tech stack info
+Portal->>Portal : Display unified status (ready/degraded/not ready/unavailable/checking…)
+Gateway->>Gateway : Record metrics (prometheus_client)
 Agent->>Prometheus : Export metrics (prometheus_client)
-EvidenceStore->>Prometheus : Evidence Store Metrics
-ModelDiscovery->>Prometheus : Model Discovery Metrics
-LubanProvider->>Prometheus : Provider Metrics
+EvidenceStore->>Prometheus : Evidence store metrics
+ModelDiscovery->>Prometheus : Model discovery metrics
+LubanProvider->>Prometheus : Provider metrics
 Gateway->>OpenObserve : OTLP traces/metrics/logs (authenticated)
 Agent->>OpenObserve : OTLP traces/metrics/logs (authenticated)
-EvidenceStore->>OpenObserve : Evidence Store Telemetry
-ModelDiscovery->>OpenObserve : Model Discovery Telemetry
-LubanProvider->>OpenObserve : Provider Telemetry
+EvidenceStore->>OpenObserve : Evidence store telemetry
+ModelDiscovery->>OpenObserve : Model discovery telemetry
+LubanProvider->>OpenObserve : Provider telemetry
 Gateway->>Logger : Structured logs with trace_id
 Agent->>Logger : Structured logs with trace_id
-EvidenceStore->>Logger : Evidence Store Logs
-ModelDiscovery->>Logger : Model Discovery Logs
-LubanProvider->>Logger : Provider Logs
+EvidenceStore->>Logger : Evidence store logs
+ModelDiscovery->>Logger : Model discovery logs
+LubanProvider->>Logger : Provider logs
 ```
 
 **Diagram sources**
+- [settings-view.tsx:221-318](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L221-L318)
+- [gateway_service.py:46-84](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L46-L84)
+- [routes.py:1050-1093](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1050-L1093)
 - [test_module_parity.py:102-127](file://products/tool-gateway/tests/test_module_parity.py#L102-L127)
-- [agent-platform/src/agent_service/runtime_kernel.py:510-529](file://products/agent-platform/src/agent_service/runtime_kernel.py#L510-L529)
-- [agent-platform/src/agent_service/services/model_discovery.py:272-289](file://products/agent-platform/src/agent_service/services/model_discovery.py#L272-L289)
-- [agent-platform/src/agent_service/providers/luban.py:44-74](file://products/agent-platform/src/agent_service/providers/luban.py#L44-L74)
-- [sync-otel-secrets.sh:73-90](file://shared/platform-ops/gitops/sync-otel-secrets.sh#L73-L90)
 
 ## Detailed Component Analysis
+
+### **Enhanced** Settings Platform Pane with Technology Stack Visibility
+- **Comprehensive Component Inventory**: Displays all platform components with their underlying technology stacks
+- **Unified Status Vocabulary**: Consistent status indicators across all components (ready, degraded, not ready, unavailable, checking…)
+- **Backend Version Plumbing**: Agent service health endpoint includes Python, FastAPI, AgentScope versions plus backend server versions
+- **Gateway Tech Stack Information**: Readiness endpoint includes Python and FastAPI versions in all response branches
+- **Best-Effort Version Detection**: All version lookups fail gracefully without affecting service readiness
+- **Live Component Status**: Real-time status assessment of each platform component
+
+```mermaid
+flowchart TD
+Start(["Settings Platform Load"]) --> FetchReady["GET /health/ready"]
+FetchReady --> FetchRuntime["GET /api/v1/runtime"]
+FetchReady --> BuildGatewayRow["Build Gateway Row<br/>FastAPI · Python"]
+FetchRuntime --> BuildAgentRow["Build Agent Row<br/>AgentScope · FastAPI"]
+BuildGatewayRow --> GetTechVersions["Get Python/FastAPI Versions"]
+BuildAgentRow --> GetAgentTech["Get Python/FastAPI/AgentScope Versions"]
+GetTechVersions --> GetBackendVersions["Get Backend Server Versions"]
+GetAgentTech --> GetBackendVersions
+GetBackendVersions --> AssessStatus{"Assess Component Status"}
+AssessStatus --> |Healthy| Ready["ready (green)"]
+AssessStatus --> |Partial Failure| Degraded["degraded (orange)"]
+AssessStatus --> |Unhealthy| NotReady["not ready (red)"]
+AssessStatus --> |Probe Failed| Unavailable["unavailable"]
+AssessStatus --> |Loading| Checking["checking…"]
+Ready --> DisplayTable["Display Component Table"]
+Degraded --> DisplayTable
+NotReady --> DisplayTable
+Unavailable --> DisplayTable
+Checking --> DisplayTable
+```
+
+**Diagram sources**
+- [settings-view.tsx:221-318](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L221-L318)
+- [gateway_service.py:46-84](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L46-L84)
+- [routes.py:1050-1093](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1050-L1093)
+
+**Section sources**
+- [2026-08-28-components-tech-stack-and-status.md:21-57](file://docs/agentic-aiops-platform/release-notes/2026-08-28-components-tech-stack-and-status.md#L21-L57)
+- [settings-view.tsx:105-357](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L105-L357)
 
 ### **Enhanced** Drift-Guard Parity Suite
 - **Comprehensive Coverage**: Ensures byte-identical telemetry implementations across all seven services
@@ -463,7 +528,7 @@ Skip --> End
 - [tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [platform-gateway/src/platform_gateway/core/telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [audit-service/src/audit_service/core/telemetry.py](file://products/audit-service/src/audit_service/core/telemetry.py)
-- [skills-hub/src/skills_hub/core/telemetry.py](file://products/skills_hub/core/telemetry.py)
+- [skills-hub/src/skills_hub/core/telemetry.py](file://products/skills_hub/src/skills_hub/core/telemetry.py)
 - [incident-service/src/incident_service/core/telemetry.py](file://products/incident-service/src/incident_service/core/telemetry.py)
 
 ### **Updated** Metrics Collection Strategy
@@ -601,7 +666,7 @@ Analyze --> End(["Insights & Alerts"])
 ```mermaid
 sequenceDiagram
 participant Caller as "Caller"
-participant Gateway as "Tool Gateway"
+participant Gateway as "Platform Gateway"
 participant Agent as "Agent Platform"
 participant Identity as "Identity Broker"
 participant OpenObserve as "OpenObserve"
@@ -631,57 +696,74 @@ Agent->>OpenObserve : ExportSpans() (Authenticated)
 - [tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [platform-gateway/src/platform_gateway/core/telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [audit-service/src/audit_service/core/telemetry.py](file://products/audit-service/src/audit_service/core/telemetry.py)
-- [skills-hub/src/skills_hub/core/telemetry.py](file://products/skills_hub/core/telemetry.py)
+- [skills-hub/src/skills_hub/core/telemetry.py](file://products/skills_hub/src/skills_hub/core/telemetry.py)
 - [incident-service/src/incident_service/core/telemetry.py](file://products/incident-service/src/incident_service/core/telemetry.py)
 
-### Health Check Endpoints, Readiness Probes, and Liveness Probes
-- Health endpoints return responses conforming to the shared health schema.
-- Readiness probes verify dependencies (e.g., Redis, external APIs).
-- Liveness probes confirm process health and internal state.
-- Kubernetes deployments configure probe paths, intervals, and thresholds.
+### **Updated** Health Check Endpoints, Readiness Probes, and Liveness Probes
+- **Enhanced Health Endpoints**: 
+  - Agent service `/api/v2/health` now includes comprehensive technology stack information
+  - Gateway `/health/ready` includes Python and FastAPI versions in all response branches
+  - Backend stores provide server version information when available
+- **Standardized Status Vocabulary**: 
+  - Unified status terms: **ready**, **degraded**, **not ready**, **unavailable**, **checking…**
+  - Consistent status indicators across all platform components
+- **Readiness and Liveness Probes**: 
+  - Readiness probes verify dependencies (e.g., Redis, external APIs)
+  - Liveness probes confirm process health and internal state
+  - Kubernetes deployments configure probe paths, intervals, and thresholds
+- **Improved Operational Awareness**: 
+  - Version information enables better troubleshooting and capacity planning
+  - Technology stack visibility helps identify compatibility issues
+  - Standardized status makes it easier to assess overall system health
 
 ```mermaid
 flowchart TD
 ProbeStart["Kubelet Probe"] --> Type{"Probe Type?"}
 Type --> |Readiness| CheckDeps["Check Dependencies<br/>DB, Cache, External APIs"]
 Type --> |Liveness| CheckProcess["Check Process State<br/>Internal Health"]
-CheckDeps --> Ready{"Ready?"}
-CheckProcess --> Alive{"Alive?"}
-Ready --> |Yes| ReturnOK["Return 200 OK"]
-Ready --> |No| ReturnFail["Return 503 Unavailable"]
-Alive --> |Yes| ReturnOK
-Alive --> |No| ReturnFail
-ReturnOK --> End(["Healthy"])
-ReturnFail --> End(["Unhealthy"])
+CheckDeps --> GetTechInfo["Get Technology Stack Info"]
+CheckProcess --> GetTechInfo
+GetTechInfo --> AssessStatus{"Assess Overall Status"}
+AssessStatus --> |All Healthy| Ready["Return 200 OK<br/>status: ready"]
+AssessStatus --> |Partial Issues| Degraded["Return 200 OK<br/>status: degraded"]
+AssessStatus --> |Critical Issues| NotReady["Return 503 Unavailable<br/>status: not ready"]
+AssessStatus --> |Probe Failed| Unavailable["Return 503 Unavailable<br/>status: unavailable"]
+Ready --> End(["Healthy"])
+Degraded --> End
+NotReady --> End
+Unavailable --> End
 ```
 
 **Diagram sources**
-- [shared/shared-contracts/schemas/health-response.schema.json](file://shared/shared-contracts/schemas/health-response.schema.json)
-- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
+- [health-response.schema.json:1-21](file://shared/shared-contracts/schemas/health-response.schema.json#L1-L21)
+- [agent-health.schema.json:41-68](file://shared/shared-contracts/schemas/agent-health.schema.json#L41-L68)
+- [gateway_service.py:56-84](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L56-L84)
+- [routes.py:1073-1093](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1073-L1093)
 
 **Section sources**
 - [shared/shared-contracts/schemas/health-response.schema.json](file://shared/shared-contracts/schemas/health-response.schema.json)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/tool-gateway-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
+- [2026-08-28-components-tech-stack-and-status.md:35-57](file://docs/agentic-aiops-platform/release-notes/2026-08-28-components-tech-stack-and-status.md#L35-L57)
 
 ### Alerting Rules and Dashboard Templates
 - Alerting rules are defined based on key metrics:
-  - High error rates, latency spikes, resource exhaustion, dependency failures.
-  - Tool invocation failures and redaction overflow events.
-  - **New**: Evidence store write failures and excessive truncation events.
-  - **New**: Model discovery refresh failures and unexpected model count changes.
-  - **New**: Luban provider configuration validation failures.
-  - **New**: Drift-guard test failures indicating service inconsistency.
+  - High error rates, latency spikes, resource exhaustion, dependency failures
+  - Tool invocation failures and redaction overflow events
+  - **New**: Evidence store write failures and excessive truncation events
+  - **New**: Model discovery refresh failures and unexpected model count changes
+  - **New**: Luban provider configuration validation failures
+  - **New**: Drift-guard test failures indicating service inconsistency
+  - **Updated**: Enhanced alerts for technology stack version mismatches
 - Dashboard templates visualize:
-  - Request throughput, latency percentiles, error rates, trace spans, and system resources.
-  - Tool invocation patterns and audit trail events.
-  - **New**: Evidence store operation metrics and model discovery lifecycle visualization.
-  - **New**: Multi-provider model availability and discovery status.
-  - **New**: Authentication parity validation results.
-- Alerts trigger notifications and runbooks for incident response.
+  - Request throughput, latency percentiles, error rates, trace spans, and system resources
+  - Tool invocation patterns and audit trail events
+  - **New**: Evidence store operation metrics and model discovery lifecycle visualization
+  - **New**: Multi-provider model availability and discovery status
+  - **New**: Authentication parity validation results
+  - **Updated**: Technology stack version monitoring and compatibility dashboards
+- Alerts trigger notifications and runbooks for incident response
 
 ```mermaid
 graph TB
@@ -696,16 +778,18 @@ LubanMetrics["Luban Provider Metrics"] --> Rules
 LubanMetrics --> Dashboards
 DriftMetrics["Drift-Guard Metrics"] --> Rules
 DriftMetrics --> Dashboards
+TechStackMetrics["Technology Stack Metrics"] --> Rules
+TechStackMetrics --> Dashboards
 ```
 
 **Section sources**
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
 
 ### Custom Metric Creation, Log Aggregation, and Trace Correlation
-- Custom metrics should adhere to shared naming and labeling conventions.
-- Logs must include correlation identifiers (request_id, trace_id) for cross-service correlation.
-- Traces should be exported with consistent span names and attributes.
-- Tool invocation events provide enhanced audit trail for debugging and compliance.
+- Custom metrics should adhere to shared naming and labeling conventions
+- Logs must include correlation identifiers (request_id, trace_id) for cross-service correlation
+- Traces should be exported with consistent span names and attributes
+- Tool invocation events provide enhanced audit trail for debugging and compliance
 - **Enhanced** OpenObserve Integration:
   - All three signal types (traces, metrics, logs) exported to OpenObserve when enabled
   - Automatic correlation between logs and traces via trace context
@@ -714,6 +798,7 @@ DriftMetrics --> Dashboards
   - **New**: Multi-model runtime metrics integrated into OpenObserve pipeline
   - **New**: Provider-specific metrics for enhanced observability
   - **New**: Drift-guard parity ensures consistent metric collection patterns
+  - **Updated**: Technology stack version metrics for compatibility monitoring
 
 ```mermaid
 flowchart TD
@@ -734,6 +819,8 @@ LubanMetrics["Provider Metrics"] --> Scrape
 LubanMetrics --> OpenObserve
 DriftMetrics["Drift-Guard Metrics"] --> Scrape
 DriftMetrics --> OpenObserve
+TechStackMetrics["Technology Stack Metrics"] --> Scrape
+TechStackMetrics --> OpenObserve
 ```
 
 **Section sources**
@@ -754,6 +841,7 @@ Observability components depend on shared contracts and Kubernetes configuration
   - **New**: Robust secret synchronization ensures credential availability
   - **New**: Luban provider dependencies for self-hosted LLM support
   - **New**: Drift-guard test dependencies for cross-service validation
+  - **Updated**: Enhanced health endpoint dependencies for technology stack version detection
 
 ```mermaid
 graph TB
@@ -792,6 +880,8 @@ MULTI_MODEL --> OTEL
 LUBAN_PROVIDER["Luban Provider Metrics"] --> AP_METRICS
 LUBAN_PROVIDER --> OTEL
 DRIFT_GUARD["Drift-Guard Tests"] --> ALL_SERVICES["All Seven Services"]
+TECH_STACK["Technology Stack Detection"] --> HEALTH_ENDPOINTS["Enhanced Health Endpoints"]
+HEALTH_ENDPOINTS --> SETTINGS_PANE["Settings Platform Pane"]
 ```
 
 **Diagram sources**
@@ -799,17 +889,19 @@ DRIFT_GUARD["Drift-Guard Tests"] --> ALL_SERVICES["All Seven Services"]
 - [agent-platform/src/agent_service/providers/luban.py:9-35](file://products/agent-platform/src/agent_service/providers/luban.py#L9-L35)
 - [sync-otel-secrets.sh:73-90](file://shared/platform-ops/gitops/sync-otel-secrets.sh#L73-L90)
 - [test_module_parity.py:38-46](file://products/tool-gateway/tests/test_module_parity.py#L38-L46)
+- [gateway_service.py:46-84](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L46-L84)
+- [routes.py:1050-1093](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1050-L1093)
 
 **Section sources**
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 
 ## Performance Considerations
-- Monitor latency percentiles and error rates to identify bottlenecks.
-- Use histograms for request durations and gauge metrics for resource utilization.
-- Correlate traces with metrics to pinpoint slow or failing operations.
-- Capacity planning should be informed by trends in throughput, latency, and error rates.
-- Tool invocation patterns can reveal performance issues in external integrations.
-- Direct prometheus_client implementation provides better performance than external instrumentation libraries.
+- Monitor latency percentiles and error rates to identify bottlenecks
+- Use histograms for request durations and gauge metrics for resource utilization
+- Correlate traces with metrics to pinpoint slow or failing operations
+- Capacity planning should be informed by trends in throughput, latency, and error rates
+- Tool invocation patterns can reveal performance issues in external integrations
+- Direct prometheus_client implementation provides better performance than external instrumentation libraries
 - **Enhanced** OpenTelemetry Performance:
   - Batch processing reduces network overhead for traces, metrics, and logs
   - Fail-open design prevents OpenObserve connectivity issues from impacting service performance
@@ -820,6 +912,7 @@ DRIFT_GUARD["Drift-Guard Tests"] --> ALL_SERVICES["All Seven Services"]
   - **New**: Evidence store truncation metrics use bounded label cardinality to prevent memory growth
   - **New**: Luban provider metrics are lightweight and don't impact self-hosted LLM performance
   - **New**: Drift-guard tests run asynchronously to avoid blocking deployment pipelines
+  - **Updated**: Technology stack version detection uses best-effort approach to avoid performance impact
 - **New** Multi-Model Runtime Performance:
   - Evidence store operations are best-effort and never block chat turns
   - Model discovery runs asynchronously with configurable refresh intervals
@@ -831,15 +924,15 @@ DRIFT_GUARD["Drift-Guard Tests"] --> ALL_SERVICES["All Seven Services"]
   - Cached module reads reduce filesystem access during test execution
 
 ## Troubleshooting Guide
-- Use structured logs with correlation IDs to trace requests across services.
-- Inspect Prometheus metrics for anomalies in latency, errors, and resource usage.
-- Review traces to understand call chains and identify failures.
-- Validate health endpoints and probe configurations when services are unhealthy.
-- Check LOG_LEVEL environment variable if audit trail events are missing - uvicorn defaults to WARNING level which discards INFO-level structured events like http_request and tool_invoked.
-- Investigate tool_invoked events for tool-specific issues and redaction problems.
-- Verify that configure_logging() is called during service startup to ensure proper log level configuration.
-- **Updated** If metrics are not appearing in Prometheus, verify that the /metrics endpoint is accessible and returning prometheus_client format data.
-- **Updated** The direct prometheus_client implementation avoids compatibility issues with pinned starlette versions that affected prometheus-fastapi-instrumentator.
+- Use structured logs with correlation IDs to trace requests across services
+- Inspect Prometheus metrics for anomalies in latency, errors, and resource usage
+- Review traces to understand call chains and identify failures
+- Validate health endpoints and probe configurations when services are unhealthy
+- Check LOG_LEVEL environment variable if audit trail events are missing - uvicorn defaults to WARNING level which discards INFO-level structured events like http_request and tool_invoked
+- Investigate tool_invoked events for tool-specific issues and redaction problems
+- Verify that configure_logging() is called during service startup to ensure proper log level configuration
+- **Updated** If metrics are not appearing in Prometheus, verify that the /metrics endpoint is accessible and returning prometheus_client format data
+- **Updated** The direct prometheus_client implementation avoids compatibility issues with pinned starlette versions that affected prometheus-fastapi-instrumentator
 - **Enhanced** OpenTelemetry Troubleshooting:
   - Set OTEL_ENABLED=true to enable telemetry pipeline
   - Configure OTEL_EXPORTER_OTLP_ENDPOINT to point to OpenObserve
@@ -874,27 +967,36 @@ DRIFT_GUARD["Drift-Guard Tests"] --> ALL_SERVICES["All Seven Services"]
   - Verify LUBAN_BASE_URL and LUBAN_API_KEY configuration for luban provider
   - Monitor provider-specific metrics for self-hosted LLM connectivity issues
   - Check model discovery ladder outcomes for resolution failures
+- **Updated** Health Endpoint Troubleshooting:
+  - Check enhanced health endpoints for technology stack version information
+  - Verify standardized status vocabulary is being applied correctly
+  - Monitor backend server version detection for database connectivity issues
+  - Use Settings Platform pane to quickly assess overall system health
+  - Check for version mismatches between different platform components
 
 **Section sources**
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
 - [test_module_parity.py:102-207](file://products/tool-gateway/tests/test_module_parity.py#L102-L207)
+- [2026-08-28-components-tech-stack-and-status.md:35-57](file://docs/agentic-aiops-platform/release-notes/2026-08-28-components-tech-stack-and-status.md#L35-L57)
 
 ## Conclusion
-The Luban AIOps Platform implements a robust observability framework centered on direct prometheus_client implementation for metrics collection, enhanced structured logging with configurable log levels, and comprehensive distributed tracing with OpenObserve integration. The platform includes an opt-in OpenTelemetry push pipeline that exports traces, metrics, and logs to OpenObserve via OTLP HTTP/protobuf protocol, providing end-to-end observability across all seven platform services. **Enhanced**: The platform now features robust monitoring capabilities for multi-model runtime including evidence store operations, model discovery lifecycle, and comprehensive observability for the new multi-model runtime features with enhanced provider-specific metrics for the luban provider. **New**: The platform implements comprehensive drift-guard parity suites ensuring byte-identical telemetry implementations across all services, authentication parity between audit-service and incident-service, and improved test coverage from 80% to 95% for audit-service and 87% to 92% for incident-service. By using direct prometheus_client instead of prometheus-fastapi-instrumentator, the platform avoids compatibility issues with pinned starlette versions while maintaining equivalent functionality. The framework adheres to shared conventions, calls configure_logging() at startup, and configures Kubernetes probes appropriately, enabling operators to effectively monitor, diagnose, and respond to incidents while planning for future capacity needs. The enhanced audit trail with tool_invoked events and OpenObserve integration provides comprehensive visibility into tool execution patterns and potential security concerns. **New**: The multi-model runtime monitoring provides deep insights into evidence persistence, model discovery processes, and overall system health through comprehensive metrics collection, including specialized monitoring for the new luban provider supporting self-hosted LLMs. **New**: The drift-guard parity suite ensures long-term consistency and maintainability of observability patterns across the entire platform ecosystem.
+The Luban AIOps Platform implements a robust observability framework centered on direct prometheus_client implementation for metrics collection, enhanced structured logging with configurable log levels, and comprehensive distributed tracing with OpenObserve integration. The platform includes an opt-in OpenTelemetry push pipeline that exports traces, metrics, and logs to OpenObserve via OTLP HTTP/protobuf protocol, providing end-to-end observability across all seven platform services. **Enhanced**: The platform now features enhanced observability with comprehensive technology stack visibility in the Settings Platform pane, standardized status vocabulary (ready, degraded, not ready, unavailable, checking…), and improved health endpoint responses with version information for better operational awareness and troubleshooting. The platform also includes robust monitoring capabilities for multi-model runtime including evidence store operations, model discovery lifecycle, and comprehensive observability for the new multi-model runtime features with enhanced provider-specific metrics for the luban provider. **New**: The platform implements comprehensive drift-guard parity suites ensuring byte-identical telemetry implementations across all services, authentication parity between audit-service and incident-service, and improved test coverage from 80% to 95% for audit-service and 87% to 92% for incident-service. By using direct prometheus_client instead of prometheus-fastapi-instrumentator, the platform avoids compatibility issues with pinned starlette versions while maintaining equivalent functionality. The framework adheres to shared conventions, calls configure_logging() at startup, and configures Kubernetes probes appropriately, enabling operators to effectively monitor, diagnose, and respond to incidents while planning for future capacity needs. The enhanced audit trail with tool_invoked events and OpenObserve integration provides comprehensive visibility into tool execution patterns and potential security concerns. **New**: The multi-model runtime monitoring provides deep insights into evidence persistence, model discovery processes, and overall system health through comprehensive metrics collection, including specialized monitoring for the new luban provider supporting self-hosted LLMs. **New**: The drift-guard parity suite ensures long-term consistency and maintainability of observability patterns across the entire platform ecosystem. **Updated**: The enhanced Settings Platform pane provides operators with immediate visibility into technology stack versions and standardized status indicators, significantly improving operational awareness and troubleshooting capabilities.
 
 ## Appendices
-- Reference specifications for observability baseline and conventions.
-- Kubernetes deployment examples for probes and environment variables.
-- Health response schema for consistent health checks.
-- LOG_LEVEL environment variable configuration for different environments.
-- **Updated** Migration notes from prometheus-fastapi-instrumentator to direct prometheus_client implementation.
-- **Enhanced** OpenTelemetry configuration guide for OpenObserve integration including environment variables and authentication setup.
-- **New**: Multi-model runtime monitoring guide including evidence store and model discovery metrics.
-- **New**: Secret synchronization workflow documentation for OTLP credential management.
-- **New**: Luban provider configuration guide for self-hosted LLM monitoring.
-- **New**: Drift-guard parity suite documentation including test execution and troubleshooting.
-- **New**: Authentication parity validation guide for audit-service and incident-service consistency.
+- Reference specifications for observability baseline and conventions
+- Kubernetes deployment examples for probes and environment variables
+- Health response schema for consistent health checks
+- LOG_LEVEL environment variable configuration for different environments
+- **Updated** Migration notes from prometheus-fastapi-instrumentator to direct prometheus_client implementation
+- **Enhanced** OpenTelemetry configuration guide for OpenObserve integration including environment variables and authentication setup
+- **New**: Multi-model runtime monitoring guide including evidence store and model discovery metrics
+- **New**: Secret synchronization workflow documentation for OTLP credential management
+- **New**: Luban provider configuration guide for self-hosted LLM monitoring
+- **New**: Drift-guard parity suite documentation including test execution and troubleshooting
+- **New**: Authentication parity validation guide for audit-service and incident-service consistency
+- **Updated**: Settings Platform pane documentation for technology stack visibility and standardized status indicators
+- **Updated**: Enhanced health endpoint documentation with version information and backend server versions
 
 **Section sources**
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
@@ -907,3 +1009,5 @@ The Luban AIOps Platform implements a robust observability framework centered on
 - [sync-otel-secrets.sh:1-162](file://shared/platform-ops/gitops/sync-otel-secrets.sh#L1-L162)
 - [2026-08-24-multimodel-runtime-and-live-discovery.md:1-217](file://docs/agentic-aiops-platform/release-notes/2026-08-24-multimodel-runtime-and-live-discovery.md#L1-L217)
 - [test_module_parity.py:1-212](file://products/tool-gateway/tests/test_module_parity.py#L1-L212)
+- [2026-08-28-components-tech-stack-and-status.md:1-75](file://docs/agentic-aiops-platform/release-notes/2026-08-28-components-tech-stack-and-status.md#L1-L75)
+- [2026-08-28-platform-components-blurb-prose-voice.md:1-37](file://docs/agentic-aiops-platform/release-notes/2026-08-28-platform-components-blurb-prose-voice.md#L1-L37)

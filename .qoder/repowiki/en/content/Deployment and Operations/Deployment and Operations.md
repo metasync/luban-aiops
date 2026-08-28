@@ -89,14 +89,21 @@
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-secrets.example.env)
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
+- [products/operator-portal/Dockerfile](file://products/operator-portal/Dockerfile)
+- [products/operator-portal/Makefile](file://products/operator-portal/Makefile)
+- [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
+- [products/operator-portal/web-ui/app/package.json](file://products/operator-portal/web-ui/app/package.json)
+- [products/operator-portal/web-ui/app/package-lock.json](file://products/operator-portal/web-ui/app/package-lock.json)
+- [products/operator-portal/web-ui/app/src/version.ts](file://products/operator-portal/web-ui/app/src/version.ts)
+- [products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced sync-audit-secrets.sh to include skills-hub as part of the AUDIT_INGEST_CLIENTS registry for comprehensive audit event ingestion
-- Improved secret upsert procedures with better handling of existing environment files to preserve other secrets
-- Enhanced restart procedures to address audit-secret rollout race conditions by ensuring audit-service is fully rolled out before restarting emitters
-- Updated skills-hub integration with audit service for usage event tracking (SPEC-029)
+- Enhanced build-time version injection in operator portal Vite configuration to capture locked dependency versions from package-lock.json
+- Added __REACT_VERSION__ and __ANTD_VERSION__ constants alongside existing __PLATFORM_VERSION__ for accurate version display matching actual shipped bundles
+- Updated operator portal Settings view to display precise React and Ant Design versions used in the built bundle
+- Improved version accuracy for platform component inventory in the operator portal
 
 ## Table of Contents
 1. Introduction
@@ -111,7 +118,7 @@
 10. Appendices
 
 ## Introduction
-This document provides comprehensive deployment and operations guidance for the Luban AIOps Platform. It focuses on Kubernetes deployment using GitOps with Kustomize overlays, container build processes, image management, automation scripts, environment configuration, secrets management (including enhanced delegation secret auto-provisioning, comprehensive audit secrets synchronization with skills-hub support, OpenTelemetry credential provisioning, and team-hosted LLM model server management), scaling strategies, monitoring setup (Prometheus metrics, structured logging, health checks, and OpenTelemetry push pipeline), operational procedures (updates, rollbacks, disaster recovery, capacity planning), performance tuning, resource optimization, and troubleshooting common issues. The platform now operates at version 0.5.0 with synchronized service versions across all components. Enhanced model pinning best practices ensure better audit attribution and traceability through fixed-point model IDs rather than rolling tier aliases. **New**: Team-hosted LLM model hosting capabilities enable running small models locally or on-premises with full platform integration.
+This document provides comprehensive deployment and operations guidance for the Luban AIOps Platform. It focuses on Kubernetes deployment using GitOps with Kustomize overlays, container build processes, image management, automation scripts, environment configuration, secrets management (including enhanced delegation secret auto-provisioning, comprehensive audit secrets synchronization with skills-hub support, OpenTelemetry credential provisioning, and team-hosted LLM model server management), scaling strategies, monitoring setup (Prometheus metrics, structured logging, health checks, and OpenTelemetry push pipeline), operational procedures (updates, rollbacks, disaster recovery, capacity planning), performance tuning, resource optimization, and troubleshooting common issues. The platform now operates at version 0.23.4 with synchronized service versions across all components. Enhanced model pinning best practices ensure better audit attribution and traceability through fixed-point model IDs rather than rolling tier aliases. **New**: Team-hosted LLM model hosting capabilities enable running small models locally or on-premises with full platform integration. **Enhanced**: Build-time version injection now captures locked dependency versions for accurate version display in the operator portal.
 
 ## Project Structure
 The platform is organized into multiple products and shared operational assets:
@@ -121,6 +128,7 @@ The platform is organized into multiple products and shared operational assets:
 - Version management: Centralized version control with validation across all services
 - Model catalog: Multi-provider model management with live discovery, curated series, and team-hosted model support
 - **Team-hosted LLM hosting**: Reference manifests for self-hosted model servers (Ollama, vLLM, llama.cpp) with bearer-token authentication
+- **Enhanced Operator Portal**: Build-time version injection capturing locked dependency versions for accurate platform component inventory
 
 ```mermaid
 graph TB
@@ -154,6 +162,7 @@ end
 subgraph "Build System"
 MK["mk/image.mk<br/>mk/python.mk"]
 PMK["Product Makefiles"]
+VITE["Vite Build Config"]
 end
 AP --> BASE
 IB --> BASE
@@ -182,6 +191,7 @@ PMK --> PG
 PMK --> AS
 PMK --> IS
 PMK --> SH
+VITE --> OP
 Ollama --> AP
 ```
 
@@ -196,6 +206,7 @@ Ollama --> AP
 - [products/identity-broker/Makefile](file://products/identity-broker/Makefile)
 - [products/tool-gateway/Makefile](file://products/tool-gateway/Makefile)
 - [products/audit-service/Dockerfile](file://products/audit-service/Dockerfile)
+- [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 
 **Section sources**
@@ -211,10 +222,10 @@ Ollama --> AP
 - Agent Platform: Provides agent runtime services, session management, and provider integrations. Exposes metrics and observability hooks with enhanced model catalog support including team-hosted model providers.
 - Identity Broker: Handles authentication, token issuance, and identity context propagation. Supports token delegation and exchange operations.
 - Tool Gateway: API gateway enforcing policies, routing to agents/tools, and exposing metrics and observability hooks.
-- Operator Portal: Web UI for operators to manage platform resources and configurations with OIDC authentication.
+- Operator Portal: Web UI for operators to manage platform resources and configurations with OIDC authentication. **Enhanced**: Now displays accurate React and Ant Design versions captured from package-lock.json during build time.
 - Platform Gateway: Central gateway that handles user authentication and delegates tokens to downstream services through the identity broker.
 - **Audit Service**: Durable audit trail service that ingests, stores, and queries audit events from all platform components with PostgreSQL persistence.
-- **Incident Service**: Incident management service providing intake, triage, and collaboration capabilities with version 0.5.0 synchronization.
+- **Incident Service**: Incident management service providing intake, triage, and collaboration capabilities with version 0.23.4 synchronization.
 - **Skills Hub**: Skills management service providing reusable capabilities across the platform with integrated audit event emission for usage tracking.
 - **Team-Hosted LLM Provider**: Self-hosted model server support via the `luban` provider, enabling local/on-premises model execution with bearer-token authentication.
 
@@ -224,8 +235,9 @@ Key operational artifacts:
 - mk/image.mk and mk/python.mk provide reusable build targets.
 - Kustomize base defines Kubernetes resources; overlays select runtime profiles and apply environment-specific patches.
 - Shell scripts automate deployment, secret synchronization, profile selection, verification, delegation secret provisioning, comprehensive audit secret management (including skills-hub), OpenTelemetry credential provisioning, and team-hosted model server management.
-- **Version Management**: Centralized version validation ensuring all services maintain consistent version 0.5.0.
+- **Version Management**: Centralized version validation ensuring all services maintain consistent version 0.23.4.
 - **Model Catalog**: Multi-provider model management with live discovery, curated series, credential gating, and team-hosted model support.
+- **Enhanced Build Process**: Vite configuration captures locked dependency versions for accurate version display.
 
 **Section sources**
 - [products/agent-platform/Dockerfile](file://products/agent-platform/Dockerfile)
@@ -240,9 +252,10 @@ Key operational artifacts:
 - [products/audit-service/src/audit_service/metadata.py](file://products/audit-service/src/audit_service/metadata.py)
 - [products/incident-service/src/incident_service/metadata.py](file://products/incident-service/src/incident_service/metadata.py)
 - [products/agent-platform/src/agent_service/providers/luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
+- [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
 
 ## Architecture Overview
-The platform deploys as a set of Kubernetes workloads orchestrated via Kustomize. The GitOps workflow uses overlays to compose base manifests with environment-specific settings and runtime profiles. Enhanced with automated delegation secret provisioning for secure cross-service communication, comprehensive audit trail storage with skills-hub integration, OpenTelemetry credential provisioning for centralized observability, centralized version management ensuring all services operate at version 0.5.0, advanced model catalog management with live discovery capabilities, and team-hosted model server support for local/on-premises model execution.
+The platform deploys as a set of Kubernetes workloads orchestrated via Kustomize. The GitOps workflow uses overlays to compose base manifests with environment-specific settings and runtime profiles. Enhanced with automated delegation secret provisioning for secure cross-service communication, comprehensive audit trail storage with skills-hub integration, OpenTelemetry credential provisioning for centralized observability, centralized version management ensuring all services operate at version 0.23.4, advanced model catalog management with live discovery capabilities, and team-hosted model server support for local/on-premises model execution. **Enhanced**: Build-time version injection ensures accurate dependency version display in the operator portal.
 
 ```mermaid
 graph TB
@@ -253,6 +266,7 @@ Secrets["Delegation & Audit & OTel Secrets"]
 VersionMgr["Version Manager"]
 ModelCatalog["Model Catalog"]
 LLMHosting["Team-Hosted LLM"]
+ViteBuild["Vite Build Process"]
 K8s["Kubernetes Cluster"]
 subgraph "Base Manifests"
 BaseNS["Namespace"]
@@ -285,6 +299,7 @@ Git --> Secrets
 Git --> VersionMgr
 Git --> ModelCatalog
 Git --> LLMHosting
+Git --> ViteBuild
 Kustomize --> BaseNS
 Kustomize --> BaseInfra
 Kustomize --> BaseAP
@@ -303,6 +318,7 @@ ModelCatalog --> BaseAP
 LLMHosting --> Ollama
 LLMHosting --> vLLM
 LLMHosting --> Llama
+ViteBuild --> BaseOP
 Ollama --> BaseAP
 vLLM --> BaseAP
 Llama --> BaseAP
@@ -330,6 +346,7 @@ OTLP --> OpenObserve
 - [shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml)
 - [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
+- [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
 
 ## Detailed Component Analysis
 
@@ -337,7 +354,8 @@ OTLP --> OpenObserve
 - Each product has a Dockerfile defining its runtime image.
 - Product Makefiles encapsulate build, test, and push steps.
 - Shared mk rules standardize image tagging, multi-arch builds, and Python packaging.
-- **Version Synchronization**: All services are built and tagged with version 0.5.0, ensuring consistent deployments across the platform.
+- **Version Synchronization**: All services are built and tagged with version 0.23.4, ensuring consistent deployments across the platform.
+- **Enhanced Operator Portal Build**: Vite configuration captures locked dependency versions from package-lock.json during build time, injecting __REACT_VERSION__ and __ANTD_VERSION__ constants alongside __PLATFORM_VERSION__ for accurate version display.
 
 Recommended flow:
 - Use product Makefiles to build images locally or in CI.
@@ -351,7 +369,8 @@ flowchart TD
 Start(["Start Build"]) --> CheckDeps["Check Dependencies"]
 CheckDeps --> ValidateVersion["Validate Version Consistency"]
 ValidateVersion --> BuildImage["Build Container Image"]
-BuildImage --> TagImage["Tag Image with v0.5.0"]
+BuildImage --> InjectVersions["Inject Build-Time Versions"]
+InjectVersions --> TagImage["Tag Image with v0.23.4"]
 TagImage --> PushImage["Push to Registry"]
 PushImage --> UpdateOverlay["Update Overlay Image Tag"]
 UpdateOverlay --> Commit["Commit Changes"]
@@ -363,19 +382,21 @@ Commit --> End(["End"])
 - [products/identity-broker/Dockerfile](file://products/identity-broker/Dockerfile)
 - [products/tool-gateway/Dockerfile](file://products/tool-gateway/Dockerfile)
 - [products/audit-service/Dockerfile](file://products/audit-service/Dockerfile)
+- [products/operator-portal/Dockerfile](file://products/operator-portal/Dockerfile)
 - [products/agent-platform/Makefile](file://products/agent-platform/Makefile)
 - [products/identity-broker/Makefile](file://products/identity-broker/Makefile)
 - [products/tool-gateway/Makefile](file://products/tool-gateway/Makefile)
 - [mk/image.mk](file://mk/image.mk)
 - [mk/python.mk](file://mk/python.mk)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
+- [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
 
 ### GitOps Deployment with Kustomize Overlays
 - Base manifests define core resources (namespaces, services, deployments, RBAC, policies).
 - Runtime profiles inject model provider configurations via ConfigMaps and secrets.
 - Overlays select profiles and apply environment-specific patches.
 - Scripts automate deploy, profile selection, secret sync, verification, delegation secret provisioning, comprehensive audit secret management (including skills-hub), OpenTelemetry credential provisioning, and team-hosted model server management.
-- **Version Validation**: Pre-deployment validation ensures all services maintain version 0.5.0 consistency.
+- **Version Validation**: Pre-deployment validation ensures all services maintain version 0.23.4 consistency.
 
 Operational steps:
 - Select runtime profile using the provided script.
@@ -442,7 +463,7 @@ K8s-->>Dev : Resources created/updated
 - **Updated**: Comprehensive audit secrets are automatically provisioned for audit event ingestion from all platform components including skills-hub, with improved secret upsert procedures and race condition handling.
 - **Updated**: OpenTelemetry credentials are automatically provisioned for centralized observability via OpenObserve with enhanced CI/CD support and durable cluster-side merging.
 - **New**: Team-hosted LLM model server secrets are managed through dedicated configuration for bearer-token authentication.
-- **Version Management**: All services configured with version 0.5.0 metadata and consistent versioning.
+- **Version Management**: All services configured with version 0.23.4 metadata and consistent versioning.
 - **Model Pinning Best Practices**: Enhanced runtime secrets configuration recommends fixed-point model IDs over rolling tier aliases for better audit attribution and traceability.
 
 Best practices:
@@ -454,7 +475,7 @@ Best practices:
 - Use OpenTelemetry secret provisioning to ensure consistent telemetry authentication headers with durable cluster-side merging.
 - Configure team-hosted model server secrets with proper bearer-token authentication.
 - **CI/CD Integration**: Set `SKIP_OTEL_SECRETS=true` in CI environments where secrets are injected externally.
-- **Version Validation**: Ensure all services maintain version 0.5.0 consistency during deployment.
+- **Version Validation**: Ensure all services maintain version 0.23.4 consistency during deployment.
 - **Model Pinning**: Prefer fixed-point generation IDs (e.g., `qwen3.8-max`) over rolling tier aliases (e.g., `qwen-plus`) for precise audit attribution and traceability.
 
 ```mermaid
@@ -514,7 +535,7 @@ The platform implements a sophisticated token delegation system that enables sec
 - **Token Exchange**: The identity-broker validates subject tokens and mints delegated tokens with restricted audiences
 - **Secret Management**: Automated provisioning ensures consistent service credentials across platform-gateway and identity-broker
 - **Workload Identity Support**: Optional projected workload tokens for enhanced security in production environments
-- **Version Consistency**: All services operating at version 0.5.0 ensure compatible token handling
+- **Version Consistency**: All services operating at version 0.23.4 ensure compatible token handling
 
 ```mermaid
 sequenceDiagram
@@ -556,7 +577,7 @@ The audit service implements a comprehensive audit trail system with enhanced de
 - **PostgreSQL Persistence**: Durable storage with configurable retention policies and automatic eviction
 - **Query Interface**: REST API for querying audit events with filtering capabilities
 - **Health Monitoring**: Readiness and liveness probes for reliable operation
-- **Version 0.5.0**: Fully integrated with platform version synchronization
+- **Version 0.23.4**: Fully integrated with platform version synchronization
 
 ```mermaid
 sequenceDiagram
@@ -612,7 +633,7 @@ The platform implements a unified observability pipeline using OpenTelemetry wit
 - **CI/CD Integration**: Skip mechanism (`SKIP_OTEL_SECRETS=true`) for environments where secrets are injected externally
 - **Intelligent Secret Handling**: Uses `kubectl patch --type merge` for atomic header updates instead of wholesale file rewrites, preserving other secret keys
 - **Robust Synchronization**: Sibling scripts (delegation, audit, skills) preserve existing OTLP headers during their env-file rewrites
-- **Version 0.5.0**: All services emit telemetry with consistent version metadata
+- **Version 0.23.4**: All services emit telemetry with consistent version metadata
 
 ```mermaid
 sequenceDiagram
@@ -769,7 +790,7 @@ Ollama-->>Platform : Response
 - **Observability Scaling**: Scale OpenObserve instances based on telemetry volume and query patterns.
 - **Model Catalog Scaling**: Monitor model discovery refresh rates and cache hit ratios for optimal performance.
 - **Team-Hosted Model Scaling**: Scale model servers by replicating stacks rather than increasing replicas; consider GPU node pools for high-throughput scenarios.
-- **Version 0.5.0 Considerations**: All services optimized for consistent scaling behavior across the platform.
+- **Version 0.23.4 Considerations**: All services optimized for consistent scaling behavior across the platform.
 
 Guidelines:
 - Set resource requests and limits conservatively; monitor actual usage.
@@ -779,7 +800,7 @@ Guidelines:
 - Plan OpenObserve capacity based on telemetry ingestion rates and retention policies.
 - Configure model discovery refresh intervals based on provider API rate limits and change frequency.
 - For team-hosted models, plan GPU node capacity and model weight storage sizing based on model sizes and concurrent usage patterns.
-- Ensure consistent scaling across all version 0.5.0 services for optimal performance.
+- Ensure consistent scaling across all version 0.23.4 services for optimal performance.
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
@@ -799,7 +820,8 @@ Guidelines:
 - **Model Catalog Monitoring**: Metrics for model discovery refresh rates, cache hit ratios, and model counts per provider.
 - **Team-Hosted Model Monitoring**: Health checks for Ollama endpoints, model loading status, and inference performance metrics.
 - **Skills Hub Monitoring**: Audit emission metrics for skill usage tracking (SPEC-029).
-- **Version 0.5.0 Monitoring**: All services emit consistent version metadata for accurate monitoring and alerting.
+- **Version 0.23.4 Monitoring**: All services emit consistent version metadata for accurate monitoring and alerting.
+- **Enhanced Operator Portal Monitoring**: Accurate version display showing locked dependency versions for React and Ant Design components.
 
 Implementation notes:
 - Integrate Prometheus scraping via ServiceMonitors or scrape configs targeting service ports.
@@ -814,6 +836,7 @@ Implementation notes:
 - Monitor team-hosted model server health, model loading times, and inference latency.
 - Track GPU utilization and memory usage for GPU-enabled model servers.
 - Monitor skills-hub audit emission metrics for usage tracking.
+- Verify operator portal displays accurate dependency versions in Settings view.
 
 ```mermaid
 graph TB
@@ -825,6 +848,7 @@ OTel["OpenTelemetry Exporters"]
 ModelMetrics["Model Catalog Metrics"]
 LLMMetrics["Team-Hosted Model Metrics"]
 SkillsMetrics["Skills Hub Audit Metrics"]
+PortalMetrics["Operator Portal Version Display"]
 Prometheus["Prometheus"]
 Grafana["Grafana Dashboards"]
 OpenObserve["OpenObserve Backend"]
@@ -836,6 +860,7 @@ Services --> OTel
 Services --> ModelMetrics
 Services --> LLMMetrics
 Services --> SkillsMetrics
+Services --> PortalMetrics
 Prometheus --> Metrics
 Prometheus --> ModelMetrics
 Prometheus --> LLMMetrics
@@ -857,6 +882,7 @@ VersionMonitor --> Services
 - [products/tool-gateway/src/tool_gateway/core/telemetry.py](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/audit-service-deployment.yaml)
 - [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx)
 
 ### Operational Procedures: Updates, Rollbacks, Disaster Recovery, Capacity Planning
 - Updates:
@@ -866,9 +892,10 @@ VersionMonitor --> Services
   - Re-provision delegation secrets if service credentials change.
   - Re-provision comprehensive audit secrets if audit ingestion credentials change (including skills-hub).
   - Re-provision OpenTelemetry credentials if OpenObserve authentication changes.
-  - **Version Validation**: Ensure all services maintain version 0.5.0 consistency.
+  - **Version Validation**: Ensure all services maintain version 0.23.4 consistency.
   - **Model Catalog Updates**: Refresh model discovery if provider model lineups change significantly.
   - **Team-Hosted Model Updates**: Update model weights, rotate bearer tokens, or upgrade model server software as needed.
+  - **Operator Portal Updates**: Rebuild to capture updated locked dependency versions for accurate version display.
 - Rollbacks:
   - Revert overlay commits to previous known-good tags.
   - Apply reverted overlay; confirm rollback success.
@@ -878,6 +905,7 @@ VersionMonitor --> Services
   - **Version Rollback**: Ensure all services revert to consistent previous version.
   - **Model Catalog Rollback**: Revert to curated series if live discovery causes issues.
   - **Team-Hosted Model Rollback**: Revert to previous model versions or server configurations.
+  - **Operator Portal Rollback**: Rebuild to restore previous locked dependency versions.
 - Disaster Recovery:
   - Back up persistent data (e.g., Redis volumes, PostgreSQL data, model weight PVCs).
   - Restore from backups and reapply overlays.
@@ -886,19 +914,21 @@ VersionMonitor --> Services
   - Re-provision OpenTelemetry credentials and validate telemetry flow.
   - Restore team-hosted model weights and validate model availability.
   - Confirm data integrity and service functionality.
-  - **Version Verification**: Validate all services restored to consistent version 0.5.0.
+  - **Version Verification**: Validate all services restored to consistent version 0.23.4.
   - **Model Catalog Recovery**: Rebuild model catalog from curated series if discovery cache is corrupted.
   - **Team-Hosted Model Recovery**: Restore model weights from PVC backups and restart model servers.
+  - **Operator Portal Recovery**: Rebuild to restore accurate dependency version display.
 - Capacity Planning:
   - Analyze metrics trends and resource utilization.
   - Scale horizontally or vertically based on observed demand.
   - Plan node pool sizing and cluster upgrades.
   - Monitor PostgreSQL storage growth for audit data retention.
   - Monitor OpenObserve storage and query performance for telemetry data.
-  - **Version 0.5.0 Optimization**: Leverage consistent service versions for predictable scaling behavior.
+  - **Version 0.23.4 Optimization**: Leverage consistent service versions for predictable scaling behavior.
   - **Model Catalog Capacity**: Plan for increased model discovery traffic and provider API rate limits.
   - **Team-Hosted Model Capacity**: Plan GPU node capacity, model weight storage, and concurrent inference capacity based on usage patterns.
   - **Skills Hub Capacity**: Monitor skill usage patterns and audit event volume for capacity planning.
+  - **Operator Portal Capacity**: Monitor version display accuracy and dependency resolution performance.
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
@@ -909,9 +939,10 @@ VersionMonitor --> Services
 - [shared/platform-ops/gitops/verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 - [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
+- [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
 
 ## Dependency Analysis
-The platform's dependencies span build tools, container images, Kubernetes resources, runtime profiles, delegation secret management, comprehensive audit secret management (including skills-hub), OpenTelemetry credential provisioning, centralized version management, advanced model catalog management, and team-hosted model server support.
+The platform's dependencies span build tools, container images, Kubernetes resources, runtime profiles, delegation secret management, comprehensive audit secret management (including skills-hub), OpenTelemetry credential provisioning, centralized version management, advanced model catalog management, and team-hosted model server support. **Enhanced**: Vite build configuration now depends on package-lock.json for locked dependency version resolution.
 
 ```mermaid
 graph LR
@@ -924,6 +955,7 @@ PGMake["products/platform-gateway/Makefile"] --> PGDocker["products/platform-gat
 ASMake["products/audit-service/Makefile"] --> ASDocker["products/audit-service/Dockerfile"]
 ISMake["products/incident-service/Makefile"] --> ISDocker["products/incident-service/Dockerfile"]
 SHMake["products/skills-hub/Makefile"] --> SHDocker["products/skills-hub/Dockerfile"]
+OPMake["products/operator-portal/Makefile"] --> OPDocker["products/operator-portal/Dockerfile"]
 BaseKust["base/kustomization.yaml"] --> Infra["infra/*"]
 BaseKust --> APRes["agent-platform/*"]
 BaseKust --> IBRes["identity-broker/*"]
@@ -945,6 +977,9 @@ VersionValidation --> VERSION["VERSION"]
 ModelCatalog --> Providers["provider adapters"]
 LLMHosting --> OllamaManifests["Ollama manifests"]
 OllamaManifests --> Platform["Platform Integration"]
+ViteConfig["Vite Config"] --> LockFile["package-lock.json"]
+LockFile --> VersionConstants["Version Constants"]
+VersionConstants --> PortalUI["Operator Portal UI"]
 ```
 
 **Diagram sources**
@@ -957,6 +992,7 @@ OllamaManifests --> Platform["Platform Integration"]
 - [products/audit-service/Dockerfile](file://products/audit-service/Dockerfile)
 - [products/incident-service/Dockerfile](file://products/incident-service/Dockerfile)
 - [products/skills-hub/Dockerfile](file://products/skills-hub/Dockerfile)
+- [products/operator-portal/Dockerfile](file://products/operator-portal/Dockerfile)
 - [shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
 - [shared/platform-ops/gitops/dev-k8s/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml)
@@ -964,6 +1000,8 @@ OllamaManifests --> Platform["Platform Integration"]
 - [products/agent-platform/src/agent_service/services/model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [VERSION](file://VERSION)
 - [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
+- [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
+- [products/operator-portal/web-ui/app/package-lock.json](file://products/operator-portal/web-ui/app/package-lock.json)
 
 **Section sources**
 - [Makefile](file://Makefile)
@@ -973,6 +1011,7 @@ OllamaManifests --> Platform["Platform Integration"]
 - [shared/platform-ops/gitops/dev-k8s/kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 - [VERSION](file://VERSION)
+- [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
 
 ## Performance Considerations
 - Resource Requests/Limits:
@@ -1016,10 +1055,14 @@ OllamaManifests --> Platform["Platform Integration"]
   - Monitor audit emission performance and event delivery success rates.
   - Optimize skill search and retrieval operations for better user experience.
   - Monitor audit event volume from skills-hub for capacity planning.
-- **Version 0.5.0 Optimizations**:
+- **Version 0.23.4 Optimizations**:
   - All services benefit from consistent version optimizations and performance improvements.
   - Leverage synchronized service versions for predictable performance characteristics.
   - Monitor version-specific performance metrics across all platform components.
+- **Operator Portal Performance**:
+  - Build-time version injection adds minimal overhead during container build.
+  - Locked dependency versions ensure consistent performance characteristics.
+  - Monitor Settings view load times for accurate version display.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -1081,10 +1124,16 @@ Common issues and resolutions:
   - Verify audit event delivery success rates from skills-hub.
 - **Version Consistency Issues**:
   - Use `validate_version.py` to check version drift across all services.
-  - Ensure all services maintain version 0.5.0 consistency.
+  - Ensure all services maintain version 0.23.4 consistency.
   - Check SERVICE_VERSION constants in metadata.py files.
   - Verify __version__ attributes in package __init__.py files.
   - Validate VERSION file matches expected platform version.
+- **Operator Portal Version Display Issues**:
+  - Verify Vite build completes successfully with package-lock.json present.
+  - Check that __REACT_VERSION__ and __ANTD_VERSION__ constants are properly injected.
+  - Ensure Settings view displays accurate dependency versions.
+  - Verify package-lock.json contains correct locked dependency versions.
+  - Check that build-time version injection is working in Docker build process.
 
 Operational commands:
 - Use deploy scripts to apply overlays and reconcile resources.
@@ -1096,6 +1145,7 @@ Operational commands:
 - Use model catalog metrics to monitor discovery performance and cache effectiveness.
 - Use team-hosted model health checks to verify model server availability and model loading status.
 - Use skills-hub audit metrics to monitor skill usage tracking and audit emission performance.
+- Verify operator portal Settings view displays accurate dependency versions.
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
@@ -1108,9 +1158,11 @@ Operational commands:
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 - [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
 - [docs/guides/luban-llm-guide.md](file://docs/guides/luban-llm-guide.md)
+- [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
+- [products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx)
 
 ## Conclusion
-This guide outlines the end-to-end deployment and operations for the Luban AIOps Platform using GitOps and Kustomize. By following the documented processes for building images, managing overlays, configuring environments, provisioning delegation secrets, synchronizing comprehensive audit secrets (including skills-hub integration), provisioning OpenTelemetry credentials, and setting up monitoring, teams can reliably operate the platform at scale. The enhanced delegation secret auto-provisioning ensures secure cross-service authentication while maintaining operational simplicity. The comprehensive audit service provides durable audit trail storage with PostgreSQL persistence, enabling complete compliance and security monitoring across all platform components including skills-hub usage tracking. The integrated OpenTelemetry pipeline with automated credential provisioning delivers centralized observability with fail-safe design and enhanced CI/CD support. The centralized version management system ensures all services operate at version 0.5.0 with consistent behavior across the platform. The advanced model catalog system with live discovery and enhanced model pinning best practices provides robust LLM model management with fixed-point model IDs for better audit attribution and traceability. **New**: Team-hosted LLM model hosting capabilities enable running small models locally or on-premises with full platform integration, supporting Ollama, vLLM, and llama.cpp backends with bearer-token authentication and reference Kubernetes manifests. **Enhanced**: The improved sync-audit-secrets.sh script now includes skills-hub in the AUDIT_INGEST_CLIENTS registry and addresses audit-secret rollout race conditions through enhanced restart procedures and improved secret upsert handling. Continuous validation, robust secret management, proactive capacity planning, careful monitoring of token delegation flows, comprehensive audit ingestion, telemetry export, model catalog performance, team-hosted model server health, skills-hub audit emissions, and version consistency are essential for maintaining stability and performance.
+This guide outlines the end-to-end deployment and operations for the Luban AIOps Platform using GitOps and Kustomize. By following the documented processes for building images, managing overlays, configuring environments, provisioning delegation secrets, synchronizing comprehensive audit secrets (including skills-hub integration), provisioning OpenTelemetry credentials, and setting up monitoring, teams can reliably operate the platform at scale. The enhanced delegation secret auto-provisioning ensures secure cross-service authentication while maintaining operational simplicity. The comprehensive audit service provides durable audit trail storage with PostgreSQL persistence, enabling complete compliance and security monitoring across all platform components including skills-hub usage tracking. The integrated OpenTelemetry pipeline with automated credential provisioning delivers centralized observability with fail-safe design and enhanced CI/CD support. The centralized version management system ensures all services operate at version 0.23.4 with consistent behavior across the platform. The advanced model catalog system with live discovery and enhanced model pinning best practices provides robust LLM model management with fixed-point model IDs for better audit attribution and traceability. **New**: Team-hosted LLM model hosting capabilities enable running small models locally or on-premises with full platform integration, supporting Ollama, vLLM, and llama.cpp backends with bearer-token authentication and reference Kubernetes manifests. **Enhanced**: The improved sync-audit-secrets.sh script now includes skills-hub in the AUDIT_INGEST_CLIENTS registry and addresses audit-secret rollout race conditions through enhanced restart procedures and improved secret upsert handling. **Enhanced**: Build-time version injection in the operator portal now captures locked dependency versions from package-lock.json, providing accurate React and Ant Design version display that matches the actual shipped bundles. Continuous validation, robust secret management, proactive capacity planning, careful monitoring of token delegation flows, comprehensive audit ingestion, telemetry export, model catalog performance, team-hosted model server health, skills-hub audit emissions, version consistency, and accurate dependency version display are essential for maintaining stability and performance.
 
 ## Appendices
 
@@ -1123,8 +1175,9 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - **sync-otel-secrets.sh**: Automatically provisions OpenTelemetry credentials for centralized observability via OpenObserve with enhanced CI/CD support and durable cluster-side merging using kubectl patch.
 - verify-runtime-profile.sh: Validates that the active runtime profile matches expectations.
 - reconcile-portal-oidc-client.sh: Ensures OIDC client configuration remains consistent with Keycloak.
-- **validate_version.py**: Validates version consistency across all platform services and ensures version 0.5.0 synchronization.
+- **validate_version.py**: Validates version consistency across all platform services and ensures version 0.23.4 synchronization.
 - **llm-hosting manifests**: Reference Kubernetes manifests for team-hosted model server deployment (free-standing, not part of main overlay).
+- **Vite Build Process**: Captures locked dependency versions for accurate version display in operator portal.
 
 **Section sources**
 - [shared/platform-ops/gitops/deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
@@ -1137,6 +1190,7 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - [shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 - [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
+- [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
 
 ### Appendix B: Environment Variables and Configurations
 - Observability settings centralized in a shared env file.
@@ -1146,11 +1200,12 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - **OpenTelemetry configuration**: OTEL_ENABLED for pipeline activation, OTEL_EXPORTER_OTLP_ENDPOINT for OpenObserve URL, OTEL_EXPORTER_OTLP_HEADERS for authentication (provisioned by sync-otel-secrets.sh).
 - **Workload identity**: PLATFORM_GATEWAY_WORKLOAD_TOKEN_PATH for production deployments preferring projected tokens over static secrets.
 - **CI/CD Integration**: SKIP_OTEL_SECRETS=true to skip OpenTelemetry secret provisioning in environments where secrets are injected externally.
-- **Version Management**: All services configured with version 0.5.0 metadata and consistent versioning enforced by validate_version.py.
+- **Version Management**: All services configured with version 0.23.4 metadata and consistent versioning enforced by validate_version.py.
 - **Model Catalog Configuration**: AGENT_MODEL_DISCOVERY_ENABLED for live discovery, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS for refresh intervals, AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS for API timeouts.
 - **Team-Hosted Model Configuration**: LUBAN_API_KEY for bearer-token authentication, LUBAN_BASE_URL for model server endpoint, LUBAN_MODEL_NAME for default model, LUBAN_MODELS for model pinning.
 - **Skills Hub Configuration**: SKILLS_AUDIT_SERVICE_URL for audit event emission, SKILLS_AUDIT_CLIENT_ID for client identification, SKILLS_AUDIT_CLIENT_SECRET for audit authentication.
 - **Model Pinning Best Practices**: Use fixed-point model IDs (e.g., qwen3.8-max) over rolling tier aliases (e.g., qwen-plus) for better audit attribution and traceability.
+- **Operator Portal Configuration**: Build-time version injection automatically captures locked dependency versions from package-lock.json for accurate version display.
 - Ensure consistency across environments by pinning versions and tags.
 
 **Section sources**
@@ -1165,6 +1220,7 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - [shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env](file://shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env)
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
+- [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
 
 ### Appendix C: Delegation Secret Management
 **New Section** Enhanced delegation secret management for secure cross-service authentication.
@@ -1175,7 +1231,7 @@ The delegation secret system ensures secure communication between platform-gatew
 - **Consistent Configuration**: The same secret is configured in both platform-gateway (PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET) and identity-broker (IDENTITY_SERVICE_CLIENTS)
 - **Automated Deployment**: The script creates Kubernetes secrets and restarts affected deployments
 - **Security Best Practices**: Secrets are never committed to version control; generated dynamically during deployment
-- **Version 0.5.0 Integration**: All services operate with consistent delegation secret handling
+- **Version 0.23.4 Integration**: All services operate with consistent delegation secret handling
 
 Usage:
 ```bash
@@ -1205,7 +1261,7 @@ The audit secret system ensures secure audit event ingestion from all platform c
 - **Enhanced Secret Upsert**: Improved upsert_env_line function preserves existing environment files while updating audit credentials
 - **Race Condition Handling**: Enhanced restart procedures ensure audit-service is fully rolled out before restarting emitters to prevent authentication failures
 - **Automatic Workload Restart**: Script automatically restarts affected deployments after secret updates
-- **Version 0.5.0 Compatibility**: Full integration with platform version synchronization
+- **Version 0.23.4 Compatibility**: Full integration with platform version synchronization
 
 Usage:
 ```bash
@@ -1246,7 +1302,7 @@ The OpenTelemetry secret system ensures secure telemetry ingestion via OpenObser
 - **Enhanced CI/CD Support**: Intelligent handling of externally provisioned secrets with skip mechanisms
 - **Robust Fallback**: Uses `kubectl patch --type merge` for atomic header updates instead of wholesale file rewrites, preserving other secret keys
 - **Sibling Script Synchronization**: All sibling scripts (delegation, audit, skills) preserve existing OTLP headers during their env-file rewrites
-- **Version 0.5.0 Metadata**: All telemetry includes consistent version information for accurate tracking
+- **Version 0.23.4 Metadata**: All telemetry includes consistent version information for accurate tracking
 
 Usage:
 ```bash
@@ -1282,7 +1338,7 @@ The audit service requires PostgreSQL for durable audit trail storage:
 - **Headless Service**: Enables stable DNS names for StatefulSet pod discovery
 - **Development Credentials**: Pre-configured with development database, user, and password
 - **Volume Management**: Persistent volume with 1Gi storage allocation for audit data
-- **Version 0.5.0 Optimization**: Enhanced performance and reliability improvements
+- **Version 0.23.4 Optimization**: Enhanced performance and reliability improvements
 
 Production considerations:
 - Replace development credentials with proper secrets management
@@ -1297,22 +1353,24 @@ Production considerations:
 - [shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-config.env)
 
 ### Appendix G: Version Management and Synchronization
-**New Section** Comprehensive version management system ensuring all platform services operate at version 0.5.0.
+**New Section** Comprehensive version management system ensuring all platform services operate at version 0.23.4.
 
 The platform implements a centralized version management system that enforces version consistency across all components:
 
-- **Single Source of Truth**: The root VERSION file contains the authoritative platform version (0.5.0)
+- **Single Source of Truth**: The root VERSION file contains the authoritative platform version (0.23.4)
 - **Automated Validation**: The validate_version.py script checks version consistency across all services
 - **Metadata Synchronization**: All services maintain consistent SERVICE_VERSION constants in metadata.py files
 - **Package Versioning**: Package __init__.py files contain matching __version__ attributes
 - **Build Integration**: Version validation is integrated into the build and deployment pipeline
 - **Drift Detection**: Automatic detection and reporting of version inconsistencies
+- **Enhanced Operator Portal**: Build-time version injection captures locked dependency versions for accurate display
 
 Key version locations:
-- Root VERSION file: Contains platform version 0.5.0
-- Service metadata: SERVICE_VERSION = "0.5.0" in all metadata.py files
-- Package versions: __version__ = "0.5.0" in package __init__.py files
-- Pyproject.toml: [project] version set to 0.5.0 for all products
+- Root VERSION file: Contains platform version 0.23.4
+- Service metadata: SERVICE_VERSION = "0.23.4" in all metadata.py files
+- Package versions: __version__ = "0.23.4" in package __init__.py files
+- Pyproject.toml: [project] version set to 0.23.4 for all products
+- Operator portal: __PLATFORM_VERSION__, __REACT_VERSION__, __ANTD_VERSION__ injected at build time
 
 Usage:
 ```bash
@@ -1323,7 +1381,7 @@ python shared/shared-contracts/scripts/validate_version.py
 cat VERSION
 
 # Update version across all services
-echo "0.5.0" > VERSION
+echo "0.23.4" > VERSION
 # Then run validation to ensure consistency
 python shared/shared-contracts/scripts/validate_version.py
 ```
@@ -1334,6 +1392,7 @@ Benefits:
 - Simplifies debugging and troubleshooting
 - Enables reliable rolling updates
 - Supports consistent monitoring and alerting
+- Provides accurate dependency version display in operator portal
 
 **Section sources**
 - [VERSION](file://VERSION)
@@ -1342,6 +1401,7 @@ Benefits:
 - [products/incident-service/src/incident_service/metadata.py](file://products/incident-service/src/incident_service/metadata.py)
 - [products/audit-service/src/audit_service/__init__.py](file://products/audit-service/src/audit_service/__init__.py)
 - [products/incident-service/src/incident_service/__init__.py](file://products/incident-service/src/incident_service/__init__.py)
+- [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
 
 ### Appendix H: Model Catalog Configuration and Best Practices
 **Updated Section** Comprehensive model catalog configuration with enhanced model pinning best practices and team-hosted model server support.
@@ -1463,3 +1523,43 @@ Security posture:
 - [shared/platform-ops/gitops/llm-hosting/ollama/pvc.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/pvc.yaml)
 - [shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml](file://shared/platform-ops/gitops/llm-hosting/ollama/secret.yaml)
 - [docs/guides/luban-llm-guide.md](file://docs/guides/luban-llm-guide.md)
+
+### Appendix J: Enhanced Operator Portal Build Process
+**New Section** Build-time version injection for accurate dependency version display.
+
+The operator portal now implements enhanced build-time version injection to capture locked dependency versions from package-lock.json:
+
+- **Vite Configuration Enhancement**: vite.config.ts reads package-lock.json to extract locked versions of react and antd dependencies
+- **Build-Time Constants**: Injects __REACT_VERSION__ and __ANTD_VERSION__ constants alongside existing __PLATFORM_VERSION__
+- **Accurate Version Display**: Settings view displays precise versions used in the built bundle, matching actual shipped dependencies
+- **Docker Build Integration**: Multi-stage Docker build ensures package-lock.json is available during build process
+- **Dependency Tracking**: Maintains lockstep between declared dependencies and actually installed versions
+
+Key implementation details:
+- **Locked Version Resolution**: Uses package-lock.json packages section to get exact installed versions
+- **Fallback Handling**: Falls back to package.json dependencies if locked version not found
+- **Version Formatting**: Strips caret (^) and tilde (~) prefixes for clean version display
+- **Settings View Integration**: Displays React and Ant Design versions in the Platform pane of Settings view
+
+Usage and verification:
+```bash
+# Build operator portal to generate version constants
+make -C products/operator-portal build
+
+# Verify version injection in Settings view
+# Navigate to Settings > Platform tab to see accurate dependency versions
+```
+
+Benefits:
+- **Accuracy**: Shows exactly which React and Ant Design versions are shipped in the bundle
+- **Traceability**: Links displayed versions to specific package-lock.json entries
+- **Debugging**: Helps identify version mismatches between development and production
+- **Compliance**: Ensures version display matches actual deployed dependencies
+
+**Section sources**
+- [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
+- [products/operator-portal/web-ui/app/package-lock.json](file://products/operator-portal/web-ui/app/package-lock.json)
+- [products/operator-portal/web-ui/app/src/version.ts](file://products/operator-portal/web-ui/app/src/version.ts)
+- [products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx)
+- [products/operator-portal/Dockerfile](file://products/operator-portal/Dockerfile)
+- [products/operator-portal/Makefile](file://products/operator-portal/Makefile)

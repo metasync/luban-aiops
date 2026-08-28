@@ -35,8 +35,22 @@
 - [select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
 - [sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
+- [SettingsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx)
+- [version.ts](file://products/operator-portal/web-ui/app/src/version.ts)
+- [vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
+- [package.json](file://products/operator-portal/web-ui/app/package.json)
+- [health.py](file://products/platform-gateway/src/platform_gateway/api/routes/health.py)
+- [runtime.py](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py)
 - [README.md](file://README.md)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive technology stack monitoring capabilities in the operator portal Settings view
+- Enhanced component inventory with detailed version information display for each platform component
+- Implemented backendLabel() and labeled() helper functions for consistent technology name formatting
+- Added real-time health checking and runtime metadata display for all platform components
+- Integrated React and Ant Design version tracking with build-time injection
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -44,21 +58,22 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
-10. [Appendices](#appendices)
+6. [Technology Stack Monitoring](#technology-stack-monitoring)
+7. [Dependency Analysis](#dependency-analysis)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
+11. [Appendices](#appendices)
 
 ## Introduction
-This document describes the complete technology stack powering the Luban AIOps Platform. It covers core frameworks (FastAPI, Pydantic), session storage (Redis), orchestration (Kubernetes), authentication (JWT), observability (Prometheus), and AI provider integrations (OpenAI SDK). It also details containerization with Docker, build tooling via Makefile and uv, and CI/CD practices using GitOps overlays and shell utilities. Version compatibility matrices, dependency management strategies, and upgrade procedures are provided for each component to guide safe operations and upgrades.
+This document describes the complete technology stack powering the Luban AIOps Platform. It covers core frameworks (FastAPI, Pydantic), session storage (Redis), orchestration (Kubernetes), authentication (JWT), observability (Prometheus), and AI provider integrations (OpenAI SDK). The platform now includes enhanced technology stack monitoring capabilities that provide detailed version information display in the operator portal Settings view, showing specific technology stacks underneath each component including React · Ant Design, FastAPI · Python, AgentScope · FastAPI, and PostgreSQL/Redis labels. It also details containerization with Docker, build tooling via Makefile and uv, and CI/CD practices using GitOps overlays and shell utilities. Version compatibility matrices, dependency management strategies, and upgrade procedures are provided for each component to guide safe operations and upgrades.
 
 ## Project Structure
 The platform is organized as a multi-product repository:
 - Agent Platform: FastAPI-based runtime service with providers, sessions, and observability.
 - Tool Gateway: API gateway enforcing policies, verifying tokens, and orchestrating tool invocations.
 - Identity Broker: Authentication and identity services.
-- Operator Portal: Web UI served by Nginx.
+- Operator Portal: Web UI served by Nginx with enhanced technology stack monitoring.
 - Shared resources: GitOps Kubernetes manifests, schemas, and contracts.
 
 ```mermaid
@@ -114,6 +129,7 @@ OP --> TG
 - Containerization: Docker images built per product.
 - Build Tools: Makefile targets and uv for Python dependency resolution and packaging.
 - CI/CD: GitOps-driven deployment with overlays and helper scripts.
+- **Enhanced**: Technology stack monitoring with real-time component health and version display.
 
 **Section sources**
 - [main.py](file://products/agent-platform/src/agent_service/main.py)
@@ -149,6 +165,7 @@ The platform uses a layered architecture:
 - Redis provides session persistence.
 - Kubernetes orchestrates all components.
 - Prometheus collects metrics; OpenTelemetry instruments traces.
+- **Enhanced**: Operator Portal provides real-time technology stack monitoring through health and runtime endpoints.
 
 ```mermaid
 sequenceDiagram
@@ -158,6 +175,7 @@ participant Auth as "Identity Broker"
 participant Agent as "Agent Platform"
 participant Store as "Redis"
 participant Prov as "AI Provider"
+participant Portal as "Operator Portal"
 Client->>Gateway : "HTTP Request"
 Gateway->>Auth : "Verify Token"
 Auth-->>Gateway : "Token Valid"
@@ -168,6 +186,8 @@ Agent->>Prov : "Invoke Provider"
 Prov-->>Agent : "Response"
 Agent-->>Gateway : "Result"
 Gateway-->>Client : "HTTP Response"
+Portal->>Gateway : "Health/Runtime Check"
+Gateway-->>Portal : "Component Status & Versions"
 ```
 
 **Diagram sources**
@@ -176,6 +196,7 @@ Gateway-->>Client : "HTTP Response"
 - [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
+- [SettingsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx)
 
 ## Detailed Component Analysis
 
@@ -436,12 +457,56 @@ Overlay --> Deploy["Deploy to Cluster"]
 - [sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 
+## Technology Stack Monitoring
+
+### Enhanced Operator Portal Settings View
+The operator portal now provides comprehensive technology stack monitoring through an enhanced Settings view that displays detailed version information for each platform component. The implementation includes:
+
+- **Real-time Health Checking**: The portal polls `/health/ready` and `/api/v1/runtime` endpoints to get live status and version information
+- **Component Inventory**: Displays key platform components including Operator portal, Platform gateway, Agent service, Agent runtime, Session store, Agent state store, and Policy bundle
+- **Technology Stack Display**: Shows specific technology stacks underneath each component (React · Ant Design, FastAPI · Python, AgentScope · FastAPI, PostgreSQL/Redis labels)
+- **Status Indicators**: Uses a consistent vocabulary (ready/degraded/not ready/unavailable) for component status display
+
+### Backend Label Helpers
+Two new helper functions ensure consistent technology name formatting:
+
+- `backendLabel()`: Maps backend identifiers to user-friendly names (postgres → PostgreSQL, redis → Redis, memory → In-memory)
+- `labeled()`: Provides consistent null/undefined handling for version strings
+
+### Build-Time Version Injection
+The system uses Vite's build-time constants to inject locked dependency versions:
+
+- `__PLATFORM_VERSION__`: Platform version from VERSION file
+- `__REACT_VERSION__`: Locked React version from package-lock.json
+- `__ANTD_VERSION__`: Locked Ant Design version from package-lock.json
+
+```mermaid
+flowchart TD
+Build["Vite Build Process"] --> ReadLock["Read package-lock.json"]
+ReadLock --> ExtractVersions["Extract Locked Versions"]
+ExtractVersions --> InjectConstants["Inject Build Constants"]
+InjectConstants --> Bundle["Generated Bundle"]
+Bundle --> Runtime["Runtime Display"]
+```
+
+**Diagram sources**
+- [vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
+- [version.ts](file://products/operator-portal/web-ui/app/src/version.ts)
+- [SettingsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx)
+
+**Section sources**
+- [SettingsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx)
+- [version.ts](file://products/operator-portal/web-ui/app/src/version.ts)
+- [vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
+- [package.json](file://products/operator-portal/web-ui/app/package.json)
+
 ## Dependency Analysis
 - FastAPI depends on Pydantic for schema validation and middleware support.
 - Redis client libraries integrate with session stores.
 - Prometheus client exposes metrics endpoints.
 - OpenAI SDK communicates with external AI services.
 - Kubernetes connector interacts with cluster APIs.
+- **Enhanced**: Frontend dependencies include React 18.x and Ant Design 6.x with locked versions for consistent monitoring display.
 
 ```mermaid
 graph TB
@@ -451,6 +516,8 @@ Agent["Agent Platform"] --> Redis["Redis Client"]
 Agent --> OpenAI["OpenAI SDK"]
 Gateway["Tool Gateway"] --> K8S["Kubernetes Connector"]
 Gateway --> JWT["JWT Library"]
+Portal["Operator Portal"] --> React["React 18.x"]
+Portal --> AntDesign["Ant Design 6.x"]
 ```
 
 **Diagram sources**
@@ -461,6 +528,7 @@ Gateway --> JWT["JWT Library"]
 - [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
 - [k8s_connector.py](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
 - [token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
+- [package.json](file://products/operator-portal/web-ui/app/package.json)
 
 **Section sources**
 - [pyproject.toml](file://products/agent-platform/pyproject.toml)
@@ -470,6 +538,7 @@ Gateway --> JWT["JWT Library"]
 - [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
 - [k8s_connector.py](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
 - [token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
+- [package.json](file://products/operator-portal/web-ui/app/package.json)
 
 ## Performance Considerations
 - Use connection pooling for Redis and HTTP clients to reduce latency.
@@ -477,8 +546,7 @@ Gateway --> JWT["JWT Library"]
 - Configure Prometheus scrape intervals appropriately to balance granularity and overhead.
 - Optimize Docker images by minimizing layers and removing unnecessary dependencies.
 - Scale horizontally via Kubernetes replicas based on CPU/memory metrics.
-
-[No sources needed since this section provides general guidance]
+- **Enhanced**: Monitor health endpoint performance to ensure timely status updates in the operator portal.
 
 ## Troubleshooting Guide
 - Authentication failures: Inspect token verification logs and identity broker connectivity.
@@ -486,6 +554,7 @@ Gateway --> JWT["JWT Library"]
 - Provider timeouts: Validate API keys and endpoint reachability.
 - Metrics missing: Ensure Prometheus scraping configuration and exporter endpoints are exposed.
 - Deployment issues: Review Kustomize overlays and secret synchronization scripts.
+- **Enhanced**: Technology stack monitoring issues: Verify health and runtime endpoints are accessible and returning proper JSON responses.
 
 **Section sources**
 - [token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
@@ -493,11 +562,10 @@ Gateway --> JWT["JWT Library"]
 - [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
+- [SettingsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx)
 
 ## Conclusion
-The Luban AIOps Platform leverages modern Python web frameworks, robust data validation, scalable session storage, and cloud-native orchestration. Its modular design supports multiple AI providers, strong authentication, comprehensive observability, and reproducible builds. The GitOps approach ensures consistent deployments across environments, while clear upgrade procedures maintain stability during evolution.
-
-[No sources needed since this section summarizes without analyzing specific files]
+The Luban AIOps Platform leverages modern Python web frameworks, robust data validation, scalable session storage, and cloud-native orchestration. Its modular design supports multiple AI providers, strong authentication, comprehensive observability, and reproducible builds. The enhanced technology stack monitoring capabilities provide operators with real-time visibility into component health and version information, ensuring better operational awareness and troubleshooting capabilities. The GitOps approach ensures consistent deployments across environments, while clear upgrade procedures maintain stability during evolution.
 
 ## Appendices
 
@@ -507,20 +575,24 @@ The Luban AIOps Platform leverages modern Python web frameworks, robust data val
 - Redis: Use supported major version aligned with client library.
 - Kubernetes: Match cluster version with connector capabilities.
 - Prometheus: Use stable client versions compatible with exporters.
-- OpenAI SDK: Follow provider’s recommended SDK version.
+- OpenAI SDK: Follow provider's recommended SDK version.
+- **Enhanced**: React: ^18.3.1, Ant Design: ^6.1.1 with locked versions for consistent monitoring display.
 
 **Section sources**
 - [pyproject.toml](file://products/agent-platform/pyproject.toml)
 - [uv.lock](file://products/agent-platform/uv.lock)
+- [package.json](file://products/operator-portal/web-ui/app/package.json)
 
 ### Dependency Management Strategy
 - Use uv for deterministic builds and lockfiles.
 - Pin critical dependencies in pyproject.toml and validate with uv.lock.
 - Regularly update dependencies and run tests to ensure compatibility.
+- **Enhanced**: Frontend dependencies use locked versions via package-lock.json for consistent monitoring display.
 
 **Section sources**
 - [pyproject.toml](file://products/agent-platform/pyproject.toml)
 - [uv.lock](file://products/agent-platform/uv.lock)
+- [package.json](file://products/operator-portal/web-ui/app/package.json)
 
 ### Upgrade Procedures
 - Update dependencies via uv and regenerate lockfile.
@@ -528,6 +600,7 @@ The Luban AIOps Platform leverages modern Python web frameworks, robust data val
 - Rebuild Docker images and push to registry.
 - Apply updated Kustomize overlays and verify deployments.
 - Monitor metrics and logs post-upgrade for anomalies.
+- **Enhanced**: Verify technology stack monitoring displays correct versions after upgrades.
 
 **Section sources**
 - [Makefile](file://products/agent-platform/Makefile)
@@ -535,3 +608,4 @@ The Luban AIOps Platform leverages modern Python web frameworks, robust data val
 - [image.mk](file://mk/image.mk)
 - [deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
 - [verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
+- [SettingsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx)
