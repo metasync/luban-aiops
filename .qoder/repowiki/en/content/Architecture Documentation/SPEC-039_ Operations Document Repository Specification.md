@@ -17,6 +17,8 @@
 - [documents.ts](file://products/operator-portal/web-ui/app/src/api/documents.ts)
 - [SPEC-041 spec.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md)
 - [SPEC-041 plan.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/plan.md)
+- [SPEC-043 spec.md](file://docs/specs/SPEC-043-incident-report-document-type/spec.md)
+- [SPEC-043 plan.md](file://docs/specs/SPEC-043-incident-report-document-type/plan.md)
 - [release notes](file://docs/agentic-aiops-platform/release-notes/2026-08-28-platform-components-blurb-prose-voice.md)
 </cite>
 
@@ -31,6 +33,7 @@
 - Integrated SPEC-040 context showing handover section support and prose generation defaults changes
 - **Added SPEC-041 enhancement planning**: Documentation now includes forward-looking information about upcoming readability improvements and digest reference capabilities that will extend the delivered SPEC-039 functionality
 - **Updated v0.23.3 enhancements**: Added documentation for nullable blurb field, database migration, and envelope-only listing support for AI-generated document context
+- **Added SPEC-043 incident report document type**: Documentation now includes the second document type alongside shift summaries, extending the substrate with incident-specific assembly, dual-action gate requiring documents:create and incident:read permissions, and incident-service client integration
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -42,7 +45,8 @@
 7. [Performance Considerations](#performance-considerations)
 8. [Troubleshooting Guide](#troubleshooting-guide)
 9. [Future Enhancements (SPEC-041)](#future-enhancements-spec-041)
-10. [Conclusion](#conclusion)
+10. [Second Document Type - Incident Reports (SPEC-043)](#second-document-type---incident-reports-spec-043)
+11. [Conclusion](#conclusion)
 
 ## Introduction
 This document specifies the Operations Document Repository (SPEC-039), a platform-owned, typed-document substrate that lets operators produce durable operational recaps from existing platform records and share them by role rather than per-document grants. Phase 1 ships the substrate with a draft→published lifecycle, role-based access matrix, provenance anchoring, audit events, and a portal Documents view. The first document type is the shift summary: a deterministic digest of sessions, confirmation decisions, execution receipts, and evidence counts, with an optional clearly-labeled prose layer generated solely from the digest.
@@ -95,8 +99,8 @@ J --> D
 ```
 
 **Diagram sources**
-- [operation_documents.py:1-531](file://products/agent-platform/src/agent_service/services/operation_documents.py#L1-L531)
-- [shift_summary.py:1-323](file://products/agent-platform/src/agent_service/services/shift_summary.py#L1-L323)
+- [operation_documents.py:1-573](file://products/agent-platform/src/agent_service/services/operation_documents.py#L1-L573)
+- [shift_summary.py:1-460](file://products/agent-platform/src/agent_service/services/shift_summary.py#L1-L460)
 - [document_prose.py:1-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L1-L158)
 - [routes.py:738-957](file://products/agent-platform/src/agent_service/api/v2/routes.py#L738-L957)
 - [documents.py:1-171](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L171)
@@ -118,7 +122,7 @@ J --> D
 - Schema: strict JSON schema for operation documents including envelope fields, provenance, digest, prose status, and AI-generated blurb.
 
 **Section sources**
-- [operation_documents.py:38-105](file://products/agent-platform/src/agent_service/services/operation_documents.py#L38-L105)
+- [operation_documents.py:38-120](file://products/agent-platform/src/agent_service/services/operation_documents.py#L38-L120)
 - [shift_summary.py:40-74](file://products/agent-platform/src/agent_service/services/shift_summary.py#L40-L74)
 - [document_prose.py:24-56](file://products/agent-platform/src/agent_service/services/document_prose.py#L24-L56)
 - [routes.py:763-957](file://products/agent-platform/src/agent_service/api/v2/routes.py#L763-L957)
@@ -190,16 +194,16 @@ OperationDocumentStore <|.. PostgresOperationDocumentStore
 ```
 
 **Diagram sources**
-- [operation_documents.py:80-105](file://products/agent-platform/src/agent_service/services/operation_documents.py#L80-L105)
-- [operation_documents.py:112-195](file://products/agent-platform/src/agent_service/services/operation_documents.py#L112-L195)
-- [operation_documents.py:342-481](file://products/agent-platform/src/agent_service/services/operation_documents.py#L342-L481)
+- [operation_documents.py:95-120](file://products/agent-platform/src/agent_service/services/operation_documents.py#L95-L120)
+- [operation_documents.py:127-210](file://products/agent-platform/src/agent_service/services/operation_documents.py#L127-L210)
+- [operation_documents.py:380-523](file://products/agent-platform/src/agent_service/services/operation_documents.py#L380-L523)
 
 **Section sources**
-- [operation_documents.py:38-105](file://products/agent-platform/src/agent_service/services/operation_documents.py#L38-L105)
-- [operation_documents.py:112-195](file://products/agent-platform/src/agent_service/services/operation_documents.py#L112-L195)
-- [operation_documents.py:202-297](file://products/agent-platform/src/agent_service/services/operation_documents.py#L202-L297)
-- [operation_documents.py:342-481](file://products/agent-platform/src/agent_service/services/operation_documents.py#L342-L481)
-- [operation_documents.py:488-531](file://products/agent-platform/src/agent_service/services/operation_documents.py#L488-L531)
+- [operation_documents.py:38-120](file://products/agent-platform/src/agent_service/services/operation_documents.py#L38-L120)
+- [operation_documents.py:127-210](file://products/agent-platform/src/agent_service/services/operation_documents.py#L127-L210)
+- [operation_documents.py:217-331](file://products/agent-platform/src/agent_service/services/operation_documents.py#L217-L331)
+- [operation_documents.py:380-523](file://products/agent-platform/src/agent_service/services/operation_documents.py#L380-L523)
+- [operation_documents.py:530-573](file://products/agent-platform/src/agent_service/services/operation_documents.py#L530-L573)
 
 ### Shift Summary Assembler (R-3)
 - Inputs: requester user id, bounded session ids (≤20), and a flag indicating whether foreign sessions may be viewed.
@@ -227,13 +231,13 @@ Merge --> Return(["Return (digest, provenance)"])
 **Diagram sources**
 - [shift_summary.py:77-90](file://products/agent-platform/src/agent_service/services/shift_summary.py#L77-L90)
 - [shift_summary.py:182-263](file://products/agent-platform/src/agent_service/services/shift_summary.py#L182-L263)
-- [shift_summary.py:266-323](file://products/agent-platform/src/agent_service/services/shift_summary.py#L266-L323)
+- [shift_summary.py:367-426](file://products/agent-platform/src/agent_service/services/shift_summary.py#L367-L426)
 
 **Section sources**
 - [shift_summary.py:1-22](file://products/agent-platform/src/agent_service/services/shift_summary.py#L1-L22)
 - [shift_summary.py:77-90](file://products/agent-platform/src/agent_service/services/shift_summary.py#L77-L90)
 - [shift_summary.py:182-263](file://products/agent-platform/src/agent_service/services/shift_summary.py#L182-L263)
-- [shift_summary.py:266-323](file://products/agent-platform/src/agent_service/services/shift_summary.py#L266-L323)
+- [shift_summary.py:367-426](file://products/agent-platform/src/agent_service/services/shift_summary.py#L367-L426)
 
 ### Optional Prose Layer (R-4)
 - Prompt contract: digest-only input; model cannot see transcripts or evidence payloads.
@@ -335,7 +339,7 @@ text blurb
 - List queries select blurb field alongside other document metadata for envelope-only listings.
 
 **Section sources**
-- [operation_documents.py:217-251](file://products/agent-platform/src/agent_service/services/operation_documents.py#L217-L251)
+- [operation_documents.py:246-251](file://products/agent-platform/src/agent_service/services/operation_documents.py#L246-L251)
 - [operation_documents.py:253-311](file://products/agent-platform/src/agent_service/services/operation_documents.py#L253-L311)
 
 ### Envelope-Only Listing Support (v0.23.3 Enhancement)
@@ -346,7 +350,7 @@ text blurb
 - Portal UI shows blurb in list rows and detail cards with proper fallback handling.
 
 **Section sources**
-- [operation_documents.py:63-87](file://products/agent-platform/src/agent_service/services/operation_documents.py#L63-L87)
+- [operation_documents.py:49-87](file://products/agent-platform/src/agent_service/services/operation_documents.py#L49-L87)
 - [documents.ts:17-41](file://products/operator-portal/web-ui/app/src/api/documents.ts#L17-L41)
 - [DocumentsView.tsx:1061-1072](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1061-L1072)
 - [DocumentsView.tsx:1186-1196](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1186-L1196)
@@ -378,7 +382,7 @@ Portal["Operator Portal"] --> Gateway
 
 **Diagram sources**
 - [routes.py:763-957](file://products/agent-platform/src/agent_service/api/v2/routes.py#L763-L957)
-- [operation_documents.py:488-531](file://products/agent-platform/src/agent_service/services/operation_documents.py#L488-L531)
+- [operation_documents.py:530-573](file://products/agent-platform/src/agent_service/services/operation_documents.py#L530-L573)
 - [documents.py:29-171](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L29-L171)
 - [policy-default.yaml:251-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L251-L267)
 
@@ -405,7 +409,7 @@ Portal["Operator Portal"] --> Gateway
 **Section sources**
 - [shift_summary.py:46-70](file://products/agent-platform/src/agent_service/services/shift_summary.py#L46-L70)
 - [policy-default.yaml:251-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L251-L267)
-- [operation_documents.py:488-531](file://products/agent-platform/src/agent_service/services/operation_documents.py#L488-L531)
+- [operation_documents.py:530-573](file://products/agent-platform/src/agent_service/services/operation_documents.py#L530-L573)
 - [document_prose.py:59-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L158)
 - [routes.py:705-736](file://products/agent-platform/src/agent_service/api/v2/routes.py#L705-L736)
 
@@ -449,6 +453,46 @@ SPEC-041 is currently in draft status targeting version 0.23.0 as part of the R5
 - [SPEC-041 spec.md:11-45](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md#L11-L45)
 - [SPEC-041 plan.md:13-87](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/plan.md#L13-L87)
 
+## Second Document Type - Incident Reports (SPEC-043)
+
+### Overview
+The operations document repository extends beyond shift summaries to include incident reports as its second document type. This enhancement leverages the existing substrate's type discriminator, role × type matrix, provenance anchoring, and audited cross-owner read path to provide durable, attributed incident review artifacts.
+
+### Incident Report Assembly
+An incident-report assembler in agent-platform builds the digest from two sources: incident-service (via the new internal client) and the platform's own durable stores for the linked session. The digest carries four deterministic sections:
+
+- **incident** — the incident envelope copied verbatim (incident_id, fingerprint, source, severity, status, title, summary, labels, reported_by, session_id, timestamps)
+- **triage** — the validated triage report copied verbatim when present (summary, severity assessment, evidence refs, hypotheses, next steps, skills cited, generator and timestamp), or the marker `not_triaged` when the incident has none
+- **dispatches** — the connector dispatch outcomes copied verbatim (connector, status, reference, timestamp), possibly empty
+- **session** — the linked triage session's digest under the SPEC-039 R-3 two-tier posture: full digest when the requester owns the session; metadata-only when foreign with approvals:list; foreign_denied when foreign without approvals:list; missing when the incident carries no session id
+
+### Dual-Action Gate and Permissions
+Incident report creation requires both `documents:create` and `incident:read` permissions, ensuring that incident facts reach only holders of incident:read. This dual-action gate reuses the adjudicated incident visibility matrix without introducing new policy actions or policy-bundle changes.
+
+### Internal Incident Client
+Agent-platform gains a bounded incident-service client that speaks to incident-service with agent-platform's own registered Basic query credential. The client forwards x-request-id, honors a bounded timeout knob, and is configured by three new environment variables: AGENT_INCIDENT_SERVICE_URL, AGENT_INCIDENT_CLIENT_ID, and AGENT_INCIDENT_CLIENT_SECRET.
+
+### Error Handling and Degradation
+- Missing configuration answers 503 (dependency not configured) at creation time
+- Unreachable incident-service answers 502
+- Neither surfaces a raw stack trace
+- An incident that failed triage still assembles (the digest carries the incident envelope with triage_failed status, the raw-triage marker, and the session digest)
+- Assembly never 500s on incident content
+
+### Portal Integration
+The Documents view grows incident-report creation and rendering inside the existing surfaces:
+- Creation dialog offers type choice (Shift summary / Incident report)
+- Choosing Incident report swaps the session picker for an incident picker fed by the existing incidents list surface
+- Document drawer renders the incident-report digest in the SPEC-041 tabbed posture with tabs for Incident, Triage, Dispatches, Session, Generated narrative, and Raw JSON
+- Type badge distinguishes incident reports
+
+**Section sources**
+- [SPEC-043 spec.md:15-50](file://docs/specs/SPEC-043-incident-report-document-type/spec.md#L15-L50)
+- [SPEC-043 spec.md:84-127](file://docs/specs/SPEC-043-incident-report-document-type/spec.md#L84-L127)
+- [SPEC-043 spec.md:128-154](file://docs/specs/SPEC-043-incident-report-document-type/spec.md#L128-L154)
+- [SPEC-043 spec.md:188-210](file://docs/specs/SPEC-043-incident-report-document-type/spec.md#L188-L210)
+- [SPEC-043 plan.md:49-67](file://docs/specs/SPEC-043-incident-report-document-type/plan.md#L49-L67)
+
 ## Conclusion
 SPEC-039 introduces a robust, typed operations document repository with a clear separation between immutable digests and optional prose, enforced by role-based access and strong provenance. Phase 1 delivers the substrate, shift summaries, and portal support, while leaving room for future document types and integrations. All eight requirements have been successfully implemented and delivered in v0.21.0, providing operators with a complete solution for creating, managing, and sharing operational documentation across their teams.
 
@@ -456,4 +500,4 @@ The system has been further enhanced with v0.23.3 additions including nullable b
 
 The system is now positioned to integrate with SPEC-040 capabilities, which will enhance the shift summaries with deterministic handover sections and improved prose generation defaults, further strengthening the operational handover workflow for relief operators. Additionally, SPEC-041 planning ensures continued evolution toward better operator experience through enhanced readability features and digest reference capabilities.
 
-The combination of SPEC-039's solid foundation, SPEC-040's handover narrative enhancements, v0.23.3's AI blurb capabilities, and the planned SPEC-041 readability improvements creates a comprehensive operational documentation system that scales from basic digest capture to sophisticated operator workflows.
+With the addition of SPEC-043's incident report document type, the substrate now supports two distinct document types: shift summaries for operational handover and incident reports for incident review. Both types leverage the same substrate foundation, policy enforcement, and portal integration patterns, demonstrating the extensibility of the design. The combination of SPEC-039's solid foundation, SPEC-040's handover narrative enhancements, v0.23.3's AI blurb capabilities, SPEC-043's incident report support, and the planned SPEC-041 readability improvements creates a comprehensive operational documentation system that scales from basic digest capture to sophisticated operator workflows.

@@ -12,6 +12,7 @@
 - [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
 - [pyproject.toml](file://products/agent-platform/pyproject.toml)
 - [2026-08-28-dependency-hygiene.md](file://docs/agentic-aiops-platform/release-notes/2026-08-28-dependency-hygiene.md)
+- [2026-08-28-post-release-review-remediation.md](file://docs/agentic-aiops-platform/release-notes/2026-08-28-post-release-review-remediation.md)
 </cite>
 
 ## Update Summary
@@ -21,7 +22,8 @@
 - Enhanced verification sections with actual delivery outcomes and testing results
 - Updated dependency versions to reflect the delivered state (React 19.2.8, TypeScript 5.9.3, etc.)
 - Added detailed backend service updates including cryptography cap adjudication
-- Documented the zero-tolerance antd deprecation guard implementation
+- Documented the zero-tolerance antd deprecation guard implementation with v0.24.1 hardening
+- Updated deprecation guard pattern documentation to reflect the enhanced regex pattern
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -36,21 +38,22 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document specifies the comprehensive platform dependency hygiene effort for SPEC-042, which has been **delivered** as part of v0.24.0 fourth R5 slice on 2026-08-28. The scope encompasses both frontend and backend dependency management across the entire Luban AIOps platform, extending beyond the original portal-specific antd migrations to include comprehensive backend Python services dependency management.
+This document specifies the comprehensive platform dependency hygiene effort for SPEC-042, which has been **delivered** as part of v0.24.0 fourth R5 slice on 2026-08-28, with a subsequent v0.24.1 patch enhancing the deprecation guard. The scope encompasses both frontend and backend dependency management across the entire Luban AIOps platform, extending beyond the original portal-specific antd migrations to include comprehensive backend Python services dependency management.
 
 The delivered specification successfully implemented five requirements:
 - R-1: Migrated deprecated antd v6 APIs (Drawer width → size; Alert message → title).
-- R-2: Implemented a vitest guard that fails the suite when any antd deprecation warning appears.
+- R-2: Implemented a vitest guard that fails the suite when any antd deprecation warning appears, hardened in v0.24.1 to catch aggregated batch warnings.
 - R-3: Managed refresh of portal adopt-set packages with consistent lockfiles and build gates.
 - R-4: Adopted React 19 with behavior-preserving changes only.
 - R-5: Backend stable-channel lockfile refresh across all eight Python products with cryptography cap adjudication.
 
-**Delivered** The specification was delivered on 2026-08-28 as part of v0.24.0 fourth R5 slice, achieving comprehensive acceptance criteria including zero antd deprecation warnings in test output, green type-checking and builds, unchanged visual/behavioral outcomes, and verified backend service stability after dependency updates.
+**Delivered** The specification was delivered on 2026-08-28 as part of v0.24.0 fourth R5 slice, achieving comprehensive acceptance criteria including zero antd deprecation warnings in test output, green type-checking and builds, unchanged visual/behavioral outcomes, and verified backend service stability after dependency updates. The v0.24.1 patch subsequently hardened the deprecation guard to close an escape hatch for ConfigProvider's strict mode aggregated warnings.
 
 **Section sources**
 - [spec.md:3-13](file://docs/specs/SPEC-042-dependency-hygiene/spec.md#L3-L13)
 - [spec.md:15-62](file://docs/specs/SPEC-042-dependency-hygiene/spec.md#L15-L62)
 - [delivery-roadmap.md:333](file://docs/agentic-aiops-platform/delivery-roadmap.md#L333)
+- [2026-08-28-post-release-review-remediation.md:1-35](file://docs/agentic-aiops-platform/release-notes/2026-08-28-post-release-review-remediation.md#L1-L35)
 
 ## Project Structure
 SPEC-042 targets both the operator portal web application and all backend Python services across the platform. The relevant surfaces include:
@@ -109,7 +112,7 @@ The comprehensive dependency hygiene effort spans multiple layers of the platfor
 **Frontend Components:**
 - Drawer migration: Navigation drawers in App.tsx migrate from width props to size props to eliminate deprecation warnings while preserving pixel widths.
 - Alert migration: Multiple views render Alert components migrating from message to title to match antd v6's non-deprecated API.
-- Test guard: Vitest setup intercepts console output during runs and fails if any antd deprecation warning is detected.
+- Test guard: Vitest setup intercepts console output during runs and fails if any antd deprecation warning is detected, hardened in v0.24.1 to catch aggregated batch warnings from ConfigProvider's strict mode.
 - Dependency refresh: Adopted versions for antd 6.6.2, TypeScript 5.9.3, Vite 8.2.2, Vitest 4.1.11, jsdom 30.0.1, @types/node 22.20.1, and testing libraries applied consistently.
 - React 19 adoption: react/react-dom 19.2.8 and their types move to 19.x with peer compatibility already declared by framework dependencies.
 
@@ -134,7 +137,7 @@ Portal["Operator Portal Web UI"]
 Antd["Antd 6.6.2"]
 React["React 19.2.8"]
 Vite["Vite 8.2.2"]
-Guard["Deprecation Guard"]
+Guard["Hardened Deprecation Guard"]
 end
 subgraph "Backend Layer"
 AgentPlatform["Agent Platform"]
@@ -201,29 +204,39 @@ RenderNormal --> End
 - [plan.md:19-35](file://docs/specs/SPEC-042-dependency-hygiene/plan.md#L19-L35)
 - [tasks.md:3-14](file://docs/specs/SPEC-042-dependency-hygiene/tasks.md#L3-L14)
 
-### Deprecation Regression Guard Implementation
-The vitest setup implements a comprehensive guard against future antd deprecations:
+### Hardened Deprecation Regression Guard Implementation
+The vitest setup implements a comprehensive guard against future antd deprecations, enhanced in v0.24.1 to close an escape hatch for aggregated batch warnings:
 
-**Guard Mechanism:**
+**Enhanced Guard Mechanism:**
 - Intercepts console.error and console.warn during test execution
-- Scans output for patterns matching `[antd: …] … deprecated`
+- Scans output for patterns matching `[antd(?:: .+)?\].*deprecated` (enhanced in v0.24.1)
 - Fails the suite at teardown with specific offending warning text
 - Allows non-deprecation console output to pass through unchanged
+- Catches both standard per-component warnings (`[antd: Alert]`) and aggregated batch warnings (`[antd]`)
+
+**v0.24.1 Enhancement Details:**
+- Pattern updated from `/\[antd: .+\].*deprecated/i` to `/\[antd(?:: .+)?\].*deprecated/i`
+- Makes the component segment optional to catch ConfigProvider's strict mode aggregated warnings
+- Closes escape hatch where `warning={{ strict: false }}` would bypass detection
+- Verified against both emission forms plus non-antd decoys
 
 **Verification Process:**
 - Initial run confirms zero deprecation warnings
 - Temporary reintroduction of deprecated prop proves guard functionality
 - Reversion restores clean state with guard active
+- v0.24.1 enhancement validated end-to-end with deliberate deprecation reintroduction
 
 ```mermaid
 sequenceDiagram
 participant Test as "Test Suite"
-participant Guard as "Deprecation Guard"
+participant Guard as "Hardened Deprecation Guard"
 participant Console as "Console Output"
 Test->>Guard : Initialize interception
 Console->>Guard : Emit warning/error
-Guard->>Guard : Check for antd deprecation pattern
-alt Deprecation detected
+Guard->>Guard : Check for enhanced antd deprecation pattern
+alt Standard per-component warning
+Guard->>Test : Fail suite with warning details
+else Aggregated batch warning
 Guard->>Test : Fail suite with warning details
 else No deprecation
 Guard->>Console : Pass through output
@@ -239,6 +252,8 @@ end
 - [spec.md:87-99](file://docs/specs/SPEC-042-dependency-hygiene/spec.md#L87-L99)
 - [plan.md:36-47](file://docs/specs/SPEC-042-dependency-hygiene/plan.md#L36-L47)
 - [tasks.md:15-22](file://docs/specs/SPEC-042-dependency-hygiene/tasks.md#L15-L22)
+- [setup.ts:22-29](file://products/operator-portal/web-ui/app/src/test/setup.ts#L22-L29)
+- [2026-08-28-post-release-review-remediation.md:15-35](file://docs/agentic-aiops-platform/release-notes/2026-08-28-post-release-review-remediation.md#L15-L35)
 
 ### Backend Lockfile Management
 The backend component successfully managed dependency updates across eight Python products:
@@ -381,11 +396,12 @@ The comprehensive dependency hygiene effort considers performance implications a
 Comprehensive troubleshooting procedures for both frontend and backend dependency issues:
 
 **Frontend Issues:**
-- If suite fails due to antd deprecation warnings, inspect console output captured by the guard and locate offending component usage
+- If suite fails due to antd deprecation warnings, inspect console output captured by the hardened guard and locate offending component usage
 - If Drawer width-to-size migration causes layout shifts, verify numeric size values match original widths (230, 260, 560)
 - If Alert title migration alters appearance, ensure icon and type props remain unchanged and description is preserved where applicable
 - If dependency refresh breaks builds, check Vitest config shape changes and plugin-react 6 options; revert to behavior-preserving fixes only
 - If React 19 introduces type tightening errors, address them conservatively without changing runtime behavior
+- If deprecation warnings appear despite migration, check for ConfigProvider's strict mode aggregated warnings caught by v0.24.1 enhancement
 
 **Backend Issues:**
 - If lockfile regeneration fails, verify dependency ranges in pyproject.toml files are correctly specified
@@ -405,11 +421,11 @@ Comprehensive troubleshooting procedures for both frontend and backend dependenc
 - [tasks.md:15-76](file://docs/specs/SPEC-042-dependency-hygiene/tasks.md#L15-L76)
 
 ## Conclusion
-SPEC-042 establishes a comprehensive platform-wide dependency hygiene approach that extends far beyond the original portal-only scope. The **delivered** specification successfully addresses both frontend and backend dependency management through coordinated migration of deprecated antd APIs, implementation of deprecation regression guards, managed refresh of toolchain dependencies including React 19, and systematic re-locking of all backend Python services to their latest stable versions.
+SPEC-042 establishes a comprehensive platform-wide dependency hygiene approach that extends far beyond the original portal-only scope. The **delivered** specification successfully addresses both frontend and backend dependency management through coordinated migration of deprecated antd APIs, implementation of a hardened deprecation regression guard enhanced in v0.24.1, managed refresh of toolchain dependencies including React 19, and systematic re-locking of all backend Python services to their latest stable versions.
 
-As a **delivered** specification completed as part of v0.24.0 fourth R5 slice on 2026-08-28, SPEC-042 sets a foundation for sustainable platform evolution through disciplined dependency management that includes cryptography cap adjudication, agentscope kernel updates with enhanced verification, and comprehensive live checking of critical paths.
+As a **delivered** specification completed as part of v0.24.0 fourth R5 slice on 2026-08-28, with v0.24.1 patch hardening the deprecation guard, SPEC-042 sets a foundation for sustainable platform evolution through disciplined dependency management that includes cryptography cap adjudication, agentscope kernel updates with enhanced verification, and comprehensive live checking of critical paths.
 
-The expansion from portal-specific to platform-wide scope demonstrates the interconnected nature of modern platform architectures and the importance of coordinated dependency management strategies that consider both user-facing interfaces and backend service stability.
+The expansion from portal-specific to platform-wide scope demonstrates the interconnected nature of modern platform architectures and the importance of coordinated dependency management strategies that consider both user-facing interfaces and backend service stability. The v0.24.1 enhancement specifically addresses edge cases in antd's warning emission modes, ensuring robust protection against deprecation regressions.
 
 ## Appendices
 **Verification Checklist:**
@@ -420,6 +436,7 @@ The expansion from portal-specific to platform-wide scope demonstrates the inter
 - make verify passes with updated dependencies ✓
 - Live walkthrough covering sign-in, streamed chat turn, session panel, Approvals, and Documents drawer ✓
 - Live check of chat, HITL confirmation, and approved-mutating paths via mutating-demo.sh ✓
+- Hardened deprecation guard catches both standard and aggregated batch warnings ✓
 
 **Impact Assessment:**
 - Frontend: Operator portal web-ui app and Dockerfile node base pin check ✓
@@ -429,8 +446,8 @@ The expansion from portal-specific to platform-wide scope demonstrates the inter
 - Operations: Living-state docs require updates including CHANGELOG, release notes, configuration reference, spec index, and delivery roadmap ✓
 
 **Delivery Status:**
-- **Status**: Delivered (2026-08-28)
-- **Release**: v0.24.0 fourth R5 slice
+- **Status**: Delivered (2026-08-28) with v0.24.1 hardening patch
+- **Release**: v0.24.0 fourth R5 slice, followed by v0.24.1 post-release remediation
 - **Related ADRs**: Extends SPEC-023 portal framework rebuild's technology choices; honors ADR-0002's AgentScope kernel position
 
 **Section sources**
@@ -439,3 +456,4 @@ The expansion from portal-specific to platform-wide scope demonstrates the inter
 - [tasks.md:65-76](file://docs/specs/SPEC-042-dependency-hygiene/tasks.md#L65-L76)
 - [delivery-roadmap.md:333](file://docs/agentic-aiops-platform/delivery-roadmap.md#L333)
 - [2026-08-28-dependency-hygiene.md:1-124](file://docs/agentic-aiops-platform/release-notes/2026-08-28-dependency-hygiene.md#L1-L124)
+- [2026-08-28-post-release-review-remediation.md:1-66](file://docs/agentic-aiops-platform/release-notes/2026-08-28-post-release-review-remediation.md#L1-L66)
