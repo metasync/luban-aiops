@@ -1,1 +1,0 @@
-Root workspace orchestrating the Luban AIOps platform's product services, shared contracts, Kubernetes deployment assets, and spec-driven documentation under a unified Make-based build and verification pipeline.

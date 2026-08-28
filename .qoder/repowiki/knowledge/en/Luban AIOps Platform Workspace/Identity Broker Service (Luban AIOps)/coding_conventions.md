@@ -1,6 +1,0 @@
-- Configuration is modeled as frozen dataclasses with a `from_env()` classmethod that reads `IDENTITY_*` / `KEYCLOAK_*` / `OIDC_*` environment variables and exposes them via an `lru_cache(maxsize=1)` accessor.
-- Route handlers receive settings through FastAPI `Depends(get_settings)` rather than global imports, keeping configuration testable and explicit per endpoint.
-- All request/response payloads are declared as Pydantic `BaseModel` subclasses in `schemas/` and referenced via `response_model` on route decorators.
-- Audit and metric side-effects are emitted via dedicated helpers (`emit_audit_event`, `record_token_exchange`, `record_token_issued`) instead of inline logging/calls, keeping business routes focused on control flow.
-- Long-lived mutable state (RSA private key, JWKS clients) is held in module-level globals with explicit `reset_*` functions exported for test isolation.
-- External failures are wrapped in domain-specific exceptions (e.g. `ExchangeError` with a `status_code` field) that routes translate into appropriate HTTPException responses.

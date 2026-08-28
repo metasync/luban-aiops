@@ -1,1 +1,0 @@
-Defines cross-project API, event, policy, and tool-execution JSON Schema contracts plus a default action-authorization policy bundle consumed by platform services.

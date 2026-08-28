@@ -1,1 +1,0 @@
-Python async HTTP via `httpx` for gateway calls; `uvicorn` for the native service; `agentscope` toolkit (`FunctionTool`, `Toolkit`, `ToolChunk`) for tool registration; `agentscope_runtime.engine.AgentApp` for the runtime agent server; Redis-backed storage/message bus/workspace manager in the native entrypoint.

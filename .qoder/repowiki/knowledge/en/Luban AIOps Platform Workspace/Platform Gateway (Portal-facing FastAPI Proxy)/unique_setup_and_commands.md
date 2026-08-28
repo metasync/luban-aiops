@@ -1,1 +1,0 @@
-Built and run via the project's Makefile fragments included from `../../mk/image.mk` and `../../mk/python.mk`; the `platform-gateway` console script (`uv run platform-gateway`) starts the app. Image name defaults to `platform-gateway` via `IMAGE_NAME` in the Makefile.

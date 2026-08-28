@@ -1,4 +1,0 @@
-- Cross-cutting concerns (config, metrics, telemetry, request context) are exposed from `agent_service/core/` and imported directly by every other layer rather than passed through DI containers.
-- Pluggable components (chat providers, session stores, evidence/execution record stores) are registered via module-level registries in `__init__.py` and resolved by name at runtime.
-- HTTP contracts are versioned under `schemas/v2.py` and routed through `api/v2/routes.py`, keeping legacy surfaces separate from the current API surface.
-- Business services in `services/` encapsulate domain orchestration and delegate I/O to pluggable backends, keeping API handlers thin.

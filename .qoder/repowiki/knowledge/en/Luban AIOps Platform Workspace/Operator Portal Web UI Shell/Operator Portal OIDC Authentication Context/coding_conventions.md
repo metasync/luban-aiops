@@ -1,4 +1,0 @@
-- Side effects that mutate timers or window state are paired with a cleanup flag/cancel function (e.g. `cancelled` flag in the boot effect, `cancelRefreshTimer` clearing `refreshTimerId`) to avoid stale updates after unmount.
-- All persisted values go through a guarded `parseStored` wrapper that catches JSON parse errors and returns `null`, ensuring corrupt storage never crashes render or login.
-- Gateway API calls use the shared `requestJson<T>(path, options)` helper with explicit method/body shapes instead of raw `fetch` calls.
-- Login state transitions surface as a single `AuthContextValue` object memoized via `useMemo`, exposing derived fields (`username`, `roles`) computed from the raw `session`.

@@ -1,6 +1,0 @@
-- Feature views gate rendering behind role checks via `hasAnyRole(roles, <DOMAIN>_ROLES)` from `../../roles`, returning early with an informational `Alert` when the user lacks permission.
-- Data fetching is wrapped in a `try/catch` that stores errors in a local `error` state string and clears it on successful load, then displays a single `Alert` at the top of the view.
-- Long-running or periodic data loads use `useEffect` with `setInterval` (e.g. 30s approvals poll, 15s incidents auto-refresh) and clean up timers in the effect return.
-- User actions call async APIs through dedicated `../../api/*` functions and surface failures via `setError(err instanceof Error ? err.message : String(err))` rather than throwing.
-- Domain-specific constants (status colors, severity colors, page sizes, poll intervals) are declared as `const` maps or numbers near the top of the file instead of being scattered inline.
-- Complex features extract reusable data-fetching logic into a named hook (e.g. `useApprovalsInbox`) that returns a plain state object plus action methods, keeping the default export component focused on layout.

@@ -1,1 +1,0 @@
-None beyond standard React build; voice input requires the browser to grant microphone permission and supports only the codes listed in `VOICE_LANGUAGES` (`en-US`, `zh-CN`), defaulting to the user's first matching subtag or `en-US`.

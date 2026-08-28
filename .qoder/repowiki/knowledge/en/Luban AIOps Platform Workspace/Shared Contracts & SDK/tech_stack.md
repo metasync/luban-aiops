@@ -1,1 +1,0 @@
-JSON Schema Draft 2020-12 for wire-format contracts; YAML for the v1 action-authorization policy bundle; Python scripts for policy and version validation.

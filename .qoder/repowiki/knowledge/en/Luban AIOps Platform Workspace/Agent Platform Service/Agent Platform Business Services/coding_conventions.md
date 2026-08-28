@@ -1,6 +1,0 @@
-- Pluggable backends implement a shared `Protocol` (e.g. `SessionStore`) so callers depend only on method signatures rather than concrete classes.
-- External dependencies (Postgres, Redis) are imported lazily inside functions to keep dev/CI environments free of optional packages until needed.
-- Persistence failures are best-effort and fail-open: operations wrap DB/Redis calls in try/except that log warnings and either return safe defaults or continue without raising, preserving core flow.
-- Process-wide singletons are exposed as module-level constants (e.g. `SESSION_STORE`, `AGENT_STATE_STORE`, `CONFIRMATION_RECORD_STORE`) initialized once at import time via factory functions.
-- Runtime configuration is read from environment variables via small `_env_*` helpers with typed defaults, keeping env parsing co-located with usage sites.
-- Cross-cutting per-request state (tool evidence sink, call IDs) is propagated through `contextvars.ContextVar` rather than function arguments, allowing middleware to inject data transparently.

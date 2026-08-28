@@ -1,1 +1,0 @@
-`make verify` is the canonical verification gate that runs every product test suite and renders all GitOps overlays via `kustomize build`; it is forge-agnostic and intended to run locally before commit as well as under CI.

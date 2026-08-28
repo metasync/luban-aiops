@@ -1,6 +1,0 @@
-- Identity and correlation IDs are read exclusively from FastAPI `Header(...)` parameters (`x_user_id`, `x_request_id`, `authorization`); they are never accepted in request bodies.
-- Route handlers raise `HTTPException` with explicit status codes (401/400/404/409/410/422) rather than returning error dicts, keeping the response contract enforced by Pydantic `response_model`.
-- Kernel stream chunks are normalized through a central `_normalize_stream_event` function that validates event types and field values against module-level `frozenset` allowlists before constructing `AgentStreamEvent`.
-- Optional downstream stores (evidence store, confirmation record store, execution record store) are wrapped in try/except blocks that log warnings and degrade to `None` or empty lists instead of raising 5xx errors.
-- Each route docstring cites the governing specification reference (e.g. `SPEC-020 R-1`, `SPEC-039 R-1/R-3`) describing the behavior being implemented.
-- Pydantic models in `schemas/v2.py` carry descriptive `Field(description=...)` strings that restate the spec rule governing each field's semantics.

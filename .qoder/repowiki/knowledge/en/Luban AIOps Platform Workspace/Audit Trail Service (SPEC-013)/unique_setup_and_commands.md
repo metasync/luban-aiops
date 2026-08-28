@@ -1,1 +1,0 @@
-Entry point is registered as the `audit-service` console script (`uv run audit-service`) which calls `audit_service.main:run`; build system uses `uv_build` backend with `uv.lock` lockfile; tests run via pytest under `.venv` managed by uv.

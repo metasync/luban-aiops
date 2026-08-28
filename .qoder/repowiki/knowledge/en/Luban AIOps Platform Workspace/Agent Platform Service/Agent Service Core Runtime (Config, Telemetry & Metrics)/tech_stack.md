@@ -1,1 +1,0 @@
-Prometheus client (`prometheus_client`) for local metrics scraping; OpenTelemetry SDK with OTLP HTTP/protobuf exporters (traces, metrics, logs) and FastAPI/HTTPX instrumentors, gated by `OTEL_ENABLED`.

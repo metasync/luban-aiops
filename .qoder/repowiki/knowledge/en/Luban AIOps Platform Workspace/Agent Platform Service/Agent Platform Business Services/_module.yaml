@@ -1,9 +1,0 @@
-schema_version: 1
-module_path: agent_platform/business_services
-title: Agent Platform Business Services
-scope:
-    - products/agent-platform/src/agent_service/services/
-source_files: []
-depends_on: []
-related_to:
-    - path: agent_platform/providers

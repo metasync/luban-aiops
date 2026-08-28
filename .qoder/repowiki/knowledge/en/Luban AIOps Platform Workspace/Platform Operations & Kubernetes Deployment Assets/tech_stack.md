@@ -1,1 +1,0 @@
-Kubernetes manifests managed with Kustomize (no Helm); deployment driven by `kubectl kustomize` + `kubectl apply`; secrets and config propagated via environment files mounted as ConfigMaps/Secrets; optional OpenShift HTTPRoute resource for the operator portal.

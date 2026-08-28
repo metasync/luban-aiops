@@ -1,5 +1,0 @@
-- Session lifecycle mutations call `refresh()` after each write so the UI stays consistent with server state rather than optimistically patching.
-- Concurrent refreshes are guarded by a monotonically increasing `refreshSeqRef` counter so only the newest fetch applies its result, preventing stale responses from overwriting pending-confirmation flags.
-- Error handling branches on `ApiError.status` (409, 404, 400) and returns structured outcome objects (`DeleteOutcome`, `RenameOutcome`) with user-facing messages instead of throwing.
-- Design tokens live in a single `palette` constant and are mirrored verbatim as CSS custom properties on `:root` so both Ant Design and bespoke CSS share the same color vocabulary.
-- Per-tab active session identity is persisted in `window.sessionStorage` under a named key and restored on mount, keeping the selected session alive across tab reloads.

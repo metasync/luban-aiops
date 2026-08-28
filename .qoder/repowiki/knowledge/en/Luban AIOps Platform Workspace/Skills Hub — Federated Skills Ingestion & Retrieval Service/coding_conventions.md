@@ -1,6 +1,0 @@
-- Configuration is modeled as frozen dataclasses with `from_env()` classmethods that parse `SKILLS_*` environment variables and raise `SettingsError` on malformed input, then cached via `@lru_cache(maxsize=1)`.
-- Pluggable backends are exposed through a `Protocol` interface (`SkillStore`) with multiple implementations (`InMemorySkillStore`, `PostgresSkillStore`) selected by a factory function based on a string setting.
-- Route modules are registered in explicit declaration order inside a single `router.py` so that static path routes (`/status`, `/health`) take precedence over parameterized routes like `{skill_id:path}`.
-- Validation failures during ingestion produce typed `Rejection` dataclass entries collected alongside valid records rather than raising exceptions, allowing partial snapshots per source.
-- Database access uses per-operation async connection context managers with parameterized queries and a shared `_row_to_skill` mapper to keep row-to-model conversion consistent across read methods.
-- Search results are always re-ranked by the shared `scoring.rank` function after backend-specific candidate retrieval, ensuring identical ordering between in-memory and PostgreSQL backends.

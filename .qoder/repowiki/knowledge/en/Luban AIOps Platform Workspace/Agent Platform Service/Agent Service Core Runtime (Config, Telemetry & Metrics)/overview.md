@@ -1,1 +1,0 @@
-Shared runtime bootstrap for the agent service providing environment/config access, Prometheus metrics, OpenTelemetry telemetry, structured logging, and request correlation.

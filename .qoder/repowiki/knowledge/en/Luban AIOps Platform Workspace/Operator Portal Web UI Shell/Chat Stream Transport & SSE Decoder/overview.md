@@ -1,1 +1,0 @@
-Implements the server-sent events transport, SSE frame decoder, and React hook that drive live chat turns, tool-call evidence, and human-in-the-loop confirmation cards for the operator portal.

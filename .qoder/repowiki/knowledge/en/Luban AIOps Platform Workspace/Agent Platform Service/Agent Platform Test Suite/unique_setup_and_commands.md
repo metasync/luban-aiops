@@ -1,1 +1,0 @@
-Tests rely on environment variables like `SESSION_TTL_SECONDS`, `SESSION_MAX_ENTRIES`, and `SESSION_STORE_BACKEND` to configure in-memory vs. Redis/Postgres session stores at runtime; no separate test runner script is needed — standard `pytest` execution against this directory is sufficient.

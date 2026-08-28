@@ -1,1 +1,0 @@
-pytest with `fastapi.testclient.TestClient` for HTTP smoke tests; `monkeypatch` fixture for dependency injection; `agentscope` toolkit and `AgentState` types exercised directly; Prometheus client registry used to assert metrics counters.

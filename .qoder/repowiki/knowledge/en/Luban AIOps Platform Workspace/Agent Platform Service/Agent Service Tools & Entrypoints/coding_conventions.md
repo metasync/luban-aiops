@@ -1,6 +1,0 @@
-- Per-call identity is propagated through module-level `ContextVar`s (`DELEGATED_TOKEN`, `EXECUTION_REQUESTS`, `EXECUTION_REJECTION`, `CURRENT_CALL_ID`) set by the surrounding kernel so closures never capture stale credentials.
-- Gateway failures and missing credentials are surfaced as structured dict results with `tool_name`, `status`, `request_id`, and an `error` dict containing a machine-readable `code`, rather than raising exceptions from tool closures.
-- Mutating tools are gated by argument-digest verification against a signed execution envelope before any network call, falling back to a `WorkerHandoffTimeout` / `WorkerHandoffError` path that audits rejections via `execution_rejected` events.
-- Entrypoint configuration is modeled as frozen dataclasses with a `from_env()` classmethod that maps `AGENT*` / `AGENTSCOPE*` environment variables onto typed fields with defaults.
-- Heavy framework imports (`agentscope.tool`, `agentscope.app`, `agentscope_runtime.engine`) are deferred inside factory functions to keep startup fast and allow graceful fallback when optional dependencies are absent.
-- Each built tool attaches its original dotted gateway name and risk level as `gateway_tool_name` / `gateway_risk_level` attributes on the `FunctionTool` so middleware can emit evidence frames and confirmation UIs without re-parsing.

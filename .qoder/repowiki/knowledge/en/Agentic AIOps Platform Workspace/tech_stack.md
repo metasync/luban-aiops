@@ -1,0 +1,1 @@
+Python services managed with `uv` (pinning interpreter via `.python-version`); container images built with Dockerfiles using a shared `base-uv` base image; Kubernetes deployments rendered via Kustomize overlays; JSON Schema–based API/event contracts in `shared/shared-contracts/schemas`; policy enforcement driven by YAML policy bundles validated against a schema script.

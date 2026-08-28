@@ -1,1 +1,0 @@
-FastAPI-based portal gateway that authenticates requests, enforces YAML-driven RBAC policies, and proxies chat, session, document, tool, skills, incident, audit, and approval calls to downstream platform services.

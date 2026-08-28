@@ -1,1 +1,0 @@
-Python FastAPI application using Pydantic schemas, AgentScope chat model SDK, Prometheus + OpenTelemetry for observability, and pluggable storage backends (Postgres, Redis, filesystem/object store) selected at runtime.

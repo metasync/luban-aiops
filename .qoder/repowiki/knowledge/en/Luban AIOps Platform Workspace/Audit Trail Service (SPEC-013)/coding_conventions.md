@@ -1,6 +1,0 @@
-- Configuration is modeled as frozen dataclasses with a `from_env` classmethod and exposed via an `@lru_cache(maxsize=1)` getter so settings are parsed once per process.
-- Pluggable storage backends implement the shared `AuditStore` Protocol and are selected at runtime by a factory (`build_audit_store`) driven by the `store_backend` setting rather than conditional imports.
-- Request lifecycle logging is centralized in a single FastAPI HTTP middleware that extracts `x-request-id`, measures duration, and emits structured `http_request` events via `log_event`.
-- All I/O paths record Prometheus counters through dedicated helpers (`record_ingested`, `record_rejected`, `record_store_growth`) before returning responses, keeping metrics orthogonal to business logic.
-- Pydantic models use `ConfigDict(extra='forbid')` to enforce strict schema enforcement on both inbound requests and stored event envelopes, ensuring no field rewriting between ingest and query.
-- Pagination over ordered event streams uses a deterministic cursor encoding of `(occurred_at, event_id)` base64-encoded, shared between in-memory and PostgreSQL implementations.

@@ -1,1 +1,0 @@
-Renders the operator's chat session workspace with streaming replies, tool evidence panels, confirmation approval cards, and optional browser speech-to-text input.

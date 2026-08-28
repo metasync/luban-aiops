@@ -6,6 +6,7 @@
 - [plan.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/plan.md)
 - [tasks.md](file://docs/specs/SPEC-020-hitl-confirmation-bridging/tasks.md)
 - [release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-21-hitl-confirmation-bridging.md)
+- [mutating-tool-name-regression.md](file://docs/agentic-aiops-platform/release-notes/2026-08-28-mutating-tool-name-regression.md)
 - [multimodel-runtime-and-live-discovery.md](file://docs/agentic-aiops-platform/release-notes/2026-08-24-multimodel-runtime-and-live-discovery.md)
 - [approval-inbox-persistent-confirmation.md](file://docs/agentic-aiops-platform/release-notes/2026-08-25-approval-inbox-persistent-confirmation.md)
 - [confirmation-race-and-restart-sweep-patch.md](file://docs/agentic-aiops-platform/release-notes/2026-08-25-confirmation-race-and-restart-sweep-patch.md)
@@ -34,6 +35,7 @@
 - Updated confirm route to persist decision outcomes before streaming resumes, ensuring racing approvers receive structured resolution information
 - Enhanced Postgres backend initialization with proper TTL-based stale record closure during startup
 - Added support for structured 409 conflict responses with detailed resolution information including decider identity and timestamps
+- **v0.23.1 Enhancement**: Fixed TOOL_NOT_FOUND errors for approved mutating tool invocations by implementing canonical tool name resolution mapping between sanitized model-visible names and canonical dotted names required by gateway registry
 
 ## Table of Contents
 1. Introduction
@@ -63,17 +65,19 @@ Key outcomes:
 - **Race resilience**: Concurrent approver attempts resolve to structured outcomes rather than errors.
 - **Cross-session discovery**: Designated approvers can discover and act on parked confirmations across sessions via approvals inbox.
 - **Owner transcript persistence**: Confirmed decisions persist in owner transcripts after re-login or pod restarts.
+- **Canonical tool name resolution**: Approved mutating tool invocations correctly resolve to gateway registry using canonical dotted names instead of sanitized model-visible names.
 
 **Section sources**
 - [spec.md:11-20](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md#L11-L20)
 - [release-notes.md:3-35](file://docs/agentic-aiops-platform/release-notes/2026-08-21-hitl-confirmation-bridging.md#L3-L35)
+- [mutating-tool-name-regression.md:7-58](file://docs/agentic-aiops-platform/release-notes/2026-08-28-mutating-tool-name-regression.md#L7-L58)
 - [multimodel-runtime-and-live-discovery.md:126-136](file://docs/agentic-aiops-platform/release-notes/2026-08-24-multimodel-runtime-and-live-discovery.md#L126-L136)
 - [approval-inbox-persistent-confirmation.md:6-51](file://docs/agentic-aiops-platform/release-notes/2026-08-25-approval-inbox-persistent-confirmation.md#L6-L51)
 - [spec.md:17-31](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md#L17-L31)
 - [spec.md:43-67](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/spec.md#L43-L67)
 
 ## Project Structure
-The feature spans three products plus shared contracts, enhanced with SPEC-021 capabilities, SPEC-030 tier enforcement, and SPEC-031 persistent storage:
+The feature spans three products plus shared contracts, enhanced with SPEC-021 capabilities, SPEC-030 tier enforcement, SPEC-031 persistent storage, and v0.23.1 canonical name resolution:
 - Agent platform: runtime park/resume, in-memory registry with risk tracking, v2 routes, schemas, settings, and durable confirmation records store.
 - Platform gateway: confirm proxy route, tiered policy enforcement, audit emission, approval validation, and approvals inbox relay.
 - Tool gateway: risk-tier admission gate, mutating tool registration, tools:mutate enforcement.
@@ -142,9 +146,9 @@ AV -.-> AI
 - [tasks.md:5-41](file://docs/specs/SPEC-020-hitl-confirmation-bridging/tasks.md#L5-L41)
 
 ## Core Components
-- **Enhanced Confirmation Registry**: In-memory per-process store keyed by session_id with risk_level tracking; supports register, claim, resolve, expiry, and parked checks with risk tier awareness. Single pending confirmation per session with optional risk metadata.
+- **Enhanced Confirmation Registry**: In-memory per-process store keyed by session_id with risk tracking and canonical name mapping; supports register, claim, resolve, expiry, and parked checks with risk tier awareness. Single pending confirmation per session with optional risk metadata and gateway name mapping.
 - **Durable Confirmation Records Store**: Postgres-backed persistence layer that survives pod restarts and maintains consistency across replicas. Implements bounded storage (50 records per session, 30-day inbox history) with automatic cleanup and stale record handling.
-- **Runtime kernel bridge**: Translates RequireUserConfirmEvent into confirmation_request frame with risk_level payload, registers pending calls with risk mapping, ends stream without message_end, and resumes via UserConfirmResultEvent on decision. Now persists confirmation lifecycle to durable store before streaming.
+- **Runtime kernel bridge**: Translates RequireUserConfirmEvent into confirmation_request frame with risk_level payload, registers pending calls with risk mapping and canonical name resolution, ends stream without message_end, and resumes via UserConfirmResultEvent on decision. Now persists confirmation lifecycle to durable store before streaming.
 - **Confirm route (agent platform)**: POST /api/v2/chat/confirm validates ownership, claims entry, handles expired/unknown states, streams resumed reply with confirmation_result first. **Updated**: Now uses degraded model resolution to prevent UnknownModelError exceptions and removed session ownership assertion for tier_2 approvers. **Enhanced**: Persists decision outcomes immediately at claim time for race resilience.
 - **Pending confirmation endpoint**: GET /api/v2/chat/pending-confirmation provides authoritative parked batch metadata including owner_user_id, derived policy action, and pending_calls with risk levels for gateway tier enforcement.
 - **Confirm proxy (platform gateway)**: POST /api/v1/chat/confirm enforces chat:confirm action, obtains delegated token, proxies to agent platform, emits confirmation_decided audit when kernel applies decision. **Enhanced**: Enforces tier-based approval requirements against decided_by_roles using pending confirmation data. **Updated**: Passes through structured 409 responses with detailed resolution information.
@@ -170,7 +174,7 @@ AV -.-> AI
 - [styles.css:682-683](file://products/operator-portal/web-ui/styles.css#L682-L683)
 
 ## Architecture Overview
-End-to-end flow from kernel ASK to portal decision and resumed execution, enhanced with tiered approval enforcement, resilient model resolution, and persistent state management:
+End-to-end flow from kernel ASK to portal decision and resumed execution, enhanced with tiered approval enforcement, resilient model resolution, persistent state management, and canonical tool name resolution:
 
 ```mermaid
 sequenceDiagram
@@ -183,11 +187,11 @@ participant Reg as "ConfirmationRegistry"
 participant Store as "ConfirmationRecordStore"
 participant DB as "PostgreSQL"
 Note over RK : Stream turn begins
-RK-->>AP : RequireUserConfirmEvent + risk_levels
-AP->>Reg : register(session, user, reply, tool_calls, timeout, risk_levels)
+RK-->>AP : RequireUserConfirmEvent + risk_levels + gateway_names
+AP->>Reg : register(session, user, reply, tool_calls, timeout, risk_levels, gateway_names)
 AP->>Store : save_parked(confirm_id, session_id, owner, pending_calls, action)
 Store->>DB : INSERT confirmation_records
-AP-->>Portal : data : {type : "confirmation_request", confirm_id, pending_calls[risk_level], message}
+AP-->>Portal : data : {type : "confirmation_request", confirm_id, pending_calls[risk_level, canonical_tool_name], message}
 Portal->>GW : POST /api/v1/chat/confirm {session_id, confirm_id, decision}
 GW->>GW : enforce_policy("chat : confirm")
 alt Decision involves write/admin tool
@@ -237,13 +241,14 @@ end
 
 ## Detailed Component Analysis
 
-### Enhanced Confirmation Registry (In-Memory State with Risk Tracking)
+### Enhanced Confirmation Registry (In-Memory State with Risk Tracking and Canonical Name Mapping)
 Responsibilities:
 - Register pending confirmations per session with TTL awareness and risk level mapping.
 - Atomic claim to prevent double-resume.
 - Resolve entries after decision or expiry closure.
 - Provide parked checks for new-turn rejection.
 - Track risk levels per tool call for portal visualization.
+- **v0.23.1 Enhancement**: Maintain gateway_names mapping between sanitized model-visible names and canonical dotted names required by gateway registry.
 - **New**: Derive policy actions from risk levels using RISK_LEVEL_ACTIONS mapping.
 
 Concurrency and safety:
@@ -251,6 +256,7 @@ Concurrency and safety:
 - Expiry path uses take_for_expiry to avoid interrupting in-flight resumes.
 - No persistence across restarts; parked state is lost safely.
 - Risk levels captured at park time from toolkit discovery.
+- **v0.23.1 Enhancement**: Canonical name mapping captured at park time ensures approved tool invocations resolve correctly at gateway registry.
 
 ```mermaid
 classDiagram
@@ -261,6 +267,7 @@ class PendingConfirmation {
 +string reply_id
 +list tool_calls
 +dict risk_levels
++dict gateway_names
 +float created_at
 +bool resolved
 +bool claimed
@@ -270,7 +277,7 @@ class PendingConfirmation {
 +tool_names() list
 }
 class ConfirmationRegistry {
-+register(session_id, user_id, reply_id, tool_calls, timeout, risk_levels) PendingConfirmation
++register(session_id, user_id, reply_id, tool_calls, timeout, risk_levels, gateway_names) PendingConfirmation
 +get(session_id, confirm_id, timeout) PendingConfirmation
 +claim(session_id, confirm_id, timeout) PendingConfirmation
 +take_for_expiry(session_id, confirm_id) PendingConfirmation
@@ -318,20 +325,21 @@ CloseStale --> Complete
 
 **Diagram sources**
 - [confirmation_records.py:407-455](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L407-L455)
-- [confirmation_records.py:233-317](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L233-L317)
+- [confirmation_records.py:233-317](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L233-317)
 - [confirmation_records.py:415-431](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L415-L431)
 
 **Section sources**
 - [confirmation_records.py:114-565](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L114-L565)
 
-### Runtime Kernel Bridge (Park and Resume with Risk Mapping)
+### Runtime Kernel Bridge (Park and Resume with Risk Mapping and Canonical Name Resolution)
 Behavior:
-- On RequireUserConfirmEvent, builds confirmation_request frame with risk_level payload, registers pending calls with risk mapping, yields frame, and ends stream without message_end.
+- On RequireUserConfirmEvent, builds confirmation_request frame with risk_level payload, registers pending calls with risk mapping and canonical name resolution, yields frame, and ends stream without message_end.
 - **Enhanced**: Persists confirmation lifecycle to durable store before streaming confirmation_request frame to client.
 - resume_confirmation sets delegated token, emits confirmation_result first, then streams resumed reply through normalization/evidence pipeline.
 - **Enhanced**: Records resolution outcome to durable store after confirmation_result flows through.
 - Handles chained parks: resumed turns can trigger another ASK, emitting a fresh confirmation_request.
 - Filters mutating tools when HITL bridging is disabled to maintain honest posture.
+- **v0.23.1 Enhancement**: Captures gateway_tool_name mapping from toolkit to ensure canonical names flow through signed execution envelopes.
 
 ```mermaid
 flowchart TD
@@ -339,7 +347,8 @@ Start(["Stream Event"]) --> CheckASK{"RequireUserConfirmEvent?"}
 CheckASK -- No --> Normalize["Normalize event"]
 Normalize --> Yield["Yield normalized event"]
 CheckASK -- Yes --> BuildFrame["Build confirmation_request frame with risk_level"]
-BuildFrame --> Register["Register pending confirmation with risk_levels"]
+BuildFrame --> MapNames["_toolkit_gateway_name_map(toolkit)"]
+MapNames --> Register["Register pending confirmation with risk_levels, gateway_names"]
 Register --> Persist["save_parked(confirm_id, session_id, owner, pending_calls, action)"]
 Persist --> EndStream["End stream (no message_end)"]
 EndStream --> WaitDecision["Await confirm decision"]
@@ -356,10 +365,12 @@ ChainedASK -- No --> Complete["Complete turn"]
 - [runtime_kernel.py:555-644](file://products/agent-platform/src/agent_service/runtime_kernel.py#L555-L644)
 - [runtime_kernel.py:657-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L657-L794)
 - [runtime_kernel.py:1000-1060](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1000-L1060)
+- [runtime_kernel.py:1328-1344](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1328-L1344)
 
 **Section sources**
 - [runtime_kernel.py:657-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L657-L794)
 - [runtime_kernel.py:1000-1060](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1000-L1060)
+- [runtime_kernel.py:1328-1344](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1328-L1344)
 
 ### Tiered Policy Engine (SPEC-030 Implementation)
 Responsibilities:
@@ -556,7 +567,7 @@ Normal --> Done
   - **Enhanced**: Policy engine adds require_approval outcome with ApprovalSpec containing tier, decided_by_roles, and allow_self_approval.
   - **New**: Session schema includes additive `confirmations` field for persistent card rendering.
 - Services:
-  - Agent platform depends on runtime kernel and registry for park/resume semantics with risk tracking.
+  - Agent platform depends on runtime kernel and registry for park/resume semantics with risk tracking and canonical name resolution.
   - **Enhanced**: Agent platform now depends on durable confirmation records store for persistence with best-effort degradation.
   - Platform gateway depends on policy engine, delegation client, and agent client for proxying and audit.
   - **New**: Platform gateway includes approvals inbox route with `approvals:list` policy enforcement.
@@ -619,6 +630,7 @@ PE --> DECISION["PolicyDecision with ApprovalSpec"]
 - **Opportunistic cleanup**: Stale record cleanup and old resolved record sweeping piggyback on write operations to minimize background overhead.
 - **Metadata-only inbox**: Cross-session discovery exposes only metadata fields, preserving owner privacy and reducing data transfer costs.
 - **Claim-time persistence**: Immediate outcome persistence at claim time eliminates race conditions while maintaining high performance through best-effort degradation.
+- **v0.23.1 Enhancement**: Canonical name mapping is captured once at park time from toolkit, avoiding repeated lookups during confirmation processing.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -642,6 +654,7 @@ Common issues and resolutions:
 - **Race condition confusion**: Structured 409 responses include winner's outcome; losing approvers can see who decided and when.
 - **Startup sweep issues**: Verify AGENT_HITL_CONFIRM_TIMEOUT is properly configured; startup sweep uses this value to identify stale pending records for closure.
 - **Postgres initialization failures**: Check AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL configuration; service falls back to in-memory store when Postgres is unavailable.
+- **v0.23.1 Fix**: TOOL_NOT_FOUND errors for approved mutating tool invocations are now resolved by using canonical dotted names (e.g., `k8s.delete_pod`) instead of sanitized model-visible names (e.g., `k8s_delete_pod`) in the signed execution envelope.
 
 Operational checks:
 - Verify AGENT_HITL_CONFIRM_TIMEOUT > 0 to enable bridging; set to 0 to restore legacy silent-park behavior.
@@ -660,6 +673,7 @@ Operational checks:
 - **Validate owner transcript cards**: Check GET /api/v2/sessions/{id} includes confirmations field with persistent card data.
 - **Verify startup sweep configuration**: Ensure AGENT_HITL_CONFIRM_TIMEOUT is properly set for accurate stale record identification during startup.
 - **Monitor structured 409 responses**: Check that concurrent approver attempts receive detailed resolution information including decider identity and timestamps.
+- **v0.23.1 Verification**: Verify that approved mutating tool invocations execute successfully by checking that the signed execution envelope contains canonical dotted tool names (e.g., `k8s.delete_pod`) rather than sanitized names (e.g., `k8s_delete_pod`).
 
 **Section sources**
 - [routes.py:65-94](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L94)
@@ -676,6 +690,7 @@ Operational checks:
 - [confirmation_records.py:399-405](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L399-L405)
 - [confirmation_records.py:415-431](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L415-L431)
 - [routes.py:370-410](file://products/agent-platform/src/agent_service/api/v2/routes.py#L370-L410)
+- [mutating-tool-name-regression.md:18-58](file://docs/agentic-aiops-platform/release-notes/2026-08-28-mutating-tool-name-regression.md#L18-L58)
 
 ## Conclusion
 SPEC-020 delivers a robust, auditable HITL bridge that transforms kernel ASK parking into a portal-driven approval workflow, enhanced with SPEC-021's bounded mutating actions, SPEC-030's require-approval tier system, and SPEC-031's persistent confirmation registry. It enforces policy at the gateway, preserves session integrity, and records decisions durably with tier context. The design keeps the kernel unchanged, relies on existing agentscope machinery, and scales to future write/mutating tools by gating them behind the same confirmation surface with risk-tier enforcement.
@@ -693,6 +708,8 @@ The integration provides a five-layer security model: deny-by-default policy bun
 **Critical Enhancement**: Startup sweep logic now uses configurable TTL scoping via AGENT_HITL_CONFIRM_TIMEOUT for precise identification of stale pending records. This ensures that only records that have genuinely exceeded their confirmation timeout are marked as expired, preventing premature closure of active confirmations while cleaning up truly orphaned records.
 
 **Critical Enhancement**: Immediate outcome persistence at claim time provides better durability guarantees. The winning approver's decision is persisted to the durable store before the resumed stream begins, ensuring that racing approvers receive structured 409 responses with complete resolution details while the winner's stream continues uninterrupted.
+
+**v0.23.1 Critical Enhancement**: The canonical tool name resolution fix resolves TOOL_NOT_FOUND errors for approved mutating tool invocations by implementing a gateway_names mapping between sanitized model-visible names (e.g., `k8s_delete_pod`) and canonical dotted names (e.g., `k8s.delete_pod`) required by the gateway registry. This ensures that the signed execution envelope carries the correct tool name that the gateway registry can resolve, fixing the regression where approved mutating calls would fail at the final invocation step despite passing all previous approval and verification gates.
 
 **New Capability**: The addition of the pending-confirmation endpoint, RISK_LEVEL_ACTIONS mapping, and approvals inbox enables sophisticated approval workflows where the platform gateway can make informed tier enforcement decisions based on authoritative parked batch metadata, including the original session owner and derived policy actions from tool risk levels.
 

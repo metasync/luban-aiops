@@ -1,1 +1,0 @@
-Two parallel entrypoints are supported: a native FastAPI process started via `native_service.py` (default Redis-backed) and an AgentScope Runtime agent process started via `runtime_kernel.py`; both share the same config, telemetry, and provider wiring.

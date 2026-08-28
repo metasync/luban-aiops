@@ -1,1 +1,0 @@
-Native entrypoint requires `AGENT_NATIVE_HOST`, `AGENT_NATIVE_PORT`, and `AGENTSCOPE_REDIS_*` environment variables; runtime entrypoint requires `agentscope-runtime` installed or raises at import time. Both are launched via their respective `run()` functions rather than a shared CLI.

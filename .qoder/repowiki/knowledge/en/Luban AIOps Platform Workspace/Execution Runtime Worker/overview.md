@@ -1,1 +1,0 @@
-FastAPI-based isolated execution worker that receives handoff tokens, signs receipts, and invokes approved tools through a tool gateway with single-flight idempotency.

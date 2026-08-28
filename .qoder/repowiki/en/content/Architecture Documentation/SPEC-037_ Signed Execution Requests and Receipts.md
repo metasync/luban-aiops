@@ -10,6 +10,7 @@
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [execution-request.schema.json](file://shared/shared-contracts/schemas/execution-request.schema.json)
 - [execution-receipt.schema.json](file://shared/shared-contracts/schemas/execution-receipt.schema.json)
@@ -24,6 +25,7 @@
 - Updated diagrams to reflect actual component interactions
 - Strengthened troubleshooting guidance with concrete error scenarios
 - **Updated**: Enhanced security implementation with constant-time comparison using hmac.compare_digest() to prevent timing attack vulnerabilities
+- **Updated**: Fixed v0.23.1 bug where signed execution envelopes now carry canonical tool names instead of sanitized names, resolving tool resolution failures between agent service and gateway registry for approved mutating tool calls
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -47,6 +49,7 @@ Key implemented features:
 - Durable execution records with Postgres backend and memory fallback
 - Additive audit events correlating confirmation decisions with execution outcomes
 - Portal visibility enhancements showing receipt status on decided confirmation cards
+- **v0.23.1 Fix**: Canonical tool name resolution ensuring approved mutating tool calls execute correctly by carrying canonical names (e.g., `k8s.delete_pod`) instead of sanitized names (e.g., `k8s_delete_pod`) in signed envelopes
 
 The implementation maintains fail-closed security posture where missing signing keys block execution rather than degrading to unsigned operations.
 
@@ -64,6 +67,7 @@ ES["services/execution_signing.py"]
 ER["services/execution_records.py"]
 RK["runtime_kernel.py"]
 GT["tools/gateway_tools.py"]
+HC["services/hitl_confirmations.py"]
 RS["runtime_settings.py"]
 end
 subgraph "Shared Contracts"
@@ -79,6 +83,7 @@ ES --> ERQ
 ES --> ERT
 RK --> ES
 RK --> ER
+RK --> HC
 RK --> AUD
 GT --> ES
 UI --> SD
@@ -91,6 +96,7 @@ RS --> RK
 - [execution_records.py:1-494](file://products/agent-platform/src/agent_service/services/execution_records.py#L1-L494)
 - [runtime_kernel.py:1096-1295](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1096-L1295)
 - [gateway_tools.py:127-326](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L127-L326)
+- [hitl_confirmations.py:72-93](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L72-L93)
 - [runtime_settings.py:117-316](file://products/agent-platform/src/agent_service/runtime_settings.py#L117-L316)
 
 **Section sources**
@@ -140,6 +146,7 @@ participant Audit as "AuditEmitter"
 participant Portal as "Portal UI"
 Client->>Kernel : Approve parked batch
 Kernel->>Signing : Build signed requests per call
+Note over Signing,Gateway : Envelope carries canonical tool_name (v0.23.1 fix)
 Signing-->>Kernel : List of execution requests
 Kernel->>Store : Persist execution_request (best-effort)
 Kernel->>Audit : emission(execution_requested)
@@ -217,6 +224,32 @@ Block --> Exit
 - [spec.md:94-108](file://docs/specs/SPEC-037-signed-execution-requests/spec.md#L94-L108)
 - [gateway_tools.py:153-181](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L153-L181)
 - [gateway_tools.py:244-317](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L244-L317)
+
+### Canonical Tool Name Resolution (v0.23.1 Fix)
+The v0.23.1 fix ensures that signed execution envelopes carry canonical tool names instead of sanitized names, resolving tool resolution failures between agent service and gateway registry:
+
+```mermaid
+flowchart TD
+Park["Tool call parked"] --> Sanitized["Sanitized name: k8s_delete_pod"]
+Sanitized --> Map["Lookup gateway_names map"]
+Map --> Canonical["Canonical name: k8s.delete_pod"]
+Canonical --> Payload["pending_calls_payload() emits canonical name"]
+Payload --> Envelope["Signed envelope carries canonical tool_name"]
+Envelope --> Registry["Gateway registry resolves by canonical name"]
+Registry --> Execute["Tool executes successfully"]
+```
+
+**Updated** Added v0.23.1 fix implementation showing how canonical tool names are captured at park time and emitted through the entire execution chain to prevent TOOL_NOT_FOUND errors.
+
+**Diagram sources**
+- [hitl_confirmations.py:55-61](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L55-L61)
+- [hitl_confirmations.py:72-93](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L72-L93)
+- [runtime_kernel.py:1328-1344](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1328-L1344)
+
+**Section sources**
+- [hitl_confirmations.py:55-61](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L55-L61)
+- [hitl_confirmations.py:72-93](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L72-L93)
+- [runtime_kernel.py:1328-1344](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1328-L1344)
 
 ### Durable Execution Records and Retention
 The storage layer provides robust persistence with graceful degradation:
@@ -317,14 +350,16 @@ RS["runtime_settings.execution_signing_key"] --> RK["runtime_kernel.resume_confi
 RK --> ES["execution_signing.build_requests"]
 RK --> ER["execution_records.ExecutionRecordStore"]
 RK --> AE["audit_event.emission"]
-GT["gateway_tools._make_tool_fn"] --> EV["execution_signing.verify_envelope"]
+RK --> HC["hitl_confirmations.PendingConfirmation"]
+HC --> GT["gateway_tools._make_tool_fn"]
+GT --> EV["execution_signing.verify_envelope"]
 GT --> AR["audit_execution_rejected"]
 ER --> DB["PostgreSQL/Memory Backend"]
 UI["portal receipt badge"] --> SD["session_detail.executions"]
 SD --> ER
 ```
 
-**Updated** Enhanced with specific module dependencies and data flow paths from the actual implementation.
+**Updated** Enhanced with specific module dependencies and data flow paths from the actual implementation, including the v0.23.1 fix dependencies.
 
 **Diagram sources**
 - [runtime_settings.py:161-165](file://products/agent-platform/src/agent_service/runtime_settings.py#L161-L165)
@@ -332,6 +367,7 @@ SD --> ER
 - [execution_signing.py:69-123](file://products/agent-platform/src/agent_service/services/execution_signing.py#L69-L123)
 - [execution_records.py:453-494](file://products/agent-platform/src/agent_service/services/execution_records.py#L453-L494)
 - [gateway_tools.py:153-326](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L153-L326)
+- [hitl_confirmations.py:72-93](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L72-L93)
 
 **Section sources**
 - [plan.md:100-109](file://docs/specs/SPEC-037-signed-execution-requests/plan.md#L100-L109)
@@ -344,6 +380,7 @@ The implementation optimizes performance while maintaining security guarantees:
 - **Selective Verification**: Read-only tools completely bypass signing checks, preserving performance for diagnostic flows
 - **Efficient Storage**: Postgres backend uses targeted queries with proper indexing on session_id and requested_at columns
 - **Startup Sweeps**: Retention cleanup runs during startup and opportunistically on writes using bounded LIMIT clauses
+- **Name Mapping Optimization**: Gateway name mapping is captured once at park time and reused throughout the execution lifecycle
 
 [No sources needed since this section provides general guidance]
 
@@ -366,6 +403,7 @@ This replaces potential standard string equality comparisons that could be vulne
 - **Timing Attack Prevention**: Constant-time comparison ensures that the comparison operation takes the same amount of time regardless of how many characters match
 - **Cryptographic Integrity**: Maintains the security properties of HMAC-SHA256 signatures throughout the verification process
 - **Fail-Closed Design**: Any verification failure immediately blocks the execution, preventing unauthorized mutations
+- **v0.23.1 Security Enhancement**: Canonical tool name resolution prevents TOOL_NOT_FOUND attacks that could bypass approval gates
 
 **Section sources**
 - [gateway_tools.py:180-183](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L180-L183)
@@ -384,6 +422,11 @@ Common issues and diagnostic approaches based on actual implementation behavior:
 **Diagnostics**: Verify parked arguments were not mutated between park and resume; inspect args_digest values in execution records
 **Resolution**: Check for argument transformation in tool definitions or middleware that might alter parameters
 
+### Tool Name Resolution Failure (v0.23.1 Issue)
+**Symptoms**: Approved mutating tool calls fail with TOOL_NOT_FOUND at gateway despite successful approval
+**Diagnostics**: Check if signed envelope contains sanitized name (e.g., `k8s_delete_pod`) instead of canonical name (e.g., `k8s.delete_pod`); verify gateway_names mapping exists in PendingConfirmation
+**Resolution**: Ensure toolkit registration includes gateway_tool_name attributes and that pending_calls_payload() emits canonical names
+
 ### Store Failures
 **Symptoms**: Execution records may be incomplete but service continues normally
 **Diagnostics**: Inspect backend readiness and logs around execution record writes; check Postgres connectivity
@@ -399,7 +442,7 @@ Common issues and diagnostic approaches based on actual implementation behavior:
 - [plan.md:51-80](file://docs/specs/SPEC-037-signed-execution-requests/plan.md#L51-L80)
 
 ## Conclusion
-SPEC-037 has been successfully delivered with comprehensive tamper-evident execution binding through HMAC-SHA256 signatures and durable receipts. The implementation maintains fail-closed security posture, provides robust verification at invocation boundaries using constant-time comparison to prevent timing attacks, and delivers clear portal visibility. The additive contract approach ensures backward compatibility while strengthening the approval-to-execution binding. Phase 2 isolated execution workers will build upon this proven foundation.
+SPEC-037 has been successfully delivered with comprehensive tamper-evident execution binding through HMAC-SHA256 signatures and durable receipts. The implementation maintains fail-closed security posture, provides robust verification at invocation boundaries using constant-time comparison to prevent timing attacks, and delivers clear portal visibility. The v0.23.1 fix ensures that signed execution envelopes carry canonical tool names, resolving tool resolution failures between agent service and gateway registry for approved mutating tool calls. Phase 2 isolated execution workers will build upon this proven foundation.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -413,7 +456,7 @@ SPEC-037 has been successfully delivered with comprehensive tamper-evident execu
 - session_id: Agent session identifier
 - owner_user_id: Session owner whose delegated token executes
 - decider_user_id: Approver who resumed the confirmation
-- tool_name: Sanitized tool name
+- tool_name: **v0.23.1**: Canonical tool name (e.g., `k8s.delete_pod`) instead of sanitized name (e.g., `k8s_delete_pod`)
 - args_digest: SHA-256 hex of canonical JSON parked arguments
 - requested_at: UTC timestamp (RFC 3339)
 - signature: HMAC-SHA256 hex over canonical envelope excluding signature field
@@ -446,6 +489,7 @@ All requirements have been fully implemented and verified:
 - **R-4**: ✅ Durable execution records with Postgres/memory backends and session detail augmentation
 - **R-5**: ✅ Execution audit events with proper correlation
 - **R-6**: ✅ Receipt visibility on decided confirmation cards
+- **v0.23.1 Fix**: ✅ Canonical tool name resolution preventing TOOL_NOT_FOUND errors in approved mutating tool calls
 
 **Section sources**
 - [tasks.md:5-43](file://docs/specs/SPEC-037-signed-execution-requests/tasks.md#L5-L43)

@@ -1,1 +1,0 @@
-Python 3.11+ FastAPI + Uvicorn server, httpx async client for tool-gateway calls, psycopg3 for PostgreSQL-backed execution records, OpenTelemetry SDK with OTLP HTTP exporter and FastAPI/httpx instrumentation, Prometheus client for metrics, uv_build as the build backend.

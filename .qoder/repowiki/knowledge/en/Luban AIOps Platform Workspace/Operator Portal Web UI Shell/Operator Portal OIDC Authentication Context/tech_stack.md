@@ -1,1 +1,0 @@
-OIDC authorization-code flow with PKCE (state + code_verifier) against a Keycloak-backed gateway; sessions stored in browser `sessionStorage`; access-token expiry parsed by decoding the JWT payload base64 directly rather than using a JWT library.

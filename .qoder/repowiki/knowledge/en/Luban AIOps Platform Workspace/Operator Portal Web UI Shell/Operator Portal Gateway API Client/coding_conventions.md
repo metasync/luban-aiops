@@ -1,6 +1,0 @@
-- Each domain module pairs TypeScript interface definitions with async functions that return those types, keeping wire shapes close to the gateway schema.
-- Endpoint functions accept an optional `AbortSignal` parameter and forward it to `requestJson` so callers can cancel in-flight requests.
-- List endpoints normalize server responses by falling back to empty arrays or zero totals when fields are missing (e.g. `response.sessions ?? []`).
-- Resource paths are built with string interpolation and `encodeURIComponent` for dynamic segments under the `/api/v1/` prefix.
-- Query parameters are constructed via `new URLSearchParams` with explicit defaults before being appended to the request path.
-- Errors propagate as `ApiError` instances carrying the HTTP status code, letting callers branch on status (e.g. 409 conflict, 404 not found).

@@ -1,1 +1,0 @@
-FastAPI router and Pydantic schemas exposing the platform-owned /api/v2 surface for agent chat, sessions, HITL confirmations, model catalog, operations documents, and health endpoints.

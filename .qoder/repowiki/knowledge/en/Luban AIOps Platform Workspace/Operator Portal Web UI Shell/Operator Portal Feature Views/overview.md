@@ -1,1 +1,0 @@
-React/Ant Design feature views (Approvals, Incidents, Settings, Documents, Audit) that render operator-facing dashboards and workflows backed by the portal's API layer.

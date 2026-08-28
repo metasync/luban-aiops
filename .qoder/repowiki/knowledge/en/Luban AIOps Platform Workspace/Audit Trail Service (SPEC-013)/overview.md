@@ -1,1 +1,0 @@
-FastAPI-based audit trail service that ingests, persists, and queries immutable audit events from platform services with configurable in-memory or PostgreSQL backends.

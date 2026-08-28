@@ -1,9 +1,0 @@
-schema_version: 1
-module_path: agent_platform/providers
-title: AgentScope Provider Adapters
-scope:
-    - products/agent-platform/src/agent_service/providers/
-source_files: []
-depends_on: []
-related_to:
-    - path: agent_platform/business_services

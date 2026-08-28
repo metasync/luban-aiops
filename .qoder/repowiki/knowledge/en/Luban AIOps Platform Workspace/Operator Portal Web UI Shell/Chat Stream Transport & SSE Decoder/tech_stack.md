@@ -1,1 +1,0 @@
-Browser `fetch` + `ReadableStream` body reader for SSE transport; `TextDecoder` streaming decode; React hooks (`useReducer`, `useState`, `useRef`, `useCallback`) for turn state management; no external streaming library — custom line-buffered SSE parser.

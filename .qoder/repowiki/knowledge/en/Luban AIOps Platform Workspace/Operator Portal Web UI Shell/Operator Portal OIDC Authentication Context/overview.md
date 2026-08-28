@@ -1,1 +1,0 @@
-React authentication context that drives the Keycloak-backed OIDC authorization-code flow, session persistence, and automatic token refresh for the operator portal web UI.

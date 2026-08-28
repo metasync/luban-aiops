@@ -1,1 +1,0 @@
-Markdown-based spec-driven development process enforced via review discipline and a portable `make verify` gate; specifications follow a fixed three-file template layout with numbered IDs and requirement/task traceability.

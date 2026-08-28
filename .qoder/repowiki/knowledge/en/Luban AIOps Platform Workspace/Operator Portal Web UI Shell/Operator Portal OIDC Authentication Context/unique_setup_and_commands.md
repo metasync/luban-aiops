@@ -1,1 +1,0 @@
-The provider must wrap the app tree via `<AuthProvider>` before any component calls `useAuth()`, otherwise the hook throws. Login redirects to the gateway's `authorization_url` and expects a `/callback` route to complete the flow; the provider auto-clears OIDC query params after completion.

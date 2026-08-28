@@ -12,6 +12,7 @@
 - [test_shift_summary.py](file://products/agent-platform/tests/test_shift_summary.py)
 - [test_documents.py](file://products/agent-platform/tests/test_documents.py)
 - [2026-08-28-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-28-shift-summary-handover-narrative-export.md)
+- [2026-08-28-shift-summary-narrative-expanded.md](file://docs/agentic-aiops-platform/release-notes/2026-08-28-shift-summary-narrative-expanded.md)
 - [SPEC-041 spec.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md)
 - [SPEC-041 plan.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/plan.md)
 - [SPEC-041 tasks.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/tasks.md)
@@ -26,6 +27,7 @@
 - Added comprehensive verification and testing information from unit tests and release notes
 - Enhanced dependency analysis with concrete file relationships
 - **Updated for SPEC-041 enhancements**: Added digest rendering improvements, tabbed structured display, bounded scroll panes, and deterministic summary lines that enhance the readability of shift summary handover narratives established in SPEC-040
+- **Updated for v0.23.2 enhancement**: Added expanded narrative panel behavior that opens by default in Documents drawer, addressing operator feedback about improved accessibility to handover content without requiring additional clicks
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -49,6 +51,8 @@ The implementation spans three layers:
 
 **Enhanced by SPEC-041**: The digest rendering and readability have been significantly improved with tabbed structured display, bounded scroll panes, and deterministic summary lines that make shift summary handover narratives more scannable and operator-friendly.
 
+**Enhanced by v0.23.2**: The AI-generated narrative panel now opens expanded by default in the Documents drawer, eliminating the need for operators to click through before reading the shift story — the primary reason they open documents for handover purposes.
+
 ## Project Structure
 The delivered implementation follows the planned architecture with all components integrated:
 
@@ -66,12 +70,14 @@ F["Drawer Export Button<br/>client-side markdown"]
 G["Tabbed Digest Panel<br/>SPEC-041 enhancement"]
 H["Bounded Scroll Panes<br/>SPEC-041 enhancement"]
 I["Summary Lines<br/>SPEC-041 enhancement"]
+J["Expanded Prose Panel<br/>v0.23.2 enhancement"]
 end
 subgraph "Spec Artifacts"
 S1["spec.md<br/>status: delivered"]
 S2["plan.md<br/>all workstreams complete"]
 S3["tasks.md<br/>all tasks checked"]
 S4["SPEC-041<br/>readability enhancements"]
+S5["v0.23.2<br/>expanded narrative"]
 end
 S1 --> A
 S1 --> B
@@ -88,12 +94,14 @@ S3 --> E
 S4 --> G
 S4 --> H
 S4 --> I
+S5 --> J
 ```
 
 **Diagram sources**
 - [shift_summary.py:182-280](file://products/agent-platform/src/agent_service/services/shift_summary.py#L182-L280)
 - [document_prose.py:32-50](file://products/agent-platform/src/agent_service/services/document_prose.py#L32-50)
 - [DocumentsView.tsx:254-305](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L254-L305)
+- [DocumentsView.tsx:593-634](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L593-L634)
 - [App.tsx:113-203](file://products/operator-portal/web-ui/app/src/App.tsx#L113-L203)
 
 **Section sources**
@@ -130,10 +138,14 @@ All four requirements have been successfully delivered:
 - **Bounded scroll panes**: Digest and prose areas with maximum height and internal scrolling
 - **Deterministic summary lines**: One-line counts-only summaries computed at creation time and shown in document lists
 
+**v0.23.2 Enhancement**:
+- **Expanded narrative panel**: The AI-generated narrative now opens expanded by default in the Documents drawer, allowing relieving operators to immediately read the handover story without additional clicks while maintaining collapsible functionality
+
 **Section sources**
 - [shift_summary.py:182-280](file://products/agent-platform/src/agent_service/services/shift_summary.py#L182-L280)
 - [document_prose.py:32-50](file://products/agent-platform/src/agent_service/services/document_prose.py#L32-50)
 - [DocumentsView.tsx:254-305](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L254-L305)
+- [DocumentsView.tsx:593-634](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L593-L634)
 - [App.tsx:113-203](file://products/operator-portal/web-ui/app/src/App.tsx#L113-L203)
 
 ## Architecture Overview
@@ -163,6 +175,7 @@ end
 Portal-->>User : Draft created (digest + optional prose)
 User->>Portal : Open document drawer
 Portal->>Portal : Tabbed digest panel (SPEC-041)
+Portal->>Portal : Expanded prose panel (v0.23.2)
 Portal->>Portal : buildDocumentMarkdown(document)
 Portal-->>User : Download <label-slug>-doc-<id>.md
 ```
@@ -172,6 +185,7 @@ Portal-->>User : Download <label-slug>-doc-<id>.md
 - [shift_summary.py:367-426](file://products/agent-platform/src/agent_service/services/shift_summary.py#L367-L426)
 - [document_prose.py:68-109](file://products/agent-platform/src/agent_service/services/document_prose.py#L68-L109)
 - [DocumentsView.tsx:393-461](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L393-L461)
+- [DocumentsView.tsx:593-634](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L593-L634)
 
 ## Detailed Component Analysis
 
@@ -278,6 +292,28 @@ Browser-->>User : File saved locally
 - [DocumentsView.tsx:393-461](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L393-L461)
 - [DocumentsView.tsx:683-701](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L683-L701)
 
+### Expanded Narrative Panel (v0.23.2 Enhancement) - DELIVERED
+The narrative panel now opens expanded by default to improve operator accessibility:
+
+```mermaid
+flowchart TD
+OpenDrawer["Open Document Drawer"] --> CheckProse{"Has included prose?"}
+CheckProse --> |Yes| ExpandPanel["Collapse with defaultActiveKey=['prose']"]
+CheckProse --> |No| ShowAlert["Show 'No narrative requested'"]
+ExpandPanel --> ReadStory["Immediate access to handover story"]
+ReadStory --> CollapseOption["Optional collapse to header"]
+```
+
+**Enhancement Features:**
+- **Default expanded state**: The narrative panel opens expanded by default using `defaultActiveKey={["prose"]}`
+- **Maintains collapsibility**: Operators can still collapse the panel to its header if needed
+- **Improved accessibility**: Eliminates the extra click required to access the handover story
+- **Preserves existing states**: Failed and not-requested states remain unchanged
+
+**Section sources**
+- [DocumentsView.tsx:593-634](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L593-L634)
+- [2026-08-28-shift-summary-narrative-expanded.md:17-24](file://docs/agentic-aiops-platform/release-notes/2026-08-28-shift-summary-narrative-expanded.md#L17-L24)
+
 ### SPEC-041 Readability Enhancements - DELIVERED
 The digest rendering has been enhanced with operator-focused improvements:
 
@@ -326,6 +362,7 @@ PV["DocumentsView.tsx"] --> API["API clients (list/get/create)"]
 PV -.->|no network| MD["client-side Markdown renderer"]
 PV -.->|SPEC-041| TABS["Tabbed digest interface"]
 PV -.->|SPEC-041| SCROLL["Bounded scroll panes"]
+PV -.->|v0.23.2| EXPANDED["Expanded narrative panel"]
 ```
 
 **Dependencies:**
@@ -333,11 +370,13 @@ PV -.->|SPEC-041| SCROLL["Bounded scroll panes"]
 - Prose generation depends on the runtime kernel's model path with a hard timeout; failures are captured and surfaced as `prose_status=failed`
 - Portal depends on existing API clients for list/get/create/publish/delete; export is purely client-side and does not call the gateway
 - **SPEC-041 additions**: Tabbed interface and bounded panes are pure rendering enhancements that don't affect data flow
+- **v0.23.2 addition**: Expanded narrative panel is a presentation-only change that doesn't affect data flow or storage
 
 **Section sources**
 - [shift_summary.py:93-113](file://products/agent-platform/src/agent_service/services/shift_summary.py#L93-L113)
 - [document_prose.py:79-109](file://products/agent-platform/src/agent_service/services/document_prose.py#L79-L109)
 - [DocumentsView.tsx:393-461](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L393-L461)
+- [DocumentsView.tsx:593-634](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L593-L634)
 
 ## Performance Considerations
 - Handover assembly is O(N) over covered sessions and their confirmation/execution rows; sorting is bounded by per-session lists
@@ -345,6 +384,7 @@ PV -.->|SPEC-041| SCROLL["Bounded scroll panes"]
 - Export is client-side and CPU-bound only on the current tab; large digests may increase render time but do not impact servers
 - No new server endpoints or audit events introduced; export leverages already-fetched documents
 - **SPEC-041 performance**: Tabbed interface and bounded panes are pure client-side rendering optimizations that improve user experience without additional server load
+- **v0.23.2 performance**: Expanded narrative panel is a presentation-only change with minimal performance impact; uses existing Collapse component with default active key
 
 ## Verification and Testing
 The implementation has been thoroughly verified through multiple testing approaches:
@@ -354,6 +394,7 @@ The implementation has been thoroughly verified through multiple testing approac
 - Route-created document assertion requires the `handover` skeleton
 - Prompt-contract test asserts the R-2 anchoring rules
 - Portal suite covers narrative default, drawer export affordance, and Markdown serializer
+- **v0.23.2 test**: Verifies narrative body renders immediately without a click, locking the expanded default while panel remains collapsible
 
 ### Integration Testing
 - Agent-platform + platform-gateway suites green
@@ -364,11 +405,13 @@ The implementation has been thoroughly verified through multiple testing approac
 - Extended `documents-demo.sh` validates created document carries `handover` (quiet shape on demo session)
 - Browser walkthrough covers nav placement, default prose switch, handover rendering, and export download
 - Dev cluster deployment validated end-to-end workflow
+- **v0.23.2 verification**: Confirms narrative opens expanded by default in document drawer
 
 **Section sources**
 - [test_shift_summary.py:282-370](file://products/agent-platform/tests/test_shift_summary.py#L282-L370)
 - [test_documents.py:95-136](file://products/agent-platform/tests/test_documents.py#L95-L136)
 - [2026-08-28-release-notes.md:65-80](file://docs/agentic-aiops-platform/release-notes/2026-08-28-shift-summary-handover-narrative-export.md#L65-L80)
+- [DocumentsView.test.tsx:351-369](file://products/operator-portal/web-ui/app/src/views/workspace/__tests__/DocumentsView.test.tsx#L351-L369)
 
 ## Troubleshooting Guide
 Common issues and their resolutions:
@@ -401,10 +444,16 @@ Common issues and their resolutions:
 - **Summary lines missing**: Check that documents were created after SPEC-041 deployment; legacy documents won't have summary fields
 - **Foreign session tags not visible**: Ensure proper coverage detection in provenance data
 
+### v0.23.2 Narrative Panel Issues
+- **Narrative not opening expanded**: Verify the document has `prose_status='included'` and contains prose content
+- **Cannot collapse narrative**: The panel should remain collapsible to its header; check for JavaScript errors
+- **Narrative appears collapsed initially**: This indicates a rendering issue; refresh the page or check browser console for errors
+
 **Section sources**
 - [document_prose.py:68-109](file://products/agent-platform/src/agent_service/services/document_prose.py#L68-L109)
 - [DocumentsView.tsx:198-236](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L198-L236)
 - [DocumentsView.tsx:393-461](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L393-L461)
+- [DocumentsView.tsx:593-634](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L593-L634)
 - [App.tsx:113-203](file://products/operator-portal/web-ui/app/src/App.tsx#L113-L203)
 
 ## Conclusion
@@ -417,4 +466,6 @@ SPEC-040 has been successfully delivered in v0.22.0, providing a comprehensive s
 
 **Enhanced by SPEC-041**: The digest rendering and readability have been significantly improved with tabbed structured display, bounded scroll panes, and deterministic summary lines that make shift summary handover narratives more scannable and operator-friendly.
 
-The changes preserve all prior invariants (no model output outside labeled prose, fail-soft generation, two-tier coverage) while closing the operator feedback gap about inheriting actionable context between shifts. All four workstreams (W-1 through W-4) have been completed and verified through comprehensive testing and live deployment, with additional readability enhancements from SPEC-041 improving the overall operator experience.
+**Enhanced by v0.23.2**: The AI-generated narrative panel now opens expanded by default in the Documents drawer, addressing operator feedback about improved accessibility to handover content without requiring additional clicks. This presentation-only enhancement eliminates the friction of having to click through before reading the shift story — the primary reason operators open documents for handover purposes.
+
+The changes preserve all prior invariants (no model output outside labeled prose, fail-soft generation, two-tier coverage) while closing the operator feedback gap about inheriting actionable context between shifts. All four workstreams (W-1 through W-4) have been completed and verified through comprehensive testing and live deployment, with additional readability enhancements from SPEC-041 improving the overall operator experience and the expanded narrative behavior from v0.23.2 further optimizing the handover workflow.

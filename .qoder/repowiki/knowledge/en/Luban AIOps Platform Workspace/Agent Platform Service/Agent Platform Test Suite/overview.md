@@ -1,1 +1,0 @@
-Pytest-based unit and integration tests covering the agent-service FastAPI app, runtime kernel, session stores, tool gateway, model catalog, and persistence backends.

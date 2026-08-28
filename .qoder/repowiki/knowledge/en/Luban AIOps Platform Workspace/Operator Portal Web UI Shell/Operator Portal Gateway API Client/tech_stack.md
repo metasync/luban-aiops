@@ -1,1 +1,0 @@
-Plain browser `fetch` with TypeScript; uses `crypto.randomUUID()` for request IDs and `URLSearchParams` for query strings; relies on the project's `../auth/storage` for bearer tokens.

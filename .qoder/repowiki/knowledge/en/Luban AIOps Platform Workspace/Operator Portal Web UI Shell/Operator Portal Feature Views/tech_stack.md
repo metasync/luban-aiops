@@ -1,1 +1,0 @@
-React + TypeScript with Ant Design components (Tabs, Table, Tag, Alert, Spin, etc.), dayjs for relative timestamps, and a custom SSE/stream transport (`../../stream/transport`) for real-time confirmation results.

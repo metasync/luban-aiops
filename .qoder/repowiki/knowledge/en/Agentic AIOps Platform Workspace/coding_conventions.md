@@ -1,0 +1,6 @@
+- Each product follows a uniform layout with `src/<package>/api`, `core`, `schemas`, `services`, plus a sibling `tests/` directory, a `Dockerfile`, a product-local `Makefile`, and `pyproject.toml` + `uv.lock`.
+- Inter-service boundaries are expressed as JSON Schema files under `shared/shared-contracts/schemas/` rather than inline type definitions, and consumers validate payloads against these schemas.
+- Policy configuration is centralized in `shared/shared-contracts/policies/policy-default.yaml` and copied into each consuming product via the root `make sync-policy` target.
+- Product versions are kept lockstep with the root `VERSION` file and enforced by `make validate-version`, which runs the shared `validate_version.py` script against all products.
+- Cross-cutting concerns (config, metrics, observability, request context, telemetry, runtime metadata) are implemented as reusable modules under each product's `core/` package so services share the same bootstrap pattern.
+- Container images use a coordinated tag scheme derived from `PLATFORM_VERSION`, `IMAGE_TAG_PREFIX`, optional profile, git SHA, and dirty-state timestamp computed once by the root Makefile.
