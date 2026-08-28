@@ -44,6 +44,14 @@ Release 1 entries are grouped retrospectively under 0.1.0.
   section-tied facts, no invented ids/causes/recommendations, honest
   quiet flag). Locked by the document-prose prompt tests.
 
+### Fixed
+
+- **Health probes reach the gateway through the portal's nginx**: the
+  web-ui image proxied only `/api/`, so the new Settings component
+  probes to `/health/ready` hit the SPA fallback and degraded to
+  *unavailable* in the browser; the portal nginx now routes `/health/`
+  to the platform gateway alongside `/api/`.
+
 ## 0.23.2 — 2026-08-28
 
 ### Changed

@@ -32,6 +32,9 @@ Three polish items from operator live-test feedback:
   count) and `/api/v1/runtime` (provider, model, runtime state).
 - Every row degrades to *unavailable* when its probe fails — nothing is
   guessed or cached.
+- The portal's nginx routes `/health/` through to the platform gateway
+  alongside `/api/`; without it the probes hit the SPA fallback and the
+  table degrades in the browser.
 
 ### Documents: the AI one-liner (agent-platform + portal)
 
