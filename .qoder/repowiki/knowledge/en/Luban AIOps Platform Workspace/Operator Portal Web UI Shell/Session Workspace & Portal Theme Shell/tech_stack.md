@@ -1,0 +1,1 @@
+React hooks (`useState`, `useEffect`, `useCallback`, `useRef`) over a generated `../api/sessions` client; Ant Design v5 `ThemeConfig` with `darkAlgorithm`; CSS custom properties for a unified dark palette ported from the legacy portal's `styles.css`.

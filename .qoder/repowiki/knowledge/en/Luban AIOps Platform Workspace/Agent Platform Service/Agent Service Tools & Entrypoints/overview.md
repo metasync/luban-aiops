@@ -1,0 +1,1 @@
+Provides AgentScope tool wrappers that proxy calls to the platform's tool-gateway and defines two service entrypoints: a native FastAPI app backed by Redis and an AgentScope Runtime agent application.

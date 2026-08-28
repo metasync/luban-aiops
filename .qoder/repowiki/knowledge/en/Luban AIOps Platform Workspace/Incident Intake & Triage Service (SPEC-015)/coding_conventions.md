@@ -1,0 +1,6 @@
+- External dependencies (e.g. `AuditConnector`, `psycopg`) are imported lazily inside functions to keep modules importable without optional runtime deps.
+- Pluggable subsystems expose a `Protocol` plus a registry/factory pair (`Connector` + `CONNECTOR_REGISTRY`, `IncidentStore` + `build_incident_store`) so new implementations are added by registering a factory rather than modifying callers.
+- Configuration is modeled as frozen `@dataclass` objects loaded from `INCIDENT_*` environment variables with `from_env()` classmethods and a cached `get_settings()` accessor.
+- Connector dispatch failures are caught with broad `except Exception` blocks and recorded as failed outcomes instead of propagating, ensuring a downstream connector outage never aborts the triage path.
+- Database access uses per-operation async connection contexts (`async with self._connect() as conn`) with parameterized queries and explicit `conn.commit()` after writes.
+- Structured events are emitted via `log_event(LOGGER, event_name, ...)` with a `service` field set to `SERVICE_NAME` from `metadata.py` for consistent observability.

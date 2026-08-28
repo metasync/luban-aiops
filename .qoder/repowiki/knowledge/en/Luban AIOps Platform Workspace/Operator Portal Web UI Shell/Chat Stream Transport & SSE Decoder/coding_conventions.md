@@ -1,0 +1,6 @@
+- Wire payloads are decoded defensively via small helpers (`asString`, `asRecord`) that coerce unknown values to safe defaults rather than throwing, so malformed frames degrade gracefully instead of breaking the stream.
+- Frame kinds are modeled as a TypeScript discriminated union (`kind: 'delta' | 'terminal' | ...`) and dispatched with a `switch` statement in both the decoder's `toFrame` and the hook's `handleEvent`.
+- Known-but-unmodeled event types are explicitly whitelisted (e.g. `DELTA_EVENT_TYPES`, `PENDING_CALL_ACTIONS`) and silently ignored otherwise, preserving legacy parity when the backend evolves.
+- HTTP errors are wrapped in a domain-specific `StreamOpenError` carrying status and an optional parsed detail envelope, letting callers branch on specific status codes (401, 404, 409, 410) without inspecting raw responses.
+- Per-turn state is mutated in place inside the reducer-style `handleEvent` callback and then surfaced by bumping a `useReducer` counter, avoiding full object replacement while keeping React re-renders minimal.
+- Long-running streams are owned by an `AbortController` stored in a ref, with an ownership check in `endStream` so a session switch can safely supersede an in-flight stream without wiping the replacement.

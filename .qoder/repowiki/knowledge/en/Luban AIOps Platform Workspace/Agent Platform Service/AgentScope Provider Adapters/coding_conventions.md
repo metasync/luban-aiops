@@ -1,0 +1,6 @@
+- Each provider class declares class-level metadata (`provider_name`, `default_model`, `default_base_url`, `model_series`, `discover_family_prefixes`, `discover_exclude_markers`) instead of passing them through constructors.
+- `build_model` performs lazy imports of `agentscope` modules, then calls `self.validate(settings)` before constructing the credential and model instance.
+- Provider-specific option types are validated with an `isinstance(options, XOptions)` check that raises `ProviderConfigurationError` on mismatch.
+- Base URL injection uses the shared `resolved_base_url(settings)` helper so providers never read raw settings directly for endpoint resolution.
+- Live-discovery filtering composes the shared `_NON_CHAT_MARKERS` regex/marker set with per-provider `discover_family_prefixes` to restrict discovered model IDs to chat families.
+- New providers are registered by adding a class entry to the `_PROVIDERS` dict in `registry.py` rather than via dynamic import or plugin loading.

@@ -1,0 +1,5 @@
+- Configuration is modeled as frozen `@dataclass` objects with a `from_env()` classmethod and optional `__post_init__` validation, consumed via an `lru_cache` singleton getter.
+- HTTP routes are organized per feature under `api/routes/<feature>.py` exposing a module-level `router = APIRouter()` that is included by the central `api/router.py`.
+- Service state is initialized during FastAPI lifespan and attached to `app.state` (e.g., `execution_record_store`, `single_flights`) rather than passed through constructors.
+- External failures are never raised to callers; instead they are mapped into structured result dicts with a stable `error.code` vocabulary (e.g., `TIMEOUT`, `TRANSPORT_ERROR`, `NO_GATEWAY`) so callers can always sign a receipt.
+- In-process registries use asyncio locks plus eviction policies (time-based retention and hard caps like `MAX_COMPLETED_FLIGHTS`) to bound memory growth.

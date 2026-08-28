@@ -1,0 +1,6 @@
+- Each feature spec lives in its own directory named `SPEC-NNN-kebab-case-slug/` containing exactly three files: `spec.md`, `plan.md`, and `tasks.md`, derived from templates under `docs/specs/templates/`.
+- Specs carry a status header progressing through the fixed lifecycle draft → approved → in-progress → delivered → superseded, and once delivered they are never rewritten — corrections go into a changelog section or a new spec.
+- Requirements inside specs use stable IDs (`R-1`, `R-2`, …) and tasks reference those IDs so delivery is traceable from requirement to code.
+- Architecture decisions are captured as numbered ADR files (`NNNN-slug.md`) using the shared template, with immutable accepted records only updated via status changes or explicit supersession links.
+- Release notes are stored as dated Markdown files under `docs/agentic-aiops-platform/release-notes/` with filenames of the form `YYYY-MM-DD-title.md`.
+- Long-form Tier 1 architecture documents are kept minimal and only corrected or explicitly superseded; new architectural decisions are routed to `docs/adr/` instead of editing them in place.

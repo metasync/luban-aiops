@@ -13,7 +13,9 @@
 - [policy-default.yaml](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml)
 - [operation-document.schema.json](file://shared/shared-contracts/schemas/operation-document.schema.json)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
-- [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/DocumentsView.tsx)
+- [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
+- [SPEC-041 spec.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md)
+- [SPEC-041 plan.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/plan.md)
 </cite>
 
 ## Update Summary
@@ -25,6 +27,7 @@
 - Added comprehensive troubleshooting guide covering all error scenarios and degradation paths
 - Updated conclusion to reflect delivery status and future extensibility
 - Integrated SPEC-040 context showing handover section support and prose generation defaults changes
+- **Added SPEC-041 enhancement planning**: Documentation now includes forward-looking information about upcoming readability improvements and digest reference capabilities that will extend the delivered SPEC-039 functionality
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -35,7 +38,8 @@
 6. [Dependency Analysis](#dependency-analysis)
 7. [Performance Considerations](#performance-considerations)
 8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
+9. [Future Enhancements (SPEC-041)](#future-enhancements-spec-041)
+10. [Conclusion](#conclusion)
 
 ## Introduction
 This document specifies the Operations Document Repository (SPEC-039), a platform-owned, typed-document substrate that lets operators produce durable operational recaps from existing platform records and share them by role rather than per-document grants. Phase 1 ships the substrate with a draft→published lifecycle, role-based access matrix, provenance anchoring, audit events, and a portal Documents view. The first document type is the shift summary: a deterministic digest of sessions, confirmation decisions, execution receipts, and evidence counts, with an optional clearly-labeled prose layer generated solely from the digest.
@@ -94,7 +98,7 @@ J --> D
 - [routes.py:738-957](file://products/agent-platform/src/agent_service/api/v2/routes.py#L738-L957)
 - [documents.py:1-171](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L171)
 - [policy-default.yaml:251-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L251-L267)
-- [DocumentsView.tsx:195-249](file://products/operator-portal/web-ui/app/src/views/control/DocumentsView.tsx#L195-L249)
+- [DocumentsView.tsx:195-249](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L195-L249)
 - [operation-document.schema.json:1-101](file://shared/shared-contracts/schemas/operation-document.schema.json#L1-L101)
 - [v2.py:335-367](file://products/agent-platform/src/agent_service/schemas/v2.py#L335-L367)
 
@@ -373,7 +377,49 @@ Portal["Operator Portal"] --> Gateway
 - [document_prose.py:59-100](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L100)
 - [routes.py:705-736](file://products/agent-platform/src/agent_service/api/v2/routes.py#L705-L736)
 
+## Future Enhancements (SPEC-041)
+
+### Planned Readability Improvements
+The operations document repository is planned to receive significant usability enhancements through SPEC-041, which addresses operator feedback from the v0.22.0 live test. These enhancements focus on improving the digest's readability and providing better context for operators encountering the document system for the first time.
+
+### Key Planned Features
+
+#### R-1: Operator Digest and Documents Reference
+- Dedicated operator-facing reference documentation explaining digest vocabulary (digest, frame, coverage tiers, handover)
+- Integration with portal user guide and Documents view
+- Maintains envelope-only listing posture while providing educational content
+
+#### R-2: Tabbed, Structured Digest Rendering  
+- Restructure the current recursive JSON tree into tabbed interface with dedicated tabs for:
+  - Handover (default) - shift-level counts, open items, quiet state
+  - Sessions - per-session coverage details
+  - Confirmations - decision tracking
+  - Executions - tool execution outcomes
+  - Evidence & Transcript Counts - quantitative metrics
+  - Open Items - pending actions breakdown
+  - Raw JSON - preserves artifact inspection capability
+
+#### R-3: Bounded Scrollable Digest and Prose Panes
+- Maximum height constraints with internal scrolling for long content
+- Expand/collapse affordances for full content access
+- Prevents drawer overflow while maintaining content accessibility
+
+#### R-4: Deterministic Counts-Only Document Summary
+- Creation-time summary computed from handover skeleton (no model involvement)
+- Shows covered session counts, decision/execution counts, open item counts
+- Quiet phrasing for shifts with no recorded activity
+- Envelope-only field that maintains security posture
+
+### Implementation Timeline
+SPEC-041 is currently in draft status targeting version 0.23.0 as part of the R5 hardening cycle. The enhancements are designed to be additive, preserving all existing functionality while significantly improving operator experience and onboarding.
+
+**Section sources**
+- [SPEC-041 spec.md:11-45](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md#L11-L45)
+- [SPEC-041 plan.md:13-87](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/plan.md#L13-L87)
+
 ## Conclusion
 SPEC-039 introduces a robust, typed operations document repository with a clear separation between immutable digests and optional prose, enforced by role-based access and strong provenance. Phase 1 delivers the substrate, shift summaries, and portal support, while leaving room for future document types and integrations. All eight requirements have been successfully implemented and delivered in v0.21.0, providing operators with a complete solution for creating, managing, and sharing operational documentation across their teams.
 
-The system is now positioned to integrate with SPEC-040 capabilities, which will enhance the shift summaries with deterministic handover sections and improved prose generation defaults, further strengthening the operational handover workflow for relief operators.
+The system is now positioned to integrate with SPEC-040 capabilities, which will enhance the shift summaries with deterministic handover sections and improved prose generation defaults, further strengthening the operational handover workflow for relief operators. Additionally, SPEC-041 planning ensures continued evolution toward better operator experience through enhanced readability features and digest reference capabilities.
+
+The combination of SPEC-039's solid foundation, SPEC-040's handover narrative enhancements, and the planned SPEC-041 readability improvements creates a comprehensive operational documentation system that scales from basic digest capture to sophisticated operator workflows.

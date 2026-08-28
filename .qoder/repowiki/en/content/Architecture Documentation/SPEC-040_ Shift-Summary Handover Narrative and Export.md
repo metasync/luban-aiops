@@ -9,17 +9,23 @@
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
 - [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
+- [test_shift_summary.py](file://products/agent-platform/tests/test_shift_summary.py)
+- [test_documents.py](file://products/agent-platform/tests/test_documents.py)
 - [2026-08-28-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-28-shift-summary-handover-narrative-export.md)
+- [SPEC-041 spec.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md)
+- [SPEC-041 plan.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/plan.md)
+- [SPEC-041 tasks.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/tasks.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated status from draft to delivered (v0.22.0)
-- Added comprehensive implementation details for all four workstreams (W-1 through W-4)
-- Enhanced architecture diagrams with actual file mappings
-- Added detailed component analysis based on delivered code
-- Updated troubleshooting guide with specific error scenarios
-- Added verification and testing information from release notes
+- Updated status from draft to delivered (v0.22.0) with complete implementation verification
+- Enhanced architecture diagrams with actual file mappings and line references
+- Added detailed component analysis based on delivered code with specific function implementations
+- Updated troubleshooting guide with specific error scenarios and resolution paths
+- Added comprehensive verification and testing information from unit tests and release notes
+- Enhanced dependency analysis with concrete file relationships
+- **Updated for SPEC-041 enhancements**: Added digest rendering improvements, tabbed structured display, bounded scroll panes, and deterministic summary lines that enhance the readability of shift summary handover narratives established in SPEC-040
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -41,6 +47,8 @@ The implementation spans three layers:
 - Operator portal (navigation placement, UI defaults, and client-side export)
 - Spec artifacts (requirements, plan, tasks)
 
+**Enhanced by SPEC-041**: The digest rendering and readability have been significantly improved with tabbed structured display, bounded scroll panes, and deterministic summary lines that make shift summary handover narratives more scannable and operator-friendly.
+
 ## Project Structure
 The delivered implementation follows the planned architecture with all components integrated:
 
@@ -55,11 +63,15 @@ subgraph "Operator Portal"
 D["App.tsx<br/>Workspace navigation"]
 E["DocumentsView.tsx<br/>create dialog + export"]
 F["Drawer Export Button<br/>client-side markdown"]
+G["Tabbed Digest Panel<br/>SPEC-041 enhancement"]
+H["Bounded Scroll Panes<br/>SPEC-041 enhancement"]
+I["Summary Lines<br/>SPEC-041 enhancement"]
 end
 subgraph "Spec Artifacts"
 S1["spec.md<br/>status: delivered"]
 S2["plan.md<br/>all workstreams complete"]
 S3["tasks.md<br/>all tasks checked"]
+S4["SPEC-041<br/>readability enhancements"]
 end
 S1 --> A
 S1 --> B
@@ -73,6 +85,9 @@ S3 --> A
 S3 --> B
 S3 --> D
 S3 --> E
+S4 --> G
+S4 --> H
+S4 --> I
 ```
 
 **Diagram sources**
@@ -110,6 +125,11 @@ All four requirements have been successfully delivered:
 - Download performed via Blob without network calls
 - Drawer includes Export button next to header meta
 
+**SPEC-041 Enhancements**:
+- **Tabbed structured digest rendering**: Handover, Sessions, Confirmations, Executions, Evidence & transcript counts, Open items, and Raw JSON tabs
+- **Bounded scroll panes**: Digest and prose areas with maximum height and internal scrolling
+- **Deterministic summary lines**: One-line counts-only summaries computed at creation time and shown in document lists
+
 **Section sources**
 - [shift_summary.py:182-280](file://products/agent-platform/src/agent_service/services/shift_summary.py#L182-L280)
 - [document_prose.py:32-50](file://products/agent-platform/src/agent_service/services/document_prose.py#L32-50)
@@ -142,6 +162,7 @@ Gateway-->>Portal : document without prose
 end
 Portal-->>User : Draft created (digest + optional prose)
 User->>Portal : Open document drawer
+Portal->>Portal : Tabbed digest panel (SPEC-041)
 Portal->>Portal : buildDocumentMarkdown(document)
 Portal-->>User : Download <label-slug>-doc-<id>.md
 ```
@@ -257,6 +278,40 @@ Browser-->>User : File saved locally
 - [DocumentsView.tsx:393-461](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L393-L461)
 - [DocumentsView.tsx:683-701](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L683-L701)
 
+### SPEC-041 Readability Enhancements - DELIVERED
+The digest rendering has been enhanced with operator-focused improvements:
+
+```mermaid
+flowchart TD
+Digest["Original Nested List"] --> Tabs["Tabbed Interface"]
+Tabs --> Handover["Handover Tab (Default)"]
+Tabs --> Sessions["Sessions Tab"]
+Tabs --> Confirmations["Confirmations Tab"]
+Tabs --> Executions["Executions Tab"]
+Tabs --> Evidence["Evidence & Transcript Counts"]
+Tabs --> OpenItems["Open Items Tab"]
+Tabs --> RawJSON["Raw JSON Tab"]
+Handover --> Bounded["Bounded Scroll Pane"]
+Sessions --> Bounded
+Confirmations --> Bounded
+Executions --> Bounded
+Evidence --> Bounded
+OpenItems --> Bounded
+RawJSON --> Bounded
+Bounded --> Expand["Expand/Collapse Affordance"]
+```
+
+**Enhancement Features:**
+- **Tabbed structured digest rendering**: Organized interface with dedicated tabs for different digest sections
+- **Bounded scroll panes**: Maximum height containers with internal scrolling and expand/collapse functionality
+- **Tier-aware rendering**: Foreign sessions properly labeled as metadata-only, never showing empty owner-tier fields
+- **Deterministic summary lines**: One-line counts-only summaries computed at creation time and displayed in document lists
+- **Improved scanning**: Table-shaped content instead of nested lists for better readability
+
+**Section sources**
+- [SPEC-041 spec.md:77-100](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md#L77-L100)
+- [SPEC-041 plan.md:39-73](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/plan.md#L39-L73)
+
 ## Dependency Analysis
 The implementation maintains clean separation of concerns while preserving existing invariants:
 
@@ -269,12 +324,15 @@ SS --> T["session transcript"]
 DP["document_prose.py"] --> K["runtime kernel / model"]
 PV["DocumentsView.tsx"] --> API["API clients (list/get/create)"]
 PV -.->|no network| MD["client-side Markdown renderer"]
+PV -.->|SPEC-041| TABS["Tabbed digest interface"]
+PV -.->|SPEC-041| SCROLL["Bounded scroll panes"]
 ```
 
 **Dependencies:**
 - Agent platform depends on durable stores (confirmations, executions, evidence, transcripts) through safe reads; degradation yields unavailable sections rather than errors
 - Prose generation depends on the runtime kernel's model path with a hard timeout; failures are captured and surfaced as `prose_status=failed`
 - Portal depends on existing API clients for list/get/create/publish/delete; export is purely client-side and does not call the gateway
+- **SPEC-041 additions**: Tabbed interface and bounded panes are pure rendering enhancements that don't affect data flow
 
 **Section sources**
 - [shift_summary.py:93-113](file://products/agent-platform/src/agent_service/services/shift_summary.py#L93-L113)
@@ -286,6 +344,7 @@ PV -.->|no network| MD["client-side Markdown renderer"]
 - Prose generation has a fixed 30-second timeout to prevent blocking the create route; empty replies are treated as failures
 - Export is client-side and CPU-bound only on the current tab; large digests may increase render time but do not impact servers
 - No new server endpoints or audit events introduced; export leverages already-fetched documents
+- **SPEC-041 performance**: Tabbed interface and bounded panes are pure client-side rendering optimizations that improve user experience without additional server load
 
 ## Verification and Testing
 The implementation has been thoroughly verified through multiple testing approaches:
@@ -307,6 +366,8 @@ The implementation has been thoroughly verified through multiple testing approac
 - Dev cluster deployment validated end-to-end workflow
 
 **Section sources**
+- [test_shift_summary.py:282-370](file://products/agent-platform/tests/test_shift_summary.py#L282-L370)
+- [test_documents.py:95-136](file://products/agent-platform/tests/test_documents.py#L95-L136)
 - [2026-08-28-release-notes.md:65-80](file://docs/agentic-aiops-platform/release-notes/2026-08-28-shift-summary-handover-narrative-export.md#L65-L80)
 
 ## Troubleshooting Guide
@@ -334,6 +395,12 @@ Common issues and their resolutions:
 - Verify session IDs are valid and accessible to the requester
 - Review foreign session permissions for cross-owner coverage
 
+### SPEC-041 Rendering Issues
+- **Tabbed interface not showing**: Ensure browser supports modern CSS features; check for JavaScript errors
+- **Bounded panes not working**: Verify CSS overflow properties are applied correctly
+- **Summary lines missing**: Check that documents were created after SPEC-041 deployment; legacy documents won't have summary fields
+- **Foreign session tags not visible**: Ensure proper coverage detection in provenance data
+
 **Section sources**
 - [document_prose.py:68-109](file://products/agent-platform/src/agent_service/services/document_prose.py#L68-L109)
 - [DocumentsView.tsx:198-236](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L198-L236)
@@ -348,4 +415,6 @@ SPEC-040 has been successfully delivered in v0.22.0, providing a comprehensive s
 - **Improved workspace ergonomics**: Documents relocated to logical Workspace location
 - **Offline capability**: Client-side Markdown export enables handover sharing outside the portal
 
-The changes preserve all prior invariants (no model output outside labeled prose, fail-soft generation, two-tier coverage) while closing the operator feedback gap about inheriting actionable context between shifts. All four workstreams (W-1 through W-4) have been completed and verified through comprehensive testing and live deployment.
+**Enhanced by SPEC-041**: The digest rendering and readability have been significantly improved with tabbed structured display, bounded scroll panes, and deterministic summary lines that make shift summary handover narratives more scannable and operator-friendly.
+
+The changes preserve all prior invariants (no model output outside labeled prose, fail-soft generation, two-tier coverage) while closing the operator feedback gap about inheriting actionable context between shifts. All four workstreams (W-1 through W-4) have been completed and verified through comprehensive testing and live deployment, with additional readability enhancements from SPEC-041 improving the overall operator experience.

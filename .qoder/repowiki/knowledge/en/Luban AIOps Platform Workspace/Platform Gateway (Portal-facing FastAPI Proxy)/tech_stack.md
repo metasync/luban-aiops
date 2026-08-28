@@ -1,0 +1,1 @@
+Python ≥3.11 with FastAPI 0.115+, httpx async client, PyJWT for local JWT verification against JWKS, PyYAML for the policy bundle, Prometheus client for metrics, OpenTelemetry SDK + FastAPI/httpx/logging instrumentations for distributed tracing, and uvicorn as the ASGI server.

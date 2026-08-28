@@ -1,0 +1,1 @@
+TypeScript HTTP client layer that wraps the operator portal's gateway REST API, providing typed endpoints for sessions, incidents, approvals, documents, and model catalog.

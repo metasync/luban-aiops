@@ -1,0 +1,1 @@
+FastAPI + Uvicorn ASGI server; Pydantic v2 models; psycopg async driver for PostgreSQL (with GIN full-text indexes on title+body); PyJWT for query/workload auth; OpenTelemetry OTLP exporter with FastAPI/HTTPX/logging instrumentation; Prometheus client for metrics; YAML parsing for skill frontmatter.

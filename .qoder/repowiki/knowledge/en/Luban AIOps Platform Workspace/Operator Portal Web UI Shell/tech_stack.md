@@ -1,0 +1,1 @@
+React + TypeScript front-end built with Vite, styled with Ant Design components and a custom dark theme defined in `theme/tokens.ts`; authentication via Keycloak OIDC; server communication via REST (`api/`) and Server-Sent Events (`stream/`).

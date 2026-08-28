@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: agent_platform/tests
+title: Agent Platform Test Suite
+scope:
+    - products/agent-platform/tests/
+source_files: []
+depends_on: []
+related_to: []

@@ -1,0 +1,1 @@
+React + TypeScript with Ant Design (`@ant-design/x` Bubble/Sender, antd Alert/Button/Modal); Markdown rendered via a custom escape-first regex pipeline rather than a markdown library; Web Speech API for client-side speech-to-text; dayjs with relativeTime plugin for timestamps.

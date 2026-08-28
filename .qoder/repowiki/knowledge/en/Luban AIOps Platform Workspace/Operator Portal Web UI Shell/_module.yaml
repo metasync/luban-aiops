@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: operator_portal
+title: Operator Portal Web UI Shell
+scope:
+    - products/operator-portal/web-ui/app/src/
+source_files: []
+depends_on: []
+related_to: []

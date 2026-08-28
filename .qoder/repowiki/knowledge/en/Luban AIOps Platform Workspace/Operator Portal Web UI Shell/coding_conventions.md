@@ -1,0 +1,4 @@
+- Feature visibility is controlled centrally by role constant arrays in `roles.ts` and checked via `hasAnyRole` before rendering menu items or views.
+- Cross-view shared state (current session, incident pins, approval inbox count) is lifted to `App.tsx` and passed down as props or read via React contexts rather than held locally in child views.
+- All network calls go through the typed `api/` client modules instead of direct `fetch` calls, keeping endpoint definitions centralized.
+- Streaming chat logic is isolated in the `stream/` transport layer and exposed to UI via React hooks (`useChatStream`, `usePendingDecisionPoll`) consumed by `chat/`.

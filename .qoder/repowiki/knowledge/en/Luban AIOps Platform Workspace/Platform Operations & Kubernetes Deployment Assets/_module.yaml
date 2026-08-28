@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: platform_ops
+title: Platform Operations & Kubernetes Deployment Assets
+scope:
+    - shared/platform-ops/
+source_files: []
+depends_on: []
+related_to:
+    - path: platform_gateway

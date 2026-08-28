@@ -1,0 +1,1 @@
+Policy bundles must pass `scripts/validate_policy.py` and schemas must pass `scripts/validate_version.py` before being committed; the v2 agent-service contract requires `X-User-ID` and `x-request-id` headers on every request as documented in the README.

@@ -1,0 +1,1 @@
+Entry point is the `execution-runtime` console script defined in `pyproject.toml` (`execution_runtime.main:run`). Dependencies are managed with uv (`uv.lock` present). Tests run via pytest under the `tests/` directory.

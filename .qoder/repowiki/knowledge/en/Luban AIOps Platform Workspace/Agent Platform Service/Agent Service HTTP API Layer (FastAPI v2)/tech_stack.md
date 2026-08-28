@@ -1,0 +1,1 @@
+FastAPI (`APIRouter`, `Header`, `Query`, `StreamingResponse`) with Pydantic `BaseModel` request/response validation; SSE streaming via `AsyncIterator[str]` yielding `data: ...\n\n` frames.

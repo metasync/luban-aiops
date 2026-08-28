@@ -1,0 +1,1 @@
+React application shell that wires OIDC authentication, a role-gated sidebar, and feature views (chat, incidents, approvals, documents, audit) around the operator portal's gateway API.

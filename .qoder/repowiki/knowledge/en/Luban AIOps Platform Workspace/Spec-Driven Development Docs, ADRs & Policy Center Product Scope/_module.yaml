@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: docs_and_specs
+title: Spec-Driven Development Docs, ADRs & Policy Center Product Scope
+scope:
+    - docs/
+    - products/policy-center/
+source_files: []
+depends_on: []
+related_to:
+    - path: platform_gateway

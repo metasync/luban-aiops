@@ -1,0 +1,1 @@
+Provides the React session workspace hook that manages session CRUD, polling, and pinned incident deep links, plus the shared dark-theme design tokens and global CSS for the operator portal shell.

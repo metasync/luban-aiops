@@ -1,0 +1,1 @@
+GNU Make with shared `.mk` fragments for reproducible builds; Docker images built on a pinned `al2023` base-uv image; kustomize for GitOps overlay rendering; uv + pytest for Python product toolchains; KIND auto-loading for local cluster deploys.

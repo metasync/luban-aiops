@@ -1,0 +1,1 @@
+None beyond standard project build/test; each view ships with a colocated `__tests__` directory of Jest tests (e.g. `ApprovalsView.test.tsx`, `labels.test.ts`).

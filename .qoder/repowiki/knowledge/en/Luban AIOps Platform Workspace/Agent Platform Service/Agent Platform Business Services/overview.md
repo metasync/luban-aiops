@@ -1,0 +1,1 @@
+Service-layer orchestration for the transitional agent platform, wiring sessions, runtime kernel, model discovery, tool evidence, and HITL confirmations behind pluggable storage backends.

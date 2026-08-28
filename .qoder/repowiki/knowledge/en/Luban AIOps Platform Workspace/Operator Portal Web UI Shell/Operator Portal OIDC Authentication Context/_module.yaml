@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: operator_portal/auth
+title: Operator Portal OIDC Authentication Context
+scope:
+    - products/operator-portal/web-ui/app/src/auth/
+source_files: []
+depends_on: []
+related_to:
+    - path: identity_broker

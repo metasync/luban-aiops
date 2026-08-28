@@ -1,0 +1,5 @@
+- Configuration is centralized in a frozen `dataclass` (`GatewaySettings`) with a `from_env()` classmethod that reads `GATEWAY_*` / `IDENTITY_*` environment variables and defaults, exposed through an `lru_cache`-decorated `get_settings()` accessor.
+- Connectors are implemented as classes implementing `BaseTool` and expose a `register_tools(registry)` method so they self-register during app startup without circular imports.
+- Mutating tools are gated by both a runtime flag (`allow_mutating` / `GATEWAY_MUTATING_TOOLS_ENABLED`) passed into `ToolRegistry.__init__` and a separate `tools:mutate` policy check in `gateway_service.invoke_tool` before dispatch.
+- All cross-cutting side effects (policy decisions, token verification outcomes, redaction stats, audit events) are recorded via dedicated metric functions in `core.metrics` or `log_event` calls rather than ad-hoc logging.
+- Tool invocations always return a `ToolResult` envelope produced by `make_error_result` / `make_denied_result`, so callers uniformly handle success, error, and denied states regardless of failure source.

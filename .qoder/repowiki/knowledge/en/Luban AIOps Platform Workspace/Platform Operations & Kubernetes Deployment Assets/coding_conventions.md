@@ -1,0 +1,5 @@
+- Each platform service has its own directory under `gitops/dev-k8s/base/<service>/` containing a matching `<service>-deployment.yaml` and `<service>-service.yaml` pair, plus per-environment `runtime-config.env` and `runtime-secrets.env` files.
+- Per-service secrets come in pairs of a checked-in `runtime-secrets.env` template and a `runtime-secrets.example.env` example file, keeping actual values out of version control.
+- Runtime configuration is injected into pods through environment files mounted as ConfigMaps/Secrets rather than inline env vars, enabling hot reload via deployment rollout restarts after ConfigMap changes.
+- Shell helpers use `set -eu`, resolve script-relative paths via `SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)`, and accept parameters through environment variables with sensible defaults.
+- Kustomize overlays are layered: a stable `base/` defines resources and a `runtime-profiles/<profile>/` layer provides patches, so profile changes remain independently reviewable.

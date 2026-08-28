@@ -1,0 +1,5 @@
+- Module-level metric objects (Counters, Gauges, Histograms) are declared at import time and exposed through small `record_*` helper functions rather than being created on each call.
+- Optional heavy dependencies (OpenTelemetry SDK, exporters, instrumentors) are imported lazily inside functions so the service runs without them when disabled.
+- Feature flags are read from environment variables via `os.getenv` with explicit defaults and normalized boolean checks (e.g. `is_enabled` accepts '1', 'true', 'yes', 'on').
+- Process-wide initialization uses module-level guard flags (`_providers_initialized`, `_log_bridge_attached`) to ensure single setup even if `setup_*` is called multiple times during tests.
+- Request correlation prefers an inbound header, falls back to the active OTel trace id, and finally generates a UUID — centralizing ID resolution in `resolve_request_id`.

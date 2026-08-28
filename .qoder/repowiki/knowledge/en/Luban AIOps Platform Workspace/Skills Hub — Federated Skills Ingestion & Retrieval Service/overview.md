@@ -1,0 +1,1 @@
+FastAPI service that ingests Markdown skill documents from configured local/git sources, validates them against a schema, and exposes search/list endpoints backed by in-memory or PostgreSQL stores.

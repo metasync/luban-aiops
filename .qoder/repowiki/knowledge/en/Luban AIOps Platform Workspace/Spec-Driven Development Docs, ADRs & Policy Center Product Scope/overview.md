@@ -1,0 +1,1 @@
+Central repository for the project's spec-driven development workflow: architecture decision records, feature specs with plan/task triads, release notes, operator/user guides, and the policy-center product boundary definition.

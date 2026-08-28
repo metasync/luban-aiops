@@ -1,0 +1,6 @@
+- Feature logic is split into a thin React component plus one or more dedicated hooks (e.g. `usePendingDecisionPoll`, `useSpeechRecognition`) that encapsulate timers, refs, and cleanup.
+- Server payload shapes are mapped into in-memory domain models through pure adapter functions (`toToolCallFrame`, `toToolResultFrame`, `confirmationRecordToCard`, `transcriptToTurns`) so UI code always consumes a stable type.
+- User-facing HTML is produced by an escape-first regex renderer (`renderMarkdown`) that whitelists only http(s) link targets, avoiding third-party markdown libraries for safety.
+- Async operations use `AbortController` signals passed to fetch calls and cleaned up in effect return closures to prevent state updates after unmount or session switch.
+- Bounded polling uses a fingerprint-based change gate (`detailFingerprint`) so identical responses do not rebuild timelines, and a time-based settle window (`SETTLE_WINDOW_MS`) scoped per session via refs.
+- Constants drive UI state mapping tables (e.g. `CARD_STATUS`, `EXECUTION_STATUS`, `RESULT_STATUS_COLOR`) keyed by string status values rather than ad-hoc conditionals.

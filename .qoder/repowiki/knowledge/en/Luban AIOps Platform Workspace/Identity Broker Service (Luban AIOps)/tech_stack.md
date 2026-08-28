@@ -1,0 +1,1 @@
+Python ≥3.11 with FastAPI + Uvicorn; PyJWT + cryptography for RS256 JWT signing/JWKS; httpx for outbound Keycloak and audit calls; OpenTelemetry SDK with OTLP HTTP exporter and FastAPI/httpx instrumentation; Prometheus client for metrics; uv as build backend and dependency manager.

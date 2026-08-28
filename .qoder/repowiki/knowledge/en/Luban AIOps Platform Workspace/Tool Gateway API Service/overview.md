@@ -1,0 +1,1 @@
+FastAPI-based gateway that authenticates requests, enforces role-based policies, and dispatches tool invocations to pluggable Kubernetes, Elasticsearch, Skills, and Incidents connectors.

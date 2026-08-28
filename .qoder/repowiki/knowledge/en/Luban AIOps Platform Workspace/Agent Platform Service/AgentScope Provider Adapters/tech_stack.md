@@ -1,0 +1,1 @@
+Wraps AgentScope SDK classes (`agentscope.model.*ChatModel`, `agentscope.credential.*Credential`) lazily imported inside `build_model` to avoid importing heavy SDKs when no provider is selected.

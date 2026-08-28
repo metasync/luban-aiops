@@ -1,1 +1,0 @@
-Python services managed with `uv` (pinning interpreter via `.python-version` per product), FastAPI-based HTTP servers, Docker images built from `shared/base-images/base-uv`, Kubernetes deployment via Kustomize overlays under `shared/platform-ops/gitops`, and end-to-end demos driven by shell scripts under `shared/platform-ops/e2e`.

@@ -1,0 +1,1 @@
+Enable distributed tracing by setting `OTEL_ENABLED=1` and `OTEL_EXPORTER_OTLP_ENDPOINT` pointing to the OTLP ingest endpoint; authentication is passed via `OTEL_EXPORTER_OTLP_HEADERS`. Logging verbosity is controlled by `LOG_LEVEL` (default INFO).

@@ -1,0 +1,6 @@
+- External dependencies (stores, gateways, build agents) are swapped in by assigning a mock object to a module-level attribute via `monkeypatch.setattr(...)` rather than constructor injection.
+- Async kernel methods are invoked from sync tests using `asyncio.run()` wrapping an inner coroutine that collects events or awaits replies.
+- HTTP route tests construct a fresh `TestClient(create_app())` per test and assert both status codes and JSON payload fields of `/api/v2/*` endpoints.
+- Failure paths are tested by injecting a minimal `Broken*Store` class whose methods raise `RuntimeError`, then asserting the operation degrades gracefully instead of propagating the exception.
+- Concurrent behavior is validated by patching `_build_agent` or discovery functions to yield control (`await asyncio.sleep(0)`) and then calling the target concurrently with `asyncio.gather`.
+- Assertions reference specification requirements inline via comments prefixed with `SPEC-XXX R-N:` to tie each test case to a documented requirement.

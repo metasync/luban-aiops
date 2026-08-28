@@ -1,0 +1,1 @@
+The app mounts at `document.getElementById('root')` via `createRoot` in `main.tsx` and expects an HTML page served by the portal's web server; no local dev server command is defined inside this scope.

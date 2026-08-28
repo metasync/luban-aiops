@@ -1,0 +1,1 @@
+Built with `uv_build` (see `pyproject.toml` build-system); the package exposes a `tool-gateway` console script (`tool_gateway.main:run`) installed via `uv pip install .`; container image and shared Python/Makefile targets are included via `include ../../mk/image.mk` and `../../mk/python.mk` in the Makefile.

@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: tool_gateway
+title: Tool Gateway API Service
+scope:
+    - products/tool-gateway/
+source_files: []
+depends_on: []
+related_to:
+    - path: execution_runtime
+    - path: platform_gateway
+    - path: shared_contracts_and_sdk

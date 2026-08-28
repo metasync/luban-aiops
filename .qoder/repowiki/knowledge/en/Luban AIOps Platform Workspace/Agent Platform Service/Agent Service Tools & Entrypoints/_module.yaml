@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: agent_platform/tools_and_entrypoints
+title: Agent Service Tools & Entrypoints
+scope:
+    - products/agent-platform/src/agent_service/tools/
+    - products/agent-platform/src/agent_service/entrypoints/
+source_files: []
+depends_on: []
+related_to:
+    - path: execution_runtime

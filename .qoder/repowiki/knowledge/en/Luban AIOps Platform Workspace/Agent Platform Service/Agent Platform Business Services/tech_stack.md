@@ -1,0 +1,1 @@
+Python with Pydantic models, AgentScope middleware (`MiddlewareBase`, `PermissionDecision`), optional Redis client, optional `psycopg` for Postgres-backed session store and model-discovery cache, and `httpx` for OpenAI-compatible `/models` discovery calls.

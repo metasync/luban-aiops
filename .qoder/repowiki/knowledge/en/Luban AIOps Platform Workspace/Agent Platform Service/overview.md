@@ -1,0 +1,1 @@
+FastAPI-based agent service that wires pluggable chat providers, session stores, and tool integrations behind a v2 HTTP API with shared runtime config, telemetry, and metrics.

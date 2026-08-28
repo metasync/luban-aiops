@@ -1,0 +1,6 @@
+- Each schema file declares a stable `$schema` URL pointing to Draft 2020-12 and an `$id` URI scoped under `https://metasync.github.io/luban-aiops/schemas/`.
+- Schemas use `additionalProperties: false` and enumerate all fields via `properties` to enforce strict wire compatibility across services.
+- Versioned contracts are grouped by prefix (v1 `chat-*` vs v2 `agent-chat-*`) rather than by versioned directories, keeping related request/response/event schemas co-located.
+- Policy rules follow the `<resource>:<verb>` action naming convention and express authorization via `match.roles_any` / `match.actions_any` paired with an `outcome` of `allow`, `deny`, or `require_approval`.
+- Approval tiers are expressed declaratively inside rules using `decision.approval.tier` (`tier_1` or `tier_2`) and `decided_by_roles`, never via code branches.
+- Cross-cutting metadata such as `request_id`, `user_id`, and `session_id` is propagated through headers or envelope fields rather than embedded business payloads.

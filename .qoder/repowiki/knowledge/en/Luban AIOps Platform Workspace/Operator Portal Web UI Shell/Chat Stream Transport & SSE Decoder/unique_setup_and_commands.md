@@ -1,0 +1,1 @@
+None beyond standard React app build; the module depends on `../api/client` for `authHeaders`, `buildRequestId`, and `currentGateway`, so those must be configured before any stream call.

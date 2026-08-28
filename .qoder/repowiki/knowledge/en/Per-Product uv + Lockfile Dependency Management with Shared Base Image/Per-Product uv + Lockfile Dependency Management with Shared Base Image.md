@@ -5,67 +5,72 @@ category: dependency_management
 scope:
     - '**'
 source_files:
-    - mk/python.mk
-    - mk/defaults.mk
-    - docs/workspace/python-container-strategy.md
     - products/agent-platform/pyproject.toml
+    - products/agent-platform/uv.lock
     - products/platform-gateway/pyproject.toml
+    - products/tool-gateway/pyproject.toml
     - products/audit-service/pyproject.toml
+    - products/execution-runtime/pyproject.toml
     - products/identity-broker/pyproject.toml
     - products/incident-service/pyproject.toml
     - products/skills-hub/pyproject.toml
-    - products/tool-gateway/pyproject.toml
     - products/operator-portal/web-ui/app/package.json
+    - products/operator-portal/web-ui/app/package-lock.json
+    - mk/python.mk
+    - Makefile
     - shared/base-images/base-uv/Dockerfile
 ---
 
-## System / Approach
+# Dependency Management in Luban AIOps Platform
 
-The workspace uses **uv** as the single Python package and interpreter manager, with one `pyproject.toml` per product under `products/<name>/`. Each product declares its runtime dependencies in `[project.dependencies]`, dev-only dependencies in a `[dependency-groups].dev` section, and pins the build backend to `uv_build>=0.8.14,<0.9.0` via `[build-system]`. A corresponding `uv.lock` file is committed alongside each product's manifest and is copied into every container image.
+## System Overview
 
-For the Node.js frontend (`operator-portal/web-ui/app`), dependencies are managed conventionally via `package.json` plus a checked-in `package-lock.json`, with an `.nvmrc` pinning Node ≥ 22.
+The repository uses a **per-product dependency management** model built on **uv** (the fast Python package manager and resolver) with **lockfiles** (`uv.lock`) pinned to exact versions, and a shared container base image that pins the uv runtime itself. The frontend web UI under `products/operator-portal/web-ui/app/` uses **npm/pnpm-style** dependencies declared in `package.json` with a `package-lock.json` lockfile.
 
-There is no monorepo-level dependency manifest — each product owns its own dependency graph independently.
+There is no monorepo-level `pyproject.toml`, no vendored third-party code, and no private PyPI registry configured — all Python packages are resolved from the public PyPI index (`https://pypi.org/simple`).
 
-## Key Files
+## Key Files and Packages
 
-- Per-product manifests: `products/*/pyproject.toml` (agent-platform, audit-service, identity-broker, incident-service, platform-gateway, skills-hub, tool-gateway)
-- Per-product lockfiles: `products/*/uv.lock` (committed alongside each `pyproject.toml`)
-- Frontend manifest: `products/operator-portal/web-ui/app/package.json` + `package-lock.json`
-- Shared Make fragments: `mk/python.mk` (defines `sync`/`test` targets that run `uv sync --frozen`), `mk/defaults.mk` (pins `BASE_UV_UV_VERSION=0.12.1`, `BASE_UV_PYTHON_VERSION=3.12`)
-- Container strategy doc: `docs/workspace/python-container-strategy.md` (documents the enforced `uv sync --frozen --no-dev` image build pattern)
-- Root orchestrator: `Makefile` lists all Python products in `PYTHON_PRODUCTS` and runs `make -C products/$p sync` / `test` across them
-- Dockerfiles: every Python product copies `.python-version`, `pyproject.toml`, and `uv.lock` before running `uv sync --frozen --no-dev`
+### Python products (8 services)
+Each product under `products/<name>/` declares its own `pyproject.toml` and ships a committed `uv.lock`. The manifest pattern is consistent across every service:
+
+- `requires-python = ">=3.11"` (enforced by each product).
+- Runtime dependencies use **upper-bound major-version pinning** (e.g. `fastapi>=0.115,<1.0`, `pydantic>=2.8,<3.0`, `opentelemetry-sdk>=1.25,<2.0`, `cryptography>=43.0,<45.0`, `httpx>=0.27,<1.0`, `PyJWT>=2.8,<3.0`, `PyYAML>=6.0,<7.0`, `redis>=6.2,<7.0`, `psycopg[binary]>=3.2,<4.0`, `prometheus-client>=0.20,<1.0`, `uvicorn[standard]>=0.30,<1.0`).
+- Development-only dependencies live in `[dependency-groups] dev = [...]` (`pytest>=8.3,<9.0`, `jsonschema>=4.23,<5.0`; `fakeredis` for agent-platform).
+- Each product exposes CLI entry points via `[project.scripts]` (e.g. `agent-service`, `platform-gateway`, `tool-gateway`, `audit-service`, `identity-service`, `incident-service`, `skills-hub`, `execution-runtime`).
+- Build backend is `uv_build` with `uv_build>=0.8.14,<0.9.0` pinned in `[build-system]`.
+
+Lockfiles: `products/agent-platform/uv.lock` (and equivalent per product) record the full transitive resolution tree with `source = { registry = "https://pypi.org/simple" }` and SHA256 hashes for every wheel/sdist, ensuring reproducible installs.
+
+### Frontend
+`products/operator-portal/web-ui/app/package.json` declares React/AntD/Vite dependencies with caret ranges (`^`) and is accompanied by `package-lock.json` as the lockfile. Node version is constrained via `engines.node = ">=22"` and `.nvmrc`.
+
+### Shared base image
+`shared/base-images/base-uv/Dockerfile` builds a minimal Amazon Linux 2023 image with a **pinned uv binary** (`UV_VERSION=0.12.1` installed via `curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | sh`) and sets environment variables `UV_LINK_MODE=copy`, `UV_NO_SYNC=1`, `UV_PYTHON=<version>` so containers run with a deterministic uv/python stack.
 
 ## Architecture and Conventions
 
-### Version ranges
-All runtime dependencies use **caret-style upper bounds** (e.g. `fastapi>=0.115,<1.0`, `pydantic>=2.7,<3.0`, `cryptography>=43.0,<45.0`). This allows minor/patch updates within a major version while preventing breaking upgrades. Dev dependencies follow the same pattern (e.g. `pytest>=8.3,<9.0`, `jsonschema>=4.23,<5.0`).
+### Per-product isolation
+Each service owns its own dependency graph. There is no shared Python workspace or cross-product `requirements.txt`. This means adding a new library requires editing exactly one `pyproject.toml` plus committing the regenerated `uv.lock`.
 
-### Interpreter pinning
-Each product root contains a `.python-version` file; the shared base image (`shared/base-images/base-uv/Dockerfile`) installs a pinned `uv` version and sets `UV_PYTHON` so `uv sync` resolves the interpreter deterministically. The root `.python-version` also exists for workspace-wide reference.
+### Version pinning strategy
+Runtime dependencies use **semantic upper bounds** (`>=X.Y,<Z.0`) rather than exact pins in `pyproject.toml`, allowing minor/patch updates while blocking breaking major upgrades. The *exact* versions are then locked by `uv.lock`, which is what CI and containers consume.
 
-### Deterministic builds
-- Development: `make sync` (root) or `make -C products/<name> sync` invokes `uv sync --frozen`, which refuses to resolve against PyPI and requires the committed `uv.lock` to match exactly.
-- CI / images: Dockerfiles copy only `.python-version`, `pyproject.toml`, and `uv.lock` first, then run `uv sync --frozen --no-dev`; the environment variable `UV_NO_SYNC=1` is set at the image level (inherited from the base image) so subsequent layers do not re-resolve.
-- The `mk/python.mk` fragment enforces this by always invoking `uv sync --frozen` before `uv run pytest`.
+### Frozen installs in CI
+The shared Make target in `mk/python.mk` runs `uv sync --frozen`, which refuses to resolve against the network and instead installs strictly from the committed `uv.lock`. This enforces that dependency changes must be committed explicitly — you cannot silently drift during test runs.
 
-### Build backend
-Every Python product uses `uv_build` as its PEP 517 build backend (`[build-system].requires = ["uv_build>=0.8.14,<0.9.0"]`), keeping packaging consistent across services.
+### Coordinated build pipeline
+The root `Makefile` lists `PYTHON_PRODUCTS := agent-platform audit-service execution-runtime identity-broker incident-service platform-gateway skills-hub tool-gateway` and provides `make sync` / `make test` / `make build` that iterate over every product. All images are tagged with a coordinated `IMAGE_TAG` derived from the root `VERSION` file; the same tag is applied to every product image, keeping runtime dependency versions synchronized across services at deploy time.
 
-### Shared base image
-`mk/defaults.mk` defines `BASE_UV_IMAGE=luban-aiops/base-uv`, `BASE_UV_TAG=al2023`, `BASE_UV_UV_VERSION=0.12.1`, and `BASE_UV_PYTHON_VERSION=3.12`. The root `Makefile`'s `base-images` target builds this image from `shared/base-images/base-uv/Dockerfile`, and `make build` depends on it. All Python product Dockerfiles start from `FROM luban-aiops/base-uv:al2023`.
-
-### Frontend dependencies
-The operator portal uses standard npm: `package.json` declares runtime deps (`react`, `antd`, `@ant-design/x`, etc.) and dev deps (`vite`, `vitest`, `typescript`, testing libs). A `package-lock.json` is committed under `products/operator-portal/web-ui/app/` to freeze versions. Node version is pinned via `.nvmrc` (≥ 22).
+### No vendoring, no private registry
+All Python packages resolve from `https://pypi.org/simple`. There is no `pip.conf`, `PYPI_URL`, `uv config`, `GOPRIVATE`, or vendor directory. Secrets and credentials are not part of dependency management here (they are provisioned separately via GitOps secret-sync scripts under `shared/platform-ops/gitops/`).
 
 ## Conventions and Constraints
 
-- **One `pyproject.toml` per product** — there is no workspace-level `pyproject.toml` aggregating dependencies; each service manages its own graph.
-- **Lockfiles are committed and mandatory** — `uv sync --frozen` is used everywhere (development, tests, image builds); any change to `pyproject.toml` must be followed by a regenerated `uv.lock`.
-- **Dev vs runtime separation** — test-only packages live exclusively in `[dependency-groups].dev`; production images install with `--no-dev`.
-- **No vendoring of third-party code** — packages are resolved from PyPI at build time; nothing is vendored into source control beyond lockfiles.
-- **No private index configured** — the manifests contain no `index-url`, `extra-index-url`, or `pip.conf`; resolution goes to the default PyPI.
-- **Interpreter selection is explicit** — `.python-version` files plus `UV_PYTHON` in the base image ensure the same CPython version is used locally and in containers.
-- **Build toolchain is pinned centrally** — `BASE_UV_UV_VERSION` and `BASE_UV_PYTHON_VERSION` in `mk/defaults.mk` are the single source of truth for the uv and Python versions used by `make base-images` and the shared Dockerfile.
-- **Frontend uses npm lockfile** — `package-lock.json` is checked in; `npm ci` is implied by the presence of the lockfile in standard CI flows.
+- **Every Python product must have a `pyproject.toml` and a committed `uv.lock`**; `make verify` will fail if tests cannot run because the lockfile is missing or out of date.
+- **Dependency changes require committing the updated `uv.lock`**: `uv sync --frozen` in CI prevents uncommitted resolution drift.
+- **Python version is pinned per product** via `.python-version` files and enforced by the shared base image's `UV_PYTHON` env var.
+- **Major-version upper bounds are required** in `pyproject.toml` for all runtime dependencies (observed uniformly across all eight services); this is the de facto convention preventing accidental breaking upgrades.
+- **Dev-only dependencies go in `[dependency-groups] dev`**, not in the main `dependencies` list, keeping production images lean.
+- **Frontend dependencies follow npm conventions**: `package.json` + `package-lock.json` under `products/operator-portal/web-ui/app/`, with Node >= 22 enforced via `engines`.
+- **No cross-product Python package sharing**: there is no `shared/shared-sdk` published as a PyPI package consumed by other products; inter-service communication is HTTP-based using JSON schemas defined in `shared/shared-contracts/schemas/`.

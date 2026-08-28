@@ -1,0 +1,4 @@
+- Each product lives under `products/<name>/` with its own Makefile and exposes `sync`, `test`, `lint`, `build`, `push` targets invoked uniformly by the root Makefile.
+- Build configuration is centralized in `mk/defaults.mk` using `?=` defaults so command-line overrides always win and per-product Makefiles can include shared fragments without duplication.
+- All service images share a coordinated tag derived from the root `VERSION` file plus git SHA/dirty marker, ensuring consistent versions across the platform at deploy time.
+- Policy bundles are authored once in `shared/shared-contracts/policies/policy-default.yaml` and synced to consumers via `make sync-policy` rather than edited per service.

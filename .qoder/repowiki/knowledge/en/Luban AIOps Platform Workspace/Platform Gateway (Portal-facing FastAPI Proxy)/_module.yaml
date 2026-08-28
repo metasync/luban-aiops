@@ -1,0 +1,18 @@
+schema_version: 1
+module_path: platform_gateway
+title: Platform Gateway (Portal-facing FastAPI Proxy)
+scope:
+    - products/platform-gateway/
+source_files: []
+depends_on: []
+related_to:
+    - path: agent_platform
+    - path: audit_service
+    - path: docs_and_specs
+    - path: identity_broker
+    - path: incident_service
+    - path: operator_portal/api_client
+    - path: platform_ops
+    - path: shared_contracts_and_sdk
+    - path: skills_hub
+    - path: tool_gateway
