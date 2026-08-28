@@ -1,0 +1,1 @@
+Markdown-based spec documents governed by a manual review workflow; mechanical enforcement is delegated to the root `Makefile` (`make verify`) and contract tests binding gateway models to `shared/shared-contracts` schemas.

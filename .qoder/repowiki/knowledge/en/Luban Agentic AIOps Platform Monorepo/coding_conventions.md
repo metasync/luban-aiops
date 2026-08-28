@@ -1,0 +1,5 @@
+- Each product follows an identical internal layout (`src/<service>/api/routes`, `core/config+runtime+telemetry`, `services`, `schemas`, `tests`) so the root Makefile can iterate uniformly over `PYTHON_PRODUCTS` and `IMAGE_PRODUCTS`.
+- Inter-service contracts are declared once in `shared/shared-contracts/schemas/*.schema.json` and consumed by producers/consumers rather than duplicated, keeping wire formats versioned and auditable.
+- Policy enforcement uses a canonical `policy-default.yaml` in `shared/shared-contracts/policies/` that is copied into each consumer's `policies/` directory via `make sync-policy`, ensuring runtime policy parity.
+- All Python services expose `/metrics` Prometheus endpoints and opt-in OTLP tracing gated by `OTEL_ENABLED`, with correlation bridged via the `x-request-id` header defined in the agent-service v2 contract.
+- Versioning is single-sourced from the root `VERSION` file and enforced at build time by `make validate-version`, which checks consistency across products and the portal.

@@ -1,0 +1,1 @@
+Centralized repository of numbered feature specs (SPEC-001 through SPEC-042) that govern the project's spec-driven development workflow, each containing requirements, technical plan, and task tracking.

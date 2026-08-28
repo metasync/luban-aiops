@@ -25,15 +25,25 @@
 - [transport.test.ts](file://products/operator-portal/web-ui/app/src/stream/__tests__/transport.test.ts)
 - [decoder.test.ts](file://products/operator-portal/web-ui/app/src/stream/__tests__/decoder.test.ts)
 - [languages.test.ts](file://products/operator-portal/web-ui/app/src/voice/__tests__/languages.test.ts)
+- [package.json](file://products/operator-portal/web-ui/app/package.json)
+- [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
+- [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
+- [ApprovalsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx)
+- [AuditView.tsx](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx)
+- [SkillsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SkillsView.tsx)
+- [ToolsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/ToolsView.tsx)
+- [SPEC-042 spec.md](file://docs/specs/SPEC-042-portal-dependency-hygiene/spec.md)
+- [SPEC-042 plan.md](file://docs/specs/SPEC-042-portal-dependency-hygiene/plan.md)
+- [SPEC-042 tasks.md](file://docs/specs/SPEC-042-portal-dependency-hygiene/tasks.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive XSS vulnerability fixes in markdown rendering pipeline with escape-first security model
-- Enhanced robust session handling improvements with owner validation and anti-enumeration patterns
-- Implemented enhanced API contract validation for v6 schema compliance across streaming endpoints
-- Added comprehensive testing coverage for security scenarios including JavaScript/data URL protection
-- Updated voice-readiness parity implementation with consistent input_modality parameter handling
+- Added comprehensive dependency hygiene measures from SPEC-042 including antd v6 API migration and deprecation regression guard
+- Updated React 19 migration with zero behavioral changes while maintaining all existing functionality
+- Enhanced build toolchain with managed component refresh including Vite 8, TypeScript 5.9.x, Vitest 4.x, and jsdom 30.x
+- Implemented comprehensive antd deprecation fixes across navigation drawers and alert components
+- Extended security hardening with deprecation regression testing to prevent future maintenance debt accumulation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -52,6 +62,8 @@
 SPEC-023 rebuilds the operator portal as a React + TypeScript application built with Vite and styled via Ant Design X, while preserving the existing nginx-static serving model and all backend contracts. The rebuild delivers the multi-session workspace UI defined by SPEC-022 Appendix A, adds voice input as a composition surface, migrates existing views (Chat, Control, Workspace), and enforces Invariant II that human-in-the-loop approvals remain click-gated. No backend, policy, or audit behavior changes are introduced; this is a presentation-layer rebuild with a platform-owned SSE contract adapter isolating wire protocol knowledge.
 
 **Updated** All four stages of progressive rollout are now complete with comprehensive security hardening measures including XSS vulnerability fixes in markdown rendering, robust session handling improvements, enhanced API contract validation for v6 schema compliance, and comprehensive testing coverage for security scenarios. Stage 1 (Portal Foundation) provides the build toolchain and theme system, Stage 2 (Platform-Owned SSE Contract Adapter) delivers transport and frame decoding with full test coverage, Stage 3 (Session Workspace UI) implements the complete multi-session management interface with streaming infrastructure, and Stage 4 (Voice Input) provides speech recognition with graceful degradation and consistent `input_modality` parameter propagation across all chat endpoints.
+
+**Enhanced** The portal framework has been further strengthened by SPEC-042 which extends the foundation with dependency hygiene measures, antd deprecation fixes, and React 19 migration while maintaining zero behavioral changes. This includes comprehensive antd v6 API migration, deprecation regression guards, and managed component refreshes across the entire dependency tree.
 
 ## Project Structure
 The portal currently ships as vanilla HTML/CSS/JS served by nginx. SPEC-023 introduces a new web-ui source tree under `products/operator-portal/web-ui/` with a multi-stage Docker build that produces content-hashed static assets. Nginx continues to proxy `/api/` to the platform gateway and serve SPA fallback through `try_files`.
@@ -99,6 +111,8 @@ GW_STREAM --> AG_STREAM
 
 **Updated** All four stages are now production-ready with full test coverage, complete streaming infrastructure supporting voice-readiness parity across both POST and streaming chat endpoints, and comprehensive security hardening measures including XSS protection and robust session handling.
 
+**Enhanced** The foundation has been further strengthened by SPEC-042 with dependency hygiene measures including antd v6 API migration, React 19 upgrade, and comprehensive deprecation regression guards that prevent future maintenance debt accumulation.
+
 Acceptance criteria and detailed behaviors are specified per requirement in the spec and plan documents.
 
 **Section sources**
@@ -110,6 +124,8 @@ Acceptance criteria and detailed behaviors are specified per requirement in the 
 The rebuild keeps the same runtime deployment shape: nginx serves static assets and proxies API calls to the platform gateway. The key architectural change is a thin adapter layer between the React UI and the gateway's streaming endpoints, insulating components from stream schema details.
 
 **Updated** The four-stage progressive rollout is now complete with comprehensive security hardening, providing a robust streaming infrastructure with consistent `input_modality` parameter propagation across the entire request chain, from gateway streaming endpoint to agent service, with full voice input support and XSS protection.
+
+**Enhanced** The architecture has been further hardened by SPEC-042 with dependency hygiene measures that ensure long-term maintainability through automated deprecation detection and managed component refresh cycles.
 
 ```mermaid
 sequenceDiagram
@@ -151,6 +167,8 @@ Adapter-->>UI : Typed deltas, evidence, confirmations
 - **Theme System**: Dark theme rebuilt from current `:root` CSS custom properties into Ant Design design tokens (`XProvider` theme), preserving slate palette and layout language
 - **Version Management**: `PLATFORM_VERSION` injected at build time from root `VERSION`; validator updated to assert it at its new home
 - **Serving Strategy**: Nginx serves `index.html` with `no-store` and may cache hashed assets immutably; SPA fallback remains via `try_files`
+
+**Enhanced** The build toolchain has been significantly upgraded by SPEC-042 with modern dependencies including Vite 8.x, TypeScript 5.9.x, Vitest 4.x, and React 19.x while maintaining zero behavioral changes. The managed component refresh ensures all dependencies stay current with proper version lockstep.
 
 ```mermaid
 flowchart TD
@@ -306,6 +324,8 @@ Audit -.-> Provenance["Complete Conversation<br/>Provenance Tracking"]
 - **Cache Strategy**: Nginx serves `index.html` with `no-store` and may cache hashed assets immutably; SPA fallback remains via `try_files`
 - **Version Injection**: `PLATFORM_VERSION` injected at build time from root `VERSION`; validator updated to assert it at its new home
 
+**Enhanced** The build toolchain has been significantly upgraded by SPEC-042 with modern dependencies including Vite 8.x, TypeScript 5.9.x, Vitest 4.x, and React 19.x while maintaining zero behavioral changes. The managed component refresh ensures all dependencies stay current with proper version lockstep.
+
 ```mermaid
 flowchart TD
 Dev["Source Tree<br/>web-ui/src/*"] --> Build["Vite Build<br/>content-hash assets"]
@@ -330,6 +350,8 @@ Image --> Deploy["Nginx serves static + proxies /api/"]
 - **View Migration**: Chat, Control (audit, permissions, tools, skills), and Workspace (incidents) views migrated with parity to current functionality
 - **Navigation**: Sectioned navigation auto-hides based on token roles and policy matrix; audit view remains auditor/platform-admin only
 - **Authentication**: Keycloak OIDC login/logout, token refresh, and per-request `Bearer` behavior are unchanged
+
+**Enhanced** All views have been updated to use non-deprecated antd v6 APIs including Drawer `size` property instead of `width`, and Alert `title` property instead of `message`, ensuring zero deprecation warnings in the test suite.
 
 **Section sources**
 - [spec.md:161-182](file://docs/specs/SPEC-023-portal-framework-rebuild/spec.md#L161-L182)
@@ -370,6 +392,8 @@ The rebuild depends on existing gateway endpoints and shared contracts without i
 
 **Updated** The four-stage implementation extends dependencies to include consistent `input_modality` parameter handling across platform gateway and agent service streaming endpoints, plus Web Speech API integration for voice input, and comprehensive security validation for markdown rendering.
 
+**Enhanced** The dependency tree has been comprehensively refreshed by SPEC-042 with modern versions including React 19.x, Vite 8.x, TypeScript 5.9.x, Vitest 4.x, and jsdom 30.x, while maintaining zero behavioral changes and adding comprehensive deprecation regression guards.
+
 ```mermaid
 graph LR
 UI["React UI"] --> Adapter["SSE Contract Adapter"]
@@ -385,6 +409,8 @@ UI -.-> SpeechAPI["Web Speech API<br/>Browser Integration"]
 SpeechAPI -.-> VoiceInput["Voice Composition"]
 UI -.-> Markdown["XSS-Safe Rendering"]
 Markdown -.-> Security["Escape-First Security Model"]
+UI -.-> DepHygiene["Deprecation Guards<br/>Managed Refresh"]
+DepHygiene -.-> ModernStack["React 19 + Vite 8<br/>TypeScript 5.9 + Vitest 4"]
 ```
 
 **Diagram sources**
@@ -393,6 +419,7 @@ Markdown -.-> Security["Escape-First Security Model"]
 - [routes.py:135-165](file://products/agent-platform/src/agent_service/api/v2/routes.py#L135-L165)
 - [useSpeechRecognition.ts:38-46](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts#L38-L46)
 - [markdown.ts:1-88](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L88)
+- [package.json:15-33](file://products/operator-portal/web-ui/app/package.json#L15-L33)
 
 **Section sources**
 - [spec.md:210-218](file://docs/specs/SPEC-023-portal-framework-rebuild/spec.md#L210-L218)
@@ -406,6 +433,8 @@ Markdown -.-> Security["Escape-First Security Model"]
 - **Voice Recognition**: Web Speech API runs entirely client-side with no network overhead; graceful degradation when unsupported
 
 **Updated** The four-stage implementation maintains performance characteristics while adding minimal overhead for `input_modality` parameter processing, audit trail generation, client-side speech recognition, and XSS-safe markdown rendering.
+
+**Enhanced** The dependency hygiene measures from SPEC-042 improve long-term performance through modernized build toolchain (Vite 8.x), optimized bundling, and reduced bundle sizes from updated dependencies while maintaining zero behavioral changes.
 
 [No sources needed since this section provides general guidance]
 
@@ -436,6 +465,14 @@ Markdown -.-> Security["Escape-First Security Model"]
 - **Contract Compliance**: Automated validation of API responses against JSON schemas
 - **Edge Case Coverage**: Tests for malformed input, concurrent operations, and failure scenarios
 
+### Deprecation Regression Guard
+**New** SPEC-042 introduces comprehensive deprecation regression testing to prevent future maintenance debt accumulation.
+
+- **Zero Tolerance Policy**: Any antd deprecation warning in test output immediately fails the suite
+- **Comprehensive Monitoring**: Intercepts console.error/console.warn during test execution
+- **Automatic Detection**: Identifies deprecated prop usage across all 48 Drawer width and 5 Alert message instances
+- **Preventive Measures**: Ensures deprecations are caught at pull request time rather than accumulating silently
+
 ```mermaid
 flowchart TD
 UserInput["User Input"] --> Escape["HTML Escape<br/>(&lt;&gt;&quot;&amp;)"]
@@ -446,17 +483,22 @@ LinkCheck --> |dangerous| PlainText["Plain Text<br/>(blocked)")
 SafeLink --> Output["Secure HTML Output"]
 PlainText --> Output
 Output --> XSSProtection["XSS Protection Verified"]
+DeprecationCheck["Deprecation Guard"] --> TestSuite["Vitest Suite"]
+TestSuite --> ZeroWarnings["Zero Deprecation Warnings"]
+ZeroWarnings --> Maintainability["Long-term Maintainability"]
 ```
 
 **Diagram sources**
 - [markdown.ts:10-55](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L10-L55)
 - [markdown.test.ts:7-57](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L7-L57)
+- [SPEC-042 plan.md:32-42](file://docs/specs/SPEC-042-portal-dependency-hygiene/plan.md#L32-L42)
 
 **Section sources**
 - [markdown.ts:1-88](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L88)
 - [markdown.test.ts:1-63](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L1-L63)
 - [session_service.py:19-61](file://products/agent-platform/src/agent_service/services/session_service.py#L19-L61)
 - [routes.py:72-101](file://products/agent-platform/src/agent_service/api/v2/routes.py#L72-L101)
+- [SPEC-042 spec.md:76-87](file://docs/specs/SPEC-042-portal-dependency-hygiene/spec.md#L76-L87)
 
 ## Troubleshooting Guide
 - **Stream Framing Issues**: Verify adapter mapping against fixture frames for every schema v6 event type; check terminal state handling on stream close/truncation
@@ -475,6 +517,14 @@ Output --> XSSProtection["XSS Protection Verified"]
 - **Speech Recognition Errors**: Check microphone permissions, browser compatibility, and error message mapping for common recognition failures
 - **Contract Validation Failures**: Verify API responses conform to v6 schemas and investigate schema validation errors
 
+**Enhanced** Deprecation-related troubleshooting for SPEC-042 implementation:
+- **Deprecation Warning Detection**: Monitor vitest output for `[antd: …] … deprecated` warnings which now fail the suite automatically
+- **Drawer Width Issues**: Verify all Drawer components use `size` property instead of deprecated `width` property
+- **Alert Message Issues**: Confirm all Alert components use `title` property instead of deprecated `message` property
+- **Dependency Version Conflicts**: Check package-lock.json consistency and resolve peer dependency warnings after updates
+- **Build Toolchain Issues**: Verify Vite 8.x compatibility with plugin-react 6.x and TypeScript 5.9.x configuration
+- **React 19 Migration Issues**: Address any React 19 type tightening or removed legacy APIs with behavior-preserving edits
+
 **Section sources**
 - [plan.md:110-123](file://docs/specs/SPEC-023-portal-framework-rebuild/plan.md#L110-L123)
 - [spec.md:83-107](file://docs/specs/SPEC-023-portal-framework-rebuild/spec.md#L83-L107)
@@ -483,11 +533,14 @@ Output --> XSSProtection["XSS Protection Verified"]
 - [decoder.test.ts:203-208](file://products/operator-portal/web-ui/app/src/stream/__tests__/decoder.test.ts#L203-L208)
 - [languages.test.ts:22-42](file://products/operator-portal/web-ui/app/src/voice/__tests__/languages.test.ts#L22-L42)
 - [markdown.test.ts:37-57](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L37-L57)
+- [SPEC-042 plan.md:32-42](file://docs/specs/SPEC-042-portal-dependency-hygiene/plan.md#L32-L42)
 
 ## Conclusion
 SPEC-023 delivers a modern, maintainable operator portal frontend that implements the deferred multi-session workspace UI, preserves all backend contracts and security invariants, and prepares the platform for future enhancements like model dropdowns. The platform-owned SSE adapter isolates wire protocol concerns, enabling framework agility while keeping deployment and runtime characteristics stable.
 
 **Updated** The four-stage progressive rollout is now complete with comprehensive security hardening, delivering a production-ready streaming infrastructure with extensive test coverage. Stage 1 provides the foundation build system, Stage 2 delivers the platform-owned SSE contract adapter with full streaming capabilities, Stage 3 implements the complete multi-session workspace UI with robust session handling, and Stage 4 provides voice input with speech recognition and graceful degradation. The implementation ensures consistent `input_modality` parameter support across all chat endpoints, comprehensive XSS protection in markdown rendering, robust session security with owner validation, and complete audit trails for voice-composed conversations while maintaining the same security and policy guarantees as text-based interactions.
+
+**Enhanced** The portal framework has been further strengthened by SPEC-042 which extends the foundation with comprehensive dependency hygiene measures, antd v6 API migration, React 19 upgrade, and managed component refresh cycles. These enhancements ensure long-term maintainability through automated deprecation detection, modernized build toolchain, and zero behavioral changes while significantly reducing future maintenance debt accumulation.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -506,6 +559,8 @@ The existing vanilla portal demonstrates streaming via `fetch` + `ReadableStream
 - **Stage 2 - Platform-Owned SSE Contract Adapter**: Full streaming infrastructure with transport, decoder, and comprehensive test coverage including security scenarios
 - **Stage 3 - Session Workspace UI**: Complete multi-session management interface with robust session handling, owner validation, and anti-enumeration patterns
 - **Stage 4 - Voice Input**: Speech recognition with language selection, graceful degradation, consistent `input_modality` parameter support, and XSS protection
+
+**Enhanced** The foundation has been further strengthened by SPEC-042 with dependency hygiene measures including antd v6 API migration, React 19 upgrade, and comprehensive deprecation regression guards that prevent future maintenance debt accumulation.
 
 **Section sources**
 - [tasks.md:5-43](file://docs/specs/SPEC-023-portal-framework-rebuild/tasks.md#L5-L43)
@@ -550,8 +605,45 @@ The existing vanilla portal demonstrates streaming via `fetch` + `ReadableStream
 - **Error Handling**: Consistent error responses with appropriate HTTP status codes
 - **Audit Logging**: Complete audit trail for all security-relevant operations
 
+#### Deprecation Hygiene and Maintenance
+**New** SPEC-042 introduces comprehensive dependency hygiene measures to prevent future maintenance debt:
+
+- **Antd v6 API Migration**: All deprecated props migrated (`Drawer.width` → `Drawer.size`, `Alert.message` → `Alert.title`)
+- **Deprecation Regression Guard**: Vitest suite fails on any antd deprecation warning, preventing silent accumulation
+- **Managed Component Refresh**: Systematic upgrade of dependencies (React 19, Vite 8, TypeScript 5.9, Vitest 4, jsdom 30)
+- **Zero Behavioral Changes**: All upgrades maintain exact same functionality and visual appearance
+- **Comprehensive Testing**: Full regression testing suite validates no breaking changes during dependency updates
+
 **Section sources**
 - [markdown.ts:1-88](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L88)
 - [markdown.test.ts:1-63](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L1-L63)
 - [session_service.py:19-61](file://products/agent-platform/src/agent_service/services/session_service.py#L19-L61)
 - [routes.py:72-101](file://products/agent-platform/src/agent_service/api/v2/routes.py#L72-L101)
+- [SPEC-042 spec.md:56-87](file://docs/specs/SPEC-042-portal-dependency-hygiene/spec.md#L56-L87)
+- [SPEC-042 plan.md:15-42](file://docs/specs/SPEC-042-portal-dependency-hygiene/plan.md#L15-L42)
+
+### Dependency Hygiene Specifications
+**New Section** SPEC-042 defines comprehensive dependency hygiene requirements for long-term maintainability:
+
+#### Antd API Migration Requirements
+- **Drawer Components**: Migrate `width` property to `size` property (230px, 260px, 560px instances)
+- **Alert Components**: Migrate `message` property to `title` property across 15 instances in 9 files
+- **Visual Parity**: Ensure all migrations maintain exact same visual appearance and behavior
+- **Zero Deprecation Warnings**: Vitest suite must emit zero antd deprecation warnings
+
+#### Managed Component Refresh Strategy
+- **Adopt Set**: Systematic upgrade of core dependencies (React 19, Vite 8, TypeScript 5.9, Vitest 4, jsdom 30)
+- **Version Lockstep**: All packages maintained at compatible versions with proper lockfile management
+- **Node Engine Requirements**: Updated to `>=22.22.2` to satisfy jsdom 30 requirements
+- **Behavioral Preservation**: All upgrades maintain zero behavioral changes with comprehensive regression testing
+
+#### Deprecation Prevention Infrastructure
+- **Console Interception**: Vitest setup intercepts console.error/console.warn during test execution
+- **Pattern Matching**: Automatically detects `[antd: …] … deprecated` warning patterns
+- **Fail-Fast Policy**: Any deprecation warning causes immediate test suite failure
+- **Developer Feedback**: Provides clear error messages pointing to offending deprecation warnings
+
+**Section sources**
+- [SPEC-042 spec.md:56-125](file://docs/specs/SPEC-042-portal-dependency-hygiene/spec.md#L56-L125)
+- [SPEC-042 plan.md:15-67](file://docs/specs/SPEC-042-portal-dependency-hygiene/plan.md#L15-L67)
+- [SPEC-042 tasks.md:5-28](file://docs/specs/SPEC-042-portal-dependency-hygiene/tasks.md#L5-L28)
