@@ -1,4 +1,4 @@
-# SPEC-042: Portal Dependency Hygiene Specification
+# SPEC-042: Portal and Backend Dependency Hygiene Specification
 
 <cite>
 **Referenced Files in This Document**
@@ -6,25 +6,22 @@
 - [plan.md](file://docs/specs/SPEC-042-dependency-hygiene/plan.md)
 - [tasks.md](file://docs/specs/SPEC-042-dependency-hygiene/tasks.md)
 - [delivery-roadmap.md](file://docs/agentic-aiops-platform/delivery-roadmap.md)
-- [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
-- [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
-- [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
-- [AuditView.tsx](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx)
-- [ApprovalsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx)
 - [package.json](file://products/operator-portal/web-ui/app/package.json)
 - [vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
+- [setup.ts](file://products/operator-portal/web-ui/app/src/test/setup.ts)
+- [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
 - [pyproject.toml](file://products/agent-platform/pyproject.toml)
-- [pyproject.toml](file://products/identity-broker/pyproject.toml)
-- [pyproject.toml](file://products/platform-gateway/pyproject.toml)
-- [pyproject.toml](file://products/tool-gateway/pyproject.toml)
+- [2026-08-28-dependency-hygiene.md](file://docs/agentic-aiops-platform/release-notes/2026-08-28-dependency-hygiene.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated specification status from draft to approved (2026-08-28)
-- Added delivery roadmap reference showing approval status and pending delivery as part of 0.24.0 fourth R5 slice
-- Enhanced scope documentation to reflect comprehensive platform-wide dependency hygiene approach
-- Updated acceptance criteria and verification processes for approved implementation
+- Updated specification status from approved to delivered (2026-08-28)
+- Added comprehensive delivery details reflecting the complete implementation across all five requirements
+- Enhanced verification sections with actual delivery outcomes and testing results
+- Updated dependency versions to reflect the delivered state (React 19.2.8, TypeScript 5.9.3, etc.)
+- Added detailed backend service updates including cryptography cap adjudication
+- Documented the zero-tolerance antd deprecation guard implementation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -39,16 +36,16 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document specifies the comprehensive platform dependency hygiene effort for SPEC-042, which has been **approved** as of 2026-08-28. The scope encompasses both frontend and backend dependency management across the entire Luban AIOps platform, extending beyond the original portal-specific antd migrations to include comprehensive backend Python services dependency management.
+This document specifies the comprehensive platform dependency hygiene effort for SPEC-042, which has been **delivered** as part of v0.24.0 fourth R5 slice on 2026-08-28. The scope encompasses both frontend and backend dependency management across the entire Luban AIOps platform, extending beyond the original portal-specific antd migrations to include comprehensive backend Python services dependency management.
 
-The approved specification defines five requirements:
-- R-1: Migrate deprecated antd v6 APIs (Drawer width → size; Alert message → title).
-- R-2: Add a vitest guard that fails the suite when any antd deprecation warning appears.
+The delivered specification successfully implemented five requirements:
+- R-1: Migrated deprecated antd v6 APIs (Drawer width → size; Alert message → title).
+- R-2: Implemented a vitest guard that fails the suite when any antd deprecation warning appears.
 - R-3: Managed refresh of portal adopt-set packages with consistent lockfiles and build gates.
-- R-4: Adopt React 19 with behavior-preserving changes only.
+- R-4: Adopted React 19 with behavior-preserving changes only.
 - R-5: Backend stable-channel lockfile refresh across all eight Python products with cryptography cap adjudication.
 
-**Updated** The specification is now approved and pending delivery as part of the 0.24.0 fourth R5 slice, with comprehensive acceptance criteria emphasizing zero antd deprecation warnings in test output, green type-checking and builds, unchanged visual/behavioral outcomes, and verified backend service stability after dependency updates.
+**Delivered** The specification was delivered on 2026-08-28 as part of v0.24.0 fourth R5 slice, achieving comprehensive acceptance criteria including zero antd deprecation warnings in test output, green type-checking and builds, unchanged visual/behavioral outcomes, and verified backend service stability after dependency updates.
 
 **Section sources**
 - [spec.md:3-13](file://docs/specs/SPEC-042-dependency-hygiene/spec.md#L3-L13)
@@ -63,6 +60,7 @@ SPEC-042 targets both the operator portal web application and all backend Python
 - Views using Alerts and Drawers: DocumentsView.tsx, ChatView.tsx, AuditView.tsx, ApprovalsView.tsx
 - Build and test configuration: vite.config.ts
 - Dependencies and Node engine constraints: package.json
+- Test setup with deprecation guard: src/test/setup.ts
 
 **Backend (Python Services):**
 - Eight Python products with individual pyproject.toml files
@@ -76,6 +74,7 @@ subgraph "Frontend Portal"
 App["App.tsx"]
 Views["Views & Components"]
 Config["Build Config"]
+TestSetup["Deprecation Guard"]
 end
 subgraph "Backend Services"
 AgentPlatform["Agent Platform"]
@@ -87,6 +86,7 @@ end
 end
 App --> Views
 Views --> Config
+Config --> TestSetup
 AgentPlatform --> OtherServices
 IdentityBroker --> OtherServices
 PlatformGateway --> OtherServices
@@ -94,11 +94,10 @@ ToolGateway --> OtherServices
 ```
 
 **Diagram sources**
-- [App.tsx:1-419](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L419)
-- [pyproject.toml:1-38](file://products/agent-platform/pyproject.toml#L1-L38)
-- [pyproject.toml:1-33](file://products/identity-broker/pyproject.toml#L1-L33)
-- [pyproject.toml:1-34](file://products/platform-gateway/pyproject.toml#L1-L34)
-- [pyproject.toml:1-36](file://products/tool-gateway/pyproject.toml#L1-L36)
+- [App.tsx:390-419](file://products/operator-portal/web-ui/app/src/App.tsx#L390-L419)
+- [package.json:15-33](file://products/operator-portal/web-ui/app/package.json#L15-L33)
+- [setup.ts:17-60](file://products/operator-portal/web-ui/app/src/test/setup.ts#L17-L60)
+- [pyproject.toml:6-21](file://products/agent-platform/pyproject.toml#L6-L21)
 
 **Section sources**
 - [plan.md:3-15](file://docs/specs/SPEC-042-dependency-hygiene/plan.md#L3-L15)
@@ -111,12 +110,12 @@ The comprehensive dependency hygiene effort spans multiple layers of the platfor
 - Drawer migration: Navigation drawers in App.tsx migrate from width props to size props to eliminate deprecation warnings while preserving pixel widths.
 - Alert migration: Multiple views render Alert components migrating from message to title to match antd v6's non-deprecated API.
 - Test guard: Vitest setup intercepts console output during runs and fails if any antd deprecation warning is detected.
-- Dependency refresh: Adopted versions for antd, TypeScript, Vite, Vitest, jsdom, @types/node, and testing libraries applied consistently.
-- React 19 adoption: react/react-dom and their types move to 19.x with peer compatibility already declared by framework dependencies.
+- Dependency refresh: Adopted versions for antd 6.6.2, TypeScript 5.9.3, Vite 8.2.2, Vitest 4.1.11, jsdom 30.0.1, @types/node 22.20.1, and testing libraries applied consistently.
+- React 19 adoption: react/react-dom 19.2.8 and their types move to 19.x with peer compatibility already declared by framework dependencies.
 
 **Backend Components:**
 - Lockfile refresh: All eight Python products re-lock inside declared ranges to latest stable versions.
-- Cryptography adjudication: Review JWT/signing call sites in six products declaring cryptography to determine cap adjustments.
+- Cryptography adjudication: Review JWT/signing call sites in six products declaring cryptography to determine cap adjustments (raised to <51.0).
 - Agentscope kernel update: Upgrade from 2.0.6 to 2.0.7.post1 with full verification including live HITL/mutating path checks.
 - Service stability: Ensure all product test suites remain green under frozen sync conditions.
 
@@ -132,9 +131,10 @@ The platform architecture encompasses both frontend and backend systems with coo
 graph TB
 subgraph "Frontend Layer"
 Portal["Operator Portal Web UI"]
-Antd["Antd 6.x"]
-React["React 19.x"]
-Vite["Vite 8.x"]
+Antd["Antd 6.6.2"]
+React["React 19.2.8"]
+Vite["Vite 8.2.2"]
+Guard["Deprecation Guard"]
 end
 subgraph "Backend Layer"
 AgentPlatform["Agent Platform"]
@@ -144,14 +144,15 @@ ToolGateway["Tool Gateway"]
 OtherServices["Other Python Services"]
 end
 subgraph "Shared Dependencies"
-FastAPI["FastAPI"]
+FastAPI["FastAPI 0.141.1"]
 Pydantic["Pydantic"]
 OpenTelemetry["OpenTelemetry"]
-Cryptography["Cryptography"]
+Cryptography["Cryptography 50.0.1"]
 end
 Portal --> Antd
 Portal --> React
 Portal --> Vite
+Portal --> Guard
 AgentPlatform --> FastAPI
 IdentityBroker --> Cryptography
 PlatformGateway --> Cryptography
@@ -161,15 +162,13 @@ OtherServices --> OpenTelemetry
 
 **Diagram sources**
 - [package.json:15-33](file://products/operator-portal/web-ui/app/package.json#L15-L33)
+- [setup.ts:17-60](file://products/operator-portal/web-ui/app/src/test/setup.ts#L17-L60)
 - [pyproject.toml:6-21](file://products/agent-platform/pyproject.toml#L6-L21)
-- [pyproject.toml:6-19](file://products/identity-broker/pyproject.toml#L6-L19)
-- [pyproject.toml:6-20](file://products/platform-gateway/pyproject.toml#L6-L20)
-- [pyproject.toml:6-22](file://products/tool-gateway/pyproject.toml#L6-L22)
 
 ## Detailed Component Analysis
 
 ### Frontend Deprecation Migration
-The portal requires migration of deprecated antd v6 APIs across multiple components:
+The portal successfully migrated deprecated antd v6 APIs across multiple components:
 
 **Drawer Migration:**
 - Two navigation drawers in App.tsx migrate from `width={230}` and `width={260}` to `size={230}` and `size={260}`
@@ -177,8 +176,8 @@ The portal requires migration of deprecated antd v6 APIs across multiple compone
 - Layout preservation ensures no visual changes occur during migration
 
 **Alert Migration:**
-- Fifteen Alert usages migrate from `message` to `title` across nine view files
-- Affected files include App.tsx, ChatView.tsx, DocumentsView.tsx, AuditView.tsx, ApprovalsView.tsx, SkillsView.tsx, ToolsView.tsx, PermissionsView.tsx, and IncidentsView.tsx
+- Twenty Alert usages migrate from `message` to `title` across ten view files
+- Affected files include App.tsx, ChatView.tsx, DocumentsView.tsx, AuditView.tsx, ApprovalsView.tsx, SkillsView.tsx, ToolsView.tsx, PermissionsView.tsx, IncidentsView.tsx, and additional sites shipped in v0.23.x line
 - Description props remain unchanged as they are not deprecated
 
 ```mermaid
@@ -196,8 +195,6 @@ RenderNormal --> End
 
 **Diagram sources**
 - [App.tsx:392-400](file://products/operator-portal/web-ui/app/src/App.tsx#L392-L400)
-- [DocumentsView.tsx:1116-1120](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1116-L1120)
-- [ChatView.tsx:512-514](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L512-L514)
 
 **Section sources**
 - [spec.md:67-86](file://docs/specs/SPEC-042-dependency-hygiene/spec.md#L67-L86)
@@ -235,8 +232,8 @@ end
 ```
 
 **Diagram sources**
-- [vite.config.ts:34-37](file://products/operator-portal/web-ui/app/vite.config.ts#L34-L37)
-- [plan.md:36-47](file://docs/specs/SPEC-042-dependency-hygiene/plan.md#L36-L47)
+- [setup.ts:17-60](file://products/operator-portal/web-ui/app/src/test/setup.ts#L17-L60)
+- [vite.config.ts:49-52](file://products/operator-portal/web-ui/app/vite.config.ts#L49-L52)
 
 **Section sources**
 - [spec.md:87-99](file://docs/specs/SPEC-042-dependency-hygiene/spec.md#L87-L99)
@@ -244,7 +241,7 @@ end
 - [tasks.md:15-22](file://docs/specs/SPEC-042-dependency-hygiene/tasks.md#L15-L22)
 
 ### Backend Lockfile Management
-The backend component manages dependency updates across eight Python products:
+The backend component successfully managed dependency updates across eight Python products:
 
 **Lockfile Refresh Strategy:**
 - Each product's uv.lock file regenerates to latest stable version within declared ranges
@@ -254,7 +251,7 @@ The backend component manages dependency updates across eight Python products:
 **Cryptography Cap Adjudication:**
 - Six products declare cryptography>=43.0,<45.0 requiring review
 - JWT/signing call sites examined in identity-broker, audit-service, incident-service, platform-gateway, skills-hub, and tool-gateway
-- Decision to raise caps to latest stable major or maintain existing bounds based on compatibility
+- Decision to raise caps to >=43.0,<51.0 (locking 50.0.1) based on compatibility review
 
 **Service Verification:**
 - Full agent-platform suite execution after re-lock
@@ -278,8 +275,6 @@ LiveCheck --> Complete(["Backend re-lock complete"])
 
 **Diagram sources**
 - [pyproject.toml:6-21](file://products/agent-platform/pyproject.toml#L6-L21)
-- [pyproject.toml:6-19](file://products/identity-broker/pyproject.toml#L6-L19)
-- [plan.md:75-95](file://docs/specs/SPEC-042-dependency-hygiene/plan.md#L75-L95)
 
 **Section sources**
 - [spec.md:161-196](file://docs/specs/SPEC-042-dependency-hygiene/spec.md#L161-L196)
@@ -287,21 +282,21 @@ LiveCheck --> Complete(["Backend re-lock complete"])
 - [tasks.md:47-64](file://docs/specs/SPEC-042-dependency-hygiene/tasks.md#L47-L64)
 
 ### Comprehensive Dependency Adoption
-The platform adopts a coordinated approach to dependency updates:
+The platform successfully adopted a coordinated approach to dependency updates:
 
 **Frontend Adopt Set:**
-- antd: 6.6.1 → latest stable 6.x (patch refresh)
-- TypeScript: 5.6.3 → 5.9.x (latest stable 5.x line)
-- Vite: 6.4.3 → 8.x (paired with plugin-react 6.x)
-- Vitest: 3.2.7 → 4.x (compatible with vite 6/7/8)
-- jsdom: 25.0.1 → 30.x (requires node ≥22.22.2)
-- React: 18.3.1 → 19.x (peer compatibility already declared)
+- antd: 6.6.1 → 6.6.2 (latest stable 6.x patch refresh)
+- TypeScript: 5.6.3 → 5.9.3 (latest stable 5.x line)
+- Vite: 6.4.3 → 8.2.2 (paired with plugin-react 6.1.1)
+- Vitest: 3.2.7 → 4.1.11 (compatible with vite 6/7/8)
+- jsdom: 25.0.1 → 30.0.1 (requires node ≥22.22.2)
+- React: 18.3.1 → 19.2.8 (peer compatibility already declared)
 
 **Backend Adopt Set:**
 - agentscope: 2.0.6 → 2.0.7.post1 (in range >=2.0.4,<3.0)
 - fastapi: 0.139.2 → 0.141.1 (in range)
 - uvicorn: 0.51.0 → 0.52.4 (in range)
-- cryptography: adjudicated per call site compatibility
+- cryptography: adjudicated up to >=43.0,<51.0 (locking 50.0.1)
 - redis/elasticsearch: caps parked with documented reasons
 
 **Design Decisions:**
@@ -322,19 +317,19 @@ The platform maintains coordinated dependencies across frontend and backend syst
 ```mermaid
 graph LR
 subgraph "Frontend Dependencies"
-React["react 19.x"]
-Antd["antd 6.x"]
-Vite["vite 8.x"]
-Vitest["vitest 4.x"]
-JSDOM["jsdom 30.x"]
-TS["typescript 5.9.x"]
+React["react 19.2.8"]
+Antd["antd 6.6.2"]
+Vite["vite 8.2.2"]
+Vitest["vitest 4.1.11"]
+JSDOM["jsdom 30.0.1"]
+TS["typescript 5.9.3"]
 end
 subgraph "Backend Dependencies"
 FastAPI["fastapi 0.141.1"]
 Uvicorn["uvicorn 0.52.4"]
 AgentScope["agentscope 2.0.7.post1"]
 Pydantic["pydantic 2.x"]
-Crypto["cryptography <45.0"]
+Crypto["cryptography 50.0.1"]
 Redis["redis <7.0"]
 ES["elasticsearch <9.0"]
 end
@@ -356,7 +351,6 @@ ES --> Search["Search Services"]
 **Diagram sources**
 - [package.json:15-33](file://products/operator-portal/web-ui/app/package.json#L15-L33)
 - [pyproject.toml:6-21](file://products/agent-platform/pyproject.toml#L6-L21)
-- [spec.md:110-126](file://docs/specs/SPEC-042-dependency-hygiene/spec.md#L110-L126)
 
 **Section sources**
 - [spec.md:110-126](file://docs/specs/SPEC-042-dependency-hygiene/spec.md#L110-L126)
@@ -411,32 +405,32 @@ Comprehensive troubleshooting procedures for both frontend and backend dependenc
 - [tasks.md:15-76](file://docs/specs/SPEC-042-dependency-hygiene/tasks.md#L15-L76)
 
 ## Conclusion
-SPEC-042 establishes a comprehensive platform-wide dependency hygiene approach that extends far beyond the original portal-only scope. The **approved** specification successfully addresses both frontend and backend dependency management through coordinated migration of deprecated antd APIs, implementation of deprecation regression guards, managed refresh of toolchain dependencies including React 19, and systematic re-locking of all backend Python services to their latest stable versions.
+SPEC-042 establishes a comprehensive platform-wide dependency hygiene approach that extends far beyond the original portal-only scope. The **delivered** specification successfully addresses both frontend and backend dependency management through coordinated migration of deprecated antd APIs, implementation of deprecation regression guards, managed refresh of toolchain dependencies including React 19, and systematic re-locking of all backend Python services to their latest stable versions.
 
-As an **approved** specification pending delivery as part of the 0.24.0 fourth R5 slice, SPEC-042 sets a foundation for sustainable platform evolution through disciplined dependency management that includes cryptography cap adjudication, agentscope kernel updates with enhanced verification, and comprehensive live checking of critical paths.
+As a **delivered** specification completed as part of v0.24.0 fourth R5 slice on 2026-08-28, SPEC-042 sets a foundation for sustainable platform evolution through disciplined dependency management that includes cryptography cap adjudication, agentscope kernel updates with enhanced verification, and comprehensive live checking of critical paths.
 
 The expansion from portal-specific to platform-wide scope demonstrates the interconnected nature of modern platform architectures and the importance of coordinated dependency management strategies that consider both user-facing interfaces and backend service stability.
 
 ## Appendices
 **Verification Checklist:**
-- Zero antd deprecation warnings in vitest output
-- Green tsc --noEmit compilation
-- Green production build for portal
-- All eight Python product test suites green under frozen sync
-- make verify passes with updated dependencies
-- Live walkthrough covering sign-in, streamed chat turn, session panel, Approvals, and Documents drawer
-- Live check of chat, HITL confirmation, and approved-mutating paths via mutating-demo.sh
+- Zero antd deprecation warnings in vitest output ✓
+- Green tsc --noEmit compilation ✓
+- Green production build for portal ✓
+- All eight Python product test suites green under frozen sync ✓
+- make verify passes with updated dependencies ✓
+- Live walkthrough covering sign-in, streamed chat turn, session panel, Approvals, and Documents drawer ✓
+- Live check of chat, HITL confirmation, and approved-mutating paths via mutating-demo.sh ✓
 
 **Impact Assessment:**
-- Frontend: Operator portal web-ui app and Dockerfile node base pin check
-- Backend: All eight Python products' uv.lock files with cryptography cap adjudication
-- Contracts: None touched - no route, action, event type, or execution path changes
-- Security: Enhanced verification burden for agentscope kernel bump and cryptography cap review
-- Operations: Living-state docs require updates including CHANGELOG, release notes, configuration reference, spec index, and delivery roadmap
+- Frontend: Operator portal web-ui app and Dockerfile node base pin check ✓
+- Backend: All eight Python products' uv.lock files with cryptography cap adjudication ✓
+- Contracts: None touched - no route, action, event type, or execution path changes ✓
+- Security: Enhanced verification burden for agentscope kernel bump and cryptography cap review ✓
+- Operations: Living-state docs require updates including CHANGELOG, release notes, configuration reference, spec index, and delivery roadmap ✓
 
 **Delivery Status:**
-- **Status**: Approved (2026-08-28)
-- **Delivery**: Pending as part of 0.24.0 fourth R5 slice
+- **Status**: Delivered (2026-08-28)
+- **Release**: v0.24.0 fourth R5 slice
 - **Related ADRs**: Extends SPEC-023 portal framework rebuild's technology choices; honors ADR-0002's AgentScope kernel position
 
 **Section sources**
@@ -444,3 +438,4 @@ The expansion from portal-specific to platform-wide scope demonstrates the inter
 - [spec.md:266-282](file://docs/specs/SPEC-042-dependency-hygiene/spec.md#L266-L282)
 - [tasks.md:65-76](file://docs/specs/SPEC-042-dependency-hygiene/tasks.md#L65-L76)
 - [delivery-roadmap.md:333](file://docs/agentic-aiops-platform/delivery-roadmap.md#L333)
+- [2026-08-28-dependency-hygiene.md:1-124](file://docs/agentic-aiops-platform/release-notes/2026-08-28-dependency-hygiene.md#L1-L124)
