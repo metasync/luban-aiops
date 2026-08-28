@@ -204,10 +204,10 @@ grants.
   as tabs (Handover, Sessions, Confirmations, Executions, Evidence &
   transcript, Open items, Raw JSON) and is the artifact of record; the
   digest and narrative panes scroll inside bounded regions with an
-  expand affordance. The generated narrative renders collapsed under
-  the label
-  *AI-generated narrative — from this document's digest facts*; a failed
-  generation shows a warning instead and the digest stands alone.
+  expand affordance. The generated narrative opens expanded under the
+  label *AI-generated narrative — from this document's digest facts* —
+  it stays collapsible to the header alone; a failed generation shows a
+  warning instead and the digest stands alone.
 - **Export .md** in the document drawer downloads the open document as
   Markdown (metadata, provenance, digest, and the narrative when
   included) for offline handover. Export runs entirely in your browser

@@ -595,6 +595,9 @@ function ProsePanel({ document }: { document: OperationDocument }) {
     return (
       <Collapse
         size="small"
+        // The narrative is the relieving operator's entry point: it opens
+        // expanded by default and stays collapsible to the header alone.
+        defaultActiveKey={["prose"]}
         items={[
           {
             key: "prose",

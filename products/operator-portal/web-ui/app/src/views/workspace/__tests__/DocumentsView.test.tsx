@@ -357,6 +357,9 @@ describe("DocumentsView list (SPEC-039 R-6)", () => {
     expect(
       screen.getByText(/AI-generated narrative — from this document's digest facts/),
     ).toBeTruthy();
+    // The narrative opens expanded by default: the relieving operator
+    // reads the story without an extra click, and can still collapse it.
+    expect(screen.getByText("All quiet during the day shift.")).toBeTruthy();
     // Cross-owner attribution rides the list row and the drawer alike.
     expect(
       screen.getAllByText(/created by other\.operator/).length,

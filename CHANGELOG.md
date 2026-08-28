@@ -13,6 +13,18 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.23.2 — 2026-08-28
+
+### Changed
+
+- **Shift-summary narrative opens expanded**: the AI-generated narrative
+  panel in the Documents drawer now opens expanded by default — the
+  relieving operator reads the handover story without an extra click —
+  while staying collapsible to the header alone. Presentation only:
+  digest, export, and the stored document are untouched. Locked by a
+  DocumentsView test asserting the narrative body renders immediately;
+  the portal user guide was corrected to match.
+
 ## 0.23.1 — 2026-08-28
 
 ### Fixed

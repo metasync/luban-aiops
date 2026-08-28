@@ -7,6 +7,11 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-28-shift-summary-narrative-expanded.md`
+  - same-day portal polish patch (v0.23.2): the AI-generated handover
+    narrative in the Documents drawer now opens expanded by default and
+    stays collapsible to its header — presentation only; digest, export,
+    and audit posture unchanged
 - `2026-08-28-mutating-tool-name-regression.md`
   - same-day patch on the SPEC-037/038 signed-execution path (v0.23.1):
     parked mutating calls carried the sanitized model-visible tool name
