@@ -19,6 +19,7 @@ from platform_gateway.services.policy_engine import (
     ACTION_APPROVALS_LIST,
     ACTION_DOCUMENTS_CREATE,
     ACTION_DOCUMENTS_READ,
+    ACTION_INCIDENT_READ,
     evaluate,
 )
 
@@ -33,26 +34,41 @@ async def create_document_route(
     x_request_id: str | None = Header(default=None),
     settings: PlatformGatewaySettings = Depends(get_settings),
 ) -> dict:
-    """Create an operations document draft (SPEC-039 R-1).
+    """Create an operations document draft (SPEC-039 R-1, SPEC-043).
 
-    Foreign-session coverage is a derived capability: the gateway
-    evaluates ``approvals:list`` against the caller's roles and forwards
-    the outcome as the trusted internal ``X-Foreign-Coverage`` header;
-    the agent layer fails closed on any value other than ``allowed``.
+    Incident reports additionally require ``incident:read`` — the
+    dual-action gate combines two existing actions (no new policy
+    action) so the document surface never bypasses the incident
+    visibility matrix; a denial reports the first failing action in the
+    same structured shape as today. Foreign-session coverage is a
+    derived capability: the gateway evaluates ``approvals:list`` against
+    the caller's roles and forwards the outcome as the trusted internal
+    ``X-Foreign-Coverage`` header; the agent layer fails closed on any
+    value other than ``allowed``.
     """
     request_id = resolve_request_id(x_request_id)
     identity = await resolve_request_identity(settings, request, request_id)
     enforce_policy(settings, identity, ACTION_DOCUMENTS_CREATE, request_id)
+    if body.document_type == "incident_report":
+        enforce_policy(settings, identity, ACTION_INCIDENT_READ, request_id)
     user_id = identity.username  # type: ignore[union-attr]
     foreign_decision = evaluate(settings, identity.roles, ACTION_APPROVALS_LIST)  # type: ignore[union-attr]
     foreign_coverage = (
         "allowed" if foreign_decision.decision == "allow" else "denied"
     )
+    payload = body.model_dump()
+    # Validation already rejected cross-type mixing, so only the
+    # type-relevant coverage field rides upstream: the agent never sees
+    # a mixed create shape (SPEC-043 R-3).
+    if body.document_type == "incident_report":
+        payload.pop("session_ids", None)
+    else:
+        payload.pop("incident_id", None)
     response = await create_document(
         settings,
         request_id,
         user_id,
-        body.model_dump(),
+        payload,
         foreign_coverage,
     )
     log_event(
@@ -62,6 +78,7 @@ async def create_document_route(
         document_id=response.get("document_id"),
         document_type=response.get("document_type"),
         user_id=user_id,
+        incident_id=body.incident_id,
         foreign_coverage=foreign_coverage,
         authenticated=identity.subject != "dev",  # type: ignore[union-attr]
         roles=identity.roles,  # type: ignore[union-attr]

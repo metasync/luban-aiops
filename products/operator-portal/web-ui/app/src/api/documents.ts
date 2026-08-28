@@ -2,7 +2,7 @@
 // All shapes mirror operation-document.schema.json via the gateway.
 import { requestJson } from "./client";
 
-export type DocumentType = "shift_summary";
+export type DocumentType = "shift_summary" | "incident_report";
 export type DocumentState = "draft" | "published";
 export type ProseStatus = "included" | "failed" | "not_requested";
 
@@ -22,7 +22,9 @@ export interface OperationDocument {
   label: string;
   created_at: string;
   published_at?: string | null;
-  provenance: { sessions: DocumentProvenanceSession[] };
+  // SPEC-043: incident reports add the covered incident id alongside
+  // the session entries (only covered sessions ride provenance).
+  provenance: { incident_id?: string | null; sessions: DocumentProvenanceSession[] };
   digest: Record<string, unknown>;
   prose?: string | null;
   prose_status: ProseStatus;
@@ -46,7 +48,10 @@ export interface DocumentListResponse {
 
 export interface DocumentCreateRequest {
   document_type: DocumentType;
-  session_ids: string[];
+  // shift_summary only; must be empty for incident reports.
+  session_ids?: string[];
+  // incident_report only (SPEC-043 R-2); must be absent for shift summaries.
+  incident_id?: string;
   label: string;
   include_prose: boolean;
 }
@@ -73,7 +78,9 @@ export async function getDocument(
 }
 
 // Throws ApiError 400 (validation / unknown session ids), 403 (foreign
-// sessions without approvals:list coverage), or 502 (agent outage).
+// sessions without approvals:list coverage, or a denied gate action),
+// 404 (unknown incident id, SPEC-043), 502 (agent or incident-service
+// outage), or 503 (incident dependency not configured).
 export async function createDocument(
   payload: DocumentCreateRequest,
 ): Promise<OperationDocument> {

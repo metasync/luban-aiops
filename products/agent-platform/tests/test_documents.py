@@ -17,6 +17,12 @@ from fastapi.testclient import TestClient
 
 from agent_service.api.v2 import routes as v2_routes
 from agent_service.app import create_app
+from agent_service.services.incident_client import (
+    IncidentClientRejected,
+    IncidentDependencyNotConfigured,
+    IncidentNotFound,
+    IncidentServiceUnavailable,
+)
 from agent_service.services.operation_documents import (
     OPERATION_DOCUMENT_STORE,
 )
@@ -492,3 +498,246 @@ class TestSessionRename:
         )
         assert response.status_code == 200
         assert response.json()["title"] == "renamed by owner"
+
+
+# --- SPEC-043: the incident_report document type ------------------------------
+
+INCIDENT_BUNDLE = {
+    "incident": {
+        "incident_id": "inc-abc123",
+        "fingerprint": "fp-1",
+        "source": "webhook",
+        "severity": "critical",
+        "status": "triaged",
+        "title": "Payment API latency",
+        "summary": "p99 latency spike on the payment API",
+        "labels": {"team": "payments"},
+        "reported_by": "alertmanager",
+        "session_id": None,  # tests override per case
+        "created_at": "2026-08-28T10:00:00Z",
+        "updated_at": "2026-08-28T10:05:00Z",
+        "resolved_at": None,
+        "triage_raw": "RAW ALERT PAYLOAD",
+    },
+    "report": {
+        "incident_id": "inc-abc123",
+        "severity_assessment": "critical",
+        "summary": "Database pool exhaustion on the payment service",
+        "evidence": [{"source": "metrics", "description": "pool saturation"}],
+        "hypotheses": ["connection pool exhaustion"],
+        "next_steps": [
+            {
+                "title": "raise pool size",
+                "priority": "immediate",
+                "rationale": "saturation",
+            }
+        ],
+        "skills_cited": ["sre-database"],
+        "session_id": "ses-triage",
+        "generated_at": "2026-08-28T10:10:00Z",
+        "generated_by": "triage-agent",
+    },
+    "dispatches": [
+        {
+            "connector": "pagerduty",
+            "status": "sent",
+            "reference": "PD-1",
+            "error": None,
+            "created_at": "2026-08-28T10:02:00Z",
+        }
+    ],
+}
+
+
+def _bundle_with(session_id):
+    bundle = json.loads(json.dumps(INCIDENT_BUNDLE))
+    bundle["incident"]["session_id"] = session_id
+    return bundle
+
+
+def _create_incident_report(
+    client: TestClient, user: str, incident_id: str = "inc-abc123", **extra
+):
+    body = {
+        "document_type": "incident_report",
+        "incident_id": incident_id,
+        "label": "payment latency post-mortem",
+        "include_prose": False,
+        **extra,
+    }
+    return client.post("/api/v2/documents", json=body, headers={"X-User-ID": user})
+
+
+class TestIncidentReportDocument:
+    def _patch_fetch(self, monkeypatch, bundle):
+        async def _fetch(settings, request_id, incident_id):
+            return bundle
+
+        monkeypatch.setattr(v2_routes, "fetch_incident_bundle", _fetch)
+
+    def _patch_fetch_error(self, monkeypatch, exc):
+        async def _fetch(settings, request_id, incident_id):
+            raise exc
+
+        monkeypatch.setattr(v2_routes, "fetch_incident_bundle", _fetch)
+
+    def test_create_incident_report_own_session(
+        self, monkeypatch, _clean_stores
+    ) -> None:
+        app_client = TestClient(create_app())
+        session_id = _session(app_client, "alice")
+        self._patch_fetch(monkeypatch, _bundle_with(session_id))
+        response = _create_incident_report(app_client, "alice")
+        assert response.status_code == 201
+        document = response.json()
+        assert document["document_type"] == "incident_report"
+        digest = document["digest"]
+        # Four deterministic sections; raw triage stays out of the digest.
+        assert digest["incident"]["incident_id"] == "inc-abc123"
+        assert "triage_raw" not in digest["incident"]
+        assert digest["incident"]["has_triage_raw"] is True
+        assert digest["triage"]["severity_assessment"] == "critical"
+        assert digest["dispatches"][0]["connector"] == "pagerduty"
+        assert digest["session"]["status"] == "owner"
+        # Coverage is server-derived: exactly the incident's session.
+        assert document["provenance"]["incident_id"] == "inc-abc123"
+        assert document["provenance"]["sessions"][0]["session_id"] == session_id
+        # Counts-only summary, contract envelope validation.
+        assert "triage report present" in document["summary"]
+        assert "own session" in document["summary"]
+        jsonschema.validate(
+            document, _load_schema("operation-document.schema.json")
+        )
+        # SPEC-043 R-5: document_created carries the incident id; no
+        # new event type is introduced.
+        events = [
+            e for e in _clean_stores if e["event_type"] == "document_created"
+        ]
+        assert len(events) == 1
+        assert events[0]["details"]["incident_id"] == "inc-abc123"
+        assert events[0]["details"]["document_type"] == "incident_report"
+
+    def test_not_triaged_and_missing_session_markers(self, monkeypatch) -> None:
+        app_client = TestClient(create_app())
+        bundle = _bundle_with(None)
+        bundle["report"] = None
+        bundle["dispatches"] = []
+        self._patch_fetch(monkeypatch, bundle)
+        response = _create_incident_report(app_client, "alice")
+        assert response.status_code == 201
+        digest = response.json()["digest"]
+        assert digest["triage"] == {"status": "not_triaged"}
+        assert digest["session"] == {"status": "missing"}
+        assert digest["dispatches"] == []
+        assert "not triaged" in response.json()["summary"]
+
+    def test_foreign_linked_session_denied_rides_marker(self, monkeypatch) -> None:
+        app_client = TestClient(create_app())
+        foreign_session = _session(app_client, "carol")
+        self._patch_fetch(monkeypatch, _bundle_with(foreign_session))
+        # No X-Foreign-Coverage header: creation still succeeds and the
+        # session section degrades to the foreign_denied marker.
+        response = _create_incident_report(app_client, "alice")
+        assert response.status_code == 201
+        document = response.json()
+        assert document["digest"]["session"] == {
+            "status": "foreign_denied",
+            "session_id": foreign_session,
+        }
+        assert document["provenance"]["sessions"] == []
+
+    def test_foreign_linked_session_metadata_with_capability(
+        self, monkeypatch
+    ) -> None:
+        app_client = TestClient(create_app())
+        foreign_session = _session(app_client, "carol")
+        self._patch_fetch(monkeypatch, _bundle_with(foreign_session))
+        response = app_client.post(
+            "/api/v2/documents",
+            json={
+                "document_type": "incident_report",
+                "incident_id": "inc-abc123",
+                "label": "cross-owner incident",
+                "include_prose": False,
+            },
+            headers={"X-User-ID": "alice", "X-Foreign-Coverage": "allowed"},
+        )
+        assert response.status_code == 201
+        document = response.json()
+        assert document["digest"]["session"]["status"] == "foreign"
+        assert document["provenance"]["sessions"][0]["coverage"] == "foreign"
+
+    def test_unknown_incident_answers_structural_404(self, monkeypatch) -> None:
+        app_client = TestClient(create_app())
+        self._patch_fetch_error(
+            monkeypatch, IncidentNotFound("inc-nope")
+        )
+        response = _create_incident_report(app_client, "alice", "inc-nope")
+        assert response.status_code == 404
+        assert "unknown incident id: inc-nope" in response.json()["detail"]
+
+    def test_not_configured_answers_503(self, monkeypatch) -> None:
+        app_client = TestClient(create_app())
+        self._patch_fetch_error(
+            monkeypatch,
+            IncidentDependencyNotConfigured("incident service not configured"),
+        )
+        response = _create_incident_report(app_client, "alice")
+        assert response.status_code == 503
+
+    def test_upstream_unreachable_answers_502(self, monkeypatch) -> None:
+        app_client = TestClient(create_app())
+        self._patch_fetch_error(
+            monkeypatch, IncidentServiceUnavailable("incident service unavailable")
+        )
+        response = _create_incident_report(app_client, "alice")
+        assert response.status_code == 502
+
+    def test_upstream_4xx_passes_through(self, monkeypatch) -> None:
+        app_client = TestClient(create_app())
+        self._patch_fetch_error(
+            monkeypatch, IncidentClientRejected(401, "bad credential")
+        )
+        response = _create_incident_report(app_client, "alice")
+        assert response.status_code == 401
+        assert response.json()["detail"] == "bad credential"
+
+    def test_cross_type_field_mixing_rejected(self, monkeypatch) -> None:
+        app_client = TestClient(create_app())
+        session_id = _session(app_client, "alice")
+        self._patch_fetch(monkeypatch, _bundle_with(session_id))
+        # Incident report with a session list.
+        with_sessions = app_client.post(
+            "/api/v2/documents",
+            json={
+                "document_type": "incident_report",
+                "incident_id": "inc-abc123",
+                "session_ids": [session_id],
+                "label": "mixed",
+            },
+            headers={"X-User-ID": "alice"},
+        )
+        assert with_sessions.status_code == 422
+        # Shift summary with an incident id.
+        with_incident = app_client.post(
+            "/api/v2/documents",
+            json={
+                "document_type": "shift_summary",
+                "session_ids": [session_id],
+                "incident_id": "inc-abc123",
+                "label": "mixed",
+            },
+            headers={"X-User-ID": "alice"},
+        )
+        assert with_incident.status_code == 422
+        # Incident report without an incident id.
+        missing_id = app_client.post(
+            "/api/v2/documents",
+            json={"document_type": "incident_report", "label": "missing id"},
+            headers={"X-User-ID": "alice"},
+        )
+        assert missing_id.status_code == 422
+        # The contract pattern bounds the incident id shape.
+        bad_pattern = _create_incident_report(app_client, "alice", "INC-BAD")
+        assert bad_pattern.status_code == 422
+

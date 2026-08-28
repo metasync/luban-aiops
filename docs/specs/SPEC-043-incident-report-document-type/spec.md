@@ -2,12 +2,13 @@
 
 ## Status
 
-- status: `draft`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-28
-- delivered: —
+- approved: 2026-08-29
+- delivered: 2026-08-29
 - release slice: R5 — Hardening and External Consumption (fifth R5
-  slice, planned as v0.25.0)
+  slice, delivered as v0.25.0)
 - related ADRs: none (lineage: SPEC-039 non-goal "incident reports —
   next slice", SPEC-015 incident triage, SPEC-040/041 document
   rendering conventions)
@@ -284,3 +285,8 @@ Acceptance criteria:
   commitment after the v0.24.0 post-release review recommended it as
   the fifth R5 slice; decision-complete per the Design Decisions
   section.
+- 2026-08-29: approved by the operator (status `draft` → `approved`);
+  delivery proceeds under the house train as v0.25.0.
+- 2026-08-29: delivered as v0.25.0 (status `approved` → `delivered`):
+  all six workstreams landed, the house train passed (build, verify,
+  deploy, live checks), and the living-state docs record the new type.

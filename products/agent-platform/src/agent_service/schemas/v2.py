@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 __all__ = [
     "AgentChatRequest",
@@ -343,20 +343,35 @@ class AgentHealth(BaseModel):
 class DocumentCreateRequest(BaseModel):
     """Creation request for a typed operations document (SPEC-039 R-1/R-3).
 
-    Phase 1 ships ``shift_summary`` only; the discriminator rides the
-    request so the next document type extends the enum, not the route.
+    The discriminator rides the request so each document type extends
+    the enum, not the route. ``shift_summary`` ships in Phase 1;
+    ``incident_report`` (SPEC-043) replaces the caller-supplied session
+    list with exactly one caller-supplied incident id — the covered
+    session is server-derived from the incident.
     """
 
-    document_type: Literal["shift_summary"] = Field(
-        description="Typed-document discriminator (shift_summary in Phase 1)."
+    document_type: Literal["shift_summary", "incident_report"] = Field(
+        description="Typed-document discriminator."
     )
     session_ids: list[str] = Field(
-        min_length=1,
+        default_factory=list,
         max_length=20,
         description=(
-            "Covered sessions (bounded input). Own sessions contribute the "
-            "full digest; foreign sessions (owner != requester) contribute "
-            "metadata only, and only when the requester holds approvals:list."
+            "Covered sessions (bounded input) for shift_summary only. Own "
+            "sessions contribute the full digest; foreign sessions "
+            "(owner != requester) contribute metadata only, and only when "
+            "the requester holds approvals:list. Must be empty for "
+            "incident_report documents."
+        ),
+    )
+    incident_id: str | None = Field(
+        default=None,
+        pattern=r"^inc-[a-z0-9-]+$",
+        description=(
+            "The covered incident for incident_report documents "
+            "(SPEC-043 R-2): exactly one incident id, resolved against "
+            "incident-service at creation. Must be absent for "
+            "shift_summary documents."
         ),
     )
     label: str = Field(
@@ -374,6 +389,30 @@ class DocumentCreateRequest(BaseModel):
             "(prose_status=failed)."
         ),
     )
+
+    @model_validator(mode="after")
+    def _check_type_fields(self) -> "DocumentCreateRequest":
+        """Cross-type field mixing is a structural 400 (SPEC-043 R-2)."""
+        if self.document_type == "shift_summary":
+            if self.incident_id is not None:
+                raise ValueError(
+                    "incident_id is only valid for incident_report documents"
+                )
+            if not self.session_ids:
+                raise ValueError(
+                    "shift_summary documents require at least one session id"
+                )
+        else:
+            if self.incident_id is None:
+                raise ValueError(
+                    "incident_report documents require exactly one incident id"
+                )
+            if self.session_ids:
+                raise ValueError(
+                    "incident_report coverage is the incident's own linked "
+                    "session; session_ids must be empty"
+                )
+        return self
 
 
 class SessionTitleUpdateRequest(BaseModel):

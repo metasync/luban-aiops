@@ -52,6 +52,17 @@ from agent_service.services.hitl_confirmations import (
     ConfirmationExpired,
     ConfirmationNotFound,
 )
+from agent_service.services.incident_client import (
+    IncidentClientRejected,
+    IncidentDependencyNotConfigured,
+    IncidentNotFound,
+    IncidentServiceUnavailable,
+    fetch_incident_bundle,
+)
+from agent_service.services.incident_report import (
+    build_digest as build_incident_digest,
+    document_summary as incident_document_summary,
+)
 from agent_service.services.model_catalog import MODEL_CATALOG
 from agent_service.services.operation_documents import (
     OPERATION_DOCUMENT_STORE,
@@ -768,13 +779,14 @@ async def create_document(
     x_request_id: str | None = Header(None),
     x_foreign_coverage: str | None = Header(default=None),
 ) -> dict:
-    """Create a typed operations document (SPEC-039 R-1/R-3).
+    """Create a typed operations document (SPEC-039 R-1/R-3, SPEC-043).
 
-    Authorization (``documents:create``) is enforced by the
-    platform-gateway. ``X-Foreign-Coverage`` is the gateway-computed
-    ``approvals:list`` capability marker (trusted internal header,
-    same trust model as ``X-User-ID``); it fails closed — an absent or
-    unrecognized value denies foreign coverage.
+    Authorization (``documents:create``, plus ``incident:read`` for
+    ``incident_report``) is enforced by the platform-gateway.
+    ``X-Foreign-Coverage`` is the gateway-computed ``approvals:list``
+    capability marker (trusted internal header, same trust model as
+    ``X-User-ID``); it fails closed — an absent or unrecognized value
+    denies foreign coverage.
     """
     user_id = _user_id(x_user_id)
     label = " ".join(body.label.split())
@@ -784,25 +796,33 @@ async def create_document(
             detail=f"label must be 1-{MAX_LABEL_LENGTH} characters after trimming",
         )
     can_view_foreign = (x_foreign_coverage or "").strip().lower() == "allowed"
-    try:
-        digest, provenance = build_digest(
-            user_id, list(body.session_ids), can_view_foreign
+    if body.document_type == "incident_report":
+        digest, provenance = await _build_incident_report_digest(
+            user_id, body.incident_id, can_view_foreign, x_request_id
         )
-    except UnknownSessionError as exc:
-        # Structural rejection; nothing about ownership is revealed.
-        raise HTTPException(
-            status_code=400, detail=f"unknown session ids: {exc.session_ids}"
-        ) from None
-    except ForeignSessionDenied as exc:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "foreign session coverage requires the approvals:list "
-                f"capability: {exc.session_ids}"
-            ),
-        ) from None
-    except DigestInputError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from None
+        summary = incident_document_summary(digest)
+    else:
+        try:
+            digest, provenance = build_digest(
+                user_id, list(body.session_ids), can_view_foreign
+            )
+        except UnknownSessionError as exc:
+            # Structural rejection; nothing about ownership is revealed.
+            raise HTTPException(
+                status_code=400, detail=f"unknown session ids: {exc.session_ids}"
+            ) from None
+        except ForeignSessionDenied as exc:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "foreign session coverage requires the approvals:list "
+                    f"capability: {exc.session_ids}"
+                ),
+            ) from None
+        except DigestInputError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        # SPEC-041 R-4: counts-only list summary, derived at creation.
+        summary = document_summary(digest)
 
     if body.include_prose:
         prose, blurb, prose_status = await generate_prose(
@@ -821,8 +841,7 @@ async def create_document(
         digest=digest,
         prose=prose,
         prose_status=prose_status,
-        # SPEC-041 R-4: counts-only list summary, derived at creation.
-        summary=document_summary(digest),
+        summary=summary,
         # v0.23.3: the AI one-liner rides with the prose reply.
         blurb=blurb,
     )
@@ -834,18 +853,23 @@ async def create_document(
     cited_count = sum(
         len(row["cited_record_ids"]) for row in provenance["sessions"]
     )
+    audit_details = {
+        "document_id": document_id,
+        "document_type": body.document_type,
+        "own_session_count": own_count,
+        "foreign_session_count": foreign_count,
+        "cited_record_count": cited_count,
+        "prose_status": prose_status,
+    }
+    # SPEC-043 R-5: the only audit payload addition — the covered
+    # incident id rides document_created as provenance.
+    if body.document_type == "incident_report":
+        audit_details["incident_id"] = provenance.get("incident_id")
     _emit_document_audit(
         "document_created",
         user_id,
         x_request_id,
-        {
-            "document_id": document_id,
-            "document_type": body.document_type,
-            "own_session_count": own_count,
-            "foreign_session_count": foreign_count,
-            "cited_record_count": cited_count,
-            "prose_status": prose_status,
-        },
+        audit_details,
     )
     LOGGER.info(
         "operation document created",
@@ -855,9 +879,41 @@ async def create_document(
             "document_type": body.document_type,
             "user_id": user_id,
             "prose_status": prose_status,
+            "incident_id": provenance.get("incident_id"),
         },
     )
     return OPERATION_DOCUMENT_STORE.load(document_id) or document
+
+
+async def _build_incident_report_digest(
+    user_id: str,
+    incident_id: str | None,
+    can_view_foreign: bool,
+    request_id: str | None,
+) -> tuple[dict, dict]:
+    """Fetch the incident bundle and assemble the digest (SPEC-043 R-2).
+
+    Degradation is the house posture, never a 500: not configured is
+    503, an unreachable incident-service is 502, an unknown incident id
+    answers the same structural 404 the incidents surface returns, and
+    any other upstream 4xx passes through.
+    """
+    try:
+        bundle = await fetch_incident_bundle(
+            get_settings(), request_id, incident_id or ""
+        )
+    except IncidentDependencyNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    except IncidentServiceUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+    except IncidentNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"unknown incident id: {exc.incident_id}",
+        ) from None
+    except IncidentClientRejected as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
+    return build_incident_digest(user_id, bundle, can_view_foreign)
 
 
 @router.get("/documents")

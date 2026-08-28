@@ -23,8 +23,8 @@
     },
     "document_type": {
       "type": "string",
-      "enum": ["shift_summary"],
-      "description": "Typed-document discriminator; shift_summary ships in Phase 1 (SPEC-039 R-3). Future types extend this enum without touching the substrate."
+      "enum": ["shift_summary", "incident_report"],
+      "description": "Typed-document discriminator; shift_summary shipped in Phase 1 (SPEC-039 R-3) and incident_report extended it (SPEC-043 R-1). Future types extend this enum without touching the substrate."
     },
     "state": {
       "type": "string",
@@ -56,6 +56,11 @@
       "additionalProperties": false,
       "required": ["sessions"],
       "properties": {
+        "incident_id": {
+          "type": "string",
+          "pattern": "^inc-[a-z0-9-]+$",
+          "description": "Covered incident for incident_report documents (SPEC-043 R-2): the report assembles from exactly one incident, server-derived from the creation request; the anchor is provenance, never a live reference. Absent on shift_summary documents."
+        },
         "sessions": {
           "type": "array",
           "items": {
@@ -85,7 +90,7 @@
     },
     "digest": {
       "type": "object",
-      "description": "Type-specific deterministic digest copied verbatim from the durable stores (shift_summary: sessions, confirmation decisions, execution receipts, evidence counts, open items). Never model output. Since SPEC-040 R-1, shift-summary digests also carry a deterministic handover section (covered-session counts, decision/execution details for own coverage, counts-only for foreign coverage, open items, and a quiet flag for empty shifts) so the artifact tells the next operator what happened without a model in the loop."
+      "description": "Type-specific deterministic digest copied verbatim from the durable stores. Never model output. shift_summary: sessions, confirmation decisions, execution receipts, evidence counts, open items; since SPEC-040 R-1 it also carries a deterministic handover section (covered-session counts, decision/execution details for own coverage, counts-only for foreign coverage, open items, and a quiet flag for empty shifts). incident_report (SPEC-043 R-2): four sections — 'incident' (the incident envelope copied verbatim minus the raw triage text, which is replaced by a has_triage_raw presence marker), 'triage' (the validated triage report copied verbatim, or the marker object {'status': 'not_triaged'}), 'dispatches' (connector dispatch outcomes copied verbatim, possibly empty), and 'session' (the incident's linked triage session under the SPEC-039 R-3 two-tier posture: a full session entry when owned, a metadata-only entry when foreign and the requester holds approvals:list, or the 'foreign_denied' / 'missing' / 'unavailable' markers). Digest bounds mirror the incident-service Pydantic models (SPEC-015 contract parity): title ≤200, summary ≤2000, triage evidence ≤20 refs, hypotheses ≤5, next_steps ≤10, skills_cited ≤10."
     },
     "prose": {
       "type": ["string", "null"],
@@ -98,7 +103,7 @@
     },
     "summary": {
       "type": ["string", "null"],
-      "description": "Deterministic counts-only one-liner derived from the digest's handover section at creation (SPEC-041 R-4) — covered-session/decision/execution/open-item counts or the quiet phrasing; never titles, record ids, decision outcomes, or narrative text, so it may appear in envelope-only list rows. Absent on documents created before SPEC-041."
+      "description": "Deterministic counts-only one-liner derived from the digest at creation (SPEC-041 R-4) — for shift_summary the covered-session/decision/execution/open-item counts or the quiet phrasing from the handover section; for incident_report the incident's severity/status, triage presence, and dispatch/session counts (SPEC-043) — never titles, record ids, decision outcomes, or narrative text, so it may appear in envelope-only list rows. Absent on documents created before the field existed for their type."
     },
     "blurb": {
       "type": ["string", "null"],

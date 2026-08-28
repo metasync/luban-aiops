@@ -7,6 +7,18 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-29-incident-report-document-type.md`
+  - delivers SPEC-043 (v0.25.0), the fifth R5 slice: the operations
+    document repository gains its second type — **`incident_report`** —
+    a durable, attributed report assembled verbatim from
+    incident-service facts (incident envelope, validated triage
+    report, connector dispatches) plus the linked triage session's
+    digest under the existing two-tier own/foreign posture, with the
+    inherited digest-only narrative, draft→publish lifecycle, and
+    role-based access matrix; gated by the combination of the existing
+    **`documents:create` + `incident:read`** actions — no new policy
+    actions, no new audit event types, read-only with respect to
+    incident state
 - `2026-08-28-post-release-review-remediation.md`
   - same-day patch (v0.24.1) remediating the v0.24.0 review findings:
     the zero-tolerance vitest deprecation guard broadens to cover

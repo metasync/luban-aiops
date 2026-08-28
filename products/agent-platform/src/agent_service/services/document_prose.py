@@ -60,6 +60,40 @@ JSON digest:
 {digest_json}
 """
 
+# SPEC-043 R-4: incident reports reuse the same digest-only contract —
+# the prompt receives the assembled digest JSON alone (never the raw
+# alert payload, raw triage text, or transcript, none of which reach
+# the digest) — with framing adapted to incident review.
+_INCIDENT_PROMPT_TEMPLATE = """\
+You are writing incident-review notes for the colleagues following up \
+on this incident. Write like an experienced operator briefing a peer: \
+plain, direct, and human — not like a status report.
+
+Start with exactly one line beginning with "SUMMARY:" — a single \
+sentence of at most thirty words capturing the incident's overall \
+story at a glance.
+
+Then write the review itself in at most three short paragraphs (about \
+150 words in total). Lead with what matters most to the follow-up team: \
+what the incident was, what triage concluded (or that triage failed or \
+never ran), what was dispatched, and what the linked session section \
+covers. Prefer the incident and triage sections, then dispatches and \
+session. Weave counts in only where they carry meaning — never \
+enumerate every number.
+
+Anchoring rules: state only facts present in the digest; tie each \
+statement to the digest section it comes from (incident, triage, \
+dispatches, session); never introduce record ids, causes, \
+recommendations, or any detail the digest does not contain. If the \
+triage section reports the not_triaged marker, say plainly that no \
+triage report exists. If the session section reports a marker \
+(foreign_denied, missing, unavailable), say plainly what the reader \
+will not find there. No headings, no markdown.
+
+JSON digest:
+{digest_json}
+"""
+
 # The blurb is bounded: a runaway first line can never bloat the
 # envelope listing or the detail card.
 BLURB_MAX_CHARS = 240
@@ -99,10 +133,16 @@ def parse_blurb(text: str) -> tuple[str | None, str]:
 def build_prose_prompt(document_type: str, digest: dict[str, Any]) -> str:
     """Build the digest-only prompt; the digest is the sole input.
 
-    ``document_type`` rides the prompt so the recap framing can adapt
-    per type later without changing the prompt contract (digest-only).
+    ``document_type`` selects the framing template (shift handover vs
+    incident review, SPEC-043 R-4); both templates embed the digest
+    JSON alone, so the purity contract holds for every type.
     """
-    return _PROMPT_TEMPLATE.format(
+    template = (
+        _INCIDENT_PROMPT_TEMPLATE
+        if document_type == "incident_report"
+        else _PROMPT_TEMPLATE
+    )
+    return template.format(
         digest_json=json.dumps(
             {"document_type": document_type, "digest": digest},
             sort_keys=True,

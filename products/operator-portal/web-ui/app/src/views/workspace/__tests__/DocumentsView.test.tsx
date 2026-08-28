@@ -1,8 +1,9 @@
 // Documents view tests (SPEC-039 R-6, Workspace placement per SPEC-040
 // R-3): Mine/Published split with state badges, cross-owner attribution,
-// draft publish affordance, the create dialog, and the Markdown export
-// (SPEC-040 R-4). The API module is mocked; the gateway re-enforces the
-// role matrix server-side regardless of these client gates.
+// draft publish affordance, the create dialog (both document types per
+// SPEC-043 R-6), and the Markdown export (SPEC-040 R-4). The API module
+// is mocked; the gateway re-enforces the role matrix server-side
+// regardless of these client gates.
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   afterEach,
@@ -17,20 +18,30 @@ import type { OperationDocument } from "../../../api/documents";
 import type { SessionWorkspace } from "../../../sessions/useSessionWorkspace";
 import DocumentsView, { buildDocumentMarkdown } from "../DocumentsView";
 
-const { mockListDocuments, mockGetDocument, mockCurrentUser } = vi.hoisted(
-  () => ({
-    mockListDocuments: vi.fn(),
-    mockGetDocument: vi.fn(),
-    mockCurrentUser: vi.fn(),
-  }),
-);
+const {
+  mockListDocuments,
+  mockGetDocument,
+  mockCreateDocument,
+  mockListIncidents,
+  mockCurrentUser,
+} = vi.hoisted(() => ({
+  mockListDocuments: vi.fn(),
+  mockGetDocument: vi.fn(),
+  mockCreateDocument: vi.fn(),
+  mockListIncidents: vi.fn(),
+  mockCurrentUser: vi.fn(),
+}));
 
 vi.mock("../../../api/documents", () => ({
   listDocuments: mockListDocuments,
   getDocument: mockGetDocument,
-  createDocument: vi.fn(),
+  createDocument: mockCreateDocument,
   publishDocument: vi.fn(),
   deleteDocument: vi.fn(),
+}));
+
+vi.mock("../../../api/incidents", () => ({
+  listIncidents: mockListIncidents,
 }));
 
 vi.mock("../../../api/client", () => ({
@@ -259,6 +270,130 @@ const foreignCoveredDoc: OperationDocument = {
   summary: "1 session · 0 decisions · 0 executions · 1 open item",
 };
 
+// SPEC-043 fixtures: the incident-report digest carries the four
+// deterministic sections assembled verbatim from the incident bundle.
+const incidentReportDoc: OperationDocument = {
+  document_id: "doc-6",
+  document_type: "incident_report",
+  state: "draft",
+  owner_user_id: "luban-operator",
+  label: "Payment latency post-mortem",
+  created_at: new Date(Date.now() - 20 * 60_000).toISOString(),
+  provenance: {
+    incident_id: "inc-abc123",
+    sessions: [
+      { session_id: "ses-1", coverage: "owner", cited_record_ids: [] },
+    ],
+  },
+  digest: {
+    generated_at: new Date(Date.now() - 20 * 60_000).toISOString(),
+    requester_user_id: "luban-operator",
+    incident: {
+      incident_id: "inc-abc123",
+      severity: "critical",
+      status: "triaged",
+      source: "webhook",
+      title: "Payment API latency",
+      summary: "p99 latency spike on the payment API",
+      reported_by: "alertmanager",
+      created_at: new Date(Date.now() - 60 * 60_000).toISOString(),
+      has_triage_raw: true,
+    },
+    triage: {
+      severity_assessment: "critical",
+      summary: "Database pool exhaustion on the payment service",
+      generated_by: "triage-agent",
+      generated_at: new Date(Date.now() - 55 * 60_000).toISOString(),
+      evidence: [{ source: "metrics", description: "pool saturation" }],
+      hypotheses: ["connection pool exhaustion"],
+      next_steps: [{ title: "raise pool size", priority: "immediate", rationale: "saturation" }],
+      skills_cited: ["sre-database"],
+    },
+    dispatches: [
+      {
+        connector: "pagerduty",
+        status: "sent",
+        reference: "PD-1",
+        created_at: new Date(Date.now() - 58 * 60_000).toISOString(),
+      },
+    ],
+    session: {
+      status: "owner",
+      session_id: "ses-1",
+      coverage: "owner",
+      title: "triage inc-abc123",
+      created_at: new Date(Date.now() - 50 * 60_000).toISOString(),
+      transcript: { available: true, turn_count: 2, user_turn_count: 1 },
+      evidence: { total_frame_count: 1 },
+      confirmations: [],
+      executions: [],
+      open_items: { pending_confirmations: 0, requested_executions: 0 },
+    },
+  },
+  prose_status: "not_requested",
+  summary: "critical · triaged · triage report present · 1 dispatch · own session",
+};
+
+// Marker paths: an incident that never triaged carries the
+// not_triaged digest marker and no linked session (missing).
+const notTriagedDoc: OperationDocument = {
+  document_id: "doc-7",
+  document_type: "incident_report",
+  state: "draft",
+  owner_user_id: "luban-operator",
+  label: "Untriaged intake",
+  created_at: new Date(Date.now() - 15 * 60_000).toISOString(),
+  provenance: { incident_id: "inc-def456", sessions: [] },
+  digest: {
+    generated_at: new Date(Date.now() - 15 * 60_000).toISOString(),
+    requester_user_id: "luban-operator",
+    incident: {
+      incident_id: "inc-def456",
+      severity: "info",
+      status: "new",
+      source: "manual",
+      title: "Disk warning",
+      has_triage_raw: false,
+    },
+    triage: { status: "not_triaged" },
+    dispatches: [],
+    session: { status: "missing" },
+  },
+  prose_status: "not_requested",
+};
+
+// Foreign linked session without approvals:list coverage rides the
+// digest as the foreign_denied marker (creation still succeeds).
+const foreignDeniedDoc: OperationDocument = {
+  document_id: "doc-8",
+  document_type: "incident_report",
+  state: "draft",
+  owner_user_id: "luban-operator",
+  label: "Cross-owner triage",
+  created_at: new Date(Date.now() - 10 * 60_000).toISOString(),
+  provenance: { incident_id: "inc-ghi789", sessions: [] },
+  digest: {
+    generated_at: new Date(Date.now() - 10 * 60_000).toISOString(),
+    requester_user_id: "luban-operator",
+    incident: {
+      incident_id: "inc-ghi789",
+      severity: "warning",
+      status: "triaged",
+      source: "webhook",
+      title: "Queue backlog",
+    },
+    triage: {
+      severity_assessment: "warning",
+      summary: "Consumer lag on the events queue",
+      generated_by: "triage-agent",
+      generated_at: new Date(Date.now() - 30 * 60_000).toISOString(),
+    },
+    dispatches: [],
+    session: { status: "foreign_denied", session_id: "ses-9" },
+  },
+  prose_status: "not_requested",
+};
+
 const workspaceStub = {
   sessions: [
     {
@@ -284,6 +419,9 @@ const workspaceStub = {
 beforeEach(() => {
   mockListDocuments.mockReset();
   mockGetDocument.mockReset();
+  mockCreateDocument.mockReset();
+  mockListIncidents.mockReset();
+  mockListIncidents.mockResolvedValue({ incidents: [], total: 0 });
   // The drawer fetches the full document through the audited single
   // read (list rows are envelope-only); default resolves the owner draft.
   mockGetDocument.mockImplementation(async (id: string) =>
@@ -293,7 +431,13 @@ beforeEach(() => {
         ? busyOwn
         : id === "doc-4"
           ? foreignCoveredDoc
-          : ownDraft,
+          : id === "doc-6"
+            ? incidentReportDoc
+            : id === "doc-7"
+              ? notTriagedDoc
+              : id === "doc-8"
+                ? foreignDeniedDoc
+                : ownDraft,
   );
   mockCurrentUser.mockReset();
   mockCurrentUser.mockReturnValue("luban-operator");
@@ -339,13 +483,59 @@ describe("DocumentsView list (SPEC-039 R-6)", () => {
     mockListDocuments.mockResolvedValue([]);
     render(<DocumentsView workspace={workspaceStub} />);
     await flush();
-    fireEvent.click(screen.getByText("New shift summary"));
+    fireEvent.click(screen.getByText("New document"));
+    // Shift summary stays the default type.
     expect(screen.getByText("Your sessions")).toBeTruthy();
     expect(screen.getByText(/Foreign session ids/)).toBeTruthy();
+    expect(screen.getByText("Incident report")).toBeTruthy();
     // Opening the picker offers the workspace sessions.
     fireEvent.mouseDown(screen.getByRole("combobox"));
     await flush();
     expect(screen.getByText(/check the pods \(ses-1\)/)).toBeTruthy();
+  });
+
+  it("switches the create dialog to the incident report type (SPEC-043 R-6)", async () => {
+    mockListDocuments.mockResolvedValue([]);
+    mockListIncidents.mockResolvedValue({
+      incidents: [
+        {
+          incident_id: "inc-abc123",
+          title: "Payment API latency",
+          severity: "critical",
+          status: "triaged",
+          source: "webhook",
+          created_at: new Date().toISOString(),
+        },
+      ],
+      total: 1,
+    });
+    mockCreateDocument.mockResolvedValue(incidentReportDoc);
+    render(<DocumentsView workspace={workspaceStub} />);
+    await flush();
+    fireEvent.click(screen.getByText("New document"));
+    fireEvent.click(screen.getByText("Incident report"));
+    await flush();
+    // The incident picker replaces the session inputs and feeds from
+    // the incidents list surface.
+    expect(screen.queryByText("Your sessions")).toBeNull();
+    expect(screen.getByText("Incident")).toBeTruthy();
+    expect(mockListIncidents).toHaveBeenCalled();
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    await flush();
+    fireEvent.click(
+      screen.getByText(/Payment API latency — inc-abc123 \(critical, triaged\)/),
+    );
+    fireEvent.change(screen.getByPlaceholderText(/post-mortem pack/), {
+      target: { value: "Payment latency post-mortem" },
+    });
+    fireEvent.click(screen.getByText("Create draft"));
+    await flush();
+    expect(mockCreateDocument).toHaveBeenCalledWith({
+      document_type: "incident_report",
+      incident_id: "inc-abc123",
+      label: "Payment latency post-mortem",
+      include_prose: true,
+    });
   });
 
   it("labels the narrative panel unmistakably in the document drawer", async () => {
@@ -441,6 +631,75 @@ describe("DocumentsView digest tabs (SPEC-041 R-2)", () => {
     expect(screen.getByRole("tab", { name: "Raw JSON" })).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "Raw JSON" }));
     expect(screen.getByText(/session_count/)).toBeTruthy();
+  });
+});
+
+describe("DocumentsView incident reports (SPEC-043 R-6)", () => {
+  it("renders the four-section incident digest with a type badge", async () => {
+    mockListDocuments.mockResolvedValue([incidentReportDoc]);
+    render(<DocumentsView workspace={workspaceStub} />);
+    await flush();
+    // The list row distinguishes the type and anchors the incident.
+    expect(screen.getByText("incident report")).toBeTruthy();
+    expect(screen.getByText(/incident inc-abc123/)).toBeTruthy();
+    fireEvent.click(screen.getByText("View"));
+    await flush();
+    for (const label of ["Incident", "Triage", "Dispatches", "Session", "Raw JSON"]) {
+      expect(screen.getByRole("tab", { name: label })).toBeTruthy();
+    }
+    // The Incident tab leads and renders the envelope facts.
+    expect(screen.getByText("Payment API latency")).toBeTruthy();
+    expect(screen.getByText("critical")).toBeTruthy();
+    // The raw-triage presence marker rides the incident section.
+    expect(
+      screen.getByText(/Raw triage text was present at creation/),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Triage" }));
+    expect(
+      screen.getByText("Database pool exhaustion on the payment service"),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Dispatches" }));
+    expect(screen.getByText("pagerduty")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Session" }));
+    expect(screen.getByText("triage inc-abc123")).toBeTruthy();
+  });
+
+  it("renders not_triaged and missing-session markers as alerts", async () => {
+    mockListDocuments.mockResolvedValue([notTriagedDoc]);
+    render(<DocumentsView workspace={workspaceStub} />);
+    await flush();
+    fireEvent.click(screen.getByText("View"));
+    await flush();
+    fireEvent.click(screen.getByRole("tab", { name: "Triage" }));
+    expect(screen.getByText("Not triaged")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Session" }));
+    expect(screen.getByText("No linked session")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Dispatches" }));
+    expect(
+      screen.getByText("No connector dispatches were recorded for this incident."),
+    ).toBeTruthy();
+  });
+
+  it("renders the foreign_denied session marker", async () => {
+    mockListDocuments.mockResolvedValue([foreignDeniedDoc]);
+    render(<DocumentsView workspace={workspaceStub} />);
+    await flush();
+    fireEvent.click(screen.getByText("View"));
+    await flush();
+    fireEvent.click(screen.getByRole("tab", { name: "Session" }));
+    expect(
+      screen.getByText("Session not covered by your role"),
+    ).toBeTruthy();
+  });
+
+  it("exports incident provenance in the Markdown download", () => {
+    const markdown = buildDocumentMarkdown(incidentReportDoc);
+    expect(markdown).toContain("# Payment latency post-mortem");
+    expect(markdown).toContain("| Type | incident report |");
+    expect(markdown).toContain("- Incident `inc-abc123`");
+    expect(markdown).toContain("`ses-1` — owner coverage");
+    // The digest JSON carries the incident sections verbatim.
+    expect(markdown).toContain('"incident_id": "inc-abc123"');
   });
 });
 

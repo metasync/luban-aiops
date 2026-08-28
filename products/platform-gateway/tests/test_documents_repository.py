@@ -1,10 +1,13 @@
-"""Operations document proxy tests (SPEC-039 R-1/R-2/R-7).
+"""Operations document proxy tests (SPEC-039 R-1/R-2/R-7, SPEC-043 R-3).
 
 Covers the gateway-side gates for the document repository surface:
-documents:create/documents:read policy enforcement, the derived
-``X-Foreign-Coverage`` capability on create, upstream payload
-passthrough, error mapping (4xx passthrough, transport/5xx to 502),
-and the owner session rename proxy behind ``session:update``.
+documents:create/documents:read policy enforcement, the SPEC-043
+dual-action gate for incident reports (documents:create +
+incident:read), the derived ``X-Foreign-Coverage`` capability on
+create, upstream payload passthrough, error mapping (4xx passthrough
+with the agent's structured detail, 502/503 passthrough, other 5xx and
+transport to 502), and the owner session rename proxy behind
+``session:update``.
 """
 
 from __future__ import annotations
@@ -13,15 +16,21 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 import httpx
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from platform_gateway.app import create_app
 from platform_gateway.core.config import PlatformGatewaySettings, get_settings
 from platform_gateway.schemas.api import IdentityContext
-from platform_gateway.services.policy_engine import reset_policy_state
+from platform_gateway.services.policy_engine import (
+    ACTION_DOCUMENTS_CREATE,
+    ACTION_INCIDENT_READ,
+    reset_policy_state,
+)
 
 DOCUMENTS_PATH = "/api/v1/documents"
 CREATE_PATCH = "platform_gateway.services.gateway_service.agent_client.create_document"
+ENFORCE_PATCH = "platform_gateway.api.routes.documents.enforce_policy"
 LIST_PATCH = "platform_gateway.services.gateway_service.agent_client.list_documents"
 FETCH_PATCH = "platform_gateway.services.gateway_service.agent_client.fetch_document"
 PUBLISH_PATCH = "platform_gateway.services.gateway_service.agent_client.publish_document"
@@ -35,6 +44,23 @@ CREATE_BODY = {
     "session_ids": ["ses-1", "ses-2"],
     "label": "night shift 2026-08-26",
     "include_prose": False,
+}
+INCIDENT_CREATE_BODY = {
+    "document_type": "incident_report",
+    "incident_id": "inc-abc123",
+    "label": "payment latency post-mortem",
+    "include_prose": False,
+}
+INCIDENT_DOCUMENT_PAYLOAD = {
+    "document_id": "doc-9",
+    "document_type": "incident_report",
+    "state": "draft",
+    "owner_user_id": "operator.user",
+    "label": "payment latency post-mortem",
+    "created_at": "2026-08-28T10:00:00Z",
+    "provenance": {"incident_id": "inc-abc123", "sessions": []},
+    "digest": {"incident": {"incident_id": "inc-abc123"}},
+    "prose_status": "not_requested",
 }
 DOCUMENT_PAYLOAD = {
     "document_id": "doc-1",
@@ -62,6 +88,15 @@ def _status_error(status_code: int) -> httpx.HTTPStatusError:
     request = httpx.Request("POST", "http://agent-service/api/v2/documents")
     return httpx.HTTPStatusError(
         "upstream error", request=request, response=httpx.Response(status_code)
+    )
+
+
+def _status_error_json(status_code: int, payload: dict) -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", "http://agent-service/api/v2/documents")
+    return httpx.HTTPStatusError(
+        "upstream error",
+        request=request,
+        response=httpx.Response(status_code, json=payload, request=request),
     )
 
 
@@ -175,6 +210,104 @@ class CreateDocumentProxyTests(DocumentsProxyBase):
         self.assertEqual(
             response.json()["detail"], "agent service document create failed"
         )
+
+    def test_upstream_503_not_configured_passes_through(self) -> None:
+        # SPEC-043: dependency-not-configured keeps its own status and
+        # structured detail on the way to the caller.
+        upstream = AsyncMock(
+            side_effect=_status_error_json(
+                503,
+                {"detail": "incident service not configured for document assembly"},
+            )
+        )
+        with (
+            self._patch_identity("operator"),
+            patch(CREATE_PATCH, upstream),
+        ):
+            response = self.client.post(DOCUMENTS_PATH, json=INCIDENT_CREATE_BODY)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json()["detail"],
+            "incident service not configured for document assembly",
+        )
+
+    def test_upstream_404_unknown_incident_passes_through(self) -> None:
+        # The structural 404 rides the agent's detail verbatim.
+        upstream = AsyncMock(
+            side_effect=_status_error_json(
+                404, {"detail": "unknown incident id: inc-nope"}
+            )
+        )
+        with (
+            self._patch_identity("operator"),
+            patch(CREATE_PATCH, upstream),
+        ):
+            response = self.client.post(DOCUMENTS_PATH, json=INCIDENT_CREATE_BODY)
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json()["detail"], "unknown incident id: inc-nope"
+        )
+
+    def test_incident_report_enforces_dual_action_gate(self) -> None:
+        # SPEC-043 R-3: incident reports require documents:create AND
+        # incident:read; the payload (incident id included) reaches the
+        # agent unchanged.
+        upstream = AsyncMock(return_value=INCIDENT_DOCUMENT_PAYLOAD)
+        enforced: list[str] = []
+
+        def _record(settings, identity, action, request_id):
+            enforced.append(action)
+
+        with (
+            self._patch_identity("operator"),
+            patch(ENFORCE_PATCH, _record),
+            patch(CREATE_PATCH, upstream),
+        ):
+            response = self.client.post(DOCUMENTS_PATH, json=INCIDENT_CREATE_BODY)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            enforced, [ACTION_DOCUMENTS_CREATE, ACTION_INCIDENT_READ]
+        )
+        _, args, _ = upstream.mock_calls[0]
+        self.assertEqual(args[3], INCIDENT_CREATE_BODY)
+
+    def test_shift_summary_skips_incident_gate(self) -> None:
+        upstream = AsyncMock(return_value=DOCUMENT_PAYLOAD)
+        enforced: list[str] = []
+
+        def _record(settings, identity, action, request_id):
+            enforced.append(action)
+
+        with (
+            self._patch_identity("operator"),
+            patch(ENFORCE_PATCH, _record),
+            patch(CREATE_PATCH, upstream),
+        ):
+            response = self.client.post(DOCUMENTS_PATH, json=CREATE_BODY)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(enforced, [ACTION_DOCUMENTS_CREATE])
+
+    def test_incident_gate_denial_reports_incident_read(self) -> None:
+        # A denial reports the first failing action in the same
+        # structured shape as every other gate.
+        upstream = AsyncMock(return_value=INCIDENT_DOCUMENT_PAYLOAD)
+
+        def _deny_incident(settings, identity, action, request_id):
+            if action == ACTION_INCIDENT_READ:
+                raise HTTPException(
+                    status_code=403,
+                    detail={"action": action, "decision": "deny"},
+                )
+
+        with (
+            self._patch_identity("operator"),
+            patch(ENFORCE_PATCH, _deny_incident),
+            patch(CREATE_PATCH, upstream),
+        ):
+            response = self.client.post(DOCUMENTS_PATH, json=INCIDENT_CREATE_BODY)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"]["action"], ACTION_INCIDENT_READ)
+        upstream.assert_not_called()
 
     def test_transport_failure_maps_to_502(self) -> None:
         upstream = AsyncMock(side_effect=httpx.ConnectError("boom"))

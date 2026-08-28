@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ChatRequest(BaseModel):
@@ -66,14 +66,43 @@ class SessionTitleUpdateRequest(BaseModel):
 
 
 class DocumentCreateRequest(BaseModel):
-    """Operations document create body (SPEC-039 R-1); relayed verbatim."""
+    """Operations document create body (SPEC-039 R-1); relayed verbatim.
+
+    SPEC-043: ``incident_report`` swaps the caller-supplied session
+    list for exactly one ``incident_id``; cross-type field mixing is
+    rejected structurally here and re-validated by the agent layer.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    document_type: Literal["shift_summary"]
-    session_ids: list[str] = Field(min_length=1, max_length=20)
+    document_type: Literal["shift_summary", "incident_report"]
+    session_ids: list[str] = Field(default_factory=list, max_length=20)
+    incident_id: str | None = Field(default=None, pattern=r"^inc-[a-z0-9-]+$")
     label: str = Field(min_length=1, max_length=120)
     include_prose: bool = False
+
+    @model_validator(mode="after")
+    def _check_type_fields(self) -> "DocumentCreateRequest":
+        if self.document_type == "shift_summary":
+            if self.incident_id is not None:
+                raise ValueError(
+                    "incident_id is only valid for incident_report documents"
+                )
+            if not self.session_ids:
+                raise ValueError(
+                    "shift_summary documents require at least one session id"
+                )
+        else:
+            if self.incident_id is None:
+                raise ValueError(
+                    "incident_report documents require exactly one incident id"
+                )
+            if self.session_ids:
+                raise ValueError(
+                    "incident_report coverage is the incident's own linked "
+                    "session; session_ids must be empty"
+                )
+        return self
 
 
 class ReportIncidentRequest(BaseModel):

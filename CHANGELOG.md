@@ -13,6 +13,46 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.25.0 — 2026-08-29
+
+### Added
+
+- **Incident report document type (SPEC-043)** — the operations
+  document repository (SPEC-039) gains its second type,
+  `incident_report`: pick one incident and the platform assembles a
+  durable, attributed report — the incident envelope, the validated
+  triage report (or a `not_triaged` marker), the connector dispatch
+  outcomes, and the incident's linked triage session under the
+  existing two-tier own/foreign coverage — with the same optional
+  digest-anchored narrative, draft→publish lifecycle, role-based
+  access matrix, and client-side Markdown export as shift summaries.
+  - Assembly is mechanical and read-only: facts are copied verbatim
+    from the incident-service bundle and the platform's durable
+    stores; the raw alert payload (`triage_raw`) never enters the
+    digest — a `has_triage_raw` presence marker replaces it — and no
+    incident state is mutated anywhere in the path.
+  - Authorization combines two existing actions — `documents:create`
+    **and** `incident:read` — at creation (no new policy action); a
+    denial reports the first failing action in the standard
+    structured shape. The covered incident id rides `document_created`
+    as provenance (no new audit event type).
+  - Creation answers the dependency postures: 503 when incident
+    reporting is not configured, 502 when incident-service is
+    unreachable, 404 for an unknown incident id, other upstream 4xx
+    passed through with their structured detail — never a 500. The
+    gateway forwards these statuses and details verbatim.
+  - New agent-platform incident client (Basic query credential
+    against the incident-service `INCIDENT_QUERY_CLIENTS` registry,
+    bounded timeout, `x-request-id` forwarding) behind
+    `AGENT_INCIDENT_SERVICE_URL` / `AGENT_INCIDENT_CLIENT_ID` /
+    `AGENT_INCIDENT_CLIENT_SECRET` / `AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS`;
+    `sync-incident-secrets.sh` provisions the agent-service entry.
+  - Portal Documents view: the create dialog becomes type-aware with
+    a searchable incident picker; the drawer renders the incident
+    digest as Incident / Triage / Dispatches / Session tabs with
+    marker alerts (`not_triaged`, `missing`, `foreign_denied`,
+    `unavailable`) and the foreign metadata banner.
+
 ## 0.24.1 — 2026-08-28
 
 ### Changed

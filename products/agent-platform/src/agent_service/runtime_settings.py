@@ -177,6 +177,16 @@ class RuntimeSettings:
     audit_service_url: str | None = None
     audit_client_id: str = "agent-service"
     audit_client_secret: str | None = None
+    # Incident-report assembly (SPEC-043 R-3): agent-platform's own
+    # registered Basic query credential against incident-service — the
+    # same posture the platform-gateway's incident client uses. An
+    # unset URL or secret fails incident-report creation closed (503,
+    # dependency not configured); the shift-summary path never touches
+    # these knobs.
+    incident_service_url: str | None = None
+    incident_client_id: str = "agent-service"
+    incident_client_secret: str | None = None
+    incident_client_timeout_seconds: float = 10.0
 
     @staticmethod
     def default_provider_options(provider: RuntimeProvider) -> RuntimeProviderOptions:
@@ -242,6 +252,11 @@ class RuntimeSettings:
         if self.execution_worker_timeout_seconds <= 0:
             raise ValueError(
                 "AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS must be > 0."
+            )
+        # Incident client validation (SPEC-043 R-3).
+        if self.incident_client_timeout_seconds <= 0:
+            raise ValueError(
+                "AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS must be > 0."
             )
         try:
             from zoneinfo import ZoneInfo
@@ -401,6 +416,14 @@ class RuntimeSettings:
             audit_service_url=_optional_str("AGENT_AUDIT_SERVICE_URL"),
             audit_client_id=os.getenv("AGENT_AUDIT_CLIENT_ID", "agent-service"),
             audit_client_secret=_optional_str("AGENT_AUDIT_CLIENT_SECRET"),
+            incident_service_url=_optional_str("AGENT_INCIDENT_SERVICE_URL"),
+            incident_client_id=os.getenv(
+                "AGENT_INCIDENT_CLIENT_ID", "agent-service"
+            ),
+            incident_client_secret=_optional_str("AGENT_INCIDENT_CLIENT_SECRET"),
+            incident_client_timeout_seconds=float(
+                os.getenv("AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS", "10")
+            ),
         )
 
     def is_configured(self) -> bool:

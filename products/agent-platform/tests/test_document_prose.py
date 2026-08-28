@@ -90,6 +90,32 @@ class TestPromptContract:
         params = inspect.signature(build_prose_prompt).parameters
         assert list(params) == ["document_type", "digest"]
 
+    def test_incident_prompt_carries_digest_json_only(self) -> None:
+        # SPEC-043 R-4: incident reports reuse the digest-only contract
+        # with incident-review framing; the raw alert payload, raw
+        # triage text, and transcripts never enter through this path.
+        digest = {
+            "incident": {"incident_id": "inc-abc123", "has_triage_raw": True},
+            "triage": {"status": "not_triaged"},
+            "dispatches": [],
+            "session": {"status": "missing"},
+        }
+        prompt = build_prose_prompt("incident_report", digest)
+        assert (
+            json.dumps(
+                {"document_type": "incident_report", "digest": digest},
+                sort_keys=True,
+                default=str,
+            )
+            in prompt
+        )
+        assert "incident-review notes" in prompt
+        assert "state only facts present in the digest" in prompt
+        # The marker guidance keeps the honest-degradation posture.
+        assert "not_triaged marker" in prompt
+        # Shift framing never leaks into the incident template.
+        assert "shift-handover notes" not in prompt
+
 
 class TestGeneration:
     def test_success_returns_included(self) -> None:

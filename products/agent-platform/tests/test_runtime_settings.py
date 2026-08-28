@@ -166,6 +166,33 @@ def test_execution_signing_settings_read_env(monkeypatch):
     assert settings.audit_client_secret == "ingest-secret"
 
 
+def test_incident_client_settings_defaults(monkeypatch):
+    """SPEC-043 R-3: unset incident knobs keep the fail-closed posture —
+    incident-report creation answers 503 until both URL and secret land;
+    the shift-summary path never touches these knobs."""
+    monkeypatch.delenv("AGENT_INCIDENT_SERVICE_URL", raising=False)
+    monkeypatch.delenv("AGENT_INCIDENT_CLIENT_ID", raising=False)
+    monkeypatch.delenv("AGENT_INCIDENT_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS", raising=False)
+    settings = RuntimeSettings.from_env()
+    assert settings.incident_service_url is None
+    assert settings.incident_client_id == "agent-service"
+    assert settings.incident_client_secret is None
+    assert settings.incident_client_timeout_seconds == 10.0
+
+
+def test_incident_client_settings_read_env(monkeypatch):
+    monkeypatch.setenv("AGENT_INCIDENT_SERVICE_URL", "http://incident-service:8000")
+    monkeypatch.setenv("AGENT_INCIDENT_CLIENT_ID", "agent-service")
+    monkeypatch.setenv("AGENT_INCIDENT_CLIENT_SECRET", "query-secret")
+    monkeypatch.setenv("AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS", "4.5")
+    settings = RuntimeSettings.from_env()
+    assert settings.incident_service_url == "http://incident-service:8000"
+    assert settings.incident_client_id == "agent-service"
+    assert settings.incident_client_secret == "query-secret"
+    assert settings.incident_client_timeout_seconds == 4.5
+
+
 def test_model_discovery_settings_validation():
     with pytest.raises(ValueError, match="REFRESH_SECONDS must be >= 1"):
         RuntimeSettings(model_discovery_refresh_seconds=0)

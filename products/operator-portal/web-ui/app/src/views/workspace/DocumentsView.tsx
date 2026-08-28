@@ -15,6 +15,7 @@ import {
   Empty,
   Input,
   Modal,
+  Radio,
   Select,
   Spin,
   Switch,
@@ -42,8 +43,10 @@ import {
   listDocuments,
   publishDocument,
   type DocumentListRow,
+  type DocumentType,
   type OperationDocument,
 } from "../../api/documents";
+import { listIncidents, type IncidentSummary } from "../../api/incidents";
 import type { SessionWorkspace } from "../../sessions/useSessionWorkspace";
 
 dayjs.extend(relativeTime);
@@ -56,15 +59,34 @@ const MAX_SESSION_IDS = 20;
 const DIGEST_REFERENCE_URL =
   "https://github.com/metasync/luban-aiops/blob/main/docs/guides/documents-digest-reference.md";
 
-function createFailureMessage(err: unknown): string {
-  if (err instanceof ApiError && err.status === 403) {
-    return (
-      "Foreign sessions are not covered by your role: only designated " +
-      "approvers may include other operators' sessions."
-    );
-  }
-  if (err instanceof ApiError && err.status === 400) {
-    return "The document was rejected: check the label and session ids.";
+function createFailureMessage(err: unknown, documentType: DocumentType): string {
+  if (err instanceof ApiError) {
+    if (err.status === 403) {
+      return documentType === "incident_report"
+        ? "Your role cannot create incident reports: both documents " +
+            "access and incident read are required."
+        : "Foreign sessions are not covered by your role: only designated " +
+            "approvers may include other operators' sessions.";
+    }
+    // SPEC-043 creation-time posture: unknown id, not-configured, and
+    // unreachable incident facts each carry their structured answer.
+    if (err.status === 404 && documentType === "incident_report") {
+      return "The incident was not found — check the selected incident.";
+    }
+    if (err.status === 503) {
+      return "Incident reporting is not configured on this deployment.";
+    }
+    if (err.status === 502 && documentType === "incident_report") {
+      return (
+        "The incident facts are unreachable right now; the report was " +
+        "not created. Try again shortly."
+      );
+    }
+    if (err.status === 400) {
+      return documentType === "incident_report"
+        ? "The document was rejected: check the label and the incident."
+        : "The document was rejected: check the label and session ids.";
+    }
   }
   return err instanceof Error ? err.message : String(err);
 }
@@ -489,7 +511,343 @@ function OpenItemsTab({ handover }: { handover: DigestMap | null }) {
   );
 }
 
+// --- Incident report digest rendering (SPEC-043 R-6) ------------------------
+
+// Incident digests carry four deterministic sections — incident,
+// triage, dispatches, session — assembled verbatim from the incident
+// bundle plus the linked triage session. Coverage markers
+// (not_triaged / foreign_denied / missing / unavailable) render as
+// Alert notes; anything unrecognized degrades to the Raw JSON tab.
+
+const INCIDENT_SEVERITY_COLOR: Record<string, string> = {
+  critical: "red",
+  warning: "orange",
+  info: "blue",
+};
+
+const INCIDENT_STATUS_COLOR: Record<string, string> = {
+  new: "default",
+  triaging: "processing",
+  triaged: "green",
+  triage_failed: "red",
+  resolved: "default",
+};
+
+function IncidentTab({ incident }: { incident: DigestMap }) {
+  const labels = asMap(incident.labels) ?? {};
+  const labelEntries = Object.entries(labels);
+  return (
+    <div>
+      <Descriptions
+        size="small"
+        column={1}
+        items={[
+          {
+            key: "id",
+            label: "Incident id",
+            children: (
+              <Typography.Text copyable={{ text: textOrDash(incident.incident_id) }}>
+                {textOrDash(incident.incident_id)}
+              </Typography.Text>
+            ),
+          },
+          {
+            key: "severity",
+            label: "Severity",
+            children: (
+              <Tag
+                color={
+                  INCIDENT_SEVERITY_COLOR[textOrDash(incident.severity)] ?? "default"
+                }
+              >
+                {textOrDash(incident.severity)}
+              </Tag>
+            ),
+          },
+          {
+            key: "status",
+            label: "Status",
+            children: (
+              <Tag
+                color={
+                  INCIDENT_STATUS_COLOR[textOrDash(incident.status)] ?? "default"
+                }
+              >
+                {textOrDash(incident.status)}
+              </Tag>
+            ),
+          },
+          { key: "source", label: "Source", children: textOrDash(incident.source) },
+          { key: "title", label: "Title", children: textOrDash(incident.title) },
+          { key: "summary", label: "Summary", children: textOrDash(incident.summary) },
+          {
+            key: "reported",
+            label: "Reported by",
+            children: textOrDash(incident.reported_by),
+          },
+          { key: "created", label: "Created", children: textOrDash(incident.created_at) },
+          {
+            key: "resolved",
+            label: "Resolved",
+            children: textOrDash(incident.resolved_at),
+          },
+        ]}
+      />
+      {labelEntries.length > 0 ? (
+        <div style={{ marginTop: 8 }}>
+          <Typography.Text type="secondary">Labels: </Typography.Text>
+          {labelEntries.map(([key, value]) => (
+            <Tag key={key}>{`${key}=${value}`}</Tag>
+          ))}
+        </div>
+      ) : null}
+      {incident.has_triage_raw ? (
+        <Typography.Text type="secondary" style={{ display: "block", marginTop: 8 }}>
+          Raw triage text was present at creation; it never rides the
+          digest (only this presence marker).
+        </Typography.Text>
+      ) : null}
+    </div>
+  );
+}
+
+function TriageTab({ triage }: { triage: DigestMap }) {
+  if (triage.status === "not_triaged") {
+    return (
+      <Alert
+        type="info"
+        showIcon
+        title="Not triaged"
+        description="This incident has no triage report — triage was never run, so the incident facts above stand alone."
+      />
+    );
+  }
+  const sections: Array<[string, unknown]> = [
+    ["Evidence", triage.evidence],
+    ["Hypotheses", triage.hypotheses],
+    ["Next steps", triage.next_steps],
+    ["Skills cited", triage.skills_cited],
+  ];
+  return (
+    <div>
+      <Descriptions
+        size="small"
+        column={1}
+        items={[
+          {
+            key: "severity",
+            label: "Severity assessment",
+            children: textOrDash(triage.severity_assessment),
+          },
+          { key: "summary", label: "Summary", children: textOrDash(triage.summary) },
+          {
+            key: "generated-by",
+            label: "Generated by",
+            children: textOrDash(triage.generated_by),
+          },
+          {
+            key: "generated-at",
+            label: "Generated",
+            children: textOrDash(triage.generated_at),
+          },
+        ]}
+      />
+      {sections.map(([name, value]) => {
+        if (!Array.isArray(value) || value.length === 0) {
+          return null;
+        }
+        return (
+          <div key={name} style={{ marginTop: 8 }}>
+            <Typography.Text strong>{name}</Typography.Text>
+            <DigestValue value={value} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DispatchesTab({ dispatches }: { dispatches: DigestMap[] }) {
+  if (dispatches.length === 0) {
+    return (
+      <Typography.Text type="secondary">
+        No connector dispatches were recorded for this incident.
+      </Typography.Text>
+    );
+  }
+  const rows = dispatches.map((row, index) => ({
+    key: `${textOrDash(row.connector)}:${index}`,
+    connector: textOrDash(row.connector),
+    status: textOrDash(row.status),
+    reference: textOrDash(row.reference),
+    error: textOrDash(row.error),
+    createdAt:
+      typeof row.created_at === "string" && row.created_at
+        ? dayjs(row.created_at).fromNow()
+        : "—",
+  }));
+  return (
+    <Table
+      size="small"
+      rowKey="key"
+      pagination={false}
+      dataSource={rows}
+      columns={[
+        { title: "Connector", dataIndex: "connector" },
+        { title: "Status", dataIndex: "status" },
+        { title: "Reference", dataIndex: "reference" },
+        { title: "Error", dataIndex: "error" },
+        { title: "Created", dataIndex: "createdAt" },
+      ]}
+    />
+  );
+}
+
+function IncidentSessionTab({ session }: { session: DigestMap }) {
+  const status = typeof session.status === "string" ? session.status : "";
+  if (status === "missing") {
+    return (
+      <Alert
+        type="info"
+        showIcon
+        title="No linked session"
+        description="This incident was not triaged through a platform session; the incident, triage, and dispatch facts above stand alone."
+      />
+    );
+  }
+  if (status === "foreign_denied") {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        title="Session not covered by your role"
+        description="The linked triage session belongs to another operator and foreign coverage is not granted to your role. The incident facts above remain complete."
+      />
+    );
+  }
+  if (status === "unavailable") {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        title="Session unavailable"
+        description="The linked triage session could not be covered at creation (retired or unreadable). The incident facts above remain complete."
+      />
+    );
+  }
+  // Covered tiers reuse the shift-summary session renderers: the entry
+  // shape underneath is identical (owner full / foreign metadata).
+  const entries = [session];
+  return (
+    <div>
+      {status === "foreign" ? (
+        <Alert
+          type="info"
+          showIcon
+          title="Foreign session — metadata only"
+          description="The linked triage session belongs to another operator; only the approver metadata tier is covered."
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
+      <SessionsTab sessions={entries} />
+      {status === "owner" ? (
+        <div style={{ marginTop: 12 }}>
+          <Typography.Text strong>Confirmations</Typography.Text>
+          <Table<ConfirmationRow>
+            size="small"
+            rowKey="key"
+            pagination={false}
+            dataSource={collectConfirmationRows(entries)}
+            locale={{ emptyText: "No confirmation decisions recorded." }}
+            columns={[
+              { title: "Action", dataIndex: "action" },
+              { title: "Status", dataIndex: "status" },
+              { title: "Decision", dataIndex: "decision" },
+              { title: "Decider", dataIndex: "decider" },
+              { title: "Decided", dataIndex: "decidedAt" },
+            ]}
+          />
+          <Typography.Text strong style={{ display: "block", marginTop: 8 }}>
+            Executions
+          </Typography.Text>
+          <Table<ExecutionRow>
+            size="small"
+            rowKey="key"
+            pagination={false}
+            dataSource={collectExecutionRows(entries)}
+            locale={{ emptyText: "No executions recorded." }}
+            columns={[
+              { title: "Tool", dataIndex: "tool" },
+              { title: "Status", dataIndex: "status" },
+              { title: "Receipt", dataIndex: "receipt" },
+              { title: "Completed", dataIndex: "completedAt" },
+            ]}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function IncidentDigestPanel({ document }: { document: OperationDocument }) {
+  const digest = (document.digest ?? {}) as DigestMap;
+  const incident = asMap(digest.incident) ?? {};
+  const triage = asMap(digest.triage) ?? {};
+  const dispatches = asList(digest.dispatches);
+  const session = asMap(digest.session) ?? {};
+  const items = [
+    {
+      key: "incident",
+      label: "Incident",
+      children: <IncidentTab incident={incident} />,
+    },
+    {
+      key: "triage",
+      label: "Triage",
+      children: <TriageTab triage={triage} />,
+    },
+    {
+      key: "dispatches",
+      label: "Dispatches",
+      children: <DispatchesTab dispatches={dispatches} />,
+    },
+    {
+      key: "session",
+      label: "Session",
+      children: <IncidentSessionTab session={session} />,
+    },
+    {
+      key: "raw",
+      label: "Raw JSON",
+      children: (
+        <div>
+          <Typography.Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
+            The stored digest verbatim — the artifact of record.
+          </Typography.Text>
+          <DigestValue value={digest} />
+        </div>
+      ),
+    },
+  ];
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 16, marginBottom: 4, flexWrap: "wrap" }}>
+        <Typography.Text type="secondary">
+          Generated {dayjs(String(digest.generated_at ?? document.created_at)).fromNow()}
+        </Typography.Text>
+        <Typography.Text type="secondary">
+          Requested by {String(digest.requester_user_id ?? document.owner_user_id)}
+        </Typography.Text>
+      </div>
+      <Tabs size="small" defaultActiveKey="incident" items={items} />
+    </div>
+  );
+}
+
 function DigestPanel({ document }: { document: OperationDocument }) {
+  if (document.document_type === "incident_report") {
+    return <IncidentDigestPanel document={document} />;
+  }
   const digest = (document.digest ?? {}) as DigestMap;
   const sessions = asList(digest.sessions);
   const handover = asMap(digest.handover);
@@ -696,54 +1054,110 @@ function parseForeignIds(raw: string): string[] {
     .filter(Boolean);
 }
 
-function CreateShiftSummaryDialog({
+function CreateDocumentDialog({
   open,
   workspace,
   onClose,
   onCreated,
 }: CreateDialogProps) {
+  // SPEC-043 R-6: the type radio leads the dialog; shift summary stays
+  // the default so the existing muscle memory holds.
+  const [docType, setDocType] = useState<DocumentType>("shift_summary");
   const [label, setLabel] = useState("");
   const [ownIds, setOwnIds] = useState<string[]>([]);
   const [foreignRaw, setForeignRaw] = useState("");
+  const [incidentId, setIncidentId] = useState<string | null>(null);
+  const [incidents, setIncidents] = useState<IncidentSummary[]>([]);
+  const [incidentsLoading, setIncidentsLoading] = useState(false);
+  const [incidentsError, setIncidentsError] = useState<string | null>(null);
   // Narrative is the default since SPEC-040 R-2; the switch is the opt-out.
   const [includeProse, setIncludeProse] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The incident picker reuses the incidents list surface — the same
+  // gateway route the Incidents view reads (incident:read already
+  // held by the creating roles).
+  useEffect(() => {
+    if (!open || docType !== "incident_report") {
+      return;
+    }
+    const controller = new AbortController();
+    setIncidentsLoading(true);
+    setIncidentsError(null);
+    listIncidents({}, controller.signal)
+      .then((result) => setIncidents(result.incidents ?? []))
+      .catch((err) => {
+        if (!controller.signal.aborted) {
+          setIncidentsError(err instanceof Error ? err.message : String(err));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIncidentsLoading(false);
+        }
+      });
+    return () => controller.abort();
+  }, [open, docType]);
+
+  const reset = () => {
+    setLabel("");
+    setOwnIds([]);
+    setForeignRaw("");
+    setIncidentId(null);
+    setIncludeProse(true);
+  };
+
   const submit = async () => {
     const trimmedLabel = label.trim();
-    const foreignIds = parseForeignIds(foreignRaw);
-    const sessionIds = [...new Set([...ownIds, ...foreignIds])];
     if (!trimmedLabel) {
       setError("A label is required.");
       return;
     }
-    if (sessionIds.length === 0) {
-      setError("Select at least one session.");
-      return;
-    }
-    if (sessionIds.length > MAX_SESSION_IDS) {
-      setError(`A shift summary covers at most ${MAX_SESSION_IDS} sessions.`);
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      await createDocument({
+    let payload: Parameters<typeof createDocument>[0];
+    if (docType === "incident_report") {
+      if (!incidentId) {
+        setError("Select an incident.");
+        return;
+      }
+      payload = {
+        document_type: "incident_report",
+        incident_id: incidentId,
+        label: trimmedLabel,
+        include_prose: includeProse,
+      };
+    } else {
+      const foreignIds = parseForeignIds(foreignRaw);
+      const sessionIds = [...new Set([...ownIds, ...foreignIds])];
+      if (sessionIds.length === 0) {
+        setError("Select at least one session.");
+        return;
+      }
+      if (sessionIds.length > MAX_SESSION_IDS) {
+        setError(`A shift summary covers at most ${MAX_SESSION_IDS} sessions.`);
+        return;
+      }
+      payload = {
         document_type: "shift_summary",
         session_ids: sessionIds,
         label: trimmedLabel,
         include_prose: includeProse,
-      });
-      message.success("Shift summary draft created.");
-      setLabel("");
-      setOwnIds([]);
-      setForeignRaw("");
-      setIncludeProse(true);
+      };
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await createDocument(payload);
+      message.success(
+        docType === "incident_report"
+          ? "Incident report draft created."
+          : "Shift summary draft created.",
+      );
+      reset();
       onCreated();
       onClose();
     } catch (err) {
-      setError(createFailureMessage(err));
+      setError(createFailureMessage(err, docType));
     } finally {
       setBusy(false);
     }
@@ -751,7 +1165,7 @@ function CreateShiftSummaryDialog({
 
   return (
     <Modal
-      title="New shift summary"
+      title="New operations document"
       open={open}
       okText="Create draft"
       confirmLoading={busy}
@@ -767,53 +1181,107 @@ function CreateShiftSummaryDialog({
           style={{ marginBottom: 12 }}
         />
       ) : null}
-      <Typography.Paragraph type="secondary">
-        Captures an immutable digest of up to {MAX_SESSION_IDS} sessions:
-        your own sessions in full, foreign sessions at the approver
-        metadata level only (denied otherwise).
-      </Typography.Paragraph>
+      <Radio.Group
+        value={docType}
+        onChange={(event) => {
+          setDocType(event.target.value);
+          setError(null);
+        }}
+        style={{ marginBottom: 12 }}
+        options={[
+          { value: "shift_summary", label: "Shift summary" },
+          { value: "incident_report", label: "Incident report" },
+        ]}
+      />
+      {docType === "incident_report" ? (
+        <Typography.Paragraph type="secondary">
+          Captures an immutable digest of one incident — the envelope,
+          the triage report, connector dispatches, and the incident's
+          linked triage session (coverage is server-derived).
+        </Typography.Paragraph>
+      ) : (
+        <Typography.Paragraph type="secondary">
+          Captures an immutable digest of up to {MAX_SESSION_IDS} sessions:
+          your own sessions in full, foreign sessions at the approver
+          metadata level only (denied otherwise).
+        </Typography.Paragraph>
+      )}
       <div style={{ marginBottom: 12 }}>
         <Typography.Text strong>Label</Typography.Text>
         <Input
           value={label}
           maxLength={120}
-          placeholder="e.g. Night shift 2026-08-26"
+          placeholder={
+            docType === "incident_report"
+              ? "e.g. inc-abc123 post-mortem pack"
+              : "e.g. Night shift 2026-08-26"
+          }
           onChange={(event) => setLabel(event.target.value)}
         />
       </div>
-      <div style={{ marginBottom: 12 }}>
-        <Typography.Text strong>Your sessions</Typography.Text>
-        <Select
-          mode="multiple"
-          style={{ width: "100%" }}
-          placeholder="Pick sessions from your workspace"
-          value={ownIds}
-          onChange={setOwnIds}
-          options={workspace.sessions.map((session) => ({
-            value: session.session_id,
-            label: `${session.title ?? session.session_id} (${session.session_id})`,
-          }))}
-          optionFilterProp="label"
-        />
-      </div>
-      <div style={{ marginBottom: 12 }}>
-        <Typography.Text strong>Foreign session ids (optional)</Typography.Text>
-        <Input.TextArea
-          value={foreignRaw}
-          autoSize={{ minRows: 1, maxRows: 3 }}
-          placeholder="ses-… (space or comma separated)"
-          onChange={(event) => setForeignRaw(event.target.value)}
-        />
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          Other operators' sessions are covered only for designated
-          approvers and contribute metadata only.
-        </Typography.Text>
-      </div>
+      {docType === "incident_report" ? (
+        <div style={{ marginBottom: 12 }}>
+          <Typography.Text strong>Incident</Typography.Text>
+          <Select
+            showSearch
+            style={{ width: "100%" }}
+            loading={incidentsLoading}
+            placeholder="Pick the covered incident"
+            value={incidentId}
+            onChange={(value) => setIncidentId(value)}
+            options={incidents.map((incident) => ({
+              value: incident.incident_id,
+              label: `${incident.title} — ${incident.incident_id} (${incident.severity}, ${incident.status})`,
+            }))}
+            optionFilterProp="label"
+          />
+          {incidentsError ? (
+            <Typography.Text type="danger" style={{ fontSize: 12 }}>
+              Loading incidents failed: {incidentsError}
+            </Typography.Text>
+          ) : (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              Creating an incident report requires both documents access
+              and incident read.
+            </Typography.Text>
+          )}
+        </div>
+      ) : (
+        <>
+          <div style={{ marginBottom: 12 }}>
+            <Typography.Text strong>Your sessions</Typography.Text>
+            <Select
+              mode="multiple"
+              style={{ width: "100%" }}
+              placeholder="Pick sessions from your workspace"
+              value={ownIds}
+              onChange={setOwnIds}
+              options={workspace.sessions.map((session) => ({
+                value: session.session_id,
+                label: `${session.title ?? session.session_id} (${session.session_id})`,
+              }))}
+              optionFilterProp="label"
+            />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <Typography.Text strong>Foreign session ids (optional)</Typography.Text>
+            <Input.TextArea
+              value={foreignRaw}
+              autoSize={{ minRows: 1, maxRows: 3 }}
+              placeholder="ses-… (space or comma separated)"
+              onChange={(event) => setForeignRaw(event.target.value)}
+            />
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              Other operators' sessions are covered only for designated
+              approvers and contribute metadata only.
+            </Typography.Text>
+          </div>
+        </>
+      )}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <Switch checked={includeProse} onChange={setIncludeProse} />
         <Typography.Text>
-          Include AI handover narrative (anchored to the digest facts,
-          labeled)
+          Include AI narrative (anchored to the digest facts, labeled)
         </Typography.Text>
       </div>
     </Modal>
@@ -857,12 +1325,19 @@ export function buildDocumentMarkdown(document: OperationDocument): string {
   }
   lines.push("## Provenance");
   lines.push("");
+  if (document.provenance?.incident_id) {
+    // SPEC-043: the covered incident anchors incident reports.
+    lines.push(`- Incident \`${document.provenance.incident_id}\``);
+  }
   for (const session of document.provenance?.sessions ?? []) {
     lines.push(
       `- \`${session.session_id}\` — ${session.coverage} coverage`,
     );
   }
-  if ((document.provenance?.sessions ?? []).length === 0) {
+  if (
+    (document.provenance?.sessions ?? []).length === 0 &&
+    !document.provenance?.incident_id
+  ) {
     lines.push("- none recorded");
   }
   lines.push("");
@@ -1073,7 +1548,9 @@ export default function DocumentsView({
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {dayjs(document.created_at).fromNow()}
             {!own ? ` · created by ${document.owner_user_id}` : ""}
-            {` · ${document.provenance?.sessions?.length ?? 0} session(s)`}
+            {document.document_type === "incident_report"
+              ? ` · incident ${document.provenance?.incident_id ?? "—"}`
+              : ` · ${document.provenance?.sessions?.length ?? 0} session(s)`}
           </Typography.Text>
         </div>
         <div style={{ display: "flex", gap: 8 }}>{actions}</div>
@@ -1095,20 +1572,21 @@ export default function DocumentsView({
         <Typography.Title level={4} style={{ margin: 0 }}>
           Documents
         </Typography.Title>
-        <Tooltip title="Create a shift summary draft">
+        <Tooltip title="Create a shift summary or incident report draft">
           <Button
             type="primary"
             icon={<PlusOutlined />}
             onClick={() => setCreateOpen(true)}
           >
-            New shift summary
+            New document
           </Button>
         </Tooltip>
       </div>
       <Typography.Paragraph type="secondary">
-        Immutable shift snapshots: your drafts are private until
-        published; published documents are readable by everyone with
-        documents access, and cross-owner reads are audited.
+        Immutable snapshots — shift summaries of covered sessions and
+        incident reports of single incidents: your drafts are private
+        until published; published documents are readable by everyone
+        with documents access, and cross-owner reads are audited.
       </Typography.Paragraph>
       <Tabs
         activeKey={scope}
@@ -1129,14 +1607,14 @@ export default function DocumentsView({
         <Empty
           description={
             scope === "mine"
-              ? "No documents yet. Create a shift summary from your sessions."
+              ? "No documents yet. Summarize your sessions or capture an incident report."
               : "Nothing published yet."
           }
         />
       ) : (
         items
       )}
-      <CreateShiftSummaryDialog
+      <CreateDocumentDialog
         open={createOpen}
         workspace={workspace}
         onClose={() => setCreateOpen(false)}

@@ -106,6 +106,30 @@ outcome wins and the previous report is replaced (the durable trail keeps both
 `incident_triaged` events). This is the collaboration model: one incident,
 sequential triage turns, per-operator sessions underneath.
 
+## Capturing an incident as a document (SPEC-043)
+
+The second operations document type — the **incident report** — freezes
+one incident's state into a publishable, immutable document (see the
+[Portal User Guide](portal-user-guide.md#documents-workspace) and the
+[Documents and Digest Reference](documents-digest-reference.md)):
+
+- Create it from **Documents → New document → Incident report**, picking
+  exactly one incident. Creation requires `documents:create` **and**
+  `incident:read` (a dual gate over existing actions), so the document
+  surface never bypasses the incident visibility matrix.
+- The digest copies the incident envelope, the validated triage report
+  (or a `not_triaged` marker), and the connector dispatch outcomes
+  verbatim; the raw alert payload never enters the digest (only a
+  presence marker does). Coverage is the incident's own linked triage
+  session — chosen server-side — under the usual two tiers: full digest
+  when you own it, metadata-only when it is foreign and your roles hold
+  the approvals inbox, an honest marker otherwise.
+- Creation is read-only against incident-service and answers the
+  dependency postures: 503 when incident reporting is not configured,
+  502 when incident-service is unreachable, 404 for an unknown incident
+  id — never a 500. Publishing, reading, and export behave exactly like
+  shift summaries; cross-owner reads stay audited.
+
 ## Roles and policy
 
 Actions and default grants (`policy-default.yaml`):

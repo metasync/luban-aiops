@@ -26,7 +26,7 @@ activate them. A feature is **active** when all required variables are set to no
 | **Workload identity** | `PLATFORM_GATEWAY_WORKLOAD_TOKEN_PATH`, `IDENTITY_WORKLOAD_ISSUER_URL`, `IDENTITY_WORKLOAD_CLIENTS` | platform-gateway, identity-service | disabled (dev) |
 | **Durable audit trail** | `*_AUDIT_SERVICE_URL`, `*_AUDIT_CLIENT_SECRET` ↔ `AUDIT_INGEST_CLIENTS` | audit-service, tool-gateway, platform-gateway, identity-service, incident-service, skills-hub, agent-service | **must be provisioned** (`sync-audit-secrets.sh`) |
 | **Skills and grounded guidance** | `SKILLS_SOURCES`, `GATEWAY_SKILLS_SERVICE_URL`, `GATEWAY_SKILLS_CLIENT_SECRET`, `PLATFORM_GATEWAY_SKILLS_HUB_URL`, `PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET` ↔ `SKILLS_QUERY_CLIENTS` | skills-hub, tool-gateway, platform-gateway | **must be provisioned** (`sync-skills-secrets.sh`) |
-| **Incident intake and triage** | `INCIDENT_WEBHOOK_TOKEN`, `PLATFORM_GATEWAY_INCIDENT_SERVICE_URL`, `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET` ↔ `INCIDENT_QUERY_CLIENTS` | incident-service, platform-gateway, tool-gateway | **must be provisioned** (`sync-incident-secrets.sh`) |
+| **Incident intake and triage** | `INCIDENT_WEBHOOK_TOKEN`, `PLATFORM_GATEWAY_INCIDENT_SERVICE_URL`, `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET`, `AGENT_INCIDENT_SERVICE_URL`, `AGENT_INCIDENT_CLIENT_SECRET` (SPEC-043 incident-report documents) ↔ `INCIDENT_QUERY_CLIENTS` | incident-service, platform-gateway, tool-gateway, agent-service | **must be provisioned** (`sync-incident-secrets.sh`) |
 | **Portal voice input** | *(none — browser Web Speech API; `input_modality` passes through gateway/agent and is audited only)* | operator-portal, platform-gateway, agent-service | enabled (browser-capability gated) |
 
 ## Cross-Service Dependency Chains
@@ -249,9 +249,10 @@ platform-gateway / tool-gateway            incident-service
 - `INCIDENT_WEBHOOK_TOKEN` (in `incident-service-runtime-secrets`) — shared
   bearer for the Alertmanager webhook; empty disables intake with a 503
 - `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET` /
-  `GATEWAY_INCIDENTS_CLIENT_SECRET` (in each gateway's runtime-secrets) —
-  must match the secrets registered for clients `platform-gateway` and
-  `tool-gateway` in `INCIDENT_QUERY_CLIENTS` (in
+  `GATEWAY_INCIDENTS_CLIENT_SECRET` / `AGENT_INCIDENT_CLIENT_SECRET`
+  (in each caller's runtime-secrets) —
+  must match the secrets registered for clients `platform-gateway`,
+  `tool-gateway`, and `agent-service` in `INCIDENT_QUERY_CLIENTS` (in
   `incident-service-runtime-secrets`), format `client_id=client_secret,...`
 - `INCIDENT_AUDIT_CLIENT_SECRET` (in `incident-service-runtime-secrets`) —
   the built-in audit connector's ingest credential; must match the
@@ -260,12 +261,22 @@ platform-gateway / tool-gateway            incident-service
 **Provisioning:** `make deploy` calls `sync-incident-secrets.sh` which
 creates the `incidents` database idempotently, generates the webhook token
 and one shared query secret (or uses exported `INCIDENT_WEBHOOK_TOKEN` /
-`INCIDENT_QUERY_SECRET`), and writes the three K8s secrets.
+`INCIDENT_QUERY_SECRET`), and writes the K8s secrets for every caller
+(including `agent-platform-runtime-secrets` since SPEC-043).
 `SKIP_INCIDENT_SECRETS=true` opts out; unsetting
 `PLATFORM_GATEWAY_INCIDENT_SERVICE_URL` leaves the portal incidents routes
 fail-closed (503), and unsetting `GATEWAY_INCIDENTS_SERVICE_URL` leaves the
 incident tools unregistered. Like skills-hub, incident-service uses a
 dedicated query-credential registry from day one.
+
+**Incident-report document assembly (SPEC-043):** agent-service queries
+the same registry when assembling `incident_report` documents:
+`AGENT_INCIDENT_SERVICE_URL` + `AGENT_INCIDENT_CLIENT_ID` ride
+runtime-config, and `AGENT_INCIDENT_CLIENT_SECRET` rides
+`agent-platform-runtime-secrets`. An unset URL or secret fails
+incident-report creation closed (503, "incident service not
+configured"); the portal incidents routes and the document surface
+degrade independently.
 
 ## Per-Service Environment Variables
 
@@ -312,6 +323,10 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime
 | `AGENTSCOPE_TASK_TOOLS_ENABLED` | Opt-in agentscope task tools (`TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate`; state-local, persisted via the agent state store) | `false` | code default |
 | `AGENT_AUDIT_SERVICE_URL` | Audit-service ingest URL for agent-service emissions (SPEC-037 execution events); unset degrades to log-only auditing | `http://audit-service:8000` | runtime-config |
 | `AGENT_AUDIT_CLIENT_ID` | Audit ingest client id for agent-service; must match an `AUDIT_INGEST_CLIENTS` entry | `agent-service` | runtime-config |
+| `AGENT_INCIDENT_SERVICE_URL` | incident-service base URL for incident-report document assembly (SPEC-043); unset fails incident-report creation closed (503) | `http://incident-service:8000` (dev-k8s) | runtime-config |
+| `AGENT_INCIDENT_CLIENT_ID` | Incident query client id for agent-service; must match an `INCIDENT_QUERY_CLIENTS` entry | `agent-service` | runtime-config |
+| `AGENT_INCIDENT_CLIENT_SECRET` | Incident query credential for agent-service (SPEC-043); rides `agent-platform-runtime-secrets` — absent secret fails incident-report creation closed (503) | **must be provisioned** | agent-platform-runtime-secrets |
+| `AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS` | Incident bundle fetch timeout for document assembly; must be > 0 | `10` | code default |
 | `AGENT_EXECUTION_SIGNING_KEY` | HMAC key for signed execution requests and receipts (SPEC-037); rides the `execution-signing-secret` via an optional `secretKeyRef` — an absent secret leaves it unset and mutating resumes fail closed (`signing_unavailable`) | **must be provisioned** | execution-signing-secret |
 | `AGENT_EXECUTION_WORKER_URL` | Internal `execution-runtime` worker endpoint for the authenticated handoff of approved mutating calls (SPEC-038); unset rejects mutating resumes with an audited `worker_unavailable` rejection — no in-process fallback | `http://execution-runtime:8000` (dev-k8s) | runtime-config |
 | `AGENT_EXECUTION_HANDOFF_TOKEN` | Static bearer token presented to the worker handoff (SPEC-038); rides the `execution-handoff-secret` via an optional `secretKeyRef` — absent secret fails mutating resumes closed (`worker_unavailable`) | **must be provisioned** | execution-handoff-secret |

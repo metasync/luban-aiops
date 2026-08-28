@@ -10,14 +10,16 @@ coverage tiers, provenance, and the handover narrative.
 ## What an operations document is
 
 An operations document is an **immutable snapshot** of what happened
-across a set of chat sessions during a shift. Documents are created by
+on the platform — either across a set of chat sessions during a shift
+(a **shift summary**) or around one incident (an **incident report**,
+SPEC-043). Documents are created by
 operators, stay private drafts until published, and are readable by
 everyone with a document role (`platform-admin`, `approver`, or
 `operator`) once published. A document is never edited after creation —
 publishing only changes visibility, and deletion removes it for
 everyone.
 
-Every shift summary document has three layers:
+Every operations document has three layers:
 
 1. **Metadata** — label, owner, state (draft/published), timestamps,
    and the one-line summary shown in the lists and atop the document.
@@ -103,6 +105,25 @@ Documents created before the handover skeleton existed carry no
 `handover` section; the portal degrades gracefully (no Handover tab,
 the rest of the digest renders as usual).
 
+### The incident report digest (SPEC-043)
+
+An incident report's digest is assembled the same mechanical way, but
+its facts come from the incident-service bundle plus the platform's
+own stores for the incident's linked triage session. It carries four
+deterministic sections:
+
+| Section | What it says |
+|---|---|
+| `incident` | The incident envelope copied verbatim: id, severity, status, title, summary, source, labels, reporter, and timestamps. The raw alert payload (`triage_raw`) never enters the digest — only a `has_triage_raw` presence marker does. |
+| `triage` | The validated triage report verbatim (severity assessment, evidence, hypotheses, next steps, cited skills), or the `not_triaged` marker when the incident has none. |
+| `dispatches` | Every connector dispatch outcome (connector, status, reference, error) copied verbatim — possibly empty. |
+| `session` | The incident's linked triage session under the same two-tier coverage: a full session entry when you own it, the metadata-only tier when it is foreign and your roles hold the approvals inbox, and the `foreign_denied`, `missing` (no linked session), or `unavailable` markers otherwise. |
+
+Provenance adds the covered `incident_id` alongside the usual session
+anchors, and the one-line summary is counts-only — e.g. *critical ·
+triaged · triage report present · 1 dispatch · own session* — never
+the incident title or summary text.
+
 ## The portal rendering: tabs
 
 The document drawer renders the digest as tabs instead of one long
@@ -118,6 +139,11 @@ audited fetch, and the Markdown export are unaffected:
 | **Evidence & transcript** | Per-session transcript turn counts and evidence frame counts. |
 | **Open items** | Still-pending confirmations and requested executions, with the affected sessions. |
 | **Raw JSON** | The stored digest verbatim — the artifact of record, inspectable in place. |
+
+Incident reports render their own tab set: **Incident**, **Triage**,
+**Dispatches**, **Session**, and **Raw JSON**, with the session tab
+showing the linked-session entry (or its marker) and — for
+owner-covered sessions — the same confirmation and execution tables.
 
 Both the digest and the narrative render in **bounded panes**: when
 either block grows tall it scrolls inside a fixed-height region with an

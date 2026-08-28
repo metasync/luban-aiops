@@ -496,6 +496,21 @@ async def update_session_title(
         ) from exc
 
 
+def _upstream_detail(exc: httpx.HTTPStatusError, fallback: str) -> object:
+    """The agent's structured detail when present, else the fallback.
+
+    SPEC-043: incident-report creation answers carry the agent's
+    structured detail (unknown incident id, not-configured note) so
+    surfaces can render the refusal verbatim.
+    """
+    try:
+        payload = exc.response.json()
+    except (ValueError, httpx.HTTPError):
+        return fallback
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    return detail if isinstance(detail, str) and detail else fallback
+
+
 async def create_document(
     settings: PlatformGatewaySettings,
     request_id: str,
@@ -503,12 +518,15 @@ async def create_document(
     payload: dict,
     foreign_coverage: str,
 ) -> dict:
-    """Proxy a document create (SPEC-039 R-1).
+    """Proxy a document create (SPEC-039 R-1, SPEC-043 R-3).
 
     ``foreign_coverage`` forwards the gateway-computed ``approvals:list``
     capability to the agent as a trusted internal header. Upstream 4xx
-    (validation, foreign-session denial) passes through unchanged;
-    transport failures and upstream 5xx map to 502.
+    (validation, foreign-session denial, unknown incident id) passes
+    through with the agent's structured detail; upstream 502/503
+    (transport vs dependency-not-configured) pass through verbatim so
+    the creation-time posture reaches the caller; other 5xx and
+    transport failures map to 502.
     """
     try:
         return await agent_client.create_document(
@@ -519,10 +537,13 @@ async def create_document(
         if 400 <= status < 500:
             raise HTTPException(
                 status_code=status,
-                detail="agent service rejected the document create",
+                detail=_upstream_detail(
+                    exc, "agent service rejected the document create"
+                ),
             ) from exc
         raise HTTPException(
-            status_code=502, detail="agent service document create failed"
+            status_code=status if status in (502, 503) else 502,
+            detail=_upstream_detail(exc, "agent service document create failed"),
         ) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(

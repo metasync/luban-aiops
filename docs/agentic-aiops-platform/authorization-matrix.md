@@ -392,7 +392,18 @@ section and the generated narrative defaults on under a digest-anchoring
 prompt contract; the portal's Markdown export serializes the document
 already fetched through that audited surface, so it introduces no new
 policy action and no new audit event type. That audit sits
-alongside `document_created` / `document_published`. SPEC-039 also adds
+alongside `document_created` / `document_published`. Since v0.25.0
+(SPEC-043) `incident_report` documents pass a dual-action gate at
+creation: the caller must hold `documents:create` **and**
+`incident:read` — two existing actions combined, no new policy
+vocabulary — so the document surface never bypasses the incident
+visibility matrix; a denial reports the first failing action in the
+standard structured shape. The incident's linked triage session rides
+the digest under the same `approvals:list`-derived foreign-coverage
+posture, the covered incident id rides `document_created` as
+provenance, and creation answers the dependency postures (503 not
+configured, 502 transport, 404 unknown incident id) without new audit
+event types. SPEC-039 also adds
 `session:update` (rename one's own session titles), granted exactly where
 `session:list` is granted — every chat-capable role — with server-side
 ownership scoping (anti-enumeration 404 for foreign sessions) and no new
