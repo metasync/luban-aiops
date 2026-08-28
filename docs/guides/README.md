@@ -9,6 +9,7 @@ Luban AIOps platform.
 |---|---|
 | [Getting Started](getting-started.md) | From cluster to working portal in 7 steps |
 | [Portal User Guide](portal-user-guide.md) | Day-2 portal usage: chat, voice, model selection, sessions, evidence, approvals, Control and Workspace views |
+| [Documents and Digest Reference](documents-digest-reference.md) | What shift-summary documents, digests, evidence frames, coverage tiers, and the handover narrative mean |
 | [User and Role Administration](user-and-role-administration.md) | Adding users, assigning roles in Keycloak, and mapping roles to permissions |
 | [Configuration Reference](configuration-reference.md) | Environment variables, secrets, and cross-service dependencies |
 | [Approval and HITL Governance](approval-and-hitl.md) | Four-layer approval model, auto-allow management, policy bundle workflow, HITL configuration knobs |

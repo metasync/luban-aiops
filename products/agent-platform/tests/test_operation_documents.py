@@ -205,6 +205,10 @@ class TestPostgresStore:
         assert any(
             "CREATE TABLE IF NOT EXISTS operation_documents" in s for s in sqls
         )
+        # SPEC-041 R-4: the additive summary migration rides initialize.
+        assert any(
+            "ADD COLUMN IF NOT EXISTS summary" in s for s in sqls
+        )
         sweep = next(
             call
             for call in calls
@@ -227,6 +231,8 @@ class TestPostgresStore:
         assert "'draft'" in insert["sql"]
         assert isinstance(insert["params"]["provenance"], Jsonb)
         assert isinstance(insert["params"]["digest"], Jsonb)
+        # SPEC-041 R-4: the summary lands beside the content fields.
+        assert insert["params"]["summary"] is None
         evict = next(
             call for call in executed[1:] if "OFFSET" in call["sql"]
         )
@@ -272,6 +278,7 @@ class TestPostgresStore:
             {"sessions": []},
             "narrative text",
             "included",
+            "Quiet shift \u2014 no recorded decisions or executions.",
         )
         store = PostgresOperationDocumentStore(
             db_url="postgresql://fake", connect=_fake_connect(calls, rows=[row])
@@ -282,6 +289,9 @@ class TestPostgresStore:
         assert record["published_at"] == "2026-08-27T09:00:00Z"
         assert record["prose_status"] == "included"
         assert record["provenance"]["sessions"][0]["coverage"] == "owner"
+        assert record["summary"] == (
+            "Quiet shift \u2014 no recorded decisions or executions."
+        )
 
     def test_list_published_filters_at_the_query(self) -> None:
         calls: list[dict] = []

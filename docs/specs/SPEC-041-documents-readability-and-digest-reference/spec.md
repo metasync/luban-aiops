@@ -2,10 +2,11 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-28
 - approved: 2026-08-28
+- delivered: 2026-08-28 (v0.23.0)
 - release slice: R5 — Hardening and External Consumption (third R5 slice)
 - related ADRs: none (extends SPEC-039 operations document repository and SPEC-040 handover narrative)
 
@@ -207,3 +208,5 @@ Acceptance criteria:
 - 2026-08-28: approved by the operator after the R-4 summary design
   (creation-time counts-only string in the list envelope) was
   confirmed; implementation proceeds as the third R5 slice (v0.23.0).
+- 2026-08-28: delivered as v0.23.0 — all four requirements shipped
+  with the full house delivery train; status set to `delivered`.

@@ -7,6 +7,14 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-28-documents-readability-and-digest-reference.md`
+  - delivers SPEC-041 (v0.23.0), the third R5 slice: an operator-facing
+    digest reference guide, tabbed table-shaped digest rendering in the
+    document drawer (tier-aware, Raw JSON retained), bounded scrollable
+    digest and prose panes with an expand affordance, and a
+    deterministic counts-only summary line computed at creation and
+    shown with each document in the lists — no new policy actions or
+    audit event types
 - `2026-08-28-shift-summary-handover-narrative-export.md`
   - delivers SPEC-040 (v0.22.0), the second R5 slice: a deterministic
     `handover` digest section (decisions, execution outcomes, open

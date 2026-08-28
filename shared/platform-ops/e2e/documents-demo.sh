@@ -1,19 +1,22 @@
 #!/bin/sh
 
 # Operations document repository live check (SPEC-039 delivery gate,
-# extended for the SPEC-040 handover section).
+# extended for the SPEC-040 handover section and the SPEC-041
+# counts-only summary).
 #
 # Deterministic end-to-end assertions for the operations document
 # repository (Phase 1: shift summaries), runnable after `make deploy`:
 #   1. control check: a role without documents:create is rejected (403)
 #   2. an operator creates a session, then a shift-summary draft citing
-#      it (digest + provenance present, state=draft, and the digest
-#      carries the deterministic handover section — SPEC-040 R-1)
+#      it (digest + provenance present, state=draft, the digest carries
+#      the deterministic handover section — SPEC-040 R-1 — and the
+#      record carries the counts-only summary line — SPEC-041 R-4)
 #   3. drafts are owner-only: the reader gets a 404 anti-enumeration
 #      before the owner publishes, and a 200 with owner attribution after
 #   4. publish is one-way: the second publish answers 409
 #   5. the reader sees the document in the published scope listing,
-#      envelope-only (digest/prose never leak through the listing)
+#      envelope-only (digest/prose never leak through the listing) and
+#      carrying the summary line
 #   6. the durable trail carries document_created / document_published
 #      and the cross-owner document_read attributed to the reader
 #   7. session rename (R-7): owner renames (list/detail reflect it),
@@ -131,7 +134,10 @@ DOCUMENT_ID=$(json_field "$HTTP_BODY" document_id)
   || fail "handover section lost the own-session count"
 [ "$(json_field "$HTTP_BODY" digest.handover.quiet)" = "True" ] \
   || fail "a fresh session should report an honest quiet shift"
-echo "draft $DOCUMENT_ID created citing session $SESSION_ID (handover section present)"
+# SPEC-041 R-4: the counts-only summary is computed at creation.
+[ "$(json_field "$HTTP_BODY" summary)" = "Quiet shift — no recorded decisions or executions." ] \
+  || fail "created document carries no quiet summary line"
+echo "draft $DOCUMENT_ID created citing session $SESSION_ID (handover section + summary present)"
 
 echo "==> [4/7] drafts are owner-only until publish; publish is one-way"
 http "$GATEWAY_URL/api/v1/documents/$DOCUMENT_ID" \
@@ -165,8 +171,11 @@ rows = json.load(sys.stdin).get('documents', [])
 assert rows, 'published listing is empty'
 for row in rows:
     assert 'digest' not in row and 'prose' not in row, row.get('document_id')
-" || fail "published listing leaked digest/prose content"
-echo "reader reads the published document with owner attribution; listing is envelope-only"
+mine = [row for row in rows if row.get('document_id') == sys.argv[1]]
+assert mine, 'listing lost the created document'
+assert 'Quiet shift' in (mine[0].get('summary') or ''), mine[0].get('summary')
+" "$DOCUMENT_ID" || fail "published listing leaked digest/prose content or lost the summary"
+echo "reader reads the published document with owner attribution; listing is envelope-only with the summary line"
 
 echo "==> [5/7] document audit on the durable trail"
 sleep 2  # audit emission is fire-and-forget; give the sink a beat
@@ -217,9 +226,9 @@ echo "session $SESSION_ID deleted (the published document stays immutable)"
 echo ""
 echo "Operations document repository live check passed:"
 echo "  - role matrix enforced (observer 403 on documents:create)"
-echo "  - draft created with digest + provenance anchor + handover section"
+echo "  - draft created with digest + provenance anchor + handover section + summary line"
 echo "  - drafts owner-only (404) until publish; published readable by role"
-echo "  - listing is envelope-only; full content flows the audited fetch"
+echo "  - listing is envelope-only with the counts-only summary; full content flows the audited fetch"
 echo "  - publish is one-way (409 on re-publish)"
 echo "  - document_created / document_published / cross-owner document_read durable"
 echo "  - session rename owner-only with anti-enumeration and role denial"

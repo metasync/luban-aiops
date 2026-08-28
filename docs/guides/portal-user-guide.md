@@ -178,7 +178,14 @@ grants.
 
 - **Mine** lists your drafts and published documents; **Published** lists
   every published document visible to your roles, each attributed with
-  *created by …* when the owner is someone else.
+  *created by …* when the owner is someone else. Rows carry a
+  counts-only summary line (e.g. *2 sessions · 3 decisions · 1
+  execution*) computed at creation — it never contains titles, record
+  ids, or decision outcomes.
+- The digest's vocabulary — digest, evidence frame, coverage tiers,
+  handover, quiet, provenance — is explained in the
+  [Documents and Digest Reference](documents-digest-reference.md); the
+  drawer's **Learn more** link opens the same page.
 - **New shift summary** opens the creation dialog: pick your own sessions
   from a selector, optionally add foreign session ids (copied from a
   colleague's session panel — see Sessions above), and set a label. The
@@ -193,9 +200,12 @@ grants.
   your own sessions, still-open items, and an honest *quiet* note when
   the shift recorded nothing — so the relieving operator reads what
   happened without a model in the loop.
-- The document page is **digest-first**: the structured digest (sessions,
-  confirmations, executions, evidence counts, handover) is the artifact
-  of record. The generated narrative renders collapsed under the label
+- The document page is **digest-first**: the structured digest renders
+  as tabs (Handover, Sessions, Confirmations, Executions, Evidence &
+  transcript, Open items, Raw JSON) and is the artifact of record; the
+  digest and narrative panes scroll inside bounded regions with an
+  expand affordance. The generated narrative renders collapsed under
+  the label
   *AI-generated narrative — from this document's digest facts*; a failed
   generation shows a warning instead and the digest stands alone.
 - **Export .md** in the document drawer downloads the open document as

@@ -423,3 +423,37 @@ def build_digest(
         "handover": _handover(entries),
     }
     return digest, {"sessions": provenance_sessions}
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def document_summary(digest: dict[str, Any]) -> str | None:
+    """Deterministic counts-only one-liner for the list surface (SPEC-041 R-4).
+
+    Derived from the handover skeleton alone: counts and the quiet
+    state — never titles, record ids, decision outcomes, or narrative
+    text — so the string may flow through the envelope-only listing
+    without breaking the audited single-read posture. Returns ``None``
+    when the digest carries no handover section (pre-SPEC-040
+    documents stay summary-less).
+    """
+    handover = digest.get("handover")
+    if not isinstance(handover, dict):
+        return None
+    if handover.get("quiet"):
+        return "Quiet shift — no recorded decisions or executions."
+    parts = [
+        _plural(handover.get("covered_session_count") or 0, "session"),
+        _plural(handover.get("decision_count") or 0, "decision"),
+        _plural(handover.get("execution_count") or 0, "execution"),
+    ]
+    open_items = handover.get("open_items")
+    if isinstance(open_items, dict):
+        open_count = (open_items.get("pending_confirmations") or 0) + (
+            open_items.get("requested_executions") or 0
+        )
+        if open_count:
+            parts.append(_plural(open_count, "open item"))
+    return " · ".join(parts)

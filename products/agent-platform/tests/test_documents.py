@@ -98,6 +98,12 @@ class TestCreateDocument:
         assert handover["covered_session_count"] == 1
         assert handover["own_session_count"] == 1
         assert handover["quiet"] is True
+        # SPEC-041 R-4: the counts-only list summary is derived at
+        # creation from the handover skeleton.
+        assert (
+            document["summary"]
+            == "Quiet shift \u2014 no recorded decisions or executions."
+        )
         assert document["provenance"]["sessions"][0]["session_id"] == session_id
         # The envelope validates against the shared contract.
         jsonschema.validate(document, _load_schema("operation-document.schema.json"))
@@ -207,6 +213,67 @@ class TestCreateDocument:
         assert "title" not in entry
         events = [e for e in _clean_stores if e["event_type"] == "document_created"]
         assert events[0]["details"]["foreign_session_count"] == 1
+
+
+class TestDocumentSummary:
+    """SPEC-041 R-4: counts-only summary in the envelope-only listing."""
+
+    def test_list_envelope_carries_summary_without_content(self) -> None:
+        app_client = TestClient(create_app())
+        session_id = _session(app_client, "alice")
+        created = _create_draft(app_client, "alice", [session_id]).json()
+        response = app_client.get(
+            "/api/v2/documents", headers={"X-User-ID": "alice"}
+        )
+        assert response.status_code == 200
+        [row] = response.json()["documents"]
+        assert row["document_id"] == created["document_id"]
+        assert row["summary"] == created["summary"]
+        # The envelope-only posture holds: content stays behind the
+        # audited single fetch.
+        assert "digest" not in row
+        assert "prose" not in row
+
+    def test_published_listing_carries_summary(self) -> None:
+        app_client = TestClient(create_app())
+        session_id = _session(app_client, "alice")
+        created = _create_draft(app_client, "alice", [session_id]).json()
+        publish = app_client.post(
+            f"/api/v2/documents/{created['document_id']}/publish",
+            headers={"X-User-ID": "alice"},
+        )
+        assert publish.status_code == 200
+        response = app_client.get(
+            "/api/v2/documents?scope=published", headers={"X-User-ID": "bob"}
+        )
+        assert response.status_code == 200
+        [row] = response.json()["documents"]
+        assert row["summary"] == created["summary"]
+
+    def test_legacy_record_degrades_without_summary(self) -> None:
+        app_client = TestClient(create_app())
+        # Records created before SPEC-041 carry no summary key at all.
+        OPERATION_DOCUMENT_STORE.create(
+            {
+                "document_id": "doc-legacy",
+                "document_type": "shift_summary",
+                "state": "draft",
+                "owner_user_id": "alice",
+                "label": "legacy shift",
+                "created_at": "2026-08-27T08:00:00Z",
+                "published_at": None,
+                "provenance": {"sessions": []},
+                "digest": {"sessions": []},
+                "prose": None,
+                "prose_status": "not_requested",
+            }
+        )
+        response = app_client.get(
+            "/api/v2/documents", headers={"X-User-ID": "alice"}
+        )
+        assert response.status_code == 200
+        [row] = response.json()["documents"]
+        assert "summary" not in row
 
 
 class TestVisibilityMatrix:

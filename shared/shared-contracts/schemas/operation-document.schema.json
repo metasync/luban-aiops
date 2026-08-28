@@ -95,6 +95,10 @@
       "type": "string",
       "enum": ["included", "failed", "not_requested"],
       "description": "Prose layer outcome; a model error or timeout yields failed and a digest-only document."
+    },
+    "summary": {
+      "type": ["string", "null"],
+      "description": "Deterministic counts-only one-liner derived from the digest's handover section at creation (SPEC-041 R-4) — covered-session/decision/execution/open-item counts or the quiet phrasing; never titles, record ids, decision outcomes, or narrative text, so it may appear in envelope-only list rows. Absent on documents created before SPEC-041."
     }
   }
 }

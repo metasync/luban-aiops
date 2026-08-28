@@ -5,11 +5,12 @@
 // attribute the creator prominently (R-5 audit rides the agent layer;
 // the view only renders). Export (SPEC-040 R-4) serializes the
 // already-fetched document client-side — no new gateway call.
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Alert,
   Button,
   Collapse,
+  Descriptions,
   Drawer,
   Empty,
   Input,
@@ -17,6 +18,7 @@ import {
   Select,
   Spin,
   Switch,
+  Table,
   Tabs,
   Tag,
   Tooltip,
@@ -48,6 +50,12 @@ dayjs.extend(relativeTime);
 
 const MAX_SESSION_IDS = 20;
 
+// SPEC-041 R-1: the operator-facing digest reference lives in the
+// repository guides; the drawer's Learn more link opens it directly
+// because the portal does not host the docs itself.
+const DIGEST_REFERENCE_URL =
+  "https://github.com/metasync/luban-aiops/blob/main/docs/guides/documents-digest-reference.md";
+
 function createFailureMessage(err: unknown): string {
   if (err instanceof ApiError && err.status === 403) {
     return (
@@ -61,11 +69,11 @@ function createFailureMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// --- Digest rendering ------------------------------------------------------
+// --- Digest rendering (SPEC-041 R-2) ----------------------------------------
 
 // The digest is typed-but-open: the shift-summary builder owns its
-// section shapes, so the renderer degrades to labeled JSON lines for
-// anything it does not recognize.
+// section shapes, so the Raw JSON tab degrades to labeled JSON lines
+// for anything the structured tabs do not recognize.
 function primitiveText(value: unknown): string | null {
   if (value === null) return "null";
   const type = typeof value;
@@ -117,64 +125,455 @@ function DigestValue({ value, depth = 0 }: { value: unknown; depth?: number }): 
   return <Typography.Text type="secondary">unavailable</Typography.Text>;
 }
 
-function DigestSessionEntry({ entry }: { entry: Record<string, unknown> }) {
-  const sessionId = typeof entry.session_id === "string" ? entry.session_id : "unknown";
-  const title = typeof entry.title === "string" ? entry.title : null;
-  const sections = Object.entries(entry).filter(
-    ([key]) => key !== "session_id" && key !== "title",
-  );
+// The drawer renders the digest as per-concern tabs with table-shaped
+// content (SPEC-041 R-2). Shapes below mirror the shift-summary
+// builder; anything unrecognized degrades to the Raw JSON tab.
+
+type DigestMap = Record<string, unknown>;
+
+function asMap(value: unknown): DigestMap | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as DigestMap)
+    : null;
+}
+
+function asList(value: unknown): DigestMap[] {
+  return Array.isArray(value) ? (value as DigestMap[]) : [];
+}
+
+function textOrDash(value: unknown): string {
+  return typeof value === "string" && value.length > 0 ? value : "—";
+}
+
+function countText(value: unknown): string {
+  return typeof value === "number" ? String(value) : "unavailable";
+}
+
+interface ConfirmationRow {
+  key: string;
+  sessionId: string;
+  action: string;
+  status: string;
+  decision: ReactNode;
+  decider: string;
+  decidedAt: string;
+}
+
+// Owner sessions contribute full confirmation records; foreign sessions
+// contribute the metadata-only confirmation_decisions tier. Unavailable
+// sections (string sentinel) are skipped here and labeled as such on
+// the Sessions tab.
+function collectConfirmationRows(sessions: DigestMap[]): ConfirmationRow[] {
+  const rows: ConfirmationRow[] = [];
+  for (const entry of sessions) {
+    const sessionId = textOrDash(entry.session_id);
+    const foreign = entry.coverage === "foreign";
+    const records = foreign ? entry.confirmation_decisions : entry.confirmations;
+    if (!Array.isArray(records)) {
+      continue;
+    }
+    for (const record of records as DigestMap[]) {
+      const pending = record.status === "pending";
+      rows.push({
+        key: `${sessionId}:${textOrDash(record.confirm_id)}:${rows.length}`,
+        sessionId,
+        action: textOrDash(record.action),
+        status: textOrDash(record.status),
+        decision:
+          typeof record.decision === "string" && record.decision ? (
+            record.decision
+          ) : pending ? (
+            <Tag color="orange">pending</Tag>
+          ) : (
+            "—"
+          ),
+        decider: textOrDash(record.decider_user_id),
+        decidedAt:
+          typeof record.decided_at === "string" && record.decided_at
+            ? dayjs(record.decided_at).fromNow()
+            : "—",
+      });
+    }
+  }
+  return rows;
+}
+
+interface ExecutionRow {
+  key: string;
+  sessionId: string;
+  tool: string;
+  status: string;
+  receipt: ReactNode;
+  completedAt: string;
+}
+
+function collectExecutionRows(sessions: DigestMap[]): ExecutionRow[] {
+  const rows: ExecutionRow[] = [];
+  for (const entry of sessions) {
+    const sessionId = textOrDash(entry.session_id);
+    const foreign = entry.coverage === "foreign";
+    const records = foreign ? entry.execution_receipts : entry.executions;
+    if (!Array.isArray(records)) {
+      continue;
+    }
+    for (const record of records as DigestMap[]) {
+      rows.push({
+        key: `${sessionId}:${textOrDash(record.execution_id)}:${rows.length}`,
+        sessionId,
+        tool: textOrDash(record.tool_name),
+        status: textOrDash(record.status),
+        receipt:
+          record.digest_match === false ? (
+            <span>
+              {textOrDash(record.receipt_status)}{" "}
+              <Tag color="warning">digest mismatch</Tag>
+            </span>
+          ) : (
+            textOrDash(record.receipt_status)
+          ),
+        completedAt:
+          typeof record.completed_at === "string" && record.completed_at
+            ? dayjs(record.completed_at).fromNow()
+            : "—",
+      });
+    }
+  }
+  return rows;
+}
+
+function HandoverTab({ handover }: { handover: DigestMap }) {
+  const openItems = asMap(handover.open_items) ?? {};
+  const openSessions = asList(handover.open_sessions).map((id) => String(id));
   return (
-    <div
-      style={{
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        padding: 12,
-        marginBottom: 8,
-      }}
-    >
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <Typography.Text strong>{title ?? sessionId}</Typography.Text>
-        {title ? (
-          <Typography.Text type="secondary" copyable={{ text: sessionId }}>
-            {sessionId}
-          </Typography.Text>
-        ) : (
-          <Typography.Text type="secondary" copyable>
-            {sessionId}
-          </Typography.Text>
-        )}
-      </div>
-      {sections.map(([key, value]) => (
-        <div key={key} style={{ marginTop: 8 }}>
-          <Typography.Text strong style={{ display: "block", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.4 }}>
-            {key.replace(/_/g, " ")}
-          </Typography.Text>
-          <DigestValue value={value} />
+    <div>
+      {handover.quiet ? (
+        <Alert
+          type="info"
+          showIcon
+          message="Quiet shift"
+          description="No decisions or executions were recorded across this document's coverage."
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
+      <Descriptions
+        size="small"
+        column={2}
+        items={[
+          {
+            key: "covered",
+            label: "Covered sessions",
+            children: `${countText(handover.covered_session_count)} (own ${countText(
+              handover.own_session_count,
+            )} · foreign ${countText(handover.foreign_session_count)})`,
+          },
+          {
+            key: "decisions",
+            label: "Decisions",
+            children: countText(handover.decision_count),
+          },
+          {
+            key: "executions",
+            label: "Executions",
+            children: countText(handover.execution_count),
+          },
+          {
+            key: "pending",
+            label: "Pending confirmations",
+            children: countText(openItems.pending_confirmations),
+          },
+          {
+            key: "requested",
+            label: "Requested executions",
+            children: countText(openItems.requested_executions),
+          },
+        ]}
+      />
+      {openSessions.length > 0 ? (
+        <div style={{ marginTop: 8 }}>
+          <Typography.Text type="secondary">Open sessions: </Typography.Text>
+          {openSessions.map((sessionId) => (
+            <Tag key={sessionId}>{sessionId}</Tag>
+          ))}
         </div>
-      ))}
+      ) : null}
+    </div>
+  );
+}
+
+function SessionsTab({ sessions }: { sessions: DigestMap[] }) {
+  if (sessions.length === 0) {
+    return (
+      <Typography.Text type="secondary">
+        No session entries in this digest.
+      </Typography.Text>
+    );
+  }
+  return (
+    <div>
+      {sessions.map((entry, index) => {
+        const sessionId = textOrDash(entry.session_id);
+        if (entry.coverage === "foreign") {
+          // Metadata tier: never render owner-tier fields as empty.
+          const counts = asMap(entry.record_counts) ?? {};
+          return (
+            <div
+              key={`${sessionId}:${index}`}
+              style={{
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 8,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  marginBottom: 4,
+                }}
+              >
+                <Tag color="purple">foreign session — metadata only</Tag>
+                <Typography.Text type="secondary" copyable={{ text: sessionId }}>
+                  {sessionId}
+                </Typography.Text>
+              </div>
+              <Typography.Text type="secondary">
+                confirmations: {countText(counts.confirmations)} · executions:{" "}
+                {countText(counts.executions)}
+              </Typography.Text>
+            </div>
+          );
+        }
+        const unavailableSections = [
+          "confirmations",
+          "executions",
+          "transcript",
+          "evidence",
+        ].filter((section) => entry[section] === "unavailable");
+        return (
+          <div
+            key={`${sessionId}:${index}`}
+            style={{
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              padding: 12,
+              marginBottom: 8,
+            }}
+          >
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <Typography.Text strong>{textOrDash(entry.title)}</Typography.Text>
+              <Typography.Text type="secondary" copyable={{ text: sessionId }}>
+                {sessionId}
+              </Typography.Text>
+              {unavailableSections.map((section) => (
+                <Tag key={section} color="warning">
+                  {section} unavailable
+                </Tag>
+              ))}
+            </div>
+            {typeof entry.created_at === "string" ? (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                created {dayjs(entry.created_at).fromNow()}
+              </Typography.Text>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function EvidenceTab({ sessions }: { sessions: DigestMap[] }) {
+  const ownerEntries = sessions.filter((entry) => entry.coverage !== "foreign");
+  const foreignCount = sessions.length - ownerEntries.length;
+  const rows = ownerEntries.map((entry, index) => {
+    const transcript = asMap(entry.transcript);
+    const evidence = asMap(entry.evidence);
+    return {
+      key: `${textOrDash(entry.session_id)}:${index}`,
+      sessionId: textOrDash(entry.session_id),
+      transcript: transcript
+        ? transcript.available === false
+          ? "not available"
+          : `${countText(transcript.turn_count)} turns (${countText(
+              transcript.user_turn_count,
+            )} user)`
+        : entry.transcript === "unavailable"
+          ? "unavailable"
+          : "—",
+      frames: evidence
+        ? `${countText(evidence.total_frame_count)} frames`
+        : entry.evidence === "unavailable"
+          ? "unavailable"
+          : "—",
+    };
+  });
+  return (
+    <div>
+      <Table
+        size="small"
+        rowKey="key"
+        pagination={false}
+        dataSource={rows}
+        locale={{ emptyText: "No owner-covered sessions in this digest." }}
+        columns={[
+          { title: "Session", dataIndex: "sessionId" },
+          { title: "Transcript", dataIndex: "transcript" },
+          { title: "Evidence", dataIndex: "frames" },
+        ]}
+      />
+      {foreignCount > 0 ? (
+        <Typography.Text type="secondary" style={{ display: "block", marginTop: 8 }}>
+          {foreignCount} foreign session(s) contribute metadata only — no
+          transcript or evidence counts.
+        </Typography.Text>
+      ) : null}
+    </div>
+  );
+}
+
+function OpenItemsTab({ handover }: { handover: DigestMap | null }) {
+  if (!handover) {
+    return (
+      <Typography.Text type="secondary">
+        This document predates the handover skeleton, so shift-level open
+        items are not available.
+      </Typography.Text>
+    );
+  }
+  const openItems = asMap(handover.open_items) ?? {};
+  const openSessions = asList(handover.open_sessions).map((id) => String(id));
+  const pending = openItems.pending_confirmations;
+  const requested = openItems.requested_executions;
+  if (
+    pending === 0 &&
+    requested === 0 &&
+    openSessions.length === 0
+  ) {
+    return (
+      <Typography.Text type="secondary">
+        Nothing is open — every confirmation was decided and every
+        execution closed during this shift.
+      </Typography.Text>
+    );
+  }
+  return (
+    <div>
+      <Descriptions
+        size="small"
+        column={2}
+        items={[
+          {
+            key: "pending",
+            label: "Pending confirmations",
+            children: countText(pending),
+          },
+          {
+            key: "requested",
+            label: "Requested executions",
+            children: countText(requested),
+          },
+        ]}
+      />
+      {openSessions.length > 0 ? (
+        <div style={{ marginTop: 8 }}>
+          <Typography.Text type="secondary">Sessions with open items: </Typography.Text>
+          {openSessions.map((sessionId) => (
+            <Tag key={sessionId}>{sessionId}</Tag>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
 
 function DigestPanel({ document }: { document: OperationDocument }) {
-  const digest = document.digest ?? {};
-  const sessions = Array.isArray((digest as Record<string, unknown>).sessions)
-    ? ((digest as Record<string, unknown>).sessions as Record<string, unknown>[])
-    : [];
-  const handover =
-    typeof (digest as Record<string, unknown>).handover === "object" &&
-    (digest as Record<string, unknown>).handover !== null
-      ? ((digest as Record<string, unknown>).handover as Record<string, unknown>)
-      : null;
-  const coverageBySession = new Map(
-    (document.provenance?.sessions ?? []).map((entry) => [
-      entry.session_id,
-      entry.coverage,
-    ]),
-  );
+  const digest = (document.digest ?? {}) as DigestMap;
+  const sessions = asList(digest.sessions);
+  const handover = asMap(digest.handover);
+  const items = [];
+  if (handover) {
+    // SPEC-040 R-1: the shift story leads the digest so the relieving
+    // operator sees what happened before the receipts.
+    items.push({
+      key: "handover",
+      label: "Handover",
+      children: <HandoverTab handover={handover} />,
+    });
+  }
+  items.push({
+    key: "sessions",
+    label: "Sessions",
+    children: <SessionsTab sessions={sessions} />,
+  });
+  items.push({
+    key: "confirmations",
+    label: "Confirmations",
+    children: (
+      <Table<ConfirmationRow>
+        size="small"
+        rowKey="key"
+        pagination={false}
+        dataSource={collectConfirmationRows(sessions)}
+        locale={{ emptyText: "No confirmation decisions recorded." }}
+        columns={[
+          { title: "Session", dataIndex: "sessionId" },
+          { title: "Action", dataIndex: "action" },
+          { title: "Status", dataIndex: "status" },
+          { title: "Decision", dataIndex: "decision" },
+          { title: "Decider", dataIndex: "decider" },
+          { title: "Decided", dataIndex: "decidedAt" },
+        ]}
+      />
+    ),
+  });
+  items.push({
+    key: "executions",
+    label: "Executions",
+    children: (
+      <Table<ExecutionRow>
+        size="small"
+        rowKey="key"
+        pagination={false}
+        dataSource={collectExecutionRows(sessions)}
+        locale={{ emptyText: "No executions recorded." }}
+        columns={[
+          { title: "Session", dataIndex: "sessionId" },
+          { title: "Tool", dataIndex: "tool" },
+          { title: "Status", dataIndex: "status" },
+          { title: "Receipt", dataIndex: "receipt" },
+          { title: "Completed", dataIndex: "completedAt" },
+        ]}
+      />
+    ),
+  });
+  items.push({
+    key: "evidence",
+    label: "Evidence & transcript",
+    children: <EvidenceTab sessions={sessions} />,
+  });
+  items.push({
+    key: "open-items",
+    label: "Open items",
+    children: <OpenItemsTab handover={handover} />,
+  });
+  items.push({
+    key: "raw",
+    label: "Raw JSON",
+    children: (
+      <div>
+        <Typography.Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
+          The stored digest verbatim — the artifact of record.
+        </Typography.Text>
+        <DigestValue value={digest} />
+      </div>
+    ),
+  });
   return (
     <div>
-      <div style={{ display: "flex", gap: 16, marginBottom: 12, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 16, marginBottom: 4, flexWrap: "wrap" }}>
         <Typography.Text type="secondary">
           Generated {dayjs(String(digest.generated_at ?? document.created_at)).fromNow()}
         </Typography.Text>
@@ -182,33 +581,11 @@ function DigestPanel({ document }: { document: OperationDocument }) {
           Requested by {String(digest.requester_user_id ?? document.owner_user_id)}
         </Typography.Text>
       </div>
-      {handover ? (
-        // SPEC-040 R-1: the shift story leads the digest so the
-        // relieving operator sees what happened before the receipts.
-        <div style={{ marginBottom: 12 }}>
-          <Typography.Text
-            strong
-            style={{ display: "block", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}
-          >
-            Handover
-          </Typography.Text>
-          <DigestValue value={handover} />
-        </div>
-      ) : null}
-      {sessions.map((entry, index) => {
-        const sessionId = typeof entry.session_id === "string" ? entry.session_id : "";
-        const coverage = coverageBySession.get(sessionId);
-        return (
-          <div key={sessionId || index}>
-            {coverage === "foreign" ? (
-              <Tag color="purple" style={{ marginBottom: 4 }}>
-                foreign session — metadata only
-              </Tag>
-            ) : null}
-            <DigestSessionEntry entry={entry} />
-          </div>
-        );
-      })}
+      <Tabs
+        size="small"
+        defaultActiveKey={handover ? "handover" : "sessions"}
+        items={items}
+      />
     </div>
   );
 }
@@ -250,6 +627,53 @@ function ProsePanel({ document }: { document: OperationDocument }) {
     <Typography.Text type="secondary">
       No narrative prose was requested for this document.
     </Typography.Text>
+  );
+}
+
+// --- Bounded panes (SPEC-041 R-3) -------------------------------------------
+
+// Digest and prose are the longest blocks in the drawer; each renders
+// bounded with internal scrolling and an expand affordance so nothing
+// is ever trapped. Bounding is presentation only — content, export,
+// and the stored document are untouched.
+
+const BOUNDED_PANE_MAX_HEIGHT = 320;
+
+function BoundedPane({ children }: { children: ReactNode }) {
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const node = contentRef.current;
+    setOverflows(
+      node !== null && node.scrollHeight > BOUNDED_PANE_MAX_HEIGHT + 1,
+    );
+  }, [children, expanded]);
+
+  return (
+    <div>
+      <div
+        ref={contentRef}
+        style={
+          expanded
+            ? undefined
+            : { maxHeight: BOUNDED_PANE_MAX_HEIGHT, overflowY: "auto" }
+        }
+      >
+        {children}
+      </div>
+      {overflows || expanded ? (
+        <Button
+          type="link"
+          size="small"
+          style={{ padding: 0, height: "auto" }}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? "Collapse to bounded height" : "Expand to full height"}
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
@@ -626,6 +1050,17 @@ export default function DocumentsView({
               {document.state}
             </Tag>
           </div>
+          {document.summary ? (
+            // SPEC-041 R-4: the creation-time counts-only one-liner
+            // gives the list a glimpse of the shift's substance;
+            // pre-SPEC-041 documents degrade to label-only rows.
+            <Typography.Text
+              type="secondary"
+              style={{ display: "block", fontSize: 12 }}
+            >
+              {document.summary}
+            </Typography.Text>
+          ) : null}
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {dayjs(document.created_at).fromNow()}
             {!own ? ` · created by ${document.owner_user_id}` : ""}
@@ -739,12 +1174,32 @@ export default function DocumentsView({
                 Published {dayjs(selected.published_at).fromNow()}
               </Typography.Text>
             ) : null}
-            <Typography.Title level={5}>Digest</Typography.Title>
-            <DigestPanel document={selected} />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              <Typography.Title level={5} style={{ margin: 0 }}>
+                Digest
+              </Typography.Title>
+              <Tooltip title="What digests, frames, and coverage tiers mean">
+                <Typography.Link href={DIGEST_REFERENCE_URL} target="_blank">
+                  Learn more
+                </Typography.Link>
+              </Tooltip>
+            </div>
+            <BoundedPane>
+              <DigestPanel document={selected} />
+            </BoundedPane>
             <Typography.Title level={5} style={{ marginTop: 16 }}>
               Prose
             </Typography.Title>
-            <ProsePanel document={selected} />
+            <BoundedPane>
+              <ProsePanel document={selected} />
+            </BoundedPane>
           </div>
         )}
       </Drawer>

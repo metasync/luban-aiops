@@ -26,6 +26,9 @@ export interface OperationDocument {
   digest: Record<string, unknown>;
   prose?: string | null;
   prose_status: ProseStatus;
+  // SPEC-041 R-4: creation-time counts-only one-liner derived from the
+  // digest's handover skeleton; absent on pre-SPEC-041 documents.
+  summary?: string | null;
 }
 
 // Listing rows are envelope-only: the agent strips digest and prose

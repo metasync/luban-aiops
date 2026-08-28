@@ -79,6 +79,7 @@ from agent_service.services.shift_summary import (
     ForeignSessionDenied,
     UnknownSessionError,
     build_digest,
+    document_summary,
 )
 
 router = APIRouter(prefix="/api/v2")
@@ -820,6 +821,8 @@ async def create_document(
         digest=digest,
         prose=prose,
         prose_status=prose_status,
+        # SPEC-041 R-4: counts-only list summary, derived at creation.
+        summary=document_summary(digest),
     )
     OPERATION_DOCUMENT_STORE.create(document)
     own_count = sum(

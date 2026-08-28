@@ -29,6 +29,7 @@ from agent_service.services.shift_summary import (
     ForeignSessionDenied,
     UnknownSessionError,
     build_digest,
+    document_summary,
 )
 
 
@@ -367,3 +368,68 @@ class TestHandoverSection:
         handover = digest["handover"]
         assert handover["execution_count"] == 1
         assert handover["decisions"] == []
+
+
+class TestDocumentSummary:
+    """SPEC-041 R-4: deterministic counts-only list summary."""
+
+    def test_busy_shift_summary_carries_counts_and_open_items(
+        self, stores
+    ) -> None:
+        session_id = _seed_owner_session(stores)
+        digest, _ = build_digest("alice", [session_id], False)
+        # 1 decided confirmation, 1 execution, 1 pending + 1 requested open.
+        assert (
+            document_summary(digest)
+            == "1 session \u00b7 1 decision \u00b7 1 execution \u00b7 2 open items"
+        )
+
+    def test_summary_is_counts_only(self, stores) -> None:
+        session_id = _seed_owner_session(stores)
+        digest, _ = build_digest("alice", [session_id], False)
+        summary = document_summary(digest) or ""
+        # Never titles, record ids, outcomes, or session ids.
+        assert "restart investigation" not in summary
+        assert "cf-" not in summary and "exec-" not in summary
+        assert "approved" not in summary
+        assert session_id not in summary
+
+    def test_summary_is_deterministic(self, stores) -> None:
+        session_id = _seed_owner_session(stores)
+        first, _ = build_digest("alice", [session_id], False)
+        second, _ = build_digest("alice", [session_id], False)
+        assert document_summary(first) == document_summary(second)
+
+    def test_quiet_shift_summary_uses_plain_phrasing(self, stores) -> None:
+        record = stores["sessions"].create_session(
+            user_id="alice", session_id="ses-quiet"
+        )
+        digest, _ = build_digest("alice", [record.session_id], False)
+        assert (
+            document_summary(digest)
+            == "Quiet shift \u2014 no recorded decisions or executions."
+        )
+
+    def test_missing_handover_degrades_to_none(self) -> None:
+        # Pre-SPEC-040 digests carry no handover section.
+        assert document_summary({"sessions": []}) is None
+        assert document_summary({"handover": "corrupted"}) is None
+
+    def test_open_suffix_dropped_when_nothing_open(self, stores) -> None:
+        session_id = _seed_owner_session(stores)
+        # Resolve the parked confirmation and complete the execution so
+        # nothing stays open.
+        stores["confirmations"].mark_resolved(
+            session_id, "cf-2", "approved", "alice", "approve"
+        )
+        stores["executions"].save_receipt(
+            "cf-1",
+            "call-1",
+            {"status": "succeeded", "completed_at": "2026-08-28T10:00:00Z"},
+            True,
+        )
+        digest, _ = build_digest("alice", [session_id], False)
+        assert (
+            document_summary(digest)
+            == "1 session \u00b7 2 decisions \u00b7 1 execution"
+        )

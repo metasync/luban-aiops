@@ -13,6 +13,44 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.23.0 — 2026-08-28
+
+### Added
+
+- **Documents readability and digest reference (SPEC-041, third R5
+  slice)**: a new operator-facing reference
+  (`docs/guides/documents-digest-reference.md`) explains every concept
+  in the Documents view — the digest as the deterministic artifact of
+  record, each digest section, evidence frames, owner vs foreign
+  coverage tiers, provenance anchoring, the quiet state, and the
+  envelope-only listing posture — linked from the portal user guide
+  and from a **Learn more** affordance beside the drawer's Digest
+  title.
+- **Deterministic counts-only document summaries (SPEC-041 R-4)**: the
+  agent computes a one-line summary from the document's own `handover`
+  skeleton at creation time (no model involvement), stores it on the
+  record (additive nullable `summary` column; additive schema
+  property), and both document lists surface it under the label —
+  *2 sessions · 3 decisions · 1 execution · 1 open item* or the plain
+  quiet phrasing. Counts only: never titles, record ids, decision
+  outcomes, or narrative text, so the envelope-only listing posture is
+  preserved. Pre-SPEC-041 documents stay summary-less (label-only
+  rows).
+
+### Changed
+
+- The portal document drawer renders the digest as **tabs with
+  table-shaped content** (SPEC-041 R-2): Handover (default when
+  present), Sessions, Confirmations, Executions, Evidence &
+  transcript, Open items, and Raw JSON (the stored digest verbatim).
+  Rendering is tier-aware — foreign sessions are labeled *metadata
+  only*, never empty owner-tier fields — and pre-SPEC-040 documents
+  degrade gracefully. Rendering act only: stored documents, the
+  audited single fetch, and the Markdown export are unchanged.
+- The digest and prose regions in the drawer are now **bounded and
+  scrollable** (SPEC-041 R-3) with an expand affordance, so long
+  blocks no longer stretch the drawer body off screen.
+
 ## 0.22.0 — 2026-08-28
 
 ### Added

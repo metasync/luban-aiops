@@ -55,8 +55,15 @@ def make_document(
     digest: dict[str, Any],
     prose: str | None,
     prose_status: str,
+    summary: str | None = None,
 ) -> dict[str, Any]:
-    """Shape the immutable document row written at creation time."""
+    """Shape the immutable document row written at creation time.
+
+    ``summary`` (SPEC-041 R-4) is the deterministic counts-only
+    one-liner derived from the digest's handover section at creation;
+    it flows through the envelope-only listing because it discloses
+    counts, never content.
+    """
     return {
         "document_id": document_id,
         "document_type": document_type,
@@ -69,6 +76,7 @@ def make_document(
         "digest": digest,
         "prose": prose,
         "prose_status": prose_status,
+        "summary": summary,
     }
 
 
@@ -211,7 +219,8 @@ CREATE TABLE IF NOT EXISTS operation_documents (
     provenance      JSONB NOT NULL,
     digest          JSONB NOT NULL,
     prose           TEXT,
-    prose_status    TEXT NOT NULL
+    prose_status    TEXT NOT NULL,
+    summary         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_operation_documents_owner
     ON operation_documents (owner_user_id, created_at);
@@ -219,15 +228,22 @@ CREATE INDEX IF NOT EXISTS idx_operation_documents_state
     ON operation_documents (state, created_at);
 """
 
+# Additive migration (SPEC-041 R-4): rows created before the summary
+# field keep NULL and degrade to label-only listings.
+_ADD_SUMMARY_COLUMN = """
+ALTER TABLE operation_documents
+    ADD COLUMN IF NOT EXISTS summary TEXT
+"""
+
 _INSERT_DOCUMENT = """
 INSERT INTO operation_documents (
     document_id, document_type, state, owner_user_id, label,
-    created_at, provenance, digest, prose, prose_status
+    created_at, provenance, digest, prose, prose_status, summary
 )
 VALUES (
     %(document_id)s, %(document_type)s, 'draft', %(owner_user_id)s,
     %(label)s, now(), %(provenance)s, %(digest)s, %(prose)s,
-    %(prose_status)s
+    %(prose_status)s, %(summary)s
 )
 ON CONFLICT (document_id) DO NOTHING
 """
@@ -255,14 +271,16 @@ UPDATE operation_documents
 
 _LOAD_DOCUMENT = """
 SELECT document_id, document_type, state, owner_user_id, label,
-       created_at, published_at, provenance, digest, prose, prose_status
+       created_at, published_at, provenance, digest, prose, prose_status,
+       summary
   FROM operation_documents
  WHERE document_id = %(document_id)s
 """
 
 _LIST_FOR_OWNER = """
 SELECT document_id, document_type, state, owner_user_id, label,
-       created_at, published_at, provenance, digest, prose, prose_status
+       created_at, published_at, provenance, digest, prose, prose_status,
+       summary
   FROM operation_documents
  WHERE owner_user_id = %(owner_user_id)s
  ORDER BY created_at DESC, document_id DESC
@@ -270,7 +288,8 @@ SELECT document_id, document_type, state, owner_user_id, label,
 
 _LIST_PUBLISHED = """
 SELECT document_id, document_type, state, owner_user_id, label,
-       created_at, published_at, provenance, digest, prose, prose_status
+       created_at, published_at, provenance, digest, prose, prose_status,
+       summary
   FROM operation_documents
  WHERE state = 'published'
  ORDER BY created_at DESC, document_id DESC
@@ -323,6 +342,7 @@ def _row_to_document(row: Any) -> dict[str, Any]:
         digest,
         prose,
         prose_status,
+        summary,
     ) = row
     return {
         "document_id": document_id,
@@ -336,6 +356,7 @@ def _row_to_document(row: Any) -> dict[str, Any]:
         "digest": digest or {},
         "prose": prose,
         "prose_status": prose_status,
+        "summary": summary,
     }
 
 
@@ -373,6 +394,7 @@ class PostgresOperationDocumentStore:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(_OPERATION_DOCUMENTS_DDL)
+                cur.execute(_ADD_SUMMARY_COLUMN)
                 cur.execute(
                     _SWEEP_EXPIRED,
                     {
@@ -398,6 +420,7 @@ class PostgresOperationDocumentStore:
                         "digest": Jsonb(document["digest"]),
                         "prose": document["prose"],
                         "prose_status": document["prose_status"],
+                        "summary": document.get("summary"),
                     },
                 )
                 cur.execute(
