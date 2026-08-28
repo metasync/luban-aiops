@@ -7,6 +7,14 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-28-platform-components-blurb-prose-voice.md`
+  - same-day operator polish patch (v0.23.3): a live **Key platform
+    components** table in Settings → Platform (versions and readiness
+    from the gateway's health and runtime probes), the AI one-liner
+    **blurb** surfaced on Documents list rows, the detail card, and the
+    Markdown export, and a prose prompt retuned to a concise,
+    human-oriented operator briefing — additive and presentational; no
+    new actions, event types, or approval-path change
 - `2026-08-28-shift-summary-narrative-expanded.md`
   - same-day portal polish patch (v0.23.2): the AI-generated handover
     narrative in the Documents drawer now opens expanded by default and

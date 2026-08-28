@@ -805,11 +805,11 @@ async def create_document(
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
     if body.include_prose:
-        prose, prose_status = await generate_prose(
+        prose, blurb, prose_status = await generate_prose(
             get_runtime_kernel(), body.document_type, digest
         )
     else:
-        prose, prose_status = None, "not_requested"
+        prose, blurb, prose_status = None, None, "not_requested"
 
     document_id = f"doc-{uuid.uuid4()}"
     document = make_document(
@@ -823,6 +823,8 @@ async def create_document(
         prose_status=prose_status,
         # SPEC-041 R-4: counts-only list summary, derived at creation.
         summary=document_summary(digest),
+        # v0.23.3: the AI one-liner rides with the prose reply.
+        blurb=blurb,
     )
     OPERATION_DOCUMENT_STORE.create(document)
     own_count = sum(

@@ -9,13 +9,18 @@ import {
   Alert,
   Button,
   Descriptions,
+  Table,
   Tabs,
   Tag,
   Typography,
 } from "antd";
 import { LoginOutlined, UserOutlined } from "@ant-design/icons";
-import type { ReactNode } from "react";
-import { currentGateway, lastApiRequestId } from "../../api/client";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  currentGateway,
+  lastApiRequestId,
+  requestJson,
+} from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import type { SessionWorkspace } from "../../sessions/useSessionWorkspace";
 import { PLATFORM_VERSION } from "../../version";
@@ -99,21 +104,213 @@ function SessionPane({ workspace }: { workspace: SessionWorkspace }) {
 
 // --- Platform pane --------------------------------------------------------
 
+// v0.23.3: live component inventory. /health/ready and /api/v1/runtime
+// are unauthenticated by design (health probes and runtime metadata only),
+// so the pane can read them directly; every row degrades to "unavailable"
+// when a probe fails rather than showing stale or guessed values.
+
+interface AgentServiceHealth {
+  status?: string;
+  runtime_mode?: string;
+  session_store?: string | null;
+  session_store_ready?: boolean | null;
+  agent_state?: string | null;
+  agent_state_ready?: boolean | null;
+}
+
+interface GatewayReadyStatus {
+  status?: string;
+  version?: string;
+  agent_service?: AgentServiceHealth;
+  policy_rules?: number;
+}
+
+interface RuntimeMetadata {
+  runtime_mode?: string;
+  runtime_state?: string;
+  provider?: string;
+  model_name?: string | null;
+}
+
+interface ComponentRow {
+  key: string;
+  component: string;
+  version: string;
+  status: ReactNode;
+}
+
+const TAG_FLAT = { margin: 0 };
+
+function readyTag(ready: boolean | null | undefined): ReactNode {
+  if (ready === true) {
+    return <Tag color="success" style={TAG_FLAT}>ready</Tag>;
+  }
+  if (ready === false) {
+    return <Tag color="error" style={TAG_FLAT}>not ready</Tag>;
+  }
+  return <Typography.Text type="secondary">unknown</Typography.Text>;
+}
+
+function unavailable(): ReactNode {
+  return <Typography.Text type="secondary">unavailable</Typography.Text>;
+}
+
+function checking(): ReactNode {
+  return <Typography.Text type="secondary">checking…</Typography.Text>;
+}
+
 function PlatformPane() {
+  const [ready, setReady] = useState<GatewayReadyStatus | null>(null);
+  const [readyFailed, setReadyFailed] = useState(false);
+  const [runtime, setRuntime] = useState<RuntimeMetadata | null>(null);
+  const [runtimeFailed, setRuntimeFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    requestJson<GatewayReadyStatus>("/health/ready")
+      .then((data) => {
+        if (!cancelled) setReady(data);
+      })
+      .catch(() => {
+        if (!cancelled) setReadyFailed(true);
+      });
+    requestJson<RuntimeMetadata>("/api/v1/runtime")
+      .then((data) => {
+        if (!cancelled) setRuntime(data);
+      })
+      .catch(() => {
+        if (!cancelled) setRuntimeFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const rows = useMemo<ComponentRow[]>(() => {
+    const agent = ready?.agent_service;
+    const gatewayStatus = ready?.status;
+    const runtimeState = runtime?.runtime_state;
+    return [
+      {
+        key: "portal",
+        component: "Operator portal",
+        version: PLATFORM_VERSION,
+        status: <Tag color="success" style={TAG_FLAT}>loaded</Tag>,
+      },
+      {
+        key: "gateway",
+        component: "Platform gateway",
+        version: ready?.version ?? "—",
+        status:
+          readyFailed || gatewayStatus === undefined ? (
+            readyFailed ? unavailable() : checking()
+          ) : gatewayStatus === "ok" ? (
+            <Tag color="success" style={TAG_FLAT}>ok</Tag>
+          ) : (
+            <Tag color="warning" style={TAG_FLAT}>{gatewayStatus}</Tag>
+          ),
+      },
+      {
+        key: "agent-service",
+        component: "Agent service",
+        version: agent?.runtime_mode ?? "—",
+        status:
+          readyFailed || agent === undefined ? (
+            readyFailed ? unavailable() : checking()
+          ) : agent.status === "ready" ? (
+            <Tag color="success" style={TAG_FLAT}>ready</Tag>
+          ) : (
+            <Tag color="error" style={TAG_FLAT}>not ready</Tag>
+          ),
+      },
+      {
+        key: "agent-runtime",
+        component: "Agent runtime (LLM)",
+        version: runtime?.model_name ?? runtime?.provider ?? "—",
+        status:
+          runtimeFailed || runtimeState === undefined ? (
+            runtimeFailed ? unavailable() : checking()
+          ) : runtimeState === "ready" ? (
+            <Tag color="success" style={TAG_FLAT}>ready</Tag>
+          ) : runtimeState === "provider_error" ? (
+            <Tag color="error" style={TAG_FLAT}>provider error</Tag>
+          ) : (
+            <Tag style={TAG_FLAT}>not configured</Tag>
+          ),
+      },
+      {
+        key: "session-store",
+        component: "Session store",
+        version: agent?.session_store ?? "—",
+        status:
+          readyFailed || agent === undefined
+            ? readyFailed
+              ? unavailable()
+              : checking()
+            : readyTag(agent.session_store_ready),
+      },
+      {
+        key: "agent-state",
+        component: "Agent state store",
+        version: agent?.agent_state ?? "—",
+        status:
+          readyFailed || agent === undefined
+            ? readyFailed
+              ? unavailable()
+              : checking()
+            : readyTag(agent.agent_state_ready),
+      },
+      {
+        key: "policy",
+        component: "Policy bundle",
+        version:
+          ready?.policy_rules !== undefined
+            ? `${ready.policy_rules} rule(s)`
+            : "—",
+        status:
+          readyFailed || ready === null ? (
+            readyFailed ? unavailable() : checking()
+          ) : (
+            <Tag color="success" style={TAG_FLAT}>loaded</Tag>
+          ),
+      },
+    ];
+  }, [ready, readyFailed, runtime, runtimeFailed]);
+
   return (
-    <Descriptions column={1} size="small" bordered>
-      <Descriptions.Item label="Platform version">
-        <Tag style={{ margin: 0 }}>{PLATFORM_VERSION}</Tag>
-      </Descriptions.Item>
-      <Descriptions.Item label="API origin">{currentGateway()}</Descriptions.Item>
-      <Descriptions.Item label="Last request id">
-        {lastApiRequestId() ?? (
-          <Typography.Text type="secondary">
-            no request yet this tab
-          </Typography.Text>
-        )}
-      </Descriptions.Item>
-    </Descriptions>
+    <div>
+      <Descriptions column={1} size="small" bordered>
+        <Descriptions.Item label="Platform version">
+          <Tag style={TAG_FLAT}>{PLATFORM_VERSION}</Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="API origin">{currentGateway()}</Descriptions.Item>
+        <Descriptions.Item label="Last request id">
+          {lastApiRequestId() ?? (
+            <Typography.Text type="secondary">
+              no request yet this tab
+            </Typography.Text>
+          )}
+        </Descriptions.Item>
+      </Descriptions>
+      <Typography.Text strong style={{ display: "block", marginTop: 16 }}>
+        Key platform components
+      </Typography.Text>
+      <Typography.Paragraph type="secondary" style={{ margin: "4px 0 8px" }}>
+        Live read from the gateway&apos;s health and runtime endpoints —
+        component versions and readiness at this moment.
+      </Typography.Paragraph>
+      <Table<ComponentRow>
+        size="small"
+        pagination={false}
+        rowKey="key"
+        columns={[
+          { title: "Component", dataIndex: "component", key: "component" },
+          { title: "Version", dataIndex: "version", key: "version" },
+          { title: "Status", dataIndex: "status", key: "status" },
+        ]}
+        dataSource={rows}
+      />
+    </div>
   );
 }
 

@@ -178,10 +178,12 @@ grants.
 
 - **Mine** lists your drafts and published documents; **Published** lists
   every published document visible to your roles, each attributed with
-  *created by …* when the owner is someone else. Rows carry a
-  counts-only summary line (e.g. *2 sessions · 3 decisions · 1
-  execution*) computed at creation — it never contains titles, record
-  ids, or decision outcomes.
+  *created by …* when the owner is someone else. Rows carry a one-line
+  summary: an AI one-liner when the document shipped with a narrative,
+  otherwise a counts-only line (e.g. *2 sessions · 3 decisions · 1
+  execution*) computed at creation — neither contains titles, record
+  ids, or decision outcomes. The detail card repeats the same one-liner
+  at the top of the document.
 - The digest's vocabulary — digest, evidence frame, coverage tiers,
   handover, quiet, provenance — is explained in the
   [Documents and Digest Reference](documents-digest-reference.md); the
@@ -206,8 +208,10 @@ grants.
   digest and narrative panes scroll inside bounded regions with an
   expand affordance. The generated narrative opens expanded under the
   label *AI-generated narrative — from this document's digest facts* —
-  it stays collapsible to the header alone; a failed generation shows a
-  warning instead and the digest stands alone.
+  a short, plain-language shift briefing (at most three paragraphs)
+  written for the relieving operator; it stays collapsible to the
+  header alone; a failed generation shows a warning instead and the
+  digest stands alone.
 - **Export .md** in the document drawer downloads the open document as
   Markdown (metadata, provenance, digest, and the narrative when
   included) for offline handover. Export runs entirely in your browser
@@ -312,7 +316,11 @@ A read-only panel over the portal's own state, visible to everyone
 - **Platform** — the platform version chip value, the API origin the
   portal talks to, and the most recent request id — quote these when
   reporting issues; they correlate directly with logs, traces, and audit
-  events.
+  events. Below sits the **Key platform components** table: a live read
+  of the versions and readiness the gateway reports for the operator
+  portal, platform gateway, agent service, agent runtime (LLM provider
+  and model), session and agent-state stores, and the policy bundle.
+  Rows degrade to *unavailable* when a health probe fails.
 
 The view carries no mutable controls; authorization decisions always come
 from the gateway.

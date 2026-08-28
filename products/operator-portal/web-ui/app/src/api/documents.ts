@@ -29,6 +29,10 @@ export interface OperationDocument {
   // SPEC-041 R-4: creation-time counts-only one-liner derived from the
   // digest's handover skeleton; absent on pre-SPEC-041 documents.
   summary?: string | null;
+  // v0.23.3: AI-generated one-line story extracted from the narrative's
+  // SUMMARY marker; null when prose was not requested, generation
+  // failed, or the model skipped the marker.
+  blurb?: string | null;
 }
 
 // Listing rows are envelope-only: the agent strips digest and prose

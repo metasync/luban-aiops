@@ -117,7 +117,11 @@ class TestCreateDocument:
 
         async def _fake_generate(kernel, document_type, digest):
             calls.append((document_type, digest))
-            return "A quiet shift with no recorded decisions.", "included"
+            return (
+                "A quiet shift with no recorded decisions.",
+                "A quiet shift, nothing to inherit.",
+                "included",
+            )
 
         monkeypatch.setattr(v2_routes, "generate_prose", _fake_generate)
         app_client = TestClient(create_app())
@@ -135,6 +139,8 @@ class TestCreateDocument:
         document = response.json()
         assert document["prose_status"] == "included"
         assert document["prose"].startswith("A quiet shift")
+        # v0.23.3: the AI one-liner rides with the narrative.
+        assert document["blurb"] == "A quiet shift, nothing to inherit."
         assert len(calls) == 1
         assert calls[0][0] == "shift_summary"
         # The prompt contract's sole input: the assembled digest.

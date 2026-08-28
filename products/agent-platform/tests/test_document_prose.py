@@ -18,6 +18,7 @@ from agent_service.services import document_prose
 from agent_service.services.document_prose import (
     build_prose_prompt,
     generate_prose,
+    parse_blurb,
 )
 
 
@@ -77,6 +78,11 @@ class TestPromptContract:
         assert "never introduce record ids, causes, recommendations" in prompt
         # A quiet shift must be reported honestly, not filled in.
         assert "quiet=true" in prompt
+        # v0.23.3 tuning: a human handover voice, a bounded recap, and
+        # the SUMMARY marker that parse_blurb extracts as the one-liner.
+        assert "plain, direct, and human" in prompt
+        assert "at most three short paragraphs" in prompt
+        assert '"SUMMARY:"' in prompt
 
     def test_prompt_never_receives_caller_supplied_text(self) -> None:
         # The signature only accepts the digest: there is no channel
@@ -87,18 +93,44 @@ class TestPromptContract:
 
 class TestGeneration:
     def test_success_returns_included(self) -> None:
-        prose, status = asyncio.run(
+        prose, blurb, status = asyncio.run(
             generate_prose(
-                _FakeKernel(_model_returning([{"type": "text", "text": "Recap: one session."}])),
+                _FakeKernel(
+                    _model_returning(
+                        [{"type": "text", "text": "Recap: one session."}]
+                    )
+                ),
                 "shift_summary",
                 _digest(),
             )
         )
         assert status == "included"
         assert prose == "Recap: one session."
+        # No SUMMARY marker: the whole reply stays prose, no blurb.
+        assert blurb is None
+
+    def test_success_extracts_the_summary_blurb(self) -> None:
+        reply = (
+            "SUMMARY: One restart was approved and ran clean.\n"
+            "The shift investigated the restart and the approver signed\n"
+            "off before it executed."
+        )
+        prose, blurb, status = asyncio.run(
+            generate_prose(
+                _FakeKernel(_model_returning([{"type": "text", "text": reply}])),
+                "shift_summary",
+                _digest(),
+            )
+        )
+        assert status == "included"
+        assert blurb == "One restart was approved and ran clean."
+        assert prose == (
+            "The shift investigated the restart and the approver signed\n"
+            "off before it executed."
+        )
 
     def test_model_build_failure_degrades_to_failed(self) -> None:
-        prose, status = asyncio.run(
+        prose, blurb, status = asyncio.run(
             generate_prose(
                 _FakeKernel(RuntimeError("provider unconfigured")),
                 "shift_summary",
@@ -107,25 +139,26 @@ class TestGeneration:
         )
         assert status == "failed"
         assert prose is None
+        assert blurb is None
 
     def test_model_call_failure_degrades_to_failed(self) -> None:
         async def _call(messages, **kwargs):
             raise RuntimeError("upstream 500")
 
-        prose, status = asyncio.run(
+        prose, blurb, status = asyncio.run(
             generate_prose(_FakeKernel(_call), "shift_summary", _digest())
         )
-        assert (prose, status) == (None, "failed")
+        assert (prose, blurb, status) == (None, None, "failed")
 
     def test_empty_reply_degrades_to_failed(self) -> None:
-        prose, status = asyncio.run(
+        prose, blurb, status = asyncio.run(
             generate_prose(
                 _FakeKernel(_model_returning([{"type": "text", "text": "   "}])),
                 "shift_summary",
                 _digest(),
             )
         )
-        assert (prose, status) == (None, "failed")
+        assert (prose, blurb, status) == (None, None, "failed")
 
     def test_timeout_degrades_to_failed(self, monkeypatch) -> None:
         monkeypatch.setattr(document_prose, "PROSE_TIMEOUT_SECONDS", 0.05)
@@ -134,10 +167,10 @@ class TestGeneration:
             await asyncio.sleep(5)
             return _FakeResponse([{"type": "text", "text": "late"}])
 
-        prose, status = asyncio.run(
+        prose, blurb, status = asyncio.run(
             generate_prose(_FakeKernel(_hang), "shift_summary", _digest())
         )
-        assert (prose, status) == (None, "failed")
+        assert (prose, blurb, status) == (None, None, "failed")
 
     def test_streaming_response_drained(self) -> None:
         class _Stream:
@@ -153,8 +186,49 @@ class TestGeneration:
         async def _call(messages, **kwargs):
             return _Stream()
 
-        prose, status = asyncio.run(
+        prose, blurb, status = asyncio.run(
             generate_prose(_FakeKernel(_call), "shift_summary", _digest())
         )
         assert status == "included"
         assert prose == "part one. part two."
+        assert blurb is None
+
+
+class TestParseBlurb:
+    def test_marker_on_first_line_splits(self) -> None:
+        blurb, prose = parse_blurb("SUMMARY: All quiet.\nNothing else.")
+        assert blurb == "All quiet."
+        assert prose == "Nothing else."
+
+    def test_marker_is_case_insensitive(self) -> None:
+        blurb, prose = parse_blurb("summary: All quiet.\nBody.")
+        assert blurb == "All quiet."
+        assert prose == "Body."
+
+    def test_no_marker_leaves_text_as_prose(self) -> None:
+        blurb, prose = parse_blurb("A plain recap without a marker.")
+        assert blurb is None
+        assert prose == "A plain recap without a marker."
+
+    def test_marker_later_than_first_line_is_ignored(self) -> None:
+        text = "Intro first.\nSUMMARY: late marker."
+        blurb, prose = parse_blurb(text)
+        assert blurb is None
+        assert prose == text
+
+    def test_blurb_is_bounded(self) -> None:
+        long_line = "SUMMARY: " + "x" * 500
+        blurb, prose = parse_blurb(long_line + "\nBody.")
+        assert blurb is not None
+        assert len(blurb) <= document_prose.BLURB_MAX_CHARS
+        assert prose == "Body."
+
+    def test_marker_only_reply_keeps_text_as_prose(self) -> None:
+        blurb, prose = parse_blurb("SUMMARY: Just the one-liner.")
+        assert blurb == "Just the one-liner."
+        # Nothing after the marker: the one-liner stands as the prose
+        # (marker stripped) so the narrative panel never renders empty.
+        assert prose == "Just the one-liner."
+
+    def test_empty_text(self) -> None:
+        assert parse_blurb("") == (None, "")

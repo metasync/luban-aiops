@@ -99,6 +99,11 @@
     "summary": {
       "type": ["string", "null"],
       "description": "Deterministic counts-only one-liner derived from the digest's handover section at creation (SPEC-041 R-4) — covered-session/decision/execution/open-item counts or the quiet phrasing; never titles, record ids, decision outcomes, or narrative text, so it may appear in envelope-only list rows. Absent on documents created before SPEC-041."
+    },
+    "blurb": {
+      "type": ["string", "null"],
+      "maxLength": 240,
+      "description": "AI-generated one-line story extracted from the prose reply's SUMMARY marker (v0.23.3). A bounded, digest-anchored paraphrase of the same material a documents:read holder can retrieve whole via the audited fetch, so it rides envelope-only list rows alongside summary; null when prose was not requested, generation failed, or the model skipped the marker."
     }
   }
 }

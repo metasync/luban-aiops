@@ -209,6 +209,10 @@ class TestPostgresStore:
         assert any(
             "ADD COLUMN IF NOT EXISTS summary" in s for s in sqls
         )
+        # v0.23.3: the additive blurb migration rides initialize too.
+        assert any(
+            "ADD COLUMN IF NOT EXISTS blurb" in s for s in sqls
+        )
         sweep = next(
             call
             for call in calls
@@ -233,6 +237,8 @@ class TestPostgresStore:
         assert isinstance(insert["params"]["digest"], Jsonb)
         # SPEC-041 R-4: the summary lands beside the content fields.
         assert insert["params"]["summary"] is None
+        # v0.23.3: the AI one-liner lands beside the summary.
+        assert insert["params"]["blurb"] is None
         evict = next(
             call for call in executed[1:] if "OFFSET" in call["sql"]
         )
@@ -279,6 +285,7 @@ class TestPostgresStore:
             "narrative text",
             "included",
             "Quiet shift \u2014 no recorded decisions or executions.",
+            "Quiet shift, nothing to inherit.",
         )
         store = PostgresOperationDocumentStore(
             db_url="postgresql://fake", connect=_fake_connect(calls, rows=[row])
@@ -292,6 +299,7 @@ class TestPostgresStore:
         assert record["summary"] == (
             "Quiet shift \u2014 no recorded decisions or executions."
         )
+        assert record["blurb"] == "Quiet shift, nothing to inherit."
 
     def test_list_published_filters_at_the_query(self) -> None:
         calls: list[dict] = []

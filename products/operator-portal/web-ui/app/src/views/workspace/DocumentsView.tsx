@@ -850,6 +850,11 @@ export function buildDocumentMarkdown(document: OperationDocument): string {
     lines.push(`| Published | ${document.published_at} |`);
   }
   lines.push("");
+  if (document.blurb) {
+    // v0.23.3: the AI one-liner leads the export too.
+    lines.push(`> ${document.blurb}`);
+    lines.push("");
+  }
   lines.push("## Provenance");
   lines.push("");
   for (const session of document.provenance?.sessions ?? []) {
@@ -1053,15 +1058,16 @@ export default function DocumentsView({
               {document.state}
             </Tag>
           </div>
-          {document.summary ? (
-            // SPEC-041 R-4: the creation-time counts-only one-liner
-            // gives the list a glimpse of the shift's substance;
-            // pre-SPEC-041 documents degrade to label-only rows.
+          {document.blurb ?? document.summary ? (
+            // v0.23.3: the AI one-liner (extracted from the narrative's
+            // SUMMARY marker) gives the list the shift's story at a
+            // glance; documents without it degrade to the SPEC-041
+            // counts-only summary, then to label-only rows.
             <Typography.Text
               type="secondary"
               style={{ display: "block", fontSize: 12 }}
             >
-              {document.summary}
+              {document.blurb ?? document.summary}
             </Typography.Text>
           ) : null}
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -1176,6 +1182,18 @@ export default function DocumentsView({
               <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
                 Published {dayjs(selected.published_at).fromNow()}
               </Typography.Text>
+            ) : null}
+            {selected.blurb ?? selected.summary ? (
+              // v0.23.3: the one-line story rides the detail card too —
+              // the AI blurb when the narrative carried one, else the
+              // deterministic counts-only summary.
+              <Typography.Paragraph
+                type="secondary"
+                italic
+                style={{ marginBottom: 12 }}
+              >
+                {selected.blurb ?? selected.summary}
+              </Typography.Paragraph>
             ) : null}
             <div
               style={{

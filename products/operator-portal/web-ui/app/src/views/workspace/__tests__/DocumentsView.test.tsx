@@ -481,6 +481,48 @@ describe("DocumentsView list summaries and bounded panes (SPEC-041 R-3, R-4)", (
   });
 });
 
+describe("DocumentsView AI one-liner blurb (v0.23.3)", () => {
+  // The prose SUMMARY marker yields a bounded blurb that rides the
+  // envelope-only list rows and the full document alike.
+  const blurbedDoc: OperationDocument = {
+    ...foreignPublished,
+    document_id: "doc-5",
+    blurb: "A quiet day shift — monitoring only, nothing to inherit.",
+  };
+
+  it("shows the AI blurb in the list row ahead of the counts-only summary", async () => {
+    mockListDocuments.mockResolvedValue([blurbedDoc]);
+    render(<DocumentsView workspace={workspaceStub} />);
+    await flush();
+    expect(
+      screen.getByText("A quiet day shift — monitoring only, nothing to inherit."),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText("Quiet shift — no recorded decisions or executions."),
+    ).toBeNull();
+  });
+
+  it("shows the blurb on the detail card", async () => {
+    mockListDocuments.mockResolvedValue([blurbedDoc]);
+    mockGetDocument.mockResolvedValue(blurbedDoc);
+    render(<DocumentsView workspace={workspaceStub} />);
+    await flush();
+    fireEvent.click(screen.getByText("View"));
+    await flush();
+    expect(
+      screen.getAllByText("A quiet day shift — monitoring only, nothing to inherit.")
+        .length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("leads the Markdown export with the blurb", () => {
+    const markdown = buildDocumentMarkdown(blurbedDoc);
+    expect(markdown).toContain(
+      "> A quiet day shift — monitoring only, nothing to inherit.",
+    );
+  });
+});
+
 describe("buildDocumentMarkdown (SPEC-040 R-4)", () => {
   it("serializes metadata, provenance, digest, and narrative", () => {
     const markdown = buildDocumentMarkdown(foreignPublished);

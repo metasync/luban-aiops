@@ -56,13 +56,19 @@ def make_document(
     prose: str | None,
     prose_status: str,
     summary: str | None = None,
+    blurb: str | None = None,
 ) -> dict[str, Any]:
     """Shape the immutable document row written at creation time.
 
     ``summary`` (SPEC-041 R-4) is the deterministic counts-only
     one-liner derived from the digest's handover section at creation;
     it flows through the envelope-only listing because it discloses
-    counts, never content.
+    counts, never content. ``blurb`` (v0.23.3) is the AI-generated
+    one-line story extracted from the prose reply; it is a bounded
+    digest-anchored paraphrase — the same material a
+    ``documents:read`` holder can retrieve whole via the audited
+    fetch — so it rides the envelope too, while the full digest and
+    prose stay behind the fetch.
     """
     return {
         "document_id": document_id,
@@ -77,6 +83,7 @@ def make_document(
         "prose": prose,
         "prose_status": prose_status,
         "summary": summary,
+        "blurb": blurb,
     }
 
 
@@ -220,7 +227,8 @@ CREATE TABLE IF NOT EXISTS operation_documents (
     digest          JSONB NOT NULL,
     prose           TEXT,
     prose_status    TEXT NOT NULL,
-    summary         TEXT
+    summary         TEXT,
+    blurb           TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_operation_documents_owner
     ON operation_documents (owner_user_id, created_at);
@@ -235,15 +243,22 @@ ALTER TABLE operation_documents
     ADD COLUMN IF NOT EXISTS summary TEXT
 """
 
+# Additive migration (v0.23.3): rows created before the AI one-liner
+# keep NULL and degrade to the deterministic summary in listings.
+_ADD_BLURB_COLUMN = """
+ALTER TABLE operation_documents
+    ADD COLUMN IF NOT EXISTS blurb TEXT
+"""
+
 _INSERT_DOCUMENT = """
 INSERT INTO operation_documents (
     document_id, document_type, state, owner_user_id, label,
-    created_at, provenance, digest, prose, prose_status, summary
+    created_at, provenance, digest, prose, prose_status, summary, blurb
 )
 VALUES (
     %(document_id)s, %(document_type)s, 'draft', %(owner_user_id)s,
     %(label)s, now(), %(provenance)s, %(digest)s, %(prose)s,
-    %(prose_status)s, %(summary)s
+    %(prose_status)s, %(summary)s, %(blurb)s
 )
 ON CONFLICT (document_id) DO NOTHING
 """
@@ -272,7 +287,7 @@ UPDATE operation_documents
 _LOAD_DOCUMENT = """
 SELECT document_id, document_type, state, owner_user_id, label,
        created_at, published_at, provenance, digest, prose, prose_status,
-       summary
+       summary, blurb
   FROM operation_documents
  WHERE document_id = %(document_id)s
 """
@@ -280,7 +295,7 @@ SELECT document_id, document_type, state, owner_user_id, label,
 _LIST_FOR_OWNER = """
 SELECT document_id, document_type, state, owner_user_id, label,
        created_at, published_at, provenance, digest, prose, prose_status,
-       summary
+       summary, blurb
   FROM operation_documents
  WHERE owner_user_id = %(owner_user_id)s
  ORDER BY created_at DESC, document_id DESC
@@ -289,7 +304,7 @@ SELECT document_id, document_type, state, owner_user_id, label,
 _LIST_PUBLISHED = """
 SELECT document_id, document_type, state, owner_user_id, label,
        created_at, published_at, provenance, digest, prose, prose_status,
-       summary
+       summary, blurb
   FROM operation_documents
  WHERE state = 'published'
  ORDER BY created_at DESC, document_id DESC
@@ -343,6 +358,7 @@ def _row_to_document(row: Any) -> dict[str, Any]:
         prose,
         prose_status,
         summary,
+        blurb,
     ) = row
     return {
         "document_id": document_id,
@@ -357,6 +373,7 @@ def _row_to_document(row: Any) -> dict[str, Any]:
         "prose": prose,
         "prose_status": prose_status,
         "summary": summary,
+        "blurb": blurb,
     }
 
 
@@ -395,6 +412,7 @@ class PostgresOperationDocumentStore:
             with conn.cursor() as cur:
                 cur.execute(_OPERATION_DOCUMENTS_DDL)
                 cur.execute(_ADD_SUMMARY_COLUMN)
+                cur.execute(_ADD_BLURB_COLUMN)
                 cur.execute(
                     _SWEEP_EXPIRED,
                     {
@@ -421,6 +439,7 @@ class PostgresOperationDocumentStore:
                         "prose": document["prose"],
                         "prose_status": document["prose_status"],
                         "summary": document.get("summary"),
+                        "blurb": document.get("blurb"),
                     },
                 )
                 cur.execute(

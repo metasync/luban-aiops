@@ -13,6 +13,37 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.23.3 — 2026-08-28
+
+### Added
+
+- **Key platform components table in Settings**: the Platform pane now
+  renders a live component inventory below the platform-version block —
+  operator portal, platform gateway, agent service, agent runtime (LLM
+  provider and model), session store, agent-state store, and policy
+  bundle — read from the gateway's unauthenticated health
+  (`/health/ready`) and runtime-metadata (`/api/v1/runtime`) probes,
+  with versions and readiness; rows degrade to *unavailable* when a
+  probe fails. Locked by SettingsView tests with stubbed probes.
+- **AI one-liner document summaries (blurb)**: narrative generation now
+  also yields a single bounded sentence, stored as the document's
+  `blurb` (additive nullable column and contract property) and rendered
+  on Documents list rows, the detail card, and leading the Markdown
+  export. The blurb inherits the digest's coverage scoping — the digest
+  the model sees is already two-tier with foreign sessions counts-only —
+  so it rides the envelope-only listing without weakening the audit
+  posture; documents without one degrade to the counts-only summary.
+
+### Changed
+
+- **Human-oriented handover prose**: the narrative prompt is retuned to
+  read like an experienced operator briefing the relieving peer — plain,
+  direct language in at most three short paragraphs (~150 words total,
+  down from six), counts woven in only where they carry meaning — while
+  every SPEC-040 R-2 anchoring guardrail holds (digest-only input,
+  section-tied facts, no invented ids/causes/recommendations, honest
+  quiet flag). Locked by the document-prose prompt tests.
+
 ## 0.23.2 — 2026-08-28
 
 ### Changed

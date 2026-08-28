@@ -2,8 +2,8 @@
 // from client-side state — signed-in identity claims, the workspace's
 // selected session (including the explicit no-session state), and the
 // platform surface — and the signed-out state degrades to a prompt.
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionWorkspace } from "../../sessions/useSessionWorkspace";
 import SettingsView from "../control/SettingsView";
 
@@ -42,7 +42,41 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   mockUseAuth.mockReset();
+  vi.unstubAllGlobals();
 });
+
+// The Platform pane probes /health/ready and /api/v1/runtime; stub fetch
+// globally so jsdom never attempts a real network call. Tests opt into
+// fixtures; the default rejects so probes degrade to "unavailable".
+const mockFetch = vi.fn();
+
+beforeEach(() => {
+  mockFetch.mockReset();
+  mockFetch.mockRejectedValue(new Error("network down"));
+  vi.stubGlobal("fetch", mockFetch);
+});
+
+function stubProbes(ready: unknown, runtime: unknown) {
+  mockFetch.mockImplementation(async (url: string) => {
+    const path = String(url);
+    if (path.includes("/health/ready")) {
+      return { ok: true, status: 200, statusText: "OK", json: async () => ready };
+    }
+    if (path.includes("/api/v1/runtime")) {
+      return { ok: true, status: 200, statusText: "OK", json: async () => runtime };
+    }
+    return { ok: false, status: 404, statusText: "Not Found", json: async () => ({}) };
+  });
+}
+
+function signedOutAuth() {
+  mockUseAuth.mockReturnValue({
+    session: null,
+    username: "luban-operator",
+    roles: ["operator"],
+    login: async () => {},
+  });
+}
 
 function workspaceOf(
   overrides: Partial<SessionWorkspace> = {},
@@ -141,17 +175,64 @@ describe("SettingsView (SPEC-030 R-6)", () => {
   });
 
   it("renders the platform pane with version, origin, and request-id state", () => {
-    mockUseAuth.mockReturnValue({
-      session: null,
-      username: "luban-operator",
-      roles: ["operator"],
-      login: async () => {},
-    });
+    signedOutAuth();
     render(<SettingsView workspace={workspaceOf()} />);
 
     openTab("Platform");
     expect(screen.getByText("Platform version")).toBeTruthy();
     expect(screen.getByText("API origin")).toBeTruthy();
     expect(screen.getByText("Last request id")).toBeTruthy();
+  });
+
+  it("lists key platform components from the live health probes", async () => {
+    signedOutAuth();
+    stubProbes(
+      {
+        status: "ok",
+        service: "platform-gateway",
+        version: "0.23.3",
+        agent_service: {
+          status: "ready",
+          runtime_mode: "agentscope",
+          configured: true,
+          session_store: "redis",
+          session_store_ready: true,
+          agent_state: "redis",
+          agent_state_ready: true,
+        },
+        policy_rules: 12,
+      },
+      {
+        runtime_mode: "agentscope",
+        runtime_state: "ready",
+        provider: "luban-llm",
+        model_name: "qwen3-max",
+      },
+    );
+    render(<SettingsView workspace={workspaceOf()} />);
+    openTab("Platform");
+
+    await screen.findByText("Key platform components");
+    await waitFor(() => {
+      expect(screen.getByText("0.23.3")).toBeTruthy();
+    });
+    expect(screen.getByText("Platform gateway")).toBeTruthy();
+    expect(screen.getByText("Agent runtime (LLM)")).toBeTruthy();
+    expect(screen.getByText("qwen3-max")).toBeTruthy();
+    expect(screen.getByText("Session store")).toBeTruthy();
+    expect(screen.getByText("Agent state store")).toBeTruthy();
+    expect(screen.getByText("12 rule(s)")).toBeTruthy();
+  });
+
+  it("degrades the component table to unavailable when probes fail", async () => {
+    signedOutAuth();
+    // Default mockFetch rejects — both probes fail.
+    render(<SettingsView workspace={workspaceOf()} />);
+    openTab("Platform");
+
+    await screen.findByText("Key platform components");
+    await waitFor(() => {
+      expect(screen.getAllByText("unavailable").length).toBeGreaterThan(0);
+    });
   });
 });
