@@ -2,10 +2,10 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: luban-platform-team
 - created: 2026-08-28
-- approved: —
+- approved: 2026-08-28
 - delivered: —
 - release slice: R5 — Hardening and External Consumption (fourth R5 slice)
 - related ADRs: none (extends the SPEC-023 portal framework rebuild's
