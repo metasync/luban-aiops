@@ -20,7 +20,13 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 // surface at the pull that introduces them instead of accumulating
 // silently. Non-deprecation console output passes through untouched.
 const antdDeprecations: string[] = [];
-const DEPRECATION_PATTERN = /\[antd: .+\].*deprecated/i;
+// Covers both antd emission modes: the standard per-component warning
+// (`Warning: [antd: Alert] \`message\` is deprecated …`) and the
+// aggregated batch emitted when a ConfigProvider sets
+// `warning={{ strict: false }}` (`[antd] There exists deprecated usage
+// in your code:`). The optional component segment keeps the strict-mode
+// escape hatch from silently defeating the guard.
+const DEPRECATION_PATTERN = /\[antd(?:: .+)?\].*deprecated/i;
 
 const recordDeprecation =
   (forward: (...args: unknown[]) => void) =>

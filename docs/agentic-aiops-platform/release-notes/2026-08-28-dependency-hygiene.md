@@ -49,17 +49,22 @@ stay at their locked SDK pairing.
 |---|---|---|
 | antd | 6.6.1 | 6.6.2 |
 | @testing-library/react | 16.3.2 | 16.3.3 |
-| @testing-library/dom | 10.4.0 | 10.4.1 |
+| @testing-library/dom | 10.4.1 * | 10.4.1 |
 | typescript | 5.6.3 | 5.9.3 |
 | vite | 6.4.3 | 8.2.2 |
 | @vitejs/plugin-react | 4.7.0 | 6.1.1 |
 | vitest | 3.2.7 | 4.1.11 |
 | jsdom | 25.0.1 | 30.0.1 |
-| @types/node | 22.10.x | 22.20.1 |
+| @types/node | 22.20.1 * | 22.20.1 |
 | @ant-design/x, @ant-design/icons, dayjs | unchanged | already latest stable |
 
-- `engines.node` rises to `>=22.22.2` (jsdom 30's floor); the
-  Dockerfile stays on the `node:22-alpine` line, which satisfies it.
+\* Resolved version was already at this level before the refresh; only
+the declared range rose (`^10.4.0` → `^10.4.1`, `^22.10.0` →
+`^22.20.1`).
+
+- `engines.node` rises to `>=22.22.2` — jsdom 30's floor (its own
+  engine expression, `^22.22.2 || ^24.15.0 || >=26.0.0`, is satisfied
+  by the `node:22-alpine` base, which the Dockerfile keeps).
 - TypeScript 7.x (the native tsgo line) stays parked as too new for a
   safety-critical portal build gate; 5.9.x is the latest stable 5.x.
 

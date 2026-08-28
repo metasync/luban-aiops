@@ -7,6 +7,13 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-28-post-release-review-remediation.md`
+  - same-day patch (v0.24.1) remediating the v0.24.0 review findings:
+    the zero-tolerance vitest deprecation guard broadens to cover
+    antd's aggregated emission mode (`ConfigProvider warning={{ strict:
+    false }}`), plus release-note and tasks.md accuracy polish — test
+    and documentation only; no runtime behavior, actions, event
+    types, or dependency versions change
 - `2026-08-28-dependency-hygiene.md`
   - delivers SPEC-042 (v0.24.0), the fourth R5 slice: the portal
     migrates off every deprecated antd v6 API (**Drawer `width` →

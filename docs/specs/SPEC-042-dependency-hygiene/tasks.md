@@ -2,12 +2,14 @@
 
 ## R-1: Migration off deprecated antd v6 APIs
 
-- [x] Migrate the two `App.tsx` navigation drawers from `width` to
-      `size` (230px, 260px)
+- [x] Migrate the `App.tsx` navigation drawer from `width` to
+      `size` (260px; the 230px figure in the draft inventory is a
+      `Layout.Sider` width, not a deprecated Drawer API)
 - [x] Migrate the `DocumentsView.tsx` document drawer from `width`
       to `size` (560px)
-- [x] Migrate all fifteen `Alert message` sites to `title` across
-      the nine view files
+- [x] Migrate all twenty `Alert message` sites to `title` across
+      the ten view files (the approved inventory counted fifteen;
+      views added in the v0.23.x line raised the total)
 - [x] Grep audit: no `width=` Drawer or `message=` Alert remains
       under `src/`
 - [x] Suite green with zero antd deprecation warnings in the output

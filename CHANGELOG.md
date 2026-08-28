@@ -13,6 +13,29 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.24.1 — 2026-08-28
+
+### Changed
+
+- **Post-release review remediation (v0.24.0 follow-up)** — test and
+  documentation polish only; no runtime behavior, routes, actions,
+  event types, or dependency versions change.
+  - The vitest antd deprecation guard now covers both antd emission
+    modes: its pattern broadens from `[antd: …] … deprecated` to
+    `[antd(: …)?] … deprecated`, so the aggregated batch emitted when
+    a `ConfigProvider` sets `warning={{ strict: false }}` (`[antd]
+    There exists deprecated usage in your code:`) can no longer slip
+    past the zero-tolerance gate. Re-proven by deliberately
+    re-introducing a deprecated prop (suite fails) and reverting
+    (suite green, 18 files / 184 tests).
+  - Release-note accuracy polish: the R-3 table marks the two
+    range-only bumps (`@testing-library/dom`, `@types/node`) whose
+    resolved versions were already current, and the `engines.node`
+    note now states jsdom 30's full engine expression. SPEC-042
+    tasks.md records the delivered R-1 reality (one App.tsx Drawer —
+    the 230px draft-inventory figure was `Layout.Sider`; twenty
+    Alert sites, not fifteen).
+
 ## 0.24.0 — 2026-08-28
 
 ### Changed
