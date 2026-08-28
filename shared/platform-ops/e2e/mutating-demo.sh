@@ -461,10 +461,10 @@ assert card is not None, 'no card for the decided confirmation'
 executions = card.get('executions') or []
 assert executions, 'approved card carries no execution rows'
 row = executions[0]
-# The agent runtime sanitizes gateway tool names (dot -> underscore),
-# so the execution row names the sanitized identifier.
-assert row.get('tool_name') == 'k8s_delete_pod', \
-    'execution row names %r, expected k8s_delete_pod' % row.get('tool_name')
+# v0.23.1: the execution row names the gateway canonical tool name — the
+# one the registry resolves — not the sanitized model-visible identifier.
+assert row.get('tool_name') == 'k8s.delete_pod', \
+    'execution row names %r, expected k8s.delete_pod' % row.get('tool_name')
 assert row.get('status') in ('succeeded', 'failed', 'timeout'), \
     'execution row status is %r, expected a closed receipt status' % row.get('status')
 assert row.get('digest_match') is True, \

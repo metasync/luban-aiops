@@ -52,6 +52,13 @@ class PendingConfirmation:
     # ride the confirmation_request/confirmation_result frames so the portal
     # can flag mutating batches.
     risk_levels: dict = field(default_factory=dict)
+    # Sanitized tool name -> dotted gateway canonical name, captured at park
+    # time from the toolkit. Parked tool calls carry the model-visible
+    # sanitized name (dots become underscores), but the signed execution
+    # envelope and the worker's gateway invocation need the canonical name
+    # the registry knows — without this map an approved mutating call fails
+    # closed with TOOL_NOT_FOUND at the gateway.
+    gateway_names: dict = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
     resolved: bool = False
     # Single-flight guard set by ``claim`` before a decision streams back:
@@ -66,13 +73,17 @@ class PendingConfirmation:
         """Serialize the parked calls for the confirmation_request frame."""
         payload = []
         for tool_call in self.tool_calls:
-            tool_name = str(getattr(tool_call, "name", "") or "")
+            sanitized = str(getattr(tool_call, "name", "") or "")
+            # Emit the gateway canonical name so confirmation cards, durable
+            # records, audit events, and the signed execution envelope all
+            # agree on the name the registry resolves.
+            tool_name = self.gateway_names.get(sanitized, sanitized)
             entry = {
                 "call_id": str(getattr(tool_call, "id", "") or ""),
                 "tool_name": tool_name,
                 "parameters": _parse_parameters(tool_call),
             }
-            risk_level = self.risk_levels.get(tool_name)
+            risk_level = self.risk_levels.get(sanitized)
             if risk_level:
                 entry["risk_level"] = risk_level
                 action = RISK_LEVEL_ACTIONS.get(risk_level)
@@ -142,6 +153,7 @@ class ConfirmationRegistry:
         tool_calls: list,
         timeout: float,
         risk_levels: dict | None = None,
+        gateway_names: dict | None = None,
     ) -> PendingConfirmation:
         pending = PendingConfirmation(
             confirm_id=str(uuid.uuid4()),
@@ -150,6 +162,7 @@ class ConfirmationRegistry:
             reply_id=reply_id,
             tool_calls=list(tool_calls),
             risk_levels=dict(risk_levels or {}),
+            gateway_names=dict(gateway_names or {}),
         )
         self._by_session[session_id] = pending
         return pending

@@ -126,6 +126,32 @@ class BuildRequestsTests(unittest.TestCase):
             self.assertEqual(request["tool_name"], call.name)
             self.assertTrue(verify_envelope(request, request["signature"], KEY))
 
+    def test_envelope_carries_gateway_canonical_tool_name(self) -> None:
+        """The envelope must name the tool the gateway registry resolves.
+
+        Parked calls carry the sanitized model-visible name; the worker
+        invokes the gateway with the envelope's tool_name verbatim, so a
+        sanitized name fails closed with TOOL_NOT_FOUND (v0.23.1 fix).
+        """
+        registry = ConfirmationRegistry()
+        pending = registry.register(
+            "ses-1",
+            "alice",
+            "reply-1",
+            [
+                ToolCallBlock(
+                    id="call-1",
+                    name="k8s_delete_pod",
+                    input='{"name": "web-1"}',
+                )
+            ],
+            600,
+            gateway_names={"k8s_delete_pod": "k8s.delete_pod"},
+        )
+        request = build_requests(pending, "bob-approver", KEY)[0]
+        self.assertEqual(request["tool_name"], "k8s.delete_pod")
+        self.assertTrue(verify_envelope(request, request["signature"], KEY))
+
     def test_args_digest_binds_parked_arguments(self) -> None:
         pending = _parked()
         request = build_requests(pending, "bob-approver", KEY)[0]

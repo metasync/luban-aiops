@@ -46,6 +46,12 @@ TOOL_CALL = ToolCallBlock(
     id="call-1", name="k8s.restart_service", input='{"namespace": "ops"}'
 )
 
+# Parked tool calls carry the model-visible sanitized name (dots become
+# underscores); the gateway canonical name must be restored in payloads.
+SANITIZED_TOOL_CALL = ToolCallBlock(
+    id="call-2", name="k8s_delete_pod", input='{"name": "web-1"}'
+)
+
 
 def _park_event() -> RequireUserConfirmEvent:
     return RequireUserConfirmEvent(reply_id="reply-1", tool_calls=[TOOL_CALL])
@@ -228,6 +234,32 @@ def test_pending_calls_payload_omits_unknown_risk_level() -> None:
     assert "risk_level" not in pending.pending_calls_payload()[0]
 
 
+def test_pending_calls_payload_emits_gateway_canonical_name() -> None:
+    """The parked call carries the sanitized model name; the payload must
+    emit the dotted gateway canonical name so the signed execution
+    envelope resolves at the gateway registry (TOOL_NOT_FOUND regression)."""
+    registry = ConfirmationRegistry()
+    pending = registry.register(
+        "s1", "alice", "r1", [SANITIZED_TOOL_CALL], timeout=600,
+        risk_levels={"k8s_delete_pod": "write"},
+        gateway_names={"k8s_delete_pod": "k8s.delete_pod"},
+    )
+    payload = pending.pending_calls_payload()
+    assert payload[0]["tool_name"] == "k8s.delete_pod"
+    # The risk snapshot stays keyed by the sanitized model name.
+    assert payload[0]["risk_level"] == "write"
+    assert payload[0]["action"] == "tools:mutate"
+
+
+def test_pending_calls_payload_keeps_unmapped_name() -> None:
+    """Without a canonical mapping the parked name flows through as-is."""
+    registry = ConfirmationRegistry()
+    pending = registry.register(
+        "s1", "alice", "r1", [SANITIZED_TOOL_CALL], timeout=600,
+    )
+    assert pending.pending_calls_payload()[0]["tool_name"] == "k8s_delete_pod"
+
+
 def test_pending_calls_payload_carries_bridged_action() -> None:
     """SPEC-030 R-3: risk tiers map to the policy action the confirm
     bridge evaluates; calls without a gateway tier carry no action."""
@@ -341,12 +373,56 @@ def test_confirmation_request_carries_risk_level(monkeypatch):
     assert frame["pending_calls"][0]["risk_level"] == "write"
 
 
+def test_confirmation_request_emits_gateway_canonical_name(monkeypatch):
+    """The confirmation frame must emit the dotted canonical name the
+    gateway registry resolves, not the sanitized model-visible name."""
+    kernel = _configured_kernel()
+    agent = FakeAgent(
+        events=[
+            RequireUserConfirmEvent(
+                reply_id="reply-1", tool_calls=[SANITIZED_TOOL_CALL]
+            )
+        ]
+    )
+    agent.toolkit = SimpleNamespace(
+        tool_groups=[
+            SimpleNamespace(
+                tools=[
+                    _FakeToolkitTool(
+                        "k8s_delete_pod", "write", "k8s.delete_pod"
+                    )
+                ]
+            )
+        ]
+    )
+    _patch_agent(monkeypatch, kernel, agent)
+
+    frames = _drain(
+        kernel.stream_events(
+            message="restart it",
+            request_id="req-1",
+            session_id="s1",
+            user_name="alice",
+        )
+    )
+    frame = [f for f in frames if f.get("type") == "confirmation_request"][0]
+    assert frame["pending_calls"][0]["tool_name"] == "k8s.delete_pod"
+    assert frame["pending_calls"][0]["risk_level"] == "write"
+
+
 class _FakeToolkitTool:
     """Minimal toolkit tool exposing the gateway risk tier attribute."""
 
-    def __init__(self, name: str, risk_level: str) -> None:
+    def __init__(
+        self,
+        name: str,
+        risk_level: str,
+        gateway_tool_name: str | None = None,
+    ) -> None:
         self.name = name
         self.gateway_risk_level = risk_level
+        if gateway_tool_name is not None:
+            self.gateway_tool_name = gateway_tool_name
 
 
 def test_filter_mutating_for_hitl_drops_non_read_when_disabled():

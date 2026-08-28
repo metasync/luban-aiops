@@ -7,6 +7,13 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-28-mutating-tool-name-regression.md`
+  - same-day patch on the SPEC-037/038 signed-execution path (v0.23.1):
+    parked mutating calls carried the sanitized model-visible tool name
+    into the signed envelope, so the execution worker invoked the
+    gateway with `k8s_delete_pod` and every approved `k8s.delete_pod`
+    run failed closed with `TOOL_NOT_FOUND`; the park now emits the
+    dotted canonical name end-to-end — no new actions or event types
 - `2026-08-28-documents-readability-and-digest-reference.md`
   - delivers SPEC-041 (v0.23.0), the third R5 slice: an operator-facing
     digest reference guide, tabbed table-shaped digest rendering in the

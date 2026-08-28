@@ -1018,6 +1018,7 @@ class AgentKernel:
             tool_calls=list(getattr(event, "tool_calls", None) or []),
             timeout=self.settings.hitl_confirm_timeout,
             risk_levels=self._toolkit_risk_map(toolkit),
+            gateway_names=self._toolkit_gateway_name_map(toolkit),
         )
         # SPEC-031 R-1: the durable record is written before the frame
         # below reaches the client, so the card survives re-login and
@@ -1323,6 +1324,24 @@ class AgentKernel:
                 if name and risk:
                     risks[name] = risk
         return risks
+
+    @staticmethod
+    def _toolkit_gateway_name_map(toolkit: object | None) -> dict[str, str]:
+        """Map sanitized tool names to dotted gateway canonical names.
+
+        Parked tool calls carry the model-visible sanitized name, but the
+        signed execution envelope (and the worker's gateway invocation)
+        needs the canonical name the registry resolves; the envelope would
+        otherwise fail closed with TOOL_NOT_FOUND after approval.
+        """
+        names: dict[str, str] = {}
+        for group in getattr(toolkit, "tool_groups", None) or []:
+            for tool in getattr(group, "tools", None) or []:
+                name = getattr(tool, "name", None)
+                gateway_name = getattr(tool, "gateway_tool_name", None)
+                if name and gateway_name:
+                    names[name] = gateway_name
+        return names
 
     @staticmethod
     def _confirmation_message(event: object) -> str:

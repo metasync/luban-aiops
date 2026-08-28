@@ -13,6 +13,22 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.23.1 — 2026-08-28
+
+### Fixed
+
+- **Approved mutating calls reach the gateway under the canonical tool
+  name**: parked tool calls carried the model-visible sanitized name
+  (`k8s_delete_pod`) into the SPEC-037 signed execution envelope, and the
+  SPEC-038 worker invoked the gateway with it verbatim — the registry
+  only knows the dotted canonical name (`k8s.delete_pod`) and answered
+  `TOOL_NOT_FOUND`, so an approved restart never executed. The park now
+  captures the sanitized→canonical map from the toolkit and emits the
+  canonical name, so confirmation cards, durable records, inbox entries,
+  `confirmation_decided` audit details, and signed envelopes all name the
+  tool the registry resolves. Regression covered by new unit tests and
+  the updated `mutating-demo.sh` HITL-leg assertion.
+
 ## 0.23.0 — 2026-08-28
 
 ### Added
