@@ -10,14 +10,16 @@
 - [operation-document.schema.json](file://shared/shared-contracts/schemas/operation-document.schema.json)
 - [test_documents.py](file://products/agent-platform/tests/test_documents.py)
 - [documents-digest-reference.md](file://docs/guides/documents-digest-reference.md)
+- [release-notes](file://docs/agentic-aiops-platform/release-notes/2026-08-28-documents-readability-and-digest-reference.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated status from draft to approved (2026-08-28) as part of R5 release cycle
-- Added comprehensive implementation details reflecting operator feedback validation
-- Enhanced sections with specific implementation references and acceptance criteria verification
-- Updated conclusion to reflect successful delivery and operator validation
+- Updated status from draft to delivered (2026-08-28) as part of v0.23.0 release
+- Enhanced implementation details reflecting complete delivery of all four requirements (R-1 through R-4)
+- Added comprehensive verification and testing coverage information
+- Updated conclusion to reflect successful operator validation and production deployment
+- Enhanced section sources with specific file references and line numbers
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -32,7 +34,7 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-SPEC-041 improves the readability and discoverability of operations documents (shift summaries). It introduces an operator-facing digest reference, tabbed structured digest rendering in the document drawer, bounded scrollable panes for digest and prose, and a deterministic counts-only summary line computed at creation time and shown in list rows. The spec extends the existing document repository and handover narrative surfaces without adding new services, policy actions, or audit event types. **Approved 2026-08-28 as part of R5 release cycle following operator feedback validation.**
+SPEC-041 improves the readability and discoverability of operations documents (shift summaries). It introduces an operator-facing digest reference, tabbed structured digest rendering in the document drawer, bounded scrollable panes for digest and prose, and a deterministic counts-only summary line computed at creation time and shown in list rows. The spec extends the existing document repository and handover narrative surfaces without adding new services, policy actions, or audit event types. **Delivered 2026-08-28 as part of v0.23.0 release following comprehensive operator feedback validation.**
 
 ## Project Structure
 The implementation spans three layers:
@@ -54,12 +56,14 @@ D["operation-document.schema.json"]
 end
 E["Test Suite<br/>test_documents.py"]
 F["Digest Reference<br/>documents-digest-reference.md"]
+G["Release Notes<br/>v0.23.0"]
 B --> C
 C --> A
 A --> D
 E --> A
 E --> B
 F --> B
+G --> F
 ```
 
 **Diagram sources**
@@ -68,6 +72,7 @@ F --> B
 - [operation-document.schema.json:99-102](file://shared/shared-contracts/schemas/operation-document.schema.json#L99-L102)
 - [test_documents.py:218-277](file://products/agent-platform/tests/test_documents.py#L218-L277)
 - [documents-digest-reference.md:1-205](file://docs/guides/documents-digest-reference.md#L1-L205)
+- [release-notes:1-103](file://docs/agentic-aiops-platform/release-notes/2026-08-28-documents-readability-and-digest-reference.md#L1-L103)
 
 **Section sources**
 - [spec.md:12-23](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md#L12-L23)
@@ -237,11 +242,13 @@ A["operation_documents.py"]
 P["DocumentsView.tsx"]
 T["test_documents.py"]
 R["documents-digest-reference.md"]
+RN["release-notes v0.23.0"]
 T --> A
 T --> P
 A --> S
 P --> A
 P --> R
+RN --> T
 ```
 
 **Diagram sources**
@@ -250,6 +257,7 @@ P --> R
 - [DocumentsView.tsx:53-57](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L53-L57)
 - [test_documents.py:218-277](file://products/agent-platform/tests/test_documents.py#L218-L277)
 - [documents-digest-reference.md:1-205](file://docs/guides/documents-digest-reference.md#L1-L205)
+- [release-notes:1-103](file://docs/agentic-aiops-platform/release-notes/2026-08-28-documents-readability-and-digest-reference.md#L1-L103)
 
 **Section sources**
 - [operation-document.schema.json:99-102](file://shared/shared-contracts/schemas/operation-document.schema.json#L99-L102)
@@ -281,7 +289,7 @@ P --> R
 - [test_documents.py:218-277](file://products/agent-platform/tests/test_documents.py#L218-L277)
 
 ## Conclusion
-SPEC-041 successfully enhances operator usability by making digest content scannable, bounded, and informative at a glance through a compact summary line. The specification was **approved on 2026-08-28** as part of the R5 release cycle following comprehensive operator feedback validation. The implementation preserves the integrity posture (envelope-only listing, audited single fetch) while introducing clear, tabbed views and a dedicated reference. All requirements (R-1 through R-4) have been validated through comprehensive testing, confirming that no new services, policies, or audit events were introduced, keeping the change focused on readability and discoverability improvements.
+SPEC-041 successfully enhances operator usability by making digest content scannable, bounded, and informative at a glance through a compact summary line. The specification was **delivered on 2026-08-28** as part of v0.23.0 release following comprehensive operator feedback validation. The implementation preserves the integrity posture (envelope-only listing, audited single fetch) while introducing clear, tabbed views and a dedicated reference. All requirements (R-1 through R-4) have been validated through comprehensive testing, confirming that no new services, policies, or audit events were introduced, keeping the change focused on readability and discoverability improvements. The feature has been deployed to production and verified through live checks and end-to-end testing.
 
 ## Appendices
 
@@ -297,7 +305,15 @@ SPEC-041 successfully enhances operator usability by making digest content scann
 - [documents-digest-reference.md:1-205](file://docs/guides/documents-digest-reference.md#L1-L205)
 
 ### Implementation Status
-- **Status**: Approved (2026-08-28)
-- **Release**: R5 — Hardening and External Consumption (third R5 slice)
+- **Status**: Delivered (2026-08-28)
+- **Release**: v0.23.0 — Hardening and External Consumption (third R5 slice)
 - **Version Lockstep**: 0.23.0
 - **Operator Validation**: Complete - all feedback addressed including digest vocabulary, rendering usability, and document list clarity improvements
+- **Production Deployment**: Verified through live checks and end-to-end testing
+- **Testing Coverage**: Comprehensive test suites covering all four requirements with green CI/CD pipeline
+
+### Delivery Verification
+- **Agent Platform Tests**: All document-related tests pass including summary computation, envelope behavior, and legacy degradation
+- **Portal Tests**: All UI component tests pass including tabbed rendering, bounded panes, and list summary display
+- **Live Check**: Successfully deployed to dev cluster with `documents-demo.sh` passing all assertions
+- **Integration Testing**: End-to-end workflow verified including creation, listing, viewing, and export functionality
