@@ -1,10 +1,11 @@
-# SPEC-042: Platform Dependency Hygiene Specification
+# SPEC-042: Portal Dependency Hygiene Specification
 
 <cite>
 **Referenced Files in This Document**
 - [spec.md](file://docs/specs/SPEC-042-dependency-hygiene/spec.md)
 - [plan.md](file://docs/specs/SPEC-042-dependency-hygiene/plan.md)
 - [tasks.md](file://docs/specs/SPEC-042-dependency-hygiene/tasks.md)
+- [delivery-roadmap.md](file://docs/agentic-aiops-platform/delivery-roadmap.md)
 - [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
 - [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
 - [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
@@ -20,12 +21,10 @@
 
 ## Update Summary
 **Changes Made**
-- Expanded scope from portal-only to comprehensive platform-wide dependency hygiene
-- Added backend Python services dependency management (R-5)
-- Included lockfile maintenance across all eight Python products
-- Added cryptography cap adjudication process
-- Enhanced verification requirements for agentscope kernel updates
-- Updated impact assessment to include backend services
+- Updated specification status from draft to approved (2026-08-28)
+- Added delivery roadmap reference showing approval status and pending delivery as part of 0.24.0 fourth R5 slice
+- Enhanced scope documentation to reflect comprehensive platform-wide dependency hygiene approach
+- Updated acceptance criteria and verification processes for approved implementation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -40,20 +39,21 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document specifies the comprehensive platform dependency hygiene effort for SPEC-042. The scope has been expanded from portal-specific antd migrations to include both frontend and backend dependency management across the entire Luban AIOps platform. The work encompasses migrating deprecated antd v6 APIs in the operator portal, adding deprecation regression guards, performing managed refreshes of major toolchain dependencies including React 19, and re-locking all backend Python services to their latest stable versions within declared ranges.
+This document specifies the comprehensive platform dependency hygiene effort for SPEC-042, which has been **approved** as of 2026-08-28. The scope encompasses both frontend and backend dependency management across the entire Luban AIOps platform, extending beyond the original portal-specific antd migrations to include comprehensive backend Python services dependency management.
 
-The spec defines five requirements:
+The approved specification defines five requirements:
 - R-1: Migrate deprecated antd v6 APIs (Drawer width → size; Alert message → title).
 - R-2: Add a vitest guard that fails the suite when any antd deprecation warning appears.
 - R-3: Managed refresh of portal adopt-set packages with consistent lockfiles and build gates.
 - R-4: Adopt React 19 with behavior-preserving changes only.
 - R-5: Backend stable-channel lockfile refresh across all eight Python products with cryptography cap adjudication.
 
-Acceptance criteria emphasize zero antd deprecation warnings in test output, green type-checking and builds, unchanged visual/behavioral outcomes, and verified backend service stability after dependency updates.
+**Updated** The specification is now approved and pending delivery as part of the 0.24.0 fourth R5 slice, with comprehensive acceptance criteria emphasizing zero antd deprecation warnings in test output, green type-checking and builds, unchanged visual/behavioral outcomes, and verified backend service stability after dependency updates.
 
 **Section sources**
+- [spec.md:3-13](file://docs/specs/SPEC-042-dependency-hygiene/spec.md#L3-L13)
 - [spec.md:15-62](file://docs/specs/SPEC-042-dependency-hygiene/spec.md#L15-L62)
-- [spec.md:63-196](file://docs/specs/SPEC-042-dependency-hygiene/spec.md#L63-L196)
+- [delivery-roadmap.md:333](file://docs/agentic-aiops-platform/delivery-roadmap.md#L333)
 
 ## Project Structure
 SPEC-042 targets both the operator portal web application and all backend Python services across the platform. The relevant surfaces include:
@@ -383,8 +383,6 @@ The comprehensive dependency hygiene effort considers performance implications a
 - Frozen sync approach ensures consistent dependency resolution
 - Live verification processes validate performance across critical paths
 
-[No sources needed since this section provides general guidance based on the comprehensive scope]
-
 ## Troubleshooting Guide
 Comprehensive troubleshooting procedures for both frontend and backend dependency issues:
 
@@ -413,13 +411,11 @@ Comprehensive troubleshooting procedures for both frontend and backend dependenc
 - [tasks.md:15-76](file://docs/specs/SPEC-042-dependency-hygiene/tasks.md#L15-L76)
 
 ## Conclusion
-SPEC-042 establishes a comprehensive platform-wide dependency hygiene approach that extends far beyond the original portal-only scope. The specification successfully addresses both frontend and backend dependency management through coordinated migration of deprecated antd APIs, implementation of deprecation regression guards, managed refresh of toolchain dependencies including React 19, and systematic re-locking of all backend Python services to their latest stable versions.
+SPEC-042 establishes a comprehensive platform-wide dependency hygiene approach that extends far beyond the original portal-only scope. The **approved** specification successfully addresses both frontend and backend dependency management through coordinated migration of deprecated antd APIs, implementation of deprecation regression guards, managed refresh of toolchain dependencies including React 19, and systematic re-locking of all backend Python services to their latest stable versions.
 
-The work preserves behavioral integrity while strengthening long-term maintainability across the entire Luban AIOps platform. By adopting a disciplined approach to dependency management that includes cryptography cap adjudication, agentscope kernel updates with enhanced verification, and comprehensive live checking of critical paths, SPEC-042 sets a foundation for sustainable platform evolution.
+As an **approved** specification pending delivery as part of the 0.24.0 fourth R5 slice, SPEC-042 sets a foundation for sustainable platform evolution through disciplined dependency management that includes cryptography cap adjudication, agentscope kernel updates with enhanced verification, and comprehensive live checking of critical paths.
 
 The expansion from portal-specific to platform-wide scope demonstrates the interconnected nature of modern platform architectures and the importance of coordinated dependency management strategies that consider both user-facing interfaces and backend service stability.
-
-[No sources needed since this section summarizes without analyzing specific files]
 
 ## Appendices
 **Verification Checklist:**
@@ -438,7 +434,13 @@ The expansion from portal-specific to platform-wide scope demonstrates the inter
 - Security: Enhanced verification burden for agentscope kernel bump and cryptography cap review
 - Operations: Living-state docs require updates including CHANGELOG, release notes, configuration reference, spec index, and delivery roadmap
 
+**Delivery Status:**
+- **Status**: Approved (2026-08-28)
+- **Delivery**: Pending as part of 0.24.0 fourth R5 slice
+- **Related ADRs**: Extends SPEC-023 portal framework rebuild's technology choices; honors ADR-0002's AgentScope kernel position
+
 **Section sources**
 - [plan.md:96-116](file://docs/specs/SPEC-042-dependency-hygiene/plan.md#L96-L116)
 - [spec.md:266-282](file://docs/specs/SPEC-042-dependency-hygiene/spec.md#L266-L282)
 - [tasks.md:65-76](file://docs/specs/SPEC-042-dependency-hygiene/tasks.md#L65-L76)
+- [delivery-roadmap.md:333](file://docs/agentic-aiops-platform/delivery-roadmap.md#L333)
