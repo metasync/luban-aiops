@@ -27,6 +27,8 @@
 ## Introduction
 This document specifies the incident report document type for the operations document repository. It extends the existing typed-document substrate with a new `incident_report` type that assembles a durable, attributed snapshot from incident-service and the platform’s session store. The slice is read-only with respect to incident state, reuses existing policy actions through a combined gate, and inherits the draft→publish lifecycle, role-based access, digest anchoring, and prose layer semantics already established for shift summaries.
 
+SPEC-043 was **delivered** on 2026-08-29 as v0.25.0, the fifth R5 slice: the contract extension, the agent-platform assembler and incident client (`agent_service/services/incident_report.py`, `agent_service/services/incident_client.py`), the gateway dual-action gate with typed payload forwarding, the digest-anchored prose extension, and the portal create-dialog/drawer support all shipped together with the version lockstep to 0.25.0 and the living-docs updates. No new policy actions and no new audit event types were introduced; `document_created` gained the covered `incident_id` as provenance for the new type.
+
 Key outcomes:
 - A new document type with a deterministic digest composed of incident envelope, triage report or marker, connector dispatch outcomes, and linked session digest under two-tier coverage.
 - An internal client leg in agent-platform to fetch incident facts via incident-service using an existing Basic query credential posture.
