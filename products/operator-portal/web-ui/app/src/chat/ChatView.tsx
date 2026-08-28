@@ -510,7 +510,7 @@ function TurnGroup({
         )}
       />
       {turn.error ? (
-        <Alert type="error" showIcon message={turn.error} />
+        <Alert type="error" showIcon title={turn.error} />
       ) : null}
       {/* Evidence panel renders whenever a turn carries tool frames —
           live streams and replayed (SPEC-025) evidence share this path. */}
@@ -603,7 +603,7 @@ function SessionPanel({
         <Alert
           type="warning"
           showIcon
-          message={error}
+          title={error}
           style={{ margin: 8 }}
         />
       ) : null}
@@ -1096,7 +1096,7 @@ export default function ChatView({
             <Alert
               type="warning"
               showIcon
-              message={speech.error}
+              title={speech.error}
               style={{ marginBottom: 8 }}
             />
           ) : null}
@@ -1187,7 +1187,7 @@ export default function ChatView({
           <Alert
             type="error"
             showIcon
-            message={renameError}
+            title={renameError}
             style={{ marginBottom: 12 }}
           />
         ) : null}

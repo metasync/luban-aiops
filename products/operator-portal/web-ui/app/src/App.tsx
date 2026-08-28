@@ -277,7 +277,7 @@ function SidebarContent({
           )}
         </div>
         {authError && !collapsed ? (
-          <Alert type="error" showIcon message={authError} />
+          <Alert type="error" showIcon title={authError} />
         ) : null}
       </div>
     </>
@@ -391,7 +391,7 @@ export default function App() {
           the drawer adds the full labeled menu on demand. */}
       <Drawer
         placement="left"
-        width={260}
+        size={260}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         styles={{ body: { padding: 0 } }}

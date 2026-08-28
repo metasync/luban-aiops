@@ -37,7 +37,7 @@ function IdentityPane() {
         type="info"
         showIcon
         icon={<UserOutlined />}
-        message="You are signed out"
+        title="You are signed out"
         description="Sign in to see the identity claims carried by your auth session."
         action={
           <Button

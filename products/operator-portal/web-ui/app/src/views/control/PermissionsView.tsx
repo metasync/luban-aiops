@@ -54,7 +54,7 @@ export default function PermissionsView() {
   }, []);
 
   if (error) {
-    return <Alert type="error" showIcon message={error} />;
+    return <Alert type="error" showIcon title={error} />;
   }
 
   const actions = payload?.actions ?? [];

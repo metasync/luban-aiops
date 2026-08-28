@@ -102,7 +102,7 @@ export default function SkillsView() {
         <Button onClick={() => void load(source, tag)}>Apply</Button>
       </div>
       {error ? (
-        <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />
+        <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />
       ) : null}
       <Spin spinning={loading}>
         {payload && skills.length === 0 ? (

@@ -274,8 +274,12 @@ describe("useApprovalsInbox (SPEC-031 R-5)", () => {
       expect(result.current.pending).toHaveLength(1);
     });
     await result.current.refresh();
+    // React 19 flushes the hook's error state asynchronously after the
+    // rejected refresh settles; observe it through waitFor.
+    await waitFor(() => {
+      expect(result.current.error).toContain("gateway 502");
+    });
     expect(result.current.pending).toHaveLength(1);
-    expect(result.current.error).toContain("gateway 502");
   });
 
   // SPEC-036 R-5: page navigation refetches with the new offset.
@@ -297,7 +301,12 @@ describe("useApprovalsInbox (SPEC-031 R-5)", () => {
   // SPEC-036 R-5: a decision leaves the pending queue and appears on
   // the first history page immediately, ahead of the server resync.
   it("moves a decided record onto the first history page", async () => {
-    mockGetInbox.mockResolvedValue(inboxPayload([recordOf()], [], 0));
+    // The resync refresh after the decision stays in flight (never
+    // resolves) so the test observes the optimistic move alone — the
+    // server truth takes over only once the durable store settles.
+    mockGetInbox
+      .mockResolvedValueOnce(inboxPayload([recordOf()], [], 0))
+      .mockReturnValueOnce(new Promise(() => {}));
     mockOpenStream.mockResolvedValue({ requestId: "req-1", chunks: [] });
     mockConsumeStream.mockImplementation(
       async (_chunks: unknown, onEvent: (event: unknown) => void) => {
@@ -315,7 +324,10 @@ describe("useApprovalsInbox (SPEC-031 R-5)", () => {
       expect(result.current.pendingCount).toBe(1);
     });
     await result.current.decide("cf-1", "approve");
-    expect(result.current.pendingCount).toBe(0);
+    // React 19 flushes the move asynchronously after decide settles.
+    await waitFor(() => {
+      expect(result.current.pendingCount).toBe(0);
+    });
     expect(result.current.history[0]?.confirm_id).toBe("cf-1");
     expect(result.current.history[0]?.status).toBe("approved");
     expect(result.current.historyTotal).toBe(1);

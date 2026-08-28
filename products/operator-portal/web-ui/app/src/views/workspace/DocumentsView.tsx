@@ -250,7 +250,7 @@ function HandoverTab({ handover }: { handover: DigestMap }) {
         <Alert
           type="info"
           showIcon
-          message="Quiet shift"
+          title="Quiet shift"
           description="No decisions or executions were recorded across this document's coverage."
           style={{ marginBottom: 12 }}
         />
@@ -621,7 +621,7 @@ function ProsePanel({ document }: { document: OperationDocument }) {
       <Alert
         type="warning"
         showIcon
-        message="Narrative generation failed"
+        title="Narrative generation failed"
         description="The digest above is the complete record; the generated handover narrative could not be produced."
       />
     );
@@ -763,7 +763,7 @@ function CreateShiftSummaryDialog({
         <Alert
           type="error"
           showIcon
-          message={error}
+          title={error}
           style={{ marginBottom: 12 }}
         />
       ) : null}
@@ -1119,7 +1119,7 @@ export default function DocumentsView({
         ]}
       />
       {error ? (
-        <Alert type="warning" showIcon message={error} style={{ marginBottom: 8 }} />
+        <Alert type="warning" showIcon title={error} style={{ marginBottom: 8 }} />
       ) : null}
       {loading && documents.length === 0 ? (
         <div style={{ padding: 24, textAlign: "center" }}>
@@ -1146,7 +1146,7 @@ export default function DocumentsView({
         title={selected ? selected.label : "Document"}
         open={selectedId !== null}
         onClose={() => setSelectedId(null)}
-        width={560}
+        size={560}
         extra={
           selected ? (
             <Tooltip title="Download this document as Markdown for offline use">

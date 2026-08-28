@@ -208,7 +208,7 @@ export default function IncidentsView({
       <Alert
         type="info"
         showIcon
-        message="The incidents view requires an incident-visible role."
+        title="The incidents view requires an incident-visible role."
       />
     );
   }
@@ -341,7 +341,7 @@ export default function IncidentsView({
             />
           </div>
           {formError ? (
-            <Alert type="error" showIcon message={formError} />
+            <Alert type="error" showIcon title={formError} />
           ) : null}
           <div className="view-toolbar">
             <Button
@@ -357,7 +357,7 @@ export default function IncidentsView({
         </div>
       ) : null}
       {error ? (
-        <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />
+        <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />
       ) : null}
       <Spin spinning={loading}>
         {incidents.length === 0 && !loading ? (
@@ -475,7 +475,7 @@ function IncidentDetail({
         </Typography.Paragraph>
       ) : null}
       {error ? (
-        <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />
+        <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />
       ) : null}
       <div className="view-toolbar" style={{ marginTop: 12 }}>
         {canAct ? (

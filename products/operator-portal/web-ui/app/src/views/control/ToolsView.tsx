@@ -36,7 +36,7 @@ export default function ToolsView() {
   }, []);
 
   if (error) {
-    return <Alert type="error" showIcon message={error} />;
+    return <Alert type="error" showIcon title={error} />;
   }
 
   const columns: TableColumnsType<CatalogTool> = [

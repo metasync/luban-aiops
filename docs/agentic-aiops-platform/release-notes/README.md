@@ -7,6 +7,18 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-28-dependency-hygiene.md`
+  - delivers SPEC-042 (v0.24.0), the fourth R5 slice: the portal
+    migrates off every deprecated antd v6 API (**Drawer `width` →
+    `size`**, **Alert `message` → `title`**) behind a zero-tolerance
+    vitest deprecation guard, applies the managed refresh adopt set
+    (**TypeScript 5.9, vite 8 + plugin-react 6, vitest 4, jsdom 30**,
+    `engines.node >=22.22.2`) and the **React 19** migration with a
+    behavioral gate, and all eight backend products re-lock inside
+    their declared ranges (**agentscope 2.0.7.post1**, fastapi 0.141.1,
+    uvicorn 0.52.4, cryptography caps raised to 50.x after the
+    signing call-site review) — latest stable only, no beta/RC; no new
+    routes, actions, event types, or audit changes
 - `2026-08-28-components-tech-stack-and-status.md`
   - same-day follow-up polish (v0.23.4) on the Settings component
     table: rows now list the **tech stack underneath** each component

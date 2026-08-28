@@ -2,11 +2,11 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-28
 - approved: 2026-08-28
-- delivered: —
+- delivered: 2026-08-28 (v0.24.0)
 - release slice: R5 — Hardening and External Consumption (fourth R5 slice)
 - related ADRs: none (extends the SPEC-023 portal framework rebuild's
   technology choices; honors ADR-0002's AgentScope kernel position in
@@ -301,3 +301,20 @@ Acceptance criteria:
   fastapi/uvicorn in-range floats, cryptography cap adjudication,
   redis/elasticsearch caps parked with reasons). Directory renamed
   `SPEC-042-portal-dependency-hygiene` → `SPEC-042-dependency-hygiene`.
+- 2026-08-28: delivered as v0.24.0 (fourth R5 slice). Delivery notes:
+  (a) R-1 migrated two `Drawer width` sites (the 230px figure in the
+  approved inventory is `App.tsx`'s `Layout.Sider`, not a Drawer, and
+  is not deprecated) and twenty `Alert message` sites across ten view
+  files — the inventory's fifteen preceded five sites shipped in the
+  v0.23.x line; (b) R-3 resolved antd 6.6.2, @testing-library/react
+  16.3.3 + dom 10.4.1, TypeScript 5.9.3, vite 8.2.2 + plugin-react
+  6.1.1, vitest 4.1.11, jsdom 30.0.1, @types/node 22.20.1 with
+  `engines.node >=22.22.2`; (c) R-4 landed React 19.2.8 — the only
+  forced edits were two `useApprovalsInbox` test-timing fixes for
+  React 19's asynchronous state flushes (no production code changed);
+  (d) R-5 adjudicated the cryptography caps up (`>=43.0,<51.0`,
+  locking 50.0.1) — the JWT/signing call sites use only the long-stable
+  RSA/serialization surface — while redis (`<7.0`) and elasticsearch
+  (`<9.0`) stayed parked per the recorded reasons, and the agentscope
+  2.0.7.post1 kernel bump carried the full verify gate plus the live
+  chat/HITL/mutating check.

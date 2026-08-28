@@ -13,6 +13,54 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.24.0 — 2026-08-28
+
+### Changed
+
+- **SPEC-042 dependency hygiene (fourth R5 slice)** — dependency-only
+  release; no routes, actions, event types, or execution paths change.
+  - **Portal antd deprecation migration (R-1)**: every deprecated antd
+    v6 API the portal uses moves to its non-deprecated form — the two
+    navigation/document `Drawer`s take `size` (260px / 560px) instead
+    of `width`, and every `Alert` site takes `title` instead of
+    `message` (`description` stays — it is not deprecated). The vitest
+    suite now emits zero antd deprecation warnings with no visual,
+    routing, or state behavior change.
+  - **Zero-tolerance deprecation regression guard (R-2)**: the vitest
+    setup intercepts console output and fails the suite at teardown
+    when any `[antd: …] … deprecated` warning appears, pointing at the
+    offending text — future deprecations surface at the pull that
+    introduces them. Non-deprecation console output passes through
+    untouched.
+  - **Managed portal refresh (R-3)**: the adopt set from the
+    2026-08-28 upgrade check lands on latest stable — antd 6.6.2,
+    @testing-library/react 16.3.3 + dom 10.4.1, TypeScript 5.9.3 (the
+    7.x native line stays parked), vite 8.2.2 paired with
+    @vitejs/plugin-react 6.1.1, vitest 4.1.11, jsdom 30.0.1,
+    @types/node 22.20.1 — and `engines.node` rises to `>=22.22.2`
+    (jsdom 30's floor; the Dockerfile stays on the `node:22-alpine`
+    line). No resolved version is a prerelease.
+  - **React 19 (R-4)**: react / react-dom move to stable 19.2.8 with
+    @types/react 19.2.18 and @types/react-dom 19.2.5 — every portal
+    peer already declared React 19 support, so the gate was
+    behavioral: full suite, `tsc --noEmit`, production build, and the
+    live walkthrough. Two `useApprovalsInbox` hook tests gained
+    React 19 state-flush timing fixes (waitFor around the asynchronous
+    error/move flushes and a deferred resync mock); no production code
+    changed for React 19.
+  - **Backend stable-channel re-lock (R-5)**: all eight Python
+    products re-lock inside their declared ranges at the latest stable
+    — agentscope 2.0.6 → 2.0.7.post1 (PEP 440 post-release, verified
+    like a kernel: full `make verify` plus a live chat/HITL/mutating
+    check), fastapi → 0.141.1, uvicorn → 0.52.4. The cryptography caps
+    in the six declaring products rise `>=43.0,<45.0` → `>=43.0,<51.0`
+    after the JWT/signing call-site review found only the long-stable
+    RSA/serialization surface (locking 50.0.1); redis (`<7.0`) and
+    elasticsearch (`<9.0`) caps stay parked with their recorded
+    reasons. The OTel instrumentation packages remain at their locked
+    0.65b0 / SDK 1.44.0 pairing — the single recorded stable-channel
+    exception.
+
 ## 0.23.4 — 2026-08-28
 
 ### Changed

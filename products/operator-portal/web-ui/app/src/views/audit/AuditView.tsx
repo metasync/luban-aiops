@@ -121,7 +121,7 @@ export default function AuditView() {
       <Alert
         type="info"
         showIcon
-        message="The audit trail requires the auditor or platform-admin role."
+        title="The audit trail requires the auditor or platform-admin role."
       />
     );
   }
@@ -208,7 +208,7 @@ export default function AuditView() {
         <Button onClick={() => void load(false)}>Refresh</Button>
       </div>
       {error ? (
-        <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />
+        <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />
       ) : null}
       <Spin spinning={loading}>
         {loaded && events.length === 0 ? (

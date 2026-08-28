@@ -363,7 +363,7 @@ export default function ApprovalsView({
         <Alert
           type="warning"
           showIcon
-          message={inbox.error}
+          title={inbox.error}
           style={{ marginBottom: 12 }}
         />
       ) : null}
