@@ -1,1 +1,0 @@
-Python + uv + pytest for all backend services; Docker + kustomize for containerization and GitOps deployment; JSON Schema for cross-service API/event contracts; YAML-based policy bundles validated centrally; OpenTelemetry/Prometheus metrics following shared observability conventions defined in `shared/shared-contracts/observability-conventions.md`.

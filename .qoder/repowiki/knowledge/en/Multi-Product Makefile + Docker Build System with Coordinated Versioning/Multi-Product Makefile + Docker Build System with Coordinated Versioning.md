@@ -9,61 +9,63 @@ source_files:
     - mk/defaults.mk
     - mk/image.mk
     - mk/python.mk
+    - VERSION
     - shared/base-images/base-uv/Dockerfile
-    - products/platform-gateway/Makefile
-    - products/platform-gateway/Dockerfile
+    - products/agent-platform/Makefile
+    - products/agent-platform/Dockerfile
     - shared/shared-contracts/scripts/validate_version.py
     - shared/shared-contracts/scripts/validate_policy.py
-    - VERSION
+    - shared/platform-ops/gitops/dev-k8s/deploy.sh
+    - shared/platform-ops/gitops/dev-k8s/.images.env
 ---
 
-## What system/approach is used
+## Overview
 
-The repository uses a **GNU make-based multi-product build** that coordinates Python packaging (via `uv`), container image builds (via `docker`), and GitOps overlay rendering (via `kustomize`). There is no CI pipeline file in `.github/`; the root `Makefile` defines a single verification gate (`make verify`) intended to run identically locally and under any CI, as documented in its header comment.
+The repository uses a **Makefile-driven, multi-product build system** centered on a root `Makefile` that orchestrates per-product Python builds (via `uv`) and container image creation (via `docker`). All shared logic is factored into reusable fragments under `mk/`, while each product in `products/<name>/` declares only its identity (`IMAGE_NAME`, `pyproject.toml`, `Dockerfile`) and includes the shared fragments.
 
-Key tools:
-- `make` (GNU make) — orchestration layer at root and per-product level
-- `uv` — Python dependency resolver and runner; all products use `uv sync --frozen` against a pinned `uv.lock`
-- `docker` — container image builder for every product
-- `kustomize` — renders GitOps overlays under `shared/platform-ops/gitops`
-- `hadolint` — Dockerfile linting (with a docker-run fallback)
-- A custom Python script `shared/shared-contracts/scripts/validate_version.py` — enforces version lockstep across the workspace
+## Core Components
 
-## Key files and packages
+### Root orchestration (`Makefile`)
+- Declares two product lists: `PYTHON_PRODUCTS` (8 services) and `IMAGE_PRODUCTS` (same plus `operator-portal`).
+- Single source of truth for the platform version lives in the root `VERSION` file; it is read at parse time as `PLATFORM_VERSION` and used to compose the coordinated image tag.
+- Image tag computation: `<semver>-<prefix>[-<profile>]-<gitsha>` for clean trees, or `<...>-dirty-<timestamp>` when `git status --porcelain` reports changes. The prefix/profile come from `IMAGE_TAG_PREFIX` / `IMAGE_TAG_PROFILE` (default `dev-k8s`).
+- After building all images, writes `.images.env` under `shared/platform-ops/gitops/dev-k8s/` containing every service image reference tagged with the coordinated `IMAGE_TAG`; this file is consumed by `make deploy`.
+- Provides cross-cutting targets: `sync`, `test`, `lint`, `base-images`, `build`, `push`, `overlays` (kustomize build checks), `verify` (gate combining tests + overlays + policy validation + version lockstep), `deploy`, `e2e`, `clean`.
+- Policy synchronization: `make sync-policy` copies `shared/shared-contracts/policies/policy-default.yaml` into both gateway consumers and the GitOps overlay base.
 
-- Root orchestrator: `Makefile` — declares `PYTHON_PRODUCTS`, `IMAGE_PRODUCTS`, computes a coordinated `IMAGE_TAG` from `VERSION` + git SHA + dirty flag, and delegates to per-product Makefiles via `$(MAKE) -C products/$$p ...`
-- Shared fragments in `mk/`:
-  - `mk/defaults.mk` — single source of overridable defaults (`IMAGE_PLATFORM`, `REGISTRY`, `BASE_UV_*`, `AUTO_LOAD_KIND`, etc.) included by both root and product builds
-  - `mk/image.mk` — shared `build` / `push` / `lint` targets; resolves `IMAGE_REF` based on whether `REGISTRY` is set; requires each including Makefile to set `IMAGE_NAME`
-  - `mk/python.mk` — shared `sync` / `test` targets using `uv sync --frozen` then `uv run pytest`
-- Per-product Makefiles are minimal stubs that only set `IMAGE_NAME` and include the two fragments (e.g. `products/platform-gateway/Makefile`)
-- Base image: `shared/base-images/base-uv/Dockerfile` — Amazon Linux 2023 minimal with a pinned `uv` binary, non-root `app` user (uid 1000), and env vars pinning `UV_PYTHON=3.12` and install dir `/app/.python`
-- Product Dockerfiles follow a uniform pattern: `FROM luban-aiops/base-uv:al2023`, copy `pyproject.toml` + `uv.lock` first, run `uv sync --frozen --no-dev`, then copy `src/` and `CMD ["uv", "run", "<entrypoint>"]`
-- Version enforcement: `VERSION` (root semver), `shared/shared-contracts/scripts/validate_version.py` which checks it against every `products/*/pyproject.toml`, every `products/*/src/*/metadata.py` (`SERVICE_VERSION`), any `__version__` in package roots, and `operator-portal/web-ui/app.js` (`PLATFORM_VERSION`)
-- Policy synchronization: `sync-policy` target copies `shared/shared-contracts/policies/policy-default.yaml` into `tool-gateway`, `platform-gateway`, and the GitOps base `policy.yaml`
+### Shared fragments (`mk/`)
+- `defaults.mk`: single source of overridable defaults using `?=` so command-line overrides always win. Covers `IMAGE_PLATFORM` (default `linux/amd64`), `REGISTRY`, `AUTO_LOAD_KIND`, `KIND_CLUSTER_NAME`, and pinned base image versions (`BASE_UV_IMAGE=luban-aiops/base-uv`, `BASE_UV_TAG=al2023`, `BASE_UV_UV_VERSION=0.12.1`, `BASE_UV_PYTHON_VERSION=3.12`). Includes a guard against double inclusion.
+- `image.mk`: provides `build`, `push`, `lint` targets for any product that sets `IMAGE_NAME`. Builds with `--platform $(IMAGE_PLATFORM)`, tags locally as `luban-aiops/<name>:<tag>`, and optionally re-tags to `$(REGISTRY)/luban-aiops/<name>:<tag>`. Linting falls back to `hadolint` → `docker run hadolint/hadolint` → skip if neither is available.
+- `python.mk`: provides `sync` (`uv sync --frozen`) and `test` (re-syncs then runs `pytest` with OTLP exporters disabled via `OTEL_TRACES_EXPORTER=none OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=none` so tracing tests stay functional without network noise).
 
-## Architecture and conventions
+### Per-product Makefiles
+Each product's `Makefile` is minimal — typically just setting `IMAGE_NAME` and including `../../mk/image.mk` and `../../mk/python.mk`. Example: `products/agent-platform/Makefile` sets `IMAGE_NAME := agent-service` and includes both fragments.
 
-1. **Two-level Makefile hierarchy.** The root `Makefile` owns cross-cutting concerns (image tagging, coordinated build/push, policy sync, overlay validation, deploy). Each product has a tiny Makefile that just sets `IMAGE_NAME` and includes `../../mk/image.mk` and `../../mk/python.mk`. This lets you run `make -C products/<name>` standalone or `make test` / `make build` from the repo root.
+### Container images
+- Base image built from `shared/base-images/base-uv/Dockerfile` using Alpine Linux 2023 + uv + Python 3.12.
+- Product images follow a uniform pattern: `FROM luban-aiops/base-uv:al2023`, copy `pyproject.toml`, `uv.lock`, `src/`, run `uv sync --frozen --no-dev`, expose port 8000, and `CMD ["uv", "run", "<entrypoint>"]`.
+- `operator-portal` is a Node.js Nginx static site built separately; its `Dockerfile` is included in `IMAGE_PRODUCTS` but does not use `mk/image.mk` directly.
 
-2. **Coordinated image tagging.** `IMAGE_TAG` is computed once per invocation as `<semver>-<prefix>[-<profile>]-<gitsha>[-dirty-<timestamp>]`. The root `make build` passes this tag to every product so all images share one tag, then writes an `.images.env` state file consumed by `deploy.sh`.
+### Version management
+- `VERSION` at repo root is the single source of truth for the platform semver.
+- `shared/shared-contracts/scripts/validate_version.py` enforces lockstep: every product's `pyproject.toml` `[project] version`, every `src/*/metadata.py` `SERVICE_VERSION`, any `__version__` in package roots, and the operator portal's Vite wiring must match `VERSION` exactly. It also asserts that `operator-portal/web-ui/app/vite.config.ts` reads the root `VERSION` file at build time (SPEC-023) rather than hardcoding a literal.
+- Called via `make validate-version` from the root Makefile.
 
-3. **Single base image strategy.** All backend services derive from `luban-aiops/base-uv:al2023`, built via `make base-images`. The base image pins `UV_VERSION=0.12.1` and `PYTHON_VERSION=3.12` via build args and environment variables, ensuring deterministic installs without a system Python.
+### Deployment & GitOps
+- `make deploy` invokes `shared/platform-ops/gitops/dev-k8s/deploy.sh`, which:
+  - Calls `deploy-overlay.sh` to apply Kustomize overlays.
+  - Runs a series of `sync-*` scripts to provision secrets (delegation, audit, execution signing/handoff, skills, incidents, OTel, sessions DB, Keycloak realm/portal client). Each script supports a `SKIP_*_SECRETS=true` env var for CI environments where secrets are injected externally.
+- Overlays validated via `make overlays` using `kustomize build --load-restrictor LoadRestrictionsNone`.
 
-4. **Frozen Python dependencies.** Every product uses `uv sync --frozen`, meaning `uv.lock` is the authoritative dependency graph and must be committed alongside changes. Tests also call `uv sync --frozen` before `uv run pytest`.
+### Local development helpers
+- `AUTO_LOAD_KIND=true KIND_CLUSTER_NAME=<name>` after `make build` auto-loads all built images into the named kind cluster.
+- `make e2e` runs demo scripts under `shared/platform-ops/e2e/` against a deployed dev cluster (requires prior `make deploy` and port-forwards for `platform-gateway` and `identity-service`).
 
-5. **GitOps-first deployment.** After `make build`, `make deploy` runs `shared/platform-ops/gitops/dev-k8s/deploy.sh`, which reads the `.images.env` produced by the coordinated build. Overlay rendering is validated via `make overlays` (runs `kustomize build --load-restrictor LoadRestrictionsNone` for each overlay).
+## Conventions & Constraints
 
-6. **Version lockstep enforced at build time.** `make validate-version` runs the shared script that parses `VERSION` and asserts every product's `pyproject.toml` version, `metadata.py` `SERVICE_VERSION`, optional `__version__`, and the portal's `PLATFORM_VERSION` match exactly. The root `verify` target chains `test`, `overlays`, `validate-policy`, and `validate-version` as the pre-commit/pre-push gate.
-
-7. **Policy-as-code distribution.** The canonical policy bundle lives in `shared/shared-contracts/policies/policy-default.yaml`; `make sync-policy` copies it into consumer locations. `make validate-policy` validates it against the JSON schema in `shared/shared-contracts/scripts/validate_policy.py`.
-
-## Conventions and constraints
-
-- **Every product directory must contain**: a `Dockerfile`, a `Makefile` that sets `IMAGE_NAME` and includes `../../mk/image.mk` and `../../mk/python.mk`, a `pyproject.toml` with a `[project] version`, a `uv.lock`, and a `src/<package>/metadata.py` defining `SERVICE_VERSION`.
-- **Image tags must never use `latest`**; `mk/defaults.mk` documents that pinned values are required for reproducible builds, and the root `IMAGE_TAG` computation always produces a sha-prefixed tag.
-- **Build platform is configurable but defaults to `linux/amd64`**; override via `IMAGE_PLATFORM=linux/arm64` for native arm64/kind builds.
-- **Registry push is opt-in**: `REGISTRY=` empty means images stay local; setting it causes `make build` to re-tag and `make push` to push the fully qualified reference.
-- **Local kind integration**: `AUTO_LOAD_KIND=true KIND_CLUSTER_NAME=<name>` after `make build` auto-loads all images into the named kind cluster.
-- **Verification gate**: `make verify` (and thus any pre-commit hook using it) must pass tests, kustomize overlay rendering, policy validation, and version lockstep — all four must succeed for a change to be considered verified.
-- **Base image rebuild**: Changing `BASE_UV_UV_VERSION` or `BASE_UV_PYTHON_VERSION` in `mk/defaults.mk` requires rebuilding the base image via `make base-images` before building products.
+- Every Python product must have a `pyproject.toml` + `uv.lock` pair; dependencies are resolved with `uv sync --frozen` (lockfile-only, no network drift).
+- Image builds target `linux/amd64` by default; override via `IMAGE_PLATFORM=linux/arm64` for native arm64/kind builds.
+- All images are tagged with a coordinated tag derived from `VERSION` + git SHA (+ `-dirty-<timestamp>` for uncommitted changes); pushing requires setting `REGISTRY`.
+- The verification gate `make verify` combines `test`, `overlays`, `validate-policy`, and `validate-version`; it is intended as the pre-commit/pre-push check across any forge.
+- Policy files are centralized in `shared/shared-contracts/policies/` and copied out via `make sync-policy`; consumers do not edit them directly.
+- Secrets provisioning during `make deploy` is idempotent and skippable per subsystem via environment variables, enabling CI pipelines to inject secrets through other mechanisms.

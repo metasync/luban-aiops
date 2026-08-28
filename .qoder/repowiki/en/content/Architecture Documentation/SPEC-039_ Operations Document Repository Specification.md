@@ -14,8 +14,10 @@
 - [operation-document.schema.json](file://shared/shared-contracts/schemas/operation-document.schema.json)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
 - [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
+- [documents.ts](file://products/operator-portal/web-ui/app/src/api/documents.ts)
 - [SPEC-041 spec.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md)
 - [SPEC-041 plan.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/plan.md)
+- [release notes](file://docs/agentic-aiops-platform/release-notes/2026-08-28-platform-components-blurb-prose-voice.md)
 </cite>
 
 ## Update Summary
@@ -28,6 +30,7 @@
 - Updated conclusion to reflect delivery status and future extensibility
 - Integrated SPEC-040 context showing handover section support and prose generation defaults changes
 - **Added SPEC-041 enhancement planning**: Documentation now includes forward-looking information about upcoming readability improvements and digest reference capabilities that will extend the delivered SPEC-039 functionality
+- **Updated v0.23.3 enhancements**: Added documentation for nullable blurb field, database migration, and envelope-only listing support for AI-generated document context
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -94,12 +97,12 @@ J --> D
 **Diagram sources**
 - [operation_documents.py:1-531](file://products/agent-platform/src/agent_service/services/operation_documents.py#L1-L531)
 - [shift_summary.py:1-323](file://products/agent-platform/src/agent_service/services/shift_summary.py#L1-L323)
-- [document_prose.py:1-100](file://products/agent-platform/src/agent_service/services/document_prose.py#L1-L100)
+- [document_prose.py:1-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L1-L158)
 - [routes.py:738-957](file://products/agent-platform/src/agent_service/api/v2/routes.py#L738-L957)
 - [documents.py:1-171](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L171)
 - [policy-default.yaml:251-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L251-L267)
 - [DocumentsView.tsx:195-249](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L195-L249)
-- [operation-document.schema.json:1-101](file://shared/shared-contracts/schemas/operation-document.schema.json#L1-L101)
+- [operation-document.schema.json:1-110](file://shared/shared-contracts/schemas/operation-document.schema.json#L1-L110)
 - [v2.py:335-367](file://products/agent-platform/src/agent_service/schemas/v2.py#L335-L367)
 
 **Section sources**
@@ -112,7 +115,7 @@ J --> D
 - Optional prose generator: digest-only prompt contract, hard timeout, fail-soft degradation to digest-only documents.
 - API routes: create, list (mine/published), get, publish, delete; session rename route; structured denials via gateway policy.
 - Policy actions: documents:create, documents:read, session:update granted to operator/approver/platform-admin by default.
-- Schema: strict JSON schema for operation documents including envelope fields, provenance, digest, and prose status.
+- Schema: strict JSON schema for operation documents including envelope fields, provenance, digest, prose status, and AI-generated blurb.
 
 **Section sources**
 - [operation_documents.py:38-105](file://products/agent-platform/src/agent_service/services/operation_documents.py#L38-L105)
@@ -120,7 +123,7 @@ J --> D
 - [document_prose.py:24-56](file://products/agent-platform/src/agent_service/services/document_prose.py#L24-L56)
 - [routes.py:763-957](file://products/agent-platform/src/agent_service/api/v2/routes.py#L763-L957)
 - [policy-default.yaml:251-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L251-L267)
-- [operation-document.schema.json:8-99](file://shared/shared-contracts/schemas/operation-document.schema.json#L8-L99)
+- [operation-document.schema.json:8-109](file://shared/shared-contracts/schemas/operation-document.schema.json#L8-L109)
 
 ## Architecture Overview
 The repository composes a typed store, a type-agnostic assembler, and an optional prose generator, exposed through versioned routes and guarded by gateway-enforced policies.
@@ -141,7 +144,7 @@ Asm-->>Routes : digest + provenance
 Routes->>Store : create(document)
 Store-->>Routes : ok
 Routes->>Prose : generate_prose(kernel, type, digest)
-Prose-->>Routes : prose or failed
+Prose-->>Routes : prose, blurb, failed
 Routes->>Audit : emit document_created
 Routes-->>Client : {document_id, state=draft}
 ```
@@ -151,7 +154,7 @@ Routes-->>Client : {document_id, state=draft}
 - [routes.py:763-856](file://products/agent-platform/src/agent_service/api/v2/routes.py#L763-L856)
 - [shift_summary.py:266-323](file://products/agent-platform/src/agent_service/services/shift_summary.py#L266-L323)
 - [operation_documents.py:488-531](file://products/agent-platform/src/agent_service/services/operation_documents.py#L488-L531)
-- [document_prose.py:59-100](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L100)
+- [document_prose.py:59-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L158)
 - [policy-default.yaml:251-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L251-L267)
 
 ## Detailed Component Analysis
@@ -236,6 +239,7 @@ Merge --> Return(["Return (digest, provenance)"])
 - Prompt contract: digest-only input; model cannot see transcripts or evidence payloads.
 - Execution: uses runtime's default model client with a hard timeout; drains streaming responses if needed.
 - Failure mode: any error yields prose_status=failed; document still created with digest only.
+- **Updated**: v0.23.3 enhanced prose generation to extract AI-generated one-line summaries (blurbs) from the narrative response using SUMMARY markers, bounded to 240 characters.
 
 ```mermaid
 sequenceDiagram
@@ -246,17 +250,17 @@ Route->>Prose : generate_prose(kernel, document_type, digest)
 Prose->>Kernel : build_model(None)
 Prose->>Kernel : call model([Msg(text=prompt)])
 Kernel-->>Prose : response or stream
-Prose-->>Route : (prose, "included") or (None, "failed")
+Prose-->>Route : (prose, blurb, "included") or (None, None, "failed")
 ```
 
 **Diagram sources**
 - [document_prose.py:24-56](file://products/agent-platform/src/agent_service/services/document_prose.py#L24-L56)
-- [document_prose.py:59-100](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L100)
+- [document_prose.py:59-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L158)
 
 **Section sources**
 - [document_prose.py:1-13](file://products/agent-platform/src/agent_service/services/document_prose.py#L1-L13)
 - [document_prose.py:24-56](file://products/agent-platform/src/agent_service/services/document_prose.py#L24-L56)
-- [document_prose.py:59-100](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L100)
+- [document_prose.py:59-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L158)
 
 ### API Routes and Policy Enforcement (R-2, R-5, R-7)
 - Create/list/get/publish/delete endpoints for documents with structured rejections.
@@ -294,6 +298,7 @@ Routes-->>Client : [documents...]
 
 ### Data Model (Operation Document)
 - Envelope fields: document_id, document_type, state, owner_user_id, label, created_at, published_at, provenance, digest, prose, prose_status.
+- **Updated**: v0.23.3 adds nullable blurb field (string/null, max 240 chars) for AI-generated one-line summaries extracted from prose responses.
 - Provenance: sessions array with session_id, coverage (owner/foreign), cited_record_ids.
 - Digest: type-specific deterministic data copied verbatim from durable stores.
 - Prose: optional narrative produced from digest only; prose_status indicates included/failed/not_requested.
@@ -312,14 +317,39 @@ jsonb provenance
 jsonb digest
 text prose
 string prose_status
+text blurb
 }
 ```
 
 **Diagram sources**
-- [operation-document.schema.json:8-99](file://shared/shared-contracts/schemas/operation-document.schema.json#L8-L99)
+- [operation-document.schema.json:8-109](file://shared/shared-contracts/schemas/operation-document.schema.json#L8-L109)
 
 **Section sources**
-- [operation-document.schema.json:1-101](file://shared/shared-contracts/schemas/operation-document.schema.json#L1-L101)
+- [operation-document.schema.json:1-110](file://shared/shared-contracts/schemas/operation-document.schema.json#L1-L110)
+
+### Database Migration and Storage (v0.23.3 Enhancement)
+- **Updated**: Additive migration adds nullable `blurb` column to operation_documents table for storing AI-generated one-line summaries.
+- Migration runs during store initialization alongside existing summary column migration.
+- Existing documents without blurbs degrade gracefully to null values.
+- Insert operations include blurb parameter alongside other document fields.
+- List queries select blurb field alongside other document metadata for envelope-only listings.
+
+**Section sources**
+- [operation_documents.py:217-251](file://products/agent-platform/src/agent_service/services/operation_documents.py#L217-L251)
+- [operation_documents.py:253-311](file://products/agent-platform/src/agent_service/services/operation_documents.py#L253-L311)
+
+### Envelope-Only Listing Support (v0.23.3 Enhancement)
+- **Updated**: Blurb field rides envelope-only list rows alongside the deterministic summary field.
+- Frontend displays blurb when available, falling back to summary for older documents.
+- Security posture preserved: blurb is a bounded paraphrase of digest content, safe for un-audited listings.
+- Full digest and prose remain protected behind audited single fetch endpoint.
+- Portal UI shows blurb in list rows and detail cards with proper fallback handling.
+
+**Section sources**
+- [operation_documents.py:63-87](file://products/agent-platform/src/agent_service/services/operation_documents.py#L63-L87)
+- [documents.ts:17-41](file://products/operator-portal/web-ui/app/src/api/documents.ts#L17-L41)
+- [DocumentsView.tsx:1061-1072](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1061-L1072)
+- [DocumentsView.tsx:1186-1196](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1186-L1196)
 
 ## Dependency Analysis
 - Routes depend on:
@@ -361,6 +391,7 @@ Portal["Operator Portal"] --> Gateway
 - Secondary store reads degrade gracefully; failures do not block request paths.
 - Prose generation has a hard timeout to prevent route blocking; failures degrade to digest-only documents.
 - Postgres queries use indexes on owner and state columns for efficient listing.
+- **Updated**: Blurb extraction is lightweight string parsing with 240-character bounds, adding minimal overhead to prose generation.
 
 ## Troubleshooting Guide
 - Unknown session ids during digest assembly: raises a specific error carrying offending ids; routes respond 400 without revealing ownership.
@@ -369,12 +400,13 @@ Portal["Operator Portal"] --> Gateway
 - Prose generation failure: prose_status set to failed; document still created with digest only.
 - Foreign session access: requires approvals:list capability; denied without proper authorization.
 - Session rename validation: titles must be 1-80 characters after trimming; foreign or unknown sessions return 404.
+- **Updated**: Blurb parsing edge cases handled gracefully - missing SUMMARY marker results in null blurb, empty responses handled safely.
 
 **Section sources**
 - [shift_summary.py:46-70](file://products/agent-platform/src/agent_service/services/shift_summary.py#L46-L70)
 - [policy-default.yaml:251-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L251-L267)
 - [operation_documents.py:488-531](file://products/agent-platform/src/agent_service/services/operation_documents.py#L488-L531)
-- [document_prose.py:59-100](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L100)
+- [document_prose.py:59-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L158)
 - [routes.py:705-736](file://products/agent-platform/src/agent_service/api/v2/routes.py#L705-L736)
 
 ## Future Enhancements (SPEC-041)
@@ -420,6 +452,8 @@ SPEC-041 is currently in draft status targeting version 0.23.0 as part of the R5
 ## Conclusion
 SPEC-039 introduces a robust, typed operations document repository with a clear separation between immutable digests and optional prose, enforced by role-based access and strong provenance. Phase 1 delivers the substrate, shift summaries, and portal support, while leaving room for future document types and integrations. All eight requirements have been successfully implemented and delivered in v0.21.0, providing operators with a complete solution for creating, managing, and sharing operational documentation across their teams.
 
+The system has been further enhanced with v0.23.3 additions including nullable blurb field support, database migrations, and envelope-only listing capabilities for AI-generated document context. These enhancements provide operators with concise, digest-anchored one-line summaries that ride safely in un-audited listings while maintaining the security posture of the core document system.
+
 The system is now positioned to integrate with SPEC-040 capabilities, which will enhance the shift summaries with deterministic handover sections and improved prose generation defaults, further strengthening the operational handover workflow for relief operators. Additionally, SPEC-041 planning ensures continued evolution toward better operator experience through enhanced readability features and digest reference capabilities.
 
-The combination of SPEC-039's solid foundation, SPEC-040's handover narrative enhancements, and the planned SPEC-041 readability improvements creates a comprehensive operational documentation system that scales from basic digest capture to sophisticated operator workflows.
+The combination of SPEC-039's solid foundation, SPEC-040's handover narrative enhancements, v0.23.3's AI blurb capabilities, and the planned SPEC-041 readability improvements creates a comprehensive operational documentation system that scales from basic digest capture to sophisticated operator workflows.

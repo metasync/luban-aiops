@@ -1,5 +1,0 @@
-- Each spec directory uses a sequential numeric prefix `SPEC-NNN-` with a kebab-case slug, and contains exactly `spec.md`, `plan.md`, and `tasks.md`.
-- Every `spec.md` begins with a Status header listing `status`, `owner`, `created`, `release slice`, and `related ADRs`, and uses stable requirement IDs (`R-1`, `R-2`, …) with testable acceptance criteria.
-- Specs declare an Impact section enumerating touched products, contracts, identity/policy/audit/execution safety impact, and living state docs to update on delivery.
-- Specs maintain a Changelog section recording date-stamped status transitions and scope changes, and never rewrite a `delivered` spec — corrections go into the changelog or a new spec.
-- Related specs are cross-referenced via the `extends SPEC-XXX…` notation in the spec title or summary to document dependency chains across the index.

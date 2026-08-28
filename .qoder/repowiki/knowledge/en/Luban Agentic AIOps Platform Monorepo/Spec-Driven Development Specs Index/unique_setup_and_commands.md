@@ -1,1 +1,0 @@
-New specs are created from the templates under `docs/specs/templates/`; after approval, implementation work branches follow the `feat/spec-<n>-<slug>` convention and every PR must reference its spec ID. Delivery is validated by passing the root `make verify` gate and updating living state docs listed in each spec's Impact section.
