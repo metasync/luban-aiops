@@ -123,9 +123,12 @@ kubectl -n dev-luban-aiops exec deployment/identity-service -- env | grep -E 'KE
 - If Keycloak is unreachable: check network policies, DNS resolution, and the
   `KEYCLOAK_BASE_URL` value.
 - If the OIDC callback fails with a redirect URI mismatch: verify `OIDC_REDIRECT_URI` (plus
-  `OIDC_EXTRA_REDIRECT_URIS`) cover the browser-accessible URL — the gateway hostnames
-  `https://aiops.luban.metasync.cc/callback` / `https://aiops.luban.k8s.orb.local/callback`
-  and the port-forward path `http://localhost:18080/callback`. Reconcile the
+  `OIDC_EXTRA_REDIRECT_URIS`) cover the browser-accessible URL. The broker always starts
+  the flow with the primary `OIDC_REDIRECT_URI` (`https://aiops.luban.metasync.cc/callback`);
+  the extras (`https://aiops.luban.k8s.orb.local/callback`,
+  `http://localhost:18080/callback`) are registered with Keycloak for reachability only
+  and are never selected as the callback — a sign-in started on one of those origins
+  therefore lands back on the canonical hostname instead. Reconcile the
   Keycloak client: `shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh`.
 - If login completes but the portal shows an error: check the platform-gateway logs for JWT
   verification failures (`kubectl logs deployment/platform-gateway | grep -i token`).

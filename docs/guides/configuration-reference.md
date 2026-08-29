@@ -442,8 +442,8 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtim
 | `OIDC_SCOPES` | Requested OIDC scopes | `openid groups` | runtime-config |
 | `OIDC_REDIRECT_URI` | Primary browser callback URI | `https://aiops.luban.metasync.cc/callback` | runtime-config |
 | `OIDC_POST_LOGOUT_REDIRECT_URI` | Primary post-logout redirect | `https://aiops.luban.metasync.cc/` | runtime-config |
-| `OIDC_EXTRA_REDIRECT_URIS` | Comma-separated extra callback URIs | gateway `.orb.local` + `localhost:18080` | runtime-config |
-| `OIDC_EXTRA_POST_LOGOUT_REDIRECT_URIS` | Comma-separated extra post-logout redirects | gateway `.orb.local` + `localhost:18080` | runtime-config |
+| `OIDC_EXTRA_REDIRECT_URIS` | Comma-separated extra callback URIs, registered with Keycloak for reachability only — the broker always uses `OIDC_REDIRECT_URI` as the flow's callback | gateway `.orb.local` + `localhost:18080` | runtime-config |
+| `OIDC_EXTRA_POST_LOGOUT_REDIRECT_URIS` | Comma-separated extra post-logout redirects registered with Keycloak; the portal passes its own origin on logout, so these let logout return to any reachable portal origin | gateway `.orb.local` + `localhost:18080` | runtime-config |
 | `IDENTITY_TOKEN_AUDIENCE` | JWT audience for portal tokens | `platform-gateway` | runtime-config |
 | `IDENTITY_TOKEN_TTL_SECONDS` | Portal JWT TTL | `3600` | code default |
 | `IDENTITY_DELEGATED_TOKEN_TTL_SECONDS` | Delegated token TTL | `300` | runtime-config |

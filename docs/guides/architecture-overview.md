@@ -91,8 +91,9 @@ Browser → web-ui → platform-gateway → agent-service → tool-gateway → c
 
 ### Step-by-Step
 
-1. **Browser** sends a chat request to `web-ui` (via the Envoy Gateway hostnames
-   `aiops.luban.k8s.orb.local` / `aiops.luban.metasync.cc`, or port-forwarded to
+1. **Browser** sends a chat request to `web-ui` (via the Envoy Gateway canonical
+   hostname `aiops.luban.metasync.cc` — the `aiops.luban.k8s.orb.local` wildcard
+   hostname serves the same portal as a reachability fallback — or port-forwarded to
    `localhost:18080`).
 2. **web-ui** (nginx) serves static assets and proxies `/api/` to **platform-gateway**.
 3. **platform-gateway** verifies the portal JWT, evaluates action policy (`chat`), exchanges the

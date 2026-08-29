@@ -82,6 +82,12 @@ The identity-broker config fragment defines the browser callback and logout redi
 - `OIDC_EXTRA_POST_LOGOUT_REDIRECT_URIS=https://aiops.luban.k8s.orb.local/,http://localhost:18080/`
 - `OIDC_SCOPES=openid groups`
 
+Only `OIDC_REDIRECT_URI` is ever selected as the sign-in callback — the broker starts
+every login there, so `https://aiops.luban.metasync.cc` is the canonical portal
+entrypoint and the only origin where sign-in round-trips. The extra URIs are registered
+with Keycloak for reachability: post-logout redirects select the portal's own origin
+from the registered set, but sign-in never does.
+
 The corresponding keys remain:
 
 - `KEYCLOAK_BASE_URL`
@@ -163,16 +169,24 @@ The `web-ui` image serves the rebuilt SPA portal (Vite + React on antd / Ant Des
 
 The overlay ships a Gateway API `HTTPRoute` (`base/operator-portal/web-ui-httproute.yaml`)
 that exposes the portal through the shared Envoy Gateway (`luban-gateway` in namespace
-`gateway`), so live testing does not require a per-session `kubectl port-forward`:
+`gateway`), so live testing does not require a per-session `kubectl port-forward`.
+
+The canonical portal entrypoint is:
+
+- `https://aiops.luban.metasync.cc`
+
+The OrbStack wildcard hostname serves the same portal as a reachability fallback:
 
 - `https://aiops.luban.k8s.orb.local`
-- `https://aiops.luban.metasync.cc`
 
 Both resolve to the same `web-ui:8080` backend; the gateway's wildcard HTTPS listeners
 accept routes from all namespaces, so the route only declares hostnames and the backend.
-Because `web-ui` proxies `/api/` to `platform-gateway`, no other service needs its own
-route. Port-forwarding `service/web-ui` remains a valid fallback when the wildcard DNS is
-not reachable.
+Use the canonical hostname for any browser flow: the identity broker's OIDC callback is
+pinned to `https://aiops.luban.metasync.cc/callback`, and the portal's PKCE pending
+request lives in per-origin browser storage, so a sign-in started on the orb.local
+hostname cannot round-trip back to it. Because `web-ui` proxies `/api/` to
+`platform-gateway`, no other service needs its own route. Port-forwarding
+`service/web-ui` remains a valid fallback when neither wildcard DNS is reachable.
 
 The `redis` deployment uses `emptyDir` storage in this development baseline. That keeps setup simple for Kubernetes development testing, but it is not a durable production persistence model.
 

@@ -123,10 +123,15 @@ redis-...                         1/1     Running
 ## Step 7: Access the Portal
 
 The dev-k8s overlay ships an `HTTPRoute` exposing the portal through the shared Envoy
-Gateway. If your cluster's wildcard DNS is reachable, open either hostname directly:
+Gateway. If your cluster's wildcard DNS is reachable, the canonical portal entrypoint
+is:
 
-- `https://aiops.luban.k8s.orb.local`
 - `https://aiops.luban.metasync.cc`
+
+Use it for any browser flow: the identity broker's OIDC callback is pinned to this
+hostname, so a sign-in always round-trips back here. The OrbStack wildcard hostname
+`https://aiops.luban.k8s.orb.local` serves the same portal and stays reachable as a
+fallback, but a sign-in started there cannot round-trip back to it.
 
 Otherwise port-forward the web-ui service:
 
