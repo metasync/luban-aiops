@@ -7,6 +7,14 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-29-bounded-pane-review-follow-ups.md`
+  - same-day patch (v0.25.2) closing the two minor follow-ups from
+    the v0.25.1 code review: the bounded-pane height is single-sourced
+    via a `--bounded-pane-max-height` custom property (the CSS rules
+    and the overflow comparison can no longer drift apart), and the
+    v0.25.1 post-motion re-measure race fix gains a fake-timer
+    regression test — portal rendering and tests only, no backend
+    runtime change
 - `2026-08-29-portal-live-check-polish.md`
   - same-day patch (v0.25.1) remediating the v0.25.0 live-check
     feedback: bounded panes pin their structural chrome (the digest

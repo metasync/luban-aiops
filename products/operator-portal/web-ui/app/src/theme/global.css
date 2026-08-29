@@ -621,13 +621,15 @@ body {
 /* The fixed-height bound applies to the content region only, so the
    structural chrome stays pinned while content scrolls underneath it:
    the digest tab bar (.digest-bounded) and the narrative collapse
-   header (.prose-bounded). Releasing the bound removes the class. */
+   header (.prose-bounded). Releasing the bound removes the class.
+   The height itself is single-sourced: the view sets
+   --bounded-pane-max-height on each wrapper (v0.25.2). */
 .digest-bounded .ant-tabs-body-holder {
-  max-height: 320px;
+  max-height: var(--bounded-pane-max-height);
   overflow-y: auto;
 }
 
 .prose-bounded .ant-collapse-body {
-  max-height: 320px;
+  max-height: var(--bounded-pane-max-height);
   overflow-y: auto;
 }

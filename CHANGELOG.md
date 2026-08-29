@@ -13,6 +13,24 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.25.2 — 2026-08-29
+
+### Changed
+
+- **Bounded-pane review follow-ups (v0.25.1 follow-up)** — operator
+  portal rendering and tests only; no backend runtime behavior,
+  routes, actions, event types, or dependency versions change.
+  - The bounded-pane height is single-sourced: the view sets a
+    `--bounded-pane-max-height` custom property on each bounded
+    wrapper (from `BOUNDED_PANE_MAX_HEIGHT`) and the
+    `.digest-bounded` / `.prose-bounded` CSS rules consume it, so the
+    presentation bound and the overflow comparison can no longer
+    drift apart.
+  - The v0.25.1 post-motion re-measure race fix gains a fake-timer
+    regression test: with the immediate measurement reading a
+    pre-motion height, the *Expand to full height* affordance must
+    appear only once the delayed re-measure runs.
+
 ## 0.25.1 — 2026-08-29
 
 ### Changed

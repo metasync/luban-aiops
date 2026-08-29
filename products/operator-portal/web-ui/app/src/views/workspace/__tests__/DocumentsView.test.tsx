@@ -4,7 +4,7 @@
 // SPEC-043 R-6), and the Markdown export (SPEC-040 R-4). The API module
 // is mocked; the gateway re-enforces the role matrix server-side
 // regardless of these client gates.
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   afterEach,
   beforeAll,
@@ -744,6 +744,38 @@ describe("DocumentsView list summaries and bounded panes (SPEC-041 R-3, R-4)", (
       screen.getAllByText("Collapse to bounded height").length,
     ).toBeGreaterThanOrEqual(1);
     scrollSpy.mockRestore();
+  });
+
+  it("shows the affordance on first reveal via the post-motion re-measure", async () => {
+    // Pins the v0.25.1 race fix: the immediate measurement reads the
+    // pre-motion height, so the affordance must appear from the
+    // delayed re-measure (BOUNDED_MEASURE_DELAY_MS) once the pane
+    // settles — not from the first read.
+    vi.useFakeTimers();
+    try {
+      let settledHeight = 0;
+      const scrollSpy = vi
+        .spyOn(Element.prototype, "scrollHeight", "get")
+        .mockImplementation(() => settledHeight);
+      mockListDocuments.mockResolvedValue([foreignPublished]);
+      render(<DocumentsView workspace={workspaceStub} />);
+      await act(async () => {});
+      fireEvent.click(screen.getByText("View"));
+      await act(async () => {});
+      // Immediate (pre-motion) measurements read zero: no affordance yet.
+      expect(screen.queryByText("Expand to full height")).toBeNull();
+      // The pane settles; the delayed re-measure picks up the overflow.
+      settledHeight = 2000;
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(
+        screen.getAllByText("Expand to full height").length,
+      ).toBeGreaterThanOrEqual(1);
+      scrollSpy.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

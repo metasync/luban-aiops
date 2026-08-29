@@ -5,7 +5,14 @@
 // attribute the creator prominently (R-5 audit rides the agent layer;
 // the view only renders). Export (SPEC-040 R-4) serializes the
 // already-fetched document client-side — no new gateway call.
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import {
   Alert,
   Button,
@@ -1014,7 +1021,11 @@ function ProsePanel({ document }: { document: OperationDocument }) {
   );
   if (document.prose_status === "included" && document.prose) {
     return (
-      <div ref={wrapperRef} className={expanded ? undefined : "prose-bounded"}>
+      <div
+        ref={wrapperRef}
+        className={expanded ? undefined : "prose-bounded"}
+        style={boundedPaneStyle()}
+      >
         <Collapse
           size="small"
           // The narrative is the relieving operator's entry point: it opens
@@ -1072,6 +1083,16 @@ function ProsePanel({ document }: { document: OperationDocument }) {
 // untouched.
 
 const BOUNDED_PANE_MAX_HEIGHT = 320;
+
+// The single source of truth for the bound: it rides a CSS custom
+// property on the wrapper (consumed by the `.digest-bounded` /
+// `.prose-bounded` rules in global.css) and drives the overflow
+// comparison here, so the presentation bound and the affordance
+// logic can never drift apart.
+function boundedPaneStyle(): CSSProperties {
+  // React's CSSProperties typing does not index custom properties.
+  return { "--bounded-pane-max-height": `${BOUNDED_PANE_MAX_HEIGHT}px` } as CSSProperties;
+}
 
 // antd's tab/collapse enter motion commits before the pane is laid
 // out, so a measurement taken at the moment of the switch can read
@@ -1136,7 +1157,11 @@ function BoundedDigestTabs({
     measureTick,
   );
   return (
-    <div ref={wrapperRef} className={expanded ? undefined : "digest-bounded"}>
+    <div
+      ref={wrapperRef}
+      className={expanded ? undefined : "digest-bounded"}
+      style={boundedPaneStyle()}
+    >
       <Tabs
         size="small"
         defaultActiveKey={defaultActiveKey}
