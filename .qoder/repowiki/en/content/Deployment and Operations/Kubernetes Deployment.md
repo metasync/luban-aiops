@@ -15,6 +15,7 @@
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
 - [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
+- [web-ui-httproute.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-httproute.yaml)
 - [redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
 - [skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
 - [skills-hub-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-service.yaml)
@@ -28,11 +29,11 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced deployment automation with comprehensive audit secret provisioning across all platform services
-- Updated sync-audit-secrets.sh to provision audit credentials for skills-hub alongside existing emitters (tool-gateway, platform-gateway, identity-broker, incident-service)
-- Added automatic deployment restart functionality to ensure audit credentials are applied immediately
-- Integrated durable audit trail configuration across all services with centralized secret management
-- Enhanced security context configurations for all service deployments with non-root execution and privilege restrictions
+- Enhanced identity broker configuration with expanded OIDC redirect URI handling and canonical hostname requirements
+- Updated HTTPRoute setup explanation for development environment with detailed canonical hostname guidance
+- Clarified the relationship between primary callback URIs and extra redirect URIs in identity broker configuration
+- Added comprehensive documentation for Envoy Gateway integration and wildcard HTTPS listeners
+- Enhanced troubleshooting section with identity broker-specific debugging guidance
 
 ## Table of Contents
 1. Overview
@@ -259,9 +260,15 @@ The identity-broker requires configuration for OIDC integration and audit trail 
 | KEYCLOAK_BASE_URL | Keycloak server URL | https://idp.apps.metasync.cc |
 | KEYCLOAK_REALM | Keycloak realm name | luban-aiops |
 | OIDC_CLIENT_ID | Client identifier | luban-aiops-portal |
+| OIDC_REDIRECT_URI | Primary callback URI | https://aiops.luban.metasync.cc/callback |
+| OIDC_POST_LOGOUT_REDIRECT_URI | Primary post-logout redirect | https://aiops.luban.metasync.cc/ |
+| OIDC_EXTRA_REDIRECT_URIS | Extra callback URIs for reachability | https://aiops.luban.k8s.orb.local/callback,http://localhost:18080/callback |
+| OIDC_EXTRA_POST_LOGOUT_REDIRECT_URIS | Extra post-logout redirects | https://aiops.luban.k8s.orb.local/,http://localhost:18080/ |
 | IDENTITY_TOKEN_AUDIENCE | Token audience | platform-gateway |
 | IDENTITY_AUDIT_SERVICE_URL | Audit service endpoint | http://audit-service:8000 |
 | IDENTITY_AUDIT_CLIENT_ID | Audit client identifier | identity-broker |
+
+**Updated** The identity broker configuration now includes expanded OIDC redirect URI handling with clear distinction between primary callback URIs and extra redirect URIs. The `OIDC_REDIRECT_URI` serves as the canonical entrypoint for sign-in flows, while `OIDC_EXTRA_REDIRECT_URIS` provides additional reachability options for different environments.
 
 **Section sources**
 - [identity-broker-runtime-config.env:1-19](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env#L1-L19)
@@ -457,6 +464,27 @@ The operator-portal exposes HTTP service on port 8080 for web access.
 
 **Section sources**
 - [web-ui-service.yaml:1-12](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-service.yaml#L1-L12)
+
+### HTTPRoute Configuration
+
+The operator-portal uses Kubernetes Gateway API HTTPRoute for production-like ingress configuration through the shared Envoy Gateway.
+
+**HTTPRoute Setup:**
+- **Gateway**: Uses `luban-gateway` in the `gateway` namespace
+- **Hostnames**: Supports both `aiops.luban.k8s.orb.local` and `aiops.luban.metasync.cc`
+- **Timeout Configuration**: Disables default 15s timeout for long-running SSE streams
+- **Backend**: Routes to `web-ui` service on port 8080
+
+**Canonical Hostname Requirements:**
+- **Primary Entry Point**: `https://aiops.luban.metasync.cc` is the canonical portal entrypoint
+- **Fallback Hostname**: `https://aiops.luban.k8s.orb.local` serves as OrbStack wildcard hostname fallback
+- **OIDC Callback**: The identity broker's OIDC callback is pinned to `https://aiops.luban.metasync.cc/callback`
+- **Browser Storage**: PKCE pending requests live in per-origin browser storage, requiring consistent hostnames
+
+**Updated** The HTTPRoute configuration now includes detailed explanation of canonical hostname requirements and the relationship between the primary callback URI and extra redirect URIs. The Envoy Gateway's wildcard HTTPS listeners accept routes from all namespaces, simplifying route configuration while maintaining security through hostname validation.
+
+**Section sources**
+- [web-ui-httproute.yaml:1-27](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-httproute.yaml#L1-L27)
 
 ## Infrastructure Services
 
@@ -684,6 +712,7 @@ kubectl scale deployment/audit-service --replicas=0
 - Verify OIDC client configuration in identity-broker
 - Check token audiences match between services
 - Validate secret values for client credentials
+- **Identity Broker Issues**: Ensure `OIDC_REDIRECT_URI` matches the canonical hostname and that extra redirect URIs are properly registered with Keycloak
 
 **RBAC Permission Errors:**
 - Review tool-gateway RBAC roles and bindings
@@ -707,6 +736,12 @@ kubectl scale deployment/audit-service --replicas=0
 - Validate Prometheus scraping configuration for metrics collection
 - Monitor health probe endpoints for service readiness
 
+**HTTPRoute and Ingress Issues:**
+- Verify Envoy Gateway is running and accessible
+- Check that hostnames resolve correctly in your environment
+- Validate that the canonical hostname matches the OIDC redirect URI
+- Ensure wildcard HTTPS listeners are properly configured in the gateway
+
 ### Debugging Commands
 
 **Check Pod Status:**
@@ -720,6 +755,7 @@ kubectl logs deployment/platform-gateway -n dev-luban-aiops
 kubectl logs deployment/tool-gateway -n dev-luban-aiops
 kubectl logs deployment/skills-hub -n dev-luban-aiops
 kubectl logs deployment/audit-service -n dev-luban-aiops
+kubectl logs deployment/identity-service -n dev-luban-aiops
 ```
 
 **Verify Service Endpoints:**
@@ -732,6 +768,7 @@ kubectl get endpoints -n dev-luban-aiops
 kubectl run test-pod --image=busybox -n dev-luban-aiops --command -- wget -qO- http://platform-gateway:8000/health
 kubectl run test-pod --image=busybox -n dev-luban-aiops --command -- wget -qO- http://skills-hub:8000/health/ready
 kubectl run test-pod --image=busybox -n dev-luban-aiops --command -- wget -qO- http://audit-service:8000/health/ready
+kubectl run test-pod --image=busybox -n dev-luban-aiops --command -- wget -qO- http://identity-service:8000/health/ready
 ```
 
 **Check Security Contexts:**
@@ -740,6 +777,7 @@ kubectl describe pod -l app=platform-gateway -n dev-luban-aiops
 kubectl describe pod -l app=tool-gateway -n dev-luban-aiops
 kubectl describe pod -l app=skills-hub -n dev-luban-aiops
 kubectl describe pod -l app=audit-service -n dev-luban-aiops
+kubectl describe pod -l app=identity-service -n dev-luban-aiops
 ```
 
 **Verify Service Link Configuration:**
@@ -765,6 +803,12 @@ kubectl exec -it deployment/audit-service -n dev-luban-aiops -- curl -s http://l
 kubectl exec -it deployment/audit-service -n dev-luban-aiops -- curl -s http://localhost:8000/health/live
 ```
 
+**Check Identity Broker Health:**
+```bash
+kubectl exec -it deployment/identity-service -n dev-luban-aiops -- curl -s http://localhost:8000/health/ready
+kubectl exec -it deployment/identity-service -n dev-luban-aiops -- curl -s http://localhost:8000/health/live
+```
+
 **Verify Audit Secret Configuration:**
 ```bash
 kubectl get secret audit-service-runtime-secrets -n dev-luban-aiops -o yaml
@@ -773,6 +817,22 @@ kubectl get secret platform-gateway-runtime-secrets -n dev-luban-aiops -o yaml
 kubectl get secret identity-service-runtime-secrets -n dev-luban-aiops -o yaml
 kubectl get secret incident-service-runtime-secrets -n dev-luban-aiops -o yaml
 kubectl get secret skills-hub-runtime-secrets -n dev-luban-aiops -o yaml
+```
+
+**Verify HTTPRoute Configuration:**
+```bash
+kubectl get httproute -n dev-luban-aiops
+kubectl describe httproute web-ui -n dev-luban-aiops
+kubectl get gateway -n gateway
+kubectl describe gateway luban-gateway -n gateway
+```
+
+**Test Canonical Hostname Resolution:**
+```bash
+nslookup aiops.luban.metasync.cc
+nslookup aiops.luban.k8s.orb.local
+curl -v https://aiops.luban.metasync.cc/
+curl -v https://aiops.luban.k8s.orb.local/
 ```
 
 **Section sources**

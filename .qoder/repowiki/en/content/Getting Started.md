@@ -40,6 +40,10 @@
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml)
 - [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
 - [shared/platform-ops/gitops/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/reconcile-portal-oidc-client.sh)
+- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
+- [shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-httproute.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-httproute.yaml)
+- [products/operator-portal/web-ui/app/src/auth/storage.ts](file://products/operator-portal/web-ui/app/src/auth/storage.ts)
+- [products/operator-portal/web-ui/app/src/auth/oidc.ts](file://products/operator-portal/web-ui/app/src/auth/oidc.ts)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 - [products/audit-service/src/audit_service/metadata.py](file://products/audit-service/src/audit_service/metadata.py)
 - [products/incident-service/src/incident_service/metadata.py](file://products/incident-service/src/incident_service/metadata.py)
@@ -56,11 +60,10 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the "Your first shift summary" walkthrough feature
-- Updated portal user guide references to reflect corrected deletion wording for published documents
-- Enhanced documentation with envelope-only listing behavior for document security
-- Integrated SPEC-039 operations document repository capabilities into getting started workflow
-- Updated troubleshooting section with new document-related issues and solutions
+- Enhanced Step 7 with clear guidance on canonical hostname (aiops.luban.metasync.cc) vs fallback hostname (aiops.luban.k8s.orb.local) for browser flows
+- Added detailed explanation of OIDC callback behavior and per-origin storage constraints
+- Updated troubleshooting section with hostname-related authentication issues
+- Enhanced configuration reference with hostname-specific environment variables
 
 ## Table of Contents
 1. Introduction
@@ -275,9 +278,16 @@ Environment variables and secrets are managed through Kustomize overlays and scr
   - Nginx serves the compiled React application with proper caching headers
   - Live decision sync capabilities are enabled by default in the operator portal
 
+- **Updated**: Hostname Configuration
+  - Canonical hostname: `https://aiops.luban.metasync.cc` (primary OIDC callback)
+  - Fallback hostname: `https://aiops.luban.k8s.orb.local` (secondary access point)
+  - Per-origin storage constraints require consistent hostname usage for browser flows
+  - OIDC redirect URIs configured in identity-broker runtime configuration
+
 - Example references
   - OpenAI runtime configmap: shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml
   - OpenAI runtime secrets example: shared/platform-ops/gitops/runtime-profiles/openai/runtime-secrets.example.env
+  - Identity broker runtime config: shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env
 
 Best practices:
 - Never commit real secrets to version control; use the example templates and external secret stores.
@@ -287,6 +297,7 @@ Best practices:
 - **Updated**: For frontend development, ensure Node.js 22+ is installed and dependencies are properly cached.
 - **New**: Test live decision sync functionality by creating approval workflows and verifying real-time status updates.
 - **New**: Configure proper roles for operations document repository access (platform-admin, approver, or operator).
+- **Updated**: Use the canonical hostname (`aiops.luban.metasync.cc`) for all browser-based authentication flows to ensure proper OIDC callback handling.
 
 **Section sources**
 - [shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml)
@@ -295,6 +306,7 @@ Best practices:
 - [shared/platform-ops/gitops/dev-k8s/base/shared/observability.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/observability.env)
 - [products/operator-portal/web-ui/app/vite.config.ts:6-18](file://products/operator-portal/web-ui/app/vite.config.ts#L6-L18)
 - [products/operator-portal/nginx.conf:19-30](file://products/operator-portal/nginx.conf#L19-L30)
+- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env:6-11](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env#L6-L11)
 
 ## Coordinated Version Management
 Version 0.14.0 introduces enhanced coordinated versioning that ensures all platform components maintain synchronized versions:
@@ -441,6 +453,12 @@ Common issues and resolutions:
   - Ensure all SERVICE_VERSION values match the root VERSION file
   - Verify pyproject.toml files have consistent version declarations
 
+- **Updated**: Hostname and OIDC Authentication Issues
+  - **Canonical vs Fallback Hostname**: Always use `https://aiops.luban.metasync.cc` for browser authentication flows. The OIDC callback is pinned to this canonical hostname.
+  - **Per-Origin Storage Constraints**: Browser session storage is per-origin, so sign-in started on `aiops.luban.k8s.orb.local` cannot round-trip back to it due to PKCE pending request storage isolation.
+  - **OIDC Callback Behavior**: The identity broker always starts login flows with the primary `OIDC_REDIRECT_URI` (`https://aiops.luban.metasync.cc/callback`). Extra URIs like `https://aiops.luban.k8s.orb.local/callback` are registered for reachability but never selected as callbacks.
+  - **Resolution**: If login fails with redirect URI mismatch, reconcile the Keycloak client using `shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh`.
+
 - **New**: Operations document repository issues
   - Verify users have appropriate roles (platform-admin, approver, or operator) for document access
   - Check that document listings return envelope-only data (no digest/prose content)
@@ -480,6 +498,7 @@ Useful commands:
 - **Updated**: npm run build (for frontend production builds)
 - **New**: Test operations document repository by checking document list endpoints for envelope-only responses
 - **New**: Verify shift summary creation workflow through the portal interface
+- **Updated**: Reconcile OIDC client: `shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh`
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
@@ -495,6 +514,8 @@ Useful commands:
 - [products/operator-portal/web-ui/app/package.json:6-8](file://products/operator-portal/web-ui/app/package.json#L6-L8)
 - [products/operator-portal/Dockerfile:1-29](file://products/operator-portal/Dockerfile#L1-L29)
 - [products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts:51-80](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts#L51-L80)
+- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env:6-11](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env#L6-L11)
+- [products/operator-portal/web-ui/app/src/auth/storage.ts:1-63](file://products/operator-portal/web-ui/app/src/auth/storage.ts#L1-L63)
 
 ## Next Steps by Persona
 - Developers
@@ -505,6 +526,7 @@ Useful commands:
   - **Updated**: Work with the modern React/TypeScript frontend stack using Vite for development and builds.
   - **New**: Implement and test live decision sync functionality using the usePendingDecisionPoll hook.
   - **New**: Develop custom document types extending the operations document repository substrate.
+  - **Updated**: Understand hostname configuration requirements for browser-based authentication flows.
 
 - Operators
   - Manage Kustomize overlays and secrets lifecycle.
@@ -514,6 +536,7 @@ Useful commands:
   - **Updated**: Handle multi-stage Docker builds that compile frontend assets alongside backend services.
   - **New**: Utilize shift summaries for effective end-of-shift handovers and team collaboration.
   - **New**: Configure proper roles and permissions for operations document repository access.
+  - **Updated**: Ensure canonical hostname configuration for reliable OIDC authentication flows.
 
 - Security Teams
   - Review RBAC rules and policy definitions.
@@ -523,6 +546,7 @@ Useful commands:
   - **Updated**: Review frontend security headers and caching policies in nginx configuration.
   - **New**: Assess the security implications of live decision sync polling mechanisms.
   - **New**: Verify operations document repository access controls and audit trails meet compliance requirements.
+  - **Updated**: Validate OIDC callback security and per-origin storage constraints for browser authentication.
 
 Additional resources:
 - Repository README for high-level overview and links
@@ -533,6 +557,7 @@ Additional resources:
 - **New**: SPEC-039 documentation for understanding operations document repository implementation
 - **New**: SPEC-040 documentation for shift summary handover narrative features
 - **New**: Portal user guide for detailed operations document repository workflows
+- **Updated**: Identity broker configuration reference for hostname and OIDC settings
 
 **Section sources**
 - [README.md](file://README.md)
@@ -543,6 +568,7 @@ Additional resources:
 - [docs/specs/SPEC-032-owner-side-live-decision-sync/spec.md:1-124](file://docs/specs/SPEC-032-owner-side-live-decision-sync/spec.md#L1-L124)
 - [docs/specs/SPEC-039-operations-document-repository/spec.md:1-155](file://docs/specs/SPEC-039-operations-document-repository/spec.md#L1-L155)
 - [docs/specs/SPEC-040-shift-summary-handover-narrative/spec.md:1-52](file://docs/specs/SPEC-040-shift-summary-handover-narrative/spec.md#L1-L52)
+- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env:6-11](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env#L6-L11)
 
 ## Architecture Overview
 The platform consists of several microservices orchestrated via Kubernetes and exposed through an API gateway. Core components include:
@@ -587,5 +613,7 @@ IS --> RDS
 You now have the essential information to install, configure, and operate the Luban AIOps Platform for both local development and production. Version 0.14.0 introduces enhanced coordinated versioning across all seven platform components, ensuring consistent releases and simplified maintenance. The operator portal has been modernized with a Vite/React/TypeScript stack, providing an enhanced user experience with better performance and developer productivity. The new live decision sync capabilities significantly improve the operator experience by providing real-time updates when approval decisions are made from other sessions or interfaces.
 
 **Updated** The coordinated version management system in version 0.14.0 provides enhanced reliability and simplifies multi-component releases across the entire platform ecosystem, while the modernized frontend stack offers improved performance and developer experience. The addition of live decision sync capabilities addresses critical gaps identified during v0.13.1 live validation, ensuring that operators can trust the approval workflow visibility across all user interfaces. The new operations document repository with shift summary capabilities provides operators with structured handover artifacts that improve team collaboration and knowledge transfer.
+
+**Updated** The enhanced hostname configuration guidance ensures reliable browser-based authentication flows by clearly distinguishing between the canonical hostname (`aiops.luban.metasync.cc`) used for OIDC callbacks and the fallback hostname (`aiops.luban.k8s.orb.local`) for general access. Understanding per-origin storage constraints and OIDC callback behavior is crucial for successful deployment and operation of the platform's authentication system.
 
 Use the provided scripts and overlays to manage deployments, secrets, and runtime profiles. For deeper exploration, consult the product READMEs and GitOps assets. If you encounter issues, refer to the troubleshooting guide and leverage Kubernetes diagnostics.

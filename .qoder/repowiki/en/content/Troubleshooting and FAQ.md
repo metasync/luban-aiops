@@ -13,6 +13,7 @@
 - [operator-portal/web-ui/app/src/chat/ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
 - [operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts)
 - [operator-portal/web-ui/app/src/voice/languages.ts](file://products/operator-portal/web-ui/app/src/voice/languages.ts)
+- [operator-portal/web-ui/app/src/auth/oidc.ts](file://products/operator-portal/web-ui/app/src/auth/oidc.ts)
 - [agent-platform/src/agent_platform/app.py](file://products/agent-platform/src/agent_platform/app.py)
 - [agent-platform/src/agent_platform/main.py](file://products/agent-platform/src/agent_platform/main.py)
 - [agent-platform/src/agent_platform/core/config.py](file://products/agent-platform/src/agent_platform/core/config.py)
@@ -47,6 +48,7 @@
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml)
+- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [.ooq.py](file://.ooq.py)
@@ -57,10 +59,10 @@
 
 ## Update Summary
 **Changes Made**
-- Added stale UI troubleshooting section covering cached assets, versioned builds, and redeployment refresh behavior
-- Expanded voice input microphone troubleshooting with browser compatibility, permission handling, and language selection guidance
-- Updated Operator Portal component analysis to include web speech API integration and cache control configuration
-- Enhanced deployment issues section with portal-specific caching and asset management considerations
+- Updated OIDC callback troubleshooting section to clarify canonical vs fallback hostname behavior and explain why sign-in flows round-trip back to metasync.cc origin
+- Enhanced identity integration troubleshooting with detailed explanation of redirect URI resolution
+- Added comprehensive guidance for handling different access origins (canonical vs fallback)
+- Updated configuration reference to better explain the relationship between primary and extra redirect URIs
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -75,7 +77,7 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides comprehensive troubleshooting guidance for the Luban AIOps Platform, focusing on deployment issues, service connectivity problems, performance bottlenecks, configuration mistakes, and integration failures. It includes step-by-step diagnostic procedures, log analysis techniques, metric interpretation, trace correlation, and platform-specific FAQs covering agent execution, policy enforcement, identity integration, OpenObserve telemetry pipeline issues, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, and voice input microphone issues. Escalation procedures and community resources are also included to help you resolve issues efficiently.
+This document provides comprehensive troubleshooting guidance for the Luban AIOps Platform, focusing on deployment issues, service connectivity problems, performance bottlenecks, configuration mistakes, and integration failures. It includes step-by-step diagnostic procedures, log analysis techniques, metric interpretation, trace correlation, and platform-specific FAQs covering agent execution, policy enforcement, identity integration, OpenObserve telemetry pipeline issues, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, voice input microphone issues, and OIDC callback hostname behavior. Escalation procedures and community resources are also included to help you resolve issues efficiently.
 
 ## Project Structure
 The platform is organized into multiple products:
@@ -134,6 +136,7 @@ Common areas where issues occur:
 - **Session enumeration prevention** through anti-enumeration 404 responses
 - **Stale UI symptoms** from cached assets after redeployment
 - **Voice input microphone issues** due to browser compatibility or permission problems
+- **OIDC callback hostname confusion** between canonical and fallback origins
 
 **Section sources**
 - [agent-platform/README.md](file://products/agent-platform/README.md)
@@ -151,6 +154,7 @@ participant Nginx as "Nginx Cache"
 participant Portal as "Operator Portal"
 participant Gateway as "Tool Gateway"
 participant Auth as "Identity Broker"
+participant Keycloak as "Keycloak OIDC"
 participant Agent as "Agent Platform"
 participant Store as "Redis"
 participant K8S as "Kubernetes"
@@ -160,6 +164,8 @@ Client->>Nginx : "HTTP request"
 Nginx->>Portal : "Serve cached assets/index.html"
 Portal->>Gateway : "API proxy (/api/*)"
 Gateway->>Auth : "Verify token / obtain identity"
+Auth->>Keycloak : "OIDC authorization flow"
+Keycloak-->>Auth : "Authorization code"
 Auth-->>Gateway : "Identity context"
 Gateway->>Gateway : "Policy decision"
 Gateway->>Agent : "Forward request"
@@ -179,6 +185,7 @@ Portal-->>Client : "Final response"
 - [tool-gateway/src/api_gateway/api/routes/chat.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
 - [tool-gateway/src/api_gateway/services/gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
 - [identity-broker/src/identity_service/app.py](file://products/identity-broker/src/identity_service/app.py)
+- [identity-broker/src/identity_service/services/identity_service.py:88-111](file://products/identity-broker/src/identity_service/services/identity_service.py#L88-L111)
 - [agent-platform/src/agent_platform/app.py](file://products/agent-platform/src/agent_platform/app.py)
 - [agent-platform/src/agent_platform/services/session_store.py](file://products/agent-platform/src/agent_platform/services/session_store.py)
 - [tool-gateway/src/api_gateway/tools/k8s_connector.py](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
@@ -250,6 +257,7 @@ Responsibilities:
 - Token issuance and validation
 - Identity context propagation
 - **OpenTelemetry telemetry export**
+- **OIDC callback redirect URI resolution**
 
 Common issues:
 - OIDC provider misconfiguration
@@ -257,6 +265,7 @@ Common issues:
 - Missing or incorrect audience/issuer settings
 - Network/TLS issues between services
 - **OTel exporter authentication failures**
+- **Redirect URI mismatch between canonical and fallback origins**
 
 Diagnostics:
 - Validate OIDC discovery endpoint
@@ -264,6 +273,7 @@ Diagnostics:
 - Check issuer, audience, and signing keys
 - Review broker logs for auth failures
 - **Check OTel setup and export logs**
+- **Verify redirect URI resolution logic**
 
 Resolution steps:
 - Correct OIDC configuration
@@ -271,13 +281,16 @@ Resolution steps:
 - Update signing keys and rotation policies
 - Fix DNS/TLS configurations
 - **Provision OTel headers via sync-otel-secrets.sh**
+- **Understand canonical vs fallback hostname behavior**
+
+**Updated** Enhanced OIDC callback troubleshooting with canonical vs fallback hostname clarification
 
 **Section sources**
 - [identity-broker/src/identity_service/app.py](file://products/identity-broker/src/identity_service/app.py)
 - [identity-broker/src/identity_service/api/routes/auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
 - [identity-broker/src/identity_service/api/routes/identity.py](file://products/identity-broker/src/identity_service/api/routes/identity.py)
 - [identity-broker/src/identity_service/services/token_service.py](file://products/identity-broker/src/identity_service/services/token_service.py)
-- [identity-broker/src/identity_service/services/identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
+- [identity-broker/src/identity_service/services/identity_service.py:81-111](file://products/identity-broker/src/identity_service/services/identity_service.py#L81-L111)
 
 ### Tool Gateway
 Responsibilities:
@@ -328,6 +341,7 @@ Responsibilities:
 - **Content-hashed asset serving with immutable caching**
 - **Voice input via Web Speech API with browser compatibility handling**
 - **SPA shell with no-store caching for immediate redeployment**
+- **OIDC callback handling with origin-aware navigation**
 
 Common issues:
 - CORS or proxy misconfiguration
@@ -336,6 +350,7 @@ Common issues:
 - **Stale UI after redeployment due to cached assets**
 - **Voice input microphone button disabled or non-functional**
 - **Browser compatibility issues with Web Speech API**
+- **OIDC callback confusion about redirect origins**
 
 Diagnostics:
 - Check browser console and network tab
@@ -344,6 +359,7 @@ Diagnostics:
 - **Inspect asset caching headers and version changes**
 - **Test Web Speech API availability in different browsers**
 - **Verify microphone permissions and audio device access**
+- **Check OIDC callback URL handling and origin preservation**
 
 Resolution steps:
 - Fix CORS and proxy headers
@@ -352,8 +368,9 @@ Resolution steps:
 - **Force browser reload to fetch fresh index.html**
 - **Use Chrome/Edge for voice input functionality**
 - **Grant microphone permissions and verify audio device availability**
+- **Understand that callbacks always return to canonical hostname regardless of starting origin**
 
-**Updated** Added comprehensive voice input and caching troubleshooting based on SPEC-023 implementation
+**Updated** Enhanced OIDC callback troubleshooting with comprehensive origin behavior explanation
 
 **Section sources**
 - [operator-portal/README.md:37-113](file://products/operator-portal/README.md#L37-L113)
@@ -361,6 +378,7 @@ Resolution steps:
 - [operator-portal/web-ui/app/vite.config.ts:6-25](file://products/operator-portal/web-ui/app/vite.config.ts#L6-L25)
 - [operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts:38-56](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts#L38-L56)
 - [operator-portal/web-ui/app/src/chat/ChatView.tsx:487-721](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L487-L721)
+- [operator-portal/web-ui/app/src/auth/oidc.ts:114-156](file://products/operator-portal/web-ui/app/src/auth/oidc.ts#L114-L156)
 
 ## Dependency Analysis
 Service dependencies and deployment manifests:
@@ -523,6 +541,43 @@ Resolution:
 - [tool-gateway/src/api_gateway/services/policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
 - [tool-gateway/src/api_gateway/services/token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
 - [identity-broker/src/identity_service/services/token_service.py](file://products/identity-broker/src/identity_service/services/token_service.py)
+
+### OIDC Callback Hostname Issues
+
+#### Symptom: Sign-in redirects to unexpected hostname
+**Most likely cause:** Confusion between canonical and fallback hostnames. The identity broker always uses the primary `OIDC_REDIRECT_URI` (`https://aiops.luban.metasync.cc/callback`) as the callback destination, regardless of which origin the user started from.
+
+**Understanding the behavior:**
+- **Canonical hostname**: `https://aiops.luban.metasync.cc/callback` - This is the primary callback URI used by the identity broker
+- **Fallback hostnames**: `https://aiops.luban.k8s.orb.local/callback`, `http://localhost:18080/callback` - These are registered with Keycloak for reachability but never selected as callbacks
+- **Round-trip behavior**: When users start sign-in from any origin (including fallback hostnames), they always land back on the canonical hostname after authentication
+
+**Diagnostic:**
+
+```bash
+# Check current OIDC configuration
+kubectl -n dev-luban-aiops get configmap identity-broker-runtime-config \
+  -o jsonpath='{.data.OIDC_REDIRECT_URI}{"\n"}{.data.OIDC_EXTRA_REDIRECT_URIS}'
+
+# Verify Keycloak client registration
+kubectl -n dev-luban-aiops exec deployment/identity-broker -- \
+  curl -s http://localhost:8000/.well-known/openid-configuration | jq '.issuer'
+
+# Check browser network tab for redirect URLs during login flow
+```
+
+**Resolution:**
+- **Accept the canonical hostname behavior**: All sign-in flows will return to `https://aiops.luban.metasync.cc/callback` regardless of starting origin
+- **Configure browser bookmarks/favorites** to use the canonical hostname for consistent experience
+- **Update documentation** to clarify that fallback hostnames are for internal testing only
+- **Reconcile Keycloak client** if additional redirect URIs are needed: `shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh`
+
+**Updated** Clarified canonical vs fallback hostname behavior and explained round-trip behavior
+
+**Section sources**
+- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env:8-11](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env#L8-L11)
+- [identity-broker/src/identity_service/services/identity_service.py:81-111](file://products/identity-broker/src/identity_service/services/identity_service.py#L81-L111)
+- [docs/guides/configuration-reference.md:443-446](file://docs/guides/configuration-reference.md#L443-L446)
 
 ### OpenObserve Telemetry Pipeline Issues
 
@@ -966,6 +1021,7 @@ Resolution:
 - **For session issues, include confirmation registry state and transcript fallback logs**
 - **For portal issues, include browser compatibility details and caching behavior**
 - **For voice input issues, include browser version, OS, and microphone permission status**
+- **For OIDC issues, include redirect URI configuration and hostname behavior details**
 
 ### Community Resources
 - Repository documentation and specs
@@ -977,7 +1033,7 @@ Resolution:
 - [CONTRIBUTING.md](file://CONTRIBUTING.md)
 
 ## Conclusion
-This troubleshooting guide equips you with systematic approaches to diagnose and resolve common issues across the Luban AIOps Platform. By leveraging logs, metrics, and traces, and following the step-by-step resolutions provided, you can quickly address deployment, connectivity, performance, configuration, integration, OpenObserve telemetry challenges, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, and voice input microphone issues. For further assistance, consult community resources and escalate with comprehensive diagnostics when necessary.
+This troubleshooting guide equips you with systematic approaches to diagnose and resolve common issues across the Luban AIOps Platform. By leveraging logs, metrics, and traces, and following the step-by-step resolutions provided, you can quickly address deployment, connectivity, performance, configuration, integration, OpenObserve telemetry challenges, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, voice input microphone issues, and OIDC callback hostname behavior. For further assistance, consult community resources and escalate with comprehensive diagnostics when necessary.
 
 ## Appendices
 
@@ -1008,6 +1064,8 @@ This troubleshooting guide equips you with systematic approaches to diagnose and
   - Force browser reload (Ctrl+Shift+R) to bypass cached assets; content-hashed assets use immutable caching for performance.
 - **Why is the voice input microphone button disabled or not working?**
   - Use Chrome or Edge browser, grant microphone permissions, and ensure Web Speech API support; Firefox has limited compatibility.
+- **Why do OIDC callbacks always return to the canonical hostname?**
+  - The identity broker always uses `OIDC_REDIRECT_URI` (`https://aiops.luban.metasync.cc/callback`) as the callback destination, regardless of which origin users start from. Fallback hostnames like `.k8s.orb.local` are only for reachability testing.
 - **How do I fix voice recognition errors?**
   - Check browser microphone permissions, verify audio device availability, and switch recognition language in the composer selector.
 
@@ -1077,3 +1135,25 @@ This troubleshooting guide equips you with systematic approaches to diagnose and
 - [operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts:1-135](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts#L1-L135)
 - [operator-portal/web-ui/app/src/voice/languages.ts:1-60](file://products/operator-portal/web-ui/app/src/voice/languages.ts#L1-L60)
 - [operator-portal/web-ui/app/src/chat/ChatView.tsx:487-721](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L487-L721)
+
+### OIDC Callback Hostname Reference
+**Primary vs Extra Redirect URIs:**
+- **Primary callback**: `OIDC_REDIRECT_URI=https://aiops.luban.metasync.cc/callback` - Always used by identity broker
+- **Extra callbacks**: `OIDC_EXTRA_REDIRECT_URIS=https://aiops.luban.k8s.orb.local/callback,http://localhost:18080/callback` - Registered with Keycloak only for reachability
+- **Behavior**: All sign-in flows return to the canonical hostname regardless of starting origin
+
+**Configuration:**
+- Primary URI defined in `shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env`
+- Extra URIs registered with Keycloak client for development/testing flexibility
+- Reconciliation script: `shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh`
+
+**Expected Behavior:**
+- Users can start sign-in from any registered origin
+- Authentication always completes at `https://aiops.luban.metasync.cc/callback`
+- Browser history and bookmarks should use canonical hostname for consistency
+- Fallback hostnames are for internal testing and debugging only
+
+**Section sources**
+- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env:8-11](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env#L8-L11)
+- [identity-broker/src/identity_service/services/identity_service.py:81-111](file://products/identity-broker/src/identity_service/services/identity_service.py#L81-L111)
+- [docs/guides/configuration-reference.md:443-446](file://docs/guides/configuration-reference.md#L443-L446)

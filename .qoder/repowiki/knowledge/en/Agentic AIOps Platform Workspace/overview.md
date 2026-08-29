@@ -1,0 +1,1 @@
+Monorepo workspace for an enterprise agentic AIOps platform composed of nine product services, a shared contracts/SDK layer, and GitOps deployment assets orchestrated through a root Makefile.

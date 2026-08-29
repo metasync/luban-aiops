@@ -50,6 +50,7 @@
 - [auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
 - [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [token_service.py](file://products/identity-broker/src/identity_service/services/token_service.py)
+- [config.py](file://products/identity-broker/src/identity_service/core/config.py)
 - [redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
 - [redis-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
@@ -64,20 +65,25 @@
 - [identity-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml)
 - [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
 - [web-ui-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-service.yaml)
+- [web-ui-httproute.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-httproute.yaml)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [execution-runtime-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/execution-runtime/execution-runtime-deployment.yaml)
 - [execution-runtime-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/execution-runtime/execution-runtime-service.yaml)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
 - [deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
+- [architecture-overview.md](file://docs/guides/architecture-overview.md)
+- [getting-started.md](file://docs/guides/getting-started.md)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+- [dev-k8s README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new isolated execution worker service that fundamentally changes how approved mutating actions are executed
-- Updated architecture overview to reflect the shift from in-process execution to isolated worker execution model
-- Enhanced component analysis sections to document the execution-runtime worker and its integration with agent-platform
-- Updated deployment topology diagrams to show the new execution-runtime service alongside existing services
-- Revised security boundaries and isolation patterns to reflect the new worker-based execution model
-- Added detailed documentation of the handoff mechanism, signature verification, and single-flight idempotency
+- Updated architecture overview to emphasize canonical hostname usage (`https://aiops.luban.metasync.cc`) while noting `orb.local` as fallback
+- Clarified identity broker OIDC callback pinning configuration with primary vs extra redirect URIs
+- Enhanced deployment topology section to document the dual-hostname routing strategy
+- Updated configuration reference to explain the separation between primary callback and reachability-only extras
+- Added detailed explanation of browser PKCE storage implications for hostname selection
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -92,7 +98,7 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides a comprehensive architectural overview of the Luban AIOps Platform. It describes the microservices-based design, service boundaries, data flows, and integration points. The platform has undergone significant architectural evolution with the introduction of an **isolated execution worker service** that fundamentally changes how approved mutating actions are executed, shifting from in-process to isolated worker execution model. This change enhances security boundaries, reduces blast radius, and improves operational reliability. The platform now features a dual-gateway pattern (platform-gateway for portal-facing operations and tool-gateway for tool execution) combined with a dedicated execution-runtime worker for secure mutation execution. Key architectural decisions are captured in Architectural Decision Records (ADRs), technology stack choices include FastAPI, Redis, Kubernetes, and OIDC integration, along with system context diagrams showing external dependencies and internal service communication.
+This document provides a comprehensive architectural overview of the Luban AIOps Platform. It describes the microservices-based design, service boundaries, data flows, and integration points. The platform has undergone significant architectural evolution with the introduction of an **isolated execution worker service** that fundamentally changes how approved mutating actions are executed, shifting from in-process to isolated worker execution model. This change enhances security boundaries, reduces blast radius, and improves operational reliability. The platform now features a dual-gateway pattern (platform-gateway for portal-facing operations and tool-gateway for tool execution) combined with a dedicated execution-runtime worker for secure mutation execution. Key architectural decisions are captured in Architectural Decision Records (ADRs), technology stack choices include FastAPI, Redis, Kubernetes, and OIDC integration, along with system context diagrams showing external dependencies and internal service communication. The platform uses a canonical hostname strategy with `https://aiops.luban.metasync.cc` as the primary entry point and `https://aiops.luban.k8s.orb.local` as a fallback, with OIDC callbacks pinned to the canonical hostname for reliable authentication flows.
 
 ## Project Structure
 The repository is organized into product services, shared contracts, platform operations, and documentation:
@@ -179,8 +185,8 @@ The platform now features three specialized services that replaced the original 
 
 ### Other Core Services
 - **Agent Platform**: Hosts the agent runtime kernel, manages sessions, integrates with AI providers, exposes APIs for chat and session lifecycle, and includes execution worker client for handing off approved mutations. Uses Redis for durable sessions.
-- **Identity Broker**: Handles OIDC flows, issues tokens, and validates identities for both user and service-to-service contexts.
-- **Operator Portal**: Web interface for operators to manage platform resources and configurations.
+- **Identity Broker**: Handles OIDC flows, issues tokens, and validates identities for both user and service-to-service contexts. **Updated** - Configured with canonical hostname callback pinning and extra redirect URIs for reachability.
+- **Operator Portal**: Web interface for operators to manage platform resources and configurations. **Updated** - Routes configured for both canonical and fallback hostnames.
 
 **Section sources**
 - [main.py](file://products/platform-gateway/src/platform_gateway/main.py)
@@ -201,9 +207,13 @@ The platform now features three specialized services that replaced the original 
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
 - [executor.py](file://products/execution-runtime/src/execution_runtime/services/executor.py)
 - [single_flight.py](file://products/execution-runtime/src/execution_runtime/services/single_flight.py)
+- [config.py](file://products/identity-broker/src/identity_service/core/config.py)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 
 ## Architecture Overview
 The platform follows a microservices architecture with a **triple-layer execution model**. Clients interact with the **platform-gateway** for portal-facing operations, which enforces policies and verifies tokens before delegating to the Agent Platform. The **execution-runtime worker** handles secure execution of approved mutating actions through an authenticated handoff mechanism, while the **tool-gateway** handles internal tool execution requests from agent services. The Agent Platform manages agent sessions and interacts with external AI providers and Kubernetes for tool execution. Identity Broker centralizes OIDC flows and token management. Redis provides session durability and caching, while PostgreSQL stores execution records and receipts.
+
+**Updated** - The platform uses a canonical hostname strategy where `https://aiops.luban.metasync.cc` serves as the primary entry point with OIDC callbacks pinned to this hostname, while `https://aiops.luban.k8s.orb.local` provides fallback access. The identity broker's OIDC callback is explicitly configured to use the canonical hostname, ensuring reliable authentication flows even when users access the portal through alternative hostnames.
 
 ```mermaid
 sequenceDiagram
@@ -253,11 +263,14 @@ Portal-->>Client : Final Response
 - [identity-and-authorization-design.md](file://docs/agentic-aiops-platform/identity-and-authorization-design.md)
 - [adr/0005-platform-gateway-extraction.md](file://docs/adr/0005-platform-gateway-extraction.md)
 - [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
+- [architecture-overview.md](file://docs/guides/architecture-overview.md)
+- [getting-started.md](file://docs/guides/getting-started.md)
+- [dev-k8s README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 
 ## Detailed Component Analysis
 
 ### Platform Gateway (Portal-Facing Edge)
-**Updated** - New specialized service for portal-facing operations
+**Updated** - New specialized service for portal-facing operations with canonical hostname support
 
 **Responsibilities:**
 - Exposes REST endpoints for chat, sessions, auth, identity, and runtime operations.
@@ -446,14 +459,18 @@ Persist --> ReturnResp["Return Response"]
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 
 ### Identity Broker
+**Updated** - Enhanced with canonical hostname OIDC callback configuration
+
 **Responsibilities:**
-- Manages OIDC authentication flows.
+- Manages OIDC authentication flows with canonical hostname callback pinning.
 - Issues and validates tokens for users and services.
 - Provides identity context for downstream services.
+- Supports multiple redirect URIs for reachability while maintaining primary callback pinning.
 
 **Key modules:**
 - Auth routes for login, token exchange, and introspection.
 - Identity and token services for core logic.
+- **Updated** - Configuration supporting primary callback URI (`OIDC_REDIRECT_URI`) and extra redirect URIs (`OIDC_EXTRA_REDIRECT_URIS`) for reachability-only scenarios.
 
 ```mermaid
 sequenceDiagram
@@ -473,6 +490,7 @@ IdentityBroker-->>Client : Token Status
 - [auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
 - [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [token_service.py](file://products/identity-broker/src/identity_service/services/token_service.py)
+- [config.py](file://products/identity-broker/src/identity_service/core/config.py)
 
 **Section sources**
 - [main.py](file://products/identity-broker/src/identity_service/main.py)
@@ -480,16 +498,18 @@ IdentityBroker-->>Client : Token Status
 - [auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
 - [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [token_service.py](file://products/identity-broker/src/identity_service/services/token_service.py)
+- [config.py](file://products/identity-broker/src/identity_service/core/config.py)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 
 ## Dependency Analysis
-**Updated** - Reflects the new triple-layer architecture with execution-runtime worker
+**Updated** - Reflects the new triple-layer architecture with execution-runtime worker and enhanced hostname routing
 
 The platform exhibits clear separation of concerns with well-defined interfaces:
 - **Platform Gateway** depends on Token Verifier, Policy Engine, and Agent Client for portal operations.
 - **Tool Gateway** depends on Tool Registry, Policy Engine, and Kubernetes Connector for tool execution.
 - **Execution Runtime Worker** depends on Tool Gateway, Execution Signing, and PostgreSQL for record storage.
 - **Agent Platform** depends on Session Store (Redis), AI Providers, and Execution Worker Client.
-- **Identity Broker** depends on OIDC Provider.
+- **Identity Broker** depends on OIDC Provider with canonical hostname callback configuration.
 - All services share common schemas and observability conventions.
 
 ```mermaid
@@ -524,6 +544,7 @@ ERW --> TG
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
+- [config.py](file://products/identity-broker/src/identity_service/core/config.py)
 
 **Section sources**
 - [part-2-reference-architecture.md](file://docs/agentic-aiops-platform/part-2-reference-architecture.md)
@@ -540,6 +561,7 @@ ERW --> TG
 - Policy evaluation should be optimized to minimize latency; consider caching decisions when appropriate.
 - Tool execution isolation prevents resource contention between different tool types.
 - Bounded timeouts prevent resource exhaustion during worker unavailability scenarios.
+- **Updated** - Canonical hostname routing ensures optimal DNS resolution and avoids unnecessary redirects, improving authentication flow performance.
 
 ## Troubleshooting Guide
 Common issues and strategies:
@@ -552,6 +574,7 @@ Common issues and strategies:
 - **Signature verification failures**: verify execution-signing-secret configuration and key consistency.
 - **Single-flight conflicts**: investigate concurrent execution attempts and replay scenarios.
 - **Observability gaps**: ensure metrics and logs are emitted consistently across all services.
+- **Updated** - **Hostname-related issues**: Ensure canonical hostname `https://aiops.luban.metasync.cc` is properly configured in DNS and SSL certificates. If using fallback hostname `https://aiops.luban.k8s.orb.local`, note that OIDC callbacks will still redirect to the canonical hostname due to browser PKCE storage limitations.
 
 **Section sources**
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
@@ -559,22 +582,26 @@ Common issues and strategies:
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/rbac.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
 - [execution-runtime-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/execution-runtime/execution-runtime-deployment.yaml)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+- [dev-k8s README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 
 ## Conclusion
-The Luban AIOps Platform has evolved to a robust microservices architecture centered around a **triple-layer execution model**. The **platform-gateway** serves as the portal-facing edge with authentication, authorization, and agent interaction capabilities, the **tool-gateway** specializes in secure tool execution and connector management, and the **execution-runtime worker** provides isolated execution of approved mutating actions with tamper-evident signatures and single-flight idempotency. This architectural evolution significantly improves security boundaries, reduces blast radius, and enhances operational reliability. The use of Redis for session durability, PostgreSQL for execution records, Kubernetes for orchestration, and OIDC for secure authentication ensures scalability, reliability, and security. Clear ADRs guide architectural evolution, while shared contracts and observability conventions promote consistency across services.
+The Luban AIOps Platform has evolved to a robust microservices architecture centered around a **triple-layer execution model**. The **platform-gateway** serves as the portal-facing edge with authentication, authorization, and agent interaction capabilities, the **tool-gateway** specializes in secure tool execution and connector management, and the **execution-runtime worker** provides isolated execution of approved mutating actions with tamper-evident signatures and single-flight idempotency. This architectural evolution significantly improves security boundaries, reduces blast radius, and enhances operational reliability. The use of Redis for session durability, PostgreSQL for execution records, Kubernetes for orchestration, and OIDC for secure authentication ensures scalability, reliability, and security. Clear ADRs guide architectural evolution, while shared contracts and observability conventions promote consistency across services. **Updated** - The platform's hostname strategy with canonical hostname pinning and fallback support ensures reliable authentication flows while providing flexibility for different deployment environments.
 
 ## Appendices
 
 ### Deployment Topology and Infrastructure Requirements
-**Updated** - Reflects the new triple-layer deployment architecture with execution-runtime worker
+**Updated** - Reflects the new triple-layer deployment architecture with execution-runtime worker and dual-hostname routing
 
 - Kubernetes cluster with RBAC enabled.
 - Redis instance or cluster for session storage.
 - PostgreSQL instance for execution records and receipts.
-- OIDC provider configured for identity broker.
+- OIDC provider configured for identity broker with canonical hostname callback.
 - GitOps overlays for consistent deployments across environments.
 - Separate ServiceAccounts and RBAC policies for each service.
 - Execution-runtime worker deployed as single replica with restricted security context.
+- **Updated** - DNS configuration for both `aiops.luban.metasync.cc` (canonical) and `aiops.luban.k8s.orb.local` (fallback) hostnames.
+- **Updated** - SSL certificates covering both hostnames for HTTPS access.
 
 ```mermaid
 graph TB
@@ -590,7 +617,10 @@ POSTGRES["PostgreSQL Service"]
 end
 subgraph "External"
 OIDC["OIDC Provider"]
+DNS["DNS Resolution"]
 end
+DNS --> |Canonical| UI
+DNS --> |Fallback| UI
 UI --> PGW
 PGW --> AG
 PGW --> ID
@@ -609,11 +639,14 @@ TGW --> OIDC
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
 - [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
+- [web-ui-httproute.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-httproute.yaml)
 - [redis-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml)
 
 **Section sources**
 - [deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
+- [web-ui-httproute.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-httproute.yaml)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 
 ### Architectural Decision Records (ADRs) Summary
 **Updated** - Includes the new execution-runtime worker and platform gateway extraction ADRs
@@ -624,6 +657,7 @@ TGW --> OIDC
 - Broker-mediated token delegation enhances security and trust.
 - **New**: Platform gateway extraction separates portal-facing operations from tool execution for improved security and maintainability.
 - **New**: Isolated execution worker provides infrastructure-enforced isolation for approved mutating actions with tamper-evident signatures and single-flight idempotency.
+- **New**: Canonical hostname strategy with OIDC callback pinning ensures reliable authentication flows while supporting fallback access patterns.
 
 **Section sources**
 - [adr/0001-adopt-spec-driven-development.md](file://docs/adr/0001-adopt-spec-driven-development.md)
@@ -637,10 +671,45 @@ TGW --> OIDC
 - Redis: Low-latency session storage and caching.
 - PostgreSQL: Durable execution record storage with first-write-wins semantics.
 - Kubernetes: Container orchestration with scaling and self-healing capabilities.
-- OIDC: Standardized identity and authorization flow.
+- OIDC: Standardized identity and authorization flow with canonical hostname support.
 
 **Section sources**
 - [agent-platform-runtime-options.md](file://docs/agentic-aiops-platform/agent-platform-runtime-options.md)
 - [policy-specification.md](file://docs/agentic-aiops-platform/policy-specification.md)
 - [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
 - [delivery-roadmap.md](file://docs/agentic-aiops-platform/delivery-roadmap.md)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+
+### Hostname and OIDC Configuration Details
+**New** - Detailed explanation of the canonical hostname strategy and OIDC callback configuration
+
+The platform implements a dual-hostname strategy to balance production requirements with development flexibility:
+
+**Primary Hostname**: `https://aiops.luban.metasync.cc`
+- Used as the canonical entry point for all browser flows
+- OIDC callback pinned to `/callback` endpoint
+- Required for reliable authentication due to browser PKCE storage per-origin
+
+**Fallback Hostname**: `https://aiops.luban.k8s.orb.local`
+- Serves as reachability fallback for OrbStack environments
+- Same backend service but cannot reliably complete OIDC flows
+- Useful for basic API access when DNS is not available
+
+**OIDC Callback Configuration**:
+- Primary callback: `OIDC_REDIRECT_URI=https://aiops.luban.metasync.cc/callback`
+- Extra callbacks: `OIDC_EXTRA_REDIRECT_URIS=https://aiops.luban.k8s.orb.local/callback,http://localhost:18080/callback`
+- The broker always uses the primary redirect URI for actual authentication flows
+- Extra URIs are registered with Keycloak for reachability testing only
+
+**Browser Storage Implications**:
+- Browser PKCE pending requests are stored per-origin
+- Sign-in started on `orb.local` cannot round-trip back to it after Keycloak redirect
+- Users must start authentication flows on the canonical hostname for successful completion
+- Port-forwarding `service/web-ui` remains a valid fallback for local development
+
+**Section sources**
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
+- [web-ui-httproute.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-httproute.yaml)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+- [dev-k8s README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
+- [getting-started.md](file://docs/guides/getting-started.md)

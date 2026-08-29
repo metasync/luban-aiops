@@ -1,0 +1,1 @@
+Python services managed with `uv` (per-product `pyproject.toml` + `uv.lock`), containerized with Dockerfiles built by a shared base image `shared/base-images/base-uv`; Kubernetes deployment via Kustomize overlays under `shared/platform-ops/gitops`; API/event contracts enforced by JSON Schema files in `shared/shared-contracts/schemas` and validated by scripts there.

@@ -20,6 +20,7 @@
 - Added comprehensive verification and testing coverage information
 - Updated conclusion to reflect successful operator validation and production deployment
 - Enhanced section sources with specific file references and line numbers
+- **Updated**: Expanded documentation to include the new "How the tabs lay out content" section with detailed data shape to rendering approach mapping
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -71,7 +72,7 @@ G --> F
 - [DocumentsView.tsx:53-57](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L53-L57)
 - [operation-document.schema.json:99-102](file://shared/shared-contracts/schemas/operation-document.schema.json#L99-L102)
 - [test_documents.py:218-277](file://products/agent-platform/tests/test_documents.py#L218-L277)
-- [documents-digest-reference.md:1-205](file://docs/guides/documents-digest-reference.md#L1-L205)
+- [documents-digest-reference.md:1-257](file://docs/guides/documents-digest-reference.md#L1-L257)
 - [release-notes:1-103](file://docs/agentic-aiops-platform/release-notes/2026-08-28-documents-readability-and-digest-reference.md#L1-L103)
 
 **Section sources**
@@ -222,13 +223,33 @@ PortalGuide --> View["Documents View<br/>Learn more link"]
 **Diagram sources**
 - [plan.md:75-86](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/plan.md#L75-L86)
 - [spec.md:52-76](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md#L52-L76)
-- [documents-digest-reference.md:1-205](file://docs/guides/documents-digest-reference.md#L1-L205)
+- [documents-digest-reference.md:1-257](file://docs/guides/documents-digest-reference.md#L1-L257)
 
 **Section sources**
 - [spec.md:52-76](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md#L52-L76)
 - [plan.md:75-86](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/plan.md#L75-L86)
 - [tasks.md:24-28](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/tasks.md#L24-L28)
-- [documents-digest-reference.md:1-205](file://docs/guides/documents-digest-reference.md#L1-L205)
+- [documents-digest-reference.md:1-257](file://docs/guides/documents-digest-reference.md#L1-L257)
+
+### How the Tabs Lay Out Content
+**Updated** Added comprehensive documentation of the tab layout system that maps data shapes to rendering approaches.
+
+Every tab follows one layout rule, chosen by the shape of the data:
+
+| Shape | Rendering | Examples |
+|---|---|---|
+| Repeated records sharing the same scalar fields | Table, one record per row | confirmations, executions, triage evidence and next steps, dispatches |
+| A single object with named fields | Description list | the incident envelope, the triage headline, handover counts |
+| Heterogeneous or long-text items | Bullets | triage hypotheses |
+| Identifiers and short labels | Chips (tags) | session ids, cited skills, incident labels |
+
+The rule is mechanical: a new digest section renders as a table when its entries are records with shared scalar fields, and degrades to bullets or the **Digest data** tab when they are not. Layout is a rendering act only — the stored digest is always the artifact of record.
+
+Both the digest and the narrative render **bounded**: when either block grows tall, only its content region scrolls inside a fixed-height region while the structural chrome stays pinned — the digest's tab bar and the narrative's collapse header remain visible while the content scrolls underneath. An *Expand to full height* affordance releases the bound, so nothing is ever trapped off screen.
+
+**Section sources**
+- [documents-digest-reference.md:148-170](file://docs/guides/documents-digest-reference.md#L148-L170)
+- [DocumentsView.tsx:151-158](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L151-L158)
 
 ## Dependency Analysis
 - Agent platform depends on the shared schema for validation and documentation notes; the schema remains open to accommodate the new summary field.
@@ -256,7 +277,7 @@ RN --> T
 - [operation_documents.py:49-80](file://products/agent-platform/src/agent_service/services/operation_documents.py#L49-L80)
 - [DocumentsView.tsx:53-57](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L53-L57)
 - [test_documents.py:218-277](file://products/agent-platform/tests/test_documents.py#L218-L277)
-- [documents-digest-reference.md:1-205](file://docs/guides/documents-digest-reference.md#L1-L205)
+- [documents-digest-reference.md:1-257](file://docs/guides/documents-digest-reference.md#L1-L257)
 - [release-notes:1-103](file://docs/agentic-aiops-platform/release-notes/2026-08-28-documents-readability-and-digest-reference.md#L1-L103)
 
 **Section sources**
@@ -269,6 +290,7 @@ RN --> T
 - Summary derivation is O(1) relative to the handover skeleton size and occurs once at creation time, avoiding per-list recomputation.
 - Tabbed rendering reduces DOM depth compared to recursive trees, improving scan speed and memory usage.
 - Bounded panes prevent large layouts from stretching the drawer, reducing reflow costs during interaction.
+- The mechanical layout rules ensure consistent performance across different data shapes without complex conditional logic.
 
 ## Troubleshooting Guide
 - Missing summary in lists:
@@ -282,6 +304,9 @@ RN --> T
 - Bounded pane behavior:
   - Validate that both digest and prose panes have internal scrolling and an expand affordance.
   - Confirm export is unaffected by pane bounds.
+- Layout rendering problems:
+  - Verify that data shapes match expected patterns for automatic rendering selection.
+  - Check that unrecognized data shapes fall back to the Digest data tab appropriately.
 
 **Section sources**
 - [plan.md:14-86](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/plan.md#L14-L86)
@@ -302,7 +327,7 @@ SPEC-041 successfully enhances operator usability by making digest content scann
 **Section sources**
 - [spec.md:48-142](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md#L48-L142)
 - [tasks.md:5-28](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/tasks.md#L5-L28)
-- [documents-digest-reference.md:1-205](file://docs/guides/documents-digest-reference.md#L1-L205)
+- [documents-digest-reference.md:1-257](file://docs/guides/documents-digest-reference.md#L1-L257)
 
 ### Implementation Status
 - **Status**: Delivered (2026-08-28)

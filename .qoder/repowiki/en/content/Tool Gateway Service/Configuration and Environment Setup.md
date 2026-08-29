@@ -41,15 +41,19 @@
 - [spec.md](file://docs/specs/SPEC-043-incident-report-document-type/spec.md)
 - [approval-and-hitl.md](file://docs/guides/approval-and-hitl.md)
 - [tool-configuration.md](file://docs/guides/tool-configuration.md)
+- [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
+- [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+- [troubleshooting.md](file://docs/guides/troubleshooting.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced incident service connectivity documentation with comprehensive coverage of AGENT_INCIDENT_SERVICE_URL, AGENT_INCIDENT_CLIENT_ID, AGENT_INCIDENT_CLIENT_SECRET, and AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS environment variables
-- Updated platform-gateway incident service proxy configuration with PLATFORM_GATEWAY_INCIDENT_* environment variables
-- Added detailed guidance for incident report document assembly capabilities in agent-platform
-- Integrated incident service considerations into deployment examples and security best practices
-- Enhanced troubleshooting section with incident service-specific issues and resolutions
+- Enhanced OIDC configuration documentation to clarify that extra redirect URIs are registered with Keycloak for reachability only, not selected as callbacks
+- Updated identity broker configuration section to explain canonical vs fallback behavior for redirect URIs
+- Added detailed explanation of how the identity broker always uses OIDC_REDIRECT_URI as the flow's callback regardless of which origin initiates login
+- Updated troubleshooting section with clearer guidance on redirect URI mismatch scenarios
+- Enhanced configuration reference with additional context about redirect URI behavior
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -66,7 +70,7 @@
 ## Introduction
 This document explains how the Platform Gateway Service manages configuration and environment setup across layers: environment variables, configuration files, and runtime overrides. It details available options, defaults, validation rules, and deployment-specific settings for development, staging, and production. It also provides examples for Docker and Kubernetes (ConfigMaps/Secrets), and outlines security best practices for secrets management and consistent configuration across environments.
 
-**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations, risk-tier admission gates for mutating tools via GATEWAY_MUTATING_TOOLS_ENABLED, configurable HITL confirmation timeouts through AGENT_HITL_CONFIRM_TIMEOUT, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, the new mutating-dev kustomize profile that provides a committed, environment-scoped development posture for enabling mutating tools safely with bounded RBAC permissions while preserving configuration across LLM provider switches, the live model discovery feature controlled by AGENT_MODEL_DISCOVERY_ENABLED, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS, and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS that enables automatic model catalog updates from provider endpoints with fail-soft fallback mechanisms, the new execution signing system with AGENT_EXECUTION_SIGNING_KEY that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions via AGENT_AUDIT_SERVICE_URL, and durable execution record persistence using AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL settings, plus comprehensive incident service connectivity configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables that enable incident report document assembly and triage capabilities with Basic authentication flows.
+**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations, risk-tier admission gates for mutating tools via GATEWAY_MUTATING_TOOLS_ENABLED, configurable HITL confirmation timeouts through AGENT_HITL_CONFIRM_TIMEOUT, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, the new mutating-dev kustomize profile that provides a committed, environment-scoped development posture for enabling mutating tools safely with bounded RBAC permissions while preserving configuration across LLM provider switches, the live model discovery feature controlled by AGENT_MODEL_DISCOVERY_ENABLED, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS, and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS that enables automatic model catalog updates from provider endpoints with fail-soft fallback mechanisms, the new execution signing system with AGENT_EXECUTION_SIGNING_KEY that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions via AGENT_AUDIT_SERVICE_URL, and durable execution record persistence using AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL settings, plus comprehensive incident service connectivity configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables that enable incident report document assembly and triage capabilities with Basic authentication flows, and enhanced OIDC configuration documentation clarifying that extra redirect URIs are registered with Keycloak for reachability only, not selected as callbacks.
 
 ## Project Structure
 The Platform Gateway Service is implemented under products/platform-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/platform-gateway. The service includes workspace resource integration features that proxy requests to tool-gateway and skills-hub services for read-only inventory access, plus enhanced OpenTelemetry configuration with durable secret management. The new mutating-dev profile provides a dedicated development posture for enabling mutating tools with appropriate RBAC controls. The agent platform component now includes live model discovery capabilities that automatically refresh model catalogs from provider endpoints, along with execution signing and audit trail capabilities for tamper-evident execution records.
@@ -144,6 +148,14 @@ CCC["Fire-and-Forget Emission"]
 DDD["Postgres Persistence"]
 EEE["Retention Scanning"]
 end
+subgraph "OIDC Configuration"
+FFF["Identity Broker"]
+GGG["OIDC_REDIRECT_URI"]
+HHH["OIDC_EXTRA_REDIRECT_URIS"]
+III["Keycloak Client"]
+JJJ["Canonical Callback"]
+KKK["Reachability Only"]
+end
 A --> RR
 B --> SS
 C --> NN
@@ -185,6 +197,9 @@ NN --> OO
 OO --> PP
 PP --> QQ
 QQ --> RR
+FFF --> III
+GGG --> JJJ
+HHH --> KKK
 ```
 
 **Diagram sources**
@@ -218,6 +233,8 @@ QQ --> RR
 - [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
 - [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
+- [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
+- [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -267,6 +284,7 @@ QQ --> RR
 - **New**: Audit service integration with fire-and-forget emission pattern for durable audit trails.
 - **New**: Execution record persistence with Postgres backend and retention scanning for compliance requirements.
 - **New**: Incident service connectivity with Basic authentication for incident report document assembly and triage capabilities.
+- **New**: Enhanced OIDC configuration with clear distinction between canonical callback URIs and reachability-only extra URIs.
 
 Key responsibilities:
 - Provide a single source of truth for configuration via typed models.
@@ -284,8 +302,9 @@ Key responsibilities:
 - **New**: Integrate audit service emissions with fire-and-forget pattern that never degrades the chat stream while maintaining durable audit trails.
 - **New**: Persist execution records with Postgres backend and retention scanning to ensure compliance requirements are met without impacting performance.
 - **New**: Establish incident service connectivity with Basic authentication for incident report document assembly and triage operations, supporting both agent-platform and platform-gateway incident service clients.
+- **New**: Clarify OIDC redirect URI behavior where extra URIs serve reachability purposes only while canonical URIs handle actual authentication flows.
 
-**Updated** Enhanced core components to include comprehensive workspace resource integration capabilities with read-only proxies for tools catalog and skills inventory, supporting both delegated token flow for tools and Basic authentication for skills, risk-tier admission gates for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus durable OpenTelemetry secret provisioning that persists authentication headers across deployment operations, the new mutating-dev kustomize profile that provides a safe, committed development posture for enabling mutating tools with appropriate RBAC controls, the live model discovery service that automatically refreshes model catalogs from provider endpoints with robust fallback mechanisms, the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions, and durable execution record persistence with retention scanning, plus comprehensive incident service connectivity configuration that enables incident report document assembly and triage capabilities through Basic authentication flows.
+**Updated** Enhanced core components to include comprehensive workspace resource integration capabilities with read-only proxies for tools catalog and skills inventory, supporting both delegated token flow for tools and Basic authentication for skills, risk-tier admission gates for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus durable OpenTelemetry secret provisioning that persists authentication headers across deployment operations, the new mutating-dev kustomize profile that provides a safe, committed development posture for enabling mutating tools with appropriate RBAC controls, the live model discovery service that automatically refreshes model catalogs from provider endpoints with robust fallback mechanisms, the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions, and durable execution record persistence with retention scanning, plus comprehensive incident service connectivity configuration that enables incident report document assembly and triage capabilities through Basic authentication flows, and enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs.
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -307,7 +326,7 @@ Key responsibilities:
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 
 ## Architecture Overview
-The configuration system follows a layered approach with enhanced workspace resource integration, risk-tier admission gates, durable secret management, live model discovery, execution signing, and incident service connectivity capabilities:
+The configuration system follows a layered approach with enhanced workspace resource integration, risk-tier admission gates, durable secret management, live model discovery, execution signing, incident service connectivity, and clarified OIDC redirect URI behavior:
 - Defaults: defined in code or default YAML policies.
 - Config files: loaded from container filesystem or mounted volumes.
 - Environment variables: injected at runtime via platform orchestration (e.g., Kubernetes).
@@ -324,6 +343,7 @@ The configuration system follows a layered approach with enhanced workspace reso
 - **New**: Audit service integration: fire-and-forget emission pattern for durable audit trails.
 - **New**: Execution record persistence: Postgres-backed storage with retention scanning for compliance.
 - **New**: Incident service connectivity: Basic authentication for incident report document assembly and triage operations.
+- **New**: Enhanced OIDC configuration: canonical callback URIs vs reachability-only extra URIs with clear behavioral distinctions.
 
 ```mermaid
 sequenceDiagram
@@ -332,6 +352,7 @@ participant Agent as "Agent Platform"
 participant Gateway as "Platform Gateway"
 participant ToolGW as "Tool Gateway"
 participant Identity as "Identity Broker"
+participant Keycloak as "Keycloak"
 participant Skills as "Skills Hub"
 participant Incident as "Incident Service"
 participant OTel as "OpenObserve"
@@ -349,6 +370,7 @@ Note over Agent,Audit : Audit Emission
 Note over Agent,Incident : Incident Report Assembly
 Note over Gateway,Incident : Incident Service Proxy
 Note over Agent,ExecStore : Execution Record Persistence
+Note over Identity,Keycloak : OIDC Redirect URI Behavior
 Portal->>Agent : Tool Call Request
 Agent->>Agent : Check Auto-Allow List
 Agent->>Agent : Apply HITL Timeout
@@ -386,6 +408,17 @@ Agent->>Audit : Emit audit events (non-blocking)
 Audit-->>Agent : Acknowledged (or failed silently)
 Note over ExecStore : Retention Scanning
 ExecStore->>ExecStore : Sweep expired records (30 days)
+Note over Identity,Keycloak : OIDC Flow with Canonical Callback
+Portal->>Identity : Start Login (from any origin)
+Identity->>Identity : Resolve Redirect URI
+Identity->>Keycloak : Authorization Request (canonical URI)
+Keycloak-->>Portal : Redirect to Keycloak
+Portal->>Keycloak : Authenticate
+Keycloak-->>Portal : Redirect to canonical callback
+Portal->>Identity : Exchange Code (canonical URI)
+Identity->>Keycloak : Token Exchange (canonical URI)
+Keycloak-->>Identity : Tokens
+Identity-->>Portal : Platform JWT
 ```
 
 **Diagram sources**
@@ -406,6 +439,8 @@ ExecStore->>ExecStore : Sweep expired records (30 days)
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
+- [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
+- [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 - [spec.md](file://docs/specs/SPEC-019-portal-transparency-navigation/spec.md)
 - [spec.md](file://docs/specs/SPEC-027-live-model-discovery/spec.md)
 - [spec.md](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
@@ -420,7 +455,7 @@ ExecStore->>ExecStore : Sweep expired records (30 days)
 - Error handling: Aggregates validation errors and surfaces actionable messages.
 - Service discovery: Uses DNS-based resolution for inter-service communication.
 
-**Updated** Enhanced to support workspace resource integration with new configuration fields for tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret, enabling read-only proxies for tools catalog and skills inventory, plus risk-tier admission gate configuration for mutating tools, integration with the mutating-dev profile, live model discovery configuration through AGENT_MODEL_DISCOVERY_* environment variables, execution signing configuration through AGENT_EXECUTION_SIGNING_KEY and audit service configuration through AGENT_AUDIT_SERVICE_URL, and incident service connectivity configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables for incident report document assembly and triage capabilities.
+**Updated** Enhanced to support workspace resource integration with new configuration fields for tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret, enabling read-only proxies for tools catalog and skills inventory, plus risk-tier admission gate configuration for mutating tools, integration with the mutating-dev profile, live model discovery configuration through AGENT_MODEL_DISCOVERY_* environment variables, execution signing configuration through AGENT_EXECUTION_SIGNING_KEY and audit service configuration through AGENT_AUDIT_SERVICE_URL, and incident service connectivity configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables for incident report document assembly and triage capabilities, plus enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs.
 
 ```mermaid
 flowchart TD
@@ -441,6 +476,37 @@ Expose --> End
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+
+### OIDC Configuration and Redirect URI Behavior
+- Purpose: Manages OIDC authentication flow with clear distinction between canonical callback URIs and reachability-only extra URIs.
+- Canonical Callback: `OIDC_REDIRECT_URI` serves as the primary callback URI for all authentication flows.
+- Extra URIs: `OIDC_EXTRA_REDIRECT_URIS` are registered with Keycloak for reachability only and are never selected as callbacks.
+- Identity Broker Behavior: Always uses `OIDC_REDIRECT_URI` as the flow's callback regardless of which origin initiates login.
+- Keycloak Registration: Both canonical and extra URIs are registered with Keycloak, but only canonical URI handles authentication responses.
+- Browser Origin Handling: When login starts from an extra URI origin, Keycloak redirects back to the canonical hostname after authentication.
+- Security: Prevents callback hijacking by ensuring only canonical URIs receive authentication responses.
+
+**New Section** Comprehensive OIDC configuration implementation with clear behavioral distinction between canonical callback URIs and reachability-only extra URIs.
+
+```mermaid
+flowchart TD
+LoginStart["Login Initiated from Any Origin"] --> CheckOrigin{"Origin matches<br/>canonical URI?"}
+CheckOrigin --> |yes| UseCanonical["Use OIDC_REDIRECT_URI as callback"]
+CheckOrigin --> |no| UseExtra["Use extra URI for reachability"]
+UseCanonical --> KeycloakAuth["Authenticate with Keycloak"]
+UseExtra --> KeycloakAuth
+KeycloakAuth --> RedirectBack["Keycloak redirects to canonical URI"]
+RedirectBack --> ExchangeCode["Exchange code for tokens"]
+ExchangeCode --> Complete["Authentication complete"]
+```
+
+**Diagram sources**
+- [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
+- [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
+
+**Section sources**
+- [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
+- [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 
 ### Incident Service Connectivity
 - Purpose: Provides Basic authentication-based connectivity to incident-service for incident report document assembly and triage operations.
@@ -956,8 +1022,9 @@ SkillsHubClient --> PlatformGatewaySettings
 - **New**: Execution signing secret provisioning through execution-signing-secret with optional secretKeyRef.
 - **New**: Audit service configuration through AGENT_AUDIT_SERVICE_URL and related client credentials.
 - **New**: Incident service configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables for incident report document assembly and triage capabilities.
+- **New**: Enhanced OIDC configuration with clear separation between canonical callback URIs and reachability-only extra URIs.
 
-**Updated** Enhanced deployment configuration with workspace resource integration, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list settings, plus durable OpenTelemetry secret provisioning that maintains authentication headers across deployment operations, the new mutating-dev profile that provides a committed development posture for enabling mutating tools safely, live model discovery configuration for automatic catalog updates, execution signing secret provisioning for tamper-evident execution records, audit service configuration for durable audit trails, and incident service configuration for incident report document assembly and triage capabilities.
+**Updated** Enhanced deployment configuration with workspace resource integration, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list settings, plus durable OpenTelemetry secret provisioning that maintains authentication headers across deployment operations, the new mutating-dev profile that provides a committed development posture for enabling mutating tools safely, live model discovery configuration for automatic catalog updates, execution signing secret provisioning for tamper-evident execution records, audit service configuration for durable audit trails, incident service configuration for incident report document assembly and triage capabilities, and enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs.
 
 ```mermaid
 graph TB
@@ -1001,6 +1068,12 @@ MutDev["Mutating Dev Profile"] --> ConfigMerge["ConfigMap Merge"]
 ConfigMerge --> ToolGWEnv
 ExecSigning --> ExecSign
 IncidentSecrets --> IncidentAssembly
+OIDCConfig["OIDC Configuration"] --> CanonicalURI["OIDC_REDIRECT_URI"]
+OIDCConfig --> ExtraURIs["OIDC_EXTRA_REDIRECT_URIS"]
+CanonicalURI --> IdentityBroker["Identity Broker"]
+ExtraURIs --> Keycloak["Keycloak Registration"]
+IdentityBroker --> CanonicalCallback["Canonical Callback"]
+Keycloak --> ReachabilityOnly["Reachability Only"]
 ```
 
 **Diagram sources**
@@ -1014,6 +1087,8 @@ IncidentSecrets --> IncidentAssembly
 - [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
+- [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
+- [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 
 **Section sources**
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
@@ -1025,7 +1100,7 @@ IncidentSecrets --> IncidentAssembly
 ## Dependency Analysis
 Configuration components depend on environment variables and files, while the runtime settings handle DNS-based service discovery. The Docker image encapsulates runtime dependencies, and Kubernetes manifests inject configuration at deployment time. Workspace resource integration adds dependencies on tool-gateway and skills-hub services with appropriate authentication mechanisms.
 
-**Updated** Added dependencies for workspace resource integration including tool-gateway delegation flow and skills-hub Basic authentication, risk-tier admission gate enforcement, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus enhanced OpenTelemetry secret provisioning dependencies that ensure authentication headers persist across deployment operations, the new mutating-dev profile dependencies that provide committed development posture for enabling mutating tools safely, live model discovery dependencies that connect to provider endpoints with robust fallback mechanisms, execution signing dependencies that require execution-signing-secret provisioning, audit service dependencies for durable audit trail emission, execution record store dependencies for Postgres-backed persistence with retention scanning, and incident service dependencies that require incident-query-client configuration and credential provisioning through sync-incident-secrets.sh.
+**Updated** Added dependencies for workspace resource integration including tool-gateway delegation flow and skills-hub Basic authentication, risk-tier admission gate enforcement, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus enhanced OpenTelemetry secret provisioning dependencies that ensure authentication headers persist across deployment operations, the new mutating-dev profile dependencies that provide committed development posture for enabling mutating tools safely, live model discovery dependencies that connect to provider endpoints with robust fallback mechanisms, execution signing dependencies that require execution-signing-secret provisioning, audit service dependencies for durable audit trail emission, execution record store dependencies for Postgres-backed persistence with retention scanning, incident service dependencies that require incident-query-client configuration and credential provisioning through sync-incident-secrets.sh, and OIDC configuration dependencies that distinguish between canonical callback URIs and reachability-only extra URIs.
 
 ```mermaid
 graph TB
@@ -1074,6 +1149,11 @@ ExecSigning["sync-execution-signing-secret.sh"] --> ExecSigningSecret["execution
 ExecSigningSecret --> ExecSign
 IncidentSecrets["sync-incident-secrets.sh"] --> IncidentSecrets["incident-query-clients"]
 IncidentSecrets --> IncidentAssembly
+OIDC["identity_service.py"] --> CanonicalURI["OIDC_REDIRECT_URI"]
+OIDC --> ExtraURIs["OIDC_EXTRA_REDIRECT_URIS"]
+CanonicalURI --> Keycloak["Keycloak"]
+ExtraURIs --> Keycloak
+Keycloak --> CanonicalCallback["Canonical Callback"]
 ```
 
 **Diagram sources**
@@ -1098,8 +1178,8 @@ IncidentSecrets --> IncidentAssembly
 - [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
-- [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
-- [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
+- [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
+- [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -1154,6 +1234,7 @@ IncidentSecrets --> IncidentAssembly
 - **New**: Incident service connectivity uses timeout-based HTTP clients to prevent hanging requests.
 - **New**: Incident report assembly performs efficient Basic authentication with configured credentials.
 - **New**: Incident service proxy operations use connection pooling and timeout controls for optimal performance.
+- **New**: OIDC redirect URI resolution uses efficient fallback logic to minimize authentication flow overhead.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -1207,8 +1288,11 @@ Common issues and resolutions:
 - **New**: Incident service 503 errors: Indicates incident service is not configured; verify AGENT_INCIDENT_SERVICE_URL and AGENT_INCIDENT_CLIENT_SECRET are set.
 - **New**: Incident service 502 errors: Indicates upstream service failures; check incident-service health and connectivity.
 - **New**: Incident service 4xx errors: Indicates client-side issues; verify incident query client credentials and request parameters.
+- **New**: OIDC redirect URI mismatch: Verify OIDC_REDIRECT_URI covers the browser-accessible URL; remember that OIDC_EXTRA_REDIRECT_URIS are registered for reachability only and never selected as callbacks.
+- **New**: OIDC login completes but redirects to wrong origin: Check that OIDC_REDIRECT_URI is the canonical hostname; extra URIs are only for reachability and will redirect back to canonical hostname.
+- **New**: Keycloak client reconciliation issues: Run reconcile-portal-oidc-client.sh to ensure both canonical and extra URIs are properly registered with Keycloak.
 
-**Updated** Added comprehensive troubleshooting guidance for workspace resource integration including proxy configuration, authentication issues, and downstream service connectivity problems, risk-tier admission gate configuration issues, HITL confirmation timeout problems, enhanced agent auto-allow list misconfiguration detection, plus detailed guidance for OpenTelemetry secret provisioning and authentication issues, new troubleshooting steps for the mutating-dev profile integration including profile activation, RBAC verification, and triple-gate enforcement issues, comprehensive guidance for live model discovery configuration, provider connectivity, and fallback behavior troubleshooting, new troubleshooting steps for execution signing including secret provisioning, signing failures, argument digest mismatches, audit service connectivity, and execution record persistence issues, and comprehensive troubleshooting guidance for incident service connectivity including URL configuration, credential provisioning, authentication failures, and service availability issues.
+**Updated** Added comprehensive troubleshooting guidance for workspace resource integration including proxy configuration, authentication issues, and downstream service connectivity problems, risk-tier admission gate configuration issues, HITL confirmation timeout problems, enhanced agent auto-allow list misconfiguration detection, plus detailed guidance for OpenTelemetry secret provisioning and authentication issues, new troubleshooting steps for the mutating-dev profile integration including profile activation, RBAC verification, and triple-gate enforcement issues, comprehensive guidance for live model discovery configuration, provider connectivity, and fallback behavior troubleshooting, new troubleshooting steps for execution signing including secret provisioning, signing failures, argument digest mismatches, audit service connectivity, and execution record persistence issues, comprehensive troubleshooting guidance for incident service connectivity including URL configuration, credential provisioning, authentication failures, and service availability issues, and enhanced OIDC troubleshooting guidance that clarifies the distinction between canonical callback URIs and reachability-only extra URIs, helping users understand why login from extra origins redirects back to canonical hostname.
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -1233,20 +1317,22 @@ Common issues and resolutions:
 - [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
+- [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
+- [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 
 ## Conclusion
 The Platform Gateway Service employs a robust, layered configuration system that integrates environment variables, configuration files, and runtime overrides with strict validation. By following the outlined best practices for Docker and Kubernetes deployments, teams can maintain secure, consistent configurations across environments while ensuring reliability and performance. The architectural shift to DNS-based service discovery eliminates service-link conflicts and provides more reliable inter-service communication patterns. The addition of workspace resource integration enables operators to gain self-service visibility into their workspace resources through read-only proxies for tools catalog and skills inventory, enhancing operational transparency and reducing dependency on agent-mediated resource discovery.
 
-**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive workspace resource integration capabilities that provide operators with direct visibility into their workspace resources, risk-tier admission gates that provide fine-grained control over mutating tool access, configurable HITL confirmation timeouts that balance operational efficiency with safety requirements, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, plus durable OpenTelemetry secret provisioning that ensures authentication headers persist across all deployment operations, maintaining consistent telemetry collection regardless of deployment sequence or environment regeneration, the new mutating-dev kustomize profile that provides a committed, safe development posture for enabling mutating tools with appropriate RBAC controls and triple-gate security enforcement, the live model discovery service that automatically keeps model catalogs current through periodic provider endpoint polling with robust fail-soft fallback mechanisms, the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions for durable audit trails, and execution record persistence with retention scanning for compliance requirements, plus comprehensive incident service connectivity configuration that enables incident report document assembly and triage capabilities through Basic authentication flows with proper credential management and service availability monitoring.
+**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive workspace resource integration capabilities that provide operators with direct visibility into their workspace resources, risk-tier admission gates that provide fine-grained control over mutating tool access, configurable HITL confirmation timeouts that balance operational efficiency with safety requirements, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, plus durable OpenTelemetry secret provisioning that ensures authentication headers persist across all deployment operations, maintaining consistent telemetry collection regardless of deployment sequence or environment regeneration, the new mutating-dev kustomize profile that provides a committed, safe development posture for enabling mutating tools with appropriate RBAC controls and triple-gate security enforcement, the live model discovery service that automatically keeps model catalogs current through periodic provider endpoint polling with robust fail-soft fallback mechanisms, the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions for durable audit trails, and execution record persistence with retention scanning for compliance requirements, plus comprehensive incident service connectivity configuration that enables incident report document assembly and triage capabilities through Basic authentication flows with proper credential management and service availability monitoring, and enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs, providing operators with predictable authentication behavior across different browser origins.
 
 ## Appendices
 
 ### Environment-Specific Settings
-- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable workspace resource proxies with local tool-gateway and skills-hub instances, configure OTel with dev OpenObserve credentials, set GATEWAY_MUTATING_TOOLS_ENABLED=false for safety, configure AGENT_HITL_CONFIRM_TIMEOUT=600 for reasonable confirmation windows, enable enhanced agent auto-allow list with vetted read-only tools, **new**: Include the mutating-dev profile permanently for safe development access to mutating tools with bounded RBAC permissions, **new**: Enable live model discovery with shorter refresh intervals (e.g., 300 seconds) for rapid testing of new provider models, **new**: Provision execution signing secret for testing tamper-evident execution records, **new**: Configure audit service URL for durable audit trail testing, **new**: Configure incident service connectivity with AGENT_INCIDENT_SERVICE_URL and AGENT_INCIDENT_CLIENT_SECRET for incident report document assembly testing.
-- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure workspace resource proxies with staging backend services, provision OTel secrets with staging OpenObserve credentials, carefully evaluate GATEWAY_MUTATING_TOOLS_ENABLED for testing scenarios, tune AGENT_HITL_CONFIRM_TIMEOUT for staging workflows, monitor auto-allow list effectiveness, **new**: Consider including mutating-dev profile selectively for staging testing scenarios with appropriate RBAC scoping, **new**: Configure model discovery with moderate refresh intervals (e.g., 900 seconds) to balance freshness with stability, **new**: Enable execution signing with staging audit service for end-to-end testing of tamper-evident execution records, **new**: Configure incident service connectivity with staging credentials for incident report document assembly testing.
-- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure workspace resource proxies with production backend services and proper authentication, ensure OTel secrets are provisioned with production OpenObserve credentials, keep GATEWAY_MUTATING_TOOLS_ENABLED=false unless absolutely necessary, set AGENT_HITL_CONFIRM_TIMEOUT appropriately for production SLAs, audit auto-allow list regularly for security compliance, **new**: Never include mutating-dev profile in production deployments; use separate controlled overlays if mutating tools are absolutely required, **new**: Configure model discovery with conservative refresh intervals (e.g., 1800 seconds) and longer timeouts to minimize provider load and ensure stability, **new**: Always provision execution signing secret for production tamper-evident execution records, **new**: Configure audit service integration for comprehensive audit trail compliance, **new**: Configure incident service connectivity with production credentials for incident report document assembly and triage operations.
+- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable workspace resource proxies with local tool-gateway and skills-hub instances, configure OTel with dev OpenObserve credentials, set GATEWAY_MUTATING_TOOLS_ENABLED=false for safety, configure AGENT_HITL_CONFIRM_TIMEOUT=600 for reasonable confirmation windows, enable enhanced agent auto-allow list with vetted read-only tools, **new**: Include the mutating-dev profile permanently for safe development access to mutating tools with bounded RBAC permissions, **new**: Enable live model discovery with shorter refresh intervals (e.g., 300 seconds) for rapid testing of new provider models, **new**: Provision execution signing secret for testing tamper-evident execution records, **new**: Configure audit service URL for durable audit trail testing, **new**: Configure incident service connectivity with AGENT_INCIDENT_SERVICE_URL and AGENT_INCIDENT_CLIENT_SECRET for incident report document assembly testing, **new**: Configure OIDC with both canonical callback URI and extra URIs for reachability testing across different browser origins.
+- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure workspace resource proxies with staging backend services, provision OTel secrets with staging OpenObserve credentials, carefully evaluate GATEWAY_MUTATING_TOOLS_ENABLED for testing scenarios, tune AGENT_HITL_CONFIRM_TIMEOUT for staging workflows, monitor auto-allow list effectiveness, **new**: Consider including mutating-dev profile selectively for staging testing scenarios with appropriate RBAC scoping, **new**: Configure model discovery with moderate refresh intervals (e.g., 900 seconds) to balance freshness with stability, **new**: Enable execution signing with staging audit service for end-to-end testing of tamper-evident execution records, **new**: Configure incident service connectivity with staging credentials for incident report document assembly testing, **new**: Configure OIDC with canonical callback URI and extra URIs for staging browser origin testing.
+- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure workspace resource proxies with production backend services and proper authentication, ensure OTel secrets are provisioned with production OpenObserve credentials, keep GATEWAY_MUTATING_TOOLS_ENABLED=false unless absolutely necessary, set AGENT_HITL_CONFIRM_TIMEOUT appropriately for production SLAs, audit auto-allow list regularly for security compliance, **new**: Never include mutating-dev profile in production deployments; use separate controlled overlays if mutating tools are absolutely required, **new**: Configure model discovery with conservative refresh intervals (e.g., 1800 seconds) and longer timeouts to minimize provider load and ensure stability, **new**: Always provision execution signing secret for production tamper-evident execution records, **new**: Configure audit service integration for comprehensive audit trail compliance, **new**: Configure incident service connectivity with production credentials for incident report document assembly and triage operations, **new**: Configure OIDC with canonical callback URI as the sole authentication endpoint and extra URIs only for reachability testing.
 
-**Updated** Added guidance for workspace resource proxy configuration across environments, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration recommendations, HITL confirmation timeout tuning guidelines, enhanced agent auto-allow list configuration, plus comprehensive OTel secret provisioning requirements for each environment, new guidance for the mutating-dev profile usage patterns across different deployment environments, detailed recommendations for live model discovery configuration including refresh intervals, timeout settings, and monitoring strategies across different deployment environments, comprehensive guidance for execution signing and audit service configuration across development, staging, and production environments, and comprehensive guidance for incident service connectivity configuration including URL setup, credential provisioning, and authentication configuration across different deployment environments.
+**Updated** Added guidance for workspace resource proxy configuration across environments, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration recommendations, HITL confirmation timeout tuning guidelines, enhanced agent auto-allow list configuration, plus comprehensive OTel secret provisioning requirements for each environment, new guidance for the mutating-dev profile usage patterns across different deployment environments, detailed recommendations for live model discovery configuration including refresh intervals, timeout settings, and monitoring strategies across different deployment environments, comprehensive guidance for execution signing and audit service configuration across development, staging, and production environments, comprehensive guidance for incident service connectivity configuration including URL setup, credential provisioning, and authentication configuration across different deployment environments, and enhanced OIDC configuration guidance that clarifies the role of canonical callback URIs versus reachability-only extra URIs across different deployment environments.
 
 ### Security and Secrets Management
 - Store secrets in Kubernetes Secrets or external vaults; never hardcode.
@@ -1293,11 +1379,14 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - **New**: Audit incident service access patterns for security monitoring and compliance.
 - **New**: Rotate incident service credentials regularly and monitor for unauthorized access.
 - **New**: Implement alerting for incident service authentication failures and connectivity issues.
+- **New**: Secure OIDC configuration with canonical callback URIs as the sole authentication endpoint; treat extra URIs as reachability-only and never expose them as authentication endpoints.
+- **New**: Monitor OIDC authentication flows to ensure only canonical URIs receive authentication responses.
+- **New**: Validate Keycloak client configuration to ensure extra URIs are registered only for reachability purposes.
 
-**Updated** Enhanced security guidance with workspace resource integration security considerations, including credential management, authentication monitoring, and access pattern auditing, risk-tier admission gate security controls, HITL confirmation timeout security implications, enhanced agent auto-allow list security enforcement, plus comprehensive OpenTelemetry secret management security practices, new security considerations for the mutating-dev profile including profile integrity, RBAC scoping, and triple-gate enforcement monitoring, comprehensive security guidance for live model discovery including provider credential management, endpoint access monitoring, and fallback behavior auditing, comprehensive security guidance for execution signing including secret protection, key rotation, tamper-evident record verification, audit service credential management, and execution record retention compliance, and comprehensive security guidance for incident service connectivity including credential management, authentication monitoring, access pattern auditing, and service availability monitoring.
+**Updated** Enhanced security guidance with workspace resource integration security considerations, including credential management, authentication monitoring, and access pattern auditing, risk-tier admission gate security controls, HITL confirmation timeout security implications, enhanced agent auto-allow list security enforcement, plus comprehensive OpenTelemetry secret management security practices, new security considerations for the mutating-dev profile including profile integrity, RBAC scoping, and triple-gate enforcement monitoring, comprehensive security guidance for live model discovery including provider credential management, endpoint access monitoring, and fallback behavior auditing, comprehensive security guidance for execution signing including secret protection, key rotation, tamper-evident record verification, audit service credential management, and execution record retention compliance, comprehensive security guidance for incident service connectivity including credential management, authentication monitoring, access pattern auditing, and service availability monitoring, and enhanced OIDC security guidance that emphasizes the security implications of distinguishing between canonical callback URIs and reachability-only extra URIs.
 
 ### Complete Environment Variables Reference
-**Updated** Comprehensive reference including workspace resource integration variables for tools catalog and skills inventory access, risk-tier admission gate configuration, HITL confirmation timeout settings, enhanced agent auto-allow list configuration, plus enhanced OpenTelemetry configuration variables, new variables related to the mutating-dev profile integration, comprehensive live model discovery configuration variables, execution signing and audit service configuration variables, and comprehensive incident service connectivity configuration variables for both agent-platform and platform-gateway incident service clients.
+**Updated** Comprehensive reference including workspace resource integration variables for tools catalog and skills inventory access, risk-tier admission gate configuration, HITL confirmation timeout settings, enhanced agent auto-allow list configuration, plus enhanced OpenTelemetry configuration variables, new variables related to the mutating-dev profile integration, comprehensive live model discovery configuration variables, execution signing and audit service configuration variables, comprehensive incident service connectivity configuration variables for both agent-platform and platform-gateway incident service clients, and enhanced OIDC configuration variables that clearly distinguish between canonical callback URIs and reachability-only extra URIs.
 
 #### Core Configuration
 - `AGENT_SERVICE_URL`: Agent service endpoint URL (DNS-based)
@@ -1371,6 +1460,14 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - **Note**: The mutating-dev profile automatically sets `GATEWAY_MUTATING_TOOLS_ENABLED=true` through kustomize ConfigMap merge in the dev-k8s overlay
 - **Note**: No additional environment variables needed; the profile handles configuration merge and RBAC application automatically
 
+#### OIDC Configuration
+- `OIDC_REDIRECT_URI`: Primary canonical callback URI for authentication flows (e.g., https://aiops.luban.metasync.cc/callback)
+- `OIDC_EXTRA_REDIRECT_URIS`: Comma-separated extra callback URIs registered with Keycloak for reachability only (e.g., https://aiops.luban.k8s.orb.local/callback,http://localhost:18080/callback)
+- **Important**: The identity broker always uses `OIDC_REDIRECT_URI` as the flow's callback regardless of which origin initiates login; extra URIs are registered with Keycloak for reachability only and are never selected as callbacks
+- **Behavior**: When login starts from an extra URI origin, Keycloak redirects back to the canonical hostname after authentication
+- `OIDC_POST_LOGOUT_REDIRECT_URI`: Primary post-logout redirect URI
+- `OIDC_EXTRA_POST_LOGOUT_REDIRECT_URIS`: Comma-separated extra post-logout redirect URIs registered with Keycloak
+
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
 - [runtime.py](file://products/platform-gateway/src/platform_gateway/core/runtime.py)
@@ -1387,6 +1484,9 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
+- [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+- [troubleshooting.md](file://docs/guides/troubleshooting.md)
 
 ### Execution Signing and Audit Integration Guide
 **New Section** Comprehensive guide for configuring and managing execution signing and audit service integration for tamper-evident execution records.
@@ -1860,3 +1960,67 @@ stringData:
 - [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
+
+### OIDC Configuration Guide
+**New Section** Comprehensive guide for understanding and configuring OIDC authentication with clear distinction between canonical callback URIs and reachability-only extra URIs.
+
+#### Prerequisites
+- Keycloak instance deployed and accessible
+- Identity broker service configured with OIDC settings
+- Browser portal service deployed with OIDC client configuration
+- Network connectivity to Keycloak and identity broker services
+
+#### Configuration Components
+- **OIDC_REDIRECT_URI**: Primary canonical callback URI that always handles authentication responses
+- **OIDC_EXTRA_REDIRECT_URIS**: Comma-separated URIs registered with Keycloak for reachability only
+- **Keycloak Client**: Must have both canonical and extra URIs registered in redirectUris field
+- **Identity Broker**: Always uses OIDC_REDIRECT_URI as the flow's callback regardless of login origin
+
+#### Canonical vs Fallback Behavior
+- **Canonical URI**: OIDC_REDIRECT_URI serves as the definitive callback for all authentication flows
+- **Extra URIs**: OIDC_EXTRA_REDIRECT_URIS are registered with Keycloak but never selected as callbacks
+- **Browser Origin Handling**: Login initiated from extra URI origins redirects back to canonical hostname after authentication
+- **Security Implication**: Prevents callback hijacking by ensuring only canonical URIs receive authentication responses
+
+#### Keycloak Client Configuration
+The reconcile-portal-oidc-client.sh script manages Keycloak client configuration:
+1. Registers both canonical and extra URIs in Keycloak client's redirectUris field
+2. Sets webOrigins for CORS configuration
+3. Configures PKCE challenge method (S256)
+4. Manages post-logout redirect URIs separately
+
+#### Example Configuration
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: identity-broker-runtime-config
+data:
+  OIDC_REDIRECT_URI: "https://aiops.luban.metasync.cc/callback"
+  OIDC_EXTRA_REDIRECT_URIS: "https://aiops.luban.k8s.orb.local/callback,http://localhost:18080/callback"
+  OIDC_POST_LOGOUT_REDIRECT_URI: "https://aiops.luban.metasync.cc/"
+  OIDC_EXTRA_POST_LOGOUT_REDIRECT_URIS: "https://aiops.luban.k8s.orb.local/,http://localhost:18080/"
+```
+
+#### Authentication Flow Examples
+- **Direct Canonical Login**: User accesses https://aiops.luban.metasync.cc → Login starts with canonical callback → Keycloak authenticates → Redirects to canonical callback
+- **Extra Origin Login**: User accesses https://aiops.luban.k8s.orb.local → Login starts with extra URI → Keycloak authenticates → Redirects to canonical callback
+- **Local Development**: User accesses http://localhost:18080 → Login starts with extra URI → Keycloak authenticates → Redirects to canonical callback
+
+#### Troubleshooting Common Issues
+- **Redirect URI Mismatch**: Verify OIDC_REDIRECT_URI covers the browser-accessible URL; remember that extra URIs are for reachability only
+- **Login Completes but Wrong Origin**: Check that OIDC_REDIRECT_URI is the canonical hostname; extra URIs will redirect back to canonical hostname
+- **Keycloak Client Issues**: Run reconcile-portal-oidc-client.sh to ensure both canonical and extra URIs are properly registered
+- **CORS Errors**: Verify webOrigins configuration includes both canonical and extra URI origins
+
+#### Security Considerations
+- **Canonical URI Security**: Treat OIDC_REDIRECT_URI as the sole authentication endpoint; never expose extra URIs as authentication endpoints
+- **Keycloak Configuration**: Ensure Keycloak client has both canonical and extra URIs registered to prevent authentication failures
+- **Browser Origin Validation**: Validate that login attempts from unexpected origins are handled gracefully
+- **Monitoring**: Monitor authentication flows to ensure only canonical URIs receive authentication responses
+
+**Section sources**
+- [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
+- [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+- [troubleshooting.md](file://docs/guides/troubleshooting.md)
