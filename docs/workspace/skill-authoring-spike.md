@@ -1,6 +1,6 @@
 # Spike: Skill Authoring Export from Sessions
 
-Status: spike complete — recommendation recorded pending operator sign-off
+Status: spike complete — operator sign-off granted 2026-08-29; Option A promoted to SPEC-044 (draft) the same day with the memo's Q-1…Q-5 resolved in the draft's Design Decisions
 Date: 2026-08-29
 Roadmap home: exploration backlog row "Skill authoring export from sessions" (tracked separately from the SPEC-039 document-type lineage)
 Raised by: 2026-08-27 operator review, beside the operations document repository discussion
@@ -174,9 +174,22 @@ The 2026-08-27 operator ask stands as the recorded demand; the spike
 condition (draft/validate/export shape answered) is satisfied by
 section 4.
 
+**Resolved 2026-08-29:** operator sign-off granted; Option A promoted
+to `SPEC-044-skill-authoring-export` (draft) the same day, with Q-1
+(input scope: digest-only, session entry), Q-2 (validation hosting:
+skills-hub validate route behind the existing query-credential
+registry), Q-3 (content guardrails: fenced contract + deterministic
+post-processing), Q-4 (`session:skill_draft` action +
+`skill_draft_generated` audit event), and Q-5 (deterministic
+HTML-comment provenance block) resolved in the draft's Design
+Decisions section.
+
 ## Changelog
 
 - 2026-08-29: spike memo drafted from the 2026-08-27 operator review
   backlog row, verified against the 0.25.2 skills-hub, session
   workspace, and document surfaces; recommendation recorded pending
   operator sign-off.
+- 2026-08-29: operator sign-off granted; Option A promoted to
+  SPEC-044 draft with Q-1…Q-5 resolved in the draft; promotion
+  trigger marked resolved.
