@@ -2,10 +2,10 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: luban-platform-team
 - created: 2026-08-29
-- approved: —
+- approved: 2026-08-29
 - delivered: —
 - release slice: R5 — Hardening and External Consumption (sixth R5
   slice, target v0.26.0)
@@ -299,3 +299,5 @@ Acceptance criteria:
   spike (`docs/workspace/skill-authoring-spike.md`) on operator
   sign-off of its Option A recommendation; the memo's Q-1 through
   Q-5 are resolved in the Design Decisions section.
+- 2026-08-29: operator approved the draft (`draft` → `approved`);
+  delivery proceeds under the house train as v0.26.0.
