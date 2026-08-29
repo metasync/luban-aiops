@@ -43,7 +43,8 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced skills connector to forward x-request-id headers for request correlation, enabling end-to-end audit trail tracking from tool invocation through skill usage
+- Updated to reflect v0.25.1/v0.25.2 release synchronization with enhanced request correlation capabilities
+- Enhanced skills connector implementation with x-request-id header forwarding for end-to-end audit trail tracking
 - Updated gateway service to include request_id in identity dictionary passed to tools
 - Added comprehensive testing for x-request-id header forwarding behavior including missing request ID scenarios
 - Updated architecture diagrams to reflect enhanced correlation capabilities across the tool execution pipeline

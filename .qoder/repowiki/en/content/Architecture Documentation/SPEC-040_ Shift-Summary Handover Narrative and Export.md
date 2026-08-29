@@ -13,6 +13,8 @@
 - [test_documents.py](file://products/agent-platform/tests/test_documents.py)
 - [2026-08-28-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-28-shift-summary-handover-narrative-export.md)
 - [2026-08-28-shift-summary-narrative-expanded.md](file://docs/agentic-aiops-platform/release-notes/2026-08-28-shift-summary-narrative-expanded.md)
+- [2026-08-29-bounded-pane-review-follow-ups.md](file://docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md)
+- [2026-08-29-portal-live-check-polish.md](file://docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md)
 - [SPEC-041 spec.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md)
 - [SPEC-041 plan.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/plan.md)
 - [SPEC-041 tasks.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/tasks.md)
@@ -20,14 +22,12 @@
 
 ## Update Summary
 **Changes Made**
-- Updated status from draft to delivered (v0.22.0) with complete implementation verification
-- Enhanced architecture diagrams with actual file mappings and line references
-- Added detailed component analysis based on delivered code with specific function implementations
-- Updated troubleshooting guide with specific error scenarios and resolution paths
-- Added comprehensive verification and testing information from unit tests and release notes
-- Enhanced dependency analysis with concrete file relationships
-- **Updated for SPEC-041 enhancements**: Added digest rendering improvements, tabbed structured display, bounded scroll panes, and deterministic summary lines that enhance the readability of shift summary handover narratives established in SPEC-040
-- **Updated for v0.23.2 enhancement**: Added expanded narrative panel behavior that opens by default in Documents drawer, addressing operator feedback about improved accessibility to handover content without requiring additional clicks
+- Updated status to reflect v0.25.1/v0.25.2 release synchronization as part of comprehensive release notes refresh
+- Enhanced bounded pane implementation details with single-sourced height management and post-motion measurement fixes
+- Added v0.25.1 portal live-check polish including pinned chrome for bounded panes and digest data tab renaming
+- Updated verification section with latest test counts and validation results from v0.25.1/v0.25.2 releases
+- Enhanced troubleshooting guide with bounded pane-specific issues and resolution paths
+- Updated dependency analysis to include bounded pane CSS custom property relationships
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -53,6 +53,8 @@ The implementation spans three layers:
 
 **Enhanced by v0.23.2**: The AI-generated narrative panel now opens expanded by default in the Documents drawer, eliminating the need for operators to click through before reading the shift story — the primary reason they open documents for handover purposes.
 
+**Enhanced by v0.25.1/v0.25.2**: Bounded panes now feature single-sourced height management via CSS custom properties, pinned structural chrome for better UX, and comprehensive regression testing for measurement race conditions.
+
 ## Project Structure
 The delivered implementation follows the planned architecture with all components integrated:
 
@@ -68,9 +70,11 @@ D["App.tsx<br/>Workspace navigation"]
 E["DocumentsView.tsx<br/>create dialog + export"]
 F["Drawer Export Button<br/>client-side markdown"]
 G["Tabbed Digest Panel<br/>SPEC-041 enhancement"]
-H["Bounded Scroll Panes<br/>SPEC-041 enhancement"]
+H["Bounded Scroll Panes<br/>v0.25.1/v0.25.2 enhancements"]
 I["Summary Lines<br/>SPEC-041 enhancement"]
 J["Expanded Prose Panel<br/>v0.23.2 enhancement"]
+K["Single-sourced Height<br/>v0.25.2 enhancement"]
+L["Pinned Chrome<br/>v0.25.1 enhancement"]
 end
 subgraph "Spec Artifacts"
 S1["spec.md<br/>status: delivered"]
@@ -78,6 +82,7 @@ S2["plan.md<br/>all workstreams complete"]
 S3["tasks.md<br/>all tasks checked"]
 S4["SPEC-041<br/>readability enhancements"]
 S5["v0.23.2<br/>expanded narrative"]
+S6["v0.25.1/v0.25.2<br/>bounded pane polish"]
 end
 S1 --> A
 S1 --> B
@@ -95,11 +100,14 @@ S4 --> G
 S4 --> H
 S4 --> I
 S5 --> J
+S6 --> K
+S6 --> L
 ```
 
 **Diagram sources**
 - [shift_summary.py:182-280](file://products/agent-platform/src/agent_service/services/shift_summary.py#L182-L280)
-- [document_prose.py:32-50](file://products/agent-platform/src/agent_service/services/document_prose.py#L32-50)
+- [document_prose.py:32-50](file://products/agent-platform/src/agent_service/services/document_prose.py#L32-L50)
+- [DocumentsView.tsx:1074-1143](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1074-L1143)
 - [DocumentsView.tsx:254-305](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L254-L305)
 - [DocumentsView.tsx:593-634](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L593-L634)
 - [App.tsx:113-203](file://products/operator-portal/web-ui/app/src/App.tsx#L113-L203)
@@ -141,9 +149,16 @@ All four requirements have been successfully delivered:
 **v0.23.2 Enhancement**:
 - **Expanded narrative panel**: The AI-generated narrative now opens expanded by default in the Documents drawer, allowing relieving operators to immediately read the handover story without additional clicks while maintaining collapsible functionality
 
+**v0.25.1/v0.25.2 Enhancements**:
+- **Single-sourced bounded pane height**: 320px bound now managed via CSS custom property `--bounded-pane-max-height`, preventing drift between presentation and affordance logic
+- **Pinned structural chrome**: Tab bars and collapse headers remain visible while content scrolls underneath
+- **Digest data tab renaming**: Digest data tab renamed to "Digest data" for clarity
+- **Post-motion measurement fix**: Delayed re-measure ensures expand affordance appears reliably on first reveal
+
 **Section sources**
 - [shift_summary.py:182-280](file://products/agent-platform/src/agent_service/services/shift_summary.py#L182-L280)
-- [document_prose.py:32-50](file://products/agent-platform/src/agent_service/services/document_prose.py#L32-50)
+- [document_prose.py:32-50](file://products/agent-platform/src/agent_service/services/document_prose.py#L32-L50)
+- [DocumentsView.tsx:1074-1143](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1074-L1143)
 - [DocumentsView.tsx:254-305](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L254-L305)
 - [DocumentsView.tsx:593-634](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L593-L634)
 - [App.tsx:113-203](file://products/operator-portal/web-ui/app/src/App.tsx#L113-L203)
@@ -175,7 +190,9 @@ end
 Portal-->>User : Draft created (digest + optional prose)
 User->>Portal : Open document drawer
 Portal->>Portal : Tabbed digest panel (SPEC-041)
+Portal->>Portal : Bounded panes with pinned chrome (v0.25.1)
 Portal->>Portal : Expanded prose panel (v0.23.2)
+Portal->>Portal : Single-sourced height management (v0.25.2)
 Portal->>Portal : buildDocumentMarkdown(document)
 Portal-->>User : Download <label-slug>-doc-<id>.md
 ```
@@ -186,6 +203,7 @@ Portal-->>User : Download <label-slug>-doc-<id>.md
 - [document_prose.py:68-109](file://products/agent-platform/src/agent_service/services/document_prose.py#L68-L109)
 - [DocumentsView.tsx:393-461](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L393-L461)
 - [DocumentsView.tsx:593-634](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L593-L634)
+- [DocumentsView.tsx:1074-1143](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1074-L1143)
 
 ## Detailed Component Analysis
 
@@ -242,7 +260,7 @@ DocumentProse --> ShiftSummaryDigest : "receives digest"
 - Panel relabeled to "AI-generated narrative — from this document's digest facts"
 
 **Section sources**
-- [document_prose.py:32-50](file://products/agent-platform/src/agent_service/services/document_prose.py#L32-50)
+- [document_prose.py:32-50](file://products/agent-platform/src/agent_service/services/document_prose.py#L32-L50)
 - [document_prose.py:68-109](file://products/agent-platform/src/agent_service/services/document_prose.py#L68-L109)
 - [DocumentsView.tsx:254-305](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L254-L305)
 
@@ -292,6 +310,31 @@ Browser-->>User : File saved locally
 - [DocumentsView.tsx:393-461](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L393-L461)
 - [DocumentsView.tsx:683-701](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L683-L701)
 
+### Enhanced Bounded Pane System (v0.25.1/v0.25.2) - DELIVERED
+The bounded pane system has been significantly enhanced with single-sourced height management and improved UX:
+
+```mermaid
+flowchart TD
+Height["BOUNDED_PANE_MAX_HEIGHT = 320px"] --> CustomProp["CSS Custom Property<br/>--bounded-pane-max-height"]
+CustomProp --> CSSRules[".digest-bounded / .prose-bounded rules"]
+CustomProp --> OverflowCheck["Overflow comparison logic"]
+OverflowCheck --> Affordance["Expand/Collapse affordance"]
+Affordance --> PinnedChrome["Pinned structural chrome"]
+PinnedChrome --> ContentScroll["Content region scrolls"]
+```
+
+**Enhancement Features:**
+- **Single-sourced height management**: 320px bound now managed via CSS custom property `--bounded-pane-max-height`, preventing drift between presentation and affordance logic
+- **Pinned structural chrome**: Tab bars and collapse headers remain visible while content scrolls underneath
+- **Post-motion measurement fix**: 300ms delayed re-measure ensures expand affordance appears reliably on first reveal
+- **Digest data tab renaming**: Digest data tab renamed to "Digest data" for clarity
+- **Comprehensive testing**: Fake-timer regression test pins the measurement race condition fix
+
+**Section sources**
+- [DocumentsView.tsx:1074-1143](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1074-L1143)
+- [2026-08-29-bounded-pane-review-follow-ups.md:14-22](file://docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md#L14-L22)
+- [2026-08-29-portal-live-check-polish.md:17-37](file://docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md#L17-L37)
+
 ### Expanded Narrative Panel (v0.23.2 Enhancement) - DELIVERED
 The narrative panel now opens expanded by default to improve operator accessibility:
 
@@ -326,14 +369,14 @@ Tabs --> Confirmations["Confirmations Tab"]
 Tabs --> Executions["Executions Tab"]
 Tabs --> Evidence["Evidence & Transcript Counts"]
 Tabs --> OpenItems["Open Items Tab"]
-Tabs --> RawJSON["Digest data Tab"]
+Tabs --> DigestData["Digest Data Tab"]
 Handover --> Bounded["Bounded Scroll Pane"]
 Sessions --> Bounded
 Confirmations --> Bounded
 Executions --> Bounded
 Evidence --> Bounded
 OpenItems --> Bounded
-RawJSON --> Bounded
+DigestData --> Bounded
 Bounded --> Expand["Expand/Collapse Affordance"]
 ```
 
@@ -361,8 +404,10 @@ DP["document_prose.py"] --> K["runtime kernel / model"]
 PV["DocumentsView.tsx"] --> API["API clients (list/get/create)"]
 PV -.->|no network| MD["client-side Markdown renderer"]
 PV -.->|SPEC-041| TABS["Tabbed digest interface"]
-PV -.->|SPEC-041| SCROLL["Bounded scroll panes"]
+PV -.->|v0.25.1/v0.25.2| BOUNDED["Bounded panes with CSS custom properties"]
 PV -.->|v0.23.2| EXPANDED["Expanded narrative panel"]
+BOUNDED --> CSS["global.css<br/>--bounded-pane-max-height"]
+BOUNDED --> MEASURE["Post-motion measurement<br/>300ms delay"]
 ```
 
 **Dependencies:**
@@ -371,10 +416,12 @@ PV -.->|v0.23.2| EXPANDED["Expanded narrative panel"]
 - Portal depends on existing API clients for list/get/create/publish/delete; export is purely client-side and does not call the gateway
 - **SPEC-041 additions**: Tabbed interface and bounded panes are pure rendering enhancements that don't affect data flow
 - **v0.23.2 addition**: Expanded narrative panel is a presentation-only change that doesn't affect data flow or storage
+- **v0.25.1/v0.25.2 additions**: Bounded panes use CSS custom properties for single-sourced height management and post-motion measurement fixes
 
 **Section sources**
 - [shift_summary.py:93-113](file://products/agent-platform/src/agent_service/services/shift_summary.py#L93-L113)
 - [document_prose.py:79-109](file://products/agent-platform/src/agent_service/services/document_prose.py#L79-L109)
+- [DocumentsView.tsx:1074-1143](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1074-L1143)
 - [DocumentsView.tsx:393-461](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L393-L461)
 - [DocumentsView.tsx:593-634](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L593-L634)
 
@@ -385,6 +432,7 @@ PV -.->|v0.23.2| EXPANDED["Expanded narrative panel"]
 - No new server endpoints or audit events introduced; export leverages already-fetched documents
 - **SPEC-041 performance**: Tabbed interface and bounded panes are pure client-side rendering optimizations that improve user experience without additional server load
 - **v0.23.2 performance**: Expanded narrative panel is a presentation-only change with minimal performance impact; uses existing Collapse component with default active key
+- **v0.25.1/v0.25.2 performance**: Bounded panes use efficient CSS custom properties and DOM measurements with debounced re-measurement to prevent layout thrashing
 
 ## Verification and Testing
 The implementation has been thoroughly verified through multiple testing approaches:
@@ -395,23 +443,27 @@ The implementation has been thoroughly verified through multiple testing approac
 - Prompt-contract test asserts the R-2 anchoring rules
 - Portal suite covers narrative default, drawer export affordance, and Markdown serializer
 - **v0.23.2 test**: Verifies narrative body renders immediately without a click, locking the expanded default while panel remains collapsible
+- **v0.25.2 test**: Fake-timer regression test pins the post-motion measurement race condition fix
 
 ### Integration Testing
 - Agent-platform + platform-gateway suites green
 - Portal `tsc` build and unit tests green
-- `make verify` green at 0.22.0
+- `make verify` green at 0.22.0, 0.25.1, and 0.25.2
 
 ### Live Verification
 - Extended `documents-demo.sh` validates created document carries `handover` (quiet shape on demo session)
 - Browser walkthrough covers nav placement, default prose switch, handover rendering, and export download
 - Dev cluster deployment validated end-to-end workflow
 - **v0.23.2 verification**: Confirms narrative opens expanded by default in document drawer
+- **v0.25.1/v0.25.2 verification**: Validates pinned chrome, expand affordance, and digest data tab on documents with narrative
 
 **Section sources**
 - [test_shift_summary.py:282-370](file://products/agent-platform/tests/test_shift_summary.py#L282-L370)
-- [test_documents.py:95-136](file://products/agent-platform/tests/test_documents.py#L95-L136)
+- [test_documents.py:95-136](file://products/agent-platform/tests/test_documents.py#L95-136)
 - [2026-08-28-release-notes.md:65-80](file://docs/agentic-aiops-platform/release-notes/2026-08-28-shift-summary-handover-narrative-export.md#L65-L80)
 - [DocumentsView.test.tsx:351-369](file://products/operator-portal/web-ui/app/src/views/workspace/__tests__/DocumentsView.test.tsx#L351-L369)
+- [2026-08-29-bounded-pane-review-follow-ups.md:33-39](file://docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md#L33-L39)
+- [2026-08-29-portal-live-check-polish.md:68-77](file://docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md#L68-L77)
 
 ## Troubleshooting Guide
 Common issues and their resolutions:
@@ -440,7 +492,6 @@ Common issues and their resolutions:
 
 ### SPEC-041 Rendering Issues
 - **Tabbed interface not showing**: Ensure browser supports modern CSS features; check for JavaScript errors
-- **Bounded panes not working**: Verify CSS overflow properties are applied correctly
 - **Summary lines missing**: Check that documents were created after SPEC-041 deployment; legacy documents won't have summary fields
 - **Foreign session tags not visible**: Ensure proper coverage detection in provenance data
 
@@ -449,12 +500,22 @@ Common issues and their resolutions:
 - **Cannot collapse narrative**: The panel should remain collapsible to its header; check for JavaScript errors
 - **Narrative appears collapsed initially**: This indicates a rendering issue; refresh the page or check browser console for errors
 
+### v0.25.1/v0.25.2 Bounded Pane Issues
+- **Bounded panes not working**: Verify CSS custom property `--bounded-pane-max-height` is set correctly on wrapper elements
+- **Tab bar or header scrolling away**: Ensure structural chrome is properly pinned; check that bounds apply only to content regions
+- **Expand affordance not appearing**: Check for JavaScript errors related to DOM measurement; verify the 300ms delayed re-measure is executing
+- **Digest data tab not visible**: Ensure the document has digest data available; the tab shows stored digest through typed renderers
+- **Height inconsistencies**: Verify that both CSS rules and overflow comparison use the same `BOUNDED_PANE_MAX_HEIGHT` constant
+
 **Section sources**
 - [document_prose.py:68-109](file://products/agent-platform/src/agent_service/services/document_prose.py#L68-L109)
+- [DocumentsView.tsx:1074-1143](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1074-L1143)
 - [DocumentsView.tsx:198-236](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L198-L236)
 - [DocumentsView.tsx:393-461](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L393-L461)
 - [DocumentsView.tsx:593-634](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L593-L634)
 - [App.tsx:113-203](file://products/operator-portal/web-ui/app/src/App.tsx#L113-L203)
+- [2026-08-29-bounded-pane-review-follow-ups.md:14-31](file://docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md#L14-L31)
+- [2026-08-29-portal-live-check-polish.md:17-46](file://docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md#L17-L46)
 
 ## Conclusion
 SPEC-040 has been successfully delivered in v0.22.0, providing a comprehensive solution for shift handover workflows. The implementation delivers:
@@ -466,6 +527,8 @@ SPEC-040 has been successfully delivered in v0.22.0, providing a comprehensive s
 
 **Enhanced by SPEC-041**: The digest rendering and readability have been significantly improved with tabbed structured display, bounded scroll panes, and deterministic summary lines that make shift summary handover narratives more scannable and operator-friendly.
 
-**Enhanced by v0.23.2**: The AI-generated narrative panel now opens expanded by default in the Documents drawer, addressing operator feedback about improved accessibility to handover content without requiring additional clicks. This presentation-only enhancement eliminates the friction of having to click through before reading the shift story — the primary reason operators open documents for handover purposes.
+**Enhanced by v0.23.2**: The AI-generated narrative panel now opens expanded by default in the Documents drawer, addressing operator feedback about improved accessibility to handover content without requiring additional clicks.
 
-The changes preserve all prior invariants (no model output outside labeled prose, fail-soft generation, two-tier coverage) while closing the operator feedback gap about inheriting actionable context between shifts. All four workstreams (W-1 through W-4) have been completed and verified through comprehensive testing and live deployment, with additional readability enhancements from SPEC-041 improving the overall operator experience and the expanded narrative behavior from v0.23.2 further optimizing the handover workflow.
+**Enhanced by v0.25.1/v0.25.2**: The bounded pane system now features single-sourced height management via CSS custom properties, pinned structural chrome for better UX, and comprehensive regression testing. These enhancements ensure that long content remains accessible while maintaining clean visual hierarchy and preventing layout drift between presentation and interaction logic.
+
+The changes preserve all prior invariants (no model output outside labeled prose, fail-soft generation, two-tier coverage) while closing the operator feedback gap about inheriting actionable context between shifts. All four workstreams (W-1 through W-4) have been completed and verified through comprehensive testing and live deployment, with additional readability enhancements from SPEC-041 improving the overall operator experience, the expanded narrative behavior from v0.23.2 further optimizing the handover workflow, and the bounded pane refinements from v0.25.1/v0.25.2 ensuring robust and maintainable presentation layer behavior.

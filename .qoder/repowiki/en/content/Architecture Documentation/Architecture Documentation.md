@@ -21,12 +21,14 @@
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 - [token_verifier.py](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py)
 - [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [metadata.py](file://products/platform-gateway/src/platform_gateway/metadata.py)
 - [main.py](file://products/tool-gateway/src/tool_gateway/main.py)
 - [app.py](file://products/tool-gateway/src/tool_gateway/app.py)
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
+- [metadata.py](file://products/tool-gateway/src/tool_gateway/metadata.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [main.py](file://products/agent-platform/src/agent_service/main.py)
 - [app.py](file://products/agent-platform/src/agent_service/app.py)
@@ -39,12 +41,14 @@
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [metadata.py](file://products/agent-platform/src/agent_service/metadata.py)
 - [main.py](file://products/execution-runtime/src/execution_runtime/main.py)
 - [app.py](file://products/execution-runtime/src/execution_runtime/app.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
 - [executor.py](file://products/execution-runtime/src/execution_runtime/services/executor.py)
 - [single_flight.py](file://products/execution-runtime/src/execution_runtime/services/single_flight.py)
 - [config.py](file://products/execution-runtime/src/execution_runtime/core/config.py)
+- [metadata.py](file://products/execution-runtime/src/execution_runtime/metadata.py)
 - [main.py](file://products/identity-broker/src/identity_service/main.py)
 - [app.py](file://products/identity-broker/src/identity_service/app.py)
 - [auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
@@ -75,15 +79,18 @@
 - [getting-started.md](file://docs/guides/getting-started.md)
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 - [dev-k8s README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
+- [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
+- [DocumentsView.test.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/__tests__/DocumentsView.test.tsx)
+- [__init__.py](file://products/audit-service/src/audit_service/__init__.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated architecture overview to emphasize canonical hostname usage (`https://aiops.luban.metasync.cc`) while noting `orb.local` as fallback
-- Clarified identity broker OIDC callback pinning configuration with primary vs extra redirect URIs
-- Enhanced deployment topology section to document the dual-hostname routing strategy
-- Updated configuration reference to explain the separation between primary callback and reachability-only extras
-- Added detailed explanation of browser PKCE storage implications for hostname selection
+- Updated version lockstep to v0.25.2 across all platform services (platform-gateway, tool-gateway, execution-runtime, agent-service, audit-service)
+- Enhanced portal rendering documentation with bounded-pane single-sourced height and post-motion re-measure race fix
+- Added detailed operator portal polish changes including pinned chrome for bounded panes and digest tab renaming
+- Updated deployment topology to reflect current service versions and runtime configurations
+- Enhanced troubleshooting guide with latest known issues and resolution strategies
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -100,6 +107,8 @@
 ## Introduction
 This document provides a comprehensive architectural overview of the Luban AIOps Platform. It describes the microservices-based design, service boundaries, data flows, and integration points. The platform has undergone significant architectural evolution with the introduction of an **isolated execution worker service** that fundamentally changes how approved mutating actions are executed, shifting from in-process to isolated worker execution model. This change enhances security boundaries, reduces blast radius, and improves operational reliability. The platform now features a dual-gateway pattern (platform-gateway for portal-facing operations and tool-gateway for tool execution) combined with a dedicated execution-runtime worker for secure mutation execution. Key architectural decisions are captured in Architectural Decision Records (ADRs), technology stack choices include FastAPI, Redis, Kubernetes, and OIDC integration, along with system context diagrams showing external dependencies and internal service communication. The platform uses a canonical hostname strategy with `https://aiops.luban.metasync.cc` as the primary entry point and `https://aiops.luban.k8s.orb.local` as a fallback, with OIDC callbacks pinned to the canonical hostname for reliable authentication flows.
 
+**Updated** - Version 0.25.2 brings refined portal rendering capabilities with single-sourced bounded pane heights and improved overflow detection, ensuring consistent user experience across different content types while maintaining the core architectural integrity established in previous releases.
+
 ## Project Structure
 The repository is organized into product services, shared contracts, platform operations, and documentation:
 - Products:
@@ -108,7 +117,8 @@ The repository is organized into product services, shared contracts, platform op
   - **execution-runtime**: Isolated worker service for secure execution of approved mutating actions with signature verification and single-flight idempotency.
   - agent-platform: Agent runtime kernel, session management, provider integrations, and observability with execution worker client integration.
   - identity-broker: Identity and token services for OIDC integration and service-to-service trust.
-  - operator-portal: Web UI for operators.
+  - operator-portal: Web UI for operators with enhanced bounded pane rendering and improved UX.
+  - audit-service: Durable audit trail with authenticated event ingest, retention-bounded store, and permission-scoped query API.
 - Shared:
   - platform-ops: GitOps overlays and Kubernetes manifests for dev environment including execution-runtime deployment.
   - shared-contracts: JSON schemas and policy definitions used across services.
@@ -127,6 +137,7 @@ ERW["Execution Runtime Worker"]
 AP["Agent Platform"]
 IB["Identity Broker"]
 OP["Operator Portal"]
+AS["Audit Service"]
 end
 subgraph "Shared"
 SC["Shared Contracts"]
@@ -153,6 +164,7 @@ SC --> TG
 SC --> AP
 SC --> IB
 SC --> ERW
+AS --> POSTGRES
 ```
 
 **Diagram sources**
@@ -174,19 +186,23 @@ The platform now features three specialized services that replaced the original 
 ### Platform Gateway (Portal-Facing Edge)
 - **Responsibilities**: Token verification, deny-by-default policy enforcement, chat and session proxying to agent-platform, broker-mediated token delegation, and portal-facing routes (chat, sessions, auth, identity, runtime, health/metrics).
 - **Key Features**: Audience-bound JWT validation, action policy enforcement, streaming chat responses, and synthetic development identities.
+- **Version**: 0.25.2
 
 ### Tool Gateway (Tool Execution Framework)
 - **Responsibilities**: Tool registry management, connector standardization, tools:list/invoke endpoints, deterministic redaction, tool audit, and Kubernetes connector integration.
 - **Key Features**: Tool execution isolation, security-focused redaction choke point, and service-to-service trust via delegated tokens.
+- **Version**: 0.25.2
 
 ### Execution Runtime Worker (Isolated Mutation Executor)
 - **Responsibilities**: Secure execution of approved mutating actions through authenticated handoff, signature verification, single-flight idempotency, and receipt authorship.
 - **Key Features**: Fail-closed verification, HMAC-signed execution requests/receipts, bounded timeout handling, and infrastructure-enforced isolation.
+- **Version**: 0.25.2
 
 ### Other Core Services
 - **Agent Platform**: Hosts the agent runtime kernel, manages sessions, integrates with AI providers, exposes APIs for chat and session lifecycle, and includes execution worker client for handing off approved mutations. Uses Redis for durable sessions.
-- **Identity Broker**: Handles OIDC flows, issues tokens, and validates identities for both user and service-to-service contexts. **Updated** - Configured with canonical hostname callback pinning and extra redirect URIs for reachability.
-- **Operator Portal**: Web interface for operators to manage platform resources and configurations. **Updated** - Routes configured for both canonical and fallback hostnames.
+- **Identity Broker**: Handles OIDC flows, issues tokens, and validates identities for both user and service-to-service contexts. Configured with canonical hostname callback pinning and extra redirect URIs for reachability.
+- **Operator Portal**: Web interface for operators to manage platform resources and configurations with enhanced bounded pane rendering and improved UX. Routes configured for both canonical and fallback hostnames.
+- **Audit Service**: Provides durable audit trail with authenticated event ingestion, retention-bounded storage, and permission-scoped query API.
 
 **Section sources**
 - [main.py](file://products/platform-gateway/src/platform_gateway/main.py)
@@ -195,20 +211,30 @@ The platform now features three specialized services that replaced the original 
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 - [token_verifier.py](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py)
 - [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [metadata.py](file://products/platform-gateway/src/platform_gateway/metadata.py)
 - [main.py](file://products/tool-gateway/src/tool_gateway/main.py)
 - [app.py](file://products/tool-gateway/src/tool_gateway/app.py)
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
+- [metadata.py](file://products/tool-gateway/src/tool_gateway/metadata.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [main.py](file://products/execution-runtime/src/execution_runtime/main.py)
 - [app.py](file://products/execution-runtime/src/execution_runtime/app.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
 - [executor.py](file://products/execution-runtime/src/execution_runtime/services/executor.py)
 - [single_flight.py](file://products/execution-runtime/src/execution_runtime/services/single_flight.py)
+- [config.py](file://products/execution-runtime/src/execution_runtime/core/config.py)
+- [metadata.py](file://products/execution-runtime/src/execution_runtime/metadata.py)
+- [main.py](file://products/identity-broker/src/identity_service/main.py)
+- [app.py](file://products/identity-broker/src/identity_service/app.py)
+- [auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
+- [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
+- [token_service.py](file://products/identity-broker/src/identity_service/services/token_service.py)
 - [config.py](file://products/identity-broker/src/identity_service/core/config.py)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
+- [__init__.py](file://products/audit-service/src/audit_service/__init__.py)
 
 ## Architecture Overview
 The platform follows a microservices architecture with a **triple-layer execution model**. Clients interact with the **platform-gateway** for portal-facing operations, which enforces policies and verifies tokens before delegating to the Agent Platform. The **execution-runtime worker** handles secure execution of approved mutating actions through an authenticated handoff mechanism, while the **tool-gateway** handles internal tool execution requests from agent services. The Agent Platform manages agent sessions and interacts with external AI providers and Kubernetes for tool execution. Identity Broker centralizes OIDC flows and token management. Redis provides session durability and caching, while PostgreSQL stores execution records and receipts.
@@ -322,6 +348,7 @@ PlatformGatewayService --> AgentClient : "uses"
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 - [token_verifier.py](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py)
 - [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [metadata.py](file://products/platform-gateway/src/platform_gateway/metadata.py)
 
 ### Tool Gateway (Tool Execution Framework)
 **Updated** - Now focused exclusively on tool execution and connector management
@@ -361,6 +388,7 @@ Audit --> Return["Return Response"]
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+- [metadata.py](file://products/tool-gateway/src/tool_gateway/metadata.py)
 
 ### Execution Runtime Worker (Isolated Mutation Executor)
 **New** - Dedicated service for secure execution of approved mutating actions
@@ -404,6 +432,7 @@ EmitAudit --> Return["Return Receipt & Result"]
 - [single_flight.py](file://products/execution-runtime/src/execution_runtime/services/single_flight.py)
 - [config.py](file://products/execution-runtime/src/execution_runtime/core/config.py)
 - [app.py](file://products/execution-runtime/src/execution_runtime/app.py)
+- [metadata.py](file://products/execution-runtime/src/execution_runtime/metadata.py)
 
 ### Agent Platform
 **Updated** - Enhanced with execution worker client integration
@@ -457,6 +486,7 @@ Persist --> ReturnResp["Return Response"]
 - [config.py](file://products/agent-platform/src/agent_service/core/config.py)
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
+- [metadata.py](file://products/agent-platform/src/agent_service/metadata.py)
 
 ### Identity Broker
 **Updated** - Enhanced with canonical hostname OIDC callback configuration
@@ -562,6 +592,7 @@ ERW --> TG
 - Tool execution isolation prevents resource contention between different tool types.
 - Bounded timeouts prevent resource exhaustion during worker unavailability scenarios.
 - **Updated** - Canonical hostname routing ensures optimal DNS resolution and avoids unnecessary redirects, improving authentication flow performance.
+- **Updated** - Bounded pane rendering optimizations reduce DOM manipulation overhead and improve portal responsiveness for large documents.
 
 ## Troubleshooting Guide
 Common issues and strategies:
@@ -575,6 +606,7 @@ Common issues and strategies:
 - **Single-flight conflicts**: investigate concurrent execution attempts and replay scenarios.
 - **Observability gaps**: ensure metrics and logs are emitted consistently across all services.
 - **Updated** - **Hostname-related issues**: Ensure canonical hostname `https://aiops.luban.metasync.cc` is properly configured in DNS and SSL certificates. If using fallback hostname `https://aiops.luban.k8s.orb.local`, note that OIDC callbacks will still redirect to the canonical hostname due to browser PKCE storage limitations.
+- **Updated** - **Portal rendering issues**: Check bounded pane CSS custom properties and overflow detection. The 320px bound is now single-sourced via `--bounded-pane-max-height` custom property, eliminating drift between presentation and affordance logic.
 
 **Section sources**
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
@@ -584,9 +616,10 @@ Common issues and strategies:
 - [execution-runtime-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/execution-runtime/execution-runtime-deployment.yaml)
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 - [dev-k8s README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
+- [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
 
 ## Conclusion
-The Luban AIOps Platform has evolved to a robust microservices architecture centered around a **triple-layer execution model**. The **platform-gateway** serves as the portal-facing edge with authentication, authorization, and agent interaction capabilities, the **tool-gateway** specializes in secure tool execution and connector management, and the **execution-runtime worker** provides isolated execution of approved mutating actions with tamper-evident signatures and single-flight idempotency. This architectural evolution significantly improves security boundaries, reduces blast radius, and enhances operational reliability. The use of Redis for session durability, PostgreSQL for execution records, Kubernetes for orchestration, and OIDC for secure authentication ensures scalability, reliability, and security. Clear ADRs guide architectural evolution, while shared contracts and observability conventions promote consistency across services. **Updated** - The platform's hostname strategy with canonical hostname pinning and fallback support ensures reliable authentication flows while providing flexibility for different deployment environments.
+The Luban AIOps Platform has evolved to a robust microservices architecture centered around a **triple-layer execution model**. The **platform-gateway** serves as the portal-facing edge with authentication, authorization, and agent interaction capabilities, the **tool-gateway** specializes in secure tool execution and connector management, and the **execution-runtime worker** provides isolated execution of approved mutating actions with tamper-evident signatures and single-flight idempotency. This architectural evolution significantly improves security boundaries, reduces blast radius, and enhances operational reliability. The use of Redis for session durability, PostgreSQL for execution records, Kubernetes for orchestration, and OIDC for secure authentication ensures scalability, reliability, and security. Clear ADRs guide architectural evolution, while shared contracts and observability conventions promote consistency across services. **Updated** - Version 0.25.2 brings refined portal rendering capabilities with single-sourced bounded pane heights and improved overflow detection, ensuring consistent user experience across different content types while maintaining the core architectural integrity established in previous releases.
 
 ## Appendices
 
@@ -602,6 +635,7 @@ The Luban AIOps Platform has evolved to a robust microservices architecture cent
 - Execution-runtime worker deployed as single replica with restricted security context.
 - **Updated** - DNS configuration for both `aiops.luban.metasync.cc` (canonical) and `aiops.luban.k8s.orb.local` (fallback) hostnames.
 - **Updated** - SSL certificates covering both hostnames for HTTPS access.
+- **Updated** - Version lockstep maintained at 0.25.2 across all platform services.
 
 ```mermaid
 graph TB
@@ -612,6 +646,7 @@ ERW["Execution Runtime Worker Deployment"]
 AG["Agent Platform Deployment"]
 ID["Identity Broker Deployment"]
 UI["Operator Portal Deployment"]
+AS["Audit Service Deployment"]
 REDIS["Redis Service"]
 POSTGRES["PostgreSQL Service"]
 end
@@ -629,6 +664,7 @@ AG --> REDIS
 ERW --> TGW
 ERW --> POSTGRES
 TGW --> OIDC
+AS --> POSTGRES
 ```
 
 **Diagram sources**
@@ -713,3 +749,28 @@ The platform implements a dual-hostname strategy to balance production requireme
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 - [dev-k8s README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 - [getting-started.md](file://docs/guides/getting-started.md)
+
+### Portal Rendering Enhancements (v0.25.1/v0.25.2)
+**New** - Detailed documentation of recent portal rendering improvements
+
+The v0.25.1/v0.25.2 releases bring significant improvements to the operator portal's document rendering capabilities:
+
+**Bounded Pane Improvements**:
+- Single-sourced height management via `BOUNDED_PANE_MAX_HEIGHT` constant (320px)
+- CSS custom property `--bounded-pane-max-height` eliminates drift between presentation and affordance logic
+- Pinned chrome for bounded panes keeps tab bars and collapse headers visible while content scrolls
+- Post-motion re-measure fixes address antd enter-motion measurement races
+
+**Document Type Enhancements**:
+- Digest data tab renamed to "Digest data" for clarity
+- House layout rules codified: tables for repeated records, description lists for single objects, bullets for long text, chips for identifiers
+- Incident report Triage tab updated to follow layout rules consistently
+
+**Testing and Validation**:
+- Fake-timer regression test pins the first-reveal race fix
+- Portal suite maintains 190 tests with green status
+- TypeScript compilation clean with no emit warnings
+
+**Section sources**
+- [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
+- [DocumentsView.test.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/__tests__/DocumentsView.test.tsx)

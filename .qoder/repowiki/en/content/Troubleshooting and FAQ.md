@@ -14,6 +14,7 @@
 - [operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts)
 - [operator-portal/web-ui/app/src/voice/languages.ts](file://products/operator-portal/web-ui/app/src/voice/languages.ts)
 - [operator-portal/web-ui/app/src/auth/oidc.ts](file://products/operator-portal/web-ui/app/src/auth/oidc.ts)
+- [operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
 - [agent-platform/src/agent_platform/app.py](file://products/agent-platform/src/agent_platform/app.py)
 - [agent-platform/src/agent_platform/main.py](file://products/agent-platform/src/agent_platform/main.py)
 - [agent-platform/src/agent_platform/core/config.py](file://products/agent-platform/src/agent_platform/core/config.py)
@@ -59,10 +60,11 @@
 
 ## Update Summary
 **Changes Made**
-- Updated OIDC callback troubleshooting section to clarify canonical vs fallback hostname behavior and explain why sign-in flows round-trip back to metasync.cc origin
-- Enhanced identity integration troubleshooting with detailed explanation of redirect URI resolution
-- Added comprehensive guidance for handling different access origins (canonical vs fallback)
-- Updated configuration reference to better explain the relationship between primary and extra redirect URIs
+- Updated bounded pane troubleshooting section to reflect v0.25.1/v0.25.2 improvements including single-sourced height and post-motion re-measure race fix
+- Enhanced portal UI troubleshooting with comprehensive guidance for bounded pane behavior and overflow detection
+- Added detailed explanation of the 320px bounded pane constraint and expand/collapse affordance behavior
+- Updated stale UI troubleshooting to include new content-hashed asset caching strategy details
+- Enhanced voice input troubleshooting with browser compatibility information
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -77,7 +79,7 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides comprehensive troubleshooting guidance for the Luban AIOps Platform, focusing on deployment issues, service connectivity problems, performance bottlenecks, configuration mistakes, and integration failures. It includes step-by-step diagnostic procedures, log analysis techniques, metric interpretation, trace correlation, and platform-specific FAQs covering agent execution, policy enforcement, identity integration, OpenObserve telemetry pipeline issues, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, voice input microphone issues, and OIDC callback hostname behavior. Escalation procedures and community resources are also included to help you resolve issues efficiently.
+This document provides comprehensive troubleshooting guidance for the Luban AIOps Platform, focusing on deployment issues, service connectivity problems, performance bottlenecks, configuration mistakes, and integration failures. It includes step-by-step diagnostic procedures, log analysis techniques, metric interpretation, trace correlation, and platform-specific FAQs covering agent execution, policy enforcement, identity integration, OpenObserve telemetry pipeline issues, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, voice input microphone issues, OIDC callback hostname behavior, and bounded pane rendering issues. Escalation procedures and community resources are also included to help you resolve issues efficiently.
 
 ## Project Structure
 The platform is organized into multiple products:
@@ -137,6 +139,7 @@ Common areas where issues occur:
 - **Stale UI symptoms** from cached assets after redeployment
 - **Voice input microphone issues** due to browser compatibility or permission problems
 - **OIDC callback hostname confusion** between canonical and fallback origins
+- **Bounded pane rendering issues** with overflow detection and expand/collapse affordances
 
 **Section sources**
 - [agent-platform/README.md](file://products/agent-platform/README.md)
@@ -342,6 +345,7 @@ Responsibilities:
 - **Voice input via Web Speech API with browser compatibility handling**
 - **SPA shell with no-store caching for immediate redeployment**
 - **OIDC callback handling with origin-aware navigation**
+- **Bounded pane rendering with overflow detection and expand/collapse affordances**
 
 Common issues:
 - CORS or proxy misconfiguration
@@ -351,6 +355,8 @@ Common issues:
 - **Voice input microphone button disabled or non-functional**
 - **Browser compatibility issues with Web Speech API**
 - **OIDC callback confusion about redirect origins**
+- **Bounded pane overflow detection timing issues**
+- **Expand/collapse affordance not appearing correctly**
 
 Diagnostics:
 - Check browser console and network tab
@@ -360,6 +366,7 @@ Diagnostics:
 - **Test Web Speech API availability in different browsers**
 - **Verify microphone permissions and audio device access**
 - **Check OIDC callback URL handling and origin preservation**
+- **Verify bounded pane height calculations and overflow detection**
 
 Resolution steps:
 - Fix CORS and proxy headers
@@ -369,8 +376,9 @@ Resolution steps:
 - **Use Chrome/Edge for voice input functionality**
 - **Grant microphone permissions and verify audio device availability**
 - **Understand that callbacks always return to canonical hostname regardless of starting origin**
+- **Accept 320px bounded pane constraint with expand affordance for overflow content**
 
-**Updated** Enhanced OIDC callback troubleshooting with comprehensive origin behavior explanation
+**Updated** Enhanced bounded pane troubleshooting with v0.25.1/v0.25.2 improvements including single-sourced height and post-motion re-measure race fix
 
 **Section sources**
 - [operator-portal/README.md:37-113](file://products/operator-portal/README.md#L37-L113)
@@ -379,6 +387,7 @@ Resolution steps:
 - [operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts:38-56](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts#L38-L56)
 - [operator-portal/web-ui/app/src/chat/ChatView.tsx:487-721](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L487-L721)
 - [operator-portal/web-ui/app/src/auth/oidc.ts:114-156](file://products/operator-portal/web-ui/app/src/auth/oidc.ts#L114-L156)
+- [operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx:1074-1143](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1074-L1143)
 
 ## Dependency Analysis
 Service dependencies and deployment manifests:
@@ -422,6 +431,7 @@ OP --> NGINX["Nginx Cache"]
 - **Track parked confirmation resolution times and session operation delays**
 - **Analyze asset caching effectiveness and CDN performance for portal assets**
 - **Monitor voice recognition latency and browser compatibility metrics**
+- **Monitor bounded pane rendering performance and overflow detection accuracy**
 
 ## Troubleshooting Guide
 
@@ -918,6 +928,47 @@ navigator.mediaDevices.getUserMedia({ audio: true })
 - [operator-portal/web-ui/app/src/voice/languages.ts:1-60](file://products/operator-portal/web-ui/app/src/voice/languages.ts#L1-L60)
 - [operator-portal/web-ui/app/src/chat/ChatView.tsx:487-721](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L487-L721)
 
+### Bounded Pane Rendering Issues
+
+#### Symptom: Expand to full height affordance not appearing on long content
+**Most likely cause:** The bounded pane overflow detection is experiencing timing issues with antd's enter motion. The v0.25.1/v0.25.2 fixes address this with a post-motion re-measure approach and single-sourced height configuration.
+
+**Understanding the behavior:**
+- **320px bounded pane constraint**: Digest and narrative blocks are bounded to 320px with internal scrolling
+- **Single-sourced height**: The `BOUNDED_PANE_MAX_HEIGHT` constant (320px) is now the single source of truth, applied via CSS custom property `--bounded-pane-max-height`
+- **Post-motion re-measure**: Overflow detection runs immediately and again after 300ms delay to account for antd's enter motion settling
+- **Pinned chrome**: Tab bars and collapse headers stay visible while content scrolls underneath
+
+**Diagnostic:**
+
+```bash
+# Check bounded pane implementation in DocumentsView
+kubectl -n dev-luban-aiops exec deployment/operator-portal -- \
+  cat /usr/share/nginx/html/assets/*.js | grep -A5 "BOUNDED_PANE_MAX_HEIGHT"
+
+# Verify CSS custom property is applied
+# In browser developer tools, inspect the bounded pane wrapper element
+# Look for style="--bounded-pane-max-height: 320px"
+
+# Check for overflow detection timing issues
+# Open browser console and watch for overflow detection logs
+```
+
+**Resolution:**
+
+- **Accept the 320px bounded pane behavior**: Long content will show an "Expand to full height" affordance when overflow is detected
+- **Wait for the delayed re-measure**: The affordance appears 300ms after initial render to account for animation settling
+- **Use expand/collapse affordance**: Click "Expand to full height" to view complete content without bounds
+- **Verify single-sourced height**: The 320px bound is consistently applied via CSS custom property, preventing drift between presentation and logic
+- **Check browser compatibility**: Ensure modern browser support for CSS custom properties and DOM measurements
+
+**Updated** Enhanced bounded pane troubleshooting with v0.25.1/v0.25.2 improvements including single-sourced height and post-motion re-measure race fix
+
+**Section sources**
+- [operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx:1074-1143](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1074-L1143)
+- [docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md:14-31](file://docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md#L14-L31)
+- [docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md:17-37](file://docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md#L17-L37)
+
 ### Log Analysis Techniques
 - Centralize logs and use structured formats
 - Correlate logs by request IDs and trace spans
@@ -938,6 +989,7 @@ navigator.mediaDevices.getUserMedia({ audio: true })
 - **Monitor parked confirmation resolution times and session operation delays**
 - **Analyze asset caching hit rates and portal performance metrics**
 - **Track voice recognition success rates and browser compatibility metrics**
+- **Monitor bounded pane rendering performance and overflow detection accuracy**
 
 **Section sources**
 - [agent-platform/src/agent_platform/core/metrics.py](file://products/agent-platform/src/agent_platform/core/metrics.py)
@@ -1022,6 +1074,7 @@ Resolution:
 - **For portal issues, include browser compatibility details and caching behavior**
 - **For voice input issues, include browser version, OS, and microphone permission status**
 - **For OIDC issues, include redirect URI configuration and hostname behavior details**
+- **For bounded pane issues, include browser console logs and overflow detection timing**
 
 ### Community Resources
 - Repository documentation and specs
@@ -1033,7 +1086,7 @@ Resolution:
 - [CONTRIBUTING.md](file://CONTRIBUTING.md)
 
 ## Conclusion
-This troubleshooting guide equips you with systematic approaches to diagnose and resolve common issues across the Luban AIOps Platform. By leveraging logs, metrics, and traces, and following the step-by-step resolutions provided, you can quickly address deployment, connectivity, performance, configuration, integration, OpenObserve telemetry challenges, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, voice input microphone issues, and OIDC callback hostname behavior. For further assistance, consult community resources and escalate with comprehensive diagnostics when necessary.
+This troubleshooting guide equips you with systematic approaches to diagnose and resolve common issues across the Luban AIOps Platform. By leveraging logs, metrics, and traces, and following the step-by-step resolutions provided, you can quickly address deployment, connectivity, performance, configuration, integration, OpenObserve telemetry challenges, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, voice input microphone issues, OIDC callback hostname behavior, and bounded pane rendering issues. For further assistance, consult community resources and escalate with comprehensive diagnostics when necessary.
 
 ## Appendices
 
@@ -1068,6 +1121,8 @@ This troubleshooting guide equips you with systematic approaches to diagnose and
   - The identity broker always uses `OIDC_REDIRECT_URI` (`https://aiops.luban.metasync.cc/callback`) as the callback destination, regardless of which origin users start from. Fallback hostnames like `.k8s.orb.local` are only for reachability testing.
 - **How do I fix voice recognition errors?**
   - Check browser microphone permissions, verify audio device availability, and switch recognition language in the composer selector.
+- **Why isn't the "Expand to full height" affordance appearing for long content?**
+  - The bounded pane uses a 320px constraint with delayed overflow detection (300ms) to account for animations; wait for the post-motion re-measure to trigger the affordance.
 
 ### OpenObserve Configuration Reference
 **Environment Variables:**
@@ -1157,3 +1212,29 @@ This troubleshooting guide equips you with systematic approaches to diagnose and
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env:8-11](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env#L8-L11)
 - [identity-broker/src/identity_service/services/identity_service.py:81-111](file://products/identity-broker/src/identity_service/services/identity_service.py#L81-L111)
 - [docs/guides/configuration-reference.md:443-446](file://docs/guides/configuration-reference.md#L443-L446)
+
+### Bounded Pane Implementation Reference
+**Height Constraint:**
+- **320px bounded pane**: Digest and narrative blocks are bounded to 320px maximum height
+- **Single-sourced configuration**: `BOUNDED_PANE_MAX_HEIGHT = 320` is the single source of truth
+- **CSS custom property**: Height applied via `--bounded-pane-max-height: 320px` for consistent styling
+
+**Overflow Detection:**
+- **Immediate measurement**: Initial overflow check runs on component mount
+- **Delayed re-measure**: Second measurement runs after 300ms delay to account for antd enter motion
+- **Affordance display**: "Expand to full height" button appears only when content overflows the bound
+
+**Pinned Chrome Behavior:**
+- **Tab bar pinning**: Digest tab bar stays visible while content scrolls underneath
+- **Collapse header pinning**: Narrative collapse header stays visible while body scrolls
+- **Bound removal**: When expanded, the bound class is removed entirely for full-height viewing
+
+**Implementation Details:**
+- **useBoundedRegion hook**: Manages overflow detection state and timing
+- **boundedPaneStyle function**: Applies CSS custom property to wrapper elements
+- **ExpandAffordance component**: Provides expand/collapse toggle functionality
+
+**Section sources**
+- [operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx:1074-1143](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1074-L1143)
+- [docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md:14-31](file://docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md#L14-L31)
+- [docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md:17-37](file://docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md#L17-L37)

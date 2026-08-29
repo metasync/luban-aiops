@@ -74,12 +74,10 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced Operations Document Repository with bounded panes implementation for improved content presentation
-- Standardized tab layout across the interface with consistent spacing and alignment
-- Renamed raw JSON tab to 'Digest data' for better clarity and user understanding
-- Implemented ExpandAffordance component for expandable content sections
-- Added useBoundedRegion hook for managing bounded scrollable regions with overflow detection
-- Improved content presentation features with better visual hierarchy and accessibility
+- Updated bounded pane height management documentation to reflect single-sourced CSS custom property implementation
+- Enhanced DocumentsView component documentation with refactored overflow detection logic
+- Updated styling system documentation to document the elimination of hardcoded 320px values
+- Improved synchronization documentation between visual presentation and overflow detection logic
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -322,7 +320,7 @@ The Operator Portal consists of several key React components and hooks that work
 - **Composer Selection Bar**: Extensible control strip rendered under message input for model selection and future per-turn controls
 - **Model Select Component**: Dynamic model selection with catalog-driven rendering and session persistence
 - **Operations Document Repository**: Complete shift summary creation, management, viewing capabilities with SPEC-041 tabbed digest rendering, bounded scrollable panes, and v0.23.2 enhanced narrative panels that open expanded by default, plus client-side Markdown export functionality for shift summaries and operational documentation
-- **Settings & Identity Panel**: Read-only panel displaying identity information, session details, platform metadata, and comprehensive Platform Components Health Dashboard with detailed technology stack visibility and unified status indicators
+- **Settings & Identity Panel**: Read-only panel displaying identity information, session details, platform metadata, and comprehensive Platform Components Health Dashboard with detailed technology stack visibility
 - **Enhanced Platform Components Health Dashboard**: Live monitoring table showing real-time status of critical platform components including gateway, agent service, LLM runtime, session store, state store, and policy bundle with comprehensive technology stack reporting and backend service version tracking
 - **Enhanced Incident Management**: Comprehensive incident report creation and rendering with type selector radio buttons, searchable incident lists, dedicated tabs for incident details/triage/dispatches/session/digest data, and enhanced error handling
 - **Skills Integration**: Enhanced evidence cards with "Cited guidance" chips displaying matched skills
@@ -418,7 +416,7 @@ The Operator Portal consists of several key React components and hooks that work
 - [ComposerSelectionBar.tsx:1-48](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx#L1-L48)
 - [ModelSelect.tsx:1-58](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L1-L58)
 - [useChatStream.ts:1-454](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L454)
-- [transcript.ts:137-165](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L137-165)
+- [transcript.ts:137-165](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L137-L165)
 - [ApprovalsView.tsx:1-388](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L1-L388)
 - [useSessionWorkspace.ts:1-218](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L1-L218)
 - [SettingsView.tsx:1-405](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L1-L405)
@@ -524,13 +522,6 @@ Incidents->>Incidents : Type selector radio button for incident categorization
 Incidents->>Gateway : POST /api/v1/incidents (create new incident)
 Gateway->>IncidentService : Create incident with severity and priority
 IncidentService-->>Incidents : New incident with auto-assigned ID
-Note over Incidents : Dedicated Tabs Interface
-Incidents->>Incidents : Incident detail view with tabs
-Incidents->>Incidents : Details tab for basic incident information
-Incidents->>Incidents : Triage tab for automated analysis
-Incidents->>Incidents : Dispatches tab for connector coordination
-Incidents->>Incidents : Session tab for deep linking to chat
-Incidents->>Incidents : Digest data tab for technical inspection
 Note over React : Model Catalog Discovery
 React->>ModelCat : GET /api/v1/models
 ModelCat-->>React : Model catalog with id/label/provider/default
@@ -843,7 +834,7 @@ The IncidentsView component now provides comprehensive incident report creation 
 **Updated** The enhanced human-in-the-loop approval system now provides significantly improved decision synchronization with time-based settle windows, arrival presentation polish, approvals view pagination, and session workspace synchronization. The live decision sync system implements 300-second settle windows instead of tick budgets, providing more reliable synchronization of external decisions to active chat views. **Critical Enhancement**: The approvals inbox now includes client-side pagination for decision history with 10 entries per page, improving usability when managing large volumes of confirmation records. **New Feature**: The session workspace now implements monotonic refresh sequences to prevent race conditions during concurrent decision processing, ensuring data consistency across multiple approval operations. **Enhanced Arrival Presentation**: Improved visual feedback and state management provide better user experience during decision synchronization, with clearer indicators of pending actions and resolution status. **v0.14.1 Patch**: The useChatStream hook continues to include the dedicated `reseedTurns` method that provides authoritative same-session timeline updates, preventing cache shadowing issues where stale cached turns would override fresh state during owner-side decision synchronization. **v0.15.0 Enhancement**: The confirmation card system continues to implement proper turn anchoring based on SPEC-033, ensuring each confirmation card renders under the exchange that parked it rather than stacking all cards under the newest turn, providing accurate historical context for multi-park sessions. **v0.18.1 Enhancement**: The markdown rendering system now includes enhanced nested list support with proper ordered/unordered list handling, and pod log quoting improvements that render log excerpts in fenced code blocks for better readability in agent replies. **New Feature**: The Operations Document Repository provides complete shift summary management with session selection, document creation, publishing, viewing capabilities, and client-side Markdown export functionality for operational documentation. **SPEC-041 Enhancement**: The Documents view now features deterministic summary lines in document lists, tabbed structured digest rendering with dedicated sections (Handover, Sessions, Confirmations, Executions, Evidence & transcript, Open items, Digest data), bounded scrollable panes for digest and prose content, and improved foreign vs owner coverage tier handling for enhanced operator readability and workflow efficiency. **v0.23.2 Enhancement**: AI-generated shift summary narratives in the Documents drawer now open expanded by default instead of collapsed, significantly improving operator workflow efficiency when reviewing shift handover information and operational documentation. **New Feature**: The Enhanced Platform Components Health Dashboard provides comprehensive technology stack visibility with unified status indicators and backend service version reporting for proactive platform management. **v0.23.3 Enhancement**: Health check requests are now properly routed through nginx to the platform gateway service on port 8000, fixing Settings Platform pane health monitoring functionality with detailed technology stack reporting. **Critical Enhancement**: The enhanced incident management system now provides comprehensive report creation and rendering capabilities with type selector radio buttons, searchable incident lists, dedicated tabs for detailed analysis, and enhanced error handling for improved operator workflow efficiency.
 
 **Section sources**
-- [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-L70)
+- [App.tsx:56-70](file://products/operator-portal/web-ui/app/src/App.tsx#L56-70)
 - [App.tsx:288-307](file://products/operator-portal/web-ui/app/src/App.tsx#L288-L307)
 - [App.tsx:334-357](file://products/operator-portal/web-ui/app/src/App.tsx#L334-L357)
 - [ChatView.tsx:1-790](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L790)
@@ -852,7 +843,7 @@ The IncidentsView component now provides comprehensive incident report creation 
 - [ComposerSelectionBar.tsx:1-48](file://products/operator-portal/web-ui/app/src/chat/ComposerSelectionBar.tsx#L1-L48)
 - [ModelSelect.tsx:1-58](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx#L1-L58)
 - [useChatStream.ts:1-454](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L454)
-- [transcript.ts:137-165](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L137-165)
+- [transcript.ts:137-165](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L137-L165)
 - [useSessionWorkspace.ts:1-218](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L1-L218)
 - [ApprovalsView.tsx:1-388](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L1-L388)
 - [SettingsView.tsx:1-405](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L1-L405)
@@ -1239,7 +1230,7 @@ The enhanced HITL confirmation system provides several operational benefits:
 **Section sources**
 - [ChatView.tsx:218-297](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L218-L297)
 - [useChatStream.ts:284-372](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L284-L372)
-- [transcript.ts:137-165](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L137-165)
+- [transcript.ts:137-165](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L137-L165)
 - [global.css:409-444](file://products/operator-portal/web-ui/app/src/theme/global.css#L409-L444)
 - [roles.ts:35-35](file://products/operator-portal/web-ui/app/src/roles.ts#L35-L35)
 - [ConfirmationCard.test.tsx:56-67](file://products/operator-portal/web-ui/app/src/chat/__tests__/ConfirmationCard.test.tsx#L56-L67)
@@ -3816,7 +3807,7 @@ Common issues and their solutions when working with the Operator Portal.
 - [models.ts:1-31](file://products/operator-portal/web-ui/app/src/api/models.ts#L1-L31)
 - [useChatStream.ts:1-454](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L1-L454)
 - [useChatStreamReseed.test.ts:1-66](file://products/operator-portal/web-ui/app/src/stream/__tests__/useChatStreamReseed.test.ts#L1-L66)
-- [transcript.ts:137-165](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L137-165)
+- [transcript.ts:137-165](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L137-L165)
 - [transcript.test.ts:312-365](file://products/operator-portal/web-ui/app/src/chat/__tests__/transcript.test.ts#L312-L365)
 - [ApprovalsView.tsx:1-388](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L1-L388)
 - [approvals.ts:1-20](file://products/operator-portal/web-ui/app/src/api/approvals.ts#L1-L20)

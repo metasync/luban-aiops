@@ -39,9 +39,8 @@
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml)
 - [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
-- [shared/platform-ops/gitops/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/reconcile-portal-oidc-client.sh)
+- [shared/platform-ops/gitops/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/reconcile-portal-oidC-client.sh)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
-- [shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-httproute.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-httproute.yaml)
 - [products/operator-portal/web-ui/app/src/auth/storage.ts](file://products/operator-portal/web-ui/app/src/auth/storage.ts)
 - [products/operator-portal/web-ui/app/src/auth/oidc.ts](file://products/operator-portal/web-ui/app/src/auth/oidc.ts)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
@@ -53,17 +52,20 @@
 - [products/skills-hub/src/skills_hub/metadata.py](file://products/skills-hub/src/skills_hub/metadata.py)
 - [products/tool-gateway/src/tool_gateway/metadata.py](file://products/tool-gateway/src/tool_gateway/metadata.py)
 - [docs/guides/portal-user-guide.md](file://docs/guides/portal-user-guide.md)
-- [docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md](file://docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md)
-- [docs/specs/SPEC-039-operations-document-repository/spec.md](file://docs/specs/SPEC-039-operations-document-repository/spec.md)
-- [docs/specs/SPEC-040-shift-summary-handover-narrative/spec.md](file://docs/specs/SPEC-040-shift-summary-handover-narrative/spec.md)
+- [docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md](file://docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md)
+- [docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md](file://docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md)
+- [docs/agentic-aiops-platform/release-notes/2026-08-29-incident-report-document-type.md](file://docs/agentic-aiops-platform/release-notes/2026-08-29-incident-report-document-type.md)
+- [docs/agentic-aiops-platform/release-notes/README.md](file://docs/agentic-aiops-platform/release-notes/README.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced Step 7 with clear guidance on canonical hostname (aiops.luban.metasync.cc) vs fallback hostname (aiops.luban.k8s.orb.local) for browser flows
-- Added detailed explanation of OIDC callback behavior and per-origin storage constraints
-- Updated troubleshooting section with hostname-related authentication issues
-- Enhanced configuration reference with hostname-specific environment variables
+- Updated version references from 0.14.0 to 0.25.2 across all sections to reflect the latest coordinated release
+- Enhanced incident report document type documentation with SPEC-043 details and dual-action gate requirements
+- Updated portal UI improvements including bounded pane enhancements and digest data tab renaming
+- Added comprehensive coverage of v0.25.1/v0.25.2 patch releases focusing on operator portal polish
+- Updated troubleshooting section with new incident report creation workflows and document type support
+- Enhanced operations document repository section with incident report capabilities and dual-action gates
 
 ## Table of Contents
 1. Introduction
@@ -83,7 +85,7 @@
 ## Introduction
 This guide helps you get up and running with the Luban AIOps Platform for local development and production deployment. It covers prerequisites, installation steps, environment configuration, secret management, initial validation, and common troubleshooting tips. You will also find links to additional resources and next steps tailored for developers, operators, and security teams.
 
-**Updated** This document reflects the coordinated 0.14.0 release with synchronized versions across all seven platform components, plus enhanced live decision sync capabilities that improve the operator experience through real-time approval status updates in the chat interface. The platform now includes a comprehensive operations document repository with shift summary capabilities for end-of-shift handovers.
+**Updated** This document reflects the coordinated 0.25.2 release with synchronized versions across all platform components, plus enhanced incident report document type capabilities and operator portal polish. The platform now includes comprehensive operations document repository with shift summary and incident report types, featuring dual-action gates and role-based access controls.
 
 ## Prerequisites
 Ensure your environment meets the following requirements before proceeding:
@@ -98,9 +100,9 @@ Ensure your environment meets the following requirements before proceeding:
 Notes:
 - The platform uses Kustomize overlays under shared/platform-ops/gitops for both development and production profiles.
 - Runtime profiles are provided for OpenAI, DashScope, and DeepSeek; select one based on your needs.
-- **Updated**: Version 0.14.0 introduces live decision sync capabilities that require the updated operator portal for optimal operator experience.
-- **Updated**: The operator portal now includes enhanced real-time approval status updates through the usePendingDecisionPoll hook.
-- **New**: Operations document repository requires proper role assignments for document creation and access.
+- **Updated**: Version 0.25.2 introduces enhanced incident report document type capabilities requiring proper role assignments for document creation and access.
+- **Updated**: The operator portal now includes bounded pane enhancements with pinned chrome and improved digest rendering.
+- **New**: Incident report document type requires both `documents:create` and `incident:read` actions for creation.
 
 **Section sources**
 - [products/operator-portal/web-ui/app/package.json:6-8](file://products/operator-portal/web-ui/app/package.json#L6-L8)
@@ -113,10 +115,11 @@ The repository is organized into product services and shared operational assets:
   - agent-platform: Agent runtime service and providers
   - identity-broker: Identity and token services
   - tool-gateway: API gateway, policy enforcement, and tool orchestration
-  - **Updated**: operator-portal: Modern React/TypeScript web UI built with Vite and Ant Design, featuring live decision sync and operations document repository
+  - **Updated**: operator-portal: Modern React/TypeScript web UI built with Vite and Ant Design, featuring bounded panes and enhanced document repository
   - **New**: audit-service: Durable audit trail service for authenticated event ingestion and retention
   - **New**: incident-service: Incident intake, triage, and collaboration dispatch
   - **Existing**: skills-hub: Skills and grounded guidance federation
+  - **New**: execution-runtime: Isolated execution workers for bounded operational actions
 - Shared:
   - platform-ops: GitOps overlays, scripts, runtime profiles, and base Kustomize manifests
   - shared-contracts: JSON schemas and observability conventions
@@ -128,10 +131,11 @@ subgraph "Products"
 AP["Agent Platform"]
 IB["Identity Broker"]
 TG["Tool Gateway"]
-OP["Operator Portal (Vite/React + Live Sync + Documents)"]
+OP["Operator Portal (Vite/React + Bounded Panes + Documents)"]
 AS["Audit Service"]
 IS["Incident Service"]
 SH["Skills Hub"]
+ER["Execution Runtime"]
 end
 subgraph "Shared Ops"
 KO["Kustomize Base"]
@@ -150,6 +154,7 @@ OP --> NGINX
 AS --> KO
 IS --> KO
 SH --> KO
+ER --> KO
 KO --> RDS
 KO --> K8S
 RP --> KO
@@ -180,7 +185,7 @@ Follow these steps to run the platform locally using Kustomize overlays:
    - Verify that Redis and core services are healthy.
 
 5. Deploy overlays
-   - Apply the dev overlay to deploy all platform components (agent-platform, identity-broker, tool-gateway, operator-portal, audit-service, incident-service, skills-hub).
+   - Apply the dev overlay to deploy all platform components (agent-platform, identity-broker, tool-gateway, operator-portal, audit-service, incident-service, skills-hub, execution-runtime).
    - Confirm pods are running and services are exposed.
 
 ### Frontend Development (Vite/React)
@@ -235,7 +240,7 @@ For production, use the same Kustomize overlays with appropriate overlays and se
    - The multi-stage Docker build compiles the React/Vite frontend and serves it via nginx
 
 4. Apply Kustomize overlays
-   - Apply the base and production-specific overlays to deploy all services including the new audit and incident services.
+   - Apply the base and production-specific overlays to deploy all services including the new audit, incident, and execution runtime services.
    - Verify deployments, services, and policies are applied correctly.
 
 5. Configure observability and policies
@@ -276,7 +281,7 @@ Environment variables and secrets are managed through Kustomize overlays and scr
   - Platform version is injected at build time from the root VERSION file
   - Vite configuration handles content hashing for immutable caching
   - Nginx serves the compiled React application with proper caching headers
-  - Live decision sync capabilities are enabled by default in the operator portal
+  - Bounded pane enhancements provide improved user experience with pinned chrome
 
 - **Updated**: Hostname Configuration
   - Canonical hostname: `https://aiops.luban.metasync.cc` (primary OIDC callback)
@@ -295,8 +300,8 @@ Best practices:
 - Validate configurations with the verification script before deploying.
 - **Updated**: Ensure version consistency across all components using the coordinated version validation system.
 - **Updated**: For frontend development, ensure Node.js 22+ is installed and dependencies are properly cached.
-- **New**: Test live decision sync functionality by creating approval workflows and verifying real-time status updates.
-- **New**: Configure proper roles for operations document repository access (platform-admin, approver, or operator).
+- **New**: Test incident report document type functionality by creating documents with proper dual-action permissions.
+- **New**: Configure bounded pane behavior for optimal document viewing experience.
 - **Updated**: Use the canonical hostname (`aiops.luban.metasync.cc`) for all browser-based authentication flows to ensure proper OIDC callback handling.
 
 **Section sources**
@@ -309,22 +314,23 @@ Best practices:
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env:6-11](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env#L6-L11)
 
 ## Coordinated Version Management
-Version 0.14.0 introduces enhanced coordinated versioning that ensures all platform components maintain synchronized versions:
+Version 0.25.2 introduces enhanced coordinated versioning that ensures all platform components maintain synchronized versions:
 
 ### Single Source of Truth
 - The root `VERSION` file serves as the single source of truth for the platform semver
-- All seven platform components must maintain lockstep version alignment with the central VERSION file
+- All eight platform components must maintain lockstep version alignment with the central VERSION file
 - **Updated**: The operator portal's React frontend also reads the VERSION file at build time for display purposes
 
 ### Components Covered
 The coordinated versioning applies to:
-- audit-service (SERVICE_VERSION: 0.14.0)
-- incident-service (SERVICE_VERSION: 0.14.0)
-- agent-platform (SERVICE_VERSION: 0.14.0)
-- identity-broker (SERVICE_VERSION: 0.14.0)
-- platform-gateway (SERVICE_VERSION: 0.14.0)
-- skills-hub (SERVICE_VERSION: 0.14.0)
-- tool-gateway (SERVICE_VERSION: 0.14.0)
+- audit-service (SERVICE_VERSION: 0.25.2)
+- incident-service (SERVICE_VERSION: 0.25.2)
+- agent-platform (SERVICE_VERSION: 0.25.2)
+- identity-broker (SERVICE_VERSION: 0.25.2)
+- platform-gateway (SERVICE_VERSION: 0.25.2)
+- skills-hub (SERVICE_VERSION: 0.25.2)
+- tool-gateway (SERVICE_VERSION: 0.25.2)
+- execution-runtime (SERVICE_VERSION: 0.25.2)
 - **Updated**: operator-portal (frontend version displayed in UI)
 
 ### Version Validation
@@ -356,13 +362,13 @@ The coordinated versioning applies to:
 After deployment, validate the platform and make your first API call:
 
 1. Health checks
-   - Verify health endpoints for each service (tool-gateway, identity-broker, agent-platform, audit-service, incident-service, skills-hub).
+   - Verify health endpoints for each service (tool-gateway, identity-broker, agent-platform, audit-service, incident-service, skills-hub, execution-runtime).
    - Ensure all pods are Running and Services are Ready.
 
 2. Operator Portal
    - Access the web UI via port-forwarding or ingress.
    - **Updated**: The React-based portal displays the platform version in the sidebar and provides enhanced user experience with Ant Design components.
-   - **New**: Test live decision sync by initiating an approval workflow and observing real-time status updates in the chat interface.
+   - **New**: Test incident report document creation by selecting incidents and generating reports with proper permissions.
    - Confirm basic navigation and service status displays.
 
 3. First API call
@@ -376,11 +382,12 @@ After deployment, validate the platform and make your first API call:
 5. New service validation
    - Test audit-service endpoints for event ingestion and querying
    - Validate incident-service functionality for incident management workflows
+   - Test execution-runtime for isolated operational actions
 
-6. Live decision sync validation
-   - **New**: Create a tier_2 confirmation workflow to test the live decision sync capability
-   - **New**: Observe how the owner's chat window updates when decisions are made from other sessions
-   - **New**: Verify that pending cards flip to their resolution state with decider attribution
+6. Document repository validation
+   - **New**: Test incident report document type creation with dual-action gates
+   - **New**: Verify bounded pane enhancements with pinned chrome behavior
+   - **New**: Validate digest data tab rendering and house layout rules
 
 Use curl or an HTTP client to test endpoints. Refer to service READMEs for endpoint details and examples.
 
@@ -392,7 +399,7 @@ Use curl or an HTTP client to test endpoints. Refer to service READMEs for endpo
 - [products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts:1-5](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts#L1-L5)
 
 ## Operations Document Repository and Shift Summaries
-The platform now includes a comprehensive operations document repository that enables operators to create structured shift summaries for end-of-shift handovers.
+The platform now includes a comprehensive operations document repository that enables operators to create structured shift summaries and incident reports for end-of-shift handovers and incident documentation.
 
 ### Creating Your First Shift Summary
 The typical end-of-shift workflow follows these steps:
@@ -407,22 +414,36 @@ The typical end-of-shift workflow follows these steps:
 4. **Optional Prose Summary**: Switch on the prose summary option if you want AI-generated narrative
 5. **Review and Publish**: Submit to create a draft, review the digest, then click **Publish** for team visibility
 
+### Creating Incident Reports
+The incident report document type provides structured incident documentation:
+
+1. **Navigate to Documents**: Open the **Documents** view in the Control section
+2. **Create Incident Report**: Select **Incident report** from the document type options
+3. **Select Incident**: Choose from the searchable incident list (requires `incident:read` permission)
+4. **Configure Report**: Add optional label and toggle prose generation
+5. **Review and Publish**: Review the assembled report and publish for team visibility
+
 ### Key Features
 - **Envelope-only listings**: Document listings return only metadata (no digest/prose content) for security
 - **Two-tier coverage**: Own sessions provide full coverage; foreign sessions provide metadata only
 - **Provenance anchoring**: Every fact in the digest is traced back to source records
 - **Role-based access**: Documents are accessible by role, not per-document permissions
 - **Audit trail**: Cross-owner document reads are logged for compliance
+- **Bounded panes**: Pinned chrome for digest tabs and narrative headers with expand affordances
+- **Digest data tab**: Renamed from Digest data to clearly indicate typed digest rendering
 
 ### Security Considerations
 - **Document content protection**: Full document content is only available through audited single fetch
 - **Published document deletion**: Owners may delete their own published documents (they disappear for everyone)
 - **Immutable content**: Document content cannot be edited after creation; publishing only changes visibility
+- **Dual-action gates**: Incident report creation requires both `documents:create` and `incident:read` permissions
+- **Read-only assembly**: Incident report assembly never mutates incident state
 
 **Section sources**
 - [docs/guides/portal-user-guide.md:170-223](file://docs/guides/portal-user-guide.md#L170-L223)
-- [docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md:20-44](file://docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md#L20-L44)
-- [docs/specs/SPEC-039-operations-document-repository/spec.md:14-25](file://docs/specs/SPEC-039-operations-document-repository/spec.md#L14-L25)
+- [docs/agentic-aiops-platform/release-notes/2026-08-29-incident-report-document-type.md:23-101](file://docs/agentic-aiops-platform/release-notes/2026-08-29-incident-report-document-type.md#L23-L101)
+- [docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md:17-58](file://docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md#L17-L58)
+- [docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md:14-31](file://docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md#L14-L31)
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -464,12 +485,20 @@ Common issues and resolutions:
   - Check that document listings return envelope-only data (no digest/prose content)
   - Ensure cross-owner document reads trigger audit events
   - Validate that published documents can be deleted by their owners
+  - **New**: For incident reports, verify both `documents:create` and `incident:read` permissions are granted
 
-- **New**: Shift summary creation problems
-  - Confirm session IDs are valid and accessible
-  - Verify foreign session inclusion requires approvals inbox role
-  - Check that prose generation doesn't exceed session limits (20 sessions max)
-  - Review digest construction for missing or unavailable data sources
+- **New**: Incident report creation problems
+  - Confirm incident IDs are valid and accessible
+  - Verify dual-action gate permissions (both `documents:create` and `incident:read`)
+  - Check that incident service connectivity is properly configured
+  - Validate that incident envelopes contain required triage information
+  - Review error responses for 503 (not configured), 502 (upstream failure), or 404 (unknown incident)
+
+- **Updated**: Portal UI issues
+  - **Bounded Pane Problems**: Check that CSS custom properties are properly set for height bounds
+  - **Digest Data Tab**: Verify that typed digest rendering is working instead of raw JSON dumps
+  - **Pinned Chrome**: Ensure tab bars and collapse headers remain visible while content scrolls
+  - **Expand Affordances**: Check that overflow detection works correctly after antd enter motions
 
 - **Updated**: Live decision sync issues
   - Check that the usePendingDecisionPoll hook is properly integrated in ChatView
@@ -496,8 +525,8 @@ Useful commands:
 - **Updated**: make validate-version
 - **Updated**: npm run dev (for frontend development)
 - **Updated**: npm run build (for frontend production builds)
-- **New**: Test operations document repository by checking document list endpoints for envelope-only responses
-- **New**: Verify shift summary creation workflow through the portal interface
+- **New**: Test incident report creation through portal interface with proper permissions
+- **New**: Verify bounded pane behavior in document viewer
 - **Updated**: Reconcile OIDC client: `shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh`
 
 **Section sources**
@@ -524,7 +553,7 @@ Useful commands:
   - Extend providers and tools as needed.
   - **Updated**: Understand the coordinated versioning system and contribute to version updates.
   - **Updated**: Work with the modern React/TypeScript frontend stack using Vite for development and builds.
-  - **New**: Implement and test live decision sync functionality using the usePendingDecisionPoll hook.
+  - **New**: Implement and test incident report document type functionality with dual-action gates.
   - **New**: Develop custom document types extending the operations document repository substrate.
   - **Updated**: Understand hostname configuration requirements for browser-based authentication flows.
 
@@ -532,10 +561,10 @@ Useful commands:
   - Manage Kustomize overlays and secrets lifecycle.
   - Implement CI/CD pipelines for automated deployments.
   - Configure monitoring, alerting, and log aggregation.
-  - **Updated**: Monitor version consistency across all seven platform components.
+  - **Updated**: Monitor version consistency across all eight platform components.
   - **Updated**: Handle multi-stage Docker builds that compile frontend assets alongside backend services.
-  - **New**: Utilize shift summaries for effective end-of-shift handovers and team collaboration.
-  - **New**: Configure proper roles and permissions for operations document repository access.
+  - **New**: Utilize incident report documents for structured incident documentation and team collaboration.
+  - **New**: Configure proper roles and permissions for operations document repository access with dual-action gates.
   - **Updated**: Ensure canonical hostname configuration for reliable OIDC authentication flows.
 
 - Security Teams
@@ -544,7 +573,7 @@ Useful commands:
   - Enforce compliance policies and conduct periodic assessments.
   - **Updated**: Validate audit-service and incident-service security configurations.
   - **Updated**: Review frontend security headers and caching policies in nginx configuration.
-  - **New**: Assess the security implications of live decision sync polling mechanisms.
+  - **New**: Assess the security implications of incident report document type with dual-action gates.
   - **New**: Verify operations document repository access controls and audit trails meet compliance requirements.
   - **Updated**: Validate OIDC callback security and per-origin storage constraints for browser authentication.
 
@@ -554,8 +583,7 @@ Additional resources:
 - GitOps scripts and overlays for deployment automation
 - **Updated**: Version validation scripts and coordinated release processes
 - **Updated**: Vite documentation and React/TypeScript best practices for frontend development
-- **New**: SPEC-039 documentation for understanding operations document repository implementation
-- **New**: SPEC-040 documentation for shift summary handover narrative features
+- **New**: SPEC-043 documentation for understanding incident report document type implementation
 - **New**: Portal user guide for detailed operations document repository workflows
 - **Updated**: Identity broker configuration reference for hostname and OIDC settings
 
@@ -565,9 +593,8 @@ Additional resources:
 - [products/identity-broker/README.md](file://products/identity-broker/README.md)
 - [products/tool-gateway/README.md](file://products/tool-gateway/README.md)
 - [products/operator-portal/web-ui/app/package.json:15-34](file://products/operator-portal/web-ui/app/package.json#L15-L34)
-- [docs/specs/SPEC-032-owner-side-live-decision-sync/spec.md:1-124](file://docs/specs/SPEC-032-owner-side-live-decision-sync/spec.md#L1-L124)
-- [docs/specs/SPEC-039-operations-document-repository/spec.md:1-155](file://docs/specs/SPEC-039-operations-document-repository/spec.md#L1-L155)
-- [docs/specs/SPEC-040-shift-summary-handover-narrative/spec.md:1-52](file://docs/specs/SPEC-040-shift-summary-handover-narrative/spec.md#L1-L52)
+- [docs/agentic-aiops-platform/release-notes/README.md:10-40](file://docs/agentic-aiops-platform/release-notes/README.md#L10-L40)
+- [docs/agentic-aiops-platform/release-notes/2026-08-29-incident-report-document-type.md:1-21](file://docs/agentic-aiops-platform/release-notes/2026-08-29-incident-report-document-type.md#L1-L21)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env:6-11](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env#L6-L11)
 
 ## Architecture Overview
@@ -575,10 +602,11 @@ The platform consists of several microservices orchestrated via Kubernetes and e
 - Tool Gateway: Central API entry point with policy enforcement and tool orchestration
 - Identity Broker: Authentication, authorization, and token management
 - Agent Platform: Agent runtime and provider integrations
-- **Updated**: Operator Portal: Modern React/TypeScript web UI built with Vite, served by nginx with optimized caching, featuring live decision sync capabilities and operations document repository
+- **Updated**: Operator Portal: Modern React/TypeScript web UI built with Vite, served by nginx with optimized caching, featuring bounded panes and enhanced document repository
 - **New**: Audit Service: Durable audit trail with authenticated event ingestion and retention
 - **New**: Incident Service: Incident intake, triage, and collaboration dispatch
 - **Existing**: Skills Hub: Skills and grounded guidance federation
+- **New**: Execution Runtime: Isolated execution workers for bounded operational actions
 - Redis: Stateful component for sessions and caching
 
 ```mermaid
@@ -587,9 +615,10 @@ Client["Client"]
 GW["Tool Gateway"]
 IDB["Identity Broker"]
 AP["Agent Platform"]
-OP["Operator Portal (React/Vite + Live Sync + Documents)"]
+OP["Operator Portal (React/Vite + Bounded Panes + Documents)"]
 AS["Audit Service"]
 IS["Incident Service"]
+ER["Execution Runtime"]
 RDS["Redis"]
 K8S["Kubernetes"]
 NGINX["Nginx (Static Assets)"]
@@ -599,21 +628,25 @@ GW --> IDB
 GW --> AP
 GW --> AS
 GW --> IS
+GW --> ER
 OP --> NGINX
 NGINX --> GW
 AP --> RDS
 IDB --> RDS
 AS --> RDS
 IS --> RDS
+ER --> RDS
 ```
 
 [No sources needed since this diagram shows conceptual architecture]
 
 ## Conclusion
-You now have the essential information to install, configure, and operate the Luban AIOps Platform for both local development and production. Version 0.14.0 introduces enhanced coordinated versioning across all seven platform components, ensuring consistent releases and simplified maintenance. The operator portal has been modernized with a Vite/React/TypeScript stack, providing an enhanced user experience with better performance and developer productivity. The new live decision sync capabilities significantly improve the operator experience by providing real-time updates when approval decisions are made from other sessions or interfaces.
+You now have the essential information to install, configure, and operate the Luban AIOps Platform for both local development and production. Version 0.25.2 introduces enhanced coordinated versioning across all eight platform components, ensuring consistent releases and simplified maintenance. The operator portal has been modernized with a Vite/React/TypeScript stack, providing an enhanced user experience with better performance and developer productivity. The bounded pane enhancements improve document viewing with pinned chrome and expand affordances.
 
-**Updated** The coordinated version management system in version 0.14.0 provides enhanced reliability and simplifies multi-component releases across the entire platform ecosystem, while the modernized frontend stack offers improved performance and developer experience. The addition of live decision sync capabilities addresses critical gaps identified during v0.13.1 live validation, ensuring that operators can trust the approval workflow visibility across all user interfaces. The new operations document repository with shift summary capabilities provides operators with structured handover artifacts that improve team collaboration and knowledge transfer.
+**Updated** The coordinated version management system in version 0.25.2 provides enhanced reliability and simplifies multi-component releases across the entire platform ecosystem, while the modernized frontend stack offers improved performance and developer experience. The addition of incident report document type capabilities addresses critical gaps identified during live validation, enabling operators to create structured incident documentation with dual-action gates and role-based access controls.
 
 **Updated** The enhanced hostname configuration guidance ensures reliable browser-based authentication flows by clearly distinguishing between the canonical hostname (`aiops.luban.metasync.cc`) used for OIDC callbacks and the fallback hostname (`aiops.luban.k8s.orb.local`) for general access. Understanding per-origin storage constraints and OIDC callback behavior is crucial for successful deployment and operation of the platform's authentication system.
+
+**Updated** The bounded pane enhancements in v0.25.1/v0.25.2 provide improved document viewing experience with pinned chrome for digest tabs and narrative headers, along with expand affordances for long content. The digest data tab renaming clarifies the purpose of typed digest rendering, and the house layout rules ensure consistent presentation of repeated records, objects, and identifiers.
 
 Use the provided scripts and overlays to manage deployments, secrets, and runtime profiles. For deeper exploration, consult the product READMEs and GitOps assets. If you encounter issues, refer to the troubleshooting guide and leverage Kubernetes diagnostics.

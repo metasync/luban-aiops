@@ -15,12 +15,12 @@
 
 ## Update Summary
 **Changes Made**
-- Updated status from draft to delivered (2026-08-28) as part of v0.23.0 release
-- Enhanced implementation details reflecting complete delivery of all four requirements (R-1 through R-4)
-- Added comprehensive verification and testing coverage information
-- Updated conclusion to reflect successful operator validation and production deployment
-- Enhanced section sources with specific file references and line numbers
-- **Updated**: Expanded documentation to include the new "How the tabs lay out content" section with detailed data shape to rendering approach mapping
+- Updated status from v0.23.0 to v0.25.1/v0.25.2 release alignment with updated terminology and interface alignment
+- Enhanced implementation details reflecting complete delivery of all four requirements (R-1 through R-4) with current version lockstep
+- Added comprehensive verification and testing coverage information aligned with latest audit service versioning
+- Updated conclusion to reflect successful operator validation and production deployment across multiple releases
+- Enhanced section sources with specific file references and line numbers for current codebase state
+- **Updated**: Expanded documentation to include the new "How the tabs lay out content" section with detailed data shape to rendering approach mapping, now integrated into the main reference guide
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -35,13 +35,13 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-SPEC-041 improves the readability and discoverability of operations documents (shift summaries). It introduces an operator-facing digest reference, tabbed structured digest rendering in the document drawer, bounded scrollable panes for digest and prose, and a deterministic counts-only summary line computed at creation time and shown in list rows. The spec extends the existing document repository and handover narrative surfaces without adding new services, policy actions, or audit event types. **Delivered 2026-08-28 as part of v0.23.0 release following comprehensive operator feedback validation.**
+SPEC-041 improves the readability and discoverability of operations documents (shift summaries). It introduces an operator-facing digest reference, tabbed structured digest rendering in the document drawer, bounded scrollable panes for digest and prose, and a deterministic counts-only summary line computed at creation time and shown in list rows. The spec extends the existing document repository and handover narrative surfaces without adding new services, policy actions, or audit event types. **Delivered 2026-08-28 as part of v0.23.0 release and maintained through v0.25.1/v0.25.2 releases with updated terminology and interface alignment following comprehensive operator feedback validation.**
 
 ## Project Structure
 The implementation spans three layers:
-- Agent platform: creates documents with a deterministic summary derived from the handover skeleton and persists it alongside label/state.
+- Agent platform: creates documents with a deterministic summary derived from the handover skeleton and persists it alongside label/state, plus AI-generated blurb field.
 - Operator portal: renders tabbed digests, bounded panes, list summary lines, and a "Learn more" link to the digest reference.
-- Shared contracts: describe the operation document envelope; the schema remains open so the new summary field is additive.
+- Shared contracts: describe the operation document envelope; the schema remains open so the new summary and blurb fields are additive.
 
 ```mermaid
 graph TB
@@ -57,7 +57,7 @@ D["operation-document.schema.json"]
 end
 E["Test Suite<br/>test_documents.py"]
 F["Digest Reference<br/>documents-digest-reference.md"]
-G["Release Notes<br/>v0.23.0"]
+G["Release Notes<br/>v0.23.0+"]
 B --> C
 C --> A
 A --> D
@@ -82,6 +82,7 @@ G --> F
 ## Core Components
 - Deterministic summary computation at creation time:
   - Derived from the handover skeleton (counts only), stored as a top-level summary field on the document record, and returned in list envelopes while digest/prose remain stripped.
+  - AI-generated blurb field (v0.23.3+) provides one-line story extracted from prose reply, also flowing through envelope listings.
 - Tabbed structured digest panel:
   - Replaces the recursive JSON tree with tabs: Handover (default), Sessions, Confirmations, Executions, Evidence & transcript counts, Open items, Digest data.
 - Bounded scrollable panes:
@@ -106,14 +107,15 @@ participant Schema as "Schema<br/>operation-document.schema.json"
 UI->>API : Create shift summary (label, sessions, include_prose)
 API->>API : Build digest (includes handover)
 API->>API : Compute summary from handover (counts-only)
-API->>Store : Persist document (with summary)
+API->>API : Generate blurb from prose (v0.23.3+)
+API->>Store : Persist document (with summary + blurb)
 Store-->>API : Acknowledged
-API-->>UI : Created document envelope (summary present)
+API-->>UI : Created document envelope (summary + blurb present)
 UI->>API : List documents (mine/published)
-API-->>UI : Envelope rows (summary included; digest/prose stripped)
+API-->>UI : Envelope rows (summary + blurb included; digest/prose stripped)
 UI->>API : Get document by id (audited read)
 API-->>UI : Full document (digest + prose)
-Note over UI,Schema : Summary is metadata; schema remains open with description note
+Note over UI,Schema : Summary and blurb are metadata; schema remains open with description notes
 ```
 
 **Diagram sources**
@@ -124,17 +126,19 @@ Note over UI,Schema : Summary is metadata; schema remains open with description 
 
 ## Detailed Component Analysis
 
-### Creation-time Summary (R-4)
+### Creation-time Summary and Blurb (R-4)
 - Computes a one-line, counts-only summary from the handover skeleton at creation time.
 - Stores the summary on the document record and includes it in list envelopes while preserving the envelope-only posture (no model output on un-audited surfaces).
-- Pre-SPEC-041 documents degrade gracefully when no summary is present.
+- AI-generated blurb (v0.23.3+) provides a bounded one-line story extracted from prose reply, also flowing through envelope listings.
+- Pre-SPEC-041 documents degrade gracefully when no summary is present; legacy documents without blurb fall back to deterministic summary.
 
 ```mermaid
 flowchart TD
 Start(["Create Shift Summary"]) --> BuildDigest["Build digest (sessions + handover)"]
 BuildDigest --> DeriveSummary["Derive summary from handover<br/>counts-only"]
-DeriveSummary --> Persist["Persist document with summary"]
-Persist --> ListEnvelope["List returns summary<br/>without digest/prose"]
+BuildDigest --> GenerateBlurb["Generate blurb from prose<br/>AI one-liner (v0.23.3+)"]
+DeriveSummary --> Persist["Persist document with summary + blurb"]
+Persist --> ListEnvelope["List returns summary + blurb<br/>without digest/prose"]
 ListEnvelope --> End(["Ready"])
 ```
 
@@ -252,8 +256,8 @@ Both the digest and the narrative render **bounded**: when either block grows ta
 - [DocumentsView.tsx:151-158](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L151-L158)
 
 ## Dependency Analysis
-- Agent platform depends on the shared schema for validation and documentation notes; the schema remains open to accommodate the new summary field.
-- Portal UI consumes the list endpoint envelope (which now includes summary) and the detail fetch (unchanged).
+- Agent platform depends on the shared schema for validation and documentation notes; the schema remains open to accommodate the new summary and blurb fields.
+- Portal UI consumes the list endpoint envelope (which now includes summary and blurb) and the detail fetch (unchanged).
 - Tests validate determinism, quiet phrasing, open-item suffix, counts-only posture, and envelope behavior.
 
 ```mermaid
@@ -263,7 +267,7 @@ A["operation_documents.py"]
 P["DocumentsView.tsx"]
 T["test_documents.py"]
 R["documents-digest-reference.md"]
-RN["release-notes v0.23.0"]
+RN["release-notes v0.23.0+"]
 T --> A
 T --> P
 A --> S
@@ -291,6 +295,7 @@ RN --> T
 - Tabbed rendering reduces DOM depth compared to recursive trees, improving scan speed and memory usage.
 - Bounded panes prevent large layouts from stretching the drawer, reducing reflow costs during interaction.
 - The mechanical layout rules ensure consistent performance across different data shapes without complex conditional logic.
+- AI-generated blurbs are cached and don't impact list performance since they're pre-computed at creation time.
 
 ## Troubleshooting Guide
 - Missing summary in lists:
@@ -307,6 +312,9 @@ RN --> T
 - Layout rendering problems:
   - Verify that data shapes match expected patterns for automatic rendering selection.
   - Check that unrecognized data shapes fall back to the Digest data tab appropriately.
+- Blurb display issues (v0.23.3+):
+  - Verify AI blurb generation is working and falling back to deterministic summary when prose is unavailable.
+  - Check that blurb field is properly stored and retrieved in list envelopes.
 
 **Section sources**
 - [plan.md:14-86](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/plan.md#L14-L86)
@@ -314,7 +322,7 @@ RN --> T
 - [test_documents.py:218-277](file://products/agent-platform/tests/test_documents.py#L218-L277)
 
 ## Conclusion
-SPEC-041 successfully enhances operator usability by making digest content scannable, bounded, and informative at a glance through a compact summary line. The specification was **delivered on 2026-08-28** as part of v0.23.0 release following comprehensive operator feedback validation. The implementation preserves the integrity posture (envelope-only listing, audited single fetch) while introducing clear, tabbed views and a dedicated reference. All requirements (R-1 through R-4) have been validated through comprehensive testing, confirming that no new services, policies, or audit events were introduced, keeping the change focused on readability and discoverability improvements. The feature has been deployed to production and verified through live checks and end-to-end testing.
+SPEC-041 successfully enhances operator usability by making digest content scannable, bounded, and informative at a glance through a compact summary line. The specification was **delivered on 2026-08-28** as part of v0.23.0 release and has been maintained through v0.25.1/v0.25.2 releases with updated terminology and interface alignment. The implementation preserves the integrity posture (envelope-only listing, audited single fetch) while introducing clear, tabbed views and a dedicated reference. All requirements (R-1 through R-4) have been validated through comprehensive testing, confirming that no new services, policies, or audit events were introduced, keeping the change focused on readability and discoverability improvements. The feature has been deployed to production and verified through live checks and end-to-end testing across multiple release trains.
 
 ## Appendices
 
@@ -331,10 +339,10 @@ SPEC-041 successfully enhances operator usability by making digest content scann
 
 ### Implementation Status
 - **Status**: Delivered (2026-08-28)
-- **Release**: v0.23.0 — Hardening and External Consumption (third R5 slice)
-- **Version Lockstep**: 0.23.0
+- **Release**: v0.23.0 — Hardening and External Consumption (third R5 slice), maintained through v0.25.1/v0.25.2
+- **Version Lockstep**: 0.25.2 (audit service version alignment)
 - **Operator Validation**: Complete - all feedback addressed including digest vocabulary, rendering usability, and document list clarity improvements
-- **Production Deployment**: Verified through live checks and end-to-end testing
+- **Production Deployment**: Verified through live checks and end-to-end testing across multiple release trains
 - **Testing Coverage**: Comprehensive test suites covering all four requirements with green CI/CD pipeline
 
 ### Delivery Verification
@@ -342,3 +350,4 @@ SPEC-041 successfully enhances operator usability by making digest content scann
 - **Portal Tests**: All UI component tests pass including tabbed rendering, bounded panes, and list summary display
 - **Live Check**: Successfully deployed to dev cluster with `documents-demo.sh` passing all assertions
 - **Integration Testing**: End-to-end workflow verified including creation, listing, viewing, and export functionality
+- **Version Alignment**: Audit service version 0.25.2 confirms stable integration across the platform

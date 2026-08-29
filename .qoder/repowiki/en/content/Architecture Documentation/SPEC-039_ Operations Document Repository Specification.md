@@ -22,17 +22,15 @@
 - [SPEC-043 spec.md](file://docs/specs/SPEC-043-incident-report-document-type/spec.md)
 - [SPEC-043 plan.md](file://docs/specs/SPEC-043-incident-report-document-type/plan.md)
 - [release notes](file://docs/agentic-aiops-platform/release-notes/2026-08-28-platform-components-blurb-prose-voice.md)
+- [portal live check polish](file://docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive coverage of SPEC-043 incident report document type implementation including dual-action gate, internal incident client, error handling, and portal integration details
-- Updated architecture diagrams to include incident report assembly flow and dual-action policy enforcement
-- Enhanced component analysis with incident report assembler, incident client, and gateway dual-action gate
-- Updated dependency analysis to show incident-service integration through bounded client
-- Added detailed troubleshooting guide covering incident-specific error scenarios and degradation paths
-- Updated conclusion to reflect delivery status of both shift summaries and incident reports
-- Integrated SPEC-043 context showing the second document type extending the substrate foundation
+- Updated all references to "Digest data" tab labels to "Digest data" throughout the documentation to reflect v0.25.1/v0.25.2 changes
+- Enhanced section descriptions to clarify that the tab shows the complete stored digest through typed renderers rather than raw JSON dumps
+- Updated diagram sources to include the portal live check polish release notes
+- Maintained consistency with the actual implementation where the tab renders structured content with fallback to labeled JSON for unrecognized sections
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -87,7 +85,7 @@ end
 subgraph "Shared Contracts"
 K["operation-document.schema.json"]
 L["v2.py"]
-end
+]
 F --> A
 F --> B
 F --> C
@@ -367,7 +365,7 @@ Prose-->>Route : (prose, blurb, "included") or (None, None, "failed")
 ```
 
 **Diagram sources**
-- [document_prose.py:24-56](file://products/agent-platform/src/agent_service/services/document_prose.py#L24-L56)
+- [document_prose.py:24-56](file://products/agent-platform/src/agent_service/services/document_prose.py#L24-56)
 - [document_prose.py:59-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L158)
 
 **Section sources**
@@ -570,7 +568,7 @@ The operations document repository is planned to receive significant usability e
   - Executions - tool execution outcomes
   - Evidence & Transcript Counts - quantitative metrics
   - Open Items - pending actions breakdown
-  - Digest data - preserves artifact inspection capability
+  - **Digest data** - preserves artifact inspection capability (renamed from Digest data in v0.25.1)
 
 #### R-3: Bounded Scrollable Digest and Prose Panes
 - Maximum height constraints with internal scrolling for long content
@@ -620,7 +618,7 @@ Agent-platform gains a bounded incident-service client that speaks to incident-s
 The Documents view grows incident-report creation and rendering inside the existing surfaces:
 - Creation dialog offers type choice (Shift summary / Incident report)
 - Choosing Incident report swaps the session picker for an incident picker fed by the existing incidents list surface
-- Document drawer renders the incident-report digest in the SPEC-041 tabbed posture with tabs for Incident, Triage, Dispatches, Session, Generated narrative, and Digest data
+- Document drawer renders the incident-report digest in the SPEC-041 tabbed posture with tabs for Incident, Triage, Dispatches, Session, Generated narrative, and **Digest data** (renamed from Digest data in v0.25.1)
 - Type badge distinguishes incident reports
 
 **Section sources**
@@ -640,3 +638,5 @@ The system is now positioned to integrate with SPEC-040 capabilities, which will
 With the addition of SPEC-043's incident report document type, the substrate now supports two distinct document types: shift summaries for operational handover and incident reports for incident review. Both types leverage the same substrate foundation, policy enforcement, and portal integration patterns, demonstrating the extensibility of the design. The combination of SPEC-039's solid foundation, SPEC-040's handover narrative enhancements, v0.23.3's AI blurb capabilities, SPEC-043's incident report support, and the planned SPEC-041 readability improvements creates a comprehensive operational documentation system that scales from basic digest capture to sophisticated operator workflows.
 
 The incident report implementation demonstrates the substrate's extensibility through a clean vertical slice pattern: agent-platform owns the document assembly and storage, platform-gateway applies dual-action policy enforcement, and the operator portal provides seamless creation and rendering interfaces. The bounded incident-service client ensures reliable operation even when upstream dependencies are unavailable, while the four-section digest structure provides comprehensive incident context for post-mortem analysis and knowledge sharing.
+
+**Updated**: The v0.25.1 portal live-check polish renamed the final tab from "Digest data" to "Digest data" across both document types, clarifying that the tab shows the complete stored digest through typed renderers rather than a raw JSON dump. This change improves clarity while maintaining the same underlying functionality where the tab renders structured content with labeled JSON fallback for unrecognized sections.

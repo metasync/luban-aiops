@@ -6,22 +6,21 @@
 - [plan.md](file://docs/specs/SPEC-043-incident-report-document-type/plan.md)
 - [tasks.md](file://docs/specs/SPEC-043-incident-report-document-type/tasks.md)
 - [operation-document.schema.json](file://shared/shared-contracts/schemas/operation-document.schema.json)
-- [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
 - [incident_report.py](file://products/agent-platform/src/agent_service/services/incident_report.py)
 - [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [documents.py](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py)
-- [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
+- [api.py](file://products/platform-gateway/src/platform_gateway/schemas/api.py)
 - [incident.py](file://products/incident-service/src/incident_service/schemas/incident.py)
 - [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated all sections to reflect the fully implemented incident report document type with complete agent-platform services, platform-gateway extensions, operator portal UI enhancements, and shared contract updates
-- Added comprehensive coverage of the incident client implementation, assembler logic, API endpoints, and portal integration components
-- Enhanced architectural diagrams to show actual implementation flow including incident service integration
-- Updated component analysis to reflect real code structure and behavior patterns
-- Added detailed portal rendering implementation details for incident report tabs and UI components
+- Updated status and delivery information to reflect v0.25.1/v0.25.2 release synchronization as part of comprehensive release notes refresh
+- Enhanced implementation details with actual code references showing complete incident report document type functionality
+- Added comprehensive coverage of the assembler logic, client implementation, gateway dual-action gate, and portal UI components
+- Updated architectural diagrams to show real implementation flow including incident service integration
+- Enhanced component analysis to reflect actual code structure and behavior patterns from the delivered implementation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -86,9 +85,9 @@ OP --> GR
 
 **Diagram sources**
 - [operation-document.schema.json:24-28](file://shared/shared-contracts/schemas/operation-document.schema.json#L24-L28)
-- [operation_documents.py:49-87](file://products/agent-platform/src/agent_service/services/operation_documents.py#L49-L87)
+- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
 - [documents.py:29-69](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L29-L69)
-- [incident_client.py:65-107](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L65-L107)
+- [incident_client.py:77-122](file://products/agent-platform/src/agent_service/services/incident_client.py#L77-L122)
 - [incident.py:37-63](file://products/incident-service/src/incident_service/schemas/incident.py#L37-L63)
 
 **Section sources**
@@ -107,11 +106,10 @@ Implementation anchors:
 - Gateway document creation route performs identity resolution, policy enforcement, and event logging.
 
 **Section sources**
-- [operation_documents.py:49-87](file://products/agent-platform/src/agent_service/services/operation_documents.py#L49-L87)
-- [operation_documents.py:300-499](file://products/agent-platform/src/agent_service/services/operation_documents.py#L300-L499)
+- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
 - [incident.py:37-116](file://products/incident-service/src/incident_service/schemas/incident.py#L37-L116)
 - [documents.py:29-69](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L29-L69)
-- [incident_client.py:65-107](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L65-L107)
+- [incident_client.py:77-122](file://products/agent-platform/src/agent_service/services/incident_client.py#L77-L122)
 
 ## Architecture Overview
 The incident report document type composes a snapshot from multiple durable sources and persists it as an immutable document. Creation flows through the gateway, which applies a dual-action gate for the new type before delegating to agent-platform. Agent-platform builds the digest by fetching incident facts and session data, then persists the document and optionally generates prose.
@@ -140,7 +138,7 @@ Gateway-->>Client : 201 response
 
 **Diagram sources**
 - [documents.py:29-69](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L29-L69)
-- [operation_documents.py:49-87](file://products/agent-platform/src/agent_service/services/operation_documents.py#L49-L87)
+- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
 - [incident_client.py:77-122](file://products/agent-platform/src/agent_service/services/incident_client.py#L77-L122)
 
 ## Detailed Component Analysis
@@ -261,7 +259,7 @@ The operator portal augments the existing Documents view:
 - [spec.md:188-209](file://docs/specs/SPEC-043-incident-report-document-type/spec.md#L188-L209)
 - [plan.md:93-108](file://docs/specs/SPEC-043-incident-report-document-type/plan.md#L93-L108)
 - [tasks.md:59-67](file://docs/specs/SPEC-043-incident-report-document-type/tasks.md#L59-L67)
-- [DocumentsView.tsx:514-800](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L514-L800)
+- [DocumentsView.tsx:527-850](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L527-L850)
 
 ## Dependency Analysis
 SPEC-043 introduces minimal coupling while leveraging existing contracts and services:
@@ -285,9 +283,8 @@ IncidentClientNew --> IncidentModels
 
 **Diagram sources**
 - [operation-document.schema.json:24-28](file://shared/shared-contracts/schemas/operation-document.schema.json#L24-L28)
-- [operation_documents.py:49-87](file://products/agent-platform/src/agent_service/services/operation_documents.py#L49-L87)
+- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
 - [documents.py:29-69](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L29-L69)
-- [incident_client.py:88-107](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L88-L107)
 - [incident_client.py:77-122](file://products/agent-platform/src/agent_service/services/incident_client.py#L77-L122)
 - [incident.py:37-63](file://products/incident-service/src/incident_service/schemas/incident.py#L37-L63)
 
@@ -315,7 +312,7 @@ Operational checks:
 
 **Section sources**
 - [spec.md:128-154](file://docs/specs/SPEC-043-incident-report-document-type/spec.md#L128-L154)
-- [incident_client.py:35-62](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L35-L62)
+- [incident_client.py:35-62](file://products/agent-platform/src/agent_service/services/incident_client.py#L35-L62)
 - [documents.py:29-69](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L29-L69)
 
 ## Conclusion
@@ -378,5 +375,5 @@ OPERATION_DOCUMENT ||--o{ CONNECTOR_DISPATCH : "digest references"
 ```
 
 **Diagram sources**
-- [operation_documents.py:300-499](file://products/agent-platform/src/agent_service/services/operation_documents.py#L300-L499)
+- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
 - [incident.py:37-116](file://products/incident-service/src/incident_service/schemas/incident.py#L37-L116)
