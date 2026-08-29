@@ -7,6 +7,8 @@
 - [tasks.md](file://docs/specs/SPEC-039-operations-document-repository/tasks.md)
 - [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
+- [incident_report.py](file://products/agent-platform/src/agent_service/services/incident_report.py)
+- [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [documents.py](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py)
@@ -24,16 +26,13 @@
 
 ## Update Summary
 **Changes Made**
-- Updated implementation status to reflect fully delivered Phase 1 with all eight requirements completed
-- Enhanced architecture diagrams to include platform gateway policy enforcement and operator portal integration
-- Added detailed component analysis for the complete typed document store, shift summary assembler, prose generator, and API routes
-- Updated dependency analysis to show full cross-product integration between agent-platform, platform-gateway, and operator-portal
-- Added comprehensive troubleshooting guide covering all error scenarios and degradation paths
-- Updated conclusion to reflect delivery status and future extensibility
-- Integrated SPEC-040 context showing handover section support and prose generation defaults changes
-- **Added SPEC-041 enhancement planning**: Documentation now includes forward-looking information about upcoming readability improvements and digest reference capabilities that will extend the delivered SPEC-039 functionality
-- **Updated v0.23.3 enhancements**: Added documentation for nullable blurb field, database migration, and envelope-only listing support for AI-generated document context
-- **Added SPEC-043 incident report document type**: Documentation now includes the second document type alongside shift summaries, extending the substrate with incident-specific assembly, dual-action gate requiring documents:create and incident:read permissions, and incident-service client integration
+- Added comprehensive coverage of SPEC-043 incident report document type implementation including dual-action gate, internal incident client, error handling, and portal integration details
+- Updated architecture diagrams to include incident report assembly flow and dual-action policy enforcement
+- Enhanced component analysis with incident report assembler, incident client, and gateway dual-action gate
+- Updated dependency analysis to show incident-service integration through bounded client
+- Added detailed troubleshooting guide covering incident-specific error scenarios and degradation paths
+- Updated conclusion to reflect delivery status of both shift summaries and incident reports
+- Integrated SPEC-043 context showing the second document type extending the substrate foundation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -62,7 +61,7 @@ Key goals:
 
 ## Project Structure
 The implementation spans three products plus shared contracts:
-- Agent Platform: document store, shift-summary assembler, prose generator, routes, and session add-ons.
+- Agent Platform: document store, shift-summary assembler, incident-report assembler, prose generator, routes, and session add-ons.
 - Platform Gateway: pass-through routes enforcing new policy actions and foreign coverage capability.
 - Operator Portal: Documents view and session rename/id-copy UX.
 - Shared Contracts: JSON schema for operation documents and default policy bundle updates.
@@ -72,35 +71,41 @@ graph TB
 subgraph "Agent Platform"
 A["operation_documents.py"]
 B["shift_summary.py"]
-C["document_prose.py"]
-D["routes.py"]
+C["incident_report.py"]
+D["incident_client.py"]
+E["document_prose.py"]
+F["routes.py"]
 end
 subgraph "Platform Gateway"
-E["documents.py"]
-F["policy-default.yaml"]
+G["documents.py"]
+H["policy-default.yaml"]
 end
 subgraph "Operator Portal"
-G["DocumentsView.tsx"]
-H["Documents View UI"]
+I["DocumentsView.tsx"]
+J["Documents View UI"]
 end
 subgraph "Shared Contracts"
-I["operation-document.schema.json"]
-J["v2.py"]
+K["operation-document.schema.json"]
+L["v2.py"]
 end
-D --> A
-D --> B
-D --> C
-E --> D
+F --> A
+F --> B
+F --> C
+F --> D
 F --> E
-G --> E
-I --> D
+G --> F
+H --> G
 I --> G
-J --> D
+K --> F
+K --> I
+L --> F
 ```
 
 **Diagram sources**
 - [operation_documents.py:1-573](file://products/agent-platform/src/agent_service/services/operation_documents.py#L1-L573)
 - [shift_summary.py:1-460](file://products/agent-platform/src/agent_service/services/shift_summary.py#L1-L460)
+- [incident_report.py:1-215](file://products/agent-platform/src/agent_service/services/incident_report.py#L1-L215)
+- [incident_client.py:1-122](file://products/agent-platform/src/agent_service/services/incident_client.py#L1-L122)
 - [document_prose.py:1-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L1-L158)
 - [routes.py:738-957](file://products/agent-platform/src/agent_service/api/v2/routes.py#L738-L957)
 - [documents.py:1-171](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L171)
@@ -116,21 +121,23 @@ J --> D
 ## Core Components
 - Typed document store: immutable rows with draft→published lifecycle, per-owner cap (20), 30-day TTL sweep, memory and Postgres backends behind one interface.
 - Shift-summary assembler: builds deterministic digests from durable stores with two-tier coverage (owner full, foreign metadata-only).
+- Incident-report assembler: builds deterministic digests from incident-service data and linked session with four-section structure (incident, triage, dispatches, session).
 - Optional prose generator: digest-only prompt contract, hard timeout, fail-soft degradation to digest-only documents.
 - API routes: create, list (mine/published), get, publish, delete; session rename route; structured denials via gateway policy.
-- Policy actions: documents:create, documents:read, session:update granted to operator/approver/platform-admin by default.
+- Policy actions: documents:create, documents:read, session:update granted to operator/approver/platform-admin by default; incident:read required for incident reports.
 - Schema: strict JSON schema for operation documents including envelope fields, provenance, digest, prose status, and AI-generated blurb.
 
 **Section sources**
 - [operation_documents.py:38-120](file://products/agent-platform/src/agent_service/services/operation_documents.py#L38-L120)
 - [shift_summary.py:40-74](file://products/agent-platform/src/agent_service/services/shift_summary.py#L40-L74)
+- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
 - [document_prose.py:24-56](file://products/agent-platform/src/agent_service/services/document_prose.py#L24-L56)
 - [routes.py:763-957](file://products/agent-platform/src/agent_service/api/v2/routes.py#L763-L957)
 - [policy-default.yaml:251-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L251-L267)
 - [operation-document.schema.json:8-109](file://shared/shared-contracts/schemas/operation-document.schema.json#L8-L109)
 
 ## Architecture Overview
-The repository composes a typed store, a type-agnostic assembler, and an optional prose generator, exposed through versioned routes and guarded by gateway-enforced policies.
+The repository composes a typed store, type-agnostic assemblers, and an optional prose generator, exposed through versioned routes and guarded by gateway-enforced policies.
 
 ```mermaid
 sequenceDiagram
@@ -139,12 +146,24 @@ participant Gateway as "Platform Gateway"
 participant Routes as "Agent v2 Routes"
 participant Store as "OperationDocumentStore"
 participant Asm as "Shift Summary Assembler"
+participant IncAsm as "Incident Report Assembler"
+participant IncClient as "Incident Client"
 participant Prose as "Prose Generator"
 participant Audit as "Audit Emitter"
 Client->>Gateway : POST /api/v1/documents
 Gateway->>Routes : enforce_policy("documents : create")
+alt document_type == "incident_report"
+Gateway->>Routes : enforce_policy("incident : read")
+end
+alt document_type == "shift_summary"
 Routes->>Asm : build_digest(requester, session_ids, can_view_foreign)
 Asm-->>Routes : digest + provenance
+else document_type == "incident_report"
+Routes->>IncClient : fetch_incident_bundle(incident_id)
+IncClient-->>Routes : incident bundle
+Routes->>IncAsm : build_digest(requester, bundle, can_view_foreign)
+IncAsm-->>Routes : digest + provenance
+end
 Routes->>Store : create(document)
 Store-->>Routes : ok
 Routes->>Prose : generate_prose(kernel, type, digest)
@@ -157,6 +176,8 @@ Routes-->>Client : {document_id, state=draft}
 - [documents.py:29-69](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L29-L69)
 - [routes.py:763-856](file://products/agent-platform/src/agent_service/api/v2/routes.py#L763-L856)
 - [shift_summary.py:266-323](file://products/agent-platform/src/agent_service/services/shift_summary.py#L266-L323)
+- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
+- [incident_client.py:77-122](file://products/agent-platform/src/agent_service/services/incident_client.py#L77-L122)
 - [operation_documents.py:488-531](file://products/agent-platform/src/agent_service/services/operation_documents.py#L488-L531)
 - [document_prose.py:59-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L158)
 - [policy-default.yaml:251-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L251-L267)
@@ -239,6 +260,94 @@ Merge --> Return(["Return (digest, provenance)"])
 - [shift_summary.py:182-263](file://products/agent-platform/src/agent_service/services/shift_summary.py#L182-L263)
 - [shift_summary.py:367-426](file://products/agent-platform/src/agent_service/services/shift_summary.py#L367-L426)
 
+### Incident Report Assembler (SPEC-043 R-2)
+- Inputs: requester user id, incident-service bundle (envelope, triage report, dispatches), and foreign coverage flag.
+- Four-section digest structure:
+  - **incident**: envelope fields copied verbatim minus raw triage text, with `has_triage_raw` marker
+  - **triage**: validated triage report or `not_triaged` marker when absent
+  - **dispatches**: connector dispatch outcomes copied verbatim, possibly empty
+  - **session**: linked triage session under SPEC-039 R-3 two-tier posture (owner/full, foreign/metadata-only, foreign_denied, missing, unavailable)
+- Degradation: session store failures mark section unavailable; incident content never causes 500 errors
+- Validation: enforces server-derived coverage from incident's linked session only
+
+```mermaid
+flowchart TD
+Start(["build_digest"]) --> FetchBundle["Fetch incident bundle<br/>from incident-service"]
+FetchBundle --> Extract["Extract envelope, report, dispatches"]
+Extract --> SessionCheck{"Has session_id?"}
+SessionCheck -- No --> MissingSession["Set session.status = 'missing'"]
+SessionCheck -- Yes --> LoadSession["Load session from store"]
+LoadSession --> SessionStatus{"Session found?"}
+SessionStatus -- No --> Unavailable["Set session.status = 'unavailable'"]
+SessionStatus -- Yes --> OwnerCheck{"Requester owns session?"}
+OwnerCheck -- Yes --> FullDigest["Build full session digest"]
+OwnerCheck -- No --> ForeignCheck{"Has approvals:list?"}
+ForeignCheck -- Yes --> MetaOnly["Build metadata-only digest"]
+ForeignCheck -- No --> Denied["Set session.status = 'foreign_denied'"]
+FullDigest --> Assemble["Assemble four-section digest"]
+MetaOnly --> Assemble
+Unavailable --> Assemble
+Denied --> Assemble
+MissingSession --> Assemble
+Assemble --> Return(["Return (digest, provenance)"])
+```
+
+**Diagram sources**
+- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
+- [incident_report.py:85-124](file://products/agent-platform/src/agent_service/services/incident_report.py#L85-L124)
+
+**Section sources**
+- [incident_report.py:1-26](file://products/agent-platform/src/agent_service/services/incident_report.py#L1-L26)
+- [incident_report.py:68-83](file://products/agent-platform/src/agent_service/services/incident_report.py#L68-L83)
+- [incident_report.py:85-124](file://products/agent-platform/src/agent_service/services/incident_report.py#L85-L124)
+- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
+
+### Internal Incident Client (SPEC-043 R-3)
+- Bounded HTTP client using agent-platform's registered Basic query credential
+- Configuration: AGENT_INCIDENT_SERVICE_URL, AGENT_INCIDENT_CLIENT_ID, AGENT_INCIDENT_CLIENT_SECRET
+- Error handling hierarchy:
+  - Not configured → 503 (dependency not configured)
+  - Transport failure → 502 (service unavailable)
+  - Unknown incident → 404 (structural 404 matching incidents surface)
+  - Other 4xx → passed through with status code
+- Features: x-request-id forwarding, bounded timeout, read-only operations
+
+```mermaid
+sequenceDiagram
+participant Client as "Incident Client"
+participant Settings as "RuntimeSettings"
+participant HTTP as "HTTPX Client"
+participant Service as "Incident Service"
+Client->>Settings : check configuration
+alt Not configured
+Client-->>Caller : IncidentDependencyNotConfigured (503)
+else Configured
+Client->>HTTP : GET /api/v1/incidents/{incident_id}
+HTTP->>Service : Request with Basic auth
+alt Success
+Service-->>HTTP : 200 + bundle
+HTTP-->>Client : {incident, report, dispatches}
+Client-->>Caller : bundle
+else 404
+Service-->>HTTP : 404
+HTTP-->>Client : 404
+Client-->>Caller : IncidentNotFound (404)
+else 5xx/transport error
+Service-->>HTTP : 5xx or error
+HTTP-->>Client : error
+Client-->>Caller : IncidentServiceUnavailable (502)
+end
+end
+```
+
+**Diagram sources**
+- [incident_client.py:60-122](file://products/agent-platform/src/agent_service/services/incident_client.py#L60-L122)
+
+**Section sources**
+- [incident_client.py:1-16](file://products/agent-platform/src/agent_service/services/incident_client.py#L1-L16)
+- [incident_client.py:31-58](file://products/agent-platform/src/agent_service/services/incident_client.py#L31-L58)
+- [incident_client.py:60-122](file://products/agent-platform/src/agent_service/services/incident_client.py#L60-L122)
+
 ### Optional Prose Layer (R-4)
 - Prompt contract: digest-only input; model cannot see transcripts or evidence payloads.
 - Execution: uses runtime's default model client with a hard timeout; drains streaming responses if needed.
@@ -270,6 +379,7 @@ Prose-->>Route : (prose, blurb, "included") or (None, None, "failed")
 - Create/list/get/publish/delete endpoints for documents with structured rejections.
 - Session rename endpoint PATCH /sessions/{id}/title owner-only, bounds-checked, 404 for unknown/foreign.
 - Gateway enforces documents:create, documents:read, session:update via policy-default.yaml.
+- **Updated**: Dual-action gate for incident reports requires both documents:create AND incident:read permissions.
 - Audit emission: document_created, document_published, document_read (cross-owner only).
 
 ```mermaid
@@ -279,16 +389,20 @@ participant Gateway as "Platform Gateway"
 participant Routes as "Agent v2 Routes"
 participant Store as "OperationDocumentStore"
 participant Audit as "Audit Emitter"
-Client->>Gateway : GET /api/v1/documents?scope=mine
-Gateway->>Routes : enforce_policy("documents : read")
-Routes->>Store : list_for_owner(user_id)
-Store-->>Routes : [documents...]
-Routes->>Audit : emit document_read (if cross-owner read of published)
-Routes-->>Client : [documents...]
+Client->>Gateway : POST /api/v1/documents
+Gateway->>Gateway : enforce_policy("documents : create")
+alt document_type == "incident_report"
+Gateway->>Gateway : enforce_policy("incident : read")
+end
+Gateway->>Routes : create_document(payload, foreign_coverage)
+Routes->>Store : create(document)
+Store-->>Routes : ok
+Routes->>Audit : emit document_created
+Routes-->>Client : {document_id, state=draft}
 ```
 
 **Diagram sources**
-- [documents.py:72-95](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L72-L95)
+- [documents.py:29-86](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L29-L86)
 - [routes.py:858-874](file://products/agent-platform/src/agent_service/api/v2/routes.py#L858-L874)
 - [policy-default.yaml:251-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L251-L267)
 
@@ -303,7 +417,7 @@ Routes-->>Client : [documents...]
 ### Data Model (Operation Document)
 - Envelope fields: document_id, document_type, state, owner_user_id, label, created_at, published_at, provenance, digest, prose, prose_status.
 - **Updated**: v0.23.3 adds nullable blurb field (string/null, max 240 chars) for AI-generated one-line summaries extracted from prose responses.
-- Provenance: sessions array with session_id, coverage (owner/foreign), cited_record_ids.
+- Provenance: sessions array with session_id, coverage (owner/foreign), cited_record_ids; incident_id for incident reports.
 - Digest: type-specific deterministic data copied verbatim from durable stores.
 - Prose: optional narrative produced from digest only; prose_status indicates included/failed/not_requested.
 
@@ -323,13 +437,22 @@ text prose
 string prose_status
 text blurb
 }
+PROVENANCE {
+string incident_id
+array sessions
+}
+SESSION {
+string session_id
+string coverage
+array cited_record_ids
+}
 ```
 
 **Diagram sources**
 - [operation-document.schema.json:8-109](file://shared/shared-contracts/schemas/operation-document.schema.json#L8-L109)
 
 **Section sources**
-- [operation-document.schema.json:1-110](file://shared/shared-contracts/schemas/operation-document.schema.json#L1-L110)
+- [operation-document.schema.json:1-115](file://shared/shared-contracts/schemas/operation-document.schema.json#L1-L115)
 
 ### Database Migration and Storage (v0.23.3 Enhancement)
 - **Updated**: Additive migration adds nullable `blurb` column to operation_documents table for storing AI-generated one-line summaries.
@@ -359,12 +482,15 @@ text blurb
 - Routes depend on:
   - OperationDocumentStore (create/list/get/publish/delete)
   - ShiftSummaryAssembler (build_digest)
+  - IncidentReportAssembler (build_digest)
+  - IncidentClient (fetch_incident_bundle)
   - ProseGenerator (generate_prose)
   - AuditEmitter (emit events)
   - Session services (rename title)
 - Policy actions gate routes at the gateway:
   - documents:create → create/publish/delete own documents
   - documents:read → list/get documents
+  - incident:read → create incident reports (combined with documents:create)
   - session:update → rename session title
 - Store depends on environment knobs AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL; falls back to in-memory when Postgres is unreachable.
 
@@ -372,12 +498,15 @@ text blurb
 graph LR
 Routes["v2 Routes"] --> Store["OperationDocumentStore"]
 Routes --> Asm["Shift Summary Assembler"]
+Routes --> IncAsm["Incident Report Assembler"]
+Routes --> IncClient["Incident Client"]
 Routes --> Prose["Prose Generator"]
 Routes --> Audit["Audit Emitter"]
 Routes --> SessionSvc["Session Services"]
 Policy["policy-default.yaml"] --> Routes
 Gateway["Platform Gateway"] --> Routes
 Portal["Operator Portal"] --> Gateway
+IncService["Incident Service"] --> IncClient
 ```
 
 **Diagram sources**
@@ -396,14 +525,21 @@ Portal["Operator Portal"] --> Gateway
 - Prose generation has a hard timeout to prevent route blocking; failures degrade to digest-only documents.
 - Postgres queries use indexes on owner and state columns for efficient listing.
 - **Updated**: Blurb extraction is lightweight string parsing with 240-character bounds, adding minimal overhead to prose generation.
+- **Updated**: Incident service calls use bounded timeouts and fail fast when dependencies are unavailable.
 
 ## Troubleshooting Guide
 - Unknown session ids during digest assembly: raises a specific error carrying offending ids; routes respond 400 without revealing ownership.
 - Missing permissions: gateway returns structured denial for missing documents:create/documents:read/session:update.
+- **Updated**: Incident report creation requires both documents:create AND incident:read; missing either action results in structured denial.
 - Postgres unavailability: store factory falls back to in-memory backend; service remains usable.
 - Prose generation failure: prose_status set to failed; document still created with digest only.
 - Foreign session access: requires approvals:list capability; denied without proper authorization.
 - Session rename validation: titles must be 1-80 characters after trimming; foreign or unknown sessions return 404.
+- **Updated**: Incident service dependency errors:
+  - Not configured → 503 (dependency not configured)
+  - Unreachable → 502 (service unavailable)
+  - Unknown incident → 404 (structural 404)
+  - Neither surfaces raw stack traces
 - **Updated**: Blurb parsing edge cases handled gracefully - missing SUMMARY marker results in null blurb, empty responses handled safely.
 
 **Section sources**
@@ -412,6 +548,7 @@ Portal["Operator Portal"] --> Gateway
 - [operation_documents.py:530-573](file://products/agent-platform/src/agent_service/services/operation_documents.py#L530-L573)
 - [document_prose.py:59-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L158)
 - [routes.py:705-736](file://products/agent-platform/src/agent_service/api/v2/routes.py#L705-L736)
+- [incident_client.py:31-58](file://products/agent-platform/src/agent_service/services/incident_client.py#L31-L58)
 
 ## Future Enhancements (SPEC-041)
 
@@ -433,7 +570,7 @@ The operations document repository is planned to receive significant usability e
   - Executions - tool execution outcomes
   - Evidence & Transcript Counts - quantitative metrics
   - Open Items - pending actions breakdown
-  - Raw JSON - preserves artifact inspection capability
+  - Digest data - preserves artifact inspection capability
 
 #### R-3: Bounded Scrollable Digest and Prose Panes
 - Maximum height constraints with internal scrolling for long content
@@ -456,7 +593,7 @@ SPEC-041 is currently in draft status targeting version 0.23.0 as part of the R5
 ## Second Document Type - Incident Reports (SPEC-043)
 
 ### Overview
-The operations document repository extends beyond shift summaries to include incident reports as its second document type, delivered 2026-08-29 as v0.25.0. This enhancement leverages the existing substrate's type discriminator, role × type matrix, provenance anchoring, and audited cross-owner read path to provide durable, attributed incident review artifacts.
+The operations document repository extends beyond shift summaries to include incident reports as its second document type. This enhancement leverages the existing substrate's type discriminator, role × type matrix, provenance anchoring, and audited cross-owner read path to provide durable, attributed incident review artifacts.
 
 ### Incident Report Assembly
 An incident-report assembler in agent-platform builds the digest from two sources: incident-service (via the new internal client) and the platform's own durable stores for the linked session. The digest carries four deterministic sections:
@@ -483,7 +620,7 @@ Agent-platform gains a bounded incident-service client that speaks to incident-s
 The Documents view grows incident-report creation and rendering inside the existing surfaces:
 - Creation dialog offers type choice (Shift summary / Incident report)
 - Choosing Incident report swaps the session picker for an incident picker fed by the existing incidents list surface
-- Document drawer renders the incident-report digest in the SPEC-041 tabbed posture with tabs for Incident, Triage, Dispatches, Session, Generated narrative, and Raw JSON
+- Document drawer renders the incident-report digest in the SPEC-041 tabbed posture with tabs for Incident, Triage, Dispatches, Session, Generated narrative, and Digest data
 - Type badge distinguishes incident reports
 
 **Section sources**
@@ -500,4 +637,6 @@ The system has been further enhanced with v0.23.3 additions including nullable b
 
 The system is now positioned to integrate with SPEC-040 capabilities, which will enhance the shift summaries with deterministic handover sections and improved prose generation defaults, further strengthening the operational handover workflow for relief operators. Additionally, SPEC-041 planning ensures continued evolution toward better operator experience through enhanced readability features and digest reference capabilities.
 
-With the addition of SPEC-043's incident report document type, the substrate now supports two distinct document types: shift summaries for operational handover and incident reports for incident review. Both types leverage the same substrate foundation, policy enforcement, and portal integration patterns, demonstrating the extensibility of the design. The combination of SPEC-039's solid foundation, SPEC-040's handover narrative enhancements, v0.23.3's AI blurb capabilities, SPEC-043's incident report support, and the delivered SPEC-041 readability improvements (v0.23.0) create a comprehensive operational documentation system that scales from basic digest capture to sophisticated operator workflows.
+With the addition of SPEC-043's incident report document type, the substrate now supports two distinct document types: shift summaries for operational handover and incident reports for incident review. Both types leverage the same substrate foundation, policy enforcement, and portal integration patterns, demonstrating the extensibility of the design. The combination of SPEC-039's solid foundation, SPEC-040's handover narrative enhancements, v0.23.3's AI blurb capabilities, SPEC-043's incident report support, and the planned SPEC-041 readability improvements creates a comprehensive operational documentation system that scales from basic digest capture to sophisticated operator workflows.
+
+The incident report implementation demonstrates the substrate's extensibility through a clean vertical slice pattern: agent-platform owns the document assembly and storage, platform-gateway applies dual-action policy enforcement, and the operator portal provides seamless creation and rendering interfaces. The bounded incident-service client ensures reliable operation even when upstream dependencies are unavailable, while the four-section digest structure provides comprehensive incident context for post-mortem analysis and knowledge sharing.

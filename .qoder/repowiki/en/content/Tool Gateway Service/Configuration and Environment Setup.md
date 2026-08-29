@@ -7,8 +7,7 @@
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
-- [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
-- [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
@@ -24,6 +23,7 @@
 - [sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
 - [sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
 - [sync-skills-secrets.sh](file://shared/platform-ops/gitops/sync-skills-secrets.sh)
+- [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
@@ -38,19 +38,18 @@
 - [spec.md](file://docs/specs/SPEC-019-portal-transparency-navigation/spec.md)
 - [spec.md](file://docs/specs/SPEC-027-live-model-discovery/spec.md)
 - [spec.md](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
+- [spec.md](file://docs/specs/SPEC-043-incident-report-document-type/spec.md)
 - [approval-and-hitl.md](file://docs/guides/approval-and-hitl.md)
 - [tool-configuration.md](file://docs/guides/tool-configuration.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for execution signing configuration including AGENT_EXECUTION_SIGNING_KEY environment variable and HMAC-SHA256 signing mechanism
-- Updated audit service integration via AGENT_AUDIT_SERVICE_URL with fire-and-forget emission pattern
-- Documented execution record persistence settings using AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL
-- Enhanced agent platform section with detailed guidance on signed execution requests and durable audit trails
-- Added new sections documenting execution signing architecture, audit emission patterns, and execution record lifecycle
-- Updated environment-specific settings with recommendations for execution signing and audit configuration across different environments
-- Integrated execution signing considerations into deployment examples and security best practices
+- Enhanced incident service connectivity documentation with comprehensive coverage of AGENT_INCIDENT_SERVICE_URL, AGENT_INCIDENT_CLIENT_ID, AGENT_INCIDENT_CLIENT_SECRET, and AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS environment variables
+- Updated platform-gateway incident service proxy configuration with PLATFORM_GATEWAY_INCIDENT_* environment variables
+- Added detailed guidance for incident report document assembly capabilities in agent-platform
+- Integrated incident service considerations into deployment examples and security best practices
+- Enhanced troubleshooting section with incident service-specific issues and resolutions
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -67,7 +66,7 @@
 ## Introduction
 This document explains how the Platform Gateway Service manages configuration and environment setup across layers: environment variables, configuration files, and runtime overrides. It details available options, defaults, validation rules, and deployment-specific settings for development, staging, and production. It also provides examples for Docker and Kubernetes (ConfigMaps/Secrets), and outlines security best practices for secrets management and consistent configuration across environments.
 
-**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations, risk-tier admission gates for mutating tools via GATEWAY_MUTATING_TOOLS_ENABLED, configurable HITL confirmation timeouts through AGENT_HITL_CONFIRM_TIMEOUT, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, the new mutating-dev kustomize profile that provides a committed, environment-scoped development posture for enabling mutating tools safely with bounded RBAC permissions while preserving configuration across LLM provider switches, the live model discovery feature controlled by AGENT_MODEL_DISCOVERY_ENABLED, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS, and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS that enables automatic model catalog updates from provider endpoints with fail-soft fallback mechanisms, and the new execution signing system with AGENT_EXECUTION_SIGNING_KEY that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions via AGENT_AUDIT_SERVICE_URL, and durable execution record persistence using AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL settings.
+**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations, risk-tier admission gates for mutating tools via GATEWAY_MUTATING_TOOLS_ENABLED, configurable HITL confirmation timeouts through AGENT_HITL_CONFIRM_TIMEOUT, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, the new mutating-dev kustomize profile that provides a committed, environment-scoped development posture for enabling mutating tools safely with bounded RBAC permissions while preserving configuration across LLM provider switches, the live model discovery feature controlled by AGENT_MODEL_DISCOVERY_ENABLED, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS, and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS that enables automatic model catalog updates from provider endpoints with fail-soft fallback mechanisms, the new execution signing system with AGENT_EXECUTION_SIGNING_KEY that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions via AGENT_AUDIT_SERVICE_URL, and durable execution record persistence using AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL settings, plus comprehensive incident service connectivity configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables that enable incident report document assembly and triage capabilities with Basic authentication flows.
 
 ## Project Structure
 The Platform Gateway Service is implemented under products/platform-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/platform-gateway. The service includes workspace resource integration features that proxy requests to tool-gateway and skills-hub services for read-only inventory access, plus enhanced OpenTelemetry configuration with durable secret management. The new mutating-dev profile provides a dedicated development posture for enabling mutating tools with appropriate RBAC controls. The agent platform component now includes live model discovery capabilities that automatically refresh model catalogs from provider endpoints, along with execution signing and audit trail capabilities for tamper-evident execution records.
@@ -82,102 +81,110 @@ D["src/platform_gateway/api/routes/tools.py"]
 E["src/platform_gateway/api/routes/skills.py"]
 F["src/platform_gateway/services/tool_gateway_client.py"]
 G["src/platform_gateway/services/skills_hub_client.py"]
+H["src/platform_gateway/services/incident_client.py"]
 end
 subgraph "Agent Platform Integration"
-H["kernel_middleware.py"]
-I["runtime_settings.py"]
-J["gateway_tools.py"]
-K["AGENT_GATEWAY_TOOL_AUTO_ALLOW"]
-L["AGENT_HITL_CONFIRM_TIMEOUT"]
-M["Risk Tier Enforcement"]
-N["Model Discovery Service"]
-O["AGENT_MODEL_DISCOVERY_*"]
-P["Fail-Soft Ladder"]
-Q["Execution Signing Service"]
-R["AGENT_EXECUTION_SIGNING_KEY"]
-S["Audit Emitter"]
-T["AGENT_AUDIT_SERVICE_URL"]
-U["Execution Records Store"]
-V["AGENT_STATE_STORE_BACKEND"]
-W["AGENT_STATE_DB_URL"]
+I["kernel_middleware.py"]
+J["runtime_settings.py"]
+K["gateway_tools.py"]
+L["AGENT_GATEWAY_TOOL_AUTO_ALLOW"]
+M["AGENT_HITL_CONFIRM_TIMEOUT"]
+N["Risk Tier Enforcement"]
+O["Model Discovery Service"]
+P["AGENT_MODEL_DISCOVERY_*"]
+Q["Fail-Soft Ladder"]
+R["Execution Signing Service"]
+S["AGENT_EXECUTION_SIGNING_KEY"]
+T["Audit Emitter"]
+U["AGENT_AUDIT_SERVICE_URL"]
+V["Execution Records Store"]
+W["AGENT_STATE_STORE_BACKEND"]
+X["AGENT_STATE_DB_URL"]
+Y["Incident Report Assembly"]
+Z["AGENT_INCIDENT_*"]
+AA["Incident Service Proxy"]
+BB["PLATFORM_GATEWAY_INCIDENT_*"]
 end
 subgraph "Tool Gateway Risk Control"
-X["tool-gateway config.py"]
-Y["registry.py"]
-Z["GATEWAY_MUTATING_TOOLS_ENABLED"]
-AA["Risk-Tier Admission Gate"]
-AB["Policy Enforcement"]
+CC["tool-gateway config.py"]
+DD["registry.py"]
+EE["GATEWAY_MUTATING_TOOLS_ENABLED"]
+FF["Risk-Tier Admission Gate"]
+GG["Policy Enforcement"]
 end
 subgraph "Workspace Resource Integration"
-AC["tool_gateway_url"]
-AD["skills_hub_url"]
-AE["skills_client_id"]
-AF["skills_client_secret"]
-AG["Delegated Token Flow"]
-AH["Basic Auth Flow"]
+HH["tool_gateway_url"]
+II["skills_hub_url"]
+JJ["skills_client_id"]
+KK["skills_client_secret"]
+LL["Delegated Token Flow"]
+MM["Basic Auth Flow"]
 end
 subgraph "Enhanced OTel Secret Management"
-AI["sync-otel-secrets.sh"]
-AJ["OTEL_EXPORTER_OTLP_HEADERS"]
-AK["Cluster Secret Merge"]
-AL["Local File Preservation"]
-AM["Sibling Script Hooks"]
+NN["sync-otel-secrets.sh"]
+OO["OTEL_EXPORTER_OTLP_HEADERS"]
+PP["Cluster Secret Merge"]
+QQ["Local File Preservation"]
+RR["Sibling Script Hooks"]
 end
 subgraph "Mutating Dev Profile"
-AN["dev-k8s/kustomization.yaml"]
-AO["runtime-profiles/mutating-dev/"]
-AP["mutating.env"]
-AQ["tool-gateway-pod-delete.yaml"]
-AR["RBAC Role/RoleBinding"]
-AS["ConfigMap Merge"]
+SS["dev-k8s/kustomization.yaml"]
+TT["runtime-profiles/mutating-dev/"]
+UU["mutating.env"]
+VV["tool-gateway-pod-delete.yaml"]
+WW["RBAC Role/RoleBinding"]
+XX["ConfigMap Merge"]
 end
 subgraph "Execution Signing & Audit"
-AT["sync-execution-signing-secret.sh"]
-AU["execution-signing-secret"]
-AV["HMAC-SHA256 Signing"]
-AW["Durable Audit Trail"]
-AX["Fire-and-Forget Emission"]
-AY["Postgres Persistence"]
-AZ["Retention Scanning"]
+YY["sync-execution-signing-secret.sh"]
+ZZ["execution-signing-secret"]
+AAA["HMAC-SHA256 Signing"]
+BBB["Durable Audit Trail"]
+CCC["Fire-and-Forget Emission"]
+DDD["Postgres Persistence"]
+EEE["Retention Scanning"]
 end
-A --> AM
-B --> AN
-C --> AI
+A --> RR
+B --> SS
+C --> NN
 D --> F
 E --> G
-F --> AC
-G --> AD
-AM --> AN
-AO --> AP
-AP --> AQ
-AQ --> AR
-AR --> AS
-AS --> AT
-AT --> AU
-AU --> AV
-AV --> AW
-AW --> AX
-AX --> AY
-AY --> AZ
-H --> K
-I --> L
-J --> M
-N --> O
-N --> P
-Q --> R
-S --> T
-U --> V
-U --> W
-X --> Z
-Y --> AA
-Z --> AB
-AC --> AD
-AE --> AF
-AG --> AH
-AI --> AJ
-AJ --> AK
-AK --> AL
-AL --> AM
+F --> HH
+G --> II
+H --> BB
+RR --> SS
+TT --> UU
+UU --> VV
+VV --> WW
+WW --> XX
+XX --> YY
+YY --> ZZ
+ZZ --> AAA
+AAA --> BBB
+BBB --> CCC
+CCC --> DDD
+DDD --> EEE
+I --> LL
+J --> MM
+K --> NN
+O --> PP
+O --> QQ
+R --> S
+T --> U
+V --> W
+V --> X
+Y --> Z
+AA --> BB
+CC --> EE
+DD --> FF
+EE --> GG
+HH --> II
+JJ --> KK
+LL --> MM
+NN --> OO
+OO --> PP
+PP --> QQ
+QQ --> RR
 ```
 
 **Diagram sources**
@@ -186,6 +193,7 @@ AL --> AM
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
@@ -199,6 +207,7 @@ AL --> AM
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
@@ -216,6 +225,7 @@ AL --> AM
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
@@ -229,6 +239,7 @@ AL --> AM
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
@@ -255,6 +266,7 @@ AL --> AM
 - **New**: Execution signing service with HMAC-SHA256 signing for tamper-evident execution requests and receipts.
 - **New**: Audit service integration with fire-and-forget emission pattern for durable audit trails.
 - **New**: Execution record persistence with Postgres backend and retention scanning for compliance requirements.
+- **New**: Incident service connectivity with Basic authentication for incident report document assembly and triage capabilities.
 
 Key responsibilities:
 - Provide a single source of truth for configuration via typed models.
@@ -271,8 +283,9 @@ Key responsibilities:
 - **New**: Implement execution signing with HMAC-SHA256 to provide tamper-evident execution records that bind approved actions to their actual execution.
 - **New**: Integrate audit service emissions with fire-and-forget pattern that never degrades the chat stream while maintaining durable audit trails.
 - **New**: Persist execution records with Postgres backend and retention scanning to ensure compliance requirements are met without impacting performance.
+- **New**: Establish incident service connectivity with Basic authentication for incident report document assembly and triage operations, supporting both agent-platform and platform-gateway incident service clients.
 
-**Updated** Enhanced core components to include comprehensive workspace resource integration capabilities with read-only proxies for tools catalog and skills inventory, supporting both delegated token flow for tools and Basic authentication for skills, risk-tier admission gates for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus durable OpenTelemetry secret provisioning that persists authentication headers across deployment operations, the new mutating-dev kustomize profile that provides a safe, committed development posture for enabling mutating tools with appropriate RBAC controls, the live model discovery service that automatically refreshes model catalogs from provider endpoints with robust fallback mechanisms, and the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions, and durable execution record persistence with retention scanning.
+**Updated** Enhanced core components to include comprehensive workspace resource integration capabilities with read-only proxies for tools catalog and skills inventory, supporting both delegated token flow for tools and Basic authentication for skills, risk-tier admission gates for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus durable OpenTelemetry secret provisioning that persists authentication headers across deployment operations, the new mutating-dev kustomize profile that provides a safe, committed development posture for enabling mutating tools with appropriate RBAC controls, the live model discovery service that automatically refreshes model catalogs from provider endpoints with robust fallback mechanisms, the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions, and durable execution record persistence with retention scanning, plus comprehensive incident service connectivity configuration that enables incident report document assembly and triage capabilities through Basic authentication flows.
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -280,6 +293,7 @@ Key responsibilities:
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
@@ -293,7 +307,7 @@ Key responsibilities:
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 
 ## Architecture Overview
-The configuration system follows a layered approach with enhanced workspace resource integration, risk-tier admission gates, durable secret management, live model discovery, and execution signing capabilities:
+The configuration system follows a layered approach with enhanced workspace resource integration, risk-tier admission gates, durable secret management, live model discovery, execution signing, and incident service connectivity capabilities:
 - Defaults: defined in code or default YAML policies.
 - Config files: loaded from container filesystem or mounted volumes.
 - Environment variables: injected at runtime via platform orchestration (e.g., Kubernetes).
@@ -309,6 +323,7 @@ The configuration system follows a layered approach with enhanced workspace reso
 - **New**: Execution signing: HMAC-SHA256 signing for tamper-evident execution requests and receipts.
 - **New**: Audit service integration: fire-and-forget emission pattern for durable audit trails.
 - **New**: Execution record persistence: Postgres-backed storage with retention scanning for compliance.
+- **New**: Incident service connectivity: Basic authentication for incident report document assembly and triage operations.
 
 ```mermaid
 sequenceDiagram
@@ -318,6 +333,7 @@ participant Gateway as "Platform Gateway"
 participant ToolGW as "Tool Gateway"
 participant Identity as "Identity Broker"
 participant Skills as "Skills Hub"
+participant Incident as "Incident Service"
 participant OTel as "OpenObserve"
 participant Policy as "Policy Engine"
 participant Secrets as "Secret Manager"
@@ -330,6 +346,8 @@ Note over Portal,Agent : Agent Auto-Allow List & HITL Timeout
 Note over Agent,ModelDisc : Live Model Discovery
 Note over Agent,ExecSign : Execution Signing
 Note over Agent,Audit : Audit Emission
+Note over Agent,Incident : Incident Report Assembly
+Note over Gateway,Incident : Incident Service Proxy
 Note over Agent,ExecStore : Execution Record Persistence
 Portal->>Agent : Tool Call Request
 Agent->>Agent : Check Auto-Allow List
@@ -353,6 +371,11 @@ ModelDisc->>Provider : GET /models (with timeout)
 Provider-->>ModelDisc : Model List or Error
 ModelDisc->>ModelDisc : Apply Fail-Soft Ladder
 ModelDisc->>Agent : Update Catalog (atomic swap)
+Agent->>Incident : Create incident_report document
+Incident->>Incident : Fetch incident data (Basic Auth)
+Incident-->>Agent : Incident data for report
+Gateway->>Incident : Proxy incident queries (Basic Auth)
+Incident-->>Gateway : Incident data
 Note over Gateway,OTel : Durable OTel Secret Provisioning
 Gateway->>Secrets : Read OTEL_EXPORTER_OTLP_HEADERS
 Secrets-->>Gateway : Authenticated Headers
@@ -368,6 +391,7 @@ ExecStore->>ExecStore : Sweep expired records (30 days)
 **Diagram sources**
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
@@ -381,9 +405,11 @@ ExecStore->>ExecStore : Sweep expired records (30 days)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [spec.md](file://docs/specs/SPEC-019-portal-transparency-navigation/spec.md)
 - [spec.md](file://docs/specs/SPEC-027-live-model-discovery/spec.md)
 - [spec.md](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
+- [spec.md](file://docs/specs/SPEC-043-incident-report-document-type/spec.md)
 
 ## Detailed Component Analysis
 
@@ -394,7 +420,7 @@ ExecStore->>ExecStore : Sweep expired records (30 days)
 - Error handling: Aggregates validation errors and surfaces actionable messages.
 - Service discovery: Uses DNS-based resolution for inter-service communication.
 
-**Updated** Enhanced to support workspace resource integration with new configuration fields for tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret, enabling read-only proxies for tools catalog and skills inventory, plus risk-tier admission gate configuration for mutating tools, integration with the mutating-dev profile, live model discovery configuration through AGENT_MODEL_DISCOVERY_* environment variables, and execution signing configuration through AGENT_EXECUTION_SIGNING_KEY and audit service configuration through AGENT_AUDIT_SERVICE_URL.
+**Updated** Enhanced to support workspace resource integration with new configuration fields for tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret, enabling read-only proxies for tools catalog and skills inventory, plus risk-tier admission gate configuration for mutating tools, integration with the mutating-dev profile, live model discovery configuration through AGENT_MODEL_DISCOVERY_* environment variables, execution signing configuration through AGENT_EXECUTION_SIGNING_KEY and audit service configuration through AGENT_AUDIT_SERVICE_URL, and incident service connectivity configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables for incident report document assembly and triage capabilities.
 
 ```mermaid
 flowchart TD
@@ -415,6 +441,42 @@ Expose --> End
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+
+### Incident Service Connectivity
+- Purpose: Provides Basic authentication-based connectivity to incident-service for incident report document assembly and triage operations.
+- Agent Platform Configuration: Controlled by AGENT_INCIDENT_SERVICE_URL, AGENT_INCIDENT_CLIENT_ID, AGENT_INCIDENT_CLIENT_SECRET, and AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS environment variables.
+- Platform Gateway Configuration: Controlled by PLATFORM_GATEWAY_INCIDENT_SERVICE_URL, PLATFORM_GATEWAY_INCIDENT_CLIENT_ID, PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET, and PLATFORM_GATEWAY_INCIDENT_TRIAGE_TIMEOUT_SECONDS environment variables.
+- Authentication: Uses Basic authentication with registered query clients configured in incident-service's INCIDENT_QUERY_CLIENTS setting.
+- Behavior: Unset URL or secret fails closed with 503 responses for incident-report creation; triage operations use separate timeout configuration.
+- Security: Credentials must match entries in incident-service's INCIDENT_QUERY_CLIENTS registry; secrets are provisioned via sync-incident-secrets.sh.
+
+**New Section** Comprehensive incident service connectivity implementation with Basic authentication for incident report document assembly and triage operations.
+
+```mermaid
+flowchart TD
+Request["Incident Report Request"] --> CheckConfig{"AGENT_INCIDENT_* configured?"}
+CheckConfig --> |no| Return503["Return 503 - Not Configured"]
+CheckConfig --> |yes| BuildAuth["Build Basic Auth Credentials"]
+BuildAuth --> HTTPClient["HTTP Client with timeout"]
+HTTPClient --> IncidentsAPI["POST /api/v1/incidents/report"]
+IncidentsAPI --> Auth["Basic Auth with client credentials"]
+Auth --> Response{"Status Code"}
+Response --> |2xx| Success["Return incident report"]
+Response --> |4xx| ClientError["Pass through client error"]
+Response --> |5xx| ServerError["Return 502 - Service unavailable"]
+Success --> End(["Report Created"])
+ClientError --> End
+ServerError --> End
+Return503 --> End
+```
+
+**Diagram sources**
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
+
+**Section sources**
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
 
 ### Execution Signing Service
 - Purpose: Provides HMAC-SHA256 signing for execution requests and receipts to ensure tamper-evident execution records.
@@ -893,8 +955,9 @@ SkillsHubClient --> PlatformGatewaySettings
 - **New**: Live model discovery configuration through AGENT_MODEL_DISCOVERY_* environment variables.
 - **New**: Execution signing secret provisioning through execution-signing-secret with optional secretKeyRef.
 - **New**: Audit service configuration through AGENT_AUDIT_SERVICE_URL and related client credentials.
+- **New**: Incident service configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables for incident report document assembly and triage capabilities.
 
-**Updated** Enhanced deployment configuration with workspace resource integration, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list settings, plus durable OpenTelemetry secret provisioning that maintains authentication headers across deployment operations, the new mutating-dev profile that provides a committed development posture for enabling mutating tools safely, live model discovery configuration for automatic catalog updates, execution signing secret provisioning for tamper-evident execution records, and audit service configuration for durable audit trails.
+**Updated** Enhanced deployment configuration with workspace resource integration, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list settings, plus durable OpenTelemetry secret provisioning that maintains authentication headers across deployment operations, the new mutating-dev profile that provides a committed development posture for enabling mutating tools safely, live model discovery configuration for automatic catalog updates, execution signing secret provisioning for tamper-evident execution records, audit service configuration for durable audit trails, and incident service configuration for incident report document assembly and triage capabilities.
 
 ```mermaid
 graph TB
@@ -907,14 +970,18 @@ SVC --> APP
 Secrets["Secrets"] --> WorkspaceCreds["Workspace Resource Credentials"]
 Secrets --> OTelCreds["OTel Authentication Headers"]
 Secrets --> ExecSigning["Execution Signing Key"]
+Secrets --> IncidentCreds["Incident Service Credentials"]
 WorkspaceCreds --> APP
 OTelCreds --> APP
 ExecSigning --> APP
+IncidentCreds --> APP
 AppEnv["PLATFORM_GATEWAY_* Variables"] --> APP
 APP --> ToolsProxy["Tools Catalog Proxy"]
 APP --> SkillsProxy["Skills Inventory Proxy"]
+APP --> IncidentProxy["Incident Service Proxy"]
 ToolsProxy --> ToolsSvc["Tool Gateway Service"]
 SkillsProxy --> SkillsSvc["Skills Hub Service"]
+IncidentProxy --> IncidentSvc["Incident Service"]
 APP --> OTelExport["OTel Export Pipeline"]
 OTelExport --> Backend["OpenObserve Backend"]
 ToolGWEnv["GATEWAY_* Variables"] --> ToolGW["Tool Gateway"]
@@ -925,12 +992,15 @@ Agent --> HITLTimeout["HITL Confirmation Timeout"]
 Agent --> ModelDisc["Model Discovery Service"]
 Agent --> ExecSign["Execution Signing Service"]
 Agent --> Audit["Audit Service"]
+Agent --> IncidentAssembly["Incident Report Assembly"]
 ModelDisc --> ProviderEndpoints["Provider /models Endpoints"]
 ExecSign --> ExecStore["Execution Record Store"]
 Audit --> AuditBackend["Audit Service Backend"]
+IncidentAssembly --> IncidentSvc
 MutDev["Mutating Dev Profile"] --> ConfigMerge["ConfigMap Merge"]
 ConfigMerge --> ToolGWEnv
 ExecSigning --> ExecSign
+IncidentSecrets --> IncidentAssembly
 ```
 
 **Diagram sources**
@@ -941,6 +1011,7 @@ ExecSigning --> ExecSign
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
+- [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
 
@@ -954,7 +1025,7 @@ ExecSigning --> ExecSign
 ## Dependency Analysis
 Configuration components depend on environment variables and files, while the runtime settings handle DNS-based service discovery. The Docker image encapsulates runtime dependencies, and Kubernetes manifests inject configuration at deployment time. Workspace resource integration adds dependencies on tool-gateway and skills-hub services with appropriate authentication mechanisms.
 
-**Updated** Added dependencies for workspace resource integration including tool-gateway delegation flow and skills-hub Basic authentication, risk-tier admission gate enforcement, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus enhanced OpenTelemetry secret provisioning dependencies that ensure authentication headers persist across deployment operations, the new mutating-dev profile dependencies that provide committed development posture for enabling mutating tools safely, live model discovery dependencies that connect to provider endpoints with robust fallback mechanisms, execution signing dependencies that require execution-signing-secret provisioning, audit service dependencies for durable audit trail emission, and execution record store dependencies for Postgres-backed persistence with retention scanning.
+**Updated** Added dependencies for workspace resource integration including tool-gateway delegation flow and skills-hub Basic authentication, risk-tier admission gate enforcement, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus enhanced OpenTelemetry secret provisioning dependencies that ensure authentication headers persist across deployment operations, the new mutating-dev profile dependencies that provide committed development posture for enabling mutating tools safely, live model discovery dependencies that connect to provider endpoints with robust fallback mechanisms, execution signing dependencies that require execution-signing-secret provisioning, audit service dependencies for durable audit trail emission, execution record store dependencies for Postgres-backed persistence with retention scanning, and incident service dependencies that require incident-query-client configuration and credential provisioning through sync-incident-secrets.sh.
 
 ```mermaid
 graph TB
@@ -972,21 +1043,26 @@ INJECT --> CFG
 SVC --> RT
 WS["Workspace Resources"] --> TOOLS["Tool Gateway"]
 WS --> SKILLS["Skills Hub"]
+WS --> INCIDENT["Incident Service"]
 CFG --> WS
 Tools["tools.py"] --> ToolsClient["tool_gateway_client.py"]
 Skills["skills.py"] --> SkillsClient["skills_hub_client.py"]
+Incident["incident_client.py"] --> IncidentClient["incident_client.py"]
 ToolsClient --> TOOLS
 SkillsClient --> SKILLS
+IncidentClient --> INCIDENT
 TELEMETRY --> BACKEND["OpenObserve Backend"]
 Agent["kernel_middleware.py"] --> AutoAllow["Auto-Allow List"]
 Agent --> HITL["HITL Timeout"]
 Agent --> ModelDisc["Model Discovery"]
 Agent --> ExecSign["Execution Signing"]
 Agent --> Audit["Audit Emitter"]
+Agent --> IncidentAssembly["Incident Report Assembly"]
 ModelDisc --> Providers["Provider Endpoints"]
 ExecSign --> ExecStore["Execution Record Store"]
 ExecSign --> Audit
-Audit --> AuditBackend["Audit Service"]
+Audit --> AuditBackend["Audit Service Backend"]
+IncidentAssembly --> IncidentBackend["Incident Service Backend"]
 ExecStore --> Postgres["Postgres Database"]
 ToolGW["tool-gateway config.py"] --> RiskGate["Risk-Tier Gate"]
 RiskGate --> Policy["Policy Enforcement"]
@@ -996,6 +1072,8 @@ ConfigMerge --> ToolGW
 RBAC --> ToolGW
 ExecSigning["sync-execution-signing-secret.sh"] --> ExecSigningSecret["execution-signing-secret"]
 ExecSigningSecret --> ExecSign
+IncidentSecrets["sync-incident-secrets.sh"] --> IncidentSecrets["incident-query-clients"]
+IncidentSecrets --> IncidentAssembly
 ```
 
 **Diagram sources**
@@ -1004,6 +1082,7 @@ ExecSigningSecret --> ExecSign
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
@@ -1016,6 +1095,7 @@ ExecSigningSecret --> ExecSign
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
@@ -1027,6 +1107,7 @@ ExecSigningSecret --> ExecSign
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
@@ -1039,6 +1120,7 @@ ExecSigningSecret --> ExecSign
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 
@@ -1069,6 +1151,9 @@ ExecSigningSecret --> ExecSign
 - **New**: Execution record writes are best-effort with automatic fallback to in-memory storage.
 - **New**: Postgres execution records use connection pooling and retention scanning to manage storage growth.
 - **New**: Canonical JSON serialization optimizes signing performance through sorted keys and compact formatting.
+- **New**: Incident service connectivity uses timeout-based HTTP clients to prevent hanging requests.
+- **New**: Incident report assembly performs efficient Basic authentication with configured credentials.
+- **New**: Incident service proxy operations use connection pooling and timeout controls for optimal performance.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -1115,8 +1200,15 @@ Common issues and resolutions:
 - **New**: Execution signing secret not found: Run sync-execution-signing-secret.sh to provision the execution-signing-secret; check namespace configuration.
 - **New**: Audit service URL incorrect: Verify AGENT_AUDIT_SERVICE_URL points to correct audit service endpoint; check DNS resolution.
 - **New**: Execution record database schema missing: Postgres backend creates table on first use; verify database connectivity and permissions.
+- **New**: Incident service connectivity failures: Verify AGENT_INCIDENT_SERVICE_URL and PLATFORM_GATEWAY_INCIDENT_SERVICE_URL are configured; check incident-service is running and accessible.
+- **New**: Incident report creation failures: Check AGENT_INCIDENT_CLIENT_SECRET is properly provisioned via sync-incident-secrets.sh; verify INCIDENT_QUERY_CLIENTS configuration in incident-service.
+- **New**: Incident service authentication failures: Verify AGENT_INCIDENT_CLIENT_ID matches an entry in INCIDENT_QUERY_CLIENTS; check incident-service query client registry.
+- **New**: Incident triage timeout issues: Adjust PLATFORM_GATEWAY_INCIDENT_TRIAGE_TIMEOUT_SECONDS for slow triage operations; check agent-service connectivity.
+- **New**: Incident service 503 errors: Indicates incident service is not configured; verify AGENT_INCIDENT_SERVICE_URL and AGENT_INCIDENT_CLIENT_SECRET are set.
+- **New**: Incident service 502 errors: Indicates upstream service failures; check incident-service health and connectivity.
+- **New**: Incident service 4xx errors: Indicates client-side issues; verify incident query client credentials and request parameters.
 
-**Updated** Added comprehensive troubleshooting guidance for workspace resource integration including proxy configuration, authentication issues, and downstream service connectivity problems, risk-tier admission gate configuration issues, HITL confirmation timeout problems, enhanced agent auto-allow list misconfiguration detection, plus detailed guidance for OpenTelemetry secret provisioning and authentication issues, new troubleshooting steps for the mutating-dev profile integration including profile activation, RBAC verification, and triple-gate enforcement issues, comprehensive guidance for live model discovery configuration, provider connectivity, and fallback behavior troubleshooting, and new troubleshooting steps for execution signing including secret provisioning, signing failures, argument digest mismatches, audit service connectivity, and execution record persistence issues.
+**Updated** Added comprehensive troubleshooting guidance for workspace resource integration including proxy configuration, authentication issues, and downstream service connectivity problems, risk-tier admission gate configuration issues, HITL confirmation timeout problems, enhanced agent auto-allow list misconfiguration detection, plus detailed guidance for OpenTelemetry secret provisioning and authentication issues, new troubleshooting steps for the mutating-dev profile integration including profile activation, RBAC verification, and triple-gate enforcement issues, comprehensive guidance for live model discovery configuration, provider connectivity, and fallback behavior troubleshooting, new troubleshooting steps for execution signing including secret provisioning, signing failures, argument digest mismatches, audit service connectivity, and execution record persistence issues, and comprehensive troubleshooting guidance for incident service connectivity including URL configuration, credential provisioning, authentication failures, and service availability issues.
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -1124,6 +1216,7 @@ Common issues and resolutions:
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
 - [tools.py](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py)
 - [skills.py](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py)
+- [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
@@ -1137,22 +1230,23 @@ Common issues and resolutions:
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 
 ## Conclusion
 The Platform Gateway Service employs a robust, layered configuration system that integrates environment variables, configuration files, and runtime overrides with strict validation. By following the outlined best practices for Docker and Kubernetes deployments, teams can maintain secure, consistent configurations across environments while ensuring reliability and performance. The architectural shift to DNS-based service discovery eliminates service-link conflicts and provides more reliable inter-service communication patterns. The addition of workspace resource integration enables operators to gain self-service visibility into their workspace resources through read-only proxies for tools catalog and skills inventory, enhancing operational transparency and reducing dependency on agent-mediated resource discovery.
 
-**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive workspace resource integration capabilities that provide operators with direct visibility into their workspace resources, risk-tier admission gates that provide fine-grained control over mutating tool access, configurable HITL confirmation timeouts that balance operational efficiency with safety requirements, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, plus durable OpenTelemetry secret provisioning that ensures authentication headers persist across all deployment operations, maintaining consistent telemetry collection regardless of deployment sequence or environment regeneration, the new mutating-dev kustomize profile that provides a committed, safe development posture for enabling mutating tools with appropriate RBAC controls and triple-gate security enforcement, the live model discovery service that automatically keeps model catalogs current through periodic provider endpoint polling with robust fail-soft fallback mechanisms, and the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions for durable audit trails, and execution record persistence with retention scanning for compliance requirements.
+**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive workspace resource integration capabilities that provide operators with direct visibility into their workspace resources, risk-tier admission gates that provide fine-grained control over mutating tool access, configurable HITL confirmation timeouts that balance operational efficiency with safety requirements, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, plus durable OpenTelemetry secret provisioning that ensures authentication headers persist across all deployment operations, maintaining consistent telemetry collection regardless of deployment sequence or environment regeneration, the new mutating-dev kustomize profile that provides a committed, safe development posture for enabling mutating tools with appropriate RBAC controls and triple-gate security enforcement, the live model discovery service that automatically keeps model catalogs current through periodic provider endpoint polling with robust fail-soft fallback mechanisms, the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions for durable audit trails, and execution record persistence with retention scanning for compliance requirements, plus comprehensive incident service connectivity configuration that enables incident report document assembly and triage capabilities through Basic authentication flows with proper credential management and service availability monitoring.
 
 ## Appendices
 
 ### Environment-Specific Settings
-- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable workspace resource proxies with local tool-gateway and skills-hub instances, configure OTel with dev OpenObserve credentials, set GATEWAY_MUTATING_TOOLS_ENABLED=false for safety, configure AGENT_HITL_CONFIRM_TIMEOUT=600 for reasonable confirmation windows, enable enhanced agent auto-allow list with vetted read-only tools, **new**: Include the mutating-dev profile permanently for safe development access to mutating tools with bounded RBAC permissions, **new**: Enable live model discovery with shorter refresh intervals (e.g., 300 seconds) for rapid testing of new provider models, **new**: Provision execution signing secret for testing tamper-evident execution records, **new**: Configure audit service URL for durable audit trail testing.
-- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure workspace resource proxies with staging backend services, provision OTel secrets with staging OpenObserve credentials, carefully evaluate GATEWAY_MUTATING_TOOLS_ENABLED for testing scenarios, tune AGENT_HITL_CONFIRM_TIMEOUT for staging workflows, monitor auto-allow list effectiveness, **new**: Consider including mutating-dev profile selectively for staging testing scenarios with appropriate RBAC scoping, **new**: Configure model discovery with moderate refresh intervals (e.g., 900 seconds) to balance freshness with stability, **new**: Enable execution signing with staging audit service for end-to-end testing of tamper-evident execution records.
-- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure workspace resource proxies with production backend services and proper authentication, ensure OTel secrets are provisioned with production OpenObserve credentials, keep GATEWAY_MUTATING_TOOLS_ENABLED=false unless absolutely necessary, set AGENT_HITL_CONFIRM_TIMEOUT appropriately for production SLAs, audit auto-allow list regularly for security compliance, **new**: Never include mutating-dev profile in production deployments; use separate controlled overlays if mutating tools are absolutely required, **new**: Configure model discovery with conservative refresh intervals (e.g., 1800 seconds) and longer timeouts to minimize provider load and ensure stability, **new**: Always provision execution signing secret for production tamper-evident execution records, **new**: Configure audit service integration for comprehensive audit trail compliance.
+- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable workspace resource proxies with local tool-gateway and skills-hub instances, configure OTel with dev OpenObserve credentials, set GATEWAY_MUTATING_TOOLS_ENABLED=false for safety, configure AGENT_HITL_CONFIRM_TIMEOUT=600 for reasonable confirmation windows, enable enhanced agent auto-allow list with vetted read-only tools, **new**: Include the mutating-dev profile permanently for safe development access to mutating tools with bounded RBAC permissions, **new**: Enable live model discovery with shorter refresh intervals (e.g., 300 seconds) for rapid testing of new provider models, **new**: Provision execution signing secret for testing tamper-evident execution records, **new**: Configure audit service URL for durable audit trail testing, **new**: Configure incident service connectivity with AGENT_INCIDENT_SERVICE_URL and AGENT_INCIDENT_CLIENT_SECRET for incident report document assembly testing.
+- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure workspace resource proxies with staging backend services, provision OTel secrets with staging OpenObserve credentials, carefully evaluate GATEWAY_MUTATING_TOOLS_ENABLED for testing scenarios, tune AGENT_HITL_CONFIRM_TIMEOUT for staging workflows, monitor auto-allow list effectiveness, **new**: Consider including mutating-dev profile selectively for staging testing scenarios with appropriate RBAC scoping, **new**: Configure model discovery with moderate refresh intervals (e.g., 900 seconds) to balance freshness with stability, **new**: Enable execution signing with staging audit service for end-to-end testing of tamper-evident execution records, **new**: Configure incident service connectivity with staging credentials for incident report document assembly testing.
+- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure workspace resource proxies with production backend services and proper authentication, ensure OTel secrets are provisioned with production OpenObserve credentials, keep GATEWAY_MUTATING_TOOLS_ENABLED=false unless absolutely necessary, set AGENT_HITL_CONFIRM_TIMEOUT appropriately for production SLAs, audit auto-allow list regularly for security compliance, **new**: Never include mutating-dev profile in production deployments; use separate controlled overlays if mutating tools are absolutely required, **new**: Configure model discovery with conservative refresh intervals (e.g., 1800 seconds) and longer timeouts to minimize provider load and ensure stability, **new**: Always provision execution signing secret for production tamper-evident execution records, **new**: Configure audit service integration for comprehensive audit trail compliance, **new**: Configure incident service connectivity with production credentials for incident report document assembly and triage operations.
 
-**Updated** Added guidance for workspace resource proxy configuration across environments, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration recommendations, HITL confirmation timeout tuning guidelines, enhanced agent auto-allow list configuration, plus comprehensive OTel secret provisioning requirements for each environment, new guidance for the mutating-dev profile usage patterns across different deployment environments, detailed recommendations for live model discovery configuration including refresh intervals, timeout settings, and monitoring strategies across different deployment environments, and comprehensive guidance for execution signing and audit service configuration across development, staging, and production environments.
+**Updated** Added guidance for workspace resource proxy configuration across environments, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration recommendations, HITL confirmation timeout tuning guidelines, enhanced agent auto-allow list configuration, plus comprehensive OTel secret provisioning requirements for each environment, new guidance for the mutating-dev profile usage patterns across different deployment environments, detailed recommendations for live model discovery configuration including refresh intervals, timeout settings, and monitoring strategies across different deployment environments, comprehensive guidance for execution signing and audit service configuration across development, staging, and production environments, and comprehensive guidance for incident service connectivity configuration including URL setup, credential provisioning, and authentication configuration across different deployment environments.
 
 ### Security and Secrets Management
 - Store secrets in Kubernetes Secrets or external vaults; never hardcode.
@@ -1192,11 +1286,18 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - **New**: Audit execution record persistence and verify retention scanning operates correctly.
 - **New**: Implement alerts for execution signing failures and audit service connectivity issues.
 - **New**: Regularly review execution record retention policies and compliance requirements.
+- **New**: Secure incident service credentials (AGENT_INCIDENT_CLIENT_SECRET, PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET) with proper RBAC and access controls.
+- **New**: Configure incident-service INCIDENT_QUERY_CLIENTS registry with appropriate client IDs and secrets.
+- **New**: Monitor incident service authentication attempts and failed authentication attempts.
+- **New**: Implement rate limiting for incident service endpoints to prevent abuse.
+- **New**: Audit incident service access patterns for security monitoring and compliance.
+- **New**: Rotate incident service credentials regularly and monitor for unauthorized access.
+- **New**: Implement alerting for incident service authentication failures and connectivity issues.
 
-**Updated** Enhanced security guidance with workspace resource integration security considerations, including credential management, authentication monitoring, and access pattern auditing, risk-tier admission gate security controls, HITL confirmation timeout security implications, enhanced agent auto-allow list security enforcement, plus comprehensive OpenTelemetry secret management security practices, new security considerations for the mutating-dev profile including profile integrity, RBAC scoping, and triple-gate enforcement monitoring, comprehensive security guidance for live model discovery including provider credential management, endpoint access monitoring, and fallback behavior auditing, and comprehensive security guidance for execution signing including secret protection, key rotation, tamper-evident record verification, audit service credential management, and execution record retention compliance.
+**Updated** Enhanced security guidance with workspace resource integration security considerations, including credential management, authentication monitoring, and access pattern auditing, risk-tier admission gate security controls, HITL confirmation timeout security implications, enhanced agent auto-allow list security enforcement, plus comprehensive OpenTelemetry secret management security practices, new security considerations for the mutating-dev profile including profile integrity, RBAC scoping, and triple-gate enforcement monitoring, comprehensive security guidance for live model discovery including provider credential management, endpoint access monitoring, and fallback behavior auditing, comprehensive security guidance for execution signing including secret protection, key rotation, tamper-evident record verification, audit service credential management, and execution record retention compliance, and comprehensive security guidance for incident service connectivity including credential management, authentication monitoring, access pattern auditing, and service availability monitoring.
 
 ### Complete Environment Variables Reference
-**Updated** Comprehensive reference including workspace resource integration variables for tools catalog and skills inventory access, risk-tier admission gate configuration, HITL confirmation timeout settings, enhanced agent auto-allow list configuration, plus enhanced OpenTelemetry configuration variables, new variables related to the mutating-dev profile integration, comprehensive live model discovery configuration variables, and execution signing and audit service configuration variables.
+**Updated** Comprehensive reference including workspace resource integration variables for tools catalog and skills inventory access, risk-tier admission gate configuration, HITL confirmation timeout settings, enhanced agent auto-allow list configuration, plus enhanced OpenTelemetry configuration variables, new variables related to the mutating-dev profile integration, comprehensive live model discovery configuration variables, execution signing and audit service configuration variables, and comprehensive incident service connectivity configuration variables for both agent-platform and platform-gateway incident service clients.
 
 #### Core Configuration
 - `AGENT_SERVICE_URL`: Agent service endpoint URL (DNS-based)
@@ -1222,14 +1323,15 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - `PLATFORM_GATEWAY_SKILLS_CLIENT_ID`: Skills hub client ID for Basic authentication (default: "platform-gateway")
 - `PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET`: Skills hub client secret for Basic authentication (stored in secrets)
 
-#### Audit and Incident Services
-- `PLATFORM_GATEWAY_AUDIT_SERVICE_URL`: Audit service URL for durable audit trail
-- `PLATFORM_GATEWAY_AUDIT_CLIENT_ID`: Audit service client ID (default: "platform-gateway")
-- `PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET`: Audit service client secret (stored in secrets)
-- `PLATFORM_GATEWAY_INCIDENT_SERVICE_URL`: Incident service URL for incident triage
-- `PLATFORM_GATEWAY_INCIDENT_CLIENT_ID`: Incident service client ID (default: "platform-gateway")
-- `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET`: Incident service client secret (stored in secrets)
-- `PLATFORM_GATEWAY_INCIDENT_TRIAGE_TIMEOUT_SECONDS`: Incident triage timeout (default: 120)
+#### Incident Service Connectivity
+- `PLATFORM_GATEWAY_INCIDENT_SERVICE_URL`: Incident service URL for platform-gateway incident proxy (e.g., http://incident-service:8000)
+- `PLATFORM_GATEWAY_INCIDENT_CLIENT_ID`: Incident service client ID for platform-gateway (default: "platform-gateway")
+- `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET`: Incident service client secret for platform-gateway (stored in secrets)
+- `PLATFORM_GATEWAY_INCIDENT_TRIAGE_TIMEOUT_SECONDS`: Incident triage timeout for platform-gateway (default: 120)
+- `AGENT_INCIDENT_SERVICE_URL`: Incident service URL for agent-platform incident report assembly (e.g., http://incident-service:8000)
+- `AGENT_INCIDENT_CLIENT_ID`: Incident service client ID for agent-platform (default: "agent-service")
+- `AGENT_INCIDENT_CLIENT_SECRET`: Incident service client secret for agent-platform (stored in secrets)
+- `AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS`: Incident service timeout for agent-platform (default: 10)
 
 #### Risk-Tier Admission Gate (Tool Gateway)
 - `GATEWAY_MUTATING_TOOLS_ENABLED`: Enable/disable mutating tools (default: false, overridden to true in mutating-dev profile)
@@ -1283,6 +1385,7 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
 
 ### Execution Signing and Audit Integration Guide
@@ -1685,3 +1788,75 @@ data:
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)
+
+### Incident Service Connectivity Guide
+**New Section** Comprehensive guide for configuring and managing incident service connectivity for incident report document assembly and triage operations.
+
+#### Prerequisites
+- Incident service deployed and accessible
+- Proper INCIDENT_QUERY_CLIENTS configuration in incident-service
+- Network connectivity to incident-service endpoint
+- Basic authentication credentials configured
+
+#### Agent Platform Configuration
+1. Set `AGENT_INCIDENT_SERVICE_URL` to point to incident-service endpoint
+2. Configure `AGENT_INCIDENT_CLIENT_ID` to match an entry in INCIDENT_QUERY_CLIENTS
+3. Set `AGENT_INCIDENT_CLIENT_SECRET` in agent-platform-runtime-secrets
+4. Optionally configure `AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS` for custom timeouts
+5. Deploy agent-service with incident service configuration
+6. Test incident report document assembly functionality
+
+#### Platform Gateway Configuration
+1. Set `PLATFORM_GATEWAY_INCIDENT_SERVICE_URL` to point to incident-service endpoint
+2. Configure `PLATFORM_GATEWAY_INCIDENT_CLIENT_ID` to match an entry in INCIDENT_QUERY_CLIENTS
+3. Set `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET` in platform-gateway-runtime-secrets
+4. Optionally configure `PLATFORM_GATEWAY_INCIDENT_TRIAGE_TIMEOUT_SECONDS` for triage operations
+5. Deploy platform-gateway with incident service configuration
+6. Test incident service proxy functionality
+
+#### Example Configuration
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-runtime-config
+data:
+  AGENT_INCIDENT_SERVICE_URL: "http://incident-service:8000"
+  AGENT_INCIDENT_CLIENT_ID: "agent-service"
+  AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS: "10"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agent-platform-runtime-secrets
+type: Opaque
+stringData:
+  AGENT_INCIDENT_CLIENT_SECRET: "your-incident-client-secret"
+```
+
+#### Authentication Flow
+- Agent platform uses Basic authentication with AGENT_INCIDENT_* credentials
+- Platform gateway uses Basic authentication with PLATFORM_GATEWAY_INCIDENT_* credentials
+- Both clients authenticate against incident-service's INCIDENT_QUERY_CLIENTS registry
+- Credentials must match registered client_id=secret entries in incident-service
+
+#### Security Considerations
+- Never commit incident service secrets to version control
+- Configure INCIDENT_QUERY_CLIENTS with appropriate client IDs and secrets
+- Monitor incident service authentication attempts and failures
+- Implement proper RBAC for incident service access
+- Rotate incident service credentials regularly
+- Audit incident service access patterns for security monitoring
+
+#### Troubleshooting Common Issues
+- **503 Not Configured**: Verify AGENT_INCIDENT_SERVICE_URL and AGENT_INCIDENT_CLIENT_SECRET are set
+- **401 Unauthorized**: Check AGENT_INCIDENT_CLIENT_ID matches INCIDENT_QUERY_CLIENTS entry
+- **Connection timeouts**: Adjust AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS or check network connectivity
+- **Service unavailable**: Verify incident-service is running and accessible
+- **Authentication failures**: Check INCIDENT_QUERY_CLIENTS configuration in incident-service
+
+**Section sources**
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
+- [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)

@@ -134,7 +134,7 @@ All four requirements have been successfully delivered:
 - Drawer includes Export button next to header meta
 
 **SPEC-041 Enhancements**:
-- **Tabbed structured digest rendering**: Handover, Sessions, Confirmations, Executions, Evidence & transcript counts, Open items, and Raw JSON tabs
+- **Tabbed structured digest rendering**: Handover, Sessions, Confirmations, Executions, Evidence & transcript counts, Open items, and Digest data tabs
 - **Bounded scroll panes**: Digest and prose areas with maximum height and internal scrolling
 - **Deterministic summary lines**: One-line counts-only summaries computed at creation time and shown in document lists
 
@@ -326,7 +326,7 @@ Tabs --> Confirmations["Confirmations Tab"]
 Tabs --> Executions["Executions Tab"]
 Tabs --> Evidence["Evidence & Transcript Counts"]
 Tabs --> OpenItems["Open Items Tab"]
-Tabs --> RawJSON["Raw JSON Tab"]
+Tabs --> RawJSON["Digest data Tab"]
 Handover --> Bounded["Bounded Scroll Pane"]
 Sessions --> Bounded
 Confirmations --> Bounded

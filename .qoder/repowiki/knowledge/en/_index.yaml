@@ -3,5 +3,13 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-08-28T16:52:13Z"
-modules: {}
+exported_at: "2026-08-29T01:43:09Z"
+modules:
+    "":
+        dir_name: Agentic AIOps Platform Workspace
+        title: Agentic AIOps Platform Workspace
+        scope: []
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []

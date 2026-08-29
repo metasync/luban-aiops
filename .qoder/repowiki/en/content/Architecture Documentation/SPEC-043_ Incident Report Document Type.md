@@ -7,10 +7,21 @@
 - [tasks.md](file://docs/specs/SPEC-043-incident-report-document-type/tasks.md)
 - [operation-document.schema.json](file://shared/shared-contracts/schemas/operation-document.schema.json)
 - [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
+- [incident_report.py](file://products/agent-platform/src/agent_service/services/incident_report.py)
+- [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [documents.py](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py)
 - [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
 - [incident.py](file://products/incident-service/src/incident_service/schemas/incident.py)
+- [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated all sections to reflect the fully implemented incident report document type with complete agent-platform services, platform-gateway extensions, operator portal UI enhancements, and shared contract updates
+- Added comprehensive coverage of the incident client implementation, assembler logic, API endpoints, and portal integration components
+- Enhanced architectural diagrams to show actual implementation flow including incident service integration
+- Updated component analysis to reflect real code structure and behavior patterns
+- Added detailed portal rendering implementation details for incident report tabs and UI components
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -25,9 +36,7 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document specifies the incident report document type for the operations document repository. It extends the existing typed-document substrate with a new `incident_report` type that assembles a durable, attributed snapshot from incident-service and the platform’s session store. The slice is read-only with respect to incident state, reuses existing policy actions through a combined gate, and inherits the draft→publish lifecycle, role-based access, digest anchoring, and prose layer semantics already established for shift summaries.
-
-SPEC-043 was **delivered** on 2026-08-29 as v0.25.0, the fifth R5 slice: the contract extension, the agent-platform assembler and incident client (`agent_service/services/incident_report.py`, `agent_service/services/incident_client.py`), the gateway dual-action gate with typed payload forwarding, the digest-anchored prose extension, and the portal create-dialog/drawer support all shipped together with the version lockstep to 0.25.0 and the living-docs updates. No new policy actions and no new audit event types were introduced; `document_created` gained the covered `incident_id` as provenance for the new type.
+This document specifies the incident report document type for the operations document repository. It extends the existing typed-document substrate with a new `incident_report` type that assembles a durable, attributed snapshot from incident-service and the platform's session store. The slice is read-only with respect to incident state, reuses existing policy actions through a combined gate, and inherits the draft→publish lifecycle, role-based access, digest anchoring, and prose layer semantics already established for shift summaries.
 
 Key outcomes:
 - A new document type with a deterministic digest composed of incident envelope, triage report or marker, connector dispatch outcomes, and linked session digest under two-tier coverage.
@@ -54,7 +63,7 @@ end
 subgraph "Agent Platform"
 AD["operation_documents.py"]
 AC["incident_client.py (new)"]
-AR["incident_report assembler (new)"]
+AR["incident_report.py assembler (new)"]
 end
 subgraph "Platform Gateway"
 GR["documents.py route"]
@@ -64,7 +73,7 @@ subgraph "Incident Service"
 IS["schemas/incident.py"]
 end
 subgraph "Operator Portal"
-OP["Documents view + drawer"]
+OP["DocumentsView.tsx + drawer"]
 end
 S --> AD
 GR --> AD
@@ -99,7 +108,7 @@ Implementation anchors:
 
 **Section sources**
 - [operation_documents.py:49-87](file://products/agent-platform/src/agent_service/services/operation_documents.py#L49-L87)
-- [operation_documents.py:217-331](file://products/agent-platform/src/agent_service/services/operation_documents.py#L217-L331)
+- [operation_documents.py:300-499](file://products/agent-platform/src/agent_service/services/operation_documents.py#L300-L499)
 - [incident.py:37-116](file://products/incident-service/src/incident_service/schemas/incident.py#L37-L116)
 - [documents.py:29-69](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L29-L69)
 - [incident_client.py:65-107](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L65-L107)
@@ -113,12 +122,16 @@ participant Client as "Portal / Caller"
 participant Gateway as "Gateway documents route"
 participant Agent as "Agent platform"
 participant Store as "Document store"
-participant IncClient as "Incident client (gateway)"
+participant IncClient as "Incident client (agent)"
 participant IncSvc as "Incident service"
 Client->>Gateway : POST /api/v1/documents {document_type=incident_report}
 Gateway->>Gateway : enforce_policy("documents : create")
 Gateway->>Gateway : evaluate("approvals : list") -> X-Foreign-Coverage
 Gateway->>Agent : create_document(body, foreign_coverage)
+Agent->>IncClient : fetch_incident_bundle(incident_id)
+IncClient->>IncSvc : GET /api/v1/incidents/{id} (Basic auth)
+IncSvc-->>IncClient : 200 incident bundle
+IncClient-->>Agent : incident bundle
 Agent->>Store : create(document)
 Note over Agent,Store : Digest assembled from incident + session
 Agent-->>Gateway : 201 {document_id, document_type}
@@ -128,6 +141,7 @@ Gateway-->>Client : 201 response
 **Diagram sources**
 - [documents.py:29-69](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L29-L69)
 - [operation_documents.py:49-87](file://products/agent-platform/src/agent_service/services/operation_documents.py#L49-L87)
+- [incident_client.py:77-122](file://products/agent-platform/src/agent_service/services/incident_client.py#L77-L122)
 
 ## Detailed Component Analysis
 
@@ -145,7 +159,7 @@ Key points:
 - [plan.md:19-33](file://docs/specs/SPEC-043-incident-report-document-type/plan.md#L19-L33)
 
 ### Incident-Report Assembler (Agent Platform)
-The assembler constructs a deterministic digest from incident-service and the platform’s session store. It copies incident envelope fields, includes the validated triage report when present or a marker otherwise, aggregates connector dispatch outcomes, and resolves the linked session digest under two-tier coverage rules.
+The assembler constructs a deterministic digest from incident-service and the platform's session store. It copies incident envelope fields, includes the validated triage report when present or a marker otherwise, aggregates connector dispatch outcomes, and resolves the linked session digest under two-tier coverage rules.
 
 Behavioral guarantees:
 - Unknown incident id returns a structural 404; triage failures still assemble with markers.
@@ -178,16 +192,17 @@ Persist --> End(["Done"])
 ```
 
 **Diagram sources**
-- [spec.md:84-127](file://docs/specs/SPEC-043-incident-report-document-type/spec.md#L84-L127)
-- [plan.md:49-68](file://docs/specs/SPEC-043-incident-report-document-type/plan.md#L49-L68)
+- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
+- [incident_report.py:85-124](file://products/agent-platform/src/agent_service/services/incident_report.py#L85-L124)
 
 **Section sources**
 - [spec.md:84-127](file://docs/specs/SPEC-043-incident-report-document-type/spec.md#L84-L127)
 - [plan.md:49-68](file://docs/specs/SPEC-043-incident-report-document-type/plan.md#L49-L68)
 - [tasks.md:14-27](file://docs/specs/SPEC-043-incident-report-document-type/tasks.md#L14-L27)
+- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
 
 ### Internal Incident Client and Dual-Action Gate
-Agent-platform gains a bounded client to incident-service using the same Basic query credential posture as the gateway’s existing incident client. The gateway enforces both `documents:create` and `incident:read` for creating incident reports, ensuring incident visibility cannot be bypassed through the document surface.
+Agent-platform gains a bounded client to incident-service using the same Basic query credential posture as the gateway's existing incident client. The gateway enforces both `documents:create` and `incident:read` for creating incident reports, ensuring incident visibility cannot be bypassed through the document surface.
 
 Highlights:
 - Client configuration knobs: URL, client ID, client secret; missing config yields 503; unreachable upstream yields 502.
@@ -201,17 +216,17 @@ participant AP as "Agent platform"
 participant IC as "Incident client"
 participant IS as "Incident service"
 GW->>AP : Create document (type=incident_report)
-AP->>IC : get_incident(incident_id)
-IC->>IS : GET /incidents/{id} (Basic auth, x-request-id)
-IS-->>IC : 200 incident envelope
-IC-->>AP : incident envelope
+AP->>IC : fetch_incident_bundle(incident_id)
+IC->>IS : GET /api/v1/incidents/{id} (Basic auth, x-request-id)
+IS-->>IC : 200 incident bundle
+IC-->>AP : incident bundle
 AP->>AP : Assemble digest (triage, dispatches, session)
 AP-->>GW : 201 document created
 GW-->>GW : Log document_created with incident_id
 ```
 
 **Diagram sources**
-- [incident_client.py:88-107](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L88-L107)
+- [incident_client.py:77-122](file://products/agent-platform/src/agent_service/services/incident_client.py#L77-L122)
 - [documents.py:29-69](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L29-L69)
 
 **Section sources**
@@ -219,6 +234,7 @@ GW-->>GW : Log document_created with incident_id
 - [plan.md:35-47](file://docs/specs/SPEC-043-incident-report-document-type/plan.md#L35-L47)
 - [plan.md:69-82](file://docs/specs/SPEC-043-incident-report-document-type/plan.md#L69-L82)
 - [tasks.md:28-43](file://docs/specs/SPEC-043-incident-report-document-type/tasks.md#L28-L43)
+- [incident_client.py:77-122](file://products/agent-platform/src/agent_service/services/incident_client.py#L77-L122)
 
 ### Prose Layer and Audit Inheritance
 Prose generation for incident reports uses only the assembled digest JSON, never raw incident payloads or transcripts. Failure degrades to a digest-only document with prose_status set accordingly. Audit events reuse existing names; document_created carries incident_id for the new type.
@@ -236,13 +252,16 @@ Key constraints:
 ### Portal Documents Support
 The operator portal augments the existing Documents view:
 - Creation dialog offers a type choice; selecting incident report swaps the session picker for an incident picker backed by the incidents list surface.
-- Drawer renders tabs for Incident, Triage, Dispatches, Session, plus Generated narrative and Raw JSON.
+- Drawer renders tabs for Incident, Triage, Dispatches, Session, plus Generated narrative and Digest data.
 - List rows keep envelope-only posture with counts-only summaries and a type badge distinguishing incident reports.
+
+**Updated** Added comprehensive implementation details showing actual React components and rendering logic for incident report tabs, including severity/status color coding, label display, and session coverage markers.
 
 **Section sources**
 - [spec.md:188-209](file://docs/specs/SPEC-043-incident-report-document-type/spec.md#L188-L209)
 - [plan.md:93-108](file://docs/specs/SPEC-043-incident-report-document-type/plan.md#L93-L108)
 - [tasks.md:59-67](file://docs/specs/SPEC-043-incident-report-document-type/tasks.md#L59-L67)
+- [DocumentsView.tsx:514-800](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L514-L800)
 
 ## Dependency Analysis
 SPEC-043 introduces minimal coupling while leveraging existing contracts and services:
@@ -260,6 +279,8 @@ Agent --> IncidentModels["schemas/incident.py"]
 Gateway --> IncidentClient["incident_client.py"]
 IncidentClient --> IncidentModels
 Portal["Operator Portal"] --> Gateway
+Agent --> IncidentClientNew["incident_client.py (agent)"]
+IncidentClientNew --> IncidentModels
 ```
 
 **Diagram sources**
@@ -267,6 +288,7 @@ Portal["Operator Portal"] --> Gateway
 - [operation_documents.py:49-87](file://products/agent-platform/src/agent_service/services/operation_documents.py#L49-L87)
 - [documents.py:29-69](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L29-L69)
 - [incident_client.py:88-107](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L88-L107)
+- [incident_client.py:77-122](file://products/agent-platform/src/agent_service/services/incident_client.py#L77-L122)
 - [incident.py:37-63](file://products/incident-service/src/incident_service/schemas/incident.py#L37-L63)
 
 **Section sources**
@@ -277,8 +299,6 @@ Portal["Operator Portal"] --> Gateway
 - Minimal I/O: digest assembly reads incident and session data once; no mutations reduce write amplification.
 - Storage efficiency: digest stored as JSON; retention and per-owner cap apply uniformly across document types.
 - Error degradation: upstream failures map to 502; missing configuration maps to 503; unknown ids map to 404 — avoiding cascading failures.
-
-[No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
 Common issues and their expected behaviors:
@@ -300,8 +320,6 @@ Operational checks:
 
 ## Conclusion
 SPEC-043 delivers a focused, read-only extension to the operations document repository that consolidates incident review artifacts into a durable, auditable, and cross-owner-readable format. By reusing the typed-document substrate, existing policy actions, and proven incident-service integration patterns, it minimizes architectural risk while providing operators with a consistent post-incident artifact comparable to shift summaries.
-
-[No sources needed since this section summarizes without analyzing specific files]
 
 ## Appendices
 
@@ -360,5 +378,5 @@ OPERATION_DOCUMENT ||--o{ CONNECTOR_DISPATCH : "digest references"
 ```
 
 **Diagram sources**
-- [operation_documents.py:217-331](file://products/agent-platform/src/agent_service/services/operation_documents.py#L217-L331)
+- [operation_documents.py:300-499](file://products/agent-platform/src/agent_service/services/operation_documents.py#L300-L499)
 - [incident.py:37-116](file://products/incident-service/src/incident_service/schemas/incident.py#L37-L116)

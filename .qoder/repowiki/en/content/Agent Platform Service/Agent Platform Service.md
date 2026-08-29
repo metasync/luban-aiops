@@ -38,13 +38,17 @@
 - [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
+- [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
+- [incident_report.py](file://products/agent-platform/src/agent_service/services/incident_report.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
 - [models.py](file://products/platform-gateway/src/platform_gateway/api/routes/models.py)
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 - [documents.py](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py)
+- [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
+- [api.py](file://products/platform-gateway/src/platform_gateway/schemas/api.py)
 - [ModelSelect.tsx](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx)
 - [models.ts](file://products/operator-portal/web-ui/app/src/api/models.ts)
-- [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/DocumentsView.tsx)
+- [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [test_chat_stream_modality.py](file://products/agent-platform/tests/test_chat_stream_modality.py)
 - [test_evidence_store.py](file://products/agent-platform/tests/test_evidence_store.py)
@@ -60,13 +64,16 @@
 - [test_shift_summary.py](file://products/agent-platform/tests/test_shift_summary.py)
 - [test_document_prose.py](file://products/agent-platform/tests/test_document_prose.py)
 - [test_documents.py](file://products/agent-platform/tests/test_documents.py)
+- [test_documents_repository.py](file://products/platform-gateway/tests/test_documents_repository.py)
 - [spec.md](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md)
 - [decision-sync-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-26-decision-sync-arrival-polish.md)
 - [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
 - [SPEC-039-operations-document-repository/spec.md](file://docs/specs/SPEC-039-operations-document-repository/spec.md)
 - [SPEC-041-documents-readability-and-digest-reference/spec.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md)
+- [SPEC-043-incident-report-document-type/spec.md](file://docs/specs/SPEC-043-incident-report-document-type/spec.md)
 - [document-read-audit-integrity.md](file://docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md)
 - [documents-readability-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-28-documents-readability-and-digest-reference.md)
+- [incident-report-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-29-incident-report-document-type.md)
 - [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
 - [operation-document.schema.json](file://shared/shared-contracts/schemas/operation-document.schema.json)
@@ -77,13 +84,13 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced document prose generation system with AI-generated one-line blurbs using SUMMARY marker format
-- Updated Optional Prose Generation section to include blurb extraction and parsing logic
-- Added comprehensive coverage of AI-generated one-liner extraction from model responses
-- Updated Document API Endpoints section with blurb field integration in document creation flow
-- Enhanced schema documentation to include the new blurb field in operation documents
-- Updated testing documentation with blurb extraction validation and edge cases
-- Updated practical examples with v0.23.3 prose generation configuration and verification steps
+- Added incident report document type support with new incident_client.py and incident_report.py services
+- Implemented dual-action authorization gates requiring both documents:create and incident:read for incident reports
+- Integrated incident service client with structured error handling and bounded timeouts
+- Enhanced document creation flow to support incident_report document type with session-less coverage
+- Updated API schemas to validate incident_id field and prevent cross-type field mixing
+- Added comprehensive test coverage for incident report workflows and authorization enforcement
+- Updated practical examples with incident report configuration and operator workflow guidance
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -92,33 +99,34 @@
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Document Repository Service](#document-repository-service)
-7. [Shift Summary Digest Assembly](#shift-summary-digest-assembly)
-8. [Optional Prose Generation](#optional-prose-generation)
-9. [Document API Endpoints](#document-api-endpoints)
-10. [Execution Worker Integration](#execution-worker-integration)
-11. [Multi-Session Operator Workspace](#multi-session-operator-workspace)
-12. [Session Store Enhancements](#session-store-enhancements)
-13. [Enhanced Transcript Reconstruction](#enhanced-transcript-reconstruction)
-14. [HITL Confirmation Registry Integration](#hitl-confirmation-registry-integration)
-15. [Enhanced Streaming Architecture](#enhanced-streaming-architecture)
-16. [Voice Readiness Support](#voice-readiness-support)
-17. [Per-Request Trace Queues](#per-request-trace-queues)
-18. [Delegated Token Management](#delegated-token-management)
-19. [Evidence Store Service](#evidence-store-service)
-20. [Model Catalog Service](#model-catalog-service)
-21. [Live Model Discovery Service](#live-model-discovery-service)
-22. [Multi-Model Runtime Capability](#multi-model-runtime-capability)
-23. [Decision Sync Robustness](#decision-sync-robustness)
-24. [Dependency Analysis](#dependency-analysis)
-25. [Performance Considerations](#performance-considerations)
-26. [Troubleshooting Guide](#troubleshooting-guide)
-27. [Conclusion](#conclusion)
-28. [Appendices](#appendices)
+7. [Incident Report Document Type](#incident-report-document-type)
+8. [Shift Summary Digest Assembly](#shift-summary-digest-assembly)
+9. [Optional Prose Generation](#optional-prose-generation)
+10. [Document API Endpoints](#document-api-endpoints)
+11. [Execution Worker Integration](#execution-worker-integration)
+12. [Multi-Session Operator Workspace](#multi-session-operator-workspace)
+13. [Session Store Enhancements](#session-store-enhancements)
+14. [Enhanced Transcript Reconstruction](#enhanced-transcript-reconstruction)
+15. [HITL Confirmation Registry Integration](#hitl-confirmation-registry-integration)
+16. [Enhanced Streaming Architecture](#enhanced-streaming-architecture)
+17. [Voice Readiness Support](#voice-readiness-support)
+18. [Per-Request Trace Queues](#per-request-trace-queues)
+19. [Delegated Token Management](#delegated-token-management)
+20. [Evidence Store Service](#evidence-store-service)
+21. [Model Catalog Service](#model-catalog-service)
+22. [Live Model Discovery Service](#live-model-discovery-service)
+23. [Multi-Model Runtime Capability](#multi-model-runtime-capability)
+24. [Decision Sync Robustness](#decision-sync-robustness)
+25. [Dependency Analysis](#dependency-analysis)
+26. [Performance Considerations](#performance-considerations)
+27. [Troubleshooting Guide](#troubleshooting-guide)
+28. [Conclusion](#conclusion)
+29. [Appendices](#appendices)
 
 ## Introduction
 The Agent Platform Service is the core orchestration engine of the Luban AIOps Platform. It provides a runtime kernel for agent execution, a provider registry for multi-model backends (OpenAI, DashScope, DeepSeek, and Luban), and robust session management with durable storage. The service exposes REST APIs for agent interactions, streaming responses, and configuration management, enabling scalable and observable AI operations across diverse model providers.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs, role-based access controls, and deterministic counts-only summaries computed at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.** **Critical Security Fix v0.21.1**: Implemented envelope-only document listings for GET /documents endpoint, ensuring cross-owner reads are properly audited by stripping sensitive fields from list responses while maintaining full content access through single-document fetch endpoints. **SPEC-041 Enhancement**: Added deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Added AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs, role-based access controls, and deterministic counts-only summaries computed at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.** **Critical Security Fix v0.21.1**: Implemented envelope-only document listings for GET /documents endpoint, ensuring cross-owner reads are properly audited by stripping sensitive fields from list responses while maintaining full content access through single-document fetch endpoints. **SPEC-041 Enhancement**: Added deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Added AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic. **SPEC-043 Enhancement**: Added incident report document type support with dedicated incident service integration, dual-action authorization gates, and structured error handling for incident-specific workflows.
 
 ## Project Structure
 The Agent Platform Service is implemented as a Python FastAPI application organized by feature layers:
@@ -131,6 +139,7 @@ The Agent Platform Service is implemented as a Python FastAPI application organi
 - Model catalog service with live discovery capabilities
 - Background task management for model discovery
 - **Document repository service with persistent typed documents, role-based access controls, deterministic summary generation, and AI-generated blurbs**
+- **Incident report service with incident service client, digest assembly, and dual-action authorization**
 - **Shift summary digest assembly from multiple durable stores with handover skeleton computation**
 - **Optional prose generation with fail-soft behavior, prompt safety, and AI-generated blurb extraction**
 - Execution worker client for isolated tool execution with fail-closed behavior
@@ -174,6 +183,8 @@ subgraph "Documents"
 op_docs["services/operation_documents.py"]
 shift_sum["services/shift_summary.py"]
 doc_prose["services/document_prose.py"]
+inc_client["services/incident_client.py"]
+inc_report["services/incident_report.py"]
 end
 subgraph "Execution"
 exec_worker["services/execution_worker_client.py"]
@@ -226,6 +237,8 @@ routes_v2 --> confirm_store
 routes_v2 --> op_docs
 routes_v2 --> shift_sum
 routes_v2 --> doc_prose
+routes_v2 --> inc_client
+routes_v2 --> inc_report
 kernel --> gw_tools
 kernel --> ev_store
 kernel --> model_cat
@@ -242,6 +255,8 @@ exec_records --> metrics
 op_docs --> metrics
 shift_sum --> metrics
 doc_prose --> metrics
+inc_client --> metrics
+inc_report --> metrics
 app --> metrics
 app --> obs
 app --> tel
@@ -280,6 +295,8 @@ settings --> env
 - [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
+- [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
+- [incident_report.py](file://products/agent-platform/src/agent_service/services/incident_report.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
@@ -296,6 +313,7 @@ settings --> env
 - Provider Registry: Discovers and manages model providers (OpenAI, DashScope, DeepSeek, Luban) with pluggable interfaces using new AgentScope 2.x model construction patterns.
 - Session Management: Persists and restores conversations with durable storage, multi-session workspace support, and concurrency-safe access with model pinning.
 - **Document Repository**: Provides persistent storage for typed operation documents with draft/published states, owner-only visibility, team-wide published access, envelope-only listings for security, deterministic counts-only summaries computed at creation time, and AI-generated one-line blurbs extracted from prose responses.
+- **Incident Report Service**: Provides specialized document type for incident analysis with incident service integration, dual-action authorization gates, and structured error handling for incident-specific workflows.
 - **Shift Summary Assembly**: Builds deterministic digests from multiple durable stores with role-based coverage, provenance tracking, and handover skeleton generation for summary computation.
 - **Optional Prose Generation**: Generates AI-powered narratives from digests with fail-soft behavior, prompt safety guarantees, and AI-generated blurb extraction using SUMMARY marker format.
 - **Execution Worker Client**: Provides isolated execution of approved mutating tools through the execution-runtime service with fail-closed behavior, signature verification, and receipt tracking.
@@ -313,6 +331,7 @@ Key responsibilities:
 - Conversation: Maintain message history, context, and state per session with workspace organization.
 - Evidence Capture: Persist tool_call and tool_result frames with size caps and automatic eviction.
 - **Document Creation**: Generate typed operation documents with deterministic digests, optional prose summaries with AI-generated blurbs, deterministic counts-only summaries derived from handover skeletons, and role-based access controls.
+- **Incident Report Creation**: Generate incident report documents with incident service integration, dual-action authorization, and structured error handling.
 - **Role-Based Access**: Enforce owner-only draft visibility and team-wide published document access with envelope-only listings for security.
 - **Isolated Execution**: Route approved mutating tool calls to execution-runtime service with signature verification and receipt tracking.
 - **Enhanced Confirmation Record Management**: Persist parked confirmations with turn_index anchoring, idempotent resolution, startup sweep scoping, and cross-replica consistency.
@@ -332,7 +351,7 @@ Key responsibilities:
 - HITL Integration: Support human-in-the-loop workflows with parked confirmation management and durable state.
 - Observability: Emit structured logs, metrics, and traces for each operation with per-request audit trails.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs using SUMMARY marker format, role-based access controls with draft/published states, envelope-only listings for security, and deterministic counts-only summaries computed from handover skeletons at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.**
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs using SUMMARY marker format, role-based access controls with draft/published states, envelope-only listings for security, and deterministic counts-only summaries computed from handover skeletons at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.** **SPEC-043 Enhancement**: Added incident report document type support with dedicated incident service client, dual-action authorization gates requiring both documents:create and incident:read permissions, structured error handling for incident service dependencies, and comprehensive test coverage for incident-specific workflows.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -340,6 +359,8 @@ Key responsibilities:
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
+- [incident_report.py](file://products/agent-platform/src/agent_service/services/incident_report.py)
+- [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
@@ -362,6 +383,7 @@ The service follows a layered architecture with enhanced security and anti-hallu
 - Session service persists state using a configurable store with workspace bookkeeping and transcript extraction.
 - Evidence store provides persistent storage for tool execution evidence with dual backend support and size-capped retention.
 - **Document repository provides persistent storage for typed operation documents with role-based access controls, draft/published states, envelope-only listings for security, deterministic counts-only summaries computed from handover skeletons, and AI-generated one-line blurbs extracted from prose responses**.
+- **Incident report service provides specialized document type with incident service integration, dual-action authorization gates, and structured error handling for incident-specific workflows**.
 - **Shift summary assembly builds deterministic digests from multiple durable stores with provenance tracking, role-based coverage, and handover skeleton generation for summary computation**.
 - **Optional prose generation creates AI-powered narratives from digests with fail-soft behavior, prompt safety guarantees, and AI-generated blurb extraction using SUMMARY marker format**.
 - **Execution worker client provides isolated execution of approved mutating tools through the execution-runtime service with fail-closed behavior and signature verification**.
@@ -382,6 +404,8 @@ participant Kernel as "RuntimeKernel"
 participant Sess as "SessionService"
 participant DocStore as "OperationDocumentStore"
 participant ShiftSum as "ShiftSummary"
+participant IncClient as "IncidentClient"
+participant IncReport as "IncidentReport"
 participant DocProse as "DocumentProse"
 participant ExecWorker as "ExecutionWorkerClient"
 participant ExecRuntime as "ExecutionRuntime"
@@ -395,15 +419,16 @@ participant Tools as "GatewayTools"
 participant Transcript as "TranscriptExtractor"
 participant HITL as "ConfirmationRegistry"
 participant Trace as "TraceQueue"
-Note over Client,HITL : Document Creation with Deterministic Summary and AI Blurb
-Client->>Gateway : POST /api/v2/documents {type, sessions, label}
+Note over Client,HITL : Incident Report Document Creation with Dual-Action Gate
+Client->>Gateway : POST /api/v2/documents {type : "incident_report", incident_id}
 Gateway->>API : Forward with authorization headers
-API->>ShiftSum : build_digest(user_id, session_ids, can_view_foreign)
-ShiftSum->>Sess : load sessions and extract metadata
-ShiftSum->>EvStore : load evidence turns
-ShiftSum->>ConfirmStore : load confirmation records
-ShiftSum->>ExecRecords : load execution records
-ShiftSum-->>API : digest + provenance + handover skeleton
+API->>API : Enforce documents : create AND incident : read
+alt Authorization granted
+API->>IncClient : fetch_incident_bundle(incident_id)
+IncClient->>IncClient : Validate configuration & timeout
+IncClient-->>API : incident bundle or error
+API->>IncReport : build_digest(user_id, bundle, can_view_foreign)
+IncReport-->>API : digest + provenance + handover skeleton
 API->>API : document_summary(digest) - compute counts-only summary
 alt include_prose = true
 API->>DocProse : generate_prose(kernel, type, digest)
@@ -417,6 +442,10 @@ API->>DocStore : create(document with digest, provenance, prose, summary, blurb)
 DocStore-->>API : persisted document
 API-->>Gateway : document response
 Gateway-->>Client : 201 Created with document
+else Authorization denied
+API-->>Gateway : 403 Forbidden
+Gateway-->>Client : 403 Forbidden
+end
 Note over ExecWorker : Isolated Execution Flow
 Client->>API : Chat with approved mutating tool
 API->>Kernel : execute(message, sessionId, bearerToken)
@@ -431,7 +460,7 @@ ExecRecords-->>Kernel : execution recorded
 end
 ```
 
-**Updated** The sequence diagram now shows the complete multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated validation, and the full model resolution hierarchy (request > pinned > default). **It also includes the document repository workflow with shift summary digest assembly, deterministic counts-only summary computation from handover skeletons, optional prose generation with AI-generated blurb extraction using SUMMARY marker format, persistent document storage with role-based access controls, envelope-only listings for security, and PostgreSQL migration support for the summary and blurb columns.** **It also includes the execution worker integration for isolated tool execution with signature verification and receipt tracking, enhanced confirmation record storage layer with turn_index field support for precise confirmation card anchoring, idempotent resolution, startup sweep scoping to prevent sibling replica interference, and cross-replica consistency guarantees.**
+**Updated** The sequence diagram now shows the complete multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated validation, and the full model resolution hierarchy (request > pinned > default). **It also includes the incident report document creation flow with dual-action authorization gates requiring both documents:create and incident:read permissions, incident service client integration with structured error handling, and comprehensive degradation strategies for dependency failures.** **It also includes the document repository workflow with shift summary digest assembly, deterministic counts-only summary computation from handover skeletons, optional prose generation with AI-generated blurb extraction using SUMMARY marker format, persistent document storage with role-based access controls, envelope-only listings for security, and PostgreSQL migration support for the summary and blurb columns.** **It also includes the execution worker integration for isolated tool execution with signature verification and receipt tracking, enhanced confirmation record storage layer with turn_index field support for precise confirmation card anchoring, idempotent resolution, startup sweep scoping to prevent sibling replica interference, and cross-replica consistency guarantees.**
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -440,6 +469,8 @@ end
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
 - [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
+- [incident_report.py](file://products/agent-platform/src/agent_service/services/incident_report.py)
+- [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
@@ -521,6 +552,16 @@ class OperationDocumentStore {
 +delete(owner_user_id, document_id)
 +is_ready()
 }
+class IncidentClient {
+<<interface>>
++fetch_incident_bundle(settings, request_id, incident_id)
++is_configured(settings)
+}
+class IncidentReport {
+<<interface>>
++build_digest(requester_user_id, bundle, can_view_foreign)
++document_summary(digest)
+}
 class ShiftSummary {
 +build_digest(requester_user_id, session_ids, can_view_foreign)
 +validate_session_ids(session_ids)
@@ -598,6 +639,8 @@ class GatewayTools {
 }
 AgentKernel --> SessionService : "uses"
 AgentKernel --> OperationDocumentStore : "persists documents"
+AgentKernel --> IncidentClient : "fetches incident bundles"
+AgentKernel --> IncidentReport : "assembles incident digests"
 AgentKernel --> ShiftSummary : "generates digests"
 AgentKernel --> DocumentProse : "generates prose"
 AgentKernel --> ExecutionWorkerClient : "routes approved mutations"
@@ -613,12 +656,14 @@ GatewayTools --> ModelProvider : "secure invocation"
 GatewayTools --> ExecutionWorkerClient : "isolated execution"
 ```
 
-**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, enhanced session management methods for multi-session workspace operations and model pinning, evidence capture and persistence for tool execution frames, model normalization for legacy provider name aliases, voice readiness support through input_modality parameter passthrough, **isolated execution routing for approved mutating tools through the execution-runtime service with signature verification and receipt tracking, and enhanced durable confirmation management with turn_index field support, idempotent resolution, and cross-replica consistency guarantees.**
+**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, enhanced session management methods for multi-session workspace operations and model pinning, evidence capture and persistence for tool execution frames, model normalization for legacy provider name aliases, voice readiness support through input_modality parameter passthrough, **isolated execution routing for approved mutating tools through the execution-runtime service with signature verification and receipt tracking, enhanced durable confirmation management with turn_index field support, idempotent resolution, and cross-replica consistency guarantees, and incident report document type support with dedicated incident service client integration and dual-action authorization enforcement.**
 
 **Diagram sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
+- [incident_report.py](file://products/agent-platform/src/agent_service/services/incident_report.py)
+- [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
@@ -640,7 +685,7 @@ GatewayTools --> ExecutionWorkerClient : "isolated execution"
 The document repository service provides persistent storage for typed operation documents with role-based access controls, draft/published states, and comprehensive audit trails. It implements SPEC-039 R-1/R-2 with two-tier coverage (owner vs foreign sessions) and bounded retention policies. **Critical Security Enhancement v0.21.1**: Implements envelope-only document listings for GET /documents endpoint to ensure cross-owner reads are properly audited by stripping sensitive fields (digest and prose) from list responses while maintaining full content access through single-document fetch endpoints. **SPEC-041 Enhancement**: Adds deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Adds AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic.
 
 #### Key Features
-- **Typed Documents**: Supports `shift_summary` document type with extensible discriminator pattern
+- **Typed Documents**: Supports `shift_summary` and `incident_report` document types with extensible discriminator pattern
 - **Draft/Published States**: One-way transition from draft to published with owner-only actions
 - **Role-Based Access**: Owner-only draft visibility, team-wide published document access
 - **Bounded Storage**: PER_OWNER_CAP (20) limit per owner with oldest-first eviction
@@ -655,19 +700,23 @@ The document repository service provides persistent storage for typed operation 
 #### Document Lifecycle
 ```mermaid
 flowchart TD
-A["Create Document"] --> B{"State: draft"}
-B --> C{"Compute Summary from Handover"}
-C --> D{"Generate Prose with Blurb Extraction"}
-D --> E{"Owner Action Required"}
-E --> |Publish| F{"State: published"}
-F --> G{"Team-Wide Access"}
-G --> H{"Delete Allowed"}
-H --> I["Document Removed"]
-E --> |Delete| J["Document Removed"]
-B --> K{"Non-Owner Access"}
-K --> L{"404 Not Found"}
-F --> M{"Read Access"}
-M --> N["Document Returned"]
+A["Create Document"] --> B{"Type: shift_summary or incident_report"}
+B --> |shift_summary| C["Compute Summary from Handover"]
+B --> |incident_report| D["Fetch Incident Bundle"]
+C --> E{"Generate Prose with Blurb Extraction"}
+D --> F{"Build Incident Digest"}
+F --> G{"Generate Prose with Blurb Extraction"}
+E --> H{"Owner Action Required"}
+G --> H
+H --> |Publish| I{"State: published"}
+I --> J{"Team-Wide Access"}
+J --> K{"Delete Allowed"}
+K --> L["Document Removed"]
+H --> |Delete| M["Document Removed"]
+B --> N{"Non-Owner Access"}
+N --> O{"404 Not Found"}
+I --> P{"Read Access"}
+P --> Q["Document Returned"]
 ```
 
 **Diagram sources**
@@ -690,6 +739,93 @@ Both in-memory and Postgres backends support the complete document repository fu
 **Section sources**
 - [operation_documents.py:1-573](file://products/agent-platform/src/agent_service/services/operation_documents.py#L1-L573)
 - [routes.py:738-956](file://products/agent-platform/src/agent_service/api/v2/routes.py#L738-L956)
+
+### Incident Report Document Type
+
+#### Overview
+The incident report document type provides specialized document creation for incident analysis with dedicated incident service integration, dual-action authorization gates, and structured error handling. It implements SPEC-043 with comprehensive coverage of incident envelopes, triage reports, connector dispatches, and linked session information.
+
+#### Key Features
+- **Incident Service Integration**: Dedicated client for fetching incident bundles with Basic authentication and bounded timeouts
+- **Dual-Action Authorization**: Requires both `documents:create` and `incident:read` permissions for creation
+- **Structured Error Handling**: Comprehensive error hierarchy mapping to HTTP postures (503, 502, 404, 4xx)
+- **Two-Tier Coverage**: Full digest for owner sessions, metadata-only for foreign sessions with approvals:list capability
+- **Deterministic Digests**: Mechanical fact copying from incident service with provenance anchors
+- **Session Integration**: Links to triage sessions with appropriate coverage based on ownership and permissions
+- **Provenance Tracking**: Complete source record references for audit and traceability
+- **Graceful Degradation**: Unreadable secondary stores report unavailable without 500 errors
+
+#### Incident Bundle Structure
+```mermaid
+flowchart TD
+A["Incident Bundle"] --> B["Envelope"]
+A --> C["Triage Report"]
+A --> D["Dispatches"]
+B --> E["Incident Section"]
+C --> F["Triage Section"]
+D --> G["Dispatch Section"]
+E --> H["Session Section"]
+F --> I["Provenance Tracking"]
+G --> I
+H --> I
+I --> J["Final Digest"]
+```
+
+**Diagram sources**
+- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
+- [incident_client.py:77-121](file://products/agent-platform/src/agent_service/services/incident_client.py#L77-L121)
+
+#### Authorization Model
+- **documents:create**: Required for all document creation (enforced by platform-gateway)
+- **incident:read**: Additional requirement specifically for incident_report documents
+- **X-Foreign-Coverage Header**: Trusted internal header for foreign session access control
+- **Owner Validation**: Draft documents visible only to creators, published documents team-wide
+- **Audit Trail**: All document operations emit audit events with correlation
+
+#### Error Handling Strategy
+- **503 Not Configured**: Missing incident service configuration
+- **502 Service Unavailable**: Transport failure or upstream 5xx errors
+- **404 Not Found**: Unknown incident ID
+- **4xx Passed Through**: Other upstream client errors with original status codes
+- **Never 500**: Structured error hierarchy prevents raw stack traces
+
+#### Implementation Details
+```mermaid
+sequenceDiagram
+participant Client as "Client"
+participant Gateway as "Platform Gateway"
+participant API as "Agent Platform API"
+participant IncClient as "IncidentClient"
+participant IncReport as "IncidentReport"
+Note over Client,IncReport : Incident Report Creation Flow
+Client->>Gateway : POST /api/v2/documents {type : "incident_report", incident_id}
+Gateway->>API : Forward with authorization headers
+API->>API : Enforce documents : create AND incident : read
+alt Authorization granted
+API->>IncClient : fetch_incident_bundle(incident_id)
+IncClient->>IncClient : Validate configuration
+IncClient->>IncClient : Make HTTP request with Basic auth
+IncClient-->>API : Bundle or structured error
+API->>IncReport : build_digest(user_id, bundle, can_view_foreign)
+IncReport-->>API : digest + provenance
+API->>API : document_summary(digest)
+API-->>Client : 201 Created with document
+else Authorization denied
+API-->>Gateway : 403 Forbidden
+Gateway-->>Client : 403 Forbidden
+end
+```
+
+**Diagram sources**
+- [routes.py:888-916](file://products/agent-platform/src/agent_service/api/v2/routes.py#L888-L916)
+- [incident_client.py:77-121](file://products/agent-platform/src/agent_service/services/incident_client.py#L77-L121)
+- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
+
+**Section sources**
+- [incident_client.py:1-122](file://products/agent-platform/src/agent_service/services/incident_client.py#L1-L122)
+- [incident_report.py:1-215](file://products/agent-platform/src/agent_service/services/incident_report.py#L1-L215)
+- [routes.py:888-916](file://products/agent-platform/src/agent_service/api/v2/routes.py#L888-L916)
+- [test_documents.py:552-742](file://products/agent-platform/tests/test_documents.py#L552-L742)
 
 ### Shift Summary Digest Assembly
 
@@ -1320,7 +1456,7 @@ Typical endpoints:
 
 Request/response validation uses Pydantic models defined in schemas with enhanced v3 streaming event types.
 
-**Updated** Chat endpoints now accept delegated tokens for secure tool execution and support v3 streaming protocol with tool_call/tool_result frames for comprehensive audit trails. Both POST /chat and GET /chat/stream endpoints accept input_modality parameters for voice-readiness parity. Session endpoints provide multi-session workspace operations with proper authorization, audit trails, and evidence turn retrieval. Model endpoints provide credential-safe enumeration of available models with public schema compliance. **Document endpoints provide complete CRUD operations with role-based access controls, draft/published states, audit trail integration, envelope-only listings for security, deterministic counts-only summaries derived from handover skeletons, and AI-generated one-line blurbs extracted from prose responses. Confirmation endpoints provide structured 409 responses for racing approvers with winner attribution and durable outcome persistence, plus turn_index field support for precise confirmation card anchoring.**
+**Updated** Chat endpoints now accept delegated tokens for secure tool execution and support v3 streaming protocol with tool_call/tool_result frames for comprehensive audit trails. Both POST /chat and GET /chat/stream endpoints accept input_modality parameters for voice-readiness parity. Session endpoints provide multi-session workspace operations with proper authorization, audit trails, and evidence turn retrieval. Model endpoints provide credential-safe enumeration of available models with public schema compliance. **Document endpoints provide complete CRUD operations with role-based access controls, draft/published states, audit trail integration, envelope-only listings for security, deterministic counts-only summaries derived from handover skeletons, and AI-generated one-line blurbs extracted from prose responses. Confirmation endpoints provide structured 409 responses for racing approvers with winner attribution and durable outcome persistence, plus turn_index field support for precise confirmation card anchoring. Incident report document creation enforces dual-action authorization gates requiring both documents:create and incident:read permissions.**
 
 **Section sources**
 - [routes.py:106-235](file://products/agent-platform/src/agent_service/api/v2/routes.py#L106-L235)
@@ -1396,7 +1532,7 @@ end
 The document repository service provides persistent storage for typed operation documents with role-based access controls, draft/published states, and comprehensive audit trails. It implements SPEC-039 R-1/R-2 with two-tier coverage (owner vs foreign sessions) and bounded retention policies. **Critical Security Enhancement v0.21.1**: Implements envelope-only document listings for GET /documents endpoint to ensure cross-owner reads are properly audited by stripping sensitive fields (digest and prose) from list responses while maintaining full content access through single-document fetch endpoints. **SPEC-041 Enhancement**: Adds deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Adds AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic.
 
 ### Key Features
-- **Typed Documents**: Supports `shift_summary` document type with extensible discriminator pattern
+- **Typed Documents**: Supports `shift_summary` and `incident_report` document types with extensible discriminator pattern
 - **Draft/Published States**: One-way transition from draft to published with owner-only actions
 - **Role-Based Access**: Owner-only draft visibility, team-wide published document access
 - **Bounded Storage**: PER_OWNER_CAP (20) limit per owner with oldest-first eviction
@@ -1569,6 +1705,7 @@ The document API endpoints provide complete CRUD operations for typed operation 
 
 ### Authorization Model
 - **documents:create**: Required for document creation (enforced by platform-gateway)
+- **incident:read**: Additional requirement for incident_report documents (enforced by platform-gateway)
 - **X-Foreign-Coverage Header**: Trusted internal header for foreign session access control
 - **Owner Validation**: Draft documents visible only to creators, published documents team-wide
 - **Audit Trail**: All document operations emit audit events with correlation IDs
@@ -1603,12 +1740,21 @@ sequenceDiagram
 participant Client as "Client"
 participant API as "Document API"
 participant ShiftSum as "Shift Summary"
+participant IncClient as "IncidentClient"
+participant IncReport as "IncidentReport"
 participant DocProse as "Document Prose"
 participant DocStore as "Document Store"
 Note over Client,DocStore : Document Creation Flow with Summary and Blurb
 Client->>API : POST /api/v2/documents {type, sessions, label, include_prose}
+alt shift_summary
 API->>ShiftSum : build_digest(user_id, session_ids, can_view_foreign)
 ShiftSum-->>API : digest + provenance + handover skeleton
+else incident_report
+API->>IncClient : fetch_incident_bundle(incident_id)
+IncClient-->>API : incident bundle
+API->>IncReport : build_digest(user_id, bundle, can_view_foreign)
+IncReport-->>API : digest + provenance + handover skeleton
+end
 API->>API : document_summary(digest) - compute counts-only summary
 alt include_prose = true
 API->>DocProse : generate_prose(kernel, type, digest)
@@ -1624,14 +1770,18 @@ API-->>Client : 201 Created + document with summary and blurb
 **Diagram sources**
 - [routes.py:763-855](file://products/agent-platform/src/agent_service/api/v2/routes.py#L763-L855)
 - [shift_summary.py:432-460](file://products/agent-platform/src/agent_service/services/shift_summary.py#L432-L460)
+- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
+- [incident_client.py:77-121](file://products/agent-platform/src/agent_service/services/incident_client.py#L77-L121)
 - [operation_documents.py:488-531](file://products/agent-platform/src/agent_service/services/operation_documents.py#L488-L531)
 - [document_prose.py:114-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L114-L158)
 
 ### Error Handling
 - **400 Bad Request**: Invalid label length, unknown session IDs, digest input errors
-- **403 Forbidden**: Foreign session coverage without approvals:list capability
+- **403 Forbidden**: Foreign session coverage without approvals:list capability, missing incident:read permission for incident reports
 - **404 Not Found**: Document not found or foreign draft access
 - **409 Conflict**: Already published document
+- **503 Not Configured**: Missing incident service configuration for incident reports
+- **502 Service Unavailable**: Incident service transport failure or upstream 5xx errors
 - **Audit Events**: All operations emit structured audit events with correlation
 
 **Section sources**
@@ -2449,6 +2599,7 @@ The service has clear separation of concerns with minimal coupling between layer
 - Evidence store provides independent persistence layer with dual backend support
 - Model catalog provides credential-gated discovery with legacy alias resolution
 - **Document repository provides persistent storage for typed operation documents with role-based access controls, envelope-only listings, deterministic summary generation, and AI-generated blurb extraction**
+- **Incident report service provides specialized document type with incident service integration, dual-action authorization gates, and structured error handling**
 - **Shift summary assembly builds deterministic digests from multiple durable stores with provenance tracking and handover skeleton computation**
 - **Optional prose generation creates AI-powered narratives from digests with fail-soft behavior and AI-generated blurb extraction**
 - **Execution worker client provides isolated execution through execution-runtime service with fail-closed behavior**
@@ -2482,6 +2633,8 @@ API --> ConfirmStore
 API --> DocStore["OperationDocumentStore"]
 API --> ShiftSum["ShiftSummary"]
 API --> DocProse["DocumentProse"]
+API --> IncClient["IncidentClient"]
+API --> IncReport["IncidentReport"]
 API --> Metrics["Metrics"]
 API --> Obs["Observability"]
 API --> Tel["Telemetry"]
@@ -2500,15 +2653,19 @@ Lifespan["FastAPI Lifespan"] --> ModelDisc
 DocStore --> Metrics
 ShiftSum --> Metrics
 DocProse --> Metrics
+IncClient --> Metrics
+IncReport --> Metrics
 ```
 
-**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, **document repository integration with persistent typed documents, role-based access controls, envelope-only listings, deterministic summary generation, and AI-generated blurb extraction using SUMMARY marker format, shift summary assembly for deterministic digest generation with handover skeleton computation, optional prose generation with fail-soft behavior and AI-generated blurb extraction, execution worker integration for isolated tool execution with fail-closed behavior and signature verification, execution record persistence for signed execution lifecycle tracking, enhanced confirmation record store with turn_index field support, idempotent resolution, and cross-replica consistency, model catalog service with credential-gated discovery and legacy alias resolution, live model discovery service with background task management, voice-readiness support through input_modality parameter passthrough, and the new Luban provider for self-hosted OpenAI-compatible endpoints.**
+**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, **document repository integration with persistent typed documents, role-based access controls, envelope-only listings, deterministic summary generation, and AI-generated blurb extraction using SUMMARY marker format, incident report service integration with incident service client, dual-action authorization gates, and structured error handling, shift summary assembly for deterministic digest generation with handover skeleton computation, optional prose generation with fail-soft behavior and AI-generated blurb extraction, execution worker integration for isolated tool execution with fail-closed behavior and signature verification, execution record persistence for signed execution lifecycle tracking, enhanced confirmation record store with turn_index field support, idempotent resolution, and cross-replica consistency, model catalog service with credential-gated discovery and legacy alias resolution, live model discovery service with background task management, voice-readiness support through input_modality parameter passthrough, and the new Luban provider for self-hosted OpenAI-compatible endpoints.**
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
+- [incident_report.py](file://products/agent-platform/src/agent_service/services/incident_report.py)
+- [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
@@ -2595,8 +2752,14 @@ DocProse --> Metrics
 - **Blurb Extraction Efficiency**: Case-insensitive marker detection with early termination for optimal performance
 - **Prose Generation Fail-Safety**: Quick failure on model errors prevents blocking document creation
 - **Robust Parsing Logic**: Forgiving parser handles edge cases without impacting overall performance
+- **Incident Report Optimization**: Structured error hierarchy prevents raw stack traces and provides efficient degradation
+- **Incident Service Client**: Bounded timeouts and Basic authentication minimize overhead for incident bundle fetching
+- **Dual-Action Authorization**: Efficient policy evaluation for incident reports without impacting shift summary performance
+- **Incident Digest Assembly**: Mechanical fact copying with provenance anchors ensures deterministic performance
+- **Session Coverage**: Two-tier coverage model optimizes foreign session access with metadata-only responses
+- **Graceful Degradation**: Unreadable incident service returns structured errors without 500 responses
 
-**Updated** Performance considerations now include enhanced multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, model catalog optimization with startup-derived catalog and efficient legacy alias resolution, live model discovery optimization with background task management, multi-tier caching strategies, atomic catalog updates with lock protection, multi-model runtime optimization with priority-based resolution and session-based caching, enhanced confirmation record optimization with turn_index field support, SQL-level idempotency, startup sweep scoping, cross-replica consistency guarantees, Luban provider optimization for self-hosted OpenAI-compatible endpoints with strict security requirements, decision sync robustness with time-based settle windows, progressive arrival presentation for improved user experience, blank-line block joining for efficient markdown rendering, **document repository optimization with bounded storage, role-based access control efficiency, audit trail integration, dual backend fallback, retention policy enforcement, provenance tracking efficiency, envelope-only listings for security, deterministic summary computation with lightweight handover skeleton processing, and AI-generated blurb extraction with bounded character limits and efficient parsing logic, shift summary assembly optimization with deterministic digest generation and graceful degradation, optional prose generation optimization with hard timeout protection, fail-soft behavior, and AI-generated blurb extraction, execution worker optimization with fail-closed behavior preventing unnecessary network calls, signature verification efficiency with constant-time comparison, receipt tracking with first-write-wins semantics, single-flight idempotency preventing redundant executions, timeout handling with bounded budgets, and structured error responses for targeted troubleshooting.**
+**Updated** Performance considerations now include enhanced multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, model catalog optimization with startup-derived catalog and efficient legacy alias resolution, live model discovery optimization with background task management, multi-tier caching strategies, atomic catalog updates with lock protection, multi-model runtime optimization with priority-based resolution and session-based caching, enhanced confirmation record optimization with turn_index field support, SQL-level idempotency, startup sweep scoping, cross-replica consistency guarantees, Luban provider optimization for self-hosted OpenAI-compatible endpoints with strict security requirements, decision sync robustness with time-based settle windows, progressive arrival presentation for improved user experience, blank-line block joining for efficient markdown rendering, **document repository optimization with bounded storage, role-based access control efficiency, audit trail integration, dual backend fallback, retention policy enforcement, provenance tracking efficiency, envelope-only listings for security, deterministic summary computation with lightweight handover skeleton processing, and AI-generated blurb extraction with bounded character limits and efficient parsing logic, incident report optimization with structured error handling, dual-action authorization efficiency, incident service client performance tuning, and digest assembly optimization with mechanical fact copying, shift summary assembly optimization with deterministic digest generation and graceful degradation, optional prose generation optimization with hard timeout protection, fail-soft behavior, and AI-generated blurb extraction, execution worker optimization with fail-closed behavior preventing unnecessary network calls, signature verification efficiency with constant-time comparison, receipt tracking with first-write-wins semantics, single-flight idempotency preventing redundant executions, timeout handling with bounded budgets, and structured error responses for targeted troubleshooting.**
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -2678,6 +2841,15 @@ Common issues and resolutions:
 - **AI-Generated Blurb Problems**: Validate parse_blurb function behavior with various response formats
 - **Document Creation Failures**: Verify include_prose flag handling and fallback to digest-only documents
 - **Enveloped Listing Performance**: Monitor envelope-only field stripping efficiency and response sizes
+- **Incident Report Issues**: Verify incident service configuration, dual-action authorization, and structured error handling
+- **Incident Service Connectivity**: Check AGENT_INCIDENT_SERVICE_URL, AGENT_INCIDENT_CLIENT_ID, and AGENT_INCIDENT_CLIENT_SECRET
+- **Authorization Failures**: Verify both documents:create and incident:read permissions for incident report creation
+- **Bundle Fetching**: Validate incident service client timeout configuration and Basic authentication
+- **Digest Assembly**: Check incident envelope structure, triage report availability, and session coverage
+- **Error Mapping**: Verify 503/502/404/4xx status code mapping and structured error responses
+- **Foreign Session Access**: Validate approvals:list capability for foreign session metadata access
+- **Provenance Tracking**: Verify incident_id inclusion in audit events and session coverage documentation
+- **Graceful Degradation**: Test incident service unavailability handling and fallback behaviors
 
 Debugging utilities:
 - Health check endpoints for service status
@@ -2730,8 +2902,16 @@ Debugging utilities:
 - **AI-Generated Blurb Debugging**: Check parse_blurb function behavior, response format handling, and operator-friendly briefing generation
 - **Prose Generation Timeout Debugging**: Monitor PROSE_TIMEOUT_SECONDS configuration, model response times, and fail-soft degradation behavior
 - **Document Creation Debugging**: Validate include_prose flag handling, fallback to digest-only documents, and AI-generated blurb extraction
+- **Enveloped Listing Performance Debugging**: Monitor envelope-only field stripping efficiency and response sizes
+- **Incident Report Debugging**: Verify incident service configuration, dual-action authorization enforcement, and structured error handling
+- **Incident Client Debugging**: Check AGENT_INCIDENT_* environment variables, Basic authentication, and timeout configuration
+- **Authorization Debugging**: Validate documents:create and incident:read permission enforcement for incident report creation
+- **Bundle Fetching Debugging**: Verify incident service connectivity, incident ID validation, and error mapping to HTTP postures
+- **Digest Assembly Debugging**: Check incident envelope structure, triage report availability, session coverage, and provenance tracking
+- **Foreign Session Debugging**: Validate approvals:list capability for foreign session metadata access and coverage determination
+- **Graceful Degradation Debugging**: Test incident service unavailability handling, 503/502/404/4xx error mapping, and structured error responses
 
-**Updated** Troubleshooting guide now includes enhanced multi-session workspace troubleshooting, enhanced transcript extraction debugging strategies with blank-line block joining, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification, plus live model discovery troubleshooting with background task monitoring, provider filtering validation, cache tier diagnostics, and discovery performance optimization, and multi-model runtime troubleshooting with model resolution debugging and session pinning diagnostics, enhanced confirmation record troubleshooting with turn_index field support, SQL-level idempotency validation, startup sweep scoping verification, and cross-replica consistency testing, Luban provider troubleshooting with self-hosted endpoint configuration and bearer token authentication, decision sync robustness troubleshooting with time-based settle window validation, progressive arrival presentation debugging, and markdown rendering verification for resumed content, **document repository troubleshooting with backend connectivity validation, ownership verification, draft/published state management, role-based access control testing, envelope-only listing verification, summary computation debugging, PostgreSQL migration validation, legacy record degradation testing, AI-generated blurb extraction debugging, shift summary assembly debugging, provenance tracking validation, and audit trail verification, optional prose generation troubleshooting with model availability checking, timeout configuration validation, prompt contract adherence verification, fail-soft behavior testing, and AI-generated blurb extraction debugging, execution worker troubleshooting with worker URL configuration validation, handoff token setup verification, signature verification debugging, receipt tracking diagnostics, timeout handling validation, and structured rejection reason analysis.**
+**Updated** Troubleshooting guide now includes enhanced multi-session workspace troubleshooting, enhanced transcript extraction debugging strategies with blank-line block joining, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification, plus live model discovery troubleshooting with background task monitoring, provider filtering validation, cache tier diagnostics, and discovery performance optimization, and multi-model runtime troubleshooting with model resolution debugging and session pinning diagnostics, enhanced confirmation record troubleshooting with turn_index field support, SQL-level idempotency validation, startup sweep scoping verification, and cross-replica consistency testing, Luban provider troubleshooting with self-hosted endpoint configuration and bearer token authentication, decision sync robustness troubleshooting with time-based settle window validation, progressive arrival presentation debugging, and markdown rendering verification for resumed content, **document repository troubleshooting with backend connectivity validation, ownership verification, draft/published state management, role-based access control testing, envelope-only listing verification, summary computation debugging, PostgreSQL migration validation, legacy record degradation testing, AI-generated blurb extraction debugging, incident report troubleshooting with incident service client validation, dual-action authorization testing, structured error handling verification, and digest assembly debugging, shift summary troubleshooting with deterministic digest generation and graceful degradation, optional prose generation troubleshooting with model availability checking, timeout configuration validation, prompt contract adherence verification, fail-soft behavior testing, and AI-generated blurb extraction debugging, execution worker troubleshooting with worker URL configuration validation, handoff token setup verification, signature verification debugging, receipt tracking diagnostics, timeout handling validation, and structured rejection reason analysis.**
 
 **Section sources**
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -2742,7 +2922,7 @@ Debugging utilities:
 ## Conclusion
 The Agent Platform Service provides a robust foundation for AI agent orchestration with multi-provider support, durable session management, and comprehensive observability. Its modular architecture enables easy customization and scaling while maintaining high performance and reliability.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs using SUMMARY marker format, role-based access controls with draft/published states, envelope-only listings for security, and deterministic counts-only summaries computed from handover skeletons at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict security requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses. The service also features enhanced decision sync robustness with time-based settle windows, improved session transcript reconstruction with blank-line block joining for proper markdown rendering, and progressive arrival presentation for resumed content.** These enhancements strengthen the platform's flexibility, enable dynamic model management, provide detailed operational visibility, ensure cross-replica consistency for HITL workflows, improve user experience with reliable content delivery, and maintain the performance characteristics that make it suitable for production AI operations. **Critical Security Fix v0.21.1**: Implemented envelope-only document listings for GET /documents endpoint to prevent unauthorized content access while maintaining full content access through audited single-document fetch endpoints, ensuring cross-owner reads are properly audited. **SPEC-041 Enhancement**: Added deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Added AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs using SUMMARY marker format, role-based access controls with draft/published states, envelope-only listings for security, and deterministic counts-only summaries computed from handover skeletons at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict security requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses. The service also features enhanced decision sync robustness with time-based settle windows, improved session transcript reconstruction with blank-line block joining for proper markdown rendering, and progressive arrival presentation for resumed content.** **SPEC-043 Enhancement**: Added incident report document type support with dedicated incident service integration, dual-action authorization gates requiring both documents:create and incident:read permissions, structured error handling for incident service dependencies, and comprehensive test coverage for incident-specific workflows. These enhancements strengthen the platform's flexibility, enable dynamic model management, provide detailed operational visibility, ensure cross-replica consistency for HITL workflows, improve user experience with reliable content delivery, and maintain the performance characteristics that make it suitable for production AI operations. **Critical Security Fix v0.21.1**: Implemented envelope-only document listings for GET /documents endpoint to prevent unauthorized content access while maintaining full content access through audited single-document fetch endpoints, ensuring cross-owner reads are properly audited. **SPEC-041 Enhancement**: Added deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Added AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic.
 
 ## Appendices
 
@@ -2883,6 +3063,20 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - **Prose Generation**: Test include_prose flag handling and fallback to digest-only documents
 - **Blurb Extraction**: Validate parse_blurb function behavior with various response formats
 
+#### Incident Report Configuration
+- **Incident Service Setup**: Configure `AGENT_INCIDENT_SERVICE_URL`, `AGENT_INCIDENT_CLIENT_ID`, and `AGENT_INCIDENT_CLIENT_SECRET`
+- **Dual-Action Authorization**: Ensure both documents:create and incident:read permissions for incident report creation
+- **Timeout Configuration**: Set `AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS` for bounded incident service calls
+- **Basic Authentication**: Verify incident service client credentials in INCIDENT_QUERY_CLIENTS registry
+- **Error Handling**: Test 503/502/404/4xx status code mapping and structured error responses
+- **Bundle Fetching**: Validate incident service connectivity and incident ID format validation
+- **Session Coverage**: Test owner vs foreign session coverage with approvals:list capability
+- **Provenance Tracking**: Verify incident_id inclusion in audit events and session coverage documentation
+- **Graceful Degradation**: Test incident service unavailability handling and fallback behaviors
+- **Digest Assembly**: Validate incident envelope structure, triage report availability, and dispatch outcomes
+- **Prose Generation**: Test incident report prose generation with digest-only prompt contract
+- **Portal Integration**: Verify incident picker in Documents dialog and incident report rendering
+
 #### Shift Summary Configuration
 - **Session Coverage**: Configure MAX_SESSION_IDS for bounded input (default: 20)
 - **Label Length**: Set MAX_LABEL_LENGTH for document labeling (default: 120 characters)
@@ -2906,7 +3100,7 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - **Blurb Parsing**: Test parse_blurb function with various response formats and edge cases
 - **Prose Status Handling**: Validate included/failed/not_requested status values and corresponding document states
 
-**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, live model discovery configuration with background task management, provider filtering mechanisms, cache tier optimization, atomic catalog updates with lock protection, multi-model runtime configuration with per-turn selection and session-based pinning, enhanced confirmation record store configuration with turn_index field support, idempotent resolution, startup sweep scoping, cross-replica consistency validation, Luban provider configuration for self-hosted OpenAI-compatible endpoints with complete operator workflow management, **document repository configuration with backend setup, retention policies, capacity limits, authorization configuration, foreign coverage handling, audit trail verification, provenance tracking, role-based access control, envelope-only listing verification, summary computation validation, PostgreSQL migration testing, legacy record degradation testing, AI-generated blurb extraction validation, and prose generation configuration with SUMMARY marker format, shift summary configuration with session coverage limits, label length constraints, foreign access validation, graceful degradation testing, provenance integrity verification, coverage tier testing, error scenario validation, handover skeleton generation, and deterministic summary computation, optional prose generation configuration with timeout settings, model availability verification, fail-soft behavior testing, prompt safety validation, streaming support testing, empty response handling, integration testing, and AI-generated blurb extraction with robust parsing logic, execution worker configuration with fail-closed behavior, signature verification, receipt tracking, and isolated tool execution**, decision sync robustness configuration with time-based settle windows, progressive arrival presentation, and blank-line block joining for proper markdown rendering.
+**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, live model discovery configuration with background task management, provider filtering mechanisms, cache tier optimization, atomic catalog updates with lock protection, multi-model runtime configuration with per-turn selection and session-based pinning, enhanced confirmation record store configuration with turn_index field support, idempotent resolution, startup sweep scoping, cross-replica consistency validation, Luban provider configuration for self-hosted OpenAI-compatible endpoints with complete operator workflow management, **document repository configuration with backend setup, retention policies, capacity limits, authorization configuration, foreign coverage handling, audit trail verification, provenance tracking, role-based access control, envelope-only listing verification, summary computation validation, PostgreSQL migration testing, legacy record degradation testing, AI-generated blurb extraction validation, and prose generation configuration with SUMMARY marker format, incident report configuration with incident service client setup, dual-action authorization testing, structured error handling validation, and digest assembly verification, shift summary configuration with session coverage limits, label length constraints, foreign access validation, graceful degradation testing, provenance integrity verification, coverage tier testing, error scenario validation, handover skeleton generation, and deterministic summary computation, optional prose generation configuration with timeout settings, model availability verification, fail-soft behavior testing, prompt safety validation, streaming support testing, empty response handling, integration testing, and AI-generated blurb extraction with robust parsing logic, execution worker configuration with fail-closed behavior, signature verification, receipt tracking, and isolated tool execution**, decision sync robustness configuration with time-based settle windows, progressive arrival presentation, and blank-line block joining for proper markdown rendering.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -2926,6 +3120,8 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
+- [incident_report.py](file://products/agent-platform/src/agent_service/services/incident_report.py)
+- [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
@@ -2944,13 +3140,16 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [test_shift_summary.py](file://products/agent-platform/tests/test_shift_summary.py)
 - [test_document_prose.py](file://products/agent-platform/tests/test_document_prose.py)
 - [test_documents.py](file://products/agent-platform/tests/test_documents.py)
+- [test_documents_repository.py](file://products/platform-gateway/tests/test_documents_repository.py)
 - [spec.md](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md)
 - [decision-sync-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-26-decision-sync-arrival-polish.md)
 - [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
 - [SPEC-039-operations-document-repository/spec.md](file://docs/specs/SPEC-039-operations-document-repository/spec.md)
 - [SPEC-041-documents-readability-and-digest-reference/spec.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md)
+- [SPEC-043-incident-report-document-type/spec.md](file://docs/specs/SPEC-043-incident-report-document-type/spec.md)
 - [document-read-audit-integrity.md](file://docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md)
 - [documents-readability-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-28-documents-readability-and-digest-reference.md)
+- [incident-report-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-29-incident-report-document-type.md)
 - [session-evidence.schema.json](file://shared/shared-contracts/schemas/session-evidence.schema.json)
 - [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
 - [operation-document.schema.json](file://shared/shared-contracts/schemas/operation-document.schema.json)
