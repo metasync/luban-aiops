@@ -616,3 +616,18 @@ body {
 .incident-section {
   margin-top: 8px;
 }
+
+/* --- Documents drawer bounded panes (SPEC-041 R-3, v0.25.1 polish) --- */
+/* The fixed-height bound applies to the content region only, so the
+   structural chrome stays pinned while content scrolls underneath it:
+   the digest tab bar (.digest-bounded) and the narrative collapse
+   header (.prose-bounded). Releasing the bound removes the class. */
+.digest-bounded .ant-tabs-body-holder {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.prose-bounded .ant-collapse-body {
+  max-height: 320px;
+  overflow-y: auto;
+}

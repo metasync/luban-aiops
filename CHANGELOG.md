@@ -13,6 +13,32 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.25.1 — 2026-08-29
+
+### Changed
+
+- **Portal live-check polish (v0.25.0 follow-up)** — operator portal
+  rendering and documentation polish only; no backend runtime
+  behavior, routes, actions, event types, or dependency versions
+  change.
+  - Bounded panes now pin their structural chrome: the digest's tab
+    bar and the narrative's collapse header stay visible while only
+    the content region (active tab content / narrative body) scrolls
+    inside the fixed-height bound; releasing the bound removes the
+    constraint entirely. The *Expand to full height* affordance stays
+    on both document types and appears only on overflow.
+  - The **Raw JSON** tab is renamed **Digest data** (both document
+    types): the tab has always rendered the stored digest through the
+    typed renderers with a typed-but-open fallback, not a JSON dump;
+    the name now says what the tab shows. Rendering is unchanged.
+  - The digest reference codifies the house layout rule for tab
+    content (tables for repeated records with shared scalar fields,
+    description lists for single objects, bullets for heterogeneous
+    or long-text items, chips for identifiers) and the incident
+    report **Triage** tab is audited into it: evidence and next steps
+    now ride tables, hypotheses stay bullets, cited skills ride
+    chips.
+
 ## 0.25.0 — 2026-08-29
 
 ### Added

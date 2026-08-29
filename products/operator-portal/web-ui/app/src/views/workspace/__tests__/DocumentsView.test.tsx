@@ -571,7 +571,7 @@ describe("DocumentsView list (SPEC-039 R-6)", () => {
     // SPEC-041 R-2: the digest renders as tabs; the handover skeleton
     // leads as the default tab and reports the honest quiet state.
     expect(screen.getByText("Handover")).toBeTruthy();
-    expect(screen.getByText("Raw JSON")).toBeTruthy();
+    expect(screen.getByText("Digest data")).toBeTruthy();
     expect(screen.getAllByText(/Quiet shift/).length).toBeGreaterThanOrEqual(1);
   });
 });
@@ -591,7 +591,7 @@ describe("DocumentsView digest tabs (SPEC-041 R-2)", () => {
       "Executions",
       "Evidence & transcript",
       "Open items",
-      "Raw JSON",
+      "Digest data",
     ]) {
       expect(screen.getByRole("tab", { name: label })).toBeTruthy();
     }
@@ -628,8 +628,8 @@ describe("DocumentsView digest tabs (SPEC-041 R-2)", () => {
     // Pre-SPEC-040 documents carry no handover tab but keep the
     // artifact of record inspectable.
     expect(screen.queryByText("Handover")).toBeNull();
-    expect(screen.getByRole("tab", { name: "Raw JSON" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("tab", { name: "Raw JSON" }));
+    expect(screen.getByRole("tab", { name: "Digest data" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Digest data" }));
     expect(screen.getByText(/session_count/)).toBeTruthy();
   });
 });
@@ -644,7 +644,7 @@ describe("DocumentsView incident reports (SPEC-043 R-6)", () => {
     expect(screen.getByText(/incident inc-abc123/)).toBeTruthy();
     fireEvent.click(screen.getByText("View"));
     await flush();
-    for (const label of ["Incident", "Triage", "Dispatches", "Session", "Raw JSON"]) {
+    for (const label of ["Incident", "Triage", "Dispatches", "Session", "Digest data"]) {
       expect(screen.getByRole("tab", { name: label })).toBeTruthy();
     }
     // The Incident tab leads and renders the envelope facts.
@@ -658,6 +658,13 @@ describe("DocumentsView incident reports (SPEC-043 R-6)", () => {
     expect(
       screen.getByText("Database pool exhaustion on the payment service"),
     ).toBeTruthy();
+    // The triage report follows the house layout rule: repeated records
+    // with shared fields (evidence, next steps) ride tables, free-text
+    // hypotheses stay bullets, and cited skills render as chips.
+    expect(screen.getByText("pool saturation")).toBeTruthy();
+    expect(screen.getByText("raise pool size")).toBeTruthy();
+    expect(screen.getByText("connection pool exhaustion")).toBeTruthy();
+    expect(screen.getByText("sre-database")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "Dispatches" }));
     expect(screen.getByText("pagerduty")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "Session" }));

@@ -7,6 +7,17 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-29-portal-live-check-polish.md`
+  - same-day patch (v0.25.1) remediating the v0.25.0 live-check
+    feedback: bounded panes pin their structural chrome (the digest
+    tab bar and the narrative collapse header stay visible while only
+    the content region scrolls), the **Raw JSON** tab is renamed
+    **Digest data** to say what it shows, and the digest reference
+    codifies the house layout rule (tables for repeated records,
+    description lists for single objects, bullets for long text,
+    chips for identifiers) — applied to the incident report Triage
+    tab; portal rendering and documentation only, no backend runtime
+    change
 - `2026-08-29-incident-report-document-type.md`
   - delivers SPEC-043 (v0.25.0), the fifth R5 slice: the operations
     document repository gains its second type — **`incident_report`** —

@@ -212,11 +212,13 @@ grants.
   happened without a model in the loop.
 - The document page is **digest-first**: the structured digest renders
   as tabs — shift summaries show Handover, Sessions, Confirmations,
-  Executions, Evidence & transcript, Open items, Raw JSON; incident
-  reports show Incident, Triage, Dispatches, Session, Raw JSON — and
+  Executions, Evidence & transcript, Open items, Digest data; incident
+  reports show Incident, Triage, Dispatches, Session, Digest data — and
   is the artifact of record; the
-  digest and narrative panes scroll inside bounded regions with an
-  expand affordance. The generated narrative opens expanded under the
+  digest and narrative panes are bounded: only their content region
+  scrolls inside a fixed height while the tab bar and the narrative's
+  collapse header stay pinned, with an expand affordance to release
+  the bound. The generated narrative opens expanded under the
   label *AI-generated narrative — from this document's digest facts* —
   a short, plain-language shift briefing (at most three paragraphs)
   written for the relieving operator; it stays collapsible to the

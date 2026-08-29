@@ -138,17 +138,36 @@ audited fetch, and the Markdown export are unaffected:
 | **Executions** | Every execution as a row: tool, status, receipt, completion time. |
 | **Evidence & transcript** | Per-session transcript turn counts and evidence frame counts. |
 | **Open items** | Still-pending confirmations and requested executions, with the affected sessions. |
-| **Raw JSON** | The stored digest verbatim — the artifact of record, inspectable in place. |
+| **Digest data** | The complete stored digest, field by field — the artifact of record, inspectable in place. |
 
 Incident reports render their own tab set: **Incident**, **Triage**,
-**Dispatches**, **Session**, and **Raw JSON**, with the session tab
+**Dispatches**, **Session**, and **Digest data**, with the session tab
 showing the linked-session entry (or its marker) and — for
 owner-covered sessions — the same confirmation and execution tables.
 
-Both the digest and the narrative render in **bounded panes**: when
-either block grows tall it scrolls inside a fixed-height region with an
-*Expand to full height* affordance, so nothing is ever trapped off
-screen.
+### How the tabs lay out content
+
+Every tab follows one layout rule, chosen by the shape of the data:
+
+| Shape | Rendering | Examples |
+|---|---|---|
+| Repeated records sharing the same scalar fields | Table, one record per row | confirmations, executions, triage evidence and next steps, dispatches |
+| A single object with named fields | Description list | the incident envelope, the triage headline, handover counts |
+| Heterogeneous or long-text items | Bullets | triage hypotheses |
+| Identifiers and short labels | Chips (tags) | session ids, cited skills, incident labels |
+
+The rule is mechanical: a new digest section renders as a table when
+its entries are records with shared scalar fields, and degrades to
+bullets or the **Digest data** tab when they are not. Layout is a
+rendering act only — the stored digest is always the artifact of
+record.
+
+Both the digest and the narrative render **bounded**: when either
+block grows tall, only its content region scrolls inside a
+fixed-height region while the structural chrome stays pinned — the
+digest's tab bar and the narrative's collapse header remain visible
+while the content scrolls underneath. An *Expand to full height*
+affordance releases the bound, so nothing is ever trapped off screen.
 
 ## The list summary line
 

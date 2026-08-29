@@ -26,6 +26,7 @@ import {
   Typography,
   message,
 } from "antd";
+import type { TabsProps } from "antd";
 import {
   DeleteOutlined,
   DownloadOutlined,
@@ -94,8 +95,8 @@ function createFailureMessage(err: unknown, documentType: DocumentType): string 
 // --- Digest rendering (SPEC-041 R-2) ----------------------------------------
 
 // The digest is typed-but-open: the shift-summary builder owns its
-// section shapes, so the Raw JSON tab degrades to labeled JSON lines
-// for anything the structured tabs do not recognize.
+// section shapes, so the Digest data tab degrades to labeled JSON
+// lines for anything the structured tabs do not recognize.
 function primitiveText(value: unknown): string | null {
   if (value === null) return "null";
   const type = typeof value;
@@ -149,7 +150,12 @@ function DigestValue({ value, depth = 0 }: { value: unknown; depth?: number }): 
 
 // The drawer renders the digest as per-concern tabs with table-shaped
 // content (SPEC-041 R-2). Shapes below mirror the shift-summary
-// builder; anything unrecognized degrades to the Raw JSON tab.
+// builder; anything unrecognized degrades to the Digest data tab.
+//
+// Tab content follows one layout rule set (documents-digest-reference
+// "How the tabs lay out content"): repeated records sharing scalar
+// fields render as tables; a single object renders as a description
+// list; heterogeneous or long-text items render as bullets or chips.
 
 type DigestMap = Record<string, unknown>;
 
@@ -517,7 +523,7 @@ function OpenItemsTab({ handover }: { handover: DigestMap | null }) {
 // triage, dispatches, session — assembled verbatim from the incident
 // bundle plus the linked triage session. Coverage markers
 // (not_triaged / foreign_denied / missing / unavailable) render as
-// Alert notes; anything unrecognized degrades to the Raw JSON tab.
+// Alert notes; anything unrecognized degrades to the Digest data tab.
 
 const INCIDENT_SEVERITY_COLOR: Record<string, string> = {
   critical: "red",
@@ -622,12 +628,21 @@ function TriageTab({ triage }: { triage: DigestMap }) {
       />
     );
   }
-  const sections: Array<[string, unknown]> = [
-    ["Evidence", triage.evidence],
-    ["Hypotheses", triage.hypotheses],
-    ["Next steps", triage.next_steps],
-    ["Skills cited", triage.skills_cited],
-  ];
+  // Repeated records with shared fields ride tables; free-text lists
+  // stay bullets; identifiers render as chips (house layout rule).
+  const evidenceRows = asList(triage.evidence).map((row, index) => ({
+    key: String(index),
+    source: textOrDash(row.source),
+    description: textOrDash(row.description),
+  }));
+  const stepRows = asList(triage.next_steps).map((row, index) => ({
+    key: String(index),
+    title: textOrDash(row.title),
+    rationale: textOrDash(row.rationale),
+    priority: textOrDash(row.priority),
+  }));
+  const hypotheses = asList(triage.hypotheses).map((entry) => String(entry));
+  const skillsCited = asList(triage.skills_cited).map((entry) => String(entry));
   return (
     <div>
       <Descriptions
@@ -652,17 +667,57 @@ function TriageTab({ triage }: { triage: DigestMap }) {
           },
         ]}
       />
-      {sections.map(([name, value]) => {
-        if (!Array.isArray(value) || value.length === 0) {
-          return null;
-        }
-        return (
-          <div key={name} style={{ marginTop: 8 }}>
-            <Typography.Text strong>{name}</Typography.Text>
-            <DigestValue value={value} />
-          </div>
-        );
-      })}
+      {evidenceRows.length > 0 ? (
+        <div style={{ marginTop: 8 }}>
+          <Typography.Text strong>Evidence</Typography.Text>
+          <Table
+            size="small"
+            rowKey="key"
+            pagination={false}
+            dataSource={evidenceRows}
+            columns={[
+              { title: "Source", dataIndex: "source" },
+              { title: "Finding", dataIndex: "description" },
+            ]}
+          />
+        </div>
+      ) : null}
+      {hypotheses.length > 0 ? (
+        <div style={{ marginTop: 8 }}>
+          <Typography.Text strong>Hypotheses</Typography.Text>
+          <ul style={{ margin: "4px 0", paddingLeft: 18 }}>
+            {hypotheses.map((entry, index) => (
+              <li key={index}>
+                <Typography.Text>{entry}</Typography.Text>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {stepRows.length > 0 ? (
+        <div style={{ marginTop: 8 }}>
+          <Typography.Text strong>Next steps</Typography.Text>
+          <Table
+            size="small"
+            rowKey="key"
+            pagination={false}
+            dataSource={stepRows}
+            columns={[
+              { title: "Action", dataIndex: "title" },
+              { title: "Rationale", dataIndex: "rationale" },
+              { title: "Priority", dataIndex: "priority" },
+            ]}
+          />
+        </div>
+      ) : null}
+      {skillsCited.length > 0 ? (
+        <div style={{ marginTop: 8 }}>
+          <Typography.Text type="secondary">Skills cited: </Typography.Text>
+          {skillsCited.map((skillId) => (
+            <Tag key={skillId}>{skillId}</Tag>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -818,11 +873,12 @@ function IncidentDigestPanel({ document }: { document: OperationDocument }) {
     },
     {
       key: "raw",
-      label: "Raw JSON",
+      label: "Digest data",
       children: (
         <div>
           <Typography.Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
-            The stored digest verbatim — the artifact of record.
+            The complete stored digest, field by field — the artifact of
+            record.
           </Typography.Text>
           <DigestValue value={digest} />
         </div>
@@ -839,7 +895,7 @@ function IncidentDigestPanel({ document }: { document: OperationDocument }) {
           Requested by {String(digest.requester_user_id ?? document.owner_user_id)}
         </Typography.Text>
       </div>
-      <Tabs size="small" defaultActiveKey="incident" items={items} />
+      <BoundedDigestTabs defaultActiveKey="incident" items={items} />
     </div>
   );
 }
@@ -919,11 +975,12 @@ function DigestPanel({ document }: { document: OperationDocument }) {
   });
   items.push({
     key: "raw",
-    label: "Raw JSON",
+    label: "Digest data",
     children: (
       <div>
         <Typography.Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
-          The stored digest verbatim — the artifact of record.
+          The complete stored digest, field by field — the artifact of
+          record.
         </Typography.Text>
         <DigestValue value={digest} />
       </div>
@@ -939,8 +996,7 @@ function DigestPanel({ document }: { document: OperationDocument }) {
           Requested by {String(digest.requester_user_id ?? document.owner_user_id)}
         </Typography.Text>
       </div>
-      <Tabs
-        size="small"
+      <BoundedDigestTabs
         defaultActiveKey={handover ? "handover" : "sessions"}
         items={items}
       />
@@ -949,29 +1005,42 @@ function DigestPanel({ document }: { document: OperationDocument }) {
 }
 
 function ProsePanel({ document }: { document: OperationDocument }) {
+  // The collapse header stays pinned; only the narrative body scrolls
+  // inside the bound (global.css `.prose-bounded` rule).
+  const [measureTick, setMeasureTick] = useState(0);
+  const { wrapperRef, expanded, setExpanded, overflows } = useBoundedRegion(
+    ".ant-collapse-body",
+    measureTick,
+  );
   if (document.prose_status === "included" && document.prose) {
     return (
-      <Collapse
-        size="small"
-        // The narrative is the relieving operator's entry point: it opens
-        // expanded by default and stays collapsible to the header alone.
-        defaultActiveKey={["prose"]}
-        items={[
-          {
-            key: "prose",
-            label: (
-              <Typography.Text strong>
-                AI-generated narrative — from this document's digest facts
-              </Typography.Text>
-            ),
-            children: (
-              <Typography.Paragraph style={{ whiteSpace: "pre-wrap", margin: 0 }}>
-                {document.prose}
-              </Typography.Paragraph>
-            ),
-          },
-        ]}
-      />
+      <div ref={wrapperRef} className={expanded ? undefined : "prose-bounded"}>
+        <Collapse
+          size="small"
+          // The narrative is the relieving operator's entry point: it opens
+          // expanded by default and stays collapsible to the header alone.
+          defaultActiveKey={["prose"]}
+          onChange={() => setMeasureTick((tick) => tick + 1)}
+          items={[
+            {
+              key: "prose",
+              label: (
+                <Typography.Text strong>
+                  AI-generated narrative — from this document's digest facts
+                </Typography.Text>
+              ),
+              children: (
+                <Typography.Paragraph style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+                  {document.prose}
+                </Typography.Paragraph>
+              ),
+            },
+          ]}
+        />
+        {overflows || expanded ? (
+          <ExpandAffordance expanded={expanded} onChange={setExpanded} />
+        ) : null}
+      </div>
     );
   }
   if (document.prose_status === "failed") {
@@ -995,44 +1064,87 @@ function ProsePanel({ document }: { document: OperationDocument }) {
 
 // Digest and prose are the longest blocks in the drawer; each renders
 // bounded with internal scrolling and an expand affordance so nothing
-// is ever trapped. Bounding is presentation only — content, export,
-// and the stored document are untouched.
+// is ever trapped. The bound applies to the content region only —
+// the tab content for digests, the collapse body for the narrative —
+// so the tab bar and the collapse header stay pinned while content
+// scrolls underneath them (v0.25.1 live-check polish). Bounding is
+// presentation only — content, export, and the stored document are
+// untouched.
 
 const BOUNDED_PANE_MAX_HEIGHT = 320;
 
-function BoundedPane({ children }: { children: ReactNode }) {
+// antd's tab/collapse enter motion commits before the pane is laid
+// out, so a measurement taken at the moment of the switch can read
+// the pre-motion height; a short re-measure after the motion settles
+// keeps `overflows` honest on first reveal.
+const BOUNDED_MEASURE_DELAY_MS = 300;
+
+// Measures the bounded region inside `wrapperRef` (found via `selector`)
+// and reports whether it overflows the bound; `measureTick` re-runs the
+// measurement after the user switches tabs or toggles the panel.
+function useBoundedRegion(selector: string, measureTick: number) {
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
-  const contentRef = useRef<HTMLDivElement | null>(null);
-
   useEffect(() => {
-    const node = contentRef.current;
-    setOverflows(
-      node !== null && node.scrollHeight > BOUNDED_PANE_MAX_HEIGHT + 1,
-    );
-  }, [children, expanded]);
+    const measure = () => {
+      const region =
+        wrapperRef.current?.querySelector<HTMLElement>(selector) ?? null;
+      setOverflows(
+        region !== null && region.scrollHeight > BOUNDED_PANE_MAX_HEIGHT + 1,
+      );
+      return region !== null;
+    };
+    measure();
+    const timer = window.setTimeout(measure, BOUNDED_MEASURE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [selector, measureTick, expanded]);
+  return { wrapperRef, expanded, setExpanded, overflows };
+}
 
+function ExpandAffordance({
+  expanded,
+  onChange,
+}: {
+  expanded: boolean;
+  onChange: (next: boolean) => void;
+}) {
   return (
-    <div>
-      <div
-        ref={contentRef}
-        style={
-          expanded
-            ? undefined
-            : { maxHeight: BOUNDED_PANE_MAX_HEIGHT, overflowY: "auto" }
-        }
-      >
-        {children}
-      </div>
+    <Button
+      type="link"
+      size="small"
+      style={{ padding: 0, height: "auto" }}
+      onClick={() => onChange(!expanded)}
+    >
+      {expanded ? "Collapse to bounded height" : "Expand to full height"}
+    </Button>
+  );
+}
+
+// The digest's tab bar stays pinned; only the active tab's content
+// scrolls inside the bound (global.css `.digest-bounded` rule).
+function BoundedDigestTabs({
+  defaultActiveKey,
+  items,
+}: {
+  defaultActiveKey: string;
+  items: NonNullable<TabsProps["items"]>;
+}) {
+  const [measureTick, setMeasureTick] = useState(0);
+  const { wrapperRef, expanded, setExpanded, overflows } = useBoundedRegion(
+    ".ant-tabs-body-holder",
+    measureTick,
+  );
+  return (
+    <div ref={wrapperRef} className={expanded ? undefined : "digest-bounded"}>
+      <Tabs
+        size="small"
+        defaultActiveKey={defaultActiveKey}
+        items={items}
+        onChange={() => setMeasureTick((tick) => tick + 1)}
+      />
       {overflows || expanded ? (
-        <Button
-          type="link"
-          size="small"
-          style={{ padding: 0, height: "auto" }}
-          onClick={() => setExpanded((current) => !current)}
-        >
-          {expanded ? "Collapse to bounded height" : "Expand to full height"}
-        </Button>
+        <ExpandAffordance expanded={expanded} onChange={setExpanded} />
       ) : null}
     </div>
   );
@@ -1690,15 +1802,11 @@ export default function DocumentsView({
                 </Typography.Link>
               </Tooltip>
             </div>
-            <BoundedPane>
-              <DigestPanel document={selected} />
-            </BoundedPane>
+            <DigestPanel document={selected} />
             <Typography.Title level={5} style={{ marginTop: 16 }}>
               Prose
             </Typography.Title>
-            <BoundedPane>
-              <ProsePanel document={selected} />
-            </BoundedPane>
+            <ProsePanel document={selected} />
           </div>
         )}
       </Drawer>
