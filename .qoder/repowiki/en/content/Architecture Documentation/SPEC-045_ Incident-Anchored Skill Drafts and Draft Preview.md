@@ -19,28 +19,30 @@
 
 ## Update Summary
 **Changes Made**
-- Updated Core Components section with complete implementation details for incident-anchored generator, gateway pass-through, and shared preview modal
-- Enhanced Architecture Overview with detailed sequence diagram showing dual authorization model
-- Added comprehensive Policy Gate and Audit section covering new policy rules and audit events
-- Expanded Operator Portal section with incident-detail action and shared preview modal implementation
-- Updated Dependency Analysis to reflect complete service integration
-- Enhanced Troubleshooting Guide with specific error scenarios and resolution steps
-- Added detailed component analysis sections with code references and diagrams
+- Updated Core Components section with enhanced envelope stripping details for v0.27.1 security remediation
+- Enhanced Architecture Overview with updated sequence diagram showing dual field stripping
+- Added comprehensive Security Remediation section covering the enhanced envelope stripping implementation
+- Updated Detailed Component Analysis to reflect both triage_raw and session_id field removal
+- Enhanced Troubleshooting Guide with security-related error scenarios
+- Added detailed security considerations and invariant enforcement
 
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
-5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
-10. [Appendices](#appendices)
+5. [Security Remediation](#security-remediation)
+6. [Detailed Component Analysis](#detailed-component-analysis)
+7. [Dependency Analysis](#dependency-analysis)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
+11. [Appendices](#appendices)
 
 ## Introduction
 This document specifies the design, implementation plan, and task breakdown for SPEC-045: Incident-Anchored Skill Drafts and Draft Preview. It introduces an incident-scoped skill-draft generation flow that converts a validated triage report into a reusable skill draft without touching session ownership. It also defines a shared preview modal that appears before download from both the chat header (session-scoped) and the incident detail toolbar (incident-scoped). The spec enforces digest-only inputs, deterministic post-processing, fail-closed validation, and no durable draft persistence on the platform.
+
+**Updated** Enhanced security remediation in v0.27.1 now strips both `triage_raw` and `session_id` fields from incident envelopes to prevent operator session identifier leakage into generated skill drafts, maintaining the 'never anyone's session' invariant.
 
 ## Project Structure
 SPEC-045 spans three products plus policy and audit surfaces:
@@ -69,10 +71,12 @@ AgentPlatform --> AuditEmitter["Audit Emitter<br/>incident_skill_draft_generated
 - [plan.md:1-15](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/plan.md#L1-L15)
 
 ## Core Components
-- **Incident-anchored generator**: builds a digest bundle from the incident envelope (stripped of raw triage output) and the validated triage report, then runs the same bounded generation pipeline as the session-scoped path. A triage-required gate returns a deterministic 409 when no validated triage exists.
+- **Incident-anchored generator**: builds a digest bundle from the incident envelope (stripped of raw triage output and session identifiers) and the validated triage report, then runs the same bounded generation pipeline as the session-scoped path. A triage-required gate returns a deterministic 409 when no validated triage exists.
 - **Gateway pass-through**: adds a new incidents endpoint behind a dual-action gate (incident:skill_draft and incident:read), forwards identity and request id, and maps upstream errors to house conventions without returning unvalidated drafts.
 - **Shared preview modal**: renders markdown (rendered by default, raw toggle shows provenance), mode badge (generated vs skeleton), validation status, suggested filename, and offers Download .md or Discard.
 - **Policy and audit**: new allow rule for incident:skill_draft and a typed audit event emitted per generation.
+
+**Updated** Enhanced envelope stripping now removes both `triage_raw` and `session_id` fields from incident envelopes to prevent operator session identifier leakage into generated skill drafts.
 
 **Section sources**
 - [spec.md:51-106](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/spec.md#L51-L106)
@@ -84,7 +88,7 @@ AgentPlatform --> AuditEmitter["Audit Emitter<br/>incident_skill_draft_generated
 The end-to-end flow for incident-anchored drafting:
 - Portal triggers "Draft as skill" on the incident detail toolbar.
 - Gateway enforces dual actions and proxies to agent-platform.
-- Agent-platform fetches the incident bundle via the incident client, strips triage_raw, requires a validated triage report, generates or degrades to a facts-only skeleton, validates via skills-hub, and emits an audit event.
+- Agent-platform fetches the incident bundle via the incident client, strips both `triage_raw` and `session_id`, requires a validated triage report, generates or degrades to a facts-only skeleton, validates via skills-hub, and emits an audit event.
 - Response flows back through gateway verbatim to the portal's shared preview modal.
 
 ```mermaid
@@ -101,7 +105,7 @@ GW->>GW : enforce_policy("incident : skill_draft","incident : read")
 GW->>AP : POST /api/v2/incidents/{id}/skill-draft
 AP->>SD : build_incident_skill_draft_bundle(id)
 SD->>IC : fetch_incident_bundle(id)
-IC-->>SD : {envelope (no triage_raw), report}
+IC-->>SD : {envelope (no triage_raw/session_id), report}
 SD-->>AP : bundle
 AP->>SD : generate_skill_draft(bundle)
 alt generation succeeds
@@ -124,16 +128,38 @@ GW-->>UI : verbatim response
 - [skill_draft.py:184-215](file://products/agent-platform/src/agent_service/services/skill_draft.py#L184-L215)
 - [skill_draft.py:625-667](file://products/agent-platform/src/agent_service/services/skill_draft.py#L625-L667)
 
+## Security Remediation
+**v0.27.1 Security Enhancement**: Enhanced envelope stripping to prevent operator session identifier leakage into generated skill drafts.
+
+### Enhanced Field Stripping
+The incident-anchored skill draft generation now implements comprehensive envelope sanitization:
+
+- **Dual field removal**: Both `triage_raw` (raw alert payloads) and `session_id` (operator session identifiers) are stripped from incident envelopes
+- **Report sanitization**: Session identifiers are also removed from validated triage reports to maintain the 'never anyone's session' invariant
+- **Bundle purity**: Only essential incident data and validated triage information passes through to the generation pipeline
+
+### Security Invariants
+- **No session leakage**: Generated skill drafts never contain references to any operator's session
+- **Raw data exclusion**: Unvalidated agent output and raw alert payloads are excluded from generation input
+- **Deterministic degradation**: Any generation or parse failure falls back to a facts-only skeleton that maintains security properties
+
+### Implementation Details
+The enhanced stripping occurs in the `build_incident_skill_draft_bundle` function, which filters incident envelope fields to exclude both sensitive fields while preserving all other incident metadata necessary for skill draft generation.
+
+**Section sources**
+- [skill_draft.py:184-215](file://products/agent-platform/src/agent_service/services/skill_draft.py#L184-L215)
+- [test_skill_draft.py:278-305](file://products/agent-platform/tests/test_skill_draft.py#L278-L305)
+
 ## Detailed Component Analysis
 
 ### Agent Platform: Incident-Anchored Generator and Route
-- **Bundle assembly**: uses the existing incident client to fetch the incident bundle, strips triage_raw from the envelope, excludes connector dispatch outcomes, and requires a validated triage report. Missing triage yields a typed 409 before generation.
+- **Bundle assembly**: uses the existing incident client to fetch the incident bundle, strips both `triage_raw` and `session_id` from the envelope, excludes connector dispatch outcomes, and requires a validated triage report. Missing triage yields a typed 409 before generation.
 - **Generation reuse**: shares prompt posture, fenced contract, parser, redaction vocabulary, Skill Format v1 caps, and skeleton builder with the session-scoped path. Any failure degrades to a deterministic facts-only skeleton.
 - **Route**: exposes POST /api/v2/incidents/{incident_id}/skill-draft, maps incident-client errors (not configured, transport, unknown id), applies the generate → validate → bounded-regenerate → skeleton sequence, and emits the incident-specific audit event.
 
 ```mermaid
 flowchart TD
-Start(["POST /api/v2/incidents/{id}/skill-draft"]) --> FetchBundle["Fetch incident bundle<br/>strip triage_raw"]
+Start(["POST /api/v2/incidents/{id}/skill-draft"]) --> FetchBundle["Fetch incident bundle<br/>strip triage_raw & session_id"]
 FetchBundle --> TriageGate{"Validated triage present?"}
 TriageGate -- No --> Return409["Return 409<br/>no validated triage"]
 TriageGate -- Yes --> Generate["generate_skill_draft(bundle)"]
@@ -223,7 +249,7 @@ Actions -- Discard --> Close["Close modal"]
 
 ## Dependency Analysis
 - Agent-platform depends on:
-  - Incident client for fetching the incident bundle (digest-only).
+  - Incident client for fetching the incident bundle (digest-only with enhanced stripping).
   - Skills validation service for validating Markdown before return.
   - Audit emitter for incident_skill_draft_generated.
 - Platform-gateway depends on:
@@ -255,6 +281,7 @@ Agent --> Audit["Audit Emitter"]
 - **Deterministic degradation**: any generation or parse failure falls back to a facts-only skeleton, ensuring predictable latency and response shape.
 - **Minimal network hops**: incident bundle fetched once; validation performed server-side before response.
 - **No persistent draft storage**: reduces I/O overhead and avoids contention.
+- **Enhanced security overhead**: additional field stripping operations are minimal and occur only during incident-anchored draft generation.
 
 ## Troubleshooting Guide
 - **409 No validated triage report**: indicates the incident has not completed a validated triage. Run triage first; do not treat as a platform error.
@@ -262,6 +289,9 @@ Agent --> Audit["Audit Emitter"]
 - **502 Transport or upstream 5xx**: transient or upstream failures; retry after short delay.
 - **403 Policy denial**: ensure the caller holds incident:skill_draft and incident:read; verify role grants.
 - **404 Unknown incident id**: anti-enumeration posture; confirm the incident id format and existence.
+- **Security-related issues**: if skill drafts contain unexpected session identifiers, verify that the enhanced envelope stripping is functioning correctly in the incident-anchored generation path.
+
+**Updated** Added security-related troubleshooting guidance for potential session identifier leakage issues.
 
 **Section sources**
 - [spec.md:89-106](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/spec.md#L89-L106)
@@ -269,6 +299,8 @@ Agent --> Audit["Audit Emitter"]
 
 ## Conclusion
 SPEC-045 introduces an incident-anchored skill-draft workflow that aligns with operators' mental model: review the incident and its validated triage, then convert it into a reusable skill. The design preserves digest-only inputs, deterministic post-processing, fail-closed validation, and no durable draft persistence. Both entry points share a read-only preview experience, and the session-scoped path remains unchanged.
+
+**Updated** The v0.27.1 security remediation enhances the system's security posture by implementing comprehensive envelope stripping that prevents operator session identifier leakage into generated skill drafts, maintaining the critical 'never anyone's session' invariant across all skill draft generation paths.
 
 ## Appendices
 - Related specs: SPEC-015 (incident triage sessions), SPEC-043 (incident bundle client), SPEC-044 (skill authoring export).
