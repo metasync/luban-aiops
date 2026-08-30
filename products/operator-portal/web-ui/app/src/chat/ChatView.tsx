@@ -35,6 +35,7 @@ import {
   createSkillDraft,
   getSession,
   type SessionSummary,
+  type SkillDraftResponse,
 } from "../api/sessions";
 import { useAuth } from "../auth/AuthContext";
 import {
@@ -53,6 +54,7 @@ import {
 } from "../stream/useChatStream";
 import { renderMarkdown } from "./markdown";
 import { ComposerSelectionBar } from "./ComposerSelectionBar";
+import { SkillDraftPreviewModal } from "./SkillDraftPreview";
 import { detectArrivalSpan, transcriptToTurns, type ArrivalSpan } from "./transcript";
 import { usePendingDecisionPoll } from "./usePendingDecisionPoll";
 import {
@@ -570,41 +572,26 @@ export function CopyIdButton({ id }: { id: string }) {
   );
 }
 
-// SPEC-044 R-5: "Draft as skill" session action. Visibility mirrors the
-// documents matrix (client-side gate; the gateway re-enforces
-// session:skill_draft regardless). The validated Markdown downloads
-// client-side via the SPEC-040 R-4 Blob pattern; the toast distinguishes
-// the generated draft from the facts-only skeleton degradation.
+// SPEC-044 R-5 (rewired by SPEC-045 R-5): "Draft as skill" session
+// action. Visibility mirrors the documents matrix (client-side gate;
+// the gateway re-enforces session:skill_draft regardless). The
+// validated draft opens in the shared read-only preview modal — the
+// generated/skeleton distinction is the modal's mode badge — and only
+// downloads client-side (SPEC-040 R-4 Blob pattern) on explicit
+// Download .md; Discard drops the in-memory response.
 export function DraftAsSkillButton({ sessionId }: { sessionId: string }) {
   const { roles } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState<SkillDraftResponse | null>(null);
   if (!hasAnyRole(roles, SKILL_DRAFT_ROLES)) {
     return null;
   }
-  const draft = async () => {
+  const requestDraft = async () => {
     if (busy) return;
     setBusy(true);
     try {
       const result = await createSkillDraft(sessionId);
-      const blob = new Blob([result.markdown], {
-        type: "text/markdown;charset=utf-8",
-      });
-      const url = URL.createObjectURL(blob);
-      const anchor = window.document.createElement("a");
-      anchor.href = url;
-      anchor.download = result.suggested_filename;
-      window.document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-      if (result.mode === "skeleton") {
-        message.info(
-          "Downloaded the facts-only skill skeleton — generation could " +
-            "not shape a narrative for this session.",
-        );
-      } else {
-        message.success("Skill draft downloaded (validated).");
-      }
+      setDraft(result);
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
         message.error("Your role cannot draft skills from sessions.");
@@ -622,18 +609,21 @@ export function DraftAsSkillButton({ sessionId }: { sessionId: string }) {
     }
   };
   return (
-    <Tooltip title="Download a validated Skill Format draft built from this session's record">
-      <Button
-        type="text"
-        size="small"
-        icon={<FileTextOutlined />}
-        aria-label="Draft as skill"
-        loading={busy}
-        onClick={() => void draft()}
-      >
-        Draft as skill
-      </Button>
-    </Tooltip>
+    <>
+      <Tooltip title="Preview a validated Skill Format draft built from this session's record">
+        <Button
+          type="text"
+          size="small"
+          icon={<FileTextOutlined />}
+          aria-label="Draft as skill"
+          loading={busy}
+          onClick={() => void requestDraft()}
+        >
+          Draft as skill
+        </Button>
+      </Tooltip>
+      <SkillDraftPreviewModal draft={draft} onClose={() => setDraft(null)} />
+    </>
   );
 }
 

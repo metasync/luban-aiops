@@ -13,6 +13,57 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.27.0 — 2026-08-30
+
+### Added
+
+- **Incident-anchored skill drafts and draft preview (SPEC-045, seventh
+  R5 slice)** — a triaged incident becomes team-authored guidance: any
+  caller holding the grant drafts a validated Skill Format v1 Markdown
+  from the incident's validated triage — no matter who ran the triage
+  session — and both skill-draft entry points now open a read-only
+  preview before any download. Ephemeral by construction, as before:
+  nothing about a draft is persisted anywhere on the platform.
+  - agent-service gains `POST /api/v2/incidents/{incident_id}/skill-draft`:
+    the bundle is the incident envelope (minus the raw failed-triage
+    output) plus the validated triage report only — never anyone's
+    session, never connector dispatches. Generation reuses the SPEC-044
+    internals verbatim (digest-only prompt, fenced skill-frontmatter
+    contract, deterministic redaction + Skill Format caps, provenance
+    block carrying the incident id and no session line, facts-only
+    skeleton degradation — generation never 500s) and the same bounded
+    regeneration + fail-closed validation (503 not configured, 502
+    unreachable). An incident without a validated triage report (new,
+    triaging, `triage_failed`) answers a deterministic **409** — never
+    a thin guess.
+  - platform-gateway passes through
+    `POST /api/v1/incidents/{incident_id}/skill-draft` behind the new
+    deny-by-default **`incident:skill_draft`** action, dual-gated with
+    `incident:read` at the same route (the SPEC-043 pattern; a denial
+    reports the first failing action) and granted to `platform-admin`,
+    `approver`, and `operator` via the new
+    `allow-operators-incident-skill-draft` rule — synced byte-for-byte
+    to both gateway copies and the dev-k8s ConfigMap.
+  - `incident_skill_draft_generated` joins the audit-service event enum
+    with the SPEC-029 parity-guard members (shared
+    `audit-event.schema.json`); one event per generation carrying the
+    incident id, mode, and validation outcome — emitted regardless of
+    whether the operator downloads or discards.
+  - The portal gains a shared read-only **skill-draft preview modal**:
+    rendered view (escape-first renderer) with a **Raw** toggle that
+    shows the full markdown including the provenance block, a
+    **generated** / facts-only **skeleton** mode badge, validation
+    status, and suggested filename; **Download .md** (SPEC-040 R-4 Blob
+    download of the raw markdown) and **Discard** (drop the in-memory
+    response). The incident detail toolbar gains **Draft as skill**
+    beside Run/Re-run triage and Continue in chat, with structured
+    403/404/409/502/503 toasts — the 409 names the precondition: run
+    triage first, then draft the skill. The chat header's **Draft as
+    skill** now opens the same preview instead of downloading blindly;
+    its error toasts stay identical.
+  - No new configuration knobs: the SPEC-043 incident client and the
+    SPEC-044 skills-validation wiring are reused as-is.
+
 ## 0.26.0 — 2026-08-30
 
 ### Added

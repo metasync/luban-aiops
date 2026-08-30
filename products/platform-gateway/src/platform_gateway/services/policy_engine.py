@@ -71,6 +71,13 @@ ACTION_SESSION_UPDATE = "session:update"
 # skills is an operational act, so developer and read-only-observer are
 # denied by default (documents-create grant pattern).
 ACTION_SESSION_SKILL_DRAFT = "session:skill_draft"
+# Incident-anchored skill drafts (SPEC-045 R-3): the incident is the
+# anchor, so the action names the incident; the route dual-gates it with
+# incident:read so the skill-draft surface never bypasses the incident
+# visibility matrix (SPEC-043 pattern). Same grant posture as the session
+# sibling: drafting skills is an operational act, so developer and
+# read-only-observer are denied by default.
+ACTION_INCIDENT_SKILL_DRAFT = "incident:skill_draft"
 PROTECTED_ACTIONS = frozenset(
     {
         ACTION_CHAT,
@@ -93,6 +100,7 @@ PROTECTED_ACTIONS = frozenset(
         ACTION_DOCUMENTS_READ,
         ACTION_SESSION_UPDATE,
         ACTION_SESSION_SKILL_DRAFT,
+        ACTION_INCIDENT_SKILL_DRAFT,
     }
 )
 

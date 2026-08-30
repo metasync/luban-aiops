@@ -20,6 +20,7 @@ from platform_gateway.core.request_context import resolve_request_id
 from platform_gateway.schemas.api import ReportIncidentRequest
 from platform_gateway.services.delegation_client import obtain_delegated_token
 from platform_gateway.services.gateway_service import (
+    create_incident_skill_draft,
     enforce_policy,
     resolve_request_identity,
 )
@@ -29,6 +30,10 @@ from platform_gateway.services.incident_client import (
     get_report,
     list_incidents,
     run_triage,
+)
+from platform_gateway.services.policy_engine import (
+    ACTION_INCIDENT_READ,
+    ACTION_INCIDENT_SKILL_DRAFT,
 )
 
 router = APIRouter()
@@ -142,6 +147,44 @@ async def get_incident_report_route(
     enforce_policy(settings, identity, "incident:read", request_id)
     _check_incident_id(incident_id)
     return await get_report(settings, request_id, incident_id)
+
+
+@router.post("/api/v1/incidents/{incident_id}/skill-draft")
+async def create_incident_skill_draft_route(
+    request: Request,
+    incident_id: str,
+    x_request_id: str | None = Header(default=None),
+    settings: PlatformGatewaySettings = Depends(get_settings),
+) -> dict:
+    """Incident-anchored skill draft (SPEC-045 R-2).
+
+    Dual-gated per the SPEC-043 pattern: ``incident:skill_draft`` first,
+    then ``incident:read`` — denial reports the first failing action and
+    blocked attempts ride the gateway's blocked-attempt audit. The
+    validated draft is passed through verbatim — the gateway holds no
+    draft state; the agent layer emits the
+    ``incident_skill_draft_generated`` audit event.
+    """
+    request_id = resolve_request_id(x_request_id)
+    identity = await resolve_request_identity(settings, request, request_id)
+    enforce_policy(settings, identity, ACTION_INCIDENT_SKILL_DRAFT, request_id)
+    enforce_policy(settings, identity, ACTION_INCIDENT_READ, request_id)
+    _check_incident_id(incident_id)
+    user_id = identity.username  # type: ignore[union-attr]
+    response = await create_incident_skill_draft(
+        settings, request_id, incident_id, user_id
+    )
+    log_event(
+        LOGGER,
+        "incident_skill_draft_generated",
+        request_id=request_id,
+        incident_id=incident_id,
+        user_id=user_id,
+        mode=response.get("mode"),
+        authenticated=identity.subject != "dev",  # type: ignore[union-attr]
+        roles=identity.roles,  # type: ignore[union-attr]
+    )
+    return response
 
 
 @router.post("/api/v1/incidents/{incident_id}/triage")

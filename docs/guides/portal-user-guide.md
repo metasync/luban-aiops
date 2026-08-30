@@ -98,17 +98,19 @@ relative last-active times.
   check mark confirms the copy. The open session's header shows the same
   id + copy pair. This is how you hand a colleague a session id to cite
   in a shift summary (see below).
-- **Draft as skill** (SPEC-044): the open session's header carries a
-  **Draft as skill** action for `platform-admin`, `approver`, and
-  `operator`. It generates a Skill Format v1 Markdown draft from the
-  session's durable record (the validated triage report joins when the
-  session is incident-linked), validates it against skills-hub before
-  returning it, and downloads `<suggested-slug>.md` in your browser.
-  The toast tells you whether you received a **generated** draft or the
-  facts-only **skeleton** (the honest degradation for quiet sessions).
-  Generation may take a few seconds; if validation cannot run the
-  action reports an error instead of handing out an unvalidated draft.
-  Nothing is stored on the platform — see the
+- **Draft as skill** (SPEC-044, preview per SPEC-045): the open
+  session's header carries a **Draft as skill** action for
+  `platform-admin`, `approver`, and `operator`. It generates a Skill
+  Format v1 Markdown draft from the session's durable record (the
+  validated triage report joins when the session is incident-linked),
+  validates it against skills-hub before returning it, and opens it in
+  a read-only **preview modal**: rendered view with a **Raw** toggle,
+  a **generated** / facts-only **skeleton** mode badge, the validation
+  status, and the suggested filename. **Download .md** hands over
+  `<suggested-slug>.md`; **Discard** drops the draft. Generation may
+  take a few seconds; if validation cannot run the action reports an
+  error instead of handing out an unvalidated draft. Nothing is stored
+  on the platform — see the
   [Skills and Guidance Guide](skills-guide.md) for merging the draft
   into a skill source.
 
@@ -301,14 +303,23 @@ steps, and cited skills, plus any collaboration dispatch outcomes.
 
 - **Run triage** starts an agent triage with a live *triaging* state; a
   failed run exposes the raw agent text so you can see what went wrong.
+- **Draft as skill** (SPEC-045) turns the incident's validated triage
+  into a Skill Format v1 draft for `platform-admin`, `approver`, and
+  `operator` — regardless of who ran the triage session. The draft is
+  built from the incident envelope and the validated triage report only
+  (never from anyone's session), validated before it is returned, and
+  opens in the same read-only preview modal as the chat action. An
+  incident without a validated triage report answers 409 with a toast
+  naming the precondition — run triage first, then draft the skill.
 - **Continue in chat** drops you into the incident's dedicated session to
   investigate interactively.
 - **Report incident** files a new incident manually.
 
 Viewing requires `incident:read`; reporting and triaging require
-`incident:create` / `incident:triage`. Wiring Alertmanager and
-interpreting triage reports in depth is covered in the
-[Incident Triage and Collaboration Guide](incident-guide.md).
+`incident:create` / `incident:triage`; drafting a skill from an incident
+requires the combination of `incident:skill_draft` and `incident:read`.
+Wiring Alertmanager and interpreting triage reports in depth is covered
+in the [Incident Triage and Collaboration Guide](incident-guide.md).
 
 ## Audit Trail (Control)
 

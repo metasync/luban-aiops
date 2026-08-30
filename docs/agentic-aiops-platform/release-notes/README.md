@@ -7,6 +7,21 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-30-incident-skill-draft-and-preview.md`
+  - delivers SPEC-045 (v0.27.0), the seventh R5 slice: a triaged
+    incident becomes team-authored guidance — any caller holding the
+    new deny-by-default **`incident:skill_draft`** action (dual-gated
+    with `incident:read` per the SPEC-043 pattern, granted to the
+    operational roles) drafts a validated Skill Format v1 Markdown from
+    the incident envelope (minus `triage_raw`) plus the validated
+    triage report — never anyone's session, never connector
+    dispatches — with a deterministic **409** when no validated report
+    exists; both entry points (the new incident toolbar action and the
+    existing chat session action) now open the validated draft in a
+    read-only preview modal (rendered + raw toggle, mode badge,
+    Download .md / Discard) before any client-side download; audited
+    as **`incident_skill_draft_generated`**; ephemeral by construction
+    — nothing about a draft is persisted
 - `2026-08-30-skill-authoring-export.md`
   - delivers SPEC-044 (v0.26.0), the sixth R5 slice: one route turns
     the durable record of a session into a validated Skill Format v1

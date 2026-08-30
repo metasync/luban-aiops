@@ -281,3 +281,20 @@ rules:
       actions_any: ["session:skill_draft"]
     decision:
       outcome: allow
+
+  # Incident-anchored skill drafts (SPEC-045 R-3): incident:skill_draft
+  # gates converting an incident's validated triage into a skill draft.
+  # The route dual-gates with incident:read, so this grant alone never
+  # admits a caller who cannot see the incident; developer and
+  # read-only-observer keep incident:read but stay denied here (same
+  # operational-act posture as the session sibling).
+  - id: allow-operators-incident-skill-draft
+    domain: action_authz
+    description: Platform admins, approvers, and operators may draft skills from an incident's validated triage.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator"]
+      actions_any: ["incident:skill_draft"]
+    decision:
+      outcome: allow

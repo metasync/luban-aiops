@@ -41,6 +41,10 @@ TITLE_PATCH = (
 SKILL_DRAFT_PATCH = (
     "platform_gateway.services.gateway_service.agent_client.create_skill_draft"
 )
+INCIDENT_SKILL_DRAFT_PATCH = (
+    "platform_gateway.services.gateway_service."
+    "agent_client.create_incident_skill_draft"
+)
 
 CREATE_BODY = {
     "document_type": "shift_summary",
@@ -644,6 +648,148 @@ class SkillDraftProxyTests(DocumentsProxyBase):
             patch(SKILL_DRAFT_PATCH, upstream),
         ):
             response = self.client.post("/api/v1/sessions/ses-1/skill-draft")
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], "agent service unavailable")
+
+
+class IncidentSkillDraftProxyTests(DocumentsProxyBase):
+    """SPEC-045 R-2/R-3: incident-anchored skill drafts behind the dual
+    ``incident:skill_draft`` + ``incident:read`` gate."""
+
+    INCIDENT_SKILL_DRAFT_PAYLOAD = {
+        "markdown": "---\ntitle: \"Triage runbook: Checkout latency\"\n---\n\nBody\n",
+        "mode": "generated",
+        "validation": "passed",
+        "suggested_filename": "triage-runbook-checkout-latency.md",
+    }
+
+    def _post(self, incident_id: str = "inc-abc123"):
+        return self.client.post(f"/api/v1/incidents/{incident_id}/skill-draft")
+
+    def test_operator_drafts_incident_skill_verbatim(self) -> None:
+        upstream = AsyncMock(return_value=self.INCIDENT_SKILL_DRAFT_PAYLOAD)
+        with (
+            self._patch_identity("operator", route_module="incidents"),
+            patch(INCIDENT_SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), self.INCIDENT_SKILL_DRAFT_PAYLOAD)
+        _, args, _ = upstream.mock_calls[0]
+        self.assertEqual(args[2], "inc-abc123")
+        self.assertEqual(args[3], "operator.user")
+
+    def test_observer_denied_reports_first_failing_action(self) -> None:
+        # read-only-observer holds incident:read but not
+        # incident:skill_draft; the denial names the first failing
+        # action (dual-gate order: incident:skill_draft first).
+        upstream = AsyncMock(return_value=self.INCIDENT_SKILL_DRAFT_PAYLOAD)
+        with (
+            self._patch_identity("read-only-observer", route_module="incidents"),
+            patch(INCIDENT_SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json()["detail"]["action"], "incident:skill_draft"
+        )
+        upstream.assert_not_called()
+
+    def test_developer_denied_before_upstream(self) -> None:
+        upstream = AsyncMock(return_value=self.INCIDENT_SKILL_DRAFT_PAYLOAD)
+        with (
+            self._patch_identity("developer", route_module="incidents"),
+            patch(INCIDENT_SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 403)
+        upstream.assert_not_called()
+
+    def test_invalid_incident_id_rejected_before_upstream(self) -> None:
+        upstream = AsyncMock(return_value=self.INCIDENT_SKILL_DRAFT_PAYLOAD)
+        with (
+            self._patch_identity("operator", route_module="incidents"),
+            patch(INCIDENT_SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self._post(incident_id="not-an-incident")
+        self.assertEqual(response.status_code, 400)
+        upstream.assert_not_called()
+
+    def test_upstream_409_triage_gate_passes_through(self) -> None:
+        # The deterministic 409 names the precondition, not a failure.
+        upstream = AsyncMock(
+            side_effect=_status_error_json(
+                409,
+                {
+                    "detail": "no validated triage report to draft from "
+                    "— run triage first"
+                },
+            )
+        )
+        with (
+            self._patch_identity("operator", route_module="incidents"),
+            patch(INCIDENT_SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("run triage first", response.json()["detail"])
+
+    def test_upstream_404_passes_through_with_detail(self) -> None:
+        upstream = AsyncMock(
+            side_effect=_status_error_json(404, {"detail": "incident not found"})
+        )
+        with (
+            self._patch_identity("operator", route_module="incidents"),
+            patch(INCIDENT_SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self._post(incident_id="inc-missing")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "incident not found")
+
+    def test_upstream_503_not_configured_passes_through(self) -> None:
+        upstream = AsyncMock(
+            side_effect=_status_error_json(
+                503,
+                {"detail": "skills service not configured for skill-draft validation"},
+            )
+        )
+        with (
+            self._patch_identity("operator", route_module="incidents"),
+            patch(INCIDENT_SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 503)
+
+    def test_upstream_502_validation_unreachable_passes_through(self) -> None:
+        upstream = AsyncMock(
+            side_effect=_status_error_json(
+                502, {"detail": "skills service unreachable"}
+            )
+        )
+        with (
+            self._patch_identity("operator", route_module="incidents"),
+            patch(INCIDENT_SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], "skills service unreachable")
+
+    def test_upstream_500_maps_to_502(self) -> None:
+        upstream = AsyncMock(side_effect=_status_error(500))
+        with (
+            self._patch_identity("operator", route_module="incidents"),
+            patch(INCIDENT_SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 502)
+
+    def test_transport_failure_maps_to_502(self) -> None:
+        upstream = AsyncMock(side_effect=httpx.ConnectError("boom"))
+        with (
+            self._patch_identity("operator", route_module="incidents"),
+            patch(INCIDENT_SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self._post()
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.json()["detail"], "agent service unavailable")
 

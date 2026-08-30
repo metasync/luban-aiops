@@ -2,11 +2,11 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-30
 - approved: 2026-08-30
-- delivered: —
+- delivered: 2026-08-30
 - release slice: R5 — Hardening and External Consumption (seventh R5
   slice, target v0.27.0)
 - related ADRs: none (lineage: the 2026-08-30 post-delivery design
@@ -266,3 +266,10 @@ resolved the open questions:
   preview-before-download experience the same day.
 - 2026-08-30: operator approved the draft (`draft` → `approved`);
   delivery proceeds under the house train as v0.27.0.
+- 2026-08-30: delivered as v0.27.0 (`approved` → `delivered`) —
+  incident-anchored route + dual-gated gateway pass-through + audit
+  event, shared preview modal with both entry points rewired through
+  it, session surface byte-untouched; `make verify` green before and
+  after `make build`, browser live check 5/5 scenarios on the
+  canonical deployment (non-owner draft + preview + download, 409
+  precondition, observer denial, discard, session entry).

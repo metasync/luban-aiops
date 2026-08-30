@@ -444,6 +444,30 @@ async def create_skill_draft(
     return response.json()
 
 
+async def create_incident_skill_draft(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    incident_id: str,
+    user_id: str,
+) -> dict:
+    """Generate a validated skill draft from one incident (SPEC-045 R-1).
+
+    Same generous timeout as the session sibling: one bounded model call
+    plus a skills-hub validation round-trip (and a bounded regeneration
+    on rejection). Upstream 404 answers unknown incident ids, 409 means
+    the incident has no validated triage report; 502/503 mean the draft
+    failed validation legs and is never returned.
+    """
+    timeout = httpx.Timeout(60.0, connect=5.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            f"{settings.agent_service_url}/api/v2/incidents/{incident_id}/skill-draft",
+            headers=_headers(request_id, user_id),
+        )
+    response.raise_for_status()
+    return response.json()
+
+
 async def runtime_metadata(settings: PlatformGatewaySettings) -> dict:
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(

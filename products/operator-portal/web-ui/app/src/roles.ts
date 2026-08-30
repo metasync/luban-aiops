@@ -55,6 +55,18 @@ export const SKILL_DRAFT_ROLES = new Set([
   "operator",
 ]);
 
+// SPEC-045 R-4: incident:skill_draft follows the same operational
+// grant (bundled with incident:read, which observer roles hold) —
+// drafting a skill from an incident's validated triage is an
+// operational act, so developer and observer hold it not. Client-side
+// mirror of allow-operators-incident-skill-draft; the gateway
+// re-enforces both actions on every request.
+export const INCIDENT_SKILL_DRAFT_ROLES = new Set([
+  "platform-admin",
+  "approver",
+  "operator",
+]);
+
 export function hasAnyRole(roles: string[], allowed: Set<string>): boolean {
   return roles.some((role) => allowed.has(role));
 }

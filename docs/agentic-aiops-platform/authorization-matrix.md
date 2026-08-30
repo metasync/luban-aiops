@@ -410,7 +410,7 @@ ownership scoping (anti-enumeration 404 for foreign sessions) and no new
 audit event; `auditor` holds none of the session actions. Since v0.26.0
 (SPEC-044) `session:skill_draft` gates the skill-draft export — one
 bounded generation over the caller's own session record, validated on
-skills-hub's ingestion code path before it is returned and downloaded
+skills-hub's ingestion code path before it is returned and handed over
 client-side (nothing persisted). The action follows the documents-create
 grant pattern: `platform-admin`, `approver`, and `operator` hold it;
 `developer`, `read-only-observer`, and `auditor` receive the standard
@@ -418,7 +418,21 @@ audited policy 403. Ownership stays enforced by the anti-enumeration
 404, and each successful draft is recorded as a
 `skill_draft_generated` audit event carrying the session, the covered
 incident id when present, the mode (generated/skeleton), and the
-validation outcome. The full approval model —
+validation outcome. Since v0.27.0 (SPEC-045) the incident detail gains
+the companion entry point: `incident:skill_draft` gates drafting a skill
+from an incident's **validated triage report**, dual-gated with
+`incident:read` at the same route (the SPEC-043 pattern; a denial
+reports the first failing action) and granted to the same operational
+roles — a triaged incident is team property, so the drafter need not
+own the triage session. The bundle is the incident envelope (minus the
+raw failed-triage output) plus the validated report only — never
+anyone's session; an incident without a validated report (new,
+triaging, `triage_failed`) answers a deterministic 409 instead of a
+thin guess. Both entry points open the validated draft in a read-only
+preview modal before the client-side download, and each incident
+generation is recorded once as `incident_skill_draft_generated`
+carrying the incident id, mode, and validation outcome — emitted
+regardless of whether the operator downloads or discards. The full approval model —
 policy actions, risk-tier admission, the agent auto-allow list, and HITL
 confirmation — is documented in the
 [Approval and HITL Governance Guide](../guides/approval-and-hitl.md).

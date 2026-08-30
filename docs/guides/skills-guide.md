@@ -104,10 +104,14 @@ page.
    it is returned — an unvalidated draft is never handed out. If
    validation cannot run (dependency not configured or unreachable) the
    request fails closed with 503/502 instead.
-3. The browser downloads `<suggested-slug>.md`. The download toast tells
-   you whether you hold a **generated** draft or the facts-only
-   **skeleton** (the honest degradation for quiet sessions or generation
-   failures — always format-valid).
+3. The draft opens in a read-only **preview modal** (SPEC-045): a
+   rendered view plus a **Raw** toggle showing the full markdown
+   (including the provenance block), a mode badge, the validation
+   status, and the suggested filename. **Download .md** hands over
+   `<suggested-slug>.md`; **Discard** drops the draft without
+   downloading. The badge tells you whether you hold a **generated**
+   draft or the facts-only **skeleton** (the honest degradation for
+   quiet sessions or generation failures — always format-valid).
 4. Review, edit, and merge the draft into a skill source as usual
    ([Adding a skill to an existing source](#adding-a-skill-to-an-existing-source)).
    Every draft carries an HTML-comment provenance block (session, covered
@@ -118,6 +122,34 @@ page.
 Content guardrails are deterministic, not model obedience: the gateway's
 redaction vocabulary scrubs the generated body and the Skill Format caps
 are enforced by post-processing regardless of what the model emitted.
+
+## Authoring a skill from an incident's validated triage (SPEC-045)
+
+A triaged incident is team property — anyone holding the grant can turn
+its validated triage into a skill draft, no matter who ran the triage
+session:
+
+1. Open the incident in the portal Incidents view and press **Draft as
+   skill** beside **Run/Re-run triage** and **Continue in chat**
+   (visible to `platform-admin`, `approver`, and `operator`; the gateway
+   checks both `incident:skill_draft` and `incident:read` on every
+   request).
+2. The draft is generated from the incident envelope (minus the raw
+   failed-triage output) and the validated triage report only — never
+   from anyone's session — validated on the same skills-hub code path,
+   with the same fail-closed 503/502 postures and the same skeleton
+   degradation.
+3. An incident without a validated triage report (new, triaging, or
+   failed triage) returns a deterministic **409** — the toast names the
+   precondition: run triage first, then draft the skill. The platform
+   never guesses.
+4. The same read-only preview modal opens; the provenance block carries
+   the incident id and no session line. Download or discard as above.
+
+Each generation — session- or incident-anchored, downloaded or discarded
+— is recorded once in the audit trail (`skill_draft_generated` /
+`incident_skill_draft_generated`); the audit event is the platform's only
+trace of an ephemeral draft.
 
 ## Adding a skill to an existing source
 

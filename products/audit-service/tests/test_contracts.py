@@ -105,6 +105,22 @@ class AuditEventContractTests(unittest.TestCase):
             _load_schema(self.schema_name),
         )
 
+    def test_incident_skill_draft_generated_event_validates(self) -> None:
+        # SPEC-045 R-3: agent-platform emits the incident-anchored entry
+        # point's event; it carries the incident id, never a session id.
+        event = _event(
+            event_type="incident_skill_draft_generated",
+            details={
+                "incident_id": "inc-abc123",
+                "mode": "generated",
+                "validation": "passed",
+            },
+        )
+        jsonschema.validate(
+            event.model_dump(mode="json", exclude_none=True),
+            _load_schema(self.schema_name),
+        )
+
     def test_document_events_validate(self) -> None:
         # SPEC-039 R-5: agent-service emits document_created /
         # document_published / cross-owner document_read; the model must

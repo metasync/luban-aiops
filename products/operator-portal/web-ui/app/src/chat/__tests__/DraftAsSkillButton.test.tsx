@@ -1,8 +1,9 @@
-// Draft-as-skill session action tests (SPEC-044 R-5): role-matrix
-// visibility (client-side mirror of allow-operators-skill-draft; the
-// gateway re-enforces session:skill_draft regardless), the busy state,
-// the SPEC-040 R-4 Blob download filename, the mode toast, and the
-// structured 403/502/503 error toasts.
+// Draft-as-skill session action tests (SPEC-044 R-5, rewired by
+// SPEC-045 R-5): role-matrix visibility (client-side mirror of
+// allow-operators-skill-draft; the gateway re-enforces
+// session:skill_draft regardless), the busy state, the shared preview
+// modal opening with the mode badge instead of a blind download, and
+// the structured 403/502/503 error toasts.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DraftAsSkillButton } from "../ChatView";
@@ -64,46 +65,41 @@ describe("DraftAsSkillButton (SPEC-044 R-5)", () => {
     },
   );
 
-  it("downloads the suggested filename and toasts the generated mode", async () => {
+  it("opens the preview modal with the generated badge and no download", async () => {
     useRoles(["operator"]);
     mockCreateSkillDraft.mockResolvedValue(DRAFT_RESPONSE);
     const clickSpy = vi
       .spyOn(HTMLAnchorElement.prototype, "click")
-      .mockImplementation(function (this: HTMLAnchorElement) {
-        expect(this.download).toBe("restart-checkout.md");
-      });
+      .mockImplementation(() => {});
     render(<DraftAsSkillButton sessionId="ses-1" />);
     await act(async () => {
       fireEvent.click(screen.getByLabelText("Draft as skill"));
     });
     expect(mockCreateSkillDraft).toHaveBeenCalledWith("ses-1");
-    expect(clickSpy).toHaveBeenCalled();
-    expect(URL.createObjectURL).toHaveBeenCalled();
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock");
+    // Preview first: nothing downloads until the modal's Download .md.
+    expect(clickSpy).not.toHaveBeenCalled();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(await screen.findByText("Skill draft preview")).toBeTruthy();
+    expect(screen.getByText("generated")).toBeTruthy();
+    expect(screen.getByText("restart-checkout.md")).toBeTruthy();
     expect(
-      await screen.findByText("Skill draft downloaded (validated)."),
+      screen.getByLabelText("Download skill draft markdown"),
     ).toBeTruthy();
   });
 
-  it("distinguishes the facts-only skeleton mode in the toast", async () => {
+  it("badges the facts-only skeleton mode in the preview modal", async () => {
     useRoles(["operator"]);
     mockCreateSkillDraft.mockResolvedValue({
       ...DRAFT_RESPONSE,
       mode: "skeleton",
       suggested_filename: "session-skill-draft.md",
     });
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
-      function (this: HTMLAnchorElement) {
-        expect(this.download).toBe("session-skill-draft.md");
-      },
-    );
     render(<DraftAsSkillButton sessionId="ses-quiet" />);
     await act(async () => {
       fireEvent.click(screen.getByLabelText("Draft as skill"));
     });
-    expect(
-      await screen.findByText(/facts-only skill skeleton/),
-    ).toBeTruthy();
+    expect(await screen.findByText("Skill draft preview")).toBeTruthy();
+    expect(screen.getByText("facts-only skeleton")).toBeTruthy();
   });
 
   it("shows the busy state while generation runs", async () => {
@@ -114,7 +110,6 @@ describe("DraftAsSkillButton (SPEC-044 R-5)", () => {
         release = resolve;
       }),
     );
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     render(<DraftAsSkillButton sessionId="ses-1" />);
     const button = screen.getByLabelText("Draft as skill");
     await act(async () => {
@@ -132,20 +127,17 @@ describe("DraftAsSkillButton (SPEC-044 R-5)", () => {
     );
   });
 
-  it("maps a 403 to the role-denial toast without downloading", async () => {
+  it("maps a 403 to the role-denial toast without opening the preview", async () => {
     useRoles(["operator"]);
     const { ApiError } = await import("../../api/client");
     mockCreateSkillDraft.mockRejectedValue(
       new ApiError(403, "Request failed: 403 Forbidden"),
     );
-    const clickSpy = vi
-      .spyOn(HTMLAnchorElement.prototype, "click")
-      .mockImplementation(() => {});
     render(<DraftAsSkillButton sessionId="ses-1" />);
     await act(async () => {
       fireEvent.click(screen.getByLabelText("Draft as skill"));
     });
-    expect(clickSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText("Skill draft preview")).toBeNull();
     expect(
       await screen.findByText("Your role cannot draft skills from sessions."),
     ).toBeTruthy();

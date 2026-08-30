@@ -534,6 +534,47 @@ async def create_skill_draft(
         ) from exc
 
 
+async def create_incident_skill_draft(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    incident_id: str,
+    user_id: str,
+) -> dict:
+    """Proxy an incident-anchored skill-draft generation (SPEC-045 R-2).
+
+    House mapping, identical to the session sibling: upstream 4xx
+    (unknown incident id, the deterministic 409 triage gate) passes
+    through with the agent's structured detail; upstream 502/503
+    (validation legs unreachable/not configured — an unvalidated draft
+    is never returned) pass through verbatim; other 5xx and transport
+    failures map to 502. The response is passed through verbatim; the
+    gateway holds no draft state.
+    """
+    try:
+        return await agent_client.create_incident_skill_draft(
+            settings, request_id, incident_id, user_id
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail=_upstream_detail(
+                    exc, "agent service rejected the incident skill draft"
+                ),
+            ) from exc
+        raise HTTPException(
+            status_code=status if status in (502, 503) else 502,
+            detail=_upstream_detail(
+                exc, "agent service incident skill draft failed"
+            ),
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+
 def _upstream_detail(exc: httpx.HTTPStatusError, fallback: str) -> object:
     """The agent's structured detail when present, else the fallback.
 

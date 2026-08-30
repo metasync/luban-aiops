@@ -180,6 +180,15 @@ class PolicyMatrixScopingTests(PolicyMatrixBase):
         self.assertFalse(matrix["developer"]["session:skill_draft"])
         self.assertFalse(matrix["read-only-observer"]["session:skill_draft"])
         self.assertFalse(matrix["auditor"]["session:skill_draft"])
+        # SPEC-045 R-3: incident:skill_draft mirrors the session sibling;
+        # the route dual-gates with incident:read, so observer/developer
+        # incident visibility alone never admits them here.
+        self.assertIn("incident:skill_draft", payload["actions"])
+        for role in ("platform-admin", "approver", "operator"):
+            self.assertTrue(matrix[role]["incident:skill_draft"], role)
+        self.assertFalse(matrix["developer"]["incident:skill_draft"])
+        self.assertFalse(matrix["read-only-observer"]["incident:skill_draft"])
+        self.assertFalse(matrix["auditor"]["incident:skill_draft"])
         # auditor exists in the bundle (audit:read) but holds nothing else.
         self.assertTrue(matrix["auditor"]["audit:read"])
         self.assertFalse(matrix["auditor"]["chat"])

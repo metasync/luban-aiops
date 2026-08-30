@@ -1,11 +1,14 @@
-"""Skill-draft generation from a session's durable facts (SPEC-044 R-1/R-6).
+"""Skill-draft generation from durable platform facts (SPEC-044/SPEC-045).
 
-One route over the caller's own session assembles the generation input
-deterministically — the same session-fact digest the shift-summary uses,
-plus the validated triage report when the session is incident-linked —
-runs one bounded LLM call, and returns a Markdown skill draft. The prompt
-receives the digest bundle only (never raw transcripts, alert payloads, or
-evidence payloads); facts are copied verbatim, the model only shapes them.
+Two anchors, one guardrail set. The session-scoped route (SPEC-044 R-1/R-6)
+assembles the caller's own session-fact digest — the same digest the
+shift-summary uses, plus the validated triage report when the session is
+incident-linked. The incident-anchored route (SPEC-045 R-1) assembles the
+incident envelope (with ``triage_raw`` stripped) plus the validated triage
+report only — never anyone's session. Both run one bounded LLM call and
+return a Markdown skill draft. The prompt receives the digest bundle only
+(never raw transcripts, alert payloads, or evidence payloads); facts are
+copied verbatim, the model only shapes them.
 
 Content guardrails are deterministic, never model obedience: the model
 proposes within a fenced ``skill-frontmatter`` contract, and the platform
@@ -81,6 +84,20 @@ _SEGMENT_CLEANUP = re.compile(r"[^a-z0-9]+")
 
 MODE_GENERATED = "generated"
 MODE_SKELETON = "skeleton"
+
+ANCHOR_SESSION = "session"
+ANCHOR_INCIDENT = "incident"
+
+
+class NoValidatedTriageReport(Exception):
+    """The incident holds no validated triage report — drafting answers
+    a deterministic 409 (SPEC-045 Q-2), never a thin envelope guess."""
+
+    def __init__(self, incident_id: str) -> None:
+        super().__init__(
+            f"incident {incident_id} has no validated triage report"
+        )
+        self.incident_id = incident_id
 
 
 class SkillFrontmatter(BaseModel):
@@ -163,9 +180,40 @@ async def build_skill_draft_bundle(
     return bundle, incident_id
 
 
+async def build_incident_skill_draft_bundle(
+    settings: Any,
+    request_id: str | None,
+    incident_id: str,
+) -> dict[str, Any]:
+    """Assemble the incident-anchored generation input (SPEC-045 R-1).
+
+    The bundle is the incident envelope (``triage_raw`` stripped — raw,
+    unvalidated agent output never reaches the builder) plus the
+    validated triage report, fetched through the SPEC-043 incident
+    client in one bounded GET. Connector dispatches are excluded
+    (action history, not diagnostic technique — Q-3); the report's
+    session reference is stripped so the draft never names anyone's
+    session. An incident without a validated triage report raises the
+    typed ``NoValidatedTriageReport`` — the route answers 409.
+    """
+    incident_bundle = await fetch_incident_bundle(settings, request_id, incident_id)
+    envelope = {
+        key: value
+        for key, value in (incident_bundle.get("incident") or {}).items()
+        if key != "triage_raw"  # raw agent output never reaches the prompt
+    }
+    report = incident_bundle.get("report")
+    if not report:
+        raise NoValidatedTriageReport(incident_id)
+    report = {
+        key: value for key, value in report.items() if key != "session_id"
+    }
+    return {"incident": {"envelope": envelope, "triage_report": report}}
+
+
 _PROMPT_TEMPLATE = """\
 You are drafting a reusable operations skill for the team's skills \
-repository from the record of one troubleshooting session. Write it for \
+repository {anchor_source}. Write it for \
 the colleague who meets the same problem next: plain, direct, procedural.
 
 Output contract — two parts, in order:
@@ -180,7 +228,7 @@ what to check, and what the record shows worked. Use short headings and \
 lists; keep it under a few hundred lines.
 
 Anchoring rules: state only facts present in the digest bundle; every \
-claim must trace to the sessions, handover, or incident section. Never \
+claim must trace to {anchor_sections}. Never \
 invent steps, causes, or numbers the record does not support. Never \
 include secrets, credentials, tokens, hostnames, IP addresses, or \
 customer-identifying data in the draft.
@@ -190,12 +238,28 @@ JSON digest bundle:
 {bundle_json}
 """
 
+_ANCHOR_SOURCES = {
+    ANCHOR_SESSION: "from the record of one troubleshooting session",
+    ANCHOR_INCIDENT: (
+        "from the validated triage report of one incident"
+    ),
+}
+_ANCHOR_SECTIONS = {
+    ANCHOR_SESSION: "the sessions, handover, or incident section",
+    ANCHOR_INCIDENT: "the incident envelope or the triage report section",
+}
+
 
 def build_skill_draft_prompt(
-    bundle: dict[str, Any], rejection_reason: str | None = None
+    bundle: dict[str, Any],
+    rejection_reason: str | None = None,
+    anchor: str = ANCHOR_SESSION,
 ) -> str:
     """Build the digest-only prompt; the digest bundle is the sole input.
 
+    The anchor selects the framing sentence and the anchoring sections
+    (session record vs incident triage); the fenced contract, the
+    prohibitions, and the digest-only posture are identical for both.
     On the bounded regeneration the rejection reason rides the prompt so
     the model can correct the specific contract violation.
     """
@@ -207,6 +271,8 @@ def build_skill_draft_prompt(
             "satisfies the output contract.\n\n"
         )
     return _PROMPT_TEMPLATE.format(
+        anchor_source=_ANCHOR_SOURCES[anchor],
+        anchor_sections=_ANCHOR_SECTIONS[anchor],
         retry_hint=retry_hint,
         bundle_json=json.dumps(bundle, sort_keys=True, default=str),
     )
@@ -285,18 +351,20 @@ def slug_from_title(title: str) -> str:
 
 
 def provenance_block(
-    session_id: str, incident_id: str | None, mode: str
+    session_id: str | None, incident_id: str | None, mode: str
 ) -> str:
-    """Deterministic HTML-comment provenance (SPEC-044 Q-5).
+    """Deterministic HTML-comment provenance (SPEC-044 Q-5, SPEC-045 R-1).
 
     Body content, not frontmatter — the team may keep or strip it on
-    merge without breaking ingestion.
+    merge without breaking ingestion. The incident-anchored draft names
+    the incident only — never anyone's session.
     """
     lines = [
         "<!--",
         "Skill draft generated by the Luban AIOps platform.",
-        f"session: {session_id}",
     ]
+    if session_id:
+        lines.append(f"session: {session_id}")
     if incident_id:
         lines.append(f"incident: {incident_id}")
     lines.extend(
@@ -330,7 +398,7 @@ def _yaml_frontmatter(frontmatter: dict[str, Any]) -> str:
 def assemble_markdown(
     frontmatter: dict[str, Any],
     body: str,
-    session_id: str,
+    session_id: str | None,
     incident_id: str | None,
     mode: str,
 ) -> tuple[str, str]:
@@ -459,6 +527,94 @@ def build_skeleton(bundle: dict[str, Any]) -> tuple[dict[str, Any], str]:
     return frontmatter, "\n".join(lines).strip()
 
 
+def build_incident_skeleton(bundle: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """Deterministic facts-only draft for the incident anchor (SPEC-045 R-1).
+
+    Assembled from the incident envelope + triage-report facts only —
+    always format-valid, never names anyone's session. Mirrors the
+    session skeleton's posture: contract frontmatter from the facts,
+    report sections copied verbatim.
+    """
+    incident = bundle.get("incident") or {}
+    envelope = incident.get("envelope") or {}
+    report = incident.get("triage_report") or {}
+
+    title_seed = envelope.get("title") or envelope.get("incident_id") or ""
+    title = (
+        f"Triage runbook: {title_seed}" if title_seed else "Incident skill draft"
+    ).strip()[:MAX_TITLE_CHARS]
+
+    description_seed = report.get("summary") or envelope.get("summary") or ""
+    if description_seed:
+        description = str(description_seed).strip()[:MAX_DESCRIPTION_CHARS]
+    else:
+        description = (
+            "Facts-only skill draft assembled from the incident envelope and "
+            "validated triage report; no triage narrative was available."
+        )
+
+    tags: list[str] = ["triage"]
+    severity = envelope.get("severity")
+    if isinstance(severity, str) and severity.strip():
+        tags.insert(0, severity.strip()[:MAX_TAG_CHARS])
+
+    lines: list[str] = ["# " + title, ""]
+    lines.append("## Context")
+    lines.append("")
+    lines.append(
+        f"- Incident: {envelope.get('incident_id', 'unknown')} "
+        f"(severity: {envelope.get('severity', 'unknown')}, "
+        f"status: {envelope.get('status', 'unknown')})"
+    )
+    lines.append("")
+    summary = report.get("summary")
+    if summary:
+        lines.append("## Summary")
+        lines.append("")
+        lines.append(str(summary))
+        lines.append("")
+    hypotheses = report.get("hypotheses") or []
+    if hypotheses:
+        lines.append("## Hypotheses")
+        lines.append("")
+        for hypothesis in hypotheses:
+            lines.append(f"- {hypothesis}")
+        lines.append("")
+    next_steps = report.get("next_steps") or []
+    if next_steps:
+        lines.append("## Next steps")
+        lines.append("")
+        for step in next_steps:
+            step_title = step.get("title") if isinstance(step, dict) else step
+            lines.append(f"- {step_title}")
+        lines.append("")
+    evidence = report.get("evidence") or []
+    if evidence:
+        lines.append("## Evidence")
+        lines.append("")
+        for item in evidence:
+            if isinstance(item, dict):
+                lines.append(
+                    f"- {item.get('source', 'unknown')}: "
+                    f"{item.get('description', '')}"
+                )
+            else:
+                lines.append(f"- {item}")
+        lines.append("")
+    generated_by = report.get("generated_by")
+    if generated_by:
+        lines.append("## Attribution")
+        lines.append("")
+        lines.append(f"- Triage run by: {generated_by}")
+        generated_at = report.get("generated_at")
+        if generated_at:
+            lines.append(f"- Triage date: {generated_at}")
+        lines.append("")
+
+    frontmatter = {"title": title, "description": description, "tags": tags}
+    return frontmatter, "\n".join(lines).strip()
+
+
 # --- Bounded generation ---------------------------------------------------------
 
 
@@ -466,6 +622,7 @@ async def generate_skill_draft(
     kernel: Any,
     bundle: dict[str, Any],
     rejection_reason: str | None = None,
+    anchor: str = ANCHOR_SESSION,
 ) -> tuple[dict[str, Any], str] | None:
     """One bounded model call; ``(frontmatter, body)`` or ``None``.
 
@@ -478,7 +635,7 @@ async def generate_skill_draft(
 
     try:
         model = kernel._build_model(None)
-        prompt = build_skill_draft_prompt(bundle, rejection_reason)
+        prompt = build_skill_draft_prompt(bundle, rejection_reason, anchor)
         message = Msg(
             name="user",
             role="user",

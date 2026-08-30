@@ -90,9 +90,17 @@ Log in through operator-portal as a role with the incident actions (see
    disabled while a triage is in flight. Success renders the report; failure
    surfaces a plain error banner and leaves the incident in `triage_failed` —
    run it again once the underlying problem is fixed.
-4. **Continue in chat.** Opens the chat view on the incident's triage session
+4. **Draft as skill** (SPEC-045). Turns the validated triage report into a
+   Skill Format v1 draft — built from the incident envelope and the report
+   only, never from anyone's session — and opens it in a read-only preview
+   modal (rendered + raw toggle, mode badge, Download .md / Discard).
+   Available to `platform-admin`, `approver`, and `operator` regardless of
+   who ran the triage; an incident without a validated report answers 409
+   with a precondition toast — run triage first, then draft the skill. See
+   the [Skills and Guidance Guide](skills-guide.md) for the merge step.
+5. **Continue in chat.** Opens the chat view on the incident's triage session
    so follow-up questions carry the gathered evidence.
-5. **Report incident.** Manual intake form: title, summary, severity
+6. **Report incident.** Manual intake form: title, summary, severity
    (`critical`/`warning`/`info`), optional `key=value` labels.
 
 **Interpreting triage output.** Triage is advisory: the agent grounds its

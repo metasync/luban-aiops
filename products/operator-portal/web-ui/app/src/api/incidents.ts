@@ -2,6 +2,11 @@
 // SPEC-023 R-5). Shapes mirror the incident-service gateway contracts.
 import { requestJson } from "./client";
 
+// The incident-anchored draft returns the same shape as the session
+// entry point (SPEC-045 R-4 reuses the SPEC-044 contract).
+import type { SkillDraftResponse } from "./sessions";
+export type { SkillDraftResponse };
+
 export interface IncidentSummary {
   incident_id: string;
   title: string;
@@ -119,4 +124,20 @@ export async function reportIncident(
     method: "POST",
     body: input,
   });
+}
+
+// Incident-anchored skill draft (SPEC-045 R-4): generated from the
+// incident envelope (minus triage_raw) plus the validated triage report
+// — never from anyone's session. Dual-gated on incident:skill_draft +
+// incident:read at the gateway. Throws ApiError 403 (either action
+// denied), 404 (unknown incident), 409 (no validated triage report —
+// triage_failed and untriaged incidents alike), 503 (validation not
+// configured), or 502 (validation unreachable).
+export async function createIncidentSkillDraft(
+  incidentId: string,
+): Promise<SkillDraftResponse> {
+  return requestJson<SkillDraftResponse>(
+    `/api/v1/incidents/${encodeURIComponent(incidentId)}/skill-draft`,
+    { method: "POST" },
+  );
 }

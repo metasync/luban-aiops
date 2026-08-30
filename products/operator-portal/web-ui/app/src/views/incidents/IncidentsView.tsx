@@ -13,10 +13,17 @@ import {
   Table,
   Tag,
   Typography,
+  message,
   type TableColumnsType,
 } from "antd";
-import { ArrowLeftOutlined, MessageOutlined } from "@ant-design/icons";
 import {
+  ArrowLeftOutlined,
+  FileTextOutlined,
+  MessageOutlined,
+} from "@ant-design/icons";
+import { ApiError } from "../../api/client";
+import {
+  createIncidentSkillDraft,
   getIncident,
   listIncidents,
   reportIncident,
@@ -25,12 +32,15 @@ import {
   type IncidentDetailPayload,
   type IncidentFilters,
   type IncidentSummary,
+  type SkillDraftResponse,
   type TriageReport,
 } from "../../api/incidents";
 import { useAuth } from "../../auth/AuthContext";
 import { renderMarkdown } from "../../chat/markdown";
+import { SkillDraftPreviewModal } from "../../chat/SkillDraftPreview";
 import {
   INCIDENT_ACT_ROLES,
+  INCIDENT_SKILL_DRAFT_ROLES,
   INCIDENT_VIEW_ROLES,
   hasAnyRole,
 } from "../../roles";
@@ -86,6 +96,7 @@ export default function IncidentsView({
   const { roles } = useAuth();
   const canView = hasAnyRole(roles, INCIDENT_VIEW_ROLES);
   const canAct = hasAnyRole(roles, INCIDENT_ACT_ROLES);
+  const canDraft = hasAnyRole(roles, INCIDENT_SKILL_DRAFT_ROLES);
 
   const [filters, setFilters] = useState<IncidentFilters>({});
   const [incidents, setIncidents] = useState<IncidentSummary[]>([]);
@@ -219,6 +230,7 @@ export default function IncidentsView({
         payload={detail}
         triaging={triaging}
         canAct={canAct}
+        canDraft={canDraft}
         error={error}
         onBack={backToList}
         onTriage={() => void triggerTriage(detail.incident.incident_id)}
@@ -390,6 +402,7 @@ function IncidentDetail({
   payload,
   triaging,
   canAct,
+  canDraft,
   error,
   onBack,
   onTriage,
@@ -398,6 +411,7 @@ function IncidentDetail({
   payload: IncidentDetailPayload;
   triaging: boolean;
   canAct: boolean;
+  canDraft: boolean;
   error: string | null;
   onBack: () => void;
   onTriage: () => void;
@@ -405,6 +419,42 @@ function IncidentDetail({
 }) {
   const { incident, report, dispatches } = payload;
   const labels = incident.labels ?? {};
+
+  // SPEC-045 R-4: incident-anchored draft — generated from the
+  // incident's validated triage, never from anyone's session. The
+  // response opens in the shared read-only preview (SPEC-045 R-5);
+  // the gateway re-enforces incident:skill_draft + incident:read.
+  const [drafting, setDrafting] = useState(false);
+  const [draft, setDraft] = useState<SkillDraftResponse | null>(null);
+  const requestDraft = async () => {
+    if (drafting) return;
+    setDrafting(true);
+    try {
+      const result = await createIncidentSkillDraft(incident.incident_id);
+      setDraft(result);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) {
+        message.error("Your role cannot draft skills from incidents.");
+      } else if (err instanceof ApiError && err.status === 404) {
+        message.error("Incident not found.");
+      } else if (err instanceof ApiError && err.status === 409) {
+        message.error(
+          "No validated triage report yet — run triage first, then " +
+            "draft the skill.",
+        );
+      } else if (err instanceof ApiError && err.status === 503) {
+        message.error("Skill validation is not configured right now.");
+      } else if (err instanceof ApiError && err.status === 502) {
+        message.error("Skill validation is unreachable — no draft returned.");
+      } else {
+        message.error(
+          err instanceof Error ? err.message : "Skill draft failed.",
+        );
+      }
+    } finally {
+      setDrafting(false);
+    }
+  };
 
   const dispatchColumns: TableColumnsType<ConnectorDispatch> = [
     { title: "connector", dataIndex: "connector" },
@@ -488,10 +538,21 @@ function IncidentDetail({
             {report ? "Re-run triage" : "Run triage"}
           </Button>
         ) : null}
+        {canDraft ? (
+          <Button
+            icon={<FileTextOutlined />}
+            loading={drafting}
+            aria-label="Draft as skill"
+            onClick={() => void requestDraft()}
+          >
+            Draft as skill
+          </Button>
+        ) : null}
         <Button icon={<MessageOutlined />} onClick={onOpenChat}>
           Continue in chat
         </Button>
       </div>
+      <SkillDraftPreviewModal draft={draft} onClose={() => setDraft(null)} />
       {report ? (
         <TriageReportSection report={report} />
       ) : incident.status === "triage_failed" && incident.triage_raw ? (
