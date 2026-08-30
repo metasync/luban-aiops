@@ -33,12 +33,10 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced health endpoints with optional tech-stack version reporting (Python, FastAPI, AgentScope) through new helper functions
-- Added `_tech_versions()` helper function in agent service routes for comprehensive tech-stack version detection
-- Added `_gateway_tech()` function in platform gateway service for gateway-specific tech-stack information
-- Extended shared contract schema with five new nullable fields for informational-only version reporting
-- Updated platform gateway readiness endpoint to include Python and FastAPI version information
-- Maintained backward compatibility by making all new version fields nullable and informational only
+- Enhanced runtime metadata endpoint to include platform version information alongside agent service metadata
+- Updated `/api/v1/runtime` endpoint to override agent service version with platform gateway version for consistent deployment verification
+- Added comprehensive testing coverage for version merging behavior ensuring platform version takes precedence
+- Maintained backward compatibility while providing enhanced version tracking capabilities
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -47,7 +45,7 @@
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Platform Gateway Health Endpoints](#platform-gateway-health-endpoints)
-7. [Enhanced Tech-Stack Version Reporting](#enhanced-tech-stack-version-reporting)
+7. [Enhanced Runtime Metadata Endpoint](#enhanced-runtime-metadata-endpoint)
 8. [Dependency Analysis](#dependency-analysis)
 9. [Performance Considerations](#performance-considerations)
 10. [Troubleshooting Guide](#troubleshooting-guide)
@@ -55,7 +53,7 @@
 12. [Appendices](#appendices)
 
 ## Introduction
-This document provides detailed API documentation for health check and monitoring endpoints across the platform services, with enhanced coverage of the new unauthenticated health endpoints exposed by the platform gateway for operator portal component monitoring. It covers REST endpoints for service health status, readiness probes, and liveness checks; Prometheus-compatible metrics exposure; custom health indicators; dependency status reporting; telemetry collection; distributed tracing integration; and observability conventions. The platform gateway now provides real-time visibility into platform component health without authentication overhead, enabling efficient operator portal monitoring with comprehensive tech-stack version reporting.
+This document provides detailed API documentation for health check and monitoring endpoints across the platform services, with enhanced coverage of the new unauthenticated health endpoints exposed by the platform gateway for operator portal component monitoring. It covers REST endpoints for service health status, readiness probes, and liveness checks; Prometheus-compatible metrics exposure; custom health indicators; dependency status reporting; telemetry collection; distributed tracing integration; and observability conventions. The platform gateway now provides real-time visibility into platform component health without authentication overhead, enabling efficient operator portal monitoring with comprehensive version tracking and deployment verification capabilities.
 
 ## Project Structure
 The platform exposes health and monitoring capabilities consistently across multiple services, with the platform gateway serving as the primary entry point for unauthenticated monitoring:
@@ -140,12 +138,12 @@ Each service implements a consistent set of components to expose health, metrics
 - Observability: OpenTelemetry-based tracing and logging setup
 - Telemetry: Context propagation and instrumentation helpers
 - Platform Gateway: Unauthenticated monitoring endpoints for operator portal integration
-- Tech-Stack Version Detection: Optional version reporting for Python, FastAPI, and framework dependencies
+- Version Tracking: Enhanced runtime metadata with platform version information for deployment verification
 
 Key responsibilities:
 - Health endpoints provide liveness/readiness semantics and aggregate dependency statuses
 - Platform gateway exposes unauthenticated endpoints for monitoring without authentication overhead
-- Tech-stack version detection provides informational-only version information for inventory purposes
+- Runtime metadata endpoint provides comprehensive version information including platform and agent service details
 - Metrics module registers counters, gauges, histograms, and summary metrics
 - Observability initializes tracing providers, propagators, and exporters
 - Telemetry provides request context enrichment and span creation utilities
@@ -173,7 +171,7 @@ The health and monitoring architecture follows a layered approach with the platf
 - HTTP layer: FastAPI routers register health and metrics endpoints
 - Gateway layer: Platform gateway provides unauthenticated access to health and runtime information
 - Service layer: Health aggregators query dependencies and compute overall status
-- Tech-Stack layer: Optional version detection for Python, FastAPI, and framework dependencies
+- Version Tracking layer: Enhanced runtime metadata with platform version information
 - Metrics layer: Prometheus client exposes metrics via an HTTP handler
 - Observability layer: OpenTelemetry SDK configured per service
 
@@ -182,37 +180,25 @@ sequenceDiagram
 participant Client as "Operator Portal"
 participant Gateway as "Platform Gateway"
 participant Router as "FastAPI Router"
-participant Health as "Health Route"
-participant Deps as "Dependencies Checker"
-participant Tech as "Tech Stack Detector"
+participant Runtime as "Runtime Route"
+participant Service as "Gateway Service"
+participant Agent as "Agent Client"
 participant Metrics as "Prometheus Handler"
 participant Obs as "Observability"
 Note over Client,Gateway : Unauthenticated Access
-Client->>Gateway : GET /health/live
-Gateway->>Router : route to health endpoint
-Router->>Health : invoke live_status()
-Health-->>Client : {"status" : "ok", "service" : "platform-gateway"}
-Client->>Gateway : GET /health/ready
-Gateway->>Router : route to health endpoint
-Router->>Health : invoke ready_status()
-Health->>Deps : check_agent_service()
-Health->>Deps : load_policy_bundle()
-Health->>Tech : _gateway_tech()
-Deps-->>Health : {agent_health, policy_rules}
-Tech-->>Health : {python_version, fastapi_version}
-Health-->>Client : {"status" : "ok", "components" : [...], "tech_stack" : {...}}
 Client->>Gateway : GET /api/v1/runtime
 Gateway->>Router : route to runtime endpoint
-Router->>Health : invoke runtime_status()
-Health-->>Client : {"runtime_metadata" : {...}}
-Client->>Gateway : GET /metrics
-Gateway->>Metrics : collect_prometheus_metrics()
-Metrics-->>Client : text/plain metrics
+Router->>Runtime : invoke runtime_metadata()
+Runtime->>Service : call runtime_status()
+Service->>Agent : get runtime_metadata()
+Agent-->>Service : {service, models, version}
+Service->>Service : override version with platform version
+Service-->>Runtime : {service, models, version (platform)}
+Runtime-->>Client : {"service" : "agent-service", "version" : "0.27.2", "models" : []}
 ```
 
 **Diagram sources**
 - [router.py](file://products/platform-gateway/src/platform_gateway/api/router.py)
-- [health.py](file://products/platform-gateway/src/platform_gateway/api/routes/health.py)
 - [runtime.py](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py)
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 - [app.py](file://products/platform-gateway/src/platform_gateway/app.py)
@@ -220,18 +206,17 @@ Metrics-->>Client : text/plain metrics
 ## Detailed Component Analysis
 
 ### Platform Gateway Health Endpoints
-**Updated** Enhanced with optional tech-stack version reporting
+**Updated** Enhanced with platform version information in runtime metadata
 
-The platform gateway exposes three key unauthenticated endpoints with enhanced tech-stack information:
+The platform gateway exposes three key unauthenticated endpoints with enhanced version tracking:
 - Liveness probe (`/health/live`): Returns whether the gateway process is alive and able to serve requests
-- Readiness probe (`/health/ready`): Returns whether the gateway is ready to accept traffic (policy bundle loaded, agent service responsive) with tech-stack details
-- Runtime metadata (`/api/v1/runtime`): Exposes runtime information including service version and agent service status
+- Readiness probe (`/health/ready`): Returns whether the gateway is ready to accept traffic (policy bundle loaded, agent service responsive)
+- Runtime metadata (`/api/v1/runtime`): Exposes runtime information with platform version overriding agent service version
 
 Implementation highlights:
 - All endpoints are unauthenticated, enabling operator portal monitoring without authentication overhead
 - Readiness endpoint performs comprehensive dependency checks including policy bundle loading and agent service connectivity
-- Tech-stack version detection provides Python and FastAPI version information for inventory purposes
-- Runtime endpoint proxies to agent service for runtime metadata without requiring authentication
+- Runtime metadata endpoint merges agent service information with platform version for consistent deployment verification
 - Endpoints follow standard Kubernetes probing patterns for container orchestration compatibility
 
 ```mermaid
@@ -271,11 +256,60 @@ GatewayService --> TechDetector : "_gateway_tech()"
 - [runtime.py](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py)
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 
-### Agent Platform Health Endpoints
-**Updated** Enhanced with comprehensive tech-stack version detection
+### Enhanced Runtime Metadata Endpoint
+**New Section** Documentation for the enhanced runtime metadata endpoint with platform version information
 
-The agent platform now includes a sophisticated tech-stack version detection system:
-- Tech-stack version helper (`_tech_versions()`): Best-effort version detection for Python, FastAPI, and AgentScope
+The platform gateway's runtime metadata endpoint has been enhanced to provide comprehensive version tracking and deployment verification capabilities through platform version overlay.
+
+#### Platform Version Overlay Mechanism
+The runtime metadata endpoint now implements a sophisticated version overlay system:
+
+**Features:**
+- **Version Override**: Platform gateway version always takes precedence over agent service version
+- **Metadata Preservation**: All other agent service metadata fields remain unchanged
+- **Deployment Verification**: Consistent version reporting across all platform components
+- **Backward Compatibility**: Existing agent service responses are preserved and enhanced
+
+**Implementation Details:**
+- The `runtime_status()` function retrieves agent service metadata first
+- Platform version from `SERVICE_VERSION` overrides any existing version field
+- All other agent service fields (service name, models, etc.) pass through unchanged
+- Tests ensure platform version wins even when agent service reports its own version
+
+```mermaid
+flowchart TD
+Start(["Runtime Metadata Request"]) --> GetAgent["Get Agent Service Metadata"]
+GetAgent --> CheckVersion{"Agent Has Version?"}
+CheckVersion --> |Yes| Override["Override with Platform Version"]
+CheckVersion --> |No| AddVersion["Add Platform Version"]
+Override --> PreserveOther["Preserve Other Fields"]
+AddVersion --> PreserveOther
+PreserveOther --> Return["Return Enhanced Response"]
+```
+
+**Diagram sources**
+- [gateway_service.py:87-92](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L87-L92)
+
+#### Version Merging Behavior
+The endpoint ensures consistent version reporting through controlled merging:
+
+**Behavior:**
+- Agent service returns: `{"service": "agent-service", "version": "9.9.9-agent", "models": []}`
+- Platform gateway response: `{"service": "agent-service", "version": "0.27.2", "models": []}`
+- Platform version (`0.27.2`) replaces agent version (`9.9.9-agent`)
+- All other fields remain unchanged
+
+**Testing Coverage:**
+- Comprehensive test suite validates version override behavior
+- Ensures platform version wins regardless of agent service version
+- Verifies other metadata fields pass through unchanged
+
+**Section sources**
+- [gateway_service.py:87-92](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L87-L92)
+- [test_auth_legs.py:107-127](file://products/platform-gateway/tests/test_auth_legs.py#L107-L127)
+
+### Agent Platform Health Endpoints
+- Tech-stack version detection: Best-effort version detection for Python, FastAPI, and AgentScope
 - Enhanced health endpoint: Returns comprehensive health status with optional version information
 - Backward compatible: All new version fields are nullable and informational only
 
@@ -436,7 +470,7 @@ ReturnDegraded --> End
 The health and monitoring system adheres to standard Kubernetes probing patterns and Prometheus metrics conventions:
 - Liveness: Process-level health without dependency checks
 - Readiness: Service-level health including dependency validation
-- Tech-Stack Detection: Optional version reporting for inventory and debugging
+- Version Tracking: Enhanced runtime metadata with platform version overlay
 - Metrics: Prometheus exposition format with labels for dimensionality
 - Tracing: OpenTelemetry spans propagated across service boundaries
 - Platform Gateway: Centralized unauthenticated access for operator monitoring
@@ -445,7 +479,7 @@ The health and monitoring system adheres to standard Kubernetes probing patterns
 graph TB
 Liveness["Liveness Probe"] --> Process["Process Alive"]
 Readiness["Readiness Probe"] --> Dependencies["Dependencies Healthy"]
-TechDetection["Tech-Stack Detection"] --> Versions["Version Information"]
+VersionTracking["Version Tracking"] --> PlatformVersion["Platform Version Overlay"]
 Metrics["Prometheus Metrics"] --> Exporter["HTTP Endpoint"]
 Tracing["OpenTelemetry Tracing"] --> Propagation["Context Propagation"]
 Gateway["Platform Gateway"] --> Unauth["Unauthenticated Access"]
@@ -455,9 +489,9 @@ Gateway --> OperatorPortal["Operator Portal Monitoring"]
 [No sources needed since this diagram shows conceptual workflow, not actual code structure]
 
 ## Platform Gateway Health Endpoints
-**New Section** Added comprehensive documentation for platform gateway monitoring endpoints
+**Updated** Enhanced with platform version information in runtime metadata
 
-The platform gateway serves as the primary entry point for unauthenticated health monitoring, providing three key endpoints with enhanced tech-stack information:
+The platform gateway serves as the primary entry point for unauthenticated health monitoring, providing three key endpoints with enhanced version tracking:
 
 ### Liveness Endpoint (`/health/live`)
 Returns basic process health information without dependency checks:
@@ -467,99 +501,83 @@ Returns basic process health information without dependency checks:
 - **Use Case**: Container orchestration liveness probes
 
 ### Readiness Endpoint (`/health/ready`)  
-Performs comprehensive dependency validation with tech-stack information:
+Performs comprehensive dependency validation:
 - **Method**: GET
 - **Authentication**: None required
-- **Response**: JSON object with service status, component details, and tech-stack versions
-- **Checks**: Policy bundle loading, agent service connectivity, Python/FastAPI versions
+- **Response**: JSON object with service status and component details
+- **Checks**: Policy bundle loading, agent service connectivity
 - **Use Case**: Container orchestration readiness probes
 
 ### Runtime Metadata Endpoint (`/api/v1/runtime`)
-Exposes runtime information from the agent service:
+**Updated** Enhanced with platform version overlay for deployment verification:
 - **Method**: GET
 - **Authentication**: None required
-- **Response**: JSON object with runtime metadata
-- **Use Case**: Operator portal runtime visibility
+- **Response**: JSON object with runtime metadata and platform version
+- **Version Behavior**: Platform version overrides agent service version
+- **Use Case**: Operator portal runtime visibility and deployment verification
 
 **Section sources**
 - [health.py](file://products/platform-gateway/src/platform_gateway/api/routes/health.py)
 - [runtime.py](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py)
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 
-## Enhanced Tech-Stack Version Reporting
-**New Section** Documentation for the new tech-stack version detection capabilities
+## Enhanced Runtime Metadata Endpoint
+**New Section** Documentation for the enhanced runtime metadata endpoint with platform version information
 
-The platform now includes comprehensive tech-stack version reporting across multiple services, providing valuable inventory and debugging information while maintaining backward compatibility.
+The platform gateway's runtime metadata endpoint has been enhanced to provide comprehensive version tracking and deployment verification capabilities through platform version overlay.
 
-### Agent Platform Tech-Stack Detection
-The agent platform implements a sophisticated tech-stack version detection system through the `_tech_versions()` helper function:
+### Platform Version Overlay Mechanism
+The runtime metadata endpoint now implements a sophisticated version overlay system:
 
 **Features:**
-- **Python Version Detection**: Uses `platform.python_version()` for accurate Python interpreter version
-- **Framework Version Detection**: Safely detects FastAPI and AgentScope versions using `importlib.metadata`
-- **Graceful Fallback**: Returns `None` for any version that cannot be detected, never raising exceptions
-- **Backward Compatibility**: All new version fields are nullable and informational-only
+- **Version Override**: Platform gateway version always takes precedence over agent service version
+- **Metadata Preservation**: All other agent service metadata fields remain unchanged
+- **Deployment Verification**: Consistent version reporting across all platform components
+- **Backward Compatibility**: Existing agent service responses are preserved and enhanced
 
 **Implementation Details:**
-- Uses try-catch blocks around package imports to handle missing dependencies
-- Leverages `importlib.metadata.version()` for reliable package version detection
-- Integrates with session store and agent state store version detection
-- Maintains existing health check behavior while adding version information
-
-### Platform Gateway Tech-Stack Information
-The platform gateway provides simplified tech-stack information through the `_gateway_tech()` function:
-
-**Features:**
-- **Python Version**: Reports the Python interpreter version running the gateway
-- **FastAPI Version**: Reports the FastAPI framework version for consistency
-- **Minimal Overhead**: Lightweight version detection with no external dependencies
-- **Integration**: Seamlessly integrated into readiness endpoint responses
-
-### Shared Contract Schema Updates
-The shared contract schemas have been extended with five new nullable fields:
-
-**Agent Health Schema Extensions:**
-- `python_version`: Informational tech-stack version (string or null)
-- `fastapi_version`: Informational tech-stack version (string or null) 
-- `agentscope_version`: Informational tech-stack version (string or null, null in non-agentscope modes)
-- `session_store_version`: Session store server version when available (string or null)
-- `agent_state_version`: Agent state store server version when available (string or null)
-
-**Design Principles:**
-- **Informational Only**: Version fields never affect health status or readiness decisions
-- **Nullable Fields**: All new fields support null values for backward compatibility
-- **Best-Effort Detection**: Version detection failures result in null values, not errors
-- **Inventory Focus**: Designed for platform inventory and debugging, not operational logic
+- The `runtime_status()` function retrieves agent service metadata first
+- Platform version from `SERVICE_VERSION` overrides any existing version field
+- All other agent service fields (service name, models, etc.) pass through unchanged
+- Tests ensure platform version wins regardless of agent service version
 
 ```mermaid
-flowchart LR
-AgentPlatform["Agent Platform"] --> TechVersions["_tech_versions()"]
-TechVersions --> Python["Python Version"]
-TechVersions --> FastAPI["FastAPI Version"]
-TechVersions --> AgentScope["AgentScope Version"]
-PlatformGateway["Platform Gateway"] --> GatewayTech["_gateway_tech()"]
-GatewayTech --> Python2["Python Version"]
-GatewayTech --> FastAPI2["FastAPI Version"]
-Schema["Shared Contract Schema"] --> NullableFields["5 New Nullable Fields"]
-NullableFields --> Inventory["Platform Inventory"]
-NullableFields --> Debugging["Debugging Support"]
+flowchart TD
+Start(["Runtime Metadata Request"]) --> GetAgent["Get Agent Service Metadata"]
+GetAgent --> CheckVersion{"Agent Has Version?"}
+CheckVersion --> |Yes| Override["Override with Platform Version"]
+CheckVersion --> |No| AddVersion["Add Platform Version"]
+Override --> PreserveOther["Preserve Other Fields"]
+AddVersion --> PreserveOther
+PreserveOther --> Return["Return Enhanced Response"]
 ```
 
 **Diagram sources**
-- [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
-- [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
-- [agent-health.schema.json](file://shared/shared-contracts/schemas/agent-health.schema.json)
+- [gateway_service.py:87-92](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L87-L92)
+
+### Version Merging Behavior
+The endpoint ensures consistent version reporting through controlled merging:
+
+**Behavior:**
+- Agent service returns: `{"service": "agent-service", "version": "9.9.9-agent", "models": []}`
+- Platform gateway response: `{"service": "agent-service", "version": "0.27.2", "models": []}`
+- Platform version (`0.27.2`) replaces agent version (`9.9.9-agent`)
+- All other fields remain unchanged
+
+**Testing Coverage:**
+- Comprehensive test suite validates version override behavior
+- Ensures platform version wins regardless of agent service version
+- Verifies other metadata fields pass through unchanged
 
 **Section sources**
-- [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
-- [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
-- [agent-health.schema.json](file://shared/shared-contracts/schemas/agent-health.schema.json)
+- [gateway_service.py:87-92](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L87-L92)
+- [test_auth_legs.py:107-127](file://products/platform-gateway/tests/test_auth_legs.py#L107-L127)
 
 ## Dependency Analysis
 The services depend on shared observability conventions and implement consistent patterns, with the platform gateway providing centralized access:
 - Health routes depend on dependency checkers and metrics collectors
 - Platform gateway routes depend on gateway service functions for health aggregation
-- Tech-stack detection depends on Python standard library and optional third-party packages
+- Runtime metadata depends on agent client for service information and platform metadata for version
 - Metrics modules depend on Prometheus client libraries
 - Observability modules depend on OpenTelemetry SDK
 - Telemetry modules provide context enrichment and span utilities
@@ -568,16 +586,12 @@ The services depend on shared observability conventions and implement consistent
 graph LR
 Health["Health Routes"] --> Deps["Dependency Checkers"]
 Health --> Metrics["Metrics Collector"]
-Health --> TechDetect["Tech-Stack Detector"]
 Gateway["Platform Gateway"] --> GatewayService["Gateway Service"]
 GatewayService --> PolicyEngine["Policy Engine"]
 GatewayService --> AgentClient["Agent Client"]
-GatewayService --> GatewayTech["_gateway_tech()"]
-TechDetect --> ImportLib["importlib.metadata"]
-TechDetect --> Platform["platform module"]
-Metrics --> Prometheus["Prometheus Client"]
-Observability["Observability"] --> OTel["OpenTelemetry SDK"]
-Telemetry["Telemetry"] --> Context["Request Context"]
+GatewayService --> PlatformMeta["Platform Metadata"]
+AgentClient --> RuntimeMeta["Runtime Metadata"]
+PlatformMeta --> Version["Platform Version"]
 ```
 
 **Diagram sources**
@@ -613,8 +627,8 @@ Telemetry["Telemetry"] --> Context["Request Context"]
 ## Performance Considerations
 - Health checks should be lightweight and avoid blocking operations
 - Platform gateway endpoints are designed for low-latency monitoring queries
-- Tech-stack version detection uses best-effort approaches with minimal overhead
-- Version detection failures are handled gracefully without impacting performance
+- Runtime metadata endpoint performs minimal overhead version overlay operation
+- Version overlay uses simple dictionary assignment with no additional network calls
 - Metrics collection should use efficient data structures and avoid excessive allocations
 - Tracing overhead can be controlled via sampling strategies
 - Dependency checks should implement timeouts and circuit breakers
@@ -625,18 +639,19 @@ Telemetry["Telemetry"] --> Context["Request Context"]
 Common issues and resolution steps:
 - Health check failures: Inspect dependency status responses for specific component failures
 - Platform gateway readiness issues: Check policy bundle loading and agent service connectivity
-- Missing tech-stack versions: Verify Python environment and package installations
+- Missing runtime metadata: Verify agent service availability and network connectivity
+- Version inconsistencies: Check platform version configuration and agent service version reporting
 - Metrics not available: Verify Prometheus scraping configuration and endpoint accessibility
 - Missing traces: Check OpenTelemetry exporter configuration and network connectivity
 - High latency: Analyze histogram metrics and trace spans to identify bottlenecks
 
 Diagnostic workflows:
 - Use platform gateway health endpoints for quick service status checks without authentication
-- Query `/health/ready` to validate complete platform health including dependencies and tech-stack info
-- Use `/api/v1/runtime` for runtime metadata without authentication overhead
+- Query `/health/ready` to validate complete platform health including dependencies
+- Use `/api/v1/runtime` for runtime metadata with platform version overlay
 - Monitor platform gateway logs for policy loading and agent service communication errors
 - Configure operator portal to poll health endpoints at appropriate intervals
-- Check tech-stack version fields for environment consistency across deployments
+- Check version fields in runtime metadata for deployment consistency
 
 **Section sources**
 - [health.py](file://products/platform-gateway/src/platform_gateway/api/routes/health.py)
@@ -654,20 +669,19 @@ Diagnostic workflows:
 - [runtime_dependencies.py](file://products/agent-platform/src/agent_service/services/runtime_dependencies.py)
 
 ## Conclusion
-The platform provides comprehensive health and monitoring capabilities through standardized endpoints, with the platform gateway serving as the central entry point for unauthenticated monitoring. The enhanced tech-stack version reporting adds valuable inventory and debugging capabilities while maintaining full backward compatibility. The new unauthenticated health endpoints enable efficient operator portal monitoring without authentication overhead, while maintaining security for sensitive operations. Each service implements consistent patterns for health checks, dependency reporting, tech-stack version detection, and telemetry collection, enabling effective monitoring, alerting, and troubleshooting across the distributed system.
+The platform provides comprehensive health and monitoring capabilities through standardized endpoints, with the platform gateway serving as the central entry point for unauthenticated monitoring. The enhanced runtime metadata endpoint now includes platform version information alongside agent service metadata, supporting better version tracking and deployment verification. The new version overlay mechanism ensures consistent platform version reporting while preserving all other agent service metadata. The enhanced unauthenticated health endpoints enable efficient operator portal monitoring without authentication overhead, while maintaining security for sensitive operations. Each service implements consistent patterns for health checks, dependency reporting, and telemetry collection, enabling effective monitoring, alerting, and troubleshooting across the distributed system.
 
 ## Appendices
 
 ### API Reference
-**Updated** Added platform gateway endpoints and enhanced tech-stack version reporting
+**Updated** Added enhanced runtime metadata endpoint with platform version information
 
 - Platform Gateway Health Endpoints:
   - GET /health/live: Returns process liveness status (unauthenticated)
-  - GET /health/ready: Returns service readiness with dependency details and tech-stack info (unauthenticated)
-  - GET /api/v1/runtime: Returns runtime metadata (unauthenticated)
+  - GET /health/ready: Returns service readiness with dependency details (unauthenticated)
+  - GET /api/v1/runtime: Returns runtime metadata with platform version overlay (unauthenticated)
 - Agent Platform Health Endpoints:
   - GET /health: Returns comprehensive health status with tech-stack versions (v2-conformant)
-  - Enhanced with python_version, fastapi_version, agentscope_version fields
 - Other Service Health Endpoints:
   - GET /health: Returns overall service health and component statuses
   - GET /health/liveness: Returns process liveness status
@@ -680,22 +694,21 @@ The platform provides comprehensive health and monitoring capabilities through s
   - Create dependency check functions that return status objects
   - Aggregate dependency results in health endpoint handlers
   - Include timeout handling and error recovery
-  - Add tech-stack version detection using best-effort approaches
 - Configuring monitoring dashboards:
   - Import Prometheus metrics into Grafana dashboards
   - Create panels for key performance indicators
   - Set up alerts based on metric thresholds
-  - Display tech-stack version information for inventory tracking
+  - Display runtime version information for deployment tracking
 - Setting up alerting rules:
   - Define rules for health check failures
   - Configure alerts for high error rates and latency
   - Implement escalation policies for critical conditions
-  - Alert on tech-stack version inconsistencies across deployments
+  - Alert on version inconsistencies across deployments
 - Operator portal integration:
   - Poll platform gateway health endpoints at regular intervals
   - Display real-time platform component status
   - Implement fallback mechanisms for endpoint unavailability
-  - Show tech-stack versions for platform inventory
+  - Show runtime versions for platform inventory and deployment verification
 
 ### Observability Conventions
 - Trace naming conventions for consistent span identification
@@ -703,7 +716,7 @@ The platform provides comprehensive health and monitoring capabilities through s
 - Metric labeling standards for dimensional analysis
 - Error handling patterns for observability data
 - Platform gateway monitoring patterns for unauthenticated access
-- Tech-stack version reporting conventions for inventory and debugging
+- Version tracking conventions for deployment verification and inventory management
 
 **Section sources**
 - [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)

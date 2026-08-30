@@ -26,6 +26,7 @@
 - [identity broker tests - token service](file://products/identity-broker/tests/test_token_service.py)
 - [identity broker tests - observability](file://products/identity-broker/tests/test_observability.py)
 - [identity broker tests - exchange service](file://products/identity-broker/tests/test_exchange_service.py)
+- [platform gateway service](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 - [shared identity context schema](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [shared identity token schema](file://shared/shared-contracts/schemas/identity-token.schema.json)
 - [policy center policy default](file://shared/shared-contracts/policies/policy-default.yaml)
@@ -40,11 +41,10 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced exchange_service.py with Kubernetes projected service-account token validation using JWKS discovery and audience claims verification
-- Added new configuration options for workload identity including IDENTITY_WORKLOAD_ISSUER_URL, IDENTITY_WORKLOAD_AUDIENCE, and IDENTITY_WORKLOAD_CLIENTS mapping
-- Maintained backward compatibility with static HTTP Basic authentication as fallback
-- Updated authentication flow diagrams to show dual authentication paths
-- Added comprehensive workload identity documentation and configuration examples
+- Updated error handling architecture to reflect the new `_identity_leg` function in platform gateway that standardizes 4xx pass-through and 5xx conversion to structured 502 responses
+- Enhanced reliability during rollouts with consistent error posture across identity service communication
+- Added comprehensive documentation of the unified error handling pattern used throughout the platform
+- Updated troubleshooting guidance to reflect improved error reporting and retry semantics
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -54,11 +54,12 @@
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Service Client Authentication](#service-client-authentication)
 7. [Workload Identity Support](#workload-identity-support)
-8. [Dependency Analysis](#dependency-analysis)
-9. [Performance Considerations](#performance-considerations)
-10. [Troubleshooting Guide](#troubleshooting-guide)
-11. [Conclusion](#conclusion)
-12. [Appendices](#appendices)
+8. [Error Handling and Reliability](#error-handling-and-reliability)
+9. [Dependency Analysis](#dependency-analysis)
+10. [Performance Considerations](#performance-considerations)
+11. [Troubleshooting Guide](#troubleshooting-guide)
+12. [Conclusion](#conclusion)
+13. [Appendices](#appendices)
 
 ## Introduction
 The Identity Broker Service centralizes authentication and authorization across the platform. It integrates with external OpenID Connect (OIDC) providers, issues and validates tokens, manages user sessions, and exposes standardized identity endpoints consumed by other services such as the Tool Gateway. The service enforces role-based access control (RBAC) through shared policies and produces audit logs for compliance.
@@ -71,6 +72,7 @@ Key responsibilities:
 - Policy-aware identity context propagation
 - **Dual-path service client authentication: static credentials and Kubernetes workload identity**
 - **Kubernetes projected service-account token validation with JWKS discovery**
+- **Standardized error handling with 4xx pass-through and 5xx conversion to structured 502 responses**
 
 **Section sources**
 - [identity-broker README](file://products/identity-broker/README.md)
@@ -106,6 +108,10 @@ B --> L["core/metrics.py"]
 B --> M["core/observability.py"]
 B --> N["core/telemetry.py"]
 end
+subgraph "Platform Gateway"
+O["gateway_service.py"] --> P["_identity_leg function"]
+P --> Q["Error handling middleware"]
+end
 ```
 
 **Diagram sources**
@@ -123,6 +129,7 @@ end
 - [identity broker metrics](file://products/identity-broker/src/identity_service/core/metrics.py)
 - [identity broker observability](file://products/identity-broker/src/identity_service/core/observability.py)
 - [identity broker telemetry](file://products/identity-broker/src/identity_service/core/telemetry.py)
+- [platform gateway service](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 
 **Section sources**
 - [identity broker app](file://products/identity-broker/src/identity_service/app.py)
@@ -157,6 +164,7 @@ Key behaviors:
 - **Dual authentication paths: static HTTP Basic credentials and Kubernetes workload identity**
 - **JWKS-based validation of Kubernetes projected service-account tokens**
 - **Delegated token minting with configurable TTL (300 seconds)**
+- **Standardized error handling with 4xx pass-through and 5xx conversion to structured 502 responses**
 
 **Section sources**
 - [identity broker auth routes](file://products/identity-broker/src/identity_service/api/routes/auth.py)
@@ -168,31 +176,21 @@ Key behaviors:
 - [identity broker observability](file://products/identity-broker/src/identity_service/core/observability.py)
 
 ## Architecture Overview
-The Identity Broker sits between clients and external OIDC providers, issuing platform tokens that downstream services validate. It also persists sessions and propagates identity contexts to enforce policies consistently. The service now supports both user authentication and dual-path service client authentication flows with enhanced Kubernetes workload identity support.
+The Identity Broker sits between clients and external OIDC providers, issuing platform tokens that downstream services validate. It also persists sessions and propagates identity contexts to enforce policies consistently. The service now supports both user authentication and dual-path service client authentication flows with enhanced Kubernetes workload identity support and standardized error handling.
 
 ```mermaid
 sequenceDiagram
 participant Client as "Client App"
-participant Service as "Service Client"
+participant GW as "Platform Gateway"
 participant IB as "Identity Broker"
 participant OIDC as "External OIDC Provider"
 participant K8S as "Kubernetes OIDC"
-participant GW as "Tool Gateway"
 participant POL as "Policy Engine"
-Client->>IB : POST /auth/login (credentials or redirect)
-IB->>OIDC : Initiate OIDC Authorization Code Flow
-OIDC-->>IB : Authorization Code
-IB->>OIDC : Exchange Code for Tokens
-OIDC-->>IB : Access Token + ID Token
-IB->>IB : Validate ID Token, map roles/scopes
-IB->>IB : Issue Platform JWT (signed)
-IB-->>Client : {access_token, refresh_token}
-Service->>IB : POST /api/v1/auth/exchange
+Client->>GW : Request with Platform JWT
+GW->>IB : POST /api/v1/auth/exchange
 alt Static Credentials Path
-Service->>IB : Authorization : Basic (client_id : secret)
 IB->>IB : Validate service client in registry
 else Workload Identity Path
-Service->>IB : Authorization : Bearer (K8s projected token)
 IB->>K8S : Discover JWKS from cluster issuer
 K8S-->>IB : JWKS endpoint URL
 IB->>K8S : Fetch and cache JWKS keys
@@ -201,14 +199,13 @@ IB->>IB : Validate workload token signature & claims
 end
 IB->>IB : Verify subject token against broker's key
 IB->>IB : Issue delegated token (300s TTL)
-IB-->>Service : {delegated_access_token}
-Client->>GW : Request with Platform JWT
-Service->>GW : Request with Delegated Token
-GW->>IB : Validate token (introspect or verify signature)
-IB-->>GW : Validated identity context
-GW->>POL : Evaluate policy with identity context
-POL-->>GW : Decision (allow/deny)
+IB-->>GW : {delegated_access_token}
+alt Success
 GW-->>Client : Response based on decision
+else Error Handling
+GW->>GW : Apply _identity_leg error handling
+GW-->>Client : 4xx pass-through or 502 structured response
+end
 ```
 
 **Diagram sources**
@@ -216,13 +213,11 @@ GW-->>Client : Response based on decision
 - [identity broker exchange service](file://products/identity-broker/src/identity_service/services/exchange_service.py)
 - [identity broker identity service](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [identity broker token service](file://products/identity-broker/src/identity_service/services/token_service.py)
-- [tool gateway token verifier](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
-- [tool gateway policy engine](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
+- [platform gateway service](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 
 **Section sources**
 - [ADR broker mediated token delegation](file://docs/adr/0004-broker-mediated-token-delegation.md)
-- [tool gateway token verifier](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
-- [tool gateway policy engine](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
+- [platform gateway service](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 
 ## Detailed Component Analysis
 
@@ -242,6 +237,7 @@ Behavior highlights:
 - **Dual authentication: static HTTP Basic credentials and Kubernetes workload identity**
 - **JWKS-based validation of projected service-account tokens**
 - **Issues delegated tokens with 300-second TTL for service-to-service communication**
+- **Standardized error handling with 4xx pass-through and 5xx conversion**
 
 ```mermaid
 flowchart TD
@@ -265,6 +261,8 @@ DiscoverJWKS --> ValidateToken["Validate workload token"]
 ValidateToken --> |Valid| IssueDelegated
 ValidateToken --> |Invalid| Reject
 IssueDelegated --> ReturnDelegated["Return delegated token"]
+ErrorHandling["Error Handling"] --> PassThrough["4xx pass-through"]
+ErrorHandling --> Convert5xx["Convert 5xx to 502"]
 ```
 
 **Diagram sources**
@@ -272,6 +270,7 @@ IssueDelegated --> ReturnDelegated["Return delegated token"]
 - [identity broker exchange service](file://products/identity-broker/src/identity_service/services/exchange_service.py)
 - [identity broker identity service](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [identity broker token service](file://products/identity-broker/src/identity_service/services/token_service.py)
+- [platform gateway service](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 
 **Section sources**
 - [identity broker auth routes](file://products/identity-broker/src/identity_service/api/routes/auth.py)
@@ -347,7 +346,7 @@ ExchangeService --> TokenService : "delegates"
 - [identity broker config](file://products/identity-broker/src/identity_service/core/config.py)
 
 ### Identity Context and Policy Enforcement
-Identity context encapsulates subject identity, roles, scopes, and session metadata. Downstream services use this context to enforce policies defined centrally. The system now supports both user and service client identity contexts with enhanced workload identity support.
+Identity context encapsulates subject identity, roles, scopes, and session metadata. Downstream services use this context to enforce policies defined centrally. The system now supports both user and service client identity contexts with enhanced workload identity support and standardized error handling.
 
 Relationships:
 - Identity Broker produces identity context from OIDC tokens
@@ -463,6 +462,7 @@ Best practices:
 - **Service client credential rotation and monitoring**
 - **TTL-based token expiration for enhanced security**
 - **JWKS-based validation for workload identity tokens**
+- **Standardized error handling for security-sensitive operations**
 
 **Section sources**
 - [policy center policy default](file://shared/shared-contracts/policies/policy-default.yaml)
@@ -478,6 +478,7 @@ The Identity Broker provides a dedicated endpoint for service-to-service authent
 - **Credential Verification**: Validates service client credentials against the registry or workload identity mappings
 - **Delegated Token Minting**: Issues short-lived access tokens (300-second TTL) for service-to-service calls
 - **Audit Logging**: Records all authentication attempts and outcomes for compliance
+- **Standardized Error Handling**: Consistent 4xx pass-through and 5xx conversion to structured 502 responses
 
 ### Static Credential Authentication Path
 Traditional HTTP Basic authentication remains fully supported:
@@ -500,7 +501,9 @@ participant Exchange as "Exchange Service"
 participant Registry as "Service Registry"
 participant K8S as "Kubernetes OIDC"
 participant Token as "Token Service"
-Service->>Exchange : POST /api/v1/auth/exchange
+participant Gateway as "Platform Gateway"
+Service->>Gateway : POST /api/v1/auth/exchange
+Gateway->>Exchange : Forward request with error handling
 alt Static Credentials
 Exchange->>Registry : Validate basic credentials
 Registry-->>Exchange : Service client verified
@@ -514,7 +517,9 @@ Registry-->>Exchange : Client verified
 end
 Exchange->>Token : Mint delegated token (300s TTL)
 Token-->>Exchange : Delegated access token
-Exchange-->>Service : {access_token, expires_in}
+Exchange-->>Gateway : Response
+Gateway->>Gateway : Apply _identity_leg error handling
+Gateway-->>Service : {access_token, expires_in}
 ```
 
 ### Security Considerations
@@ -525,11 +530,13 @@ Exchange-->>Service : {access_token, expires_in}
 - Failed authentication attempts trigger security alerts
 - Token validation includes service client context and permissions
 - **JWKS caching for improved performance and reliability**
+- **Standardized error handling for improved reliability during rollouts**
 
 **Section sources**
 - [identity broker exchange service](file://products/identity-broker/src/identity_service/services/exchange_service.py)
 - [identity broker auth routes](file://products/identity-broker/src/identity_service/api/routes/auth.py)
 - [identity broker config](file://products/identity-broker/src/identity_service/core/config.py)
+- [platform gateway service](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 
 ## Workload Identity Support
 
@@ -572,16 +579,67 @@ VerifySignature --> ValidateClaims["Validate Claims (exp, iss, sub, aud)"]
 ValidateClaims --> MapSubject["Map Subject to Client"]
 MapSubject --> |Valid| IssueDelegated["Issue Delegated Token"]
 MapSubject --> |Invalid| Reject["Reject Authentication"]
+ErrorHandling["Error Handling"] --> PassThrough["4xx pass-through"]
+ErrorHandling --> Convert5xx["Convert 5xx to 502"]
 ```
 
 **Diagram sources**
 - [identity broker exchange service](file://products/identity-broker/src/identity_service/services/exchange_service.py)
 - [identity broker config](file://products/identity-broker/src/identity_service/core/config.py)
+- [platform gateway service](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 
 **Section sources**
 - [identity broker exchange service](file://products/identity-broker/src/identity_service/services/exchange_service.py)
 - [identity broker config](file://products/identity-broker/src/identity_service/core/config.py)
 - [identity broker tests - exchange service](file://products/identity-broker/tests/test_exchange_service.py)
+
+## Error Handling and Reliability
+
+The platform now implements a standardized error handling approach through the `_identity_leg` function in the platform gateway, ensuring consistent behavior during identity service communications and improving reliability during rollouts.
+
+### Unified Error Posture
+The `_identity_leg` function provides a centralized approach to handling identity service communications:
+- **4xx Status Codes**: Pass through unchanged to preserve client error semantics
+- **5xx Status Codes**: Convert to structured 502 responses with actionable details
+- **Transport Errors**: Convert to 502 responses with "identity service unavailable" messaging
+- **Structured Error Details**: Extract and preserve meaningful error information from upstream responses
+
+### Rollout Reliability Improvements
+This error handling strategy specifically addresses rollout scenarios:
+- Prevents raw 500 errors from masking as authentication failures
+- Provides clear distinction between client errors and service unavailability
+- Enables better monitoring and alerting for identity service health
+- Maintains consistent user experience during partial outages
+
+### Implementation Pattern
+The error handling follows a consistent pattern across all identity-related operations:
+
+```mermaid
+flowchart TD
+Request["Identity Service Request"] --> TryCall["Try Upstream Call"]
+TryCall --> |Success| ReturnResponse["Return Response"]
+TryCall --> |HTTPStatusError| CheckStatus{"Status < 500?"}
+CheckStatus --> |Yes| PassThrough["Pass Through 4xx"]
+CheckStatus --> |No| Convert502["Convert to 502"]
+TryCall --> |HTTPError| TransportError["Transport Error"]
+TransportError --> Convert502
+Convert502 --> Structured502["Structured 502 Response"]
+PassThrough --> FinalResponse["Final Response"]
+ReturnResponse --> FinalResponse
+Structured502 --> FinalResponse
+```
+
+**Diagram sources**
+- [platform gateway service](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
+
+### Benefits During Rollouts
+- **Graceful Degradation**: Users see actionable errors instead of generic failures
+- **Better Diagnostics**: Clear separation between client errors and service issues
+- **Improved Monitoring**: Consistent error patterns enable better observability
+- **Faster Recovery**: Clear error signals help identify and resolve issues quickly
+
+**Section sources**
+- [platform gateway service](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 
 ## Dependency Analysis
 The Identity Broker depends on:
@@ -591,6 +649,7 @@ The Identity Broker depends on:
 - Observability libraries for metrics and tracing
 - **Service client registry for authentication validation**
 - **Kubernetes OIDC issuer for workload identity validation**
+- **Platform gateway for standardized error handling**
 
 ```mermaid
 graph TB
@@ -600,8 +659,9 @@ IB --> POLICY["Policy Definitions"]
 IB --> OBS["Observability Stack"]
 IB --> REGISTRY["Service Client Registry"]
 IB --> K8S_OIDC["Kubernetes OIDC Issuer"]
-GW["Tool Gateway"] --> IB
+GW["Platform Gateway"] --> IB
 GW --> POLICY
+GW --> ERROR_HANDLING["_identity_leg Error Handler"]
 ```
 
 **Diagram sources**
@@ -609,14 +669,14 @@ GW --> POLICY
 - [shared identity context schema](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [shared identity token schema](file://shared/shared-contracts/schemas/identity-token.schema.json)
 - [policy center policy default](file://shared/shared-contracts/policies/policy-default.yaml)
-- [tool gateway token verifier](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
+- [platform gateway service](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 
 **Section sources**
 - [identity broker config](file://products/identity-broker/src/identity_service/core/config.py)
 - [shared identity context schema](file://shared/shared-contracts/schemas/identity-context.schema.json)
 - [shared identity token schema](file://shared/shared-contracts/schemas/identity-token.schema.json)
 - [policy center policy default](file://shared/shared-contracts/policies/policy-default.yaml)
-- [tool gateway token verifier](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
+- [platform gateway service](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 
 ## Performance Considerations
 - Cache OIDC discovery documents where supported
@@ -628,6 +688,7 @@ GW --> POLICY
 - **Cache JWKS clients per workload issuer URL**
 - **Monitor delegated token minting rates and failures**
 - **Optimize network calls to Kubernetes OIDC endpoints**
+- **Leverage cached error handling for reduced latency**
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -639,6 +700,13 @@ Common issues and resolutions:
 - **Delegated token expiration: Check 300-second TTL limits for service-to-service calls**
 - **Workload identity issues: Verify cluster OIDC issuer configuration and subject mappings**
 - **JWKS discovery failures: Check network connectivity to Kubernetes API server**
+- **502 errors: Check identity service availability and network connectivity**
+
+### Error-Specific Troubleshooting
+- **4xx Errors**: These are passed through unchanged, indicating client-side issues
+- **502 Errors**: Indicate identity service unavailability or transport failures
+- **Authentication Failures**: Check service client credentials and workload identity configuration
+- **Token Validation Errors**: Verify JWT signing keys and token expiration
 
 Audit logs should capture:
 - Authentication attempts and outcomes
@@ -648,13 +716,15 @@ Audit logs should capture:
 - **Service client authentication attempts and registry validation results**
 - **Delegated token minting and expiration events**
 - **Workload identity validation attempts and JWKS discovery results**
+- **Error handling events and status code conversions**
 
 **Section sources**
 - [identity broker observability](file://products/identity-broker/src/identity_service/core/observability.py)
 - [identity broker tests - observability](file://products/identity-broker/tests/test_observability.py)
+- [platform gateway service](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 
 ## Conclusion
-The Identity Broker Service provides a robust foundation for authentication and authorization across the platform. By integrating with OIDC providers, managing JWT lifecycles, enforcing policies via shared definitions, and supporting dual-path service client authentication with enhanced Kubernetes workload identity support, it enables secure and compliant operations. The addition of JWKS-based workload identity validation significantly enhances security while maintaining backward compatibility with static credentials. Proper configuration, observability, and adherence to best practices ensure reliability and maintainability.
+The Identity Broker Service provides a robust foundation for authentication and authorization across the platform. By integrating with OIDC providers, managing JWT lifecycles, enforcing policies via shared definitions, and supporting dual-path service client authentication with enhanced Kubernetes workload identity support, it enables secure and compliant operations. The addition of standardized error handling through the `_identity_leg` function significantly improves reliability during rollouts while maintaining backward compatibility with static credentials. Proper configuration, observability, and adherence to best practices ensure reliability and maintainability.
 
 ## Appendices
 
@@ -675,6 +745,7 @@ The Identity Broker Service provides a robust foundation for authentication and 
 - Kubernetes manifests for deployment and services
 - **Service client registry configuration required for exchange endpoint**
 - **Workload identity requires proper cluster OIDC issuer configuration**
+- **Platform gateway configuration for standardized error handling**
 
 **Section sources**
 - [identity broker Dockerfile](file://products/identity-broker/Dockerfile)
@@ -725,3 +796,19 @@ For Kubernetes workload identity support:
 **Section sources**
 - [identity broker config](file://products/identity-broker/src/identity_service/core/config.py)
 - [identity broker README](file://products/identity-broker/README.md)
+
+### Error Handling Configuration
+**Platform Gateway Settings:**
+- `IDENTITY_SERVICE_URL`: Base URL for identity service
+- Timeout configurations for identity service calls
+- Retry policies for transient failures
+- Logging levels for error tracking
+
+**Monitoring and Alerting:**
+- Error rate monitoring for 4xx vs 5xx responses
+- Identity service availability metrics
+- Token exchange success/failure rates
+- Workload identity validation metrics
+
+**Section sources**
+- [platform gateway service](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
