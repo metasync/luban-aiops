@@ -166,3 +166,24 @@ export async function renameSession(
     { method: "PATCH", body: { title } },
   );
 }
+
+// Skill-draft export (SPEC-044 R-1): the agent layer generates the
+// draft from the session's durable facts and validates it against
+// skills-hub before returning it — an unvalidated draft never reaches
+// the caller. Throws ApiError 404 (unknown/foreign — anti-enumeration),
+// 503 (validation not configured), or 502 (validation unreachable).
+export interface SkillDraftResponse {
+  markdown: string;
+  mode: "generated" | "skeleton" | (string & {});
+  validation: "passed" | (string & {});
+  suggested_filename: string;
+}
+
+export async function createSkillDraft(
+  sessionId: string,
+): Promise<SkillDraftResponse> {
+  return requestJson<SkillDraftResponse>(
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}/skill-draft`,
+    { method: "POST" },
+  );
+}

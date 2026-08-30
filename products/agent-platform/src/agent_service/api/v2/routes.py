@@ -92,6 +92,21 @@ from agent_service.services.shift_summary import (
     build_digest,
     document_summary,
 )
+from agent_service.services.skill_draft import (
+    MODE_GENERATED,
+    MODE_SKELETON,
+    assemble_markdown,
+    build_skill_draft_bundle,
+    build_skeleton,
+    generate_skill_draft,
+)
+from agent_service.services.skills_client import (
+    SkillsClientRejected,
+    SkillsDependencyNotConfigured,
+    SkillsServiceUnavailable,
+    is_configured as skills_validation_configured,
+    validate_skill_draft,
+)
 
 router = APIRouter(prefix="/api/v2")
 
@@ -745,6 +760,123 @@ async def rename_session_route(
         last_active_at=session.last_active_at,
         model=session.model,
     )
+
+
+# --- Skill-draft export (SPEC-044) ---
+
+
+async def _validate_skill_markdown(
+    settings, request_id: str | None, markdown: str
+) -> tuple[bool, str | None]:
+    """Validate a draft on skills-hub's own ingestion code path (R-2).
+
+    Structured errors map to the house posture: not configured 503,
+    unreachable or upstream 5xx 502, any other 4xx passed through — an
+    unvalidated draft is never returned.
+    """
+    try:
+        return await validate_skill_draft(settings, request_id, markdown)
+    except SkillsDependencyNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    except SkillsServiceUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+    except SkillsClientRejected as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
+
+
+@router.post("/sessions/{session_id}/skill-draft")
+async def create_skill_draft(
+    session_id: str,
+    x_user_id: str | None = Header(None),
+    x_request_id: str | None = Header(None),
+) -> dict:
+    """Generate a validated skill draft from one session (SPEC-044 R-1/R-2).
+
+    Authorization (``session:skill_draft``) is enforced by the
+    platform-gateway; ownership is re-checked server-side — foreign or
+    unknown ids answer the structural 404. The draft is validated against
+    Skill Format v1 before it is returned: validation not configured 503,
+    unreachable 502 — an unvalidated draft is never returned. Nothing is
+    persisted; the response is the artifact (ephemeral by construction).
+    """
+    user_id = _user_id(x_user_id)
+    session = get_session(session_id, user_id)
+    settings = get_settings()
+    if not skills_validation_configured(settings):
+        raise HTTPException(
+            status_code=503,
+            detail="skills service not configured for skill-draft validation",
+        )
+    bundle, incident_id = await build_skill_draft_bundle(
+        settings, user_id, session.session_id, x_request_id
+    )
+
+    # Generation never raises: any failure degrades to the facts-only
+    # skeleton, which is always format-valid.
+    parsed = await generate_skill_draft(get_runtime_kernel(), bundle)
+    if parsed is not None:
+        frontmatter, body = parsed
+        mode = MODE_GENERATED
+    else:
+        frontmatter, body = build_skeleton(bundle)
+        mode = MODE_SKELETON
+    markdown, slug = assemble_markdown(
+        frontmatter, body, session.session_id, incident_id, mode
+    )
+
+    valid, reason = await _validate_skill_markdown(settings, x_request_id, markdown)
+    if not valid and mode == MODE_GENERATED:
+        # One bounded regeneration with the rejection reason in the prompt.
+        parsed = await generate_skill_draft(get_runtime_kernel(), bundle, reason)
+        if parsed is not None:
+            frontmatter, body = parsed
+            markdown, slug = assemble_markdown(
+                frontmatter, body, session.session_id, incident_id, MODE_GENERATED
+            )
+            valid, reason = await _validate_skill_markdown(
+                settings, x_request_id, markdown
+            )
+    if not valid:
+        # Second failure degrades to the facts-only skeleton, validated on
+        # the same path — the operator always holds a format-valid file.
+        frontmatter, body = build_skeleton(bundle)
+        mode = MODE_SKELETON
+        markdown, slug = assemble_markdown(
+            frontmatter, body, session.session_id, incident_id, mode
+        )
+        valid, reason = await _validate_skill_markdown(
+            settings, x_request_id, markdown
+        )
+        if not valid:
+            raise HTTPException(
+                status_code=502,
+                detail="skill-draft skeleton failed format validation",
+            )
+
+    details: dict = {
+        "session_id": session.session_id,
+        "mode": mode,
+        "validation": "passed",
+    }
+    if incident_id:
+        details["incident_id"] = incident_id
+    _emit_document_audit("skill_draft_generated", user_id, x_request_id, details)
+    LOGGER.info(
+        "skill draft generated",
+        extra={
+            "request_id": x_request_id,
+            "session_id": session.session_id,
+            "incident_id": incident_id,
+            "user_id": user_id,
+            "mode": mode,
+        },
+    )
+    return {
+        "markdown": markdown,
+        "mode": mode,
+        "validation": "passed",
+        "suggested_filename": f"{slug}.md",
+    }
 
 
 # --- Operations document repository (SPEC-039) ---

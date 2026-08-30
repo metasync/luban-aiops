@@ -264,3 +264,20 @@ rules:
       actions_any: ["documents:create", "documents:read"]
     decision:
       outcome: allow
+
+  # Skill-draft export (SPEC-044 R-3): session:skill_draft gates the
+  # generation of a skill draft from one of the caller's own sessions.
+  # The output is an ephemeral, validated Markdown handover — nothing is
+  # published — but drafting skills for the team repository is an
+  # operational act, so it follows the documents-create grant pattern:
+  # developer and read-only-observer are denied by default.
+  - id: allow-operators-skill-draft
+    domain: action_authz
+    description: Platform admins, approvers, and operators may draft skills from their own sessions.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator"]
+      actions_any: ["session:skill_draft"]
+    decision:
+      outcome: allow

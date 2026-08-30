@@ -193,6 +193,38 @@ def test_incident_client_settings_read_env(monkeypatch):
     assert settings.incident_client_timeout_seconds == 4.5
 
 
+def test_skills_client_settings_defaults(monkeypatch):
+    """SPEC-044 R-2: unset skills knobs keep the fail-closed posture —
+    skill-draft generation answers 503 until both URL and secret land;
+    an unvalidated draft is never returned."""
+    monkeypatch.delenv("AGENT_SKILLS_SERVICE_URL", raising=False)
+    monkeypatch.delenv("AGENT_SKILLS_CLIENT_ID", raising=False)
+    monkeypatch.delenv("AGENT_SKILLS_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("AGENT_SKILLS_CLIENT_TIMEOUT_SECONDS", raising=False)
+    settings = RuntimeSettings.from_env()
+    assert settings.skills_service_url is None
+    assert settings.skills_client_id == "agent-service"
+    assert settings.skills_client_secret is None
+    assert settings.skills_client_timeout_seconds == 10.0
+
+
+def test_skills_client_settings_read_env(monkeypatch):
+    monkeypatch.setenv("AGENT_SKILLS_SERVICE_URL", "http://skills-hub:8000")
+    monkeypatch.setenv("AGENT_SKILLS_CLIENT_ID", "agent-service")
+    monkeypatch.setenv("AGENT_SKILLS_CLIENT_SECRET", "query-secret")
+    monkeypatch.setenv("AGENT_SKILLS_CLIENT_TIMEOUT_SECONDS", "4.5")
+    settings = RuntimeSettings.from_env()
+    assert settings.skills_service_url == "http://skills-hub:8000"
+    assert settings.skills_client_id == "agent-service"
+    assert settings.skills_client_secret == "query-secret"
+    assert settings.skills_client_timeout_seconds == 4.5
+
+
+def test_skills_client_settings_validation():
+    with pytest.raises(ValueError, match="TIMEOUT_SECONDS must be > 0"):
+        RuntimeSettings(skills_client_timeout_seconds=0.0)
+
+
 def test_model_discovery_settings_validation():
     with pytest.raises(ValueError, match="REFRESH_SECONDS must be >= 1"):
         RuntimeSettings(model_discovery_refresh_seconds=0)

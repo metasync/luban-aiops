@@ -407,7 +407,18 @@ event types. SPEC-039 also adds
 `session:update` (rename one's own session titles), granted exactly where
 `session:list` is granted — every chat-capable role — with server-side
 ownership scoping (anti-enumeration 404 for foreign sessions) and no new
-audit event; `auditor` holds none of the session actions. The full approval model —
+audit event; `auditor` holds none of the session actions. Since v0.26.0
+(SPEC-044) `session:skill_draft` gates the skill-draft export — one
+bounded generation over the caller's own session record, validated on
+skills-hub's ingestion code path before it is returned and downloaded
+client-side (nothing persisted). The action follows the documents-create
+grant pattern: `platform-admin`, `approver`, and `operator` hold it;
+`developer`, `read-only-observer`, and `auditor` receive the standard
+audited policy 403. Ownership stays enforced by the anti-enumeration
+404, and each successful draft is recorded as a
+`skill_draft_generated` audit event carrying the session, the covered
+incident id when present, the mode (generated/skeleton), and the
+validation outcome. The full approval model —
 policy actions, risk-tier admission, the agent auto-allow list, and HITL
 confirmation — is documented in the
 [Approval and HITL Governance Guide](../guides/approval-and-hitl.md).

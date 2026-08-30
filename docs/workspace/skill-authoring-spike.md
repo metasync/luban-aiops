@@ -1,6 +1,6 @@
 # Spike: Skill Authoring Export from Sessions
 
-Status: spike complete — operator sign-off granted 2026-08-29; Option A promoted to SPEC-044 (draft) the same day with the memo's Q-1…Q-5 resolved in the draft's Design Decisions
+Status: spike complete — operator sign-off granted 2026-08-29; Option A promoted to SPEC-044 the same day with the memo's Q-1…Q-5 resolved in the draft's Design Decisions; delivered 2026-08-30 as v0.26.0
 Date: 2026-08-29
 Roadmap home: exploration backlog row "Skill authoring export from sessions" (tracked separately from the SPEC-039 document-type lineage)
 Raised by: 2026-08-27 operator review, beside the operations document repository discussion

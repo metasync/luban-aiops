@@ -420,6 +420,30 @@ async def update_session_title(
     return response.json()
 
 
+async def create_skill_draft(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    session_id: str,
+    user_id: str,
+) -> dict:
+    """Generate a validated skill draft from one session (SPEC-044 R-1).
+
+    The timeout is generous because the agent layer makes one bounded
+    model call plus a skills-hub validation round-trip (and a bounded
+    regeneration on rejection). Upstream 404 answers foreign/unknown
+    sessions; 502/503 mean the draft failed validation legs and is
+    never returned.
+    """
+    timeout = httpx.Timeout(60.0, connect=5.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            f"{settings.agent_service_url}/api/v2/sessions/{session_id}/skill-draft",
+            headers=_headers(request_id, user_id),
+        )
+    response.raise_for_status()
+    return response.json()
+
+
 async def runtime_metadata(settings: PlatformGatewaySettings) -> dict:
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(

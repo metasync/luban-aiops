@@ -187,6 +187,15 @@ class RuntimeSettings:
     incident_client_id: str = "agent-service"
     incident_client_secret: str | None = None
     incident_client_timeout_seconds: float = 10.0
+    # Skill-draft validation (SPEC-044 R-2): agent-platform's own
+    # registered Basic query credential against skills-hub — the same
+    # posture as the SPEC-043 incident client. An unset URL or secret
+    # fails skill-draft generation closed (503, dependency not
+    # configured); an unvalidated draft is never returned.
+    skills_service_url: str | None = None
+    skills_client_id: str = "agent-service"
+    skills_client_secret: str | None = None
+    skills_client_timeout_seconds: float = 10.0
 
     @staticmethod
     def default_provider_options(provider: RuntimeProvider) -> RuntimeProviderOptions:
@@ -257,6 +266,11 @@ class RuntimeSettings:
         if self.incident_client_timeout_seconds <= 0:
             raise ValueError(
                 "AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS must be > 0."
+            )
+        # Skills client validation (SPEC-044 R-2).
+        if self.skills_client_timeout_seconds <= 0:
+            raise ValueError(
+                "AGENT_SKILLS_CLIENT_TIMEOUT_SECONDS must be > 0."
             )
         try:
             from zoneinfo import ZoneInfo
@@ -423,6 +437,12 @@ class RuntimeSettings:
             incident_client_secret=_optional_str("AGENT_INCIDENT_CLIENT_SECRET"),
             incident_client_timeout_seconds=float(
                 os.getenv("AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS", "10")
+            ),
+            skills_service_url=_optional_str("AGENT_SKILLS_SERVICE_URL"),
+            skills_client_id=os.getenv("AGENT_SKILLS_CLIENT_ID", "agent-service"),
+            skills_client_secret=_optional_str("AGENT_SKILLS_CLIENT_SECRET"),
+            skills_client_timeout_seconds=float(
+                os.getenv("AGENT_SKILLS_CLIENT_TIMEOUT_SECONDS", "10")
             ),
         )
 

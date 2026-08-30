@@ -81,6 +81,44 @@ products/skills-hub/.venv/bin/python -m skills_hub.validate \
 Exit code 0 means the source is safe to publish; otherwise each rejection is
 reported as `(path, reason)`.
 
+The same validation code path is also exposed as a read-only service route —
+`POST /api/v1/skills/validate` on skills-hub, behind the Basic
+query-credential registry (`SKILLS_QUERY_CLIENTS`). The agent service calls
+it to validate generated skill drafts before they reach an operator
+(SPEC-044); you can use it in CI the same way, sending
+`{"document": "<raw markdown>"}` and reading `{"valid": true}` or
+`{"valid": false, "reason": ...}`.
+
+## Authoring a skill from a session record (SPEC-044)
+
+The platform can draft a skill from the durable record of one of your own
+sessions, so a good triage run becomes reusable guidance without a blank
+page.
+
+1. Open the session in the portal chat view and press **Draft as skill**
+   (visible to `platform-admin`, `approver`, and `operator`). The agent
+   service assembles the session's digest — plus the validated triage
+   report when the session is incident-linked — and shapes it into Skill
+   Format v1; raw transcripts and alert payloads never enter the draft.
+2. The draft is validated on skills-hub's own ingestion code path before
+   it is returned — an unvalidated draft is never handed out. If
+   validation cannot run (dependency not configured or unreachable) the
+   request fails closed with 503/502 instead.
+3. The browser downloads `<suggested-slug>.md`. The download toast tells
+   you whether you hold a **generated** draft or the facts-only
+   **skeleton** (the honest degradation for quiet sessions or generation
+   failures — always format-valid).
+4. Review, edit, and merge the draft into a skill source as usual
+   ([Adding a skill to an existing source](#adding-a-skill-to-an-existing-source)).
+   Every draft carries an HTML-comment provenance block (session, covered
+   incident when present, date, platform version, mode) — body content
+   you may keep or strip without breaking ingestion. Nothing about the
+   draft is persisted on the platform: it exists only in your download.
+
+Content guardrails are deterministic, not model obedience: the gateway's
+redaction vocabulary scrubs the generated body and the Skill Format caps
+are enforced by post-processing regardless of what the model emitted.
+
 ## Adding a skill to an existing source
 
 The dev-k8s sample sources (`sre-alerting`, `platform-runbooks`) live under

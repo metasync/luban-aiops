@@ -496,6 +496,44 @@ async def update_session_title(
         ) from exc
 
 
+async def create_skill_draft(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    session_id: str,
+    user_id: str,
+) -> dict:
+    """Proxy a skill-draft generation (SPEC-044 R-1/R-2).
+
+    Upstream 4xx (unknown/foreign session) passes through with the
+    agent's structured detail; upstream 502/503 (validation legs
+    unreachable/not configured — an unvalidated draft is never
+    returned) pass through verbatim; other 5xx and transport failures
+    map to 502. The response is passed through verbatim; the gateway
+    holds no draft state.
+    """
+    try:
+        return await agent_client.create_skill_draft(
+            settings, request_id, session_id, user_id
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail=_upstream_detail(
+                    exc, "agent service rejected the skill draft"
+                ),
+            ) from exc
+        raise HTTPException(
+            status_code=status if status in (502, 503) else 502,
+            detail=_upstream_detail(exc, "agent service skill draft failed"),
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+
 def _upstream_detail(exc: httpx.HTTPStatusError, fallback: str) -> object:
     """The agent's structured detail when present, else the fallback.
 

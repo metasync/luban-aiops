@@ -13,6 +13,7 @@ import {
   Tag,
   Tooltip,
   Typography,
+  message,
 } from "antd";
 import {
   AudioOutlined,
@@ -21,6 +22,7 @@ import {
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
+  FileTextOutlined,
   PlusOutlined,
   SafetyCertificateOutlined,
 } from "@ant-design/icons";
@@ -29,9 +31,18 @@ import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { ApiError } from "../api/client";
 import { getModelCatalog, type ModelCatalogResponse } from "../api/models";
-import { getSession, type SessionSummary } from "../api/sessions";
+import {
+  createSkillDraft,
+  getSession,
+  type SessionSummary,
+} from "../api/sessions";
 import { useAuth } from "../auth/AuthContext";
-import { CHAT_CONFIRM_ROLES, APPROVAL_DECIDER_ROLES, hasAnyRole } from "../roles";
+import {
+  CHAT_CONFIRM_ROLES,
+  APPROVAL_DECIDER_ROLES,
+  SKILL_DRAFT_ROLES,
+  hasAnyRole,
+} from "../roles";
 import type { SessionWorkspace } from "../sessions/useSessionWorkspace";
 import type { ExecutionReceipt, ToolResultFrame } from "../stream/models";
 import {
@@ -559,6 +570,73 @@ export function CopyIdButton({ id }: { id: string }) {
   );
 }
 
+// SPEC-044 R-5: "Draft as skill" session action. Visibility mirrors the
+// documents matrix (client-side gate; the gateway re-enforces
+// session:skill_draft regardless). The validated Markdown downloads
+// client-side via the SPEC-040 R-4 Blob pattern; the toast distinguishes
+// the generated draft from the facts-only skeleton degradation.
+export function DraftAsSkillButton({ sessionId }: { sessionId: string }) {
+  const { roles } = useAuth();
+  const [busy, setBusy] = useState(false);
+  if (!hasAnyRole(roles, SKILL_DRAFT_ROLES)) {
+    return null;
+  }
+  const draft = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const result = await createSkillDraft(sessionId);
+      const blob = new Blob([result.markdown], {
+        type: "text/markdown;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = window.document.createElement("a");
+      anchor.href = url;
+      anchor.download = result.suggested_filename;
+      window.document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      if (result.mode === "skeleton") {
+        message.info(
+          "Downloaded the facts-only skill skeleton — generation could " +
+            "not shape a narrative for this session.",
+        );
+      } else {
+        message.success("Skill draft downloaded (validated).");
+      }
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) {
+        message.error("Your role cannot draft skills from sessions.");
+      } else if (err instanceof ApiError && err.status === 503) {
+        message.error("Skill validation is not configured right now.");
+      } else if (err instanceof ApiError && err.status === 502) {
+        message.error("Skill validation is unreachable — no draft returned.");
+      } else {
+        message.error(
+          err instanceof Error ? err.message : "Skill draft failed.",
+        );
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Tooltip title="Download a validated Skill Format draft built from this session's record">
+      <Button
+        type="text"
+        size="small"
+        icon={<FileTextOutlined />}
+        aria-label="Draft as skill"
+        loading={busy}
+        onClick={() => void draft()}
+      >
+        Draft as skill
+      </Button>
+    </Tooltip>
+  );
+}
+
 function SessionPanel({
   sessions,
   activeSessionId,
@@ -1049,6 +1127,7 @@ export default function ChatView({
               {activeSummary.session_id}
             </code>
             <CopyIdButton id={activeSummary.session_id} />
+            <DraftAsSkillButton sessionId={activeSummary.session_id} />
           </div>
         ) : null}
         <div className="chat-messages" ref={scrollRef}>

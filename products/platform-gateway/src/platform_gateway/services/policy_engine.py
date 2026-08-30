@@ -66,6 +66,11 @@ ACTION_DOCUMENTS_READ = "documents:read"
 # Owner session rename (SPEC-039 R-7): scoped server-side to the caller's
 # own sessions, mirroring session:list/session:delete grants.
 ACTION_SESSION_UPDATE = "session:update"
+# Skill-draft export (SPEC-044 R-3): scoped server-side to the caller's own
+# sessions; the bundle grants it to the operational roles only — drafting
+# skills is an operational act, so developer and read-only-observer are
+# denied by default (documents-create grant pattern).
+ACTION_SESSION_SKILL_DRAFT = "session:skill_draft"
 PROTECTED_ACTIONS = frozenset(
     {
         ACTION_CHAT,
@@ -87,6 +92,7 @@ PROTECTED_ACTIONS = frozenset(
         ACTION_DOCUMENTS_CREATE,
         ACTION_DOCUMENTS_READ,
         ACTION_SESSION_UPDATE,
+        ACTION_SESSION_SKILL_DRAFT,
     }
 )
 

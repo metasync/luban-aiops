@@ -148,6 +148,19 @@ def _validate_frontmatter(
     return frontmatter, body
 
 
+def validate_document(raw: str) -> tuple[bool, str | None]:
+    """Validate one candidate skill document against the skill contract.
+
+    Same code path ``ingest_directory`` uses at sync time (single source of
+    truth for Skill Format v1 — SPEC-044 R-2). Returns ``(valid, reason)``
+    where ``reason`` uses the ingestion report vocabulary verbatim.
+    """
+    validated = _validate_frontmatter("validate", "draft.md", raw)
+    if isinstance(validated, Rejection):
+        return False, validated.reason
+    return True, None
+
+
 def ingest_directory(
     source_id: str,
     root: Path,

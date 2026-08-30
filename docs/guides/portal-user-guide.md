@@ -98,6 +98,19 @@ relative last-active times.
   check mark confirms the copy. The open session's header shows the same
   id + copy pair. This is how you hand a colleague a session id to cite
   in a shift summary (see below).
+- **Draft as skill** (SPEC-044): the open session's header carries a
+  **Draft as skill** action for `platform-admin`, `approver`, and
+  `operator`. It generates a Skill Format v1 Markdown draft from the
+  session's durable record (the validated triage report joins when the
+  session is incident-linked), validates it against skills-hub before
+  returning it, and downloads `<suggested-slug>.md` in your browser.
+  The toast tells you whether you received a **generated** draft or the
+  facts-only **skeleton** (the honest degradation for quiet sessions).
+  Generation may take a few seconds; if validation cannot run the
+  action reports an error instead of handing out an unvalidated draft.
+  Nothing is stored on the platform — see the
+  [Skills and Guidance Guide](skills-guide.md) for merging the draft
+  into a skill source.
 
 ## Reading Tool Evidence
 
@@ -360,14 +373,14 @@ from the gateway.
 
 ## What Your Roles Unlock
 
-| Role | Chat | Approve cards | Approvals inbox | Documents | Mutating tools | Incidents | Audit trail |
-|---|---|---|---|---|---|---|---|
-| `platform-admin` | yes | yes | yes | yes | yes | full | yes |
-| `operator` | yes | yes | no | yes | yes | full | no |
-| `approver` | yes | yes | yes | yes | no | full | no |
-| `developer` | yes | yes | no | no | no | full | no |
-| `read-only-observer` | yes (read-only tools) | no | no | no | no | read | no |
-| `auditor` | no | no | no | no | no | no | yes |
+| Role | Chat | Approve cards | Approvals inbox | Documents | Skill drafts | Mutating tools | Incidents | Audit trail |
+|---|---|---|---|---|---|---|---|---|
+| `platform-admin` | yes | yes | yes | yes | yes | yes | full | yes |
+| `operator` | yes | yes | no | yes | yes | yes | full | no |
+| `approver` | yes | yes | yes | yes | yes | no | full | no |
+| `developer` | yes | yes | no | no | no | no | full | no |
+| `read-only-observer` | yes (read-only tools) | no | no | no | no | no | read | no |
+| `auditor` | no | no | no | no | no | no | no | yes |
 
 The authoritative answer is always the Permissions view — it reflects the
 deployed bundle, including any local grants your administrators added. See

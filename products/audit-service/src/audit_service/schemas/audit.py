@@ -30,6 +30,7 @@ EventType = Literal[
     "document_created",
     "document_published",
     "document_read",
+    "skill_draft_generated",
 ]
 
 Outcome = Literal["allow", "deny", "success", "error"]

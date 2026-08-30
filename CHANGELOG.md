@@ -13,6 +13,51 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.26.0 — 2026-08-30
+
+### Added
+
+- **Skill authoring export from sessions (SPEC-044, sixth R5 slice)** —
+  one route turns the durable record of a session into a validated
+  Skill Format v1 Markdown draft and hands it over as a client-side
+  download; the draft is ephemeral by construction (nothing is
+  persisted anywhere on the platform).
+  - agent-service generates the draft from the session's digest bundle
+    only — the same session-fact assembly as the shift summary, plus
+    the validated triage report when the session is incident-linked;
+    raw transcripts, alert payloads, and evidence payloads never reach
+    the builder. Content guardrails are deterministic: the gateway's
+    redaction vocabulary and the Skill Format caps are enforced by
+    post-processing regardless of model obedience, and every draft
+    carries an HTML-comment provenance block (session, covered
+    incident, date, platform version, mode).
+  - Any generation or parse failure degrades to the facts-only
+    skeleton, which is always format-valid — generation never raises a
+    500. An unvalidated draft is never returned: the draft is validated
+    on skills-hub's own ingestion code path before it reaches the
+    operator, and validation legs fail closed (503 not configured,
+    502 unreachable).
+  - skills-hub exposes `POST /api/v1/skills/validate` — read-only, on
+    the existing ingestion code path, behind the Basic query-credential
+    registry; route and CLI answer identically (fixture-parity tests).
+  - platform-gateway passes through
+    `POST /api/v1/sessions/{session_id}/skill-draft` behind the new
+    `session:skill_draft` action — granted to `platform-admin`,
+    `approver`, and `operator` (documents-create grant pattern);
+    ownership stays enforced by the anti-enumeration 404.
+  - The portal chat header gains a **Draft as skill** session action:
+    busy state during generation, `<suggested-slug>.md` Blob download,
+    and a toast distinguishing the generated draft from the facts-only
+    skeleton.
+  - Audit: `skill_draft_generated` joins the audit event enum with the
+    SPEC-029 parity-guard members, carrying session, mode, validation
+    outcome, and the covered incident id when present.
+  - Deployment: three new agent-platform knobs
+    (`AGENT_SKILLS_SERVICE_URL`, `AGENT_SKILLS_CLIENT_ID`,
+    `AGENT_SKILLS_CLIENT_SECRET`) wired in dev-k8s; the agent-service
+    credential joins the skills-hub query-auth registry via the
+    existing `sync-skills-secrets.sh` conventions.
+
 ## 0.25.2 — 2026-08-29
 
 ### Changed

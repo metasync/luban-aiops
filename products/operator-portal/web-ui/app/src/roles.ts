@@ -44,6 +44,17 @@ export const DOCUMENT_ROLES = new Set([
   "operator",
 ]);
 
+// SPEC-044 R-5: session:skill_draft follows the documents-create grant
+// pattern — drafting skills from a session is an operational act, so
+// developer and observer hold it not. Client-side mirror of the
+// allow-operators-skill-draft bundle rule; the gateway re-enforces the
+// action on every request.
+export const SKILL_DRAFT_ROLES = new Set([
+  "platform-admin",
+  "approver",
+  "operator",
+]);
+
 export function hasAnyRole(roles: string[], allowed: Set<string>): boolean {
   return roles.some((role) => allowed.has(role));
 }

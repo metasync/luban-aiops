@@ -9,6 +9,7 @@ from platform_gateway.schemas.api import CreateSessionRequest, SessionTitleUpdat
 from platform_gateway.services.audit_emitter import build_audit_event, emit_audit_event
 from platform_gateway.services.gateway_service import (
     create_session,
+    create_skill_draft,
     delete_session,
     enforce_policy,
     get_session,
@@ -21,6 +22,7 @@ from platform_gateway.services.policy_engine import (
     ACTION_SESSION_DELETE,
     ACTION_SESSION_LIST,
     ACTION_SESSION_READ,
+    ACTION_SESSION_SKILL_DRAFT,
     ACTION_SESSION_UPDATE,
 )
 
@@ -144,6 +146,39 @@ async def update_session_title_route(
         request_id=request_id,
         session_id=session_id,
         user_id=user_id,
+        authenticated=identity.subject != "dev",  # type: ignore[union-attr]
+        roles=identity.roles,  # type: ignore[union-attr]
+    )
+    return response
+
+
+@router.post("/api/v1/sessions/{session_id}/skill-draft")
+async def create_skill_draft_route(
+    request: Request,
+    session_id: str,
+    x_request_id: str | None = Header(default=None),
+    settings: PlatformGatewaySettings = Depends(get_settings),
+) -> dict:
+    """Skill-draft export from one of the caller's sessions (SPEC-044 R-1).
+
+    Authorization (``session:skill_draft``) is enforced here; ownership
+    is re-checked by the agent layer (foreign/unknown sessions answer
+    the anti-enumeration 404). The validated draft is passed through
+    verbatim — the gateway holds no draft state; the agent layer emits
+    the ``skill_draft_generated`` audit event.
+    """
+    request_id = resolve_request_id(x_request_id)
+    identity = await resolve_request_identity(settings, request, request_id)
+    enforce_policy(settings, identity, ACTION_SESSION_SKILL_DRAFT, request_id)
+    user_id = identity.username  # type: ignore[union-attr]
+    response = await create_skill_draft(settings, request_id, session_id, user_id)
+    log_event(
+        LOGGER,
+        "skill_draft_generated",
+        request_id=request_id,
+        session_id=session_id,
+        user_id=user_id,
+        mode=response.get("mode"),
         authenticated=identity.subject != "dev",  # type: ignore[union-attr]
         roles=identity.roles,  # type: ignore[union-attr]
     )

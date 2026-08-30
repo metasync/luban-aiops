@@ -171,6 +171,15 @@ class PolicyMatrixScopingTests(PolicyMatrixBase):
         for role in ALL_ROLES:
             self.assertTrue(matrix[role]["session:update"], role)
         self.assertFalse(matrix["auditor"]["session:update"])
+        # SPEC-044 R-3: session:skill_draft follows the documents-create
+        # grant pattern — the operational authoring roles only; developer,
+        # observer, and auditor are denied by default.
+        self.assertIn("session:skill_draft", payload["actions"])
+        for role in ("platform-admin", "approver", "operator"):
+            self.assertTrue(matrix[role]["session:skill_draft"], role)
+        self.assertFalse(matrix["developer"]["session:skill_draft"])
+        self.assertFalse(matrix["read-only-observer"]["session:skill_draft"])
+        self.assertFalse(matrix["auditor"]["session:skill_draft"])
         # auditor exists in the bundle (audit:read) but holds nothing else.
         self.assertTrue(matrix["auditor"]["audit:read"])
         self.assertFalse(matrix["auditor"]["chat"])

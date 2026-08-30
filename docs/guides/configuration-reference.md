@@ -327,6 +327,10 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime
 | `AGENT_INCIDENT_CLIENT_ID` | Incident query client id for agent-service; must match an `INCIDENT_QUERY_CLIENTS` entry | `agent-service` | runtime-config |
 | `AGENT_INCIDENT_CLIENT_SECRET` | Incident query credential for agent-service (SPEC-043); rides `agent-platform-runtime-secrets` — absent secret fails incident-report creation closed (503) | **must be provisioned** | agent-platform-runtime-secrets |
 | `AGENT_INCIDENT_CLIENT_TIMEOUT_SECONDS` | Incident bundle fetch timeout for document assembly; must be > 0 | `10` | code default |
+| `AGENT_SKILLS_SERVICE_URL` | skills-hub base URL for skill-draft validation (SPEC-044); unset fails skill-draft export closed (503) | `http://skills-hub:8000` (dev-k8s) | runtime-config |
+| `AGENT_SKILLS_CLIENT_ID` | Skills query client id for agent-service; must match a `SKILLS_QUERY_CLIENTS` entry | `agent-service` | runtime-config |
+| `AGENT_SKILLS_CLIENT_SECRET` | Skills query credential for agent-service (SPEC-044); rides `agent-platform-runtime-secrets` — absent secret fails skill-draft export closed (503) | **must be provisioned** | agent-platform-runtime-secrets |
+| `AGENT_SKILLS_CLIENT_TIMEOUT_SECONDS` | Skills-hub validation round-trip timeout for skill drafts; must be > 0 | `10` | code default |
 | `AGENT_EXECUTION_SIGNING_KEY` | HMAC key for signed execution requests and receipts (SPEC-037); rides the `execution-signing-secret` via an optional `secretKeyRef` — an absent secret leaves it unset and mutating resumes fail closed (`signing_unavailable`) | **must be provisioned** | execution-signing-secret |
 | `AGENT_EXECUTION_WORKER_URL` | Internal `execution-runtime` worker endpoint for the authenticated handoff of approved mutating calls (SPEC-038); unset rejects mutating resumes with an audited `worker_unavailable` rejection — no in-process fallback | `http://execution-runtime:8000` (dev-k8s) | runtime-config |
 | `AGENT_EXECUTION_HANDOFF_TOKEN` | Static bearer token presented to the worker handoff (SPEC-038); rides the `execution-handoff-secret` via an optional `secretKeyRef` — absent secret fails mutating resumes closed (`worker_unavailable`) | **must be provisioned** | execution-handoff-secret |
@@ -540,6 +544,7 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 |---|---|---|
 | `AGENTSCOPE_API_KEY` | LLM provider API key | `sync-runtime-secret.sh <profile>` |
 | `AGENT_AUDIT_CLIENT_SECRET` | Audit ingest credential for the SPEC-037 execution events | `sync-audit-secrets.sh` |
+| `AGENT_SKILLS_CLIENT_SECRET` | Skills query credential for the SPEC-044 skill-draft validation leg | `sync-skills-secrets.sh` |
 | `OTEL_EXPORTER_OTLP_HEADERS` | OTLP ingest auth (Basic) for the OTel push pipeline | `sync-otel-secrets.sh` |
 
 ### `execution-signing-secret`

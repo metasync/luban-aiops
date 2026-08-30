@@ -38,6 +38,9 @@ DELETE_PATCH = "platform_gateway.services.gateway_service.agent_client.delete_do
 TITLE_PATCH = (
     "platform_gateway.services.gateway_service.agent_client.update_session_title"
 )
+SKILL_DRAFT_PATCH = (
+    "platform_gateway.services.gateway_service.agent_client.create_skill_draft"
+)
 
 CREATE_BODY = {
     "document_type": "shift_summary",
@@ -527,6 +530,122 @@ class SessionRenameProxyTests(DocumentsProxyBase):
                 "/api/v1/sessions/ses-1/title", json={"title": "boom"}
             )
         self.assertEqual(response.status_code, 502)
+
+
+class SkillDraftProxyTests(DocumentsProxyBase):
+    """SPEC-044 R-3/R-4: skill-draft pass-through behind session:skill_draft."""
+
+    SKILL_DRAFT_PAYLOAD = {
+        "markdown": "---\ntitle: \"Restart checkout\"\n---\n\nBody\n",
+        "mode": "generated",
+        "validation": "passed",
+        "suggested_filename": "restart-checkout.md",
+    }
+
+    def test_operator_drafts_skill_verbatim(self) -> None:
+        upstream = AsyncMock(return_value=self.SKILL_DRAFT_PAYLOAD)
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self.client.post("/api/v1/sessions/ses-1/skill-draft")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), self.SKILL_DRAFT_PAYLOAD)
+        _, args, _ = upstream.mock_calls[0]
+        self.assertEqual(args[2], "ses-1")
+        self.assertEqual(args[3], "operator.user")
+
+    def test_observer_denied_before_upstream(self) -> None:
+        # Drafting skills is an operational act: read-only-observer holds
+        # no session:skill_draft grant (documents-create pattern).
+        upstream = AsyncMock(return_value=self.SKILL_DRAFT_PAYLOAD)
+        with (
+            self._patch_identity("read-only-observer", route_module="sessions"),
+            patch(SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self.client.post("/api/v1/sessions/ses-1/skill-draft")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json()["detail"]["action"], "session:skill_draft"
+        )
+        upstream.assert_not_called()
+
+    def test_developer_denied_before_upstream(self) -> None:
+        upstream = AsyncMock(return_value=self.SKILL_DRAFT_PAYLOAD)
+        with (
+            self._patch_identity("developer", route_module="sessions"),
+            patch(SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self.client.post("/api/v1/sessions/ses-1/skill-draft")
+        self.assertEqual(response.status_code, 403)
+        upstream.assert_not_called()
+
+    def test_upstream_404_passes_through_with_detail(self) -> None:
+        # Foreign/unknown sessions answer the anti-enumeration 404 with
+        # the agent's structured detail.
+        upstream = AsyncMock(
+            side_effect=_status_error_json(404, {"detail": "session not found"})
+        )
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self.client.post("/api/v1/sessions/ses-foreign/skill-draft")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "session not found")
+
+    def test_upstream_503_not_configured_passes_through(self) -> None:
+        # An unvalidated draft is never returned; the dependency posture
+        # rides verbatim to the caller.
+        upstream = AsyncMock(
+            side_effect=_status_error_json(
+                503,
+                {"detail": "skills service not configured for skill-draft validation"},
+            )
+        )
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self.client.post("/api/v1/sessions/ses-1/skill-draft")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json()["detail"],
+            "skills service not configured for skill-draft validation",
+        )
+
+    def test_upstream_502_validation_unreachable_passes_through(self) -> None:
+        upstream = AsyncMock(
+            side_effect=_status_error_json(
+                502, {"detail": "skills service unreachable"}
+            )
+        )
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self.client.post("/api/v1/sessions/ses-1/skill-draft")
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], "skills service unreachable")
+
+    def test_upstream_500_maps_to_502(self) -> None:
+        upstream = AsyncMock(side_effect=_status_error(500))
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self.client.post("/api/v1/sessions/ses-1/skill-draft")
+        self.assertEqual(response.status_code, 502)
+
+    def test_transport_failure_maps_to_502(self) -> None:
+        upstream = AsyncMock(side_effect=httpx.ConnectError("boom"))
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_DRAFT_PATCH, upstream),
+        ):
+            response = self.client.post("/api/v1/sessions/ses-1/skill-draft")
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], "agent service unavailable")
 
 
 if __name__ == "__main__":

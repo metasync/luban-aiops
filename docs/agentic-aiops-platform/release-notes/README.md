@@ -7,6 +7,19 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-30-skill-authoring-export.md`
+  - delivers SPEC-044 (v0.26.0), the sixth R5 slice: one route turns
+    the durable record of a session into a validated Skill Format v1
+    Markdown draft — digest-only generation input, deterministic
+    redaction + cap guardrails, provenance block, and a facts-only
+    skeleton degradation that keeps generation 500-free — validated on
+    skills-hub's own ingestion code path (new read-only
+    `POST /api/v1/skills/validate`) before it reaches the operator,
+    then downloaded client-side from the portal's **Draft as skill**
+    session action; gated by the new deny-by-default
+    **`session:skill_draft`** action (documents-create grant pattern)
+    and audited as **`skill_draft_generated`**; ephemeral by
+    construction — nothing about a draft is persisted
 - `2026-08-29-bounded-pane-review-follow-ups.md`
   - same-day patch (v0.25.2) closing the two minor follow-ups from
     the v0.25.1 code review: the bounded-pane height is single-sourced

@@ -13,6 +13,7 @@ import os
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,6 +21,7 @@ from fastapi.testclient import TestClient
 
 from skills_hub.app import create_app
 from skills_hub.core.config import get_settings
+from skills_hub.services.ingestion import ingest_directory
 
 QUERY_CLIENTS = "tool-gateway=tg-secret"
 
@@ -298,6 +300,142 @@ class SkillsRouteTests(unittest.TestCase):
             self.client.get("/api/v1/skills/search?q=pod")  # 401
             self.client.get("/api/v1/skills/sre-alerting/kubepodnotready")  # 401
         emit.assert_not_called()
+
+    # --- Validate (SPEC-044 R-2) ----------------------------------------------
+
+    def _validate(self, document: str, headers=None):
+        return self.client.post(
+            "/api/v1/skills/validate",
+            json={"document": document},
+            headers=headers if headers is not None else self.auth,
+        )
+
+    def test_validate_requires_auth(self) -> None:
+        response = self._validate(DOC_POD, headers={})
+        self.assertEqual(response.status_code, 401)
+
+    def test_validate_rejects_bad_credential(self) -> None:
+        response = self._validate(
+            DOC_POD, headers={"authorization": _basic("tool-gateway", "wrong")}
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_validate_accepts_valid_document(self) -> None:
+        response = self._validate(DOC_POD)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"valid": True})
+
+    def test_validate_rejects_missing_frontmatter(self) -> None:
+        response = self._validate("no frontmatter here")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertFalse(body["valid"])
+        self.assertEqual(
+            body["reason"], "missing or unterminated frontmatter"
+        )
+
+    def test_validate_rejects_oversize_description(self) -> None:
+        document = f"---\ntitle: T\ndescription: {'x' * 501}\n---\nbody\n"
+        response = self._validate(document)
+        body = response.json()
+        self.assertFalse(body["valid"])
+        self.assertEqual(body["reason"], "description exceeds 500 chars")
+
+    def test_validate_rejects_bad_payload(self) -> None:
+        response = self.client.post(
+            "/api/v1/skills/validate", json={}, headers=self.auth
+        )
+        self.assertEqual(response.status_code, 400)
+        response = self.client.post(
+            "/api/v1/skills/validate",
+            content="not json",
+            headers={**self.auth, "content-type": "application/json"},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_validate_is_read_only(self) -> None:
+        # No store write, no sync trigger, no audit emission.
+        with self._captured_events() as emit:
+            self._validate(DOC_POD)
+            self._validate("no frontmatter here")
+        emit.assert_not_called()
+        body = self.client.get("/api/v1/skills", headers=self.auth).json()
+        self.assertEqual(body["total"], 2)
+
+
+# Shared fixture set for the route/CLI parity guard: every case exercises a
+# frontmatter-contract rule so both code paths can answer identically.
+PARITY_FIXTURES = {
+    "valid.md": DOC_POD,
+    "missing_frontmatter.md": "no frontmatter here",
+    "unterminated.md": "---\ntitle: T\ndescription: D\nbody never closes\n",
+    "not_yaml.md": "---\ntitle: [unclosed\n---\nbody\n",
+    "not_mapping.md": "---\n- just\n- a list\n---\nbody\n",
+    "unknown_key.md": "---\ntitle: T\ndescription: D\nauthor: alice\n---\nbody\n",
+    "missing_title.md": "---\ndescription: only a description\n---\nbody\n",
+    "long_title.md": f"---\ntitle: {'T' * 201}\ndescription: D\n---\nbody\n",
+    "missing_description.md": "---\ntitle: Only Title\n---\nbody\n",
+    "long_description.md": f"---\ntitle: T\ndescription: {'x' * 501}\n---\nbody\n",
+    "bad_tag.md": "---\ntitle: T\ndescription: D\ntags: [ok, '']\n---\nbody\n",
+    "too_many_tags.md": "---\ntitle: T\ndescription: D\n"
+    f"tags: [{', '.join(f't{i}' for i in range(11))}]\n---\nbody\n",
+    "oversize_body.md": f"---\ntitle: T\ndescription: D\n---\n{'x' * 70000}\n",
+}
+
+
+class ValidateParityTests(unittest.TestCase):
+    """SPEC-044 R-2: the route and the CLI answer identically."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self._patcher = patch.dict(
+            os.environ,
+            {
+                "SKILLS_STORE_BACKEND": "memory",
+                "SKILLS_SOURCES": "[]",
+                "SKILLS_QUERY_CLIENTS": QUERY_CLIENTS,
+                "SKILLS_SYNC_INTERVAL_SECONDS": "3600",
+            },
+        )
+        self._patcher.start()
+        get_settings.cache_clear()
+        self._client_cm = TestClient(create_app())
+        self.client = self._client_cm.__enter__()
+
+    def tearDown(self) -> None:
+        self._client_cm.__exit__(None, None, None)
+        get_settings.cache_clear()
+        self._patcher.stop()
+        self._tmp.cleanup()
+
+    def _cli_verdict(self, name: str, document: str) -> tuple[bool, str | None]:
+        # The CLI path: python -m skills_hub.validate → ingest_directory.
+        root = Path(self._tmp.name) / name[:-3]
+        root.mkdir()
+        (root / name).write_text(document, encoding="utf-8")
+        result = ingest_directory(
+            "local-check", root, "local", datetime.now(timezone.utc)
+        )
+        if result.rejections:
+            self.assertEqual(len(result.rejections), 1)
+            return False, result.rejections[0].reason
+        self.assertEqual(len(result.records), 1)
+        return True, None
+
+    def test_route_and_cli_answer_identically(self) -> None:
+        auth = {"authorization": _basic("tool-gateway", "tg-secret")}
+        for name, document in PARITY_FIXTURES.items():
+            with self.subTest(fixture=name):
+                cli_valid, cli_reason = self._cli_verdict(name, document)
+                response = self.client.post(
+                    "/api/v1/skills/validate",
+                    json={"document": document},
+                    headers=auth,
+                )
+                self.assertEqual(response.status_code, 200)
+                body = response.json()
+                self.assertEqual(body["valid"], cli_valid, name)
+                self.assertEqual(body.get("reason"), cli_reason, name)
 
 
 if __name__ == "__main__":

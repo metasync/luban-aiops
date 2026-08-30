@@ -2,11 +2,11 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-29
 - approved: 2026-08-29
-- delivered: —
+- delivered: 2026-08-30
 - release slice: R5 — Hardening and External Consumption (sixth R5
   slice, target v0.26.0)
 - related ADRs: none (lineage: skill-authoring spike
@@ -301,3 +301,9 @@ Acceptance criteria:
   Q-5 are resolved in the Design Decisions section.
 - 2026-08-29: operator approved the draft (`draft` → `approved`);
   delivery proceeds under the house train as v0.26.0.
+- 2026-08-30: delivered as v0.26.0 (`approved` → `delivered`):
+  skills-hub validate route on the ingestion path, agent-platform
+  digest-only generation with skeleton degradation, gateway
+  pass-through with the `session:skill_draft` policy gate, the
+  `skill_draft_generated` audit event, and the portal Draft-as-skill
+  download; live-verified on the dev cluster.

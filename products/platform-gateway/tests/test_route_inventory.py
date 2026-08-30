@@ -29,6 +29,9 @@ EXPECTED_ROUTES = {
     ("DELETE", "/api/v1/sessions/{session_id}"),
     # Owner session rename (SPEC-039 R-7): cosmetic metadata, unaudited.
     ("PATCH", "/api/v1/sessions/{session_id}/title"),
+    # Skill-draft export (SPEC-044 R-1): validated Markdown handover,
+    # ephemeral by construction.
+    ("POST", "/api/v1/sessions/{session_id}/skill-draft"),
     ("POST", "/api/v1/chat"),
     ("GET", "/api/v1/chat/stream"),
     # HITL confirmation bridging (SPEC-020): answers a parked kernel ASK.

@@ -3,11 +3,16 @@
 All endpoints require a registered query credential (Basic registry or
 projected workload token); the status endpoint lives in its own router
 because it is auth-exempt operational surface. Route order matters:
-``search`` is declared before the ``{skill_id:path}`` catch-all.
+``search`` and ``validate`` are declared before the ``{skill_id:path}``
+catch-all.
 
 Search and get emit usage audit events (SPEC-029 R-2); list and auth
-failures are deliberately not audited.
+failures are deliberately not audited. ``POST /skills/validate``
+(SPEC-044 R-2) is read-only by construction: no store write, no sync
+trigger, no audit emission — the caller owns its event.
 """
+
+import json
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
@@ -16,6 +21,7 @@ from skills_hub.core import metrics
 from skills_hub.core.config import SkillsSettings, get_settings
 from skills_hub.core.request_context import resolve_request_id
 from skills_hub.services.audit_emitter import build_audit_event, emit_audit_event
+from skills_hub.services.ingestion import validate_document
 from skills_hub.services.query_auth import QueryAuthError, authenticate_caller
 from skills_hub.services.skill_store import SkillStore
 
@@ -23,6 +29,8 @@ router = APIRouter(prefix="/api/v1")
 
 MAX_LIST_LIMIT = 100
 MAX_SEARCH_LIMIT = 20
+# One candidate document: the 64 KiB body cap plus frontmatter headroom.
+MAX_VALIDATE_DOCUMENT_BYTES = 262144
 
 
 def _store(request: Request) -> SkillStore:
@@ -136,6 +144,41 @@ async def search_skills(
             "total": len(hits),
         }
     )
+
+
+@router.post("/skills/validate")
+async def validate_skill_document(
+    request: Request,
+    settings: SkillsSettings = Depends(get_settings),
+) -> JSONResponse:
+    """Validate one candidate skill document against Skill Format v1.
+
+    SPEC-044 R-2: the route calls the same ingestion validation functions
+    sync uses — one code path, the CLI stays the operator-side twin.
+    """
+    try:
+        await authenticate_caller(settings, request)
+    except QueryAuthError as exc:
+        return _error(401, "UNAUTHORIZED", str(exc))
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return _error(400, "INVALID_PARAMETERS", "request body must be JSON")
+    if not isinstance(payload, dict) or not isinstance(payload.get("document"), str):
+        return _error(
+            400, "INVALID_PARAMETERS", "'document' must be a string"
+        )
+    document = payload["document"]
+    if len(document.encode("utf-8")) > MAX_VALIDATE_DOCUMENT_BYTES:
+        return _error(
+            400,
+            "INVALID_PARAMETERS",
+            f"document exceeds {MAX_VALIDATE_DOCUMENT_BYTES} bytes",
+        )
+    valid, reason = validate_document(document)
+    if valid:
+        return JSONResponse(content={"valid": True})
+    return JSONResponse(content={"valid": False, "reason": reason})
 
 
 @router.get("/skills/{skill_id:path}")
