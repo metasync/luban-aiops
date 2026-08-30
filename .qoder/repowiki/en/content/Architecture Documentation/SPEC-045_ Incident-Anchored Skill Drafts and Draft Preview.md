@@ -11,7 +11,21 @@
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 - [IncidentsView.tsx](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx)
 - [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [SkillDraftPreview.tsx](file://products/operator-portal/web-ui/app/src/chat/SkillDraftPreview.tsx)
+- [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
+- [audit.py](file://products/audit-service/src/audit_service/schemas/audit.py)
+- [test_skill_draft.py](file://products/agent-platform/tests/test_skill_draft.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated Core Components section with complete implementation details for incident-anchored generator, gateway pass-through, and shared preview modal
+- Enhanced Architecture Overview with detailed sequence diagram showing dual authorization model
+- Added comprehensive Policy Gate and Audit section covering new policy rules and audit events
+- Expanded Operator Portal section with incident-detail action and shared preview modal implementation
+- Updated Dependency Analysis to reflect complete service integration
+- Enhanced Troubleshooting Guide with specific error scenarios and resolution steps
+- Added detailed component analysis sections with code references and diagrams
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -45,20 +59,20 @@ AgentPlatform --> AuditEmitter["Audit Emitter<br/>incident_skill_draft_generated
 ```
 
 **Diagram sources**
-- [incidents.py:119-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L119-L183)
-- [gateway_service.py:507-538](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L507-L538)
-- [routes.py:765-800](file://products/agent-platform/src/agent_service/api/v2/routes.py#L765-L800)
-- [skill_draft.py:124-163](file://products/agent-platform/src/agent_service/services/skill_draft.py#L124-L163)
+- [incidents.py:152-187](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L152-L187)
+- [gateway_service.py:537-575](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L537-L575)
+- [routes.py:931-964](file://products/agent-platform/src/agent_service/api/v2/routes.py#L931-L964)
+- [skill_draft.py:184-215](file://products/agent-platform/src/agent_service/services/skill_draft.py#L184-L215)
 
 **Section sources**
 - [spec.md:19-49](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/spec.md#L19-L49)
 - [plan.md:1-15](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/plan.md#L1-L15)
 
 ## Core Components
-- Incident-anchored generator: builds a digest bundle from the incident envelope (stripped of raw triage output) and the validated triage report, then runs the same bounded generation pipeline as the session-scoped path. A triage-required gate returns a deterministic 409 when no validated triage exists.
-- Gateway pass-through: adds a new incidents endpoint behind a dual-action gate (incident:skill_draft and incident:read), forwards identity and request id, and maps upstream errors to house conventions without returning unvalidated drafts.
-- Shared preview modal: renders markdown (rendered by default, raw toggle shows provenance), mode badge (generated vs skeleton), validation status, suggested filename, and offers Download .md or Discard.
-- Policy and audit: new allow rule for incident:skill_draft and a typed audit event emitted per generation.
+- **Incident-anchored generator**: builds a digest bundle from the incident envelope (stripped of raw triage output) and the validated triage report, then runs the same bounded generation pipeline as the session-scoped path. A triage-required gate returns a deterministic 409 when no validated triage exists.
+- **Gateway pass-through**: adds a new incidents endpoint behind a dual-action gate (incident:skill_draft and incident:read), forwards identity and request id, and maps upstream errors to house conventions without returning unvalidated drafts.
+- **Shared preview modal**: renders markdown (rendered by default, raw toggle shows provenance), mode badge (generated vs skeleton), validation status, suggested filename, and offers Download .md or Discard.
+- **Policy and audit**: new allow rule for incident:skill_draft and a typed audit event emitted per generation.
 
 **Section sources**
 - [spec.md:51-106](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/spec.md#L51-L106)
@@ -68,10 +82,10 @@ AgentPlatform --> AuditEmitter["Audit Emitter<br/>incident_skill_draft_generated
 
 ## Architecture Overview
 The end-to-end flow for incident-anchored drafting:
-- Portal triggers “Draft as skill” on the incident detail toolbar.
+- Portal triggers "Draft as skill" on the incident detail toolbar.
 - Gateway enforces dual actions and proxies to agent-platform.
 - Agent-platform fetches the incident bundle via the incident client, strips triage_raw, requires a validated triage report, generates or degrades to a facts-only skeleton, validates via skills-hub, and emits an audit event.
-- Response flows back through gateway verbatim to the portal’s shared preview modal.
+- Response flows back through gateway verbatim to the portal's shared preview modal.
 
 ```mermaid
 sequenceDiagram
@@ -104,18 +118,18 @@ GW-->>UI : verbatim response
 ```
 
 **Diagram sources**
-- [incidents.py:119-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L119-L183)
-- [gateway_service.py:507-538](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L507-L538)
-- [routes.py:765-800](file://products/agent-platform/src/agent_service/api/v2/routes.py#L765-L800)
-- [skill_draft.py:124-163](file://products/agent-platform/src/agent_service/services/skill_draft.py#L124-L163)
-- [skill_draft.py:465-506](file://products/agent-platform/src/agent_service/services/skill_draft.py#L465-L506)
+- [incidents.py:152-187](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L152-L187)
+- [gateway_service.py:537-575](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L537-L575)
+- [routes.py:931-964](file://products/agent-platform/src/agent_service/api/v2/routes.py#L931-L964)
+- [skill_draft.py:184-215](file://products/agent-platform/src/agent_service/services/skill_draft.py#L184-L215)
+- [skill_draft.py:625-667](file://products/agent-platform/src/agent_service/services/skill_draft.py#L625-L667)
 
 ## Detailed Component Analysis
 
 ### Agent Platform: Incident-Anchored Generator and Route
-- Bundle assembly: uses the existing incident client to fetch the incident bundle, strips triage_raw from the envelope, excludes connector dispatch outcomes, and requires a validated triage report. Missing triage yields a typed 409 before generation.
-- Generation reuse: shares prompt posture, fenced contract, parser, redaction vocabulary, Skill Format v1 caps, and skeleton builder with the session-scoped path. Any failure degrades to a deterministic facts-only skeleton.
-- Route: exposes POST /api/v2/incidents/{incident_id}/skill-draft, maps incident-client errors (not configured, transport, unknown id), applies the generate → validate → bounded-regenerate → skeleton sequence, and emits the incident-specific audit event.
+- **Bundle assembly**: uses the existing incident client to fetch the incident bundle, strips triage_raw from the envelope, excludes connector dispatch outcomes, and requires a validated triage report. Missing triage yields a typed 409 before generation.
+- **Generation reuse**: shares prompt posture, fenced contract, parser, redaction vocabulary, Skill Format v1 caps, and skeleton builder with the session-scoped path. Any failure degrades to a deterministic facts-only skeleton.
+- **Route**: exposes POST /api/v2/incidents/{incident_id}/skill-draft, maps incident-client errors (not configured, transport, unknown id), applies the generate → validate → bounded-regenerate → skeleton sequence, and emits the incident-specific audit event.
 
 ```mermaid
 flowchart TD
@@ -132,10 +146,9 @@ Emit --> Respond["Return {markdown, mode, validation, suggested_filename}"]
 ```
 
 **Diagram sources**
-- [skill_draft.py:124-163](file://products/agent-platform/src/agent_service/services/skill_draft.py#L124-L163)
-- [skill_draft.py:355-459](file://products/agent-platform/src/agent_service/services/skill_draft.py#L355-L459)
-- [skill_draft.py:465-506](file://products/agent-platform/src/agent_service/services/skill_draft.py#L465-L506)
-- [routes.py:765-800](file://products/agent-platform/src/agent_service/api/v2/routes.py#L765-L800)
+- [skill_draft.py:184-215](file://products/agent-platform/src/agent_service/services/skill_draft.py#L184-L215)
+- [skill_draft.py:625-667](file://products/agent-platform/src/agent_service/services/skill_draft.py#L625-L667)
+- [routes.py:931-964](file://products/agent-platform/src/agent_service/api/v2/routes.py#L931-L964)
 
 **Section sources**
 - [spec.md:51-87](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/spec.md#L51-L87)
@@ -143,9 +156,9 @@ Emit --> Respond["Return {markdown, mode, validation, suggested_filename}"]
 - [tasks.md:3-26](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/tasks.md#L3-L26)
 
 ### Platform Gateway: Pass-Through and Error Mapping
-- New incidents route: POST /api/v1/incidents/{incident_id}/skill-draft behind dual-action enforcement (incident:skill_draft first, then incident:read).
-- Identity forwarding: delegated user id and x-request-id are forwarded; responses are passed through verbatim.
-- Error mapping: 403 policy, 404 unknown incident id, 409 no validated triage (passed through with structured detail), 503 dependency not configured, 502 transport/upstream 5xx. Never returns an unvalidated draft.
+- **New incidents route**: POST /api/v1/incidents/{incident_id}/skill-draft behind dual-action enforcement (incident:skill_draft first, then incident:read).
+- **Identity forwarding**: delegated user id and x-request-id are forwarded; responses are passed through verbatim.
+- **Error mapping**: 403 policy, 404 unknown incident id, 409 no validated triage (passed through with structured detail), 503 dependency not configured, 502 transport/upstream 5xx. Never returns an unvalidated draft.
 
 ```mermaid
 sequenceDiagram
@@ -163,8 +176,8 @@ GW-->>UI : verbatim response
 ```
 
 **Diagram sources**
-- [incidents.py:119-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L119-L183)
-- [gateway_service.py:507-538](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L507-L538)
+- [incidents.py:152-187](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L152-L187)
+- [gateway_service.py:537-575](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L537-L575)
 
 **Section sources**
 - [spec.md:89-106](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/spec.md#L89-L106)
@@ -172,9 +185,9 @@ GW-->>UI : verbatim response
 - [tasks.md:27-39](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/tasks.md#L27-L39)
 
 ### Operator Portal: Incident Action and Shared Preview
-- Incident detail toolbar: gains “Draft as skill” next to Run/Re-run triage and Continue in chat. Visibility mirrors the policy grant; busy state during generation; structured toasts for 403/404/409/502/503; success opens the shared preview.
-- Shared preview modal: rendered markdown by default with raw toggle, mode badge, validation status, suggested filename; Download .md performs Blob download; Discard closes without persisting anything. Read-only by design.
-- Session surface unchanged: the existing session-scoped button is rewired through the same preview component while keeping its original behavior and tests green.
+- **Incident detail toolbar**: gains "Draft as skill" next to Run/Re-run triage and Continue in chat. Visibility mirrors the policy grant; busy state during generation; structured toasts for 403/404/409/502/503; success opens the shared preview.
+- **Shared preview modal**: rendered markdown by default with raw toggle, mode badge, validation status, suggested filename; Download .md performs Blob download; Discard closes without persisting anything. Read-only by design.
+- **Session surface unchanged**: the existing session-scoped button is rewired through the same preview component while keeping its original behavior and tests green.
 
 ```mermaid
 flowchart TD
@@ -188,8 +201,9 @@ Actions -- Discard --> Close["Close modal"]
 ```
 
 **Diagram sources**
-- [IncidentsView.tsx:480-494](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx#L480-L494)
-- [ChatView.tsx:573-638](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L573-L638)
+- [IncidentsView.tsx:541-550](file://products/operator-portal/web-ui/app/src/views/incidents/IncidentsView.tsx#L541-L550)
+- [ChatView.tsx:582-628](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L582-L628)
+- [SkillDraftPreview.tsx:46-156](file://products/operator-portal/web-ui/app/src/chat/SkillDraftPreview.tsx#L46-L156)
 
 **Section sources**
 - [spec.md:126-158](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/spec.md#L126-L158)
@@ -197,13 +211,15 @@ Actions -- Discard --> Close["Close modal"]
 - [tasks.md:57-85](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/tasks.md#L57-L85)
 
 ### Policy Gate and Audit
-- Policy: new rule granting incident:skill_draft to platform-admin, approver, operator; developer and read-only-observer remain denied by default. Dual gate ensures visibility matrix is respected.
-- Audit: new event incident_skill_draft_generated emitted on successful generation with requester, incident id, mode, validation outcome, and forwarded x-request-id. Blocked attempts ride the gateway’s blocked-attempt audit.
+- **Policy**: new rule granting incident:skill_draft to platform-admin, approver, operator; developer and read-only-observer remain denied by default. Dual gate ensures visibility matrix is respected.
+- **Audit**: new event incident_skill_draft_generated emitted on successful generation with requester, incident id, mode, validation outcome, and forwarded x-request-id. Blocked attempts ride the gateway's blocked-attempt audit.
 
 **Section sources**
 - [spec.md:108-124](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/spec.md#L108-L124)
 - [plan.md:49-73](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/plan.md#L49-L73)
 - [tasks.md:41-55](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/tasks.md#L41-L55)
+- [policy-default.yaml:285-300](file://shared/shared-contracts/policies/policy-default.yaml#L285-L300)
+- [audit.py:14-35](file://products/audit-service/src/audit_service/schemas/audit.py#L14-L35)
 
 ## Dependency Analysis
 - Agent-platform depends on:
@@ -227,36 +243,32 @@ Agent --> Audit["Audit Emitter"]
 ```
 
 **Diagram sources**
-- [routes.py:765-800](file://products/agent-platform/src/agent_service/api/v2/routes.py#L765-L800)
-- [skill_draft.py:124-163](file://products/agent-platform/src/agent_service/services/skill_draft.py#L124-L163)
-- [gateway_service.py:507-538](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L507-L538)
+- [routes.py:931-964](file://products/agent-platform/src/agent_service/api/v2/routes.py#L931-L964)
+- [skill_draft.py:184-215](file://products/agent-platform/src/agent_service/services/skill_draft.py#L184-L215)
+- [gateway_service.py:537-575](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L537-L575)
 
 **Section sources**
 - [plan.md:1-15](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/plan.md#L1-L15)
 
 ## Performance Considerations
-- Bounded LLM call: generation uses a fixed timeout to avoid long-running requests.
-- Deterministic degradation: any generation or parse failure falls back to a facts-only skeleton, ensuring predictable latency and response shape.
-- Minimal network hops: incident bundle fetched once; validation performed server-side before response.
-- No persistent draft storage: reduces I/O overhead and avoids contention.
-
-[No sources needed since this section provides general guidance]
+- **Bounded LLM call**: generation uses a fixed timeout to avoid long-running requests.
+- **Deterministic degradation**: any generation or parse failure falls back to a facts-only skeleton, ensuring predictable latency and response shape.
+- **Minimal network hops**: incident bundle fetched once; validation performed server-side before response.
+- **No persistent draft storage**: reduces I/O overhead and avoids contention.
 
 ## Troubleshooting Guide
-- 409 No validated triage report: indicates the incident has not completed a validated triage. Run triage first; do not treat as a platform error.
-- 503 Dependency not configured: skills validation or incident client not configured; check configuration and availability.
-- 502 Transport or upstream 5xx: transient or upstream failures; retry after short delay.
-- 403 Policy denial: ensure the caller holds incident:skill_draft and incident:read; verify role grants.
-- 404 Unknown incident id: anti-enumeration posture; confirm the incident id format and existence.
+- **409 No validated triage report**: indicates the incident has not completed a validated triage. Run triage first; do not treat as a platform error.
+- **503 Dependency not configured**: skills validation or incident client not configured; check configuration and availability.
+- **502 Transport or upstream 5xx**: transient or upstream failures; retry after short delay.
+- **403 Policy denial**: ensure the caller holds incident:skill_draft and incident:read; verify role grants.
+- **404 Unknown incident id**: anti-enumeration posture; confirm the incident id format and existence.
 
 **Section sources**
 - [spec.md:89-106](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/spec.md#L89-L106)
 - [tasks.md:27-39](file://docs/specs/SPEC-045-incident-skill-draft-and-preview/tasks.md#L27-L39)
 
 ## Conclusion
-SPEC-045 introduces an incident-anchored skill-draft workflow that aligns with operators’ mental model: review the incident and its validated triage, then convert it into a reusable skill. The design preserves digest-only inputs, deterministic post-processing, fail-closed validation, and no durable draft persistence. Both entry points share a read-only preview experience, and the session-scoped path remains unchanged.
-
-[No sources needed since this section summarizes without analyzing specific files]
+SPEC-045 introduces an incident-anchored skill-draft workflow that aligns with operators' mental model: review the incident and its validated triage, then convert it into a reusable skill. The design preserves digest-only inputs, deterministic post-processing, fail-closed validation, and no durable draft persistence. Both entry points share a read-only preview experience, and the session-scoped path remains unchanged.
 
 ## Appendices
 - Related specs: SPEC-015 (incident triage sessions), SPEC-043 (incident bundle client), SPEC-044 (skill authoring export).
