@@ -2,10 +2,10 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: luban-platform-team
 - created: 2026-08-30
-- approved: —
+- approved: 2026-08-30
 - delivered: —
 - release slice: R5 — Hardening and External Consumption (seventh R5
   slice, target v0.27.0)
@@ -264,3 +264,5 @@ resolved the open questions:
   exchange; the operator adjudicated the two-use-case split
   (incident-anchored option (c) + session-scoped option (a)) and the
   preview-before-download experience the same day.
+- 2026-08-30: operator approved the draft (`draft` → `approved`);
+  delivery proceeds under the house train as v0.27.0.
