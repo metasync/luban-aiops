@@ -99,7 +99,13 @@ Log in through operator-portal as a role with the incident actions (see
    with a precondition toast — run triage first, then draft the skill. See
    the [Skills and Guidance Guide](skills-guide.md) for the merge step.
 5. **Continue in chat.** Opens the chat view on the incident's triage session
-   so follow-up questions carry the gathered evidence.
+   so follow-up questions carry the gathered evidence. The button is
+   gated at render time on the caller's own live session list: triage
+   sessions are single-owner and expire after an idle TTL, so when the
+   session is expired, not yet visible, or owned by another operator
+   the button renders disabled with an explanatory tooltip instead of
+   failing with a 404 on click (use **Draft as skill** on the incident
+   instead — it never depends on session ownership).
 6. **Report incident.** Manual intake form: title, summary, severity
    (`critical`/`warning`/`info`), optional `key=value` labels.
 

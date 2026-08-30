@@ -7,6 +7,17 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-30-session-availability-gate-and-gateway-postures.md`
+  - same-day patch (v0.27.2) from a live test of v0.27.1: the
+    incident-detail **Continue in chat** button now renders disabled
+    with an explanatory tooltip whenever the incident's triage session
+    is expired, not yet visible, or owned by another operator (gated
+    at render time on the caller's own session list; the chat
+    **Draft as skill** keeps a 404 toast as a race-window safety net);
+    `GET /api/v1/runtime` now carries the platform `version`; the
+    identity-service sign-in legs ride the house proxy error model
+    (4xx passthrough, 5xx/transport → structured 502) — no routes,
+    actions, or event types change
 - `2026-08-30-post-release-review-remediation.md`
   - same-day patch (v0.27.1) closing the one High finding from the
     v0.27.0 code & doc review: the incident skill-draft assembler now

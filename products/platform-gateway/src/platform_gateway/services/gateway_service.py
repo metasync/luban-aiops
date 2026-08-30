@@ -85,29 +85,71 @@ async def ready_status(settings: PlatformGatewaySettings) -> dict[str, object]:
 
 
 async def runtime_status(settings: PlatformGatewaySettings) -> dict[str, object]:
-    return await agent_client.runtime_metadata(settings)
+    payload = dict(await agent_client.runtime_metadata(settings))
+    # The platform version rides the runtime surface so probes and the
+    # portal's Settings inventory can read it without another endpoint.
+    payload["version"] = SERVICE_VERSION
+    return payload
+
+
+async def _identity_leg(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    method: str,
+    path: str,
+    payload: dict | None = None,
+) -> dict:
+    """One identity-service leg under the house proxy error model.
+
+    The identity service's own 4xx postures (invalid or expired code,
+    bad refresh token) pass through with their status and detail; 5xx
+    and transport failures become a structured 502 — the sign-in
+    surface never answers a raw 500 when a leg races a rollout.
+    """
+    headers = _service_headers(request_id)
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.request(
+                method,
+                f"{settings.identity_service_url}{path}",
+                headers=headers,
+                json=payload,
+            )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code < 500:
+            detail = "identity service rejected the request"
+            try:
+                body = exc.response.json()
+                if isinstance(body.get("detail"), str):
+                    detail = body["detail"]
+            except (ValueError, AttributeError):
+                pass
+            raise HTTPException(
+                status_code=exc.response.status_code, detail=detail
+            ) from None
+        raise HTTPException(
+            status_code=502,
+            detail="identity service unavailable — retry the sign-in",
+        ) from None
+    except httpx.HTTPError:
+        raise HTTPException(
+            status_code=502,
+            detail="identity service unreachable — retry the sign-in",
+        ) from None
+    return response.json()
 
 
 async def fetch_login_url(settings: PlatformGatewaySettings, request_id: str) -> dict:
-    headers = _service_headers(request_id)
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.get(
-            f"{settings.identity_service_url}/api/v1/auth/login-url",
-            headers=headers,
-        )
-    response.raise_for_status()
-    return response.json()
+    return await _identity_leg(
+        settings, request_id, "GET", "/api/v1/auth/login-url"
+    )
 
 
 async def start_login(settings: PlatformGatewaySettings, request_id: str) -> dict:
-    headers = _service_headers(request_id)
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.get(
-            f"{settings.identity_service_url}/api/v1/auth/login",
-            headers=headers,
-        )
-    response.raise_for_status()
-    return response.json()
+    return await _identity_leg(
+        settings, request_id, "GET", "/api/v1/auth/login"
+    )
 
 
 async def complete_login(
@@ -115,15 +157,9 @@ async def complete_login(
     request_id: str,
     payload: dict,
 ) -> dict:
-    headers = _service_headers(request_id)
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.post(
-            f"{settings.identity_service_url}/api/v1/auth/callback",
-            json=payload,
-            headers=headers,
-        )
-    response.raise_for_status()
-    return response.json()
+    return await _identity_leg(
+        settings, request_id, "POST", "/api/v1/auth/callback", payload
+    )
 
 
 async def build_logout_url(
@@ -131,15 +167,9 @@ async def build_logout_url(
     request_id: str,
     payload: dict,
 ) -> dict:
-    headers = _service_headers(request_id)
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.post(
-            f"{settings.identity_service_url}/api/v1/auth/logout-url",
-            json=payload,
-            headers=headers,
-        )
-    response.raise_for_status()
-    return response.json()
+    return await _identity_leg(
+        settings, request_id, "POST", "/api/v1/auth/logout-url", payload
+    )
 
 
 async def refresh_token(
@@ -147,15 +177,9 @@ async def refresh_token(
     request_id: str,
     payload: dict,
 ) -> dict:
-    headers = _service_headers(request_id)
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.post(
-            f"{settings.identity_service_url}/api/v1/auth/refresh",
-            json=payload,
-            headers=headers,
-        )
-    response.raise_for_status()
-    return response.json()
+    return await _identity_leg(
+        settings, request_id, "POST", "/api/v1/auth/refresh", payload
+    )
 
 
 async def normalize_identity(

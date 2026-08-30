@@ -17,6 +17,7 @@ import {
 } from "vitest";
 import IncidentsView from "../incidents/IncidentsView";
 import type { IncidentDetailPayload } from "../../api/incidents";
+import type { SessionWorkspace } from "../../sessions/useSessionWorkspace";
 
 const { mockUseAuth, mockListIncidents, mockGetIncident, mockCreateDraft } =
   vi.hoisted(() => ({
@@ -77,6 +78,14 @@ function useRoles(roles: string[]) {
   mockUseAuth.mockReturnValue({ roles });
 }
 
+// The gate reads only the caller's own session list; everything else
+// on the workspace surface is irrelevant to these tests.
+function workspaceWith(sessionIds: string[]): SessionWorkspace {
+  return {
+    sessions: sessionIds.map((sessionId) => ({ session_id: sessionId })),
+  } as unknown as SessionWorkspace;
+}
+
 // jsdom lacks matchMedia, which antd's responsive observers probe.
 beforeAll(() => {
   if (!window.matchMedia) {
@@ -96,11 +105,17 @@ beforeAll(() => {
   }
 });
 
-async function openIncidentDetail(roles: string[], detail = TRIAGED_DETAIL) {
+async function openIncidentDetail(
+  roles: string[],
+  detail = TRIAGED_DETAIL,
+  workspace: SessionWorkspace = workspaceWith([]),
+) {
   useRoles(roles);
   mockListIncidents.mockResolvedValue({ incidents: [SUMMARY], total: 1 });
   mockGetIncident.mockResolvedValue(detail);
-  render(<IncidentsView onOpenIncidentSession={() => {}} />);
+  render(
+    <IncidentsView onOpenIncidentSession={() => {}} workspace={workspace} />,
+  );
   // Let the initial list load settle before driving the row click.
   await screen.findByText("Checkout down");
   await act(async () => {
@@ -144,7 +159,12 @@ describe("IncidentsView draft-as-skill (SPEC-045 R-4)", () => {
   it("hides the button for auditor (the view itself is denied)", async () => {
     useRoles(["auditor"]);
     mockListIncidents.mockResolvedValue({ incidents: [SUMMARY], total: 1 });
-    render(<IncidentsView onOpenIncidentSession={() => {}} />);
+    render(
+      <IncidentsView
+        onOpenIncidentSession={() => {}}
+        workspace={workspaceWith([])}
+      />,
+    );
     expect(
       await screen.findByText(
         "The incidents view requires an incident-visible role.",
@@ -262,5 +282,41 @@ describe("IncidentsView draft-as-skill (SPEC-045 R-4)", () => {
         "Skill validation is unreachable — no draft returned.",
       ),
     ).toBeTruthy();
+  });
+
+  describe("Continue in chat render-time gate", () => {
+    function continueButton(): HTMLButtonElement {
+      const button = screen.getByText("Continue in chat").closest("button");
+      expect(button).toBeTruthy();
+      return button as HTMLButtonElement;
+    }
+
+    it("disables the deep link when the triage session is gone", async () => {
+      // The incident still carries the stale session id, but it is no
+      // longer one of the caller's sessions (expired or foreign-owned).
+      await openIncidentDetail(["operator"], TRIAGED_DETAIL, workspaceWith([]));
+      expect(continueButton().disabled).toBe(true);
+    });
+
+    it("enables the deep link while the triage session is live", async () => {
+      await openIncidentDetail(
+        ["operator"],
+        TRIAGED_DETAIL,
+        workspaceWith(["ses-other", "ses-triage"]),
+      );
+      expect(continueButton().disabled).toBe(false);
+    });
+
+    it("disables the deep link when the incident has no session", async () => {
+      await openIncidentDetail(
+        ["operator"],
+        {
+          ...TRIAGED_DETAIL,
+          incident: { ...TRIAGED_DETAIL.incident, session_id: null },
+        },
+        workspaceWith(["ses-triage"]),
+      );
+      expect(continueButton().disabled).toBe(true);
+    });
   });
 });

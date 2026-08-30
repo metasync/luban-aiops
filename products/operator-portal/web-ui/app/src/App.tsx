@@ -368,7 +368,10 @@ export default function App() {
           {active === "chat" ? (
             <ChatView workspace={workspace} />
           ) : active === "incidents" ? (
-            <IncidentsView onOpenIncidentSession={openIncidentSession} />
+            <IncidentsView
+              onOpenIncidentSession={openIncidentSession}
+              workspace={workspace}
+            />
           ) : active === "approvals" ? (
             <ApprovalsView inbox={approvals} />
           ) : active === "documents" ? (

@@ -143,6 +143,24 @@ describe("DraftAsSkillButton (SPEC-044 R-5)", () => {
     ).toBeTruthy();
   });
 
+  it("maps a 404 to the session-unavailable toast pointing at the incident", async () => {
+    useRoles(["operator"]);
+    const { ApiError } = await import("../../api/client");
+    mockCreateSkillDraft.mockRejectedValue(
+      new ApiError(404, "Request failed: 404 Not Found"),
+    );
+    render(<DraftAsSkillButton sessionId="incident-inc-1" />);
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Draft as skill"));
+    });
+    expect(screen.queryByText("Skill draft preview")).toBeNull();
+    expect(
+      await screen.findByText(
+        "This session is no longer available to you (expired or owned by another operator) — draft from the incident detail instead.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("maps a 503 to the not-configured toast", async () => {
     useRoles(["operator"]);
     const { ApiError } = await import("../../api/client");

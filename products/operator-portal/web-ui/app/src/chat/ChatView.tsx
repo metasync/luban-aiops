@@ -595,6 +595,15 @@ export function DraftAsSkillButton({ sessionId }: { sessionId: string }) {
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
         message.error("Your role cannot draft skills from sessions.");
+      } else if (err instanceof ApiError && err.status === 404) {
+        // Safety net for the race between the incident-detail gate and
+        // the click: sessions expire after an idle TTL, and foreign
+        // session ids answer the same opaque 404 (anti-enumeration).
+        message.error(
+          "This session is no longer available to you (expired or " +
+            "owned by another operator) — draft from the incident " +
+            "detail instead.",
+        );
       } else if (err instanceof ApiError && err.status === 503) {
         message.error("Skill validation is not configured right now.");
       } else if (err instanceof ApiError && err.status === 502) {

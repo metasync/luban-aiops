@@ -312,7 +312,11 @@ steps, and cited skills, plus any collaboration dispatch outcomes.
   incident without a validated triage report answers 409 with a toast
   naming the precondition — run triage first, then draft the skill.
 - **Continue in chat** drops you into the incident's dedicated session to
-  investigate interactively.
+  investigate interactively. The button is enabled only while that
+  session is one of your own live sessions; triage sessions expire
+  after an idle TTL and are single-owner, so a stale or foreign
+  session greys the button out (with an explanatory tooltip) instead
+  of failing on click.
 - **Report incident** files a new incident manually.
 
 Viewing requires `incident:read`; reporting and triaging require

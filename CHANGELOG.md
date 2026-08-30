@@ -13,6 +13,36 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.27.2 — 2026-08-30
+
+### Changed
+
+- **Continue in chat availability gate (live-test follow-up to
+  SPEC-045)** — the incident-detail **Continue in chat** button now
+  renders disabled (with an explanatory tooltip) whenever the
+  incident's triage session is not among the caller's own live
+  sessions — expired by the idle TTL sweep, not yet visible, or owned
+  by another operator — instead of failing with a confusing 404 on
+  click. The gate reads the portal's existing caller-scoped session
+  list; no extra API call. The chat header's **Draft as skill** keeps
+  a 404 toast as a race-window safety net, and **Draft as skill** on
+  the incident stays the ownership-free path to turn a triage into a
+  skill.
+
+### Added
+
+- `GET /api/v1/runtime` now carries the platform `version` so probes
+  and the portal's Settings inventory can read the deployed release
+  without another endpoint.
+
+### Fixed
+
+- The identity-service sign-in legs (login-url, login, callback,
+  logout-url, refresh) now ride the house proxy error model: the
+  identity service's own 4xx postures pass through with their detail,
+  while 5xx and transport failures answer a structured 502 — the
+  sign-in surface never answers a raw 500 when a leg races a rollout.
+
 ## 0.27.1 — 2026-08-30
 
 ### Fixed

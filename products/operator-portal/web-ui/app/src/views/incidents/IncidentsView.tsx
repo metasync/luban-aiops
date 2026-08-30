@@ -12,6 +12,7 @@ import {
   Spin,
   Table,
   Tag,
+  Tooltip,
   Typography,
   message,
   type TableColumnsType,
@@ -45,6 +46,7 @@ import {
   hasAnyRole,
 } from "../../roles";
 import { formatTimestamp } from "../format";
+import type { SessionWorkspace } from "../../sessions/useSessionWorkspace";
 import { parseLabelsInput } from "./labels";
 
 const AUTO_REFRESH_MS = 15_000;
@@ -88,10 +90,17 @@ export interface IncidentsViewProps {
   // Chat deep-link: pins incident-<id> into the session panel and opens
   // the chat view (SPEC-023 R-3 deep links).
   onOpenIncidentSession: (incident: IncidentSummary) => void;
+  // The caller's own session list (server-scoped, 30s poll): an
+  // incident's triage session is continuable only while it appears
+  // here. Sessions expire after an idle TTL and are single-owner, so
+  // a stale or foreign session id on the incident gates the deep link
+  // at render time instead of surfacing a confusing 404 on click.
+  workspace: SessionWorkspace;
 }
 
 export default function IncidentsView({
   onOpenIncidentSession,
+  workspace,
 }: IncidentsViewProps) {
   const { roles } = useAuth();
   const canView = hasAnyRole(roles, INCIDENT_VIEW_ROLES);
@@ -225,12 +234,21 @@ export default function IncidentsView({
   }
 
   if (detail) {
+    // The deep link is live only while the incident's triage session
+    // is one of the caller's own sessions (expired or foreign-owned
+    // ids fall out of the workspace list).
+    const chatAvailable =
+      Boolean(detail.incident.session_id) &&
+      workspace.sessions.some(
+        (entry) => entry.session_id === detail.incident.session_id,
+      );
     return (
       <IncidentDetail
         payload={detail}
         triaging={triaging}
         canAct={canAct}
         canDraft={canDraft}
+        chatAvailable={chatAvailable}
         error={error}
         onBack={backToList}
         onTriage={() => void triggerTriage(detail.incident.incident_id)}
@@ -403,6 +421,7 @@ function IncidentDetail({
   triaging,
   canAct,
   canDraft,
+  chatAvailable,
   error,
   onBack,
   onTriage,
@@ -412,6 +431,7 @@ function IncidentDetail({
   triaging: boolean;
   canAct: boolean;
   canDraft: boolean;
+  chatAvailable: boolean;
   error: string | null;
   onBack: () => void;
   onTriage: () => void;
@@ -548,9 +568,21 @@ function IncidentDetail({
             Draft as skill
           </Button>
         ) : null}
-        <Button icon={<MessageOutlined />} onClick={onOpenChat}>
-          Continue in chat
-        </Button>
+        <Tooltip
+          title={
+            chatAvailable
+              ? undefined
+              : "This incident's triage session is not available to you (expired, not yet visible, or owned by another operator). Draft a skill from the incident instead."
+          }
+        >
+          <Button
+            icon={<MessageOutlined />}
+            onClick={onOpenChat}
+            disabled={!chatAvailable}
+          >
+            Continue in chat
+          </Button>
+        </Tooltip>
       </div>
       <SkillDraftPreviewModal draft={draft} onClose={() => setDraft(null)} />
       {report ? (
