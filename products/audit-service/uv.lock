@@ -53,7 +53,7 @@ wheels = [
 
 [[package]]
 name = "audit-service"
-version = "0.27.3"
+version = "0.27.4"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },

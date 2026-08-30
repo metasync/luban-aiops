@@ -53,6 +53,8 @@ import {
   type ConfirmationDecision,
 } from "../stream/useChatStream";
 import { renderMarkdown } from "./markdown";
+import { displayToolNames } from "./toolNames";
+import { useToolNameMap } from "./useToolNames";
 import { ComposerSelectionBar } from "./ComposerSelectionBar";
 import { SkillDraftPreviewModal } from "./SkillDraftPreview";
 import { detectArrivalSpan, transcriptToTurns, type ArrivalSpan } from "./transcript";
@@ -435,6 +437,9 @@ function TurnGroup({
   // meeting a silent wall of text. Evidence and cards render at once.
   revealFromChars?: number;
 }) {
+  // v0.27.4: prose shows the registry's dotted canonical tool names while
+  // code keeps the sanitized form (see toolNames.ts).
+  const toolNames = useToolNameMap();
   // Legacy parity: a finished turn with no text and no parked confirmation
   // shows the "(no response received)" placeholder.
   const reply =
@@ -517,7 +522,9 @@ function TurnGroup({
           <div
             className="md-content"
             dangerouslySetInnerHTML={{
-              __html: renderMarkdown(String(content ?? "")),
+              __html: renderMarkdown(
+                displayToolNames(String(content ?? ""), toolNames),
+              ),
             }}
           />
         )}

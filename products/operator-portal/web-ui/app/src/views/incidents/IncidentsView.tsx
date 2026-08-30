@@ -38,6 +38,8 @@ import {
 } from "../../api/incidents";
 import { useAuth } from "../../auth/AuthContext";
 import { renderMarkdown } from "../../chat/markdown";
+import { displayToolNames } from "../../chat/toolNames";
+import { useToolNameMap } from "../../chat/useToolNames";
 import { SkillDraftPreviewModal } from "../../chat/SkillDraftPreview";
 import {
   INCIDENT_ACT_ROLES,
@@ -619,6 +621,9 @@ function IncidentDetail({
 }
 
 function TriageReportSection({ report }: { report: TriageReport }) {
+  // v0.27.4: prose shows the registry's dotted canonical tool names while
+  // code keeps the sanitized form (see chat/toolNames.ts).
+  const toolNames = useToolNameMap();
   return (
     <div className="incident-section">
       <Typography.Title level={5} style={{ marginTop: 20 }}>
@@ -637,7 +642,7 @@ function TriageReportSection({ report }: { report: TriageReport }) {
         // character (including quotes) before introducing markup and
         // only renders http(s) links.
         dangerouslySetInnerHTML={{
-          __html: renderMarkdown(report.summary),
+          __html: renderMarkdown(displayToolNames(report.summary, toolNames)),
         }}
       />
       {(report.evidence ?? []).length > 0 ? (

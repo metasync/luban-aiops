@@ -13,6 +13,27 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.27.4 — 2026-08-31
+
+### Changed
+
+- **Dotted canonical tool names in chat prose and triage summaries** —
+  the model writes the sanitized tool names it sees in its
+  function-calling schema (dots → underscores), so replies mentioned
+  `k8s_get_pods` while evidence cards, confirmation cards, and
+  execution receipts already show the registry's dotted canonical
+  name. The portal now maps sanitized names back to the dotted form at
+  render time (map built from the `/api/v1/tools` catalog, cached once
+  per page session): chat reply bubbles and incident triage-report
+  summaries show `k8s.get_pods` in prose, while code spans and fenced
+  blocks keep the sanitized form that configuration surfaces like
+  `AGENT_GATEWAY_TOOL_AUTO_ALLOW` expect. The durable transcript keeps
+  the model's original words; the rewrite is presentation-only and
+  re-applies to historical sessions on re-render. A failed catalog
+  fetch degrades to no mapping (text renders as written); ambiguous
+  sanitized collisions are skipped rather than guessed. Portal-only,
+  no backend changes.
+
 ## 0.27.3 — 2026-08-31
 
 ### Fixed

@@ -7,6 +7,16 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-31-dotted-canonical-tool-names-in-chat-prose.md`
+  - same-day patch (v0.27.4) in the v0.27 train: chat reply prose and
+    incident triage-report summaries now show the registry's dotted
+    canonical tool names (`k8s.get_pods`) instead of the sanitized
+    form the model writes (`k8s_get_pods`) — a presentation-only,
+    render-time rewrite keyed off the `/api/v1/tools` catalog; code
+    spans and fenced blocks keep the sanitized form that
+    configuration surfaces expect, durable transcripts stay
+    untouched, and a failed catalog fetch degrades to no mapping;
+    portal-only, no backend changes
 - `2026-08-31-chat-markdown-tool-identifier-rendering.md`
   - same-day patch (v0.27.3) from a live test of v0.27.2: the chat
     markdown renderer no longer strips underscores from tool
