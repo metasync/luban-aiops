@@ -13,6 +13,23 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.27.3 — 2026-08-31
+
+### Fixed
+
+- **Chat markdown rendering of tool identifiers (live-test finding)** —
+  the agent writes the model-visible sanitized tool names
+  (dots → underscores, e.g. `k8s_delete_pod`), and the renderer's
+  underscore emphasis pass consumed the underscore pair, showing
+  "k8sdeletepod"; backticks did not protect the name because code
+  spans were converted before the emphasis passes and never shielded
+  from them. Code fences and inline code spans are now stashed before
+  any block/inline pass and restored at the end, and the underscore
+  emphasis passes require non-word context at the edges (CommonMark
+  flanking), so intra-word underscores stay literal while real
+  `_emphasis_` still renders. The escape-first contract and the
+  http(s)-only link allow-list are untouched.
+
 ## 0.27.2 — 2026-08-30
 
 ### Changed

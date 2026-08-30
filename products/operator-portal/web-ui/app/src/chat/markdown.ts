@@ -86,13 +86,30 @@ export function renderMarkdown(text: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+  // Fence code before any further pass: fenced blocks and inline code
+  // spans are stashed behind sentinels and restored at the end, so
+  // header/emphasis/list/table passes never rewrite code content. Two
+  // classes of corruption this prevents: underscore pairs inside tool
+  // identifiers (the model-visible sanitized names — k8s_delete_pod —
+  // consumed by the emphasis passes, rendering "k8sdeletepod") and
+  // heading markers inside fenced blocks becoming real <h*> tags.
+  // (v0.27.3 live-test finding.) \u0000 is stripped from the input so
+  // the sentinel cannot collide with source text.
+  html = html.replace(/\u0000/g, "");
+  const fencedBlocks: string[] = [];
+  const codeSpans: string[] = [];
+
   // Code blocks (``` ... ```).
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, lang: string, code: string) => {
-    return `<pre><code class="lang-${lang}">${code.trim()}</code></pre>`;
+    fencedBlocks.push(`<pre><code class="lang-${lang}">${code.trim()}</code></pre>`);
+    return `\u0000F${fencedBlocks.length - 1}\u0000`;
   });
 
   // Inline code.
-  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+  html = html.replace(/`([^`]+)`/g, (_m, code: string) => {
+    codeSpans.push(`<code>${code}</code>`);
+    return `\u0000S${codeSpans.length - 1}\u0000`;
+  });
 
   // Headers.
   html = html.replace(/^######\s+(.+)$/gm, "<h6>$1</h6>");
@@ -105,12 +122,14 @@ export function renderMarkdown(text: string): string {
   // Horizontal rules.
   html = html.replace(/^---+$/gm, "<hr>");
 
-  // Bold and italic.
+  // Bold and italic. The underscore passes require non-word context on
+  // the outer edges (CommonMark flanking): intra-word underscores stay
+  // literal, so identifiers like k8s_delete_pod keep their separators.
   html = html.replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>");
   html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
-  html = html.replace(/__(.+?)__/g, "<strong>$1</strong>");
-  html = html.replace(/_(.+?)_/g, "<em>$1</em>");
+  html = html.replace(/(?<!\w)__(.+?)__(?!\w)/g, "<strong>$1</strong>");
+  html = html.replace(/(?<!\w)_([^_]+?)_(?!\w)/g, "<em>$1</em>");
 
   // Strikethrough.
   html = html.replace(/~~(.+?)~~/g, "<del>$1</del>");
@@ -158,13 +177,21 @@ export function renderMarkdown(text: string): string {
   });
 
   // Paragraphs: wrap remaining lines not already in block elements.
+  // Lines opening with a code sentinel stay unwrapped so restored
+  // fenced blocks are never nested inside <p>.
   html = html.replace(
-    /^(?!<[hupoltbd]|<\/|<hr|<blockquote|<pre|<code)(.+)$/gm,
+    /^(?!<[hupoltbd]|<\/|<hr|<blockquote|<pre|<code|\u0000)(.+)$/gm,
     "<p>$1</p>",
   );
 
   // Clean up empty paragraphs.
   html = html.replace(/<p>\s*<\/p>/g, "");
+
+  // Restore the fenced code, spans first: no placeholder nests inside
+  // another (fenced content was stashed before the span pass), and the
+  // restored content is already escaped.
+  html = html.replace(/\u0000S(\d+)\u0000/g, (_m, index: string) => codeSpans[Number(index)]);
+  html = html.replace(/\u0000F(\d+)\u0000/g, (_m, index: string) => fencedBlocks[Number(index)]);
 
   return html;
 }

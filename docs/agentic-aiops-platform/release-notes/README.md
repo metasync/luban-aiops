@@ -7,6 +7,15 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-31-chat-markdown-tool-identifier-rendering.md`
+  - same-day patch (v0.27.3) from a live test of v0.27.2: the chat
+    markdown renderer no longer strips underscores from tool
+    identifiers (`k8s_delete_pod` used to render "k8sdeletepod") —
+    code fences and inline code spans are fenced from every block/
+    inline pass, and the underscore emphasis passes require non-word
+    context (CommonMark flanking); escape-first contract and the
+    http(s)-only link allow-list untouched; portal-only, no backend
+    changes
 - `2026-08-30-session-availability-gate-and-gateway-postures.md`
   - same-day patch (v0.27.2) from a live test of v0.27.1: the
     incident-detail **Continue in chat** button now renders disabled

@@ -121,6 +121,42 @@ describe("renderMarkdown", () => {
     expect(html).toContain("<li>&lt;script&gt;alert(1)&lt;/script&gt;</li>");
   });
 
+  it("keeps intra-word underscores literal in tool identifiers", () => {
+    // v0.27.3 live-test finding: the model writes the sanitized tool
+    // names (dots→underscores), and the old emphasis pass ate the
+    // underscore pair, rendering "k8sdeletepod".
+    const html = renderMarkdown("I called k8s_delete_pod to restart the pod.");
+    expect(html).toContain("k8s_delete_pod");
+    expect(html).not.toContain("<em>");
+  });
+
+  it("protects inline code spans from the emphasis passes", () => {
+    const html = renderMarkdown("Run `k8s_get_pod_logs` next.");
+    expect(html).toContain("<code>k8s_get_pod_logs</code>");
+    expect(html).not.toContain("<em>");
+  });
+
+  it("protects fenced code content from heading and emphasis passes", () => {
+    const html = renderMarkdown("```bash\n# not a heading\nsome_snake_case=1\n* not a bullet\n```");
+    expect(html).toContain("# not a heading");
+    expect(html).toContain("some_snake_case=1");
+    expect(html).not.toContain("<h1>");
+    expect(html).not.toContain("<li>");
+    expect(html).not.toContain("<em>");
+  });
+
+  it("still renders underscore emphasis with non-word context", () => {
+    const html = renderMarkdown("this is _important_ and __urgent__ now");
+    expect(html).toContain("<em>important</em>");
+    expect(html).toContain("<strong>urgent</strong>");
+  });
+
+  it("keeps asterisk emphasis and links inside list items working", () => {
+    const html = renderMarkdown("- *starred* item with [docs](https://example.com)");
+    expect(html).toContain("<li><em>starred</em> item with");
+    expect(html).toContain('href="https://example.com"');
+  });
+
   it("returns empty string for empty input", () => {
     expect(renderMarkdown("")).toBe("");
   });
