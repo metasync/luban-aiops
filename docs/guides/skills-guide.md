@@ -135,8 +135,9 @@ session:
    checks both `incident:skill_draft` and `incident:read` on every
    request).
 2. The draft is generated from the incident envelope (minus the raw
-   failed-triage output) and the validated triage report only — never
-   from anyone's session — validated on the same skills-hub code path,
+   failed-triage output and the triage session reference) and the
+   validated triage report only — never from anyone's session —
+   validated on the same skills-hub code path,
    with the same fail-closed 503/502 postures and the same skeleton
    degradation.
 3. An incident without a validated triage report (new, triaging, or

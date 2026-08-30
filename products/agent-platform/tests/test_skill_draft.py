@@ -114,6 +114,7 @@ def _incident_service_bundle() -> dict:
             "severity": "sev2",
             "status": "triaged",
             "summary": "Elevated p99 on checkout.",
+            "session_id": "incident-inc-abc123--alice",
             "triage_raw": {"raw": "secret alert payload"},
         },
         "report": {
@@ -289,7 +290,10 @@ class TestIncidentBundleAssembly:
         report = bundle["incident"]["triage_report"]
         # Raw, unvalidated agent output never reaches the builder.
         assert "triage_raw" not in envelope
-        # The draft never names anyone's session.
+        # The draft never names anyone's session — neither on the
+        # envelope (the triage session can name the triage operator)
+        # nor on the report.
+        assert "session_id" not in envelope
         assert "session_id" not in report
         # Dispatches are action history, not diagnostic technique (Q-3).
         assert "dispatches" not in bundle

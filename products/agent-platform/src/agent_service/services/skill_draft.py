@@ -3,9 +3,10 @@
 Two anchors, one guardrail set. The session-scoped route (SPEC-044 R-1/R-6)
 assembles the caller's own session-fact digest — the same digest the
 shift-summary uses, plus the validated triage report when the session is
-incident-linked. The incident-anchored route (SPEC-045 R-1) assembles the
-incident envelope (with ``triage_raw`` stripped) plus the validated triage
-report only — never anyone's session. Both run one bounded LLM call and
+incident-linked. The incident-anchored route (SPEC-045 R-1) assembles
+the incident envelope (with ``triage_raw`` and the triage ``session_id``
+stripped) plus the validated triage report only — never anyone's
+session. Both run one bounded LLM call and
 return a Markdown skill draft. The prompt receives the digest bundle only
 (never raw transcripts, alert payloads, or evidence payloads); facts are
 copied verbatim, the model only shapes them.
@@ -187,20 +188,23 @@ async def build_incident_skill_draft_bundle(
 ) -> dict[str, Any]:
     """Assemble the incident-anchored generation input (SPEC-045 R-1).
 
-    The bundle is the incident envelope (``triage_raw`` stripped — raw,
-    unvalidated agent output never reaches the builder) plus the
-    validated triage report, fetched through the SPEC-043 incident
-    client in one bounded GET. Connector dispatches are excluded
-    (action history, not diagnostic technique — Q-3); the report's
-    session reference is stripped so the draft never names anyone's
-    session. An incident without a validated triage report raises the
-    typed ``NoValidatedTriageReport`` — the route answers 409.
+    The bundle is the incident envelope (``triage_raw`` and the triage
+    ``session_id`` stripped — raw, unvalidated agent output never
+    reaches the builder, and the draft never names anyone's session)
+    plus the validated triage report, fetched through the SPEC-043
+    incident client in one bounded GET. Connector dispatches are
+    excluded (action history, not diagnostic technique — Q-3); the
+    report's session reference is stripped for the same reason. An
+    incident without a validated triage report raises the typed
+    ``NoValidatedTriageReport`` — the route answers 409.
     """
     incident_bundle = await fetch_incident_bundle(settings, request_id, incident_id)
     envelope = {
         key: value
         for key, value in (incident_bundle.get("incident") or {}).items()
-        if key != "triage_raw"  # raw agent output never reaches the prompt
+        # raw agent output never reaches the prompt; the triage session
+        # id (which can name the triage operator) never reaches the draft
+        if key not in ("triage_raw", "session_id")
     }
     report = incident_bundle.get("report")
     if not report:

@@ -56,8 +56,9 @@ Agent-platform gains an incident-scoped skill-draft generator beside
 the SPEC-044 session-scoped one:
 
 - The generation input is the **incident bundle only**: the incident
-  envelope (with `triage_raw` stripped — the raw, unvalidated agent
-  output never reaches the builder) plus the **validated triage
+  envelope (with `triage_raw` and the triage `session_id` stripped —
+  the raw, unvalidated agent output never reaches the builder, and
+  the draft never names anyone's session) plus the **validated triage
   report**. The bundle is fetched through the existing SPEC-043
   incident client (one bounded GET, Basic query credential,
   structured error hierarchy) — no new client, no new knobs.
@@ -194,11 +195,11 @@ resolved the open questions:
   team would discard anyway, and a `triage_failed` record's raw
   output is purity-forbidden input. Run triage first.
 - **Q-3: What rides the generation bundle?** **Resolved: envelope
-  (minus `triage_raw`) + validated triage report only.** Connector
-  dispatches are action history, not diagnostic technique — parked
-  with a promotion trigger. The digest-only purity invariant holds:
-  raw alert payloads and unvalidated agent output never reach the
-  builder.
+  (minus `triage_raw` and the triage `session_id`) + validated
+  triage report only.** Connector dispatches are action history,
+  not diagnostic technique — parked with a promotion trigger. The
+  digest-only purity invariant holds: raw alert payloads and
+  unvalidated agent output never reach the builder.
 - **Q-4: Preview shape.** **Resolved: read-only modal, rendered +
   raw toggle, mode badge, Download .md / Discard.** Labels avoid a
   bare "Save" — the platform stores nothing; the artifact downloads
@@ -228,9 +229,10 @@ resolved the open questions:
   in-memory; the audit event remains the platform's only trace.
 - Generation never 500s: any failure degrades to the facts-only
   skeleton; a missing triage report answers a deterministic 409.
-- Digest-only generation input: envelope without `triage_raw` plus
-  the validated triage report — raw alert payloads, unvalidated
-  agent output, and session transcripts never reach the builder.
+- Digest-only generation input: envelope without `triage_raw` or the
+  triage `session_id` plus the validated triage report — raw alert
+  payloads, unvalidated agent output, session identifiers, and
+  session transcripts never reach the builder.
 - Session ownership is untouched: the incident surface is incident
   visibility, never session access; the session surface stays
   owner-only.
@@ -273,3 +275,8 @@ resolved the open questions:
   after `make build`, browser live check 5/5 scenarios on the
   canonical deployment (non-owner draft + preview + download, 409
   precondition, observer denial, discard, session entry).
+- 2026-08-30: post-delivery code & doc review found the envelope
+  comprehension stripped `triage_raw` but not the triage `session_id`
+  (the purity fixture omitted the field, masking the gap); remediated
+  as v0.27.1 — envelope strip extended, fixture and purity assertion
+  hardened, this spec's bundle wording corrected to match.

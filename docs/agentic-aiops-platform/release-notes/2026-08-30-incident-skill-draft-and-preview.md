@@ -28,8 +28,9 @@ validation legs (503 not configured, 502 unreachable).
 
 - agent-service gains `POST /api/v2/incidents/{incident_id}/skill-draft`.
   The bundle assembler fetches the incident through the SPEC-043 client
-  (one bounded GET, structured 503/502/404 hierarchy), strips `triage_raw`
-  from the envelope comprehension and `session_id` from the report, and
+  (one bounded GET, structured 503/502/404 hierarchy), strips
+  `triage_raw` and the triage `session_id` from the envelope
+  comprehension and `session_id` from the report, and
   raises a typed 409 when no validated report exists — `report is None`
   ⇔ no validated triage report, for new, triaging, and `triage_failed`
   incidents alike.

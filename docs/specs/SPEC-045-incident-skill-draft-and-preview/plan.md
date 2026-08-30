@@ -22,7 +22,8 @@ policy rule and the audit event. Version lockstep to 0.27.0.
   extend, do not fork. New bundle assembler
   `build_incident_skill_draft_bundle(settings, request_id,
   incident_id)` calling the existing `incident_client
-  .fetch_incident_bundle`; strips `triage_raw` from the envelope;
+  .fetch_incident_bundle`; strips `triage_raw` and the triage
+  `session_id` from the envelope;
   requires a validated triage report (raises a typed
   `NoValidatedTriageReport` when absent); excludes dispatches.
   `build_skill_draft_prompt` gains an optional incident-anchored
@@ -40,8 +41,9 @@ policy rule and the audit event. Version lockstep to 0.27.0.
   → skeleton sequence (shared helpers; the session route must keep
   passing untouched). Emit `incident_skill_draft_generated` on the
   canonical fire-and-forget emitter.
-- Tests: bundle purity (no `triage_raw`, no dispatches), 409 gate
-  per missing-triage status (`new`/`triaging`/`triage_failed`),
+- Tests: bundle purity (no `triage_raw`, no `session_id`, no
+  dispatches), 409 gate per missing-triage status
+  (`new`/`triaging`/`triage_failed`),
   skeleton format-validity, provenance shape, generation-failure
   degradation, client error mapping — mirroring the SPEC-044 test
   classes.

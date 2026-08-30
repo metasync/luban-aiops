@@ -13,6 +13,19 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.27.1 — 2026-08-30
+
+### Fixed
+
+- **Post-release review remediation (SPEC-045 follow-up)** — the
+  incident skill-draft bundle assembler stripped `triage_raw` from the
+  incident envelope but not the triage `session_id`, which can name
+  the triage operator; the field now rides neither the envelope nor
+  the report into generation, restoring the "never anyone's session"
+  invariant on the incident anchor. The purity-test fixture now
+  carries a session id and the assertion pins the envelope strip. No
+  routes, policy actions, audit events, or response shapes changed.
+
 ## 0.27.0 — 2026-08-30
 
 ### Added

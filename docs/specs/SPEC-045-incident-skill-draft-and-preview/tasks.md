@@ -4,8 +4,8 @@
 
 - [x] `skill_draft.py` extended (not forked):
       `build_incident_skill_draft_bundle` through the existing
-      SPEC-043 incident client; envelope with `triage_raw`
-      stripped; validated triage report required (typed
+      SPEC-043 incident client; envelope with `triage_raw` and the
+      triage `session_id` stripped; validated triage report required (typed
       `NoValidatedTriageReport`); dispatches excluded; prompt-purity
       regression test asserts nothing outside the bundle reaches
       the builder
