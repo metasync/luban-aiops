@@ -430,7 +430,7 @@ The incident report document type provides structured incident documentation:
 - **Role-based access**: Documents are accessible by role, not per-document permissions
 - **Audit trail**: Cross-owner document reads are logged for compliance
 - **Bounded panes**: Pinned chrome for digest tabs and narrative headers with expand affordances
-- **Digest data tab**: Renamed from Digest data to clearly indicate typed digest rendering
+- **Digest data tab**: Renamed from Raw JSON to clearly indicate typed digest rendering
 
 ### Security Considerations
 - **Document content protection**: Full document content is only available through audited single fetch

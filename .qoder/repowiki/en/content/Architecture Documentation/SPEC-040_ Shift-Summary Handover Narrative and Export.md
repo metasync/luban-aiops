@@ -142,7 +142,7 @@ All four requirements have been successfully delivered:
 - Drawer includes Export button next to header meta
 
 **SPEC-041 Enhancements**:
-- **Tabbed structured digest rendering**: Handover, Sessions, Confirmations, Executions, Evidence & transcript counts, Open items, and Digest data tabs
+- **Tabbed structured digest rendering**: Handover, Sessions, Confirmations, Executions, Evidence & transcript counts, Open items, and Raw JSON tabs
 - **Bounded scroll panes**: Digest and prose areas with maximum height and internal scrolling
 - **Deterministic summary lines**: One-line counts-only summaries computed at creation time and shown in document lists
 
@@ -152,7 +152,7 @@ All four requirements have been successfully delivered:
 **v0.25.1/v0.25.2 Enhancements**:
 - **Single-sourced bounded pane height**: 320px bound now managed via CSS custom property `--bounded-pane-max-height`, preventing drift between presentation and affordance logic
 - **Pinned structural chrome**: Tab bars and collapse headers remain visible while content scrolls underneath
-- **Digest data tab renaming**: Digest data tab renamed to "Digest data" for clarity
+- **Digest data tab renaming**: Raw JSON tab renamed to "Digest data" for clarity
 - **Post-motion measurement fix**: Delayed re-measure ensures expand affordance appears reliably on first reveal
 
 **Section sources**
@@ -327,7 +327,7 @@ PinnedChrome --> ContentScroll["Content region scrolls"]
 - **Single-sourced height management**: 320px bound now managed via CSS custom property `--bounded-pane-max-height`, preventing drift between presentation and affordance logic
 - **Pinned structural chrome**: Tab bars and collapse headers remain visible while content scrolls underneath
 - **Post-motion measurement fix**: 300ms delayed re-measure ensures expand affordance appears reliably on first reveal
-- **Digest data tab renaming**: Digest data tab renamed to "Digest data" for clarity
+- **Digest data tab renaming**: Raw JSON tab renamed to "Digest data" for clarity
 - **Comprehensive testing**: Fake-timer regression test pins the measurement race condition fix
 
 **Section sources**

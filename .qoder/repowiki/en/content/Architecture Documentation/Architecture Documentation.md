@@ -762,7 +762,7 @@ The v0.25.1/v0.25.2 releases bring significant improvements to the operator port
 - Post-motion re-measure fixes address antd enter-motion measurement races
 
 **Document Type Enhancements**:
-- Digest data tab renamed to "Digest data" for clarity
+- Raw JSON tab renamed to "Digest data" for clarity
 - House layout rules codified: tables for repeated records, description lists for single objects, bullets for long text, chips for identifiers
 - Incident report Triage tab updated to follow layout rules consistently
 

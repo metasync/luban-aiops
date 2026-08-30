@@ -27,7 +27,7 @@
 
 ## Update Summary
 **Changes Made**
-- Updated all references to "Digest data" tab labels to "Digest data" throughout the documentation to reflect v0.25.1/v0.25.2 changes
+- Updated all references to "Raw JSON" tab labels to "Digest data" throughout the documentation to reflect v0.25.1/v0.25.2 changes
 - Enhanced section descriptions to clarify that the tab shows the complete stored digest through typed renderers rather than raw JSON dumps
 - Updated diagram sources to include the portal live check polish release notes
 - Maintained consistency with the actual implementation where the tab renders structured content with fallback to labeled JSON for unrecognized sections
@@ -568,7 +568,7 @@ The operations document repository is planned to receive significant usability e
   - Executions - tool execution outcomes
   - Evidence & Transcript Counts - quantitative metrics
   - Open Items - pending actions breakdown
-  - **Digest data** - preserves artifact inspection capability (renamed from Digest data in v0.25.1)
+  - **Digest data** - preserves artifact inspection capability (renamed from Raw JSON in v0.25.1)
 
 #### R-3: Bounded Scrollable Digest and Prose Panes
 - Maximum height constraints with internal scrolling for long content
@@ -618,7 +618,7 @@ Agent-platform gains a bounded incident-service client that speaks to incident-s
 The Documents view grows incident-report creation and rendering inside the existing surfaces:
 - Creation dialog offers type choice (Shift summary / Incident report)
 - Choosing Incident report swaps the session picker for an incident picker fed by the existing incidents list surface
-- Document drawer renders the incident-report digest in the SPEC-041 tabbed posture with tabs for Incident, Triage, Dispatches, Session, Generated narrative, and **Digest data** (renamed from Digest data in v0.25.1)
+- Document drawer renders the incident-report digest in the SPEC-041 tabbed posture with tabs for Incident, Triage, Dispatches, Session, Generated narrative, and **Digest data** (renamed from Raw JSON in v0.25.1)
 - Type badge distinguishes incident reports
 
 **Section sources**
@@ -639,4 +639,4 @@ With the addition of SPEC-043's incident report document type, the substrate now
 
 The incident report implementation demonstrates the substrate's extensibility through a clean vertical slice pattern: agent-platform owns the document assembly and storage, platform-gateway applies dual-action policy enforcement, and the operator portal provides seamless creation and rendering interfaces. The bounded incident-service client ensures reliable operation even when upstream dependencies are unavailable, while the four-section digest structure provides comprehensive incident context for post-mortem analysis and knowledge sharing.
 
-**Updated**: The v0.25.1 portal live-check polish renamed the final tab from "Digest data" to "Digest data" across both document types, clarifying that the tab shows the complete stored digest through typed renderers rather than a raw JSON dump. This change improves clarity while maintaining the same underlying functionality where the tab renders structured content with labeled JSON fallback for unrecognized sections.
+**Updated**: The v0.25.1 portal live-check polish renamed the final tab from "Raw JSON" to "Digest data" across both document types, clarifying that the tab shows the complete stored digest through typed renderers rather than a raw JSON dump. This change improves clarity while maintaining the same underlying functionality where the tab renders structured content with labeled JSON fallback for unrecognized sections.

@@ -375,11 +375,11 @@ The Operator Portal consists of several key React components and hooks that work
 - **Shift Summary Creation**: Modal dialog for creating immutable shift snapshots with session selection and optional prose generation
 - **Document Management**: List view with filtering by scope (mine/published), status tags, action buttons, and deterministic summary lines
 - **Cross-Owner Access**: Foreign session metadata inclusion with appropriate permission checks and improved coverage tier handling
-- **Tabbed Structured Digest Rendering**: Dedicated sections for Handover, Sessions, Confirmations, Executions, Evidence & transcript, Open items, and Digest data; since v0.25.1 the bounded panes pin their structural chrome — the digest tab bar and the narrative collapse header stay visible while only the content region scrolls, and the last tab is named Digest data (formerly Raw JSON)
+- **Tabbed Structured Digest Rendering**: Dedicated sections for Handover, Sessions, Confirmations, Executions, Evidence & transcript, Open items, and Digest data
 - **Publishing Workflow**: One-way publish operation with duplicate protection and status management
 - **Prose Integration**: Optional AI-generated narrative summary with included/failed/not_requested states
 - **Client-Side Markdown Export**: Download documents as Markdown files with comprehensive metadata, provenance, digest, and narrative content
-- **Bounded Scrollable Panes**: Digest and prose areas with maximum height constraints and expand/collapse functionality for improved readability; since v0.25.2 the bound height is single-sourced — the view sets a `--bounded-pane-max-height` CSS custom property on each wrapper and the bounded-pane rules consume it, so the presentation bound and the overflow detection can never drift apart
+- **Bounded Scrollable Panes**: Digest and prose areas with maximum height constraints and expand/collapse functionality for improved readability
 - **v0.23.2 Enhanced Narrative Panels**: AI-generated shift summary narratives now open expanded by default instead of collapsed, significantly improving operator workflow efficiency when reviewing shift handover information and operational documentation
 
 ### Enhanced Platform Components Health Dashboard
