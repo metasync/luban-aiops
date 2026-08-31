@@ -13,6 +13,7 @@ from unittest.mock import patch
 from audit_service.core.config import (
     AuditSettings,
     parse_ingest_clients,
+    parse_positive_int,
     parse_workload_clients,
 )
 from audit_service.core.runtime import AuditRunSettings
@@ -65,6 +66,7 @@ class AuditSettingsTests(unittest.TestCase):
         self.assertEqual(settings.retention_days, 30)
         self.assertEqual(settings.max_events, 100_000)
         self.assertEqual(settings.max_batch, 50)
+        self.assertEqual(settings.export_max_rows, 10_000)
 
     def test_reads_env_overrides(self) -> None:
         overrides = {
@@ -74,6 +76,7 @@ class AuditSettingsTests(unittest.TestCase):
             "AUDIT_RETENTION_DAYS": "7",
             "AUDIT_MAX_EVENTS": "500",
             "AUDIT_MAX_BATCH": "5",
+            "AUDIT_EXPORT_MAX_ROWS": "250",
         }
         with patch.dict(os.environ, overrides):
             settings = AuditSettings.from_env()
@@ -83,6 +86,19 @@ class AuditSettingsTests(unittest.TestCase):
         self.assertEqual(settings.retention_days, 7)
         self.assertEqual(settings.max_events, 500)
         self.assertEqual(settings.max_batch, 5)
+        self.assertEqual(settings.export_max_rows, 250)
+
+
+class ParsePositiveIntTests(unittest.TestCase):
+    def test_rejects_zero_and_negative(self) -> None:
+        # SPEC-046 R-2: a non-positive export cap is a startup error.
+        for raw in ("0", "-1"):
+            with self.assertRaises(ValueError):
+                parse_positive_int(raw, "AUDIT_EXPORT_MAX_ROWS")
+
+    def test_accepts_positive(self) -> None:
+        self.assertEqual(parse_positive_int("1", "X"), 1)
+        self.assertEqual(parse_positive_int("10000", "X"), 10000)
 
 
 class AuditRunSettingsTests(unittest.TestCase):

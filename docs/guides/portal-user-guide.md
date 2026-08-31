@@ -327,11 +327,27 @@ in the [Incident Triage and Collaboration Guide](incident-guide.md).
 
 ## Audit Trail (Control)
 
-A read-only view of the durable audit trail: filter bar, newest-first
-table, cursor pagination with a persistent **Load more** bar, and
-expandable event envelopes showing the full event payload. The navigation
-entry appears only for identities holding `audit:read` (auditors and
-platform admins by default).
+A read-only view of the durable audit trail. The navigation entry
+appears only for identities holding `audit:read` (auditors and platform
+admins by default). A shared filter toolbar — username, event type,
+emitter service, and a since/until window — drives both tabs and the
+export:
+
+- **Events** — the newest-first table with cursor pagination, a
+  persistent **Load more** bar, and expandable event envelopes showing
+  the full event payload.
+- **Summary** — deterministic aggregates over the filtered window:
+  the total event count, a decision-chain strip
+  (`confirmation_decided → execution_requested → execution_completed →
+  execution_rejected`, zeros shown as 0), and bucket tables by event
+  type, outcome, and service plus the top actors. The summary
+  refetches whenever the filters changed.
+- **Export CSV** — downloads the filtered envelope columns as an
+  RFC-4180 CSV under the server-chosen filename
+  (`audit-export-<timestamp>.csv`). Exports are capped at
+  `AUDIT_EXPORT_MAX_ROWS` rows; when the cap bites the response still
+  downloads and the view shows a truncation notice so you know to
+  narrow the filter window.
 
 Typical uses: tracing who approved a confirmation
 (`confirmation_decided`), what a tool run touched (`tool_invoked`), or

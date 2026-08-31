@@ -479,6 +479,7 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-
 | `AUDIT_EVICTION_INTERVAL_SECONDS` | Eviction task period | `3600` | runtime-config |
 | `AUDIT_EVICTION_BATCH_SIZE` | Batched delete size (postgres) | `1000` | code default |
 | `AUDIT_MAX_BATCH` | Max events per ingest request | `50` | code default |
+| `AUDIT_EXPORT_MAX_ROWS` | Row cap for the bounded CSV export (SPEC-046); must be positive, truncated exports set `X-Audit-Export-Truncated: true` | `10000` | code default |
 
 ### skills-hub
 

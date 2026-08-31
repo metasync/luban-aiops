@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import logging
+from collections import Counter
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,6 +17,14 @@ from typing import Any, AsyncIterator, Callable, Protocol, Sequence
 
 from audit_service.core.config import AuditSettings
 from audit_service.schemas.audit import AuditEvent, AuditQuery
+from audit_service.schemas.summary import (
+    DECISION_CHAIN_TYPES,
+    TOP_ACTORS_LIMIT,
+    AuditSummary,
+    DecisionChain,
+    SummaryBucket,
+    window_echo,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +49,8 @@ class AuditStore(Protocol):
     async def query(
         self, filters: AuditQuery, cursor: str | None, limit: int
     ) -> AuditPage: ...
+
+    async def summarize(self, filters: AuditQuery) -> AuditSummary: ...
 
     async def count(self) -> int: ...
 
@@ -119,6 +130,10 @@ class InMemoryAuditStore:
         )
         return AuditPage(events=page, next_cursor=next_cursor)
 
+    async def summarize(self, filters: AuditQuery) -> AuditSummary:
+        rows = [e for e in self._events if _matches(e, filters)]
+        return summarize_events(rows, filters)
+
     async def count(self) -> int:
         return len(self._events)
 
@@ -157,6 +172,49 @@ def _matches(event: AuditEvent, filters: AuditQuery) -> bool:
     if filters.until and event.occurred_at > filters.until:
         return False
     return True
+
+
+# --- Summary aggregation (SPEC-046 R-1) ---------------------------------------
+
+
+def _sort_buckets(counts: Counter) -> tuple[SummaryBucket, ...]:
+    # Deterministic across backends: count descending, then name ascending.
+    ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return tuple(SummaryBucket(name=name, count=count) for name, count in ordered)
+
+
+def summarize_events(
+    events: Sequence[AuditEvent], filters: AuditQuery
+) -> AuditSummary:
+    """Envelope-column aggregation shared by the in-memory backend and the
+    parity tests. ``details`` is never read (Q-3: no payload excavation)."""
+    type_counts: Counter = Counter(event.event_type for event in events)
+    outcome_counts: Counter = Counter(event.outcome for event in events)
+    service_counts: Counter = Counter(event.service for event in events)
+    actor_counts: Counter = Counter(
+        event.username for event in events if event.username
+    )
+    top_actors = tuple(
+        sorted(
+            (SummaryBucket(name=name, count=count) for name, count in actor_counts.items()),
+            key=lambda bucket: (-bucket.count, bucket.name),
+        )[:TOP_ACTORS_LIMIT]
+    )
+    decision_chain = DecisionChain(
+        confirmation_decided=type_counts.get("confirmation_decided", 0),
+        execution_requested=type_counts.get("execution_requested", 0),
+        execution_completed=type_counts.get("execution_completed", 0),
+        execution_rejected=type_counts.get("execution_rejected", 0),
+    )
+    return AuditSummary(
+        total_events=len(events),
+        window=window_echo(filters),
+        by_event_type=_sort_buckets(type_counts),
+        by_outcome=_sort_buckets(outcome_counts),
+        by_service=_sort_buckets(service_counts),
+        top_actors=top_actors,
+        decision_chain=decision_chain,
+    )
 
 
 # --- PostgreSQL store (deployed environments) --------------------------------
@@ -225,6 +283,37 @@ def _row_to_event(row: dict[str, Any]) -> AuditEvent:
     )
 
 
+def _filter_clause(
+    filters: AuditQuery,
+) -> tuple[list[str], dict[str, Any]]:
+    """Shared WHERE-builder for query and summarize (SPEC-046 R-1) so the
+    two read paths cannot drift; envelope columns only."""
+    where: list[str] = []
+    params: dict[str, Any] = {}
+    if filters.username:
+        where.append("username = %(username)s")
+        params["username"] = filters.username
+    if filters.session_id:
+        where.append("session_id = %(session_id)s")
+        params["session_id"] = filters.session_id
+    if filters.request_id:
+        where.append("request_id = %(request_id)s")
+        params["request_id"] = filters.request_id
+    if filters.event_type:
+        where.append("event_type = %(event_type)s")
+        params["event_type"] = filters.event_type
+    if filters.service:
+        where.append("service = %(service)s")
+        params["service"] = filters.service
+    if filters.since:
+        where.append("occurred_at >= %(since)s")
+        params["since"] = filters.since
+    if filters.until:
+        where.append("occurred_at <= %(until)s")
+        params["until"] = filters.until
+    return where, params
+
+
 class PostgresAuditStore:
     """WAL-durable store over a single ``audit_events`` table.
 
@@ -290,29 +379,7 @@ class PostgresAuditStore:
     async def query(
         self, filters: AuditQuery, cursor: str | None, limit: int
     ) -> AuditPage:
-        where: list[str] = []
-        params: dict[str, Any] = {}
-        if filters.username:
-            where.append("username = %(username)s")
-            params["username"] = filters.username
-        if filters.session_id:
-            where.append("session_id = %(session_id)s")
-            params["session_id"] = filters.session_id
-        if filters.request_id:
-            where.append("request_id = %(request_id)s")
-            params["request_id"] = filters.request_id
-        if filters.event_type:
-            where.append("event_type = %(event_type)s")
-            params["event_type"] = filters.event_type
-        if filters.service:
-            where.append("service = %(service)s")
-            params["service"] = filters.service
-        if filters.since:
-            where.append("occurred_at >= %(since)s")
-            params["since"] = filters.since
-        if filters.until:
-            where.append("occurred_at <= %(until)s")
-            params["until"] = filters.until
+        where, params = _filter_clause(filters)
         if cursor is not None:
             cursor_ts, cursor_id = decode_cursor(cursor)
             where.append(
@@ -339,6 +406,80 @@ class PostgresAuditStore:
             else None
         )
         return AuditPage(events=page, next_cursor=next_cursor)
+
+    async def summarize(self, filters: AuditQuery) -> AuditSummary:
+        # Grouped SQL over envelope columns only — ``details`` is never
+        # read (Q-3). Rows are sorted in-process with the same comparator
+        # as the in-memory backend so both answer byte-identically.
+        where, params = _filter_clause(filters)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        extended_where = list(where) + ["username IS NOT NULL"]
+        username_clause = f"WHERE {' AND '.join(extended_where)}"
+        # ``= ANY(...)`` rather than ``IN``: psycopg adapts a Python list to
+        # a Postgres array, and ``IN $1`` rejects an array parameter.
+        chain_where = list(where) + ["event_type = ANY(%(chain_types)s)"]
+        chain_clause = f"WHERE {' AND '.join(chain_where)}"
+        async with self._connect() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    f"SELECT count(*) FROM audit_events {clause}", params
+                )
+                total_row = await cur.fetchone()
+                total = int(total_row[0]) if total_row else 0
+
+                async def group_counts(column: str) -> Counter:
+                    await cur.execute(
+                        f"SELECT {column}, count(*) FROM audit_events "
+                        f"{clause} GROUP BY {column}",
+                        params,
+                    )
+                    return Counter(
+                        {str(row[0]): int(row[1]) for row in await cur.fetchall()}
+                    )
+
+                type_counts = await group_counts("event_type")
+                outcome_counts = await group_counts("outcome")
+                service_counts = await group_counts("service")
+
+                await cur.execute(
+                    "SELECT username, count(*) FROM audit_events "
+                    f"{username_clause} GROUP BY username "
+                    "LIMIT %(top_actors_limit)s",
+                    {**params, "top_actors_limit": TOP_ACTORS_LIMIT},
+                )
+                top_actors = tuple(
+                    sorted(
+                        (
+                            SummaryBucket(name=str(row[0]), count=int(row[1]))
+                            for row in await cur.fetchall()
+                        ),
+                        key=lambda bucket: (-bucket.count, bucket.name),
+                    )
+                )
+
+                await cur.execute(
+                    "SELECT event_type, count(*) FROM audit_events "
+                    f"{chain_clause} GROUP BY event_type",
+                    {**params, "chain_types": list(DECISION_CHAIN_TYPES)},
+                )
+                chain_counts = {
+                    str(row[0]): int(row[1]) for row in await cur.fetchall()
+                }
+        decision_chain = DecisionChain(
+            confirmation_decided=chain_counts.get("confirmation_decided", 0),
+            execution_requested=chain_counts.get("execution_requested", 0),
+            execution_completed=chain_counts.get("execution_completed", 0),
+            execution_rejected=chain_counts.get("execution_rejected", 0),
+        )
+        return AuditSummary(
+            total_events=total,
+            window=window_echo(filters),
+            by_event_type=_sort_buckets(type_counts),
+            by_outcome=_sort_buckets(outcome_counts),
+            by_service=_sort_buckets(service_counts),
+            top_actors=top_actors,
+            decision_chain=decision_chain,
+        )
 
     async def count(self) -> int:
         async with self._connect() as conn:

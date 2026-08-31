@@ -2,11 +2,11 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-08-31
 - approved: 2026-08-31
-- delivered: —
+- delivered: 2026-08-31
 - release slice: R5 — Hardening and External Consumption (eighth R5
   slice, target v0.28.0)
 - related ADRs: none (lineage: the R5 "richer audit reporting"
@@ -294,3 +294,9 @@ are recorded here:
 - 2026-08-31: operator approved the draft (`draft` → `approved`)
   after review, with no requirement changes; delivery proceeds
   under the house train as v0.28.0.
+- 2026-08-31: delivered as v0.28.0 with all six requirements
+  implemented; the browser live check on the canonical deployment
+  surfaced one Postgres array-adaptation defect in the summary path
+  (`event_type IN $1` rejects a list parameter; fixed to
+  `= ANY(%(chain_types)s)` with a pinned-shape test) before release
+  — all live scenarios then green.

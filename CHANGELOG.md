@@ -13,6 +13,49 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.28.0 — 2026-08-31
+
+### Added
+
+- **Audit reporting and export (SPEC-046)** — the audit trail gains
+  two read-only reporting surfaces that ride the existing `audit:read`
+  grant: no new policy action, no new event type, and the auditor
+  read-only invariant unchanged — both surfaces aggregate envelope
+  columns only and never touch event payloads.
+  - audit-service gains `GET /api/v1/audit/summary`: deterministic
+    aggregates over the same filters as the event query — total event
+    count, the echo of the effective window, bucket tables by event
+    type / outcome / service (count desc, name asc), top actors (cap
+    10, null usernames excluded), and the decision-chain counters
+    (`confirmation_decided → execution_requested →
+    execution_completed → execution_rejected`, zeros included). Both
+    store backends (in-memory and Postgres) compute identical results
+    behind one shared filter clause; new counters
+    `audit_summary_query_total` and `audit_exports_total`.
+  - audit-service gains `GET /api/v1/audit/export`: a bounded
+    RFC-4180 CSV of the filtered envelopes — ten fixed columns,
+    RFC-3339 UTC `Z` timestamps, sorted-key compact `details` JSON as
+    the final column. Rows are capped at `AUDIT_EXPORT_MAX_ROWS`
+    (default `10000`, positive-int validated); `X-Audit-Export-Truncated`
+    and `X-Audit-Export-Rows` are always set before the first byte
+    streams, and the filename is deterministic
+    (`audit-export-<timestamp>.csv`).
+  - shared-contracts gains `audit-summary.schema.json`
+    (`additionalProperties: false`), bound by the service's contract
+    tests.
+  - platform-gateway passes both routes through behind the existing
+    `audit:read` gate with the standard 503/4xx-passthrough/502
+    mapping; the export leg uses a dedicated 30 s timeout and forwards
+    only the allowlisted content headers.
+  - The portal Audit view becomes tabbed: **Events** (the existing
+    table, moved intact) and **Summary** (aggregate panel that
+    refetches when the filters move), driven by one shared filter
+    toolbar alongside **Export CSV** (Blob download under the server
+    filename, truncation notice when the cap bites, structured
+    403/502/503 messages). The filter vocabulary now mirrors the
+    shared audit-event schema — 20 event types and 7 emitter services
+    instead of the stale 7 and 4 — pinned by a vitest drift guard.
+
 ## 0.27.6 — 2026-08-31
 
 ### Changed

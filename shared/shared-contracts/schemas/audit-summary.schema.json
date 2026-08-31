@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/audit-summary.schema.json",
+  "title": "Audit Summary (v1)",
+  "description": "Response contract for GET /api/v1/audit/summary (SPEC-046 R-1). Deterministic aggregates over envelope columns only — event_type, outcome, service, username; the details payload is never excavated (Q-3). Every list section sorts count descending, then name ascending. The decision_chain projects the SPEC-037 decision-to-execution lineage with explicit zeros, so governance can reconcile approvals against executions without reading the type table.",
+  "type": "object",
+  "required": [
+    "total_events",
+    "window",
+    "by_event_type",
+    "by_outcome",
+    "by_service",
+    "top_actors",
+    "decision_chain"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "total_events": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total number of stored envelopes matching the applied filters (no default window; the store is retention-bounded)."
+    },
+    "window": {
+      "type": "object",
+      "description": "Echo of the applied filters; unset fields are omitted. Keys are the query-route filter dimensions; since/until are RFC 3339 strings.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "by_event_type": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/bucket"
+      },
+      "description": "Event counts grouped by event_type."
+    },
+    "by_outcome": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/bucket"
+      },
+      "description": "Event counts grouped by outcome."
+    },
+    "by_service": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/bucket"
+      },
+      "description": "Event counts grouped by emitting service."
+    },
+    "top_actors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/bucket"
+      },
+      "maxItems": 10,
+      "description": "The ten busiest non-null usernames with event counts."
+    },
+    "decision_chain": {
+      "type": "object",
+      "required": [
+        "confirmation_decided",
+        "execution_requested",
+        "execution_completed",
+        "execution_rejected"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "confirmation_decided": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "execution_requested": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "execution_completed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "execution_rejected": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "description": "SPEC-037 lineage projection; each count is zero when the event type is absent from the window."
+    }
+  },
+  "$defs": {
+    "bucket": {
+      "type": "object",
+      "required": [
+        "name",
+        "count"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

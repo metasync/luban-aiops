@@ -49,6 +49,16 @@ AUDIT_QUERIES = Counter(
     "Audit trail query requests served.",
 )
 
+AUDIT_SUMMARY_QUERIES = Counter(
+    "audit_summary_query_total",
+    "Audit summary aggregate requests served (SPEC-046 R-1).",
+)
+
+AUDIT_EXPORTS = Counter(
+    "audit_exports_total",
+    "Audit trail CSV exports generated (SPEC-046 R-2).",
+)
+
 AUDIT_EVICTED = Counter(
     "audit_evicted_total",
     "Audit events evicted by retention.",
@@ -106,6 +116,14 @@ def record_rejected(reason: str) -> None:
 
 def record_query() -> None:
     AUDIT_QUERIES.inc()
+
+
+def record_summary_query() -> None:
+    AUDIT_SUMMARY_QUERIES.inc()
+
+
+def record_export() -> None:
+    AUDIT_EXPORTS.inc()
 
 
 def record_evicted(count: int) -> None:

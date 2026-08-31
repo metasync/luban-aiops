@@ -432,7 +432,15 @@ thin guess. Both entry points open the validated draft in a read-only
 preview modal before the client-side download, and each incident
 generation is recorded once as `incident_skill_draft_generated`
 carrying the incident id, mode, and validation outcome — emitted
-regardless of whether the operator downloads or discards. The full approval model —
+regardless of whether the operator downloads or discards. Since v0.28.0
+(SPEC-046) the audit trail gains two read-only reporting surfaces — the
+summary aggregate (`GET /api/v1/audit/summary`) and the bounded CSV
+export (`GET /api/v1/audit/export`) — both riding the existing
+`audit:read` grant (auditors and platform admins; operator and
+read-only-observer receive the standard audited policy 403). No new
+policy action and no new event type are introduced, and the auditor
+read-only invariant is unchanged: both surfaces query envelope columns
+only and never aggregate over event payloads. The full approval model —
 policy actions, risk-tier admission, the agent auto-allow list, and HITL
 confirmation — is documented in the
 [Approval and HITL Governance Guide](../guides/approval-and-hitl.md).

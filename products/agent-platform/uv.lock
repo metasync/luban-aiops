@@ -42,7 +42,7 @@ wheels = [
 
 [[package]]
 name = "agent-service"
-version = "0.27.6"
+version = "0.28.0"
 source = { editable = "." }
 dependencies = [
     { name = "agentscope" },

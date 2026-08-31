@@ -1,6 +1,10 @@
-// Durable audit trail view (SPEC-013 R-5, SPEC-023 R-5): auditor and
-// platform-admin only. Filters + cursor pagination + expandable verbatim
-// envelopes. The gateway re-enforces audit:read on every query.
+// Durable audit trail view (SPEC-013 R-5, SPEC-023 R-5, SPEC-046 R-5):
+// auditor and platform-admin only. One shared filter toolbar drives both
+// tabs — Events (cursor pagination + expandable verbatim envelopes) and
+// Summary (deterministic envelope-column aggregates) — plus the bounded
+// CSV export. The filter vocabulary is pinned to the shared audit-event
+// schema by constants.ts and its drift guard. The gateway re-enforces
+// audit:read on every request.
 import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
@@ -9,31 +13,23 @@ import {
   Select,
   Spin,
   Table,
+  Tabs,
   Tag,
   Typography,
   type TableColumnsType,
 } from "antd";
-import { requestJson } from "../../api/client";
+import {
+  ApiError,
+  authHeaders,
+  buildRequestId,
+  currentGateway,
+  requestJson,
+} from "../../api/client";
 import { useAuth } from "../../auth/AuthContext";
 import { AUDIT_ROLES, hasAnyRole } from "../../roles";
 import { formatTimestamp } from "../format";
-
-const EVENT_TYPES = [
-  "tool_invoked",
-  "policy_decision",
-  "token_exchange",
-  "session_created",
-  "chat_started",
-  "chat_completed",
-  "incident_triaged",
-];
-
-const SERVICES = [
-  "tool-gateway",
-  "platform-gateway",
-  "identity-service",
-  "incident-service",
-];
+import AuditSummaryPanel, { type AuditSummary } from "./AuditSummaryPanel";
+import { EMITTER_SERVICES, EVENT_TYPES } from "./constants";
 
 interface AuditEvent {
   occurred_at: string;
@@ -68,16 +64,59 @@ const EMPTY_FILTERS: Filters = {
   until: "",
 };
 
+// Structured error surfaces (R-5): the three upstream postures get
+// distinct, operator-actionable messages instead of raw status text.
+function errorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 403) {
+      return "Access denied: the audit surface requires the audit:read policy action.";
+    }
+    if (error.status === 503) {
+      return "The audit service is not configured on this gateway.";
+    }
+    if (error.status === 502) {
+      return "The audit service is unavailable right now.";
+    }
+    return `Audit request failed: ${error.status} ${error.message}`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+function filterParams(filters: Filters): URLSearchParams {
+  const params = new URLSearchParams();
+  if (filters.username.trim()) params.set("username", filters.username.trim());
+  if (filters.eventType) params.set("event_type", filters.eventType);
+  if (filters.service) params.set("service", filters.service);
+  if (filters.since) params.set("since", new Date(filters.since).toISOString());
+  if (filters.until) params.set("until", new Date(filters.until).toISOString());
+  return params;
+}
+
 export default function AuditView() {
   const { roles } = useAuth();
   const allowed = hasAnyRole(roles, AUDIT_ROLES);
 
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [activeTab, setActiveTab] = useState<"events" | "summary">("events");
+
+  // Events tab state (the SPEC-013 table, moved intact).
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+
+  // Summary tab state; fetched lazily on tab activation and on Refresh
+  // while active, keyed off the applied filters.
+  const [summary, setSummary] = useState<AuditSummary | null>(null);
+  const [summaryKey, setSummaryKey] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+
+  // Export state.
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [truncatedRows, setTruncatedRows] = useState<string | null>(null);
 
   const load = useCallback(
     async (append: boolean) => {
@@ -85,12 +124,8 @@ export default function AuditView() {
       setLoading(true);
       setError(null);
       try {
-        const params = new URLSearchParams({ limit: "50" });
-        if (filters.username.trim()) params.set("username", filters.username.trim());
-        if (filters.eventType) params.set("event_type", filters.eventType);
-        if (filters.service) params.set("service", filters.service);
-        if (filters.since) params.set("since", new Date(filters.since).toISOString());
-        if (filters.until) params.set("until", new Date(filters.until).toISOString());
+        const params = filterParams(filters);
+        params.set("limit", "50");
         if (append && cursor) params.set("cursor", cursor);
         const payload = await requestJson<AuditPage>(
           `/api/v1/audit/events?${params.toString()}`,
@@ -100,7 +135,7 @@ export default function AuditView() {
         setCursor(payload.next_cursor ?? null);
         setLoaded(true);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorMessage(err));
       } finally {
         setLoading(false);
       }
@@ -108,13 +143,75 @@ export default function AuditView() {
     [allowed, filters, cursor],
   );
 
-  // Initial load on first entry (role gate re-checked server-side).
+  const fetchSummary = useCallback(
+    async (current: Filters) => {
+      if (!allowed) return;
+      setSummaryLoading(true);
+      setSummaryError(null);
+      try {
+        const params = filterParams(current);
+        const data = await requestJson<AuditSummary>(
+          `/api/v1/audit/summary?${params.toString()}`,
+        );
+        setSummary(data);
+        setSummaryKey(JSON.stringify(current));
+      } catch (err) {
+        setSummaryError(errorMessage(err));
+      } finally {
+        setSummaryLoading(false);
+      }
+    },
+    [allowed],
+  );
+
+  // Initial events load on first entry (role gate re-checked server-side).
   useEffect(() => {
     if (allowed && !loaded && !loading && !error) {
       void load(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowed]);
+
+  // SPEC-040 R-4 Blob download posture: the server-side export streams
+  // into a client-side download under the server's Content-Disposition
+  // filename.
+  const handleExport = useCallback(async () => {
+    if (!allowed) return;
+    setExporting(true);
+    setExportError(null);
+    setTruncatedRows(null);
+    try {
+      const params = filterParams(filters);
+      const response = await fetch(
+        `${currentGateway()}/api/v1/audit/export?${params.toString()}`,
+        {
+          headers: { "x-request-id": buildRequestId(), ...authHeaders() },
+        },
+      );
+      if (!response.ok) {
+        throw new ApiError(response.status, response.statusText);
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const filename =
+        /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? "audit-export.csv";
+      const url = URL.createObjectURL(blob);
+      const anchor = window.document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      window.document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      if (response.headers.get("x-audit-export-truncated") === "true") {
+        setTruncatedRows(response.headers.get("x-audit-export-rows") ?? "");
+      }
+    } catch (err) {
+      setExportError(errorMessage(err));
+    } finally {
+      setExporting(false);
+    }
+  }, [allowed, filters]);
 
   if (!allowed) {
     return (
@@ -125,6 +222,24 @@ export default function AuditView() {
       />
     );
   }
+
+  const onTabChange = (key: string) => {
+    const tab = key === "summary" ? "summary" : "events";
+    setActiveTab(tab);
+    // One fetch per apply: leaving a tab never invalidates it; entering
+    // the Summary tab re-fetches only when the filters moved.
+    if (tab === "summary" && summaryKey !== JSON.stringify(filters)) {
+      void fetchSummary(filters);
+    }
+  };
+
+  const refresh = () => {
+    if (activeTab === "summary") {
+      void fetchSummary(filters);
+    } else {
+      void load(false);
+    }
+  };
 
   const columns: TableColumnsType<AuditEvent> = [
     {
@@ -157,6 +272,7 @@ export default function AuditView() {
       <Typography.Title level={4} style={{ marginTop: 0 }}>
         Audit trail (durable)
       </Typography.Title>
+      {/* One shared toolbar drives both tabs and the export (Q-6). */}
       <div className="view-toolbar">
         <Input
           placeholder="username"
@@ -170,7 +286,7 @@ export default function AuditView() {
         <Select
           value={filters.eventType}
           onChange={(value) => setFilters((f) => ({ ...f, eventType: value }))}
-          style={{ width: 180 }}
+          style={{ width: 240 }}
           aria-label="Filter by event type"
           options={[
             { value: "", label: "all event types" },
@@ -180,11 +296,11 @@ export default function AuditView() {
         <Select
           value={filters.service}
           onChange={(value) => setFilters((f) => ({ ...f, service: value }))}
-          style={{ width: 180 }}
+          style={{ width: 200 }}
           aria-label="Filter by service"
           options={[
             { value: "", label: "all services" },
-            ...SERVICES.map((service) => ({ value: service, label: service })),
+            ...EMITTER_SERVICES.map((service) => ({ value: service, label: service })),
           ]}
         />
         <Input
@@ -205,45 +321,104 @@ export default function AuditView() {
           style={{ width: 200 }}
           aria-label="Until"
         />
-        <Button onClick={() => void load(false)}>Refresh</Button>
+        <Button onClick={refresh}>Refresh</Button>
+        <Button loading={exporting} onClick={() => void handleExport()}>
+          Export CSV
+        </Button>
       </div>
-      {error ? (
-        <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />
+      {exportError ? (
+        <Alert
+          type="error"
+          showIcon
+          title={exportError}
+          style={{ marginBottom: 12 }}
+        />
       ) : null}
-      <Spin spinning={loading}>
-        {loaded && events.length === 0 ? (
-          <Typography.Text type="secondary">
-            No audit events match these filters.
-          </Typography.Text>
-        ) : (
-          <Table<AuditEvent>
-            size="small"
-            rowKey={(event) => `${event.request_id}-${event.occurred_at}-${event.event_type}`}
-            columns={columns}
-            dataSource={events}
-            pagination={false}
-            expandable={{
-              // Verbatim event envelope (legacy parity: click row to toggle).
-              expandedRowRender: (event) => (
-                <pre className="evidence-pre">
-                  {JSON.stringify(event, null, 2)}
-                </pre>
-              ),
-            }}
-          />
-        )}
-      </Spin>
-      <div className="view-toolbar" style={{ marginTop: 12 }}>
-        <Typography.Text type="secondary">
-          {events.length} event{events.length === 1 ? "" : "s"} shown ·{" "}
-          {cursor ? "more available" : "end of trail"}
-        </Typography.Text>
-        {cursor ? (
-          <Button size="small" loading={loading} onClick={() => void load(true)}>
-            Load more
-          </Button>
-        ) : null}
-      </div>
+      {truncatedRows ? (
+        <Alert
+          type="warning"
+          showIcon
+          title={`Export truncated at ${truncatedRows} rows (AUDIT_EXPORT_MAX_ROWS). Narrow the filters for a complete export.`}
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
+      <Tabs
+        activeKey={activeTab}
+        onChange={onTabChange}
+        items={[
+          {
+            key: "events",
+            label: "Events",
+            children: (
+              <>
+                {error ? (
+                  <Alert
+                    type="error"
+                    showIcon
+                    title={error}
+                    style={{ marginBottom: 12 }}
+                  />
+                ) : null}
+                <Spin spinning={loading}>
+                  {loaded && events.length === 0 ? (
+                    <Typography.Text type="secondary">
+                      No audit events match these filters.
+                    </Typography.Text>
+                  ) : (
+                    <Table<AuditEvent>
+                      size="small"
+                      rowKey={(event) =>
+                        `${event.request_id}-${event.occurred_at}-${event.event_type}`
+                      }
+                      columns={columns}
+                      dataSource={events}
+                      pagination={false}
+                      expandable={{
+                        // Verbatim event envelope (legacy parity: click row to toggle).
+                        expandedRowRender: (event) => (
+                          <pre className="evidence-pre">
+                            {JSON.stringify(event, null, 2)}
+                          </pre>
+                        ),
+                      }}
+                    />
+                  )}
+                </Spin>
+                <div className="view-toolbar" style={{ marginTop: 12 }}>
+                  <Typography.Text type="secondary">
+                    {events.length} event{events.length === 1 ? "" : "s"} shown ·{" "}
+                    {cursor ? "more available" : "end of trail"}
+                  </Typography.Text>
+                  {cursor ? (
+                    <Button size="small" loading={loading} onClick={() => void load(true)}>
+                      Load more
+                    </Button>
+                  ) : null}
+                </div>
+              </>
+            ),
+          },
+          {
+            key: "summary",
+            label: "Summary",
+            children: (
+              <>
+                {summaryError ? (
+                  <Alert
+                    type="error"
+                    showIcon
+                    title={summaryError}
+                    style={{ marginBottom: 12 }}
+                  />
+                ) : null}
+                <Spin spinning={summaryLoading}>
+                  {summary ? <AuditSummaryPanel summary={summary} /> : null}
+                </Spin>
+              </>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

@@ -7,6 +7,22 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-31-audit-reporting-and-export.md`
+  - delivers SPEC-046 (v0.28.0): the audit trail gains two read-only
+    reporting surfaces that ride the existing **`audit:read`** grant —
+    a deterministic summary aggregate over any filter window (bucket
+    tables by event type / outcome / service, top actors, and the
+    decision-chain counters, zeros included) and a bounded RFC-4180
+    CSV export of the filtered envelopes under the new
+    **`AUDIT_EXPORT_MAX_ROWS`** cap (default 10000) with honest
+    `X-Audit-Export-Truncated` / `X-Audit-Export-Rows` headers; new
+    **`audit-summary.schema.json`** contract, gateway pass-through
+    (30 s export leg, allowlisted headers), and the portal Audit view
+    becomes tabbed (**Events** / **Summary**) with a shared filter
+    toolbar, **Export CSV** under the SPEC-040 Blob posture, and a
+    vitest drift guard re-syncing the filter vocabulary to the
+    contract (20 event types / 7 emitter services); no new policy
+    action, no new event type, envelope columns only
 - `2026-08-31-post-review-hardening-tool-name-rewrite.md`
   - review-remediation patch (v0.27.6) closing the v0.27.4/v0.27.5
     code review (approve-with-minor): the rewrite's match boundary

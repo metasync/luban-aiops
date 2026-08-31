@@ -205,6 +205,144 @@ class InMemoryStoreTests(unittest.TestCase):
         self.assertTrue(_run(self.store.ready()))
         self.assertIsNone(_run(self.store.close()))
 
+    # --- Summarize (SPEC-046 R-1) ------------------------------------------
+
+    def _seed_summary_fixture(self) -> None:
+        # 3 tool_invoked (2 success by alice, 1 deny by bob), 1
+        # policy_decision (allow, carol), 1 confirmation_decided +
+        # execution chain pair (alice). Username carrie is null-username
+        # coverage via event "no-user".
+        _run(
+            self.store.add(
+                [
+                    _event("t1", username="alice", outcome="success"),
+                    _event("t2", username="alice", outcome="success"),
+                    _event("t3", username="bob", outcome="deny"),
+                    _event(
+                        "p1",
+                        username="carol",
+                        event_type="policy_decision",
+                        service="platform-gateway",
+                        outcome="allow",
+                    ),
+                    _event(
+                        "c1",
+                        username="alice",
+                        event_type="confirmation_decided",
+                        service="platform-gateway",
+                    ),
+                    _event(
+                        "x1",
+                        username="alice",
+                        event_type="execution_requested",
+                        service="execution-runtime",
+                    ),
+                    _event(
+                        "x2",
+                        event_type="execution_completed",
+                        service="execution-runtime",
+                    ),
+                ]
+            )
+        )
+
+    def test_summarize_aggregates_envelope_columns(self) -> None:
+        self._seed_summary_fixture()
+        summary = _run(self.store.summarize(AuditQuery()))
+        self.assertEqual(summary.total_events, 7)
+        self.assertEqual(
+            [(b.name, b.count) for b in summary.by_event_type],
+            [
+                ("tool_invoked", 3),
+                ("confirmation_decided", 1),
+                ("execution_completed", 1),
+                ("execution_requested", 1),
+                ("policy_decision", 1),
+            ],
+        )
+        self.assertEqual(
+            [(b.name, b.count) for b in summary.by_outcome],
+            [("success", 5), ("allow", 1), ("deny", 1)],
+        )
+        self.assertEqual(
+            [(b.name, b.count) for b in summary.by_service],
+            [
+                ("tool-gateway", 3),
+                ("execution-runtime", 2),
+                ("platform-gateway", 2),
+            ],
+        )
+
+    def test_summarize_top_actors_excludes_null_usernames(self) -> None:
+        self._seed_summary_fixture()
+        summary = _run(self.store.summarize(AuditQuery()))
+        # execution_completed had no username and must not appear.
+        self.assertEqual(
+            [(b.name, b.count) for b in summary.top_actors],
+            [("alice", 4), ("bob", 1), ("carol", 1)],
+        )
+
+    def test_summarize_top_actors_capped_at_ten(self) -> None:
+        _run(
+            self.store.add(
+                [
+                    _event(f"e{i}", username=f"user-{i:02d}", minutes=i)
+                    for i in range(12)
+                ]
+                + [_event("extra", username="user-00", minutes=99)]
+            )
+        )
+        summary = _run(self.store.summarize(AuditQuery()))
+        self.assertEqual(len(summary.top_actors), 10)
+        # Busiest first; ties broken by name ascending.
+        self.assertEqual(summary.top_actors[0].name, "user-00")
+        self.assertEqual(summary.top_actors[0].count, 2)
+        self.assertEqual(
+            [b.name for b in summary.top_actors[1:]],
+            [f"user-{i:02d}" for i in range(1, 10)],
+        )
+
+    def test_summarize_decision_chain_projects_spec037_events(self) -> None:
+        self._seed_summary_fixture()
+        summary = _run(self.store.summarize(AuditQuery()))
+        chain = summary.decision_chain
+        self.assertEqual(chain.confirmation_decided, 1)
+        self.assertEqual(chain.execution_requested, 1)
+        self.assertEqual(chain.execution_completed, 1)
+        self.assertEqual(chain.execution_rejected, 0)  # zero when absent
+
+    def test_summarize_respects_filters_and_echoes_window(self) -> None:
+        self._seed_summary_fixture()
+        filters = AuditQuery(
+            username="alice", since=BASE - timedelta(hours=1)
+        )
+        summary = _run(self.store.summarize(filters))
+        self.assertEqual(summary.total_events, 4)
+        self.assertEqual(
+            summary.window,
+            {
+                "username": "alice",
+                "since": (BASE - timedelta(hours=1)).isoformat(),
+            },
+        )
+        self.assertEqual(
+            [(b.name, b.count) for b in summary.top_actors], [("alice", 4)]
+        )
+
+    def test_summarize_empty_window_answers_zeros(self) -> None:
+        self._seed_summary_fixture()
+        summary = _run(
+            self.store.summarize(AuditQuery(username="nobody"))
+        )
+        self.assertEqual(summary.total_events, 0)
+        self.assertEqual(summary.by_event_type, ())
+        self.assertEqual(summary.by_outcome, ())
+        self.assertEqual(summary.by_service, ())
+        self.assertEqual(summary.top_actors, ())
+        self.assertEqual(
+            summary.decision_chain.confirmation_decided, 0
+        )
+
 
 def _pg_row(event: AuditEvent) -> tuple:
     """Build a driver row tuple in ``_row_names()`` column order."""
@@ -389,6 +527,130 @@ class PostgresStoreAdapterTests(unittest.TestCase):
     def test_close_is_noop(self) -> None:
         calls: list[dict] = []
         self.assertIsNone(_run(self._store(calls).close()))
+
+
+class PostgresSummarizeTests(unittest.TestCase):
+    """Grouped-SQL adaptation against a fake driver (SPEC-046 R-1).
+
+    The driver hands back one canned result set per executed statement
+    (total, three grouped sections, top actors, decision chain); the
+    expectations are computed with the shared ``summarize_events`` helper
+    so the Postgres mapping layer is pinned to the in-memory semantics.
+    """
+
+    def _fake_connect(self, calls: list[dict], result_sets: list[list[tuple]]):
+        from contextlib import asynccontextmanager
+
+        queue = [list(rows) for rows in result_sets]
+
+        class FakeCursor:
+            async def execute(self, sql, params=None):
+                calls.append({"sql": sql, "params": params})
+
+            async def fetchall(self):
+                return queue.pop(0) if queue else []
+
+            async def fetchone(self):
+                rows = queue.pop(0) if queue else []
+                return rows[0] if rows else None
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+        class FakeConn:
+            def cursor(self):
+                return FakeCursor()
+
+            async def commit(self):
+                return None
+
+            async def close(self):
+                return None
+
+        @asynccontextmanager
+        async def connect():
+            yield FakeConn()
+
+        return connect
+
+    def test_summarize_matches_in_memory_semantics(self) -> None:
+        from audit_service.services.audit_store import (
+            PostgresAuditStore,
+            summarize_events,
+        )
+
+        fixture = [
+            _event("t1", username="alice"),
+            _event("t2", username="alice"),
+            _event("t3", username="bob", outcome="deny"),
+            _event("c1", username="alice", event_type="confirmation_decided"),
+            _event(
+                "x1",
+                event_type="execution_requested",
+                service="execution-runtime",
+            ),
+        ]
+        filters = AuditQuery(service="tool-gateway")
+        expected = summarize_events(
+            [e for e in fixture if e.service == "tool-gateway"], filters
+        )
+
+        calls: list[dict] = []
+        result_sets = [
+            [(4,)],  # total
+            [("tool_invoked", 3), ("confirmation_decided", 1)],
+            [("success", 3), ("deny", 1)],
+            [("tool-gateway", 4)],
+            [("alice", 3), ("bob", 1)],
+            [("confirmation_decided", 1)],
+        ]
+        store = PostgresAuditStore(
+            "postgresql://fake", connect=self._fake_connect(calls, result_sets)
+        )
+        summary = _run(store.summarize(filters))
+        self.assertEqual(summary.total_events, expected.total_events)
+        self.assertEqual(summary.by_event_type, expected.by_event_type)
+        self.assertEqual(summary.by_outcome, expected.by_outcome)
+        self.assertEqual(summary.by_service, expected.by_service)
+        self.assertEqual(summary.top_actors, expected.top_actors)
+        self.assertEqual(
+            summary.decision_chain.confirmation_decided,
+            expected.decision_chain.confirmation_decided,
+        )
+        self.assertEqual(summary.window, expected.window)
+
+        # Shared WHERE-builder: the filter rides every statement; the
+        # envelope-only rule holds (no ``details`` anywhere).
+        for call in calls:
+            self.assertIn("service = %(service)s", call["sql"])
+            self.assertNotIn("details", call["sql"])
+        self.assertIn("GROUP BY event_type", calls[1]["sql"])
+        self.assertIn("GROUP BY outcome", calls[2]["sql"])
+        self.assertIn("GROUP BY service", calls[3]["sql"])
+        self.assertIn("username IS NOT NULL", calls[4]["sql"])
+        self.assertIn("LIMIT %(top_actors_limit)s", calls[4]["sql"])
+        self.assertIn("event_type = ANY(%(chain_types)s)", calls[5]["sql"])
+        # psycopg adapts a Python list to a Postgres array for ``= ANY``;
+        # a tuple would adapt to a composite type and ``IN`` rejects arrays
+        # outright — pin the exact shape that works (live Postgres regression).
+        self.assertIsInstance(calls[5]["params"]["chain_types"], list)
+
+    def test_summarize_empty_window_answers_zeros(self) -> None:
+        from audit_service.services.audit_store import PostgresAuditStore
+
+        calls: list[dict] = []
+        result_sets = [(0,), [], [], [], [], []]
+        store = PostgresAuditStore(
+            "postgresql://fake", connect=self._fake_connect(calls, result_sets)
+        )
+        summary = _run(store.summarize(AuditQuery()))
+        self.assertEqual(summary.total_events, 0)
+        self.assertEqual(summary.by_event_type, ())
+        self.assertEqual(summary.top_actors, ())
+        self.assertEqual(summary.decision_chain.execution_rejected, 0)
 
 
 class BuildAuditStoreTests(unittest.TestCase):

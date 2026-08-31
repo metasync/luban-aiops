@@ -49,6 +49,14 @@ def parse_workload_clients(raw: str) -> tuple[WorkloadClient, ...]:
     return tuple(mappings)
 
 
+def parse_positive_int(raw: str, name: str) -> int:
+    """Integer knob that must be positive (e.g. ``AUDIT_EXPORT_MAX_ROWS``)."""
+    value = int(raw)
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
 @dataclass(frozen=True)
 class AuditSettings:
     """Frozen settings loaded from environment variables (SPEC-013 R-2)."""
@@ -64,6 +72,7 @@ class AuditSettings:
     eviction_interval_seconds: int = 3600
     eviction_batch_size: int = 1000
     max_batch: int = 50
+    export_max_rows: int = 10_000
 
     @classmethod
     def from_env(cls) -> "AuditSettings":
@@ -89,6 +98,10 @@ class AuditSettings:
                 os.getenv("AUDIT_EVICTION_BATCH_SIZE", "1000")
             ),
             max_batch=int(os.getenv("AUDIT_MAX_BATCH", "50")),
+            export_max_rows=parse_positive_int(
+                os.getenv("AUDIT_EXPORT_MAX_ROWS", "10000"),
+                "AUDIT_EXPORT_MAX_ROWS",
+            ),
         )
 
 

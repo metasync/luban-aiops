@@ -14,6 +14,24 @@ if (typeof globalThis.ResizeObserver === "undefined") {
     ResizeObserverStub as unknown as typeof ResizeObserver;
 }
 
+// antd responsive components (Tabs/Grid breakpoint hooks) register a
+// matchMedia listener, which jsdom does not provide. The stub reports a
+// static non-matching media query — tests assert rendered DOM, not
+// breakpoints (SPEC-046 R-5).
+if (typeof window.matchMedia === "undefined") {
+  window.matchMedia = (query: string) =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }) as MediaQueryList;
+}
+
 // SPEC-042 R-2: zero-tolerance antd deprecation regression guard. Any
 // `[antd: …] … deprecated` console warning emitted during the run fails
 // the suite at teardown with the offending text, so new deprecations

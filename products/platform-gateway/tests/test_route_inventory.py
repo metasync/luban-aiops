@@ -37,6 +37,10 @@ EXPECTED_ROUTES = {
     # HITL confirmation bridging (SPEC-020): answers a parked kernel ASK.
     ("POST", "/api/v1/chat/confirm"),
     ("GET", "/api/v1/audit/events"),
+    # Audit reporting surfaces (SPEC-046 R-3): summary aggregates and the
+    # bounded CSV export ride the same audit:read gate as the raw trail.
+    ("GET", "/api/v1/audit/summary"),
+    ("GET", "/api/v1/audit/export"),
     ("GET", "/api/v1/incidents"),
     ("POST", "/api/v1/incidents"),
     ("GET", "/api/v1/incidents/{incident_id}"),

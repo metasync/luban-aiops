@@ -15,6 +15,7 @@ import jsonschema
 from pydantic import ValidationError
 
 from audit_service.schemas.audit import AuditEvent, IngestRequest, EventType, Outcome
+from audit_service.schemas.summary import AuditSummaryResponse
 
 SCHEMAS_DIR = (
     Path(__file__).resolve().parents[3] / "shared" / "shared-contracts" / "schemas"
@@ -187,6 +188,69 @@ class IngestRequestContractTests(unittest.TestCase):
             {"events": [_event().model_dump(mode="json", exclude_none=True)]}
         )
         self.assertEqual(len(request.events), 1)
+
+
+class AuditSummaryContractTests(unittest.TestCase):
+    """Summary response binds to audit-summary.schema.json (SPEC-046 R-4)."""
+
+    schema_name = "audit-summary.schema.json"
+
+    def _summary_payload(self) -> dict:
+        return AuditSummaryResponse(
+            total_events=3,
+            window={"event_type": "tool_invoked"},
+            by_event_type=[{"name": "tool_invoked", "count": 3}],
+            by_outcome=[{"name": "success", "count": 3}],
+            by_service=[
+                {"name": "platform-gateway", "count": 2},
+                {"name": "tool-gateway", "count": 1},
+            ],
+            top_actors=[{"name": "alice", "count": 3}],
+            decision_chain={
+                "confirmation_decided": 0,
+                "execution_requested": 0,
+                "execution_completed": 0,
+                "execution_rejected": 0,
+            },
+        ).model_dump(mode="json")
+
+    def test_model_properties_match_contract_properties(self) -> None:
+        contract = _load_schema(self.schema_name)
+        model_properties = set(AuditSummaryResponse.model_json_schema()["properties"])
+        contract_properties = set(contract["properties"])
+        self.assertEqual(model_properties, contract_properties)
+
+    def test_full_summary_validates_against_contract(self) -> None:
+        jsonschema.validate(self._summary_payload(), _load_schema(self.schema_name))
+
+    def test_empty_summary_validates_against_contract(self) -> None:
+        payload = AuditSummaryResponse(
+            total_events=0,
+            window={},
+            by_event_type=[],
+            by_outcome=[],
+            by_service=[],
+            top_actors=[],
+            decision_chain={
+                "confirmation_decided": 0,
+                "execution_requested": 0,
+                "execution_completed": 0,
+                "execution_rejected": 0,
+            },
+        ).model_dump(mode="json")
+        jsonschema.validate(payload, _load_schema(self.schema_name))
+
+    def test_contract_rejects_extra_section(self) -> None:
+        payload = self._summary_payload()
+        payload["by_details"] = []
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(payload, _load_schema(self.schema_name))
+
+    def test_model_forbids_extras_like_contract(self) -> None:
+        with self.assertRaises(ValidationError):
+            AuditSummaryResponse.model_validate(
+                {**self._summary_payload(), "unexpected": 1}
+            )
 
 
 if __name__ == "__main__":
