@@ -344,7 +344,7 @@ and the export:
   - collapsible bucket sections (By event type, By outcome, By service,
     Top actors), all expanded by default with the section total in the
     header, and each bucket row carrying its share of the total as a
-    percentage and a neutral bar;
+    one-decimal percentage;
   - drill-down from every aggregate value: each statistic card, bucket
     row, and chain step lands on the Events tab with that value merged
     into the current filters (other filters, including the time range,

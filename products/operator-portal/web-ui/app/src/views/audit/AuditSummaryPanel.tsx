@@ -1,9 +1,11 @@
-// SPEC-047 Summary tab (R-3…R-6): a headline statistic row (total +
-// the four SPEC-037 decision-chain steps), the four bucket tables in
-// collapsible sections, a proportion column per bucket row, and
-// drill-down from every aggregate value into the Events tab under
-// merged filters. Facts only: no prose, no charts, zeros as 0.
-import { Button, Col, Collapse, Progress, Row, Statistic, Table, Typography, type TableColumnsType } from "antd";
+// SPEC-047 Summary tab (R-3…R-6), hardened in v0.29.1: a headline
+// statistic row (total + the four SPEC-037 decision-chain steps), the
+// four bucket tables in collapsible sections, a one-decimal share
+// column per bucket row (the v0.29.0 progress bar wrapped at live
+// table widths and was retired on operator review), and drill-down
+// from every aggregate value into the Events tab under merged
+// filters. Facts only: no prose, no charts, zeros as 0.
+import { Button, Col, Collapse, Row, Statistic, Table, Typography, type TableColumnsType } from "antd";
 
 export interface SummaryBucket {
   name: string;
@@ -80,30 +82,25 @@ function BucketTable({
         </Button>
       ),
     },
-    { title: "count", dataIndex: "count" },
+    // v0.29.1: fixed narrow tracks for the two numeric columns so the
+    // name column absorbs the width — the share cell is a single
+    // right-aligned percentage and can never wrap.
+    { title: "count", dataIndex: "count", width: 88, align: "right" },
     {
       title: "share",
-      render: (_value, bucket) => {
-        const percent = sharePercent(bucket.count, total);
-        return (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-            <Typography.Text type="secondary">
-              {percent.toFixed(1)}%
-            </Typography.Text>
-            <Progress
-              percent={percent}
-              size={["15%", 4]}
-              showInfo={false}
-              aria-label={`${percent.toFixed(1)} percent`}
-            />
-          </span>
-        );
-      },
+      width: 88,
+      align: "right",
+      render: (_value, bucket) => (
+        <Typography.Text type="secondary" style={{ whiteSpace: "nowrap" }}>
+          {sharePercent(bucket.count, total).toFixed(1)}%
+        </Typography.Text>
+      ),
     },
   ];
   return (
     <Table<SummaryBucket>
       size="small"
+      tableLayout="fixed"
       rowKey={(bucket) => bucket.name}
       columns={columns}
       dataSource={buckets}

@@ -7,6 +7,17 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-01-post-spec-047-hardening-audit-summary-tables.md`
+  - patch hardening batch (v0.29.1) from the operator review of the
+    live v0.29.0 Summary tab: the SPEC-047 share cell's progress bar
+    is retired (R-4 keeps the one-decimal percentage via the same
+    shared formatter) and the bucket tables gain a fixed layout with
+    narrow right-aligned count/share tracks so the `name` column
+    absorbs the width evenly and the percentage can never wrap; one
+    component touched (`AuditSummaryPanel.tsx`), no API / contract /
+    route changes, all 259 portal tests green unchanged; the
+    pie-chart alternative raised in the same review was adjudicated
+    and withdrawn in favor of the compact table
 - `2026-08-31-audit-summary-drilldown-and-readability.md`
   - delivers SPEC-047 (v0.29.0): the audit Summary tab becomes a page
     you can act on — a headline statistic row (total + decision chain,

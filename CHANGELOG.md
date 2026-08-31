@@ -13,6 +13,25 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.29.1 — 2026-09-01
+
+### Changed
+
+- **Audit summary bucket-table readability hardening** — post-v0.29.0
+  operator review of the live Summary tab: the SPEC-047 share cell
+  (percentage + thin progress bar in one inline span) wrapped onto
+  multiple lines at live table widths, and the name column absorbed
+  the table width unevenly.
+  - The progress bar is retired (R-4 keeps the one-decimal percentage
+    via the same shared formatter); the share cell is now a single
+    right-aligned, non-wrapping percentage.
+  - The bucket tables switch to a fixed layout with narrow fixed
+    tracks for the count and share columns, so the name column — the
+    only variable-content column — absorbs the width evenly.
+  - No API, contract, route, or test-posture changes; the drill-down,
+    statistic row, collapse behavior, and zero-total posture are
+    untouched (259 portal tests green).
+
 ## 0.29.0 — 2026-08-31
 
 ### Added
