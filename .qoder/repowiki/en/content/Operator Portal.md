@@ -13,8 +13,19 @@
 - [client.ts](file://products/operator-portal/web-ui/app/src/api/client.ts)
 - [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
 - [SettingsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx)
+- [AuditView.tsx](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx)
+- [AuditSummaryPanel.tsx](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx)
+- [constants.ts](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts)
 - [tokens.ts](file://products/operator-portal/web-ui/app/src/theme/tokens.ts)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Enhanced audit view with tabbed interface including Events and Summary tabs sharing common filter toolbar
+- Added AuditSummaryPanel component for displaying summary data with proper formatting and sorting
+- Integrated CSV export functionality with proper error handling and truncation warnings
+- Moved constants for emitter services and event types to dedicated constants file
+- Updated audit trail section with new tabbed interface capabilities
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -29,13 +40,13 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-The Operator Portal is the operator-facing web application for platform administration and monitoring. It provides a modern SPA shell with role-based navigation, chat-driven interactions, incident triage, approval workflows, audit trail viewing, permissions inspection, and workspace resource browsing. The portal authenticates via OIDC through the identity broker, proxies API calls to the platform gateway, and serves a static bundle via nginx with immutable asset caching and SPA fallback.
+The Operator Portal is the operator-facing web application for platform administration and monitoring. It provides a modern SPA shell with role-based navigation, chat-driven interactions, incident triage, approval workflows, enhanced audit trail viewing with tabbed interface, permissions inspection, and workspace resource browsing. The portal authenticates via OIDC through the identity broker, proxies API calls to the platform gateway, and serves a static bundle via nginx with immutable asset caching and SPA fallback.
 
 Key capabilities include:
 - Chat and streaming responses with tool evidence and inline human-in-the-loop confirmations
 - Incident management with triage reports and live runs
 - Approval queue with pending decision badges and actions
-- Read-only audit trail with pagination and expandable events
+- **Enhanced read-only audit trail with tabbed interface (Events and Summary tabs), shared filter toolbar, CSV export with truncation warnings, and summary analytics**
 - Permissions matrix view sourced from policy enforcement
 - Workspace views for tools and skills catalogs
 - Settings & Debug panel showing session, identity, and platform component health
@@ -72,7 +83,7 @@ Nginx --> Dist
 - Authentication: OIDC login flow, token refresh scheduling, and session persistence; roles drive UI visibility and feature gating.
 - API client: Centralized fetch wrapper adding bearer tokens and request IDs, with configurable gateway URL override.
 - Chat workspace: Session list, message composer, model selector, voice input, streaming SSE transport, tool evidence rendering, and HITL confirmation cards.
-- Control views: Approvals inbox, audit trail, permissions matrix, settings & debug, incidents triage.
+- Control views: Approvals inbox, **enhanced audit trail with tabbed interface**, permissions matrix, settings & debug, incidents triage.
 - Workspace views: Tools catalog and skills inventory with filters.
 - Theme and accessibility: Dark theme tokens mirrored into CSS custom properties; ARIA labels and keyboard-friendly controls.
 
@@ -82,6 +93,7 @@ Nginx --> Dist
 - [client.ts:1-101](file://products/operator-portal/web-ui/app/src/api/client.ts#L1-L101)
 - [ChatView.tsx:1-200](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L200)
 - [SettingsView.tsx:1-200](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L1-L200)
+- [AuditView.tsx:1-425](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L425)
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
 
 ## Architecture Overview
@@ -223,6 +235,48 @@ GW-->>CV : Resume stream with decision
 - [ChatView.tsx:1-200](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L200)
 - [README.md:43-126](file://products/operator-portal/README.md#L43-L126)
 
+### Enhanced Audit Trail with Tabbed Interface
+**Updated** The audit trail view has been significantly enhanced with a sophisticated tabbed interface that provides both detailed event inspection and high-level summary analytics.
+
+#### Tabbed Interface Architecture
+- **Shared Filter Toolbar**: Both Events and Summary tabs share a common filter interface for username, event type, service, and time range filtering
+- **Events Tab**: Displays cursor-paginated audit events with expandable verbatim envelopes showing full event details
+- **Summary Tab**: Shows deterministic envelope-column aggregates including total events, decision chain visualization, and bucketed analytics
+
+#### Key Features
+- **Role-Based Access**: Requires auditor or platform-admin roles with server-side enforcement
+- **Structured Error Handling**: Provides actionable error messages for different failure scenarios (403, 502, 503)
+- **CSV Export**: Server-side blob download with Content-Disposition filename support and truncation warnings
+- **Real-time Filtering**: Filters apply consistently across both tabs with lazy loading for summary data
+
+```mermaid
+flowchart TD
+FilterToolbar["Shared Filter Toolbar"] --> EventsTab["Events Tab"]
+FilterToolbar --> SummaryTab["Summary Tab"]
+FilterToolbar --> ExportBtn["Export CSV Button"]
+EventsTab --> EventTable["Event Table with Pagination"]
+EventTable --> ExpandableRows["Expandable Event Envelopes"]
+SummaryTab --> SummaryPanel["AuditSummaryPanel"]
+SummaryPanel --> DecisionChain["Decision Chain Visualization"]
+SummaryPanel --> AnalyticsTables["Analytics Tables"]
+ExportBtn --> BlobDownload["Server-side Blob Download"]
+BlobDownload --> TruncationWarning["Truncation Warning if Applied"]
+```
+
+**Diagram sources**
+- [AuditView.tsx:95-425](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L95-L425)
+- [AuditSummaryPanel.tsx:51-107](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L51-L107)
+
+#### Constants Management
+- **Centralized Constants**: Event types and emitter services moved to dedicated `constants.ts` file
+- **Schema Drift Protection**: Vitest tests ensure constants remain synchronized with shared audit-event schema
+- **Maintainable Configuration**: Single source of truth for audit-related configuration
+
+**Section sources**
+- [AuditView.tsx:1-425](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L425)
+- [AuditSummaryPanel.tsx:1-107](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L1-L107)
+- [constants.ts:1-44](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts#L1-L44)
+
 ### Settings, Health, and Debug
 - Identity pane shows sign-in state, username, roles, subject, and groups.
 - Session pane displays active session and workspace session count.
@@ -302,6 +356,8 @@ Nginx --> Gateway["Platform Gateway"]
 - SPA fallback: index.html is served with no-store to ensure immediate rollout without stale shell issues.
 - Streaming: Long-lived SSE connections use proxy_read_timeout configured to support extended operations.
 - Client-side state: Session workspace minimizes redundant network calls by maintaining local session lists and pinning incident sessions.
+- **Lazy Loading**: Summary tab data is fetched only when the tab is activated, reducing initial page load time.
+- **Efficient Filtering**: Shared filter state prevents redundant API calls when switching between tabs.
 
 [No sources needed since this section provides general guidance]
 
@@ -310,15 +366,18 @@ Nginx --> Gateway["Platform Gateway"]
 - API failures: ApiError wraps non-ok responses with status and message; verify gateway reachability and bearer token presence.
 - Gateway override: Use local storage key to redirect API calls during development or debugging.
 - Health checks: Settings panel probes gateway health endpoints; if unavailable, inspect nginx proxy configuration and upstream service status.
+- **Audit View Issues**: Check role permissions (auditor/platform-admin required); verify audit service availability; review structured error messages for specific failure scenarios.
+- **CSV Export Problems**: Monitor truncation warnings; verify server-side export limits; check Content-Disposition headers for proper filename handling.
 
 **Section sources**
 - [AuthContext.tsx:40-85](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L40-L85)
 - [client.ts:8-16](file://products/operator-portal/web-ui/app/src/api/client.ts#L8-L16)
 - [client.ts:25-36](file://products/operator-portal/web-ui/app/src/api/client.ts#L25-L36)
 - [nginx.conf:8-28](file://products/operator-portal/nginx.conf#L8-L28)
+- [AuditView.tsx:67-83](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L67-L83)
 
 ## Conclusion
-The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, audit visibility, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows.
+The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **enhanced audit trail with tabbed interface and analytics**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent enhancements to the audit trail provide operators with comprehensive event inspection capabilities and powerful summary analytics for understanding system behavior and identifying patterns.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -343,6 +402,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - Platform gateway: Proxies all /api/ calls; enforces policies and delegates to agent-platform and other services.
 - Agent platform: Provides chat sessions and streaming responses.
 - Policy center: Supplies approval queue and decision state surfaced in Approvals and Permissions views.
+- **Audit service**: Provides durable audit trail with events, summary analytics, and CSV export capabilities.
 
 **Section sources**
 - [README.md:127-133](file://products/operator-portal/README.md#L127-L133)
@@ -350,10 +410,12 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 ### UI Customization and Accessibility
 - Theme: Dark theme tokens defined in tokens.ts and applied via antd ConfigProvider; CSS custom properties mirror tokens for consistent styling.
 - Accessibility: ARIA labels on navigation and user actions; keyboard-friendly menus and controls; responsive layout adapts to narrow screens with a drawer.
+- **Enhanced Audit Interface**: Tabbed interface provides intuitive navigation between detailed events and summary analytics; shared filter toolbar ensures consistent user experience across tabs.
 
 **Section sources**
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
 - [App.tsx:395-418](file://products/operator-portal/web-ui/app/src/App.tsx#L395-L418)
+- [AuditView.tsx:275-328](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L275-L328)
 
 ### Browser Compatibility
 - Uses modern browser APIs such as Web Speech API for voice input and standard fetch/SSE patterns.
@@ -362,3 +424,26 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 **Section sources**
 - [README.md:43-65](file://products/operator-portal/README.md#L43-L65)
 - [index.html:1-14](file://products/operator-portal/web-ui/app/index.html#L1-L14)
+
+### Enhanced Audit Trail Features
+**New** The audit trail has been significantly enhanced with advanced features:
+
+#### Tabbed Interface
+- **Events Tab**: Cursor-paginated table of audit events with expandable verbatim envelopes
+- **Summary Tab**: Deterministic aggregates showing total events, decision chain visualization, and bucketed analytics
+- **Shared Filter Toolbar**: Consistent filtering across both tabs for username, event type, service, and time ranges
+
+#### CSV Export Functionality
+- Server-side blob download with proper Content-Disposition filename handling
+- Truncation warnings when export limits are exceeded (AUDIT_EXPORT_MAX_ROWS)
+- Structured error handling for permission denials and service unavailability
+
+#### Summary Analytics
+- Decision chain visualization showing confirmation → execution flow
+- Bucketed analytics by event type, outcome, service, and top actors
+- Real-time filtering with lazy loading for optimal performance
+
+**Section sources**
+- [AuditView.tsx:95-425](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L95-L425)
+- [AuditSummaryPanel.tsx:1-107](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L1-L107)
+- [constants.ts:1-44](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts#L1-L44)
