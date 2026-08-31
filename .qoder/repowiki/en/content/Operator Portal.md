@@ -21,12 +21,11 @@
 
 ## Update Summary
 **Changes Made**
-- Complete redesign of audit Summary tab with collapsible sections using antd Collapse component
-- Added interactive drill-down functionality from any aggregate value to Events tab with merged filters
-- Implemented new statistic row showing total events and decision-chain steps
-- Enhanced proportion display with percentage values and inline progress bars
-- Added new outcome select dropdown filter following drift-guard pattern
-- Updated summary analytics with bucketed tables and visualization components
+- Updated audit summary tables section to reflect v0.29.1 hardening changes
+- Added documentation for removed progress bars and simplified share column display
+- Updated table layout descriptions to reflect fixed-width columns with right alignment
+- Enhanced troubleshooting guide with v0.29.1 specific issues
+- Updated conclusion to include latest audit trail improvements
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -237,7 +236,7 @@ GW-->>CV : Resume stream with decision
 - [README.md:43-126](file://products/operator-portal/README.md#L43-L126)
 
 ### Enhanced Audit Trail with Sophisticated Tabbed Interface
-**Updated** The audit trail view has been completely redesigned with an advanced tabbed interface that provides both detailed event inspection and comprehensive summary analytics with interactive drill-down capabilities.
+**Updated** The audit trail view has been completely redesigned with an advanced tabbed interface that provides both detailed event inspection and comprehensive summary analytics with interactive drill-down capabilities. The v0.29.1 patch release further hardened the audit summary tables by removing progress bars and implementing fixed-width columns for improved layout stability.
 
 #### Advanced Tabbed Interface Architecture
 - **Shared Filter Toolbar**: Both Events and Summary tabs share a common filter interface for username, event type, outcome, service, and time range filtering
@@ -251,7 +250,7 @@ GW-->>CV : Resume stream with decision
 - **Real-time Filtering**: Filters apply consistently across both tabs with lazy loading for summary data
 - **Interactive Drill-Down**: Click any aggregate value to navigate to Events tab with merged filters
 - **Collapsible Sections**: Four bucket tables organized in antd Collapse component with default expansion
-- **Proportion Visualization**: Percentage values with inline progress bars for each bucket row
+- **Proportion Visualization**: Percentage values with simplified one-decimal display (v0.29.1: progress bars removed)
 - **Decision Chain Visualization**: New statistic row showing total events and four decision-chain steps
 
 ```mermaid
@@ -264,7 +263,8 @@ EventTable --> ExpandableRows["Expandable Event Envelopes"]
 SummaryTab --> StatisticRow["Statistic Row<br/>Total + Decision Chain"]
 StatisticRow --> CollapsibleSections["Collapsible Sections<br/>(antd Collapse)"]
 CollapsibleSections --> BucketTables["Bucket Tables<br/>by Event Type, Outcome, Service, Actors"]
-BucketTables --> ProportionDisplay["Proportion Display<br/>Percentage + Progress Bars"]
+BucketTables --> ProportionDisplay["Proportion Display<br/>One-decimal percentage only<br/>(v0.29.1: no progress bars)"]
+BucketTables --> FixedWidthColumns["Fixed-width columns<br/>Right-aligned count & share<br/>(v0.29.1 improvement)"]
 BucketTables --> Drilldown["Interactive Drill-Down<br/>to Events with Merged Filters"]
 ExportBtn --> BlobDownload["Server-side Blob Download"]
 BlobDownload --> TruncationWarning["Truncation Warning if Applied"]
@@ -278,7 +278,8 @@ BlobDownload --> TruncationWarning["Truncation Warning if Applied"]
 - **Headline Statistics**: Total events count plus four decision-chain step counters (confirmation_decided, execution_requested, execution_completed, execution_rejected)
 - **Collapsible Analytics**: Four bucket tables organized by event type, outcome, service, and top actors
 - **Interactive Elements**: Every aggregate value is clickable for drill-down to filtered Events view
-- **Visual Indicators**: Inline progress bars showing proportion percentages for each bucket
+- **Visual Indicators**: Simplified proportion display with one-decimal percentages (v0.29.1: removed progress bars for cleaner presentation)
+- **Fixed Layout**: Right-aligned numeric columns with fixed widths (88px each) for count and share, ensuring consistent table layout (v0.29.1 enhancement)
 - **Zero-State Handling**: Empty posture when no events match current filters
 
 #### Constants Management and Drift Guard
@@ -289,7 +290,7 @@ BlobDownload --> TruncationWarning["Truncation Warning if Applied"]
 
 **Section sources**
 - [AuditView.tsx:1-463](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L463)
-- [AuditSummaryPanel.tsx:1-210](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L1-L210)
+- [AuditSummaryPanel.tsx:1-207](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L1-L207)
 - [constants.ts:1-49](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts#L1-L49)
 
 ### Settings, Health, and Debug
@@ -375,6 +376,7 @@ Nginx --> Gateway["Platform Gateway"]
 - **Efficient Filtering**: Shared filter state prevents redundant API calls when switching between tabs.
 - **Optimized Rendering**: Collapsible sections reduce initial DOM complexity while providing rich interactivity.
 - **Progressive Enhancement**: Zero-state handling prevents unnecessary computations when no data is available.
+- **v0.29.1 Layout Optimization**: Fixed-width columns eliminate dynamic width recalculation overhead and prevent layout shifts during table rendering.
 
 [No sources needed since this section provides general guidance]
 
@@ -387,6 +389,7 @@ Nginx --> Gateway["Platform Gateway"]
 - **CSV Export Problems**: Monitor truncation warnings; verify server-side export limits; check Content-Disposition headers for proper filename handling.
 - **Summary Tab Issues**: Verify lazy loading behavior; check filter state synchronization; ensure collapse component renders correctly.
 - **Drill-Down Navigation**: Confirm filter merging logic; verify Events tab loads with correct merged parameters; check cursor reset behavior.
+- **v0.29.1 Table Layout Issues**: If audit summary tables show wrapping or misalignment, verify browser viewport width and antd table configuration; the fixed-width columns should prevent wrapping but may require minimum container width.
 
 **Section sources**
 - [AuthContext.tsx:40-85](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L40-L85)
@@ -396,7 +399,7 @@ Nginx --> Gateway["Platform Gateway"]
 - [AuditView.tsx:69-85](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L69-L85)
 
 ## Conclusion
-The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface and advanced analytics**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, proportion visualization, and decision-chain tracking.
+The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface and advanced analytics**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -429,7 +432,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 ### UI Customization and Accessibility
 - Theme: Dark theme tokens defined in tokens.ts and applied via antd ConfigProvider; CSS custom properties mirror tokens for consistent styling.
 - Accessibility: ARIA labels on navigation and user actions; keyboard-friendly menus and controls; responsive layout adapts to narrow screens with a drawer.
-- **Enhanced Audit Interface**: Sophisticated tabbed interface provides intuitive navigation between detailed events and comprehensive summary analytics; shared filter toolbar ensures consistent user experience across tabs; collapsible sections improve information density while maintaining accessibility.
+- **Enhanced Audit Interface**: Sophisticated tabbed interface provides intuitive navigation between detailed events and comprehensive summary analytics; shared filter toolbar ensures consistent user experience across tabs; collapsible sections improve information density while maintaining accessibility; v0.29.1 improvements provide more stable table layouts with fixed-width columns.
 
 **Section sources**
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
@@ -445,7 +448,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - [index.html:1-14](file://products/operator-portal/web-ui/app/index.html#L1-L14)
 
 ### Enhanced Audit Trail Features
-**Completely Redesigned** The audit trail has been completely redesigned with advanced interactive features:
+**Completely Redesigned** The audit trail has been completely redesigned with advanced interactive features, further hardened in v0.29.1 for improved table stability and readability.
 
 #### Sophisticated Tabbed Interface
 - **Events Tab**: Cursor-paginated table of audit events with expandable verbatim envelopes
@@ -461,7 +464,8 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 #### Advanced Summary Analytics
 - **Headline Statistics**: New statistic row showing total events plus four decision-chain steps (confirmation_decided, execution_requested, execution_completed, execution_rejected)
 - **Collapsible Sections**: Four bucket tables organized using antd Collapse component with default expansion
-- **Proportion Visualization**: Each bucket row displays percentage values with inline progress bars
+- **Proportion Visualization**: One-decimal percentage display only (v0.29.1: removed progress bars for cleaner presentation)
+- **Fixed-Width Columns**: Right-aligned count and share columns with 88px fixed width for stable layout (v0.29.1 enhancement)
 - **Interactive Elements**: All aggregate values are clickable for drill-down navigation
 - **Zero-State Handling**: Empty posture when no events match current filters
 
@@ -477,6 +481,6 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 
 **Section sources**
 - [AuditView.tsx:98-463](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L98-L463)
-- [AuditSummaryPanel.tsx:1-210](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L1-L210)
+- [AuditSummaryPanel.tsx:1-207](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L1-L207)
 - [constants.ts:1-49](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts#L1-L49)
 - [__tests__/constants.test.ts:1-70](file://products/operator-portal/web-ui/app/src/views/audit/__tests__/constants.test.ts#L1-L70)
