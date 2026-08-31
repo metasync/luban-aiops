@@ -2,10 +2,10 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: luban-platform-team
 - created: 2026-08-31
-- approved: —
+- approved: 2026-08-31
 - delivered: —
 - release slice: R5 — Hardening and External Consumption (eighth R5
   slice, target v0.28.0)
@@ -291,3 +291,6 @@ are recorded here:
 - 2026-08-31: created as `draft`, promoted memo-free from the R5
   "richer audit reporting" deliverable per the SPEC-042/045
   precedent; pending operator approval.
+- 2026-08-31: operator approved the draft (`draft` → `approved`)
+  after review, with no requirement changes; delivery proceeds
+  under the house train as v0.28.0.
