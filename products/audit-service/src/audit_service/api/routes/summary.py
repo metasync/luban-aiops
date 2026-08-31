@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from audit_service.core.config import get_settings
 from audit_service.core.metrics import record_rejected, record_summary_query
 from audit_service.core.observability import log_event
-from audit_service.schemas.audit import AuditQuery
+from audit_service.schemas.audit import AuditQuery, Outcome
 from audit_service.schemas.summary import to_response
 from audit_service.services.ingest_auth import (
     IngestAuthError,
@@ -39,6 +39,7 @@ async def summarize_events(
     request_id: str | None = None,
     event_type: str | None = None,
     service: str | None = None,
+    outcome: Outcome | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
 ) -> JSONResponse:
@@ -56,6 +57,7 @@ async def summarize_events(
         request_id=request_id,
         event_type=event_type,
         service=service,
+        outcome=outcome,
         since=since,
         until=until,
     )

@@ -48,6 +48,7 @@ def _filter_params(
     request_id_filter: str | None,
     event_type: str | None,
     service: str | None,
+    outcome: str | None,
     since: str | None,
     until: str | None,
 ) -> dict[str, str]:
@@ -58,6 +59,10 @@ def _filter_params(
         ("request_id", request_id_filter),
         ("event_type", event_type),
         ("service", service),
+        # SPEC-047 R-1: additive dimension, forwarded verbatim; the audit
+        # service owns the enum validation (422 rides back through 4xx
+        # passthrough).
+        ("outcome", outcome),
         ("since", since),
         ("until", until),
     ):
@@ -74,6 +79,7 @@ async def query_audit_events(
     request_id_filter: str | None = Query(default=None, alias="request_id"),
     event_type: str | None = Query(default=None),
     service: str | None = Query(default=None),
+    outcome: str | None = Query(default=None),
     since: str | None = Query(default=None),
     until: str | None = Query(default=None),
     cursor: str | None = Query(default=None),
@@ -87,7 +93,8 @@ async def query_audit_events(
     if not settings.audit_service_url:
         raise HTTPException(status_code=503, detail="audit service not configured")
     params: dict[str, str | int] = _filter_params(
-        username, session_id, request_id_filter, event_type, service, since, until
+        username, session_id, request_id_filter, event_type, service,
+        outcome, since, until,
     )
     params["limit"] = limit
     if cursor is not None:
@@ -132,6 +139,7 @@ async def summarize_audit_events(
     request_id_filter: str | None = Query(default=None, alias="request_id"),
     event_type: str | None = Query(default=None),
     service: str | None = Query(default=None),
+    outcome: str | None = Query(default=None),
     since: str | None = Query(default=None),
     until: str | None = Query(default=None),
     x_request_id: str | None = Header(default=None),
@@ -143,7 +151,8 @@ async def summarize_audit_events(
     if not settings.audit_service_url:
         raise HTTPException(status_code=503, detail="audit service not configured")
     params = _filter_params(
-        username, session_id, request_id_filter, event_type, service, since, until
+        username, session_id, request_id_filter, event_type, service,
+        outcome, since, until,
     )
     url = f"{settings.audit_service_url.rstrip('/')}{SUMMARY_PATH}"
     try:
@@ -182,6 +191,7 @@ async def export_audit_events(
     request_id_filter: str | None = Query(default=None, alias="request_id"),
     event_type: str | None = Query(default=None),
     service: str | None = Query(default=None),
+    outcome: str | None = Query(default=None),
     since: str | None = Query(default=None),
     until: str | None = Query(default=None),
     x_request_id: str | None = Header(default=None),
@@ -193,7 +203,8 @@ async def export_audit_events(
     if not settings.audit_service_url:
         raise HTTPException(status_code=503, detail="audit service not configured")
     params = _filter_params(
-        username, session_id, request_id_filter, event_type, service, since, until
+        username, session_id, request_id_filter, event_type, service,
+        outcome, since, until,
     )
     url = f"{settings.audit_service_url.rstrip('/')}{EXPORT_PATH}"
     try:

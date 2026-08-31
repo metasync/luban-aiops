@@ -167,6 +167,8 @@ def _matches(event: AuditEvent, filters: AuditQuery) -> bool:
         return False
     if filters.service and event.service != filters.service:
         return False
+    if filters.outcome and event.outcome != filters.outcome:
+        return False
     if filters.since and event.occurred_at < filters.since:
         return False
     if filters.until and event.occurred_at > filters.until:
@@ -305,6 +307,11 @@ def _filter_clause(
     if filters.service:
         where.append("service = %(service)s")
         params["service"] = filters.service
+    if filters.outcome:
+        # SPEC-047 R-1: additive dimension, same parameterized posture as
+        # the other envelope-column equality predicates.
+        where.append("outcome = %(outcome)s")
+        params["outcome"] = filters.outcome
     if filters.since:
         where.append("occurred_at >= %(since)s")
         params["since"] = filters.since

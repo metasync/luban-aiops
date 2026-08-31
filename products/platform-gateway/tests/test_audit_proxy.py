@@ -163,6 +163,7 @@ class AuditProxyRouteTests(unittest.TestCase):
                 params={
                     "username": "alice",
                     "event_type": "tool_invoked",
+                    "outcome": "deny",
                     "limit": 10,
                 },
             )
@@ -170,6 +171,9 @@ class AuditProxyRouteTests(unittest.TestCase):
         params = fake.calls[0]["params"]
         self.assertEqual(params["username"], "alice")
         self.assertEqual(params["event_type"], "tool_invoked")
+        # SPEC-047 R-1: the additive outcome dimension rides through to
+        # the upstream query; enum validation stays in the audit service.
+        self.assertEqual(params["outcome"], "deny")
         self.assertEqual(params["limit"], 10)
 
     def test_missing_audit_url_returns_503(self) -> None:
@@ -250,7 +254,11 @@ class AuditSummaryProxyTests(unittest.TestCase):
         ):
             response = self.client.get(
                 "/api/v1/audit/summary",
-                params={"event_type": "execution_completed", "username": "alice"},
+                params={
+                    "event_type": "execution_completed",
+                    "username": "alice",
+                    "outcome": "error",
+                },
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), summary_payload)
@@ -259,6 +267,8 @@ class AuditSummaryProxyTests(unittest.TestCase):
         )
         self.assertEqual(fake.calls[0]["params"]["event_type"], "execution_completed")
         self.assertEqual(fake.calls[0]["params"]["username"], "alice")
+        # SPEC-047 R-1: outcome reaches the summary leg too.
+        self.assertEqual(fake.calls[0]["params"]["outcome"], "error")
         self.assertEqual(fake.calls[0]["auth"], ("platform-gateway", "pg-secret"))
 
     def test_operator_denied_by_policy(self) -> None:
@@ -394,10 +404,16 @@ class AuditExportProxyTests(unittest.TestCase):
         ):
             response = self.client.get(
                 "/api/v1/audit/export",
-                params={"service": "execution-runtime", "limit": 10},
+                params={
+                    "service": "execution-runtime",
+                    "outcome": "deny",
+                    "limit": 10,
+                },
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(fake.calls[0]["params"]["service"], "execution-runtime")
+        # SPEC-047 R-1: outcome reaches the export leg too.
+        self.assertEqual(fake.calls[0]["params"]["outcome"], "deny")
         # The export is server-capped upstream; the query-page limit knob
         # must not leak into the export leg.
         self.assertNotIn("limit", fake.calls[0]["params"])

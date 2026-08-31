@@ -61,12 +61,18 @@ class IngestRequest(BaseModel):
 
 
 class AuditQuery(BaseModel):
-    """Filter set for the query API (R-4); empty fields mean no constraint."""
+    """Filter set for the query API (R-4); empty fields mean no constraint.
+
+    ``outcome`` (SPEC-047 R-1) is additive: it filters on the envelope
+    ``outcome`` column verbatim against the shared schema enum, so the
+    Summary/Export drill-down can narrow to a terminal result.
+    """
 
     username: str | None = None
     session_id: str | None = None
     request_id: str | None = None
     event_type: str | None = None
     service: str | None = None
+    outcome: Outcome | None = None
     since: datetime | None = None
     until: datetime | None = None

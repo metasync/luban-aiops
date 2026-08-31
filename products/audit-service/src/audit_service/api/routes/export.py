@@ -24,7 +24,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from audit_service.core.config import get_settings
 from audit_service.core.metrics import record_export, record_rejected
 from audit_service.core.observability import log_event
-from audit_service.schemas.audit import AuditEvent, AuditQuery
+from audit_service.schemas.audit import AuditEvent, AuditQuery, Outcome
 from audit_service.services.ingest_auth import (
     IngestAuthError,
     authenticate_caller,
@@ -92,6 +92,7 @@ async def export_events(
     request_id: str | None = None,
     event_type: str | None = None,
     service: str | None = None,
+    outcome: Outcome | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
 ) -> Response:
@@ -109,6 +110,7 @@ async def export_events(
         request_id=request_id,
         event_type=event_type,
         service=service,
+        outcome=outcome,
         since=since,
         until=until,
     )

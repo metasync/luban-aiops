@@ -99,23 +99,42 @@ describe("tabs and shared filters", () => {
     expect((usernameInput as HTMLInputElement).value).toBe("alice");
   });
 
-  it("renders summary sections and decision-chain zeros", async () => {
+  it("renders the statistic row, collapsible sections, and chain zeros", async () => {
     render(<AuditView />);
     await waitFor(() => expect(mockRequestJson).toHaveBeenCalled());
     fireEvent.click(screen.getByText("Summary"));
 
+    // R-6 statistic row: total + the four chain steps, zeros as 0.
     await waitFor(() =>
-      expect(screen.getByText("2", { selector: "strong" })).toBeTruthy(),
+      expect(screen.getByText("Total events")).toBeTruthy(),
     );
-    // Sections present.
+    expect(screen.getByText("confirmation_decided")).toBeTruthy();
+    expect(screen.getByText("execution_requested")).toBeTruthy();
+    // Also a bucket name in the fixture — the chain step and the
+    // "By event type" row both render it.
+    expect(screen.getAllByText("execution_completed").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("execution_rejected")).toBeTruthy();
+    const zeros = screen.getAllByText("0");
+    expect(zeros.length).toBeGreaterThanOrEqual(2);
+
+    // R-5 sections render expanded by default — bucket rows visible
+    // without any interaction.
     expect(screen.getByText("By event type")).toBeTruthy();
     expect(screen.getByText("By outcome")).toBeTruthy();
     expect(screen.getByText("By service")).toBeTruthy();
     expect(screen.getByText("Top actors")).toBeTruthy();
-    expect(screen.getByText("Decision chain")).toBeTruthy();
-    // Zeros render as 0, not as an error or a gap.
-    const zeros = screen.getAllByText("0");
-    expect(zeros.length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("execution-runtime")).toBeTruthy();
+    expect(screen.getByText("alice")).toBeTruthy();
+
+    // R-4 proportion math: 1 of 2 events → 50.0%.
+    expect(screen.getAllByText("50.0%").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("100.0%").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("outcome select rides the shared toolbar", async () => {
+    render(<AuditView />);
+    await waitFor(() => expect(mockRequestJson).toHaveBeenCalled());
+    expect(screen.getByLabelText("Filter by outcome")).toBeTruthy();
   });
 
   it("summary surfaces structured 502 message", async () => {
@@ -135,6 +154,93 @@ describe("tabs and shared filters", () => {
         screen.getByText(/audit service is unavailable right now/),
       ).toBeTruthy(),
     );
+  });
+});
+
+describe("summary drill-down (SPEC-047 R-3)", () => {
+  it("bucket drill-down merges the filter, keeping other dimensions", async () => {
+    render(<AuditView />);
+    await waitFor(() => expect(mockRequestJson).toHaveBeenCalled());
+
+    // Set two unrelated dimensions first.
+    fireEvent.change(screen.getByLabelText("Filter by username"), {
+      target: { value: "alice" },
+    });
+    fireEvent.change(screen.getByLabelText("Since"), {
+      target: { value: "2026-08-01T00:00" },
+    });
+
+    fireEvent.click(screen.getByText("Summary"));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Drill into execution-runtime")).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByLabelText("Drill into execution-runtime"));
+
+    // Lands on the Events tab under merged filters: the targeted
+    // dimension is set, username and the time range survive (Q-3).
+    await waitFor(() => {
+      const calls = mockRequestJson.mock.calls.map((call) => call[0] as string);
+      const landing = calls.filter((url) =>
+        url.includes("/api/v1/audit/events?"),
+      );
+      const last = landing[landing.length - 1];
+      expect(last).toContain("service=execution-runtime");
+      expect(last).toContain("username=alice");
+      expect(last).toContain("since=");
+    });
+  });
+
+  it("chain-step drill-down targets its event type, even at zero", async () => {
+    render(<AuditView />);
+    await waitFor(() => expect(mockRequestJson).toHaveBeenCalled());
+    fireEvent.click(screen.getByText("Summary"));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Drill into confirmation_decided")).toBeTruthy(),
+    );
+    // confirmation_decided is 0 in the fixture — zero-count buckets
+    // still navigate.
+    fireEvent.click(screen.getByLabelText("Drill into confirmation_decided"));
+    await waitFor(() => {
+      const calls = mockRequestJson.mock.calls.map((call) => call[0] as string);
+      expect(
+        calls.some((url) =>
+          url.includes("/api/v1/audit/events?") &&
+          url.includes("event_type=confirmation_decided"),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("zero-total summary renders the empty posture without division", async () => {
+    mockRequestJson.mockImplementation((url: string) => {
+      if (url.includes("/summary")) {
+        return Promise.resolve({
+          ...SUMMARY_FIXTURE,
+          total_events: 0,
+          by_event_type: [],
+          by_outcome: [],
+          by_service: [],
+          top_actors: [],
+          decision_chain: {
+            confirmation_decided: 0,
+            execution_requested: 0,
+            execution_completed: 0,
+            execution_rejected: 0,
+          },
+        });
+      }
+      return Promise.resolve({ events: [], next_cursor: null });
+    });
+    render(<AuditView />);
+    await waitFor(() => expect(mockRequestJson).toHaveBeenCalled());
+    fireEvent.click(screen.getByText("Summary"));
+    await waitFor(() =>
+      expect(
+        screen.getByText(/events match the current filters/),
+      ).toBeTruthy(),
+    );
+    // Zero renders as 0 — no division, no NaN.
+    expect(screen.getByText("0", { selector: "strong" })).toBeTruthy();
   });
 });
 

@@ -204,6 +204,27 @@ class AuditRouteTests(unittest.TestCase):
         ids = {e["event_id"] for e in response.json()["events"]}
         self.assertEqual(ids, {"e3"})
 
+    def test_query_filters_by_outcome(self) -> None:
+        # SPEC-047 R-1: the additive outcome dimension filters the events
+        # query verbatim against the envelope column.
+        self._seed(
+            _event_payload("e1", username="alice"),
+            _event_payload("e2", username="bob", outcome="deny"),
+            _event_payload("e3", username="carol", outcome="error"),
+        )
+        response = self.client.get(
+            "/api/v1/audit/events?outcome=deny", headers=self.auth
+        )
+        ids = {e["event_id"] for e in response.json()["events"]}
+        self.assertEqual(ids, {"e2"})
+
+    def test_query_rejects_invalid_outcome(self) -> None:
+        # SPEC-047 R-1: values outside the shared schema enum are a 422.
+        response = self.client.get(
+            "/api/v1/audit/events?outcome=exploded", headers=self.auth
+        )
+        self.assertEqual(response.status_code, 422)
+
     def test_query_paginates_with_cursor(self) -> None:
         self._seed(
             *[

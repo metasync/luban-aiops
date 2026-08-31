@@ -132,6 +132,28 @@ class InMemoryStoreTests(unittest.TestCase):
         )
         self.assertEqual([e.event_id for e in page.events], ["c"])
 
+    def test_filters_by_outcome(self) -> None:
+        # SPEC-047 R-1: the additive outcome dimension filters verbatim
+        # against the envelope column.
+        _run(
+            self.store.add(
+                [
+                    _event("ok", username="alice", outcome="success"),
+                    _event("no", username="bob", outcome="deny"),
+                    _event("bad", username="bob", outcome="error"),
+                ]
+            )
+        )
+        page = _run(self.store.query(AuditQuery(outcome="deny"), None, 50))
+        self.assertEqual([e.event_id for e in page.events], ["no"])
+
+        page = _run(
+            self.store.query(
+                AuditQuery(outcome="deny", username="alice"), None, 50
+            )
+        )
+        self.assertEqual(page.events, [])
+
     def test_filters_by_session_and_request_id(self) -> None:
         _run(
             self.store.add(
@@ -343,6 +365,27 @@ class InMemoryStoreTests(unittest.TestCase):
             summary.decision_chain.confirmation_decided, 0
         )
 
+    def test_summarize_filters_by_outcome_and_echoes_window(self) -> None:
+        # SPEC-047 R-1: outcome narrows the aggregate and echoes in the
+        # window like every other filter dimension.
+        self._seed_summary_fixture()
+        summary = _run(self.store.summarize(AuditQuery(outcome="success")))
+        self.assertEqual(summary.total_events, 5)
+        self.assertEqual(
+            [(b.name, b.count) for b in summary.by_outcome], [("success", 5)]
+        )
+        self.assertEqual(summary.window, {"outcome": "success"})
+        # The deny/allow rows dropped out of the type buckets too.
+        self.assertEqual(
+            [(b.name, b.count) for b in summary.by_event_type],
+            [
+                ("tool_invoked", 2),
+                ("confirmation_decided", 1),
+                ("execution_completed", 1),
+                ("execution_requested", 1),
+            ],
+        )
+
 
 def _pg_row(event: AuditEvent) -> tuple:
     """Build a driver row tuple in ``_row_names()`` column order."""
@@ -455,6 +498,7 @@ class PostgresStoreAdapterTests(unittest.TestCase):
             request_id="req-a",
             event_type="tool_invoked",
             service="tool-gateway",
+            outcome="deny",
             since=BASE,
             until=BASE + timedelta(hours=1),
         )
@@ -467,6 +511,7 @@ class PostgresStoreAdapterTests(unittest.TestCase):
             "request_id = %(request_id)s",
             "event_type = %(event_type)s",
             "service = %(service)s",
+            "outcome = %(outcome)s",
             "occurred_at >= %(since)s",
             "occurred_at <= %(until)s",
             "(occurred_at, event_id) < (%(cursor_ts)s, %(cursor_id)s)",
@@ -474,6 +519,7 @@ class PostgresStoreAdapterTests(unittest.TestCase):
         ):
             self.assertIn(fragment, sql)
         params = calls[0]["params"]
+        self.assertEqual(params["outcome"], "deny")
         self.assertEqual(params["limit"], 3)  # limit + 1 overflow probe
         self.assertEqual(params["cursor_id"], "evt-9")
 
@@ -651,6 +697,32 @@ class PostgresSummarizeTests(unittest.TestCase):
         self.assertEqual(summary.by_event_type, ())
         self.assertEqual(summary.top_actors, ())
         self.assertEqual(summary.decision_chain.execution_rejected, 0)
+
+    def test_summarize_outcome_filter_rides_every_statement(self) -> None:
+        # SPEC-047 R-1: the shared WHERE-builder carries the outcome
+        # predicate into the total, every grouped section, top actors,
+        # and the decision-chain projection alike.
+        from audit_service.services.audit_store import PostgresAuditStore
+
+        calls: list[dict] = []
+        result_sets = [
+            [(2,)],
+            [("tool_invoked", 2)],
+            [("deny", 2)],
+            [("tool-gateway", 2)],
+            [("bob", 2)],
+            [],
+        ]
+        store = PostgresAuditStore(
+            "postgresql://fake", connect=self._fake_connect(calls, result_sets)
+        )
+        summary = _run(store.summarize(AuditQuery(outcome="deny")))
+        self.assertEqual(summary.total_events, 2)
+        self.assertEqual(summary.window, {"outcome": "deny"})
+        self.assertEqual(len(calls), 6)
+        for call in calls:
+            self.assertIn("outcome = %(outcome)s", call["sql"])
+            self.assertEqual(call["params"]["outcome"], "deny")
 
 
 class BuildAuditStoreTests(unittest.TestCase):

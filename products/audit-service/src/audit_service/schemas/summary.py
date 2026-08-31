@@ -70,6 +70,8 @@ def window_echo(filters: AuditQuery) -> dict[str, str]:
         echo["event_type"] = filters.event_type
     if filters.service:
         echo["service"] = filters.service
+    if filters.outcome:
+        echo["outcome"] = filters.outcome
     if filters.since:
         echo["since"] = filters.since.isoformat()
     if filters.until:

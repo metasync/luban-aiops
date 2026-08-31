@@ -1,4 +1,4 @@
-// Pinned audit filter vocabulary (SPEC-046 R-4).
+// Pinned audit filter vocabulary (SPEC-046 R-4, SPEC-047 R-1).
 //
 // EVENT_TYPES mirrors the shared audit-event.schema.json enum exactly —
 // the vitest drift guard (__tests__/constants.test.ts) reads the schema
@@ -9,6 +9,9 @@
 // EMITTER_SERVICES lists the seven services that emit audit envelopes by
 // SERVICE_NAME; audit-service never emits into its own store, so it is
 // not an emitter.
+//
+// OUTCOMES mirrors the schema's outcome enum — the additive SPEC-047
+// dimension behind the Summary drill-down; the same drift guard pins it.
 export const EVENT_TYPES = [
   "tool_invoked",
   "policy_decision",
@@ -41,3 +44,5 @@ export const EMITTER_SERVICES = [
   "skills-hub",
   "tool-gateway",
 ] as const;
+
+export const OUTCOMES = ["allow", "deny", "success", "error"] as const;

@@ -29,7 +29,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { AUDIT_ROLES, hasAnyRole } from "../../roles";
 import { formatTimestamp } from "../format";
 import AuditSummaryPanel, { type AuditSummary } from "./AuditSummaryPanel";
-import { EMITTER_SERVICES, EVENT_TYPES } from "./constants";
+import { EMITTER_SERVICES, EVENT_TYPES, OUTCOMES } from "./constants";
 
 interface AuditEvent {
   occurred_at: string;
@@ -51,6 +51,7 @@ interface AuditPage {
 interface Filters {
   username: string;
   eventType: string;
+  outcome: string;
   service: string;
   since: string;
   until: string;
@@ -59,6 +60,7 @@ interface Filters {
 const EMPTY_FILTERS: Filters = {
   username: "",
   eventType: "",
+  outcome: "",
   service: "",
   since: "",
   until: "",
@@ -86,6 +88,7 @@ function filterParams(filters: Filters): URLSearchParams {
   const params = new URLSearchParams();
   if (filters.username.trim()) params.set("username", filters.username.trim());
   if (filters.eventType) params.set("event_type", filters.eventType);
+  if (filters.outcome) params.set("outcome", filters.outcome);
   if (filters.service) params.set("service", filters.service);
   if (filters.since) params.set("since", new Date(filters.since).toISOString());
   if (filters.until) params.set("until", new Date(filters.until).toISOString());
@@ -118,20 +121,20 @@ export default function AuditView() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [truncatedRows, setTruncatedRows] = useState<string | null>(null);
 
-  const load = useCallback(
-    async (append: boolean) => {
+  const loadEvents = useCallback(
+    async (current: Filters, append: boolean) => {
       if (!allowed) return;
       setLoading(true);
       setError(null);
       try {
-        const params = filterParams(filters);
+        const params = filterParams(current);
         params.set("limit", "50");
         if (append && cursor) params.set("cursor", cursor);
         const payload = await requestJson<AuditPage>(
           `/api/v1/audit/events?${params.toString()}`,
         );
         const page = payload.events ?? [];
-        setEvents((current) => (append ? [...current, ...page] : page));
+        setEvents((events) => (append ? [...events, ...page] : page));
         setCursor(payload.next_cursor ?? null);
         setLoaded(true);
       } catch (err) {
@@ -140,7 +143,12 @@ export default function AuditView() {
         setLoading(false);
       }
     },
-    [allowed, filters, cursor],
+    [allowed, cursor],
+  );
+
+  const load = useCallback(
+    async (append: boolean) => loadEvents(filters, append),
+    [filters, loadEvents],
   );
 
   const fetchSummary = useCallback(
@@ -241,6 +249,21 @@ export default function AuditView() {
     }
   };
 
+  // SPEC-047 R-3: Summary drill-down merges the patch into the current
+  // filters (merge, never reset — Q-3), lands on the Events tab, and
+  // triggers one refresh under the merged filters.
+  const handleDrilldown = useCallback(
+    (patch: Partial<Filters>) => {
+      if (!allowed) return;
+      const merged = { ...filters, ...patch };
+      setFilters(merged);
+      setActiveTab("events");
+      setCursor(null);
+      void loadEvents(merged, false);
+    },
+    [allowed, filters, loadEvents],
+  );
+
   const columns: TableColumnsType<AuditEvent> = [
     {
       title: "occurred at",
@@ -291,6 +314,16 @@ export default function AuditView() {
           options={[
             { value: "", label: "all event types" },
             ...EVENT_TYPES.map((type) => ({ value: type, label: type })),
+          ]}
+        />
+        <Select
+          value={filters.outcome}
+          onChange={(value) => setFilters((f) => ({ ...f, outcome: value }))}
+          style={{ width: 160 }}
+          aria-label="Filter by outcome"
+          options={[
+            { value: "", label: "all outcomes" },
+            ...OUTCOMES.map((outcome) => ({ value: outcome, label: outcome })),
           ]}
         />
         <Select
@@ -412,7 +445,12 @@ export default function AuditView() {
                   />
                 ) : null}
                 <Spin spinning={summaryLoading}>
-                  {summary ? <AuditSummaryPanel summary={summary} /> : null}
+                  {summary ? (
+                    <AuditSummaryPanel
+                      summary={summary}
+                      onDrilldown={handleDrilldown}
+                    />
+                  ) : null}
                 </Spin>
               </>
             ),

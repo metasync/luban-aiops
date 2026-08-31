@@ -13,6 +13,43 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.29.0 — 2026-08-31
+
+### Added
+
+- **Audit summary drill-down and readability (SPEC-047)** — one UX
+  iteration on the SPEC-046 Summary tab plus the one additive API
+  dimension that makes it complete; no new routes, no new gates, no
+  new policy actions, no new event types, and both contract schemas
+  keep their shapes.
+  - audit-service gains an `outcome` filter dimension on its three
+    read routes (`GET /api/v1/audit/events`, `/summary`, `/export`),
+    validated against the four contract enum values (`allow`,
+    `deny`, `success`, `error` — anything else is a 422) and applied
+    in the shared WHERE-builder, so both store backends and all three
+    read surfaces inherit it with no per-route special casing; the
+    platform-gateway forwards the parameter on its existing
+    pass-through routes under the unchanged `audit:read` gate.
+  - The portal's pinned filter vocabulary gains `OUTCOMES` beside
+    `EVENT_TYPES` / `EMITTER_SERVICES`, behind the same vitest drift
+    guard that reads the contract schema enum.
+
+### Changed
+
+- **Audit Summary tab rebuilt** — the aggregates render as a single
+  page instead of four static tables: a headline statistic row
+  (total events plus the four decision-chain steps, zeros as 0),
+  collapsible bucket sections (By event type / By outcome / By
+  service / Top actors — all expanded by default, section total in
+  the header), a share column per bucket row (one-decimal percentage
+  plus a thin neutral progress bar), and drill-down from every
+  aggregate value — each statistic card, bucket row, and chain step
+  lands on the Events tab with that value merged into the current
+  filters (merge, never reset; the time range survives).
+- The shared audit toolbar gains the outcome select ("all
+  outcomes" placeholder) in the pinned-vocabulary posture; it drives
+  both tabs and the export like the existing dimensions.
+
 ## 0.28.0 — 2026-08-31
 
 ### Added

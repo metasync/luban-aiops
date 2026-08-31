@@ -138,6 +138,32 @@ class ReportingRouteTests(unittest.TestCase):
         )
         self.assertEqual(body["by_event_type"], [{"name": "tool_invoked", "count": 1}])
 
+    def test_summary_outcome_filter_narrows_and_echoes(self) -> None:
+        # SPEC-047 R-1: the additive outcome dimension reaches the
+        # aggregate and echoes in the window like the other filters.
+        self._seed(
+            _event_payload("t1", username="alice"),
+            _event_payload("t2", username="bob", outcome="deny"),
+            _event_payload("t3", username="carol", outcome="error"),
+        )
+        response = self.client.get(
+            "/api/v1/audit/summary?outcome=deny", headers=self.auth
+        )
+        body = response.json()
+        self.assertEqual(body["total_events"], 1)
+        self.assertEqual(body["window"], {"outcome": "deny"})
+        self.assertEqual(
+            body["by_outcome"], [{"name": "deny", "count": 1}]
+        )
+
+    def test_summary_rejects_invalid_outcome(self) -> None:
+        # SPEC-047 R-1: values outside the shared schema enum are a 422
+        # under the existing validation posture.
+        response = self.client.get(
+            "/api/v1/audit/summary?outcome=exploded", headers=self.auth
+        )
+        self.assertEqual(response.status_code, 422)
+
     def test_summary_empty_window_answers_zeros(self) -> None:
         response = self.client.get(
             "/api/v1/audit/summary?username=nobody", headers=self.auth
@@ -214,6 +240,27 @@ class ReportingRouteTests(unittest.TestCase):
         self.assertEqual(response.headers["x-audit-export-rows"], "1")
         rows = list(csv.reader(io.StringIO(response.text)))
         self.assertEqual(rows[1][4], "alice")
+
+    def test_export_respects_outcome_filter(self) -> None:
+        # SPEC-047 R-1: the outcome dimension reaches the export leg
+        # through the same shared store filters.
+        self._seed(
+            _event_payload("a", username="alice"),
+            _event_payload("b", username="bob", outcome="deny"),
+        )
+        response = self.client.get(
+            "/api/v1/audit/export?outcome=deny", headers=self.auth
+        )
+        self.assertEqual(response.headers["x-audit-export-rows"], "1")
+        rows = list(csv.reader(io.StringIO(response.text)))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1][3], "deny")
+
+    def test_export_rejects_invalid_outcome(self) -> None:
+        response = self.client.get(
+            "/api/v1/audit/export?outcome=exploded", headers=self.auth
+        )
+        self.assertEqual(response.status_code, 422)
 
     def test_export_requires_auth(self) -> None:
         response = self.client.get("/api/v1/audit/export")

@@ -330,18 +330,27 @@ in the [Incident Triage and Collaboration Guide](incident-guide.md).
 A read-only view of the durable audit trail. The navigation entry
 appears only for identities holding `audit:read` (auditors and platform
 admins by default). A shared filter toolbar — username, event type,
-emitter service, and a since/until window — drives both tabs and the
-export:
+outcome, emitter service, and a since/until window — drives both tabs
+and the export:
 
 - **Events** — the newest-first table with cursor pagination, a
   persistent **Load more** bar, and expandable event envelopes showing
   the full event payload.
-- **Summary** — deterministic aggregates over the filtered window:
-  the total event count, a decision-chain strip
-  (`confirmation_decided → execution_requested → execution_completed →
-  execution_rejected`, zeros shown as 0), and bucket tables by event
-  type, outcome, and service plus the top actors. The summary
-  refetches whenever the filters changed.
+- **Summary** — deterministic aggregates over the filtered window as a
+  single page:
+  - a headline statistic row — total events plus the decision chain
+    (`confirmation_decided → execution_requested → execution_completed →
+    execution_rejected`, zeros shown as 0);
+  - collapsible bucket sections (By event type, By outcome, By service,
+    Top actors), all expanded by default with the section total in the
+    header, and each bucket row carrying its share of the total as a
+    percentage and a neutral bar;
+  - drill-down from every aggregate value: each statistic card, bucket
+    row, and chain step lands on the Events tab with that value merged
+    into the current filters (other filters, including the time range,
+    are preserved — clear them from the toolbar when done).
+
+  The summary refetches whenever the filters changed.
 - **Export CSV** — downloads the filtered envelope columns as an
   RFC-4180 CSV under the server-chosen filename
   (`audit-export-<timestamp>.csv`). Exports are capped at

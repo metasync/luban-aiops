@@ -7,6 +7,20 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-31-audit-summary-drilldown-and-readability.md`
+  - delivers SPEC-047 (v0.29.0): the audit Summary tab becomes a page
+    you can act on — a headline statistic row (total + decision chain,
+    zeros as 0), collapsible bucket sections (expanded by default,
+    section total in the header), a share column per bucket row
+    (one-decimal percentage + neutral bar), and drill-down from every
+    aggregate value into the Events tab under merged filters; backed
+    by the additive **`outcome`** filter dimension on the three audit
+    read routes (events / summary / export, four contract enum values,
+    422 otherwise) forwarded by the gateway under the unchanged
+    **`audit:read`** gate, and `OUTCOMES` joining the portal's pinned
+    filter vocabulary behind the existing drift guard; no new routes,
+    no new policy actions, no new event types, both contract schemas
+    unchanged
 - `2026-08-31-audit-reporting-and-export.md`
   - delivers SPEC-046 (v0.28.0): the audit trail gains two read-only
     reporting surfaces that ride the existing **`audit:read`** grant —
