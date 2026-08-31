@@ -7,6 +7,16 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-31-dotted-tool-names-everywhere.md`
+  - same-day patch (v0.27.5) broadening v0.27.4: the sanitized →
+    dotted tool-name rewrite now covers every rendered surface,
+    including inline code spans and fenced blocks — the v0.27.4
+    shield assumed configuration surfaces need the sanitized form,
+    but the sanitized form has no external consumer and
+    `AGENT_GATEWAY_TOOL_AUTO_ALLOW` normalizes dots on input; tool
+    lists (which the model backticks) now render dotted too;
+    transcripts still keep the model's original words; portal-only,
+    no backend changes
 - `2026-08-31-dotted-canonical-tool-names-in-chat-prose.md`
   - same-day patch (v0.27.4) in the v0.27 train: chat reply prose and
     incident triage-report summaries now show the registry's dotted

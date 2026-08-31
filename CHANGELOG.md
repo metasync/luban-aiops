@@ -13,6 +13,26 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.27.5 — 2026-08-31
+
+### Changed
+
+- **Dotted canonical tool names everywhere, including code regions** —
+  v0.27.4's render-time rewrite deliberately shielded inline code
+  spans and fenced blocks so they kept the sanitized form, on the
+  assumption that configuration surfaces expect it; a live test showed
+  the model backticks every name in tool-list replies, so the lists
+  stayed underscored. The assumption no longer holds: the sanitized
+  form has no external consumer besides the model's function-calling
+  schema, and `AGENT_GATEWAY_TOOL_AUTO_ALLOW` normalizes dots to
+  underscores on input, so copy-paste of the dotted form works too.
+  The rewrite now applies to every rendered surface — prose, inline
+  code spans, and fenced blocks — dropping the shielding machinery
+  entirely. Durable transcripts keep the model's original words;
+  the rewrite remains presentation-only. Skill drafts still render
+  as generated (preview must match the download). Portal-only, no
+  backend changes.
+
 ## 0.27.4 — 2026-08-31
 
 ### Changed

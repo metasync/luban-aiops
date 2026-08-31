@@ -1,15 +1,14 @@
-// Display-name alignment for gateway tools (v0.27.4): the model writes the
-// sanitized tool names it sees in its function-calling schema (dots become
-// underscores to satisfy provider name constraints), but the registry's
-// canonical name is dotted. Chat prose and triage summaries map sanitized
-// names back to the dotted canonical form at render time; the durable
-// transcript keeps the model's original words, and code regions keep the
-// sanitized form that configuration surfaces (AGENT_GATEWAY_TOOL_AUTO_ALLOW)
-// expect.
-
-const FENCE_SENTINEL = "\u0000F";
-const FENCE_CLOSE = "\u0000";
-const SPAN_SENTINEL = "\u0000S";
+// Display-name alignment for gateway tools (v0.27.4, broadened in v0.27.5):
+// the model writes the sanitized tool names it sees in its function-calling
+// schema (dots become underscores to satisfy provider name constraints),
+// but the registry's canonical name is dotted. Every rendered surface —
+// prose, inline code spans, fenced blocks — maps sanitized names back to
+// the dotted canonical form at render time. Copy-paste stays safe: the
+// sanitized form has no external consumer besides the model schema, and the
+// one configuration surface that lists tool names
+// (AGENT_GATEWAY_TOOL_AUTO_ALLOW) normalizes dots to underscores on input.
+// The durable transcript keeps the model's original words, so the rewrite
+// re-applies to historical sessions on re-render with no migration.
 
 /** AgentScope sanitizes tool names for function-calling: dots become underscores. */
 export function sanitizeToolName(canonical: string): string {
@@ -50,42 +49,24 @@ function escapeRegExp(text: string): string {
 }
 
 /**
- * Rewrite sanitized tool names to their dotted canonical form in prose.
+ * Rewrite sanitized tool names to their dotted canonical form, everywhere.
  *
- * Code regions (fenced blocks and inline spans) are shielded: the sanitized
- * form is the one configuration surfaces expect, so copy-paste out of a code
- * block must keep it. Replacement runs on raw text before markdown escaping;
- * canonical names introduce no markup, so output stays safe by construction.
- * Text that is mid-stream (an unclosed fence) is left untouched rather than
- * half-rewritten.
+ * Replacement runs on raw text before markdown escaping; canonical names
+ * introduce no markup, so output stays safe by construction. Word
+ * boundaries plus longest-match-first ordering keep shared prefixes
+ * (k8s_get_pods vs k8s_get_pod_logs) unambiguous.
  */
 export function displayToolNames(
   text: string,
   names: Map<string, string>,
 ): string {
   if (!names.size) return text;
-  const fences: string[] = [];
-  const spans: string[] = [];
-  let shielded = text.replace(/\u0000/g, "");
-  shielded = shielded.replace(/```[\s\S]*?```/g, (block) => {
-    fences.push(block);
-    return `${FENCE_SENTINEL}${fences.length - 1}${FENCE_CLOSE}`;
-  });
-  shielded = shielded.replace(/`[^`\n]+`/g, (span) => {
-    spans.push(span);
-    return `${SPAN_SENTINEL}${spans.length - 1}${FENCE_CLOSE}`;
-  });
-  // Longest first so a shared prefix (k8s_get_pods vs k8s_get_pod_logs)
-  // resolves to the most specific registered name.
   const pattern = [...names.keys()]
     .sort((a, b) => b.length - a.length)
     .map(escapeRegExp)
     .join("|");
-  const rewritten = shielded.replace(
+  return text.replace(
     new RegExp(`\\b(${pattern})\\b`, "g"),
     (match) => names.get(match) ?? match,
   );
-  return rewritten
-    .replace(/\u0000S(\d+)\u0000/g, (_m, index: string) => spans[Number(index)] ?? "")
-    .replace(/\u0000F(\d+)\u0000/g, (_m, index: string) => fences[Number(index)] ?? "");
 }

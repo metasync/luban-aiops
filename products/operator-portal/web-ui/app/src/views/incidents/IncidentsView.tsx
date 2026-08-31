@@ -621,8 +621,8 @@ function IncidentDetail({
 }
 
 function TriageReportSection({ report }: { report: TriageReport }) {
-  // v0.27.4: prose shows the registry's dotted canonical tool names while
-  // code keeps the sanitized form (see chat/toolNames.ts).
+  // v0.27.4 (broadened v0.27.5): every rendered surface shows the
+  // registry's dotted canonical tool names (see chat/toolNames.ts).
   const toolNames = useToolNameMap();
   return (
     <div className="incident-section">

@@ -437,8 +437,8 @@ function TurnGroup({
   // meeting a silent wall of text. Evidence and cards render at once.
   revealFromChars?: number;
 }) {
-  // v0.27.4: prose shows the registry's dotted canonical tool names while
-  // code keeps the sanitized form (see toolNames.ts).
+  // v0.27.4 (broadened v0.27.5): every rendered surface shows the
+  // registry's dotted canonical tool names (see toolNames.ts).
   const toolNames = useToolNameMap();
   // Legacy parity: a finished turn with no text and no parked confirmation
   // shows the "(no response received)" placeholder.

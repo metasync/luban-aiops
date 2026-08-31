@@ -78,22 +78,16 @@ describe("displayToolNames", () => {
     );
   });
 
-  it("leaves inline code spans untouched", () => {
+  it("rewrites names inside inline code spans too (v0.27.5)", () => {
     expect(
-      displayToolNames("prose k8s_get_pods but `k8s_get_pods` in code", NAMES),
-    ).toBe("prose k8s.get_pods but `k8s_get_pods` in code");
+      displayToolNames("prose k8s_get_pods and `k8s_get_pods` in code", NAMES),
+    ).toBe("prose k8s.get_pods and `k8s.get_pods` in code");
   });
 
-  it("leaves fenced blocks untouched", () => {
+  it("rewrites names inside fenced blocks too (v0.27.5)", () => {
     const text = "ran k8s_get_pods\n```bash\nAGENT_GATEWAY_TOOL_AUTO_ALLOW=k8s_get_pods\n```\nthen k8s_get_pod_logs";
     expect(displayToolNames(text, NAMES)).toBe(
-      "ran k8s.get_pods\n```bash\nAGENT_GATEWAY_TOOL_AUTO_ALLOW=k8s_get_pods\n```\nthen k8s.get_pod_logs",
-    );
-  });
-
-  it("strips stray control characters from the input", () => {
-    expect(displayToolNames("a\u0000 k8s_get_pods", NAMES)).toBe(
-      "a k8s.get_pods",
+      "ran k8s.get_pods\n```bash\nAGENT_GATEWAY_TOOL_AUTO_ALLOW=k8s.get_pods\n```\nthen k8s.get_pod_logs",
     );
   });
 });
