@@ -52,9 +52,13 @@ function escapeRegExp(text: string): string {
  * Rewrite sanitized tool names to their dotted canonical form, everywhere.
  *
  * Replacement runs on raw text before markdown escaping; canonical names
- * introduce no markup, so output stays safe by construction. Word
- * boundaries plus longest-match-first ordering keep shared prefixes
- * (k8s_get_pods vs k8s_get_pod_logs) unambiguous.
+ * introduce no markup, so output stays safe by construction. Longest-
+ * match-first ordering keeps shared prefixes (k8s_get_pods vs
+ * k8s_get_pod_logs) unambiguous, and the leading boundary also excludes
+ * dots: an already-dotted mention (k8s.get_pod_logs) must not re-match a
+ * suffix key should the registry ever contain one. The trailing boundary
+ * stays word-only so names ending a sentence ("called k8s_get_pods.")
+ * still rewrite.
  */
 export function displayToolNames(
   text: string,
@@ -66,7 +70,7 @@ export function displayToolNames(
     .map(escapeRegExp)
     .join("|");
   return text.replace(
-    new RegExp(`\\b(${pattern})\\b`, "g"),
+    new RegExp(`(?<![\\w.])(${pattern})(?!\\w)`, "g"),
     (match) => names.get(match) ?? match,
   );
 }

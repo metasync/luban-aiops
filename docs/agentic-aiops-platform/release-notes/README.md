@@ -7,6 +7,14 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-08-31-post-review-hardening-tool-name-rewrite.md`
+  - review-remediation patch (v0.27.6) closing the v0.27.4/v0.27.5
+    code review (approve-with-minor): the rewrite's match boundary
+    now excludes a leading dot so an already-dotted mention can never
+    re-match a pathological suffix key (trailing boundary stays
+    word-only so sentence-final names still rewrite), plus four new
+    boundary/collision tests; doc review found no findings; portal-
+    only, no backend changes
 - `2026-08-31-dotted-tool-names-everywhere.md`
   - same-day patch (v0.27.5) broadening v0.27.4: the sanitized →
     dotted tool-name rewrite now covers every rendered surface,

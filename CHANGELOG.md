@@ -13,6 +13,22 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.27.6 — 2026-08-31
+
+### Changed
+
+- **Post-review hardening of the dotted tool-name rewrite** — the
+  post-v0.27.5 code review returned approve-with-minor with two Low
+  findings, both remediated here. (1) The match boundary now excludes a
+  leading dot as well as word characters, so an already-dotted mention
+  can never re-match a suffix key should the registry ever contain one
+  (`k8s.get_pod_logs` vs a hypothetical `get_pod_logs` entry); the
+  trailing boundary stays word-only so names ending a sentence
+  ("called k8s_get_pods.") still rewrite. (2) Test coverage gains:
+  leading-boundary adjacency, sentence-final names, the pathological
+  suffix-key registry, and the third-colliding-entry skip branch.
+  Portal-only, no backend changes.
+
 ## 0.27.5 — 2026-08-31
 
 ### Changed
