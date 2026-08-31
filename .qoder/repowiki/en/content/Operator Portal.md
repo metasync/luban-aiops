@@ -21,11 +21,12 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced audit view with tabbed interface including Events and Summary tabs sharing common filter toolbar
-- Added AuditSummaryPanel component for displaying summary data with proper formatting and sorting
-- Integrated CSV export functionality with proper error handling and truncation warnings
-- Moved constants for emitter services and event types to dedicated constants file
-- Updated audit trail section with new tabbed interface capabilities
+- Complete redesign of audit Summary tab with collapsible sections using antd Collapse component
+- Added interactive drill-down functionality from any aggregate value to Events tab with merged filters
+- Implemented new statistic row showing total events and decision-chain steps
+- Enhanced proportion display with percentage values and inline progress bars
+- Added new outcome select dropdown filter following drift-guard pattern
+- Updated summary analytics with bucketed tables and visualization components
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -46,7 +47,7 @@ Key capabilities include:
 - Chat and streaming responses with tool evidence and inline human-in-the-loop confirmations
 - Incident management with triage reports and live runs
 - Approval queue with pending decision badges and actions
-- **Enhanced read-only audit trail with tabbed interface (Events and Summary tabs), shared filter toolbar, CSV export with truncation warnings, and summary analytics**
+- **Enhanced read-only audit trail with sophisticated tabbed interface (Events and Summary tabs), shared filter toolbar, CSV export with truncation warnings, and comprehensive summary analytics with drill-down capabilities**
 - Permissions matrix view sourced from policy enforcement
 - Workspace views for tools and skills catalogs
 - Settings & Debug panel showing session, identity, and platform component health
@@ -83,7 +84,7 @@ Nginx --> Dist
 - Authentication: OIDC login flow, token refresh scheduling, and session persistence; roles drive UI visibility and feature gating.
 - API client: Centralized fetch wrapper adding bearer tokens and request IDs, with configurable gateway URL override.
 - Chat workspace: Session list, message composer, model selector, voice input, streaming SSE transport, tool evidence rendering, and HITL confirmation cards.
-- Control views: Approvals inbox, **enhanced audit trail with tabbed interface**, permissions matrix, settings & debug, incidents triage.
+- Control views: Approvals inbox, **enhanced audit trail with sophisticated tabbed interface**, permissions matrix, settings & debug, incidents triage.
 - Workspace views: Tools catalog and skills inventory with filters.
 - Theme and accessibility: Dark theme tokens mirrored into CSS custom properties; ARIA labels and keyboard-friendly controls.
 
@@ -93,7 +94,7 @@ Nginx --> Dist
 - [client.ts:1-101](file://products/operator-portal/web-ui/app/src/api/client.ts#L1-L101)
 - [ChatView.tsx:1-200](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L200)
 - [SettingsView.tsx:1-200](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L1-L200)
-- [AuditView.tsx:1-425](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L425)
+- [AuditView.tsx:1-463](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L463)
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
 
 ## Architecture Overview
@@ -235,19 +236,23 @@ GW-->>CV : Resume stream with decision
 - [ChatView.tsx:1-200](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L200)
 - [README.md:43-126](file://products/operator-portal/README.md#L43-L126)
 
-### Enhanced Audit Trail with Tabbed Interface
-**Updated** The audit trail view has been significantly enhanced with a sophisticated tabbed interface that provides both detailed event inspection and high-level summary analytics.
+### Enhanced Audit Trail with Sophisticated Tabbed Interface
+**Updated** The audit trail view has been completely redesigned with an advanced tabbed interface that provides both detailed event inspection and comprehensive summary analytics with interactive drill-down capabilities.
 
-#### Tabbed Interface Architecture
-- **Shared Filter Toolbar**: Both Events and Summary tabs share a common filter interface for username, event type, service, and time range filtering
+#### Advanced Tabbed Interface Architecture
+- **Shared Filter Toolbar**: Both Events and Summary tabs share a common filter interface for username, event type, outcome, service, and time range filtering
 - **Events Tab**: Displays cursor-paginated audit events with expandable verbatim envelopes showing full event details
-- **Summary Tab**: Shows deterministic envelope-column aggregates including total events, decision chain visualization, and bucketed analytics
+- **Summary Tab**: Shows deterministic envelope-column aggregates with collapsible sections, interactive drill-down, and comprehensive analytics
 
 #### Key Features
 - **Role-Based Access**: Requires auditor or platform-admin roles with server-side enforcement
 - **Structured Error Handling**: Provides actionable error messages for different failure scenarios (403, 502, 503)
 - **CSV Export**: Server-side blob download with Content-Disposition filename support and truncation warnings
 - **Real-time Filtering**: Filters apply consistently across both tabs with lazy loading for summary data
+- **Interactive Drill-Down**: Click any aggregate value to navigate to Events tab with merged filters
+- **Collapsible Sections**: Four bucket tables organized in antd Collapse component with default expansion
+- **Proportion Visualization**: Percentage values with inline progress bars for each bucket row
+- **Decision Chain Visualization**: New statistic row showing total events and four decision-chain steps
 
 ```mermaid
 flowchart TD
@@ -256,26 +261,36 @@ FilterToolbar --> SummaryTab["Summary Tab"]
 FilterToolbar --> ExportBtn["Export CSV Button"]
 EventsTab --> EventTable["Event Table with Pagination"]
 EventTable --> ExpandableRows["Expandable Event Envelopes"]
-SummaryTab --> SummaryPanel["AuditSummaryPanel"]
-SummaryPanel --> DecisionChain["Decision Chain Visualization"]
-SummaryPanel --> AnalyticsTables["Analytics Tables"]
+SummaryTab --> StatisticRow["Statistic Row<br/>Total + Decision Chain"]
+StatisticRow --> CollapsibleSections["Collapsible Sections<br/>(antd Collapse)"]
+CollapsibleSections --> BucketTables["Bucket Tables<br/>by Event Type, Outcome, Service, Actors"]
+BucketTables --> ProportionDisplay["Proportion Display<br/>Percentage + Progress Bars"]
+BucketTables --> Drilldown["Interactive Drill-Down<br/>to Events with Merged Filters"]
 ExportBtn --> BlobDownload["Server-side Blob Download"]
 BlobDownload --> TruncationWarning["Truncation Warning if Applied"]
 ```
 
 **Diagram sources**
-- [AuditView.tsx:95-425](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L95-L425)
-- [AuditSummaryPanel.tsx:51-107](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L51-L107)
+- [AuditView.tsx:98-463](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L98-L463)
+- [AuditSummaryPanel.tsx:115-210](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L115-L210)
 
-#### Constants Management
-- **Centralized Constants**: Event types and emitter services moved to dedicated `constants.ts` file
+#### Summary Panel Components
+- **Headline Statistics**: Total events count plus four decision-chain step counters (confirmation_decided, execution_requested, execution_completed, execution_rejected)
+- **Collapsible Analytics**: Four bucket tables organized by event type, outcome, service, and top actors
+- **Interactive Elements**: Every aggregate value is clickable for drill-down to filtered Events view
+- **Visual Indicators**: Inline progress bars showing proportion percentages for each bucket
+- **Zero-State Handling**: Empty posture when no events match current filters
+
+#### Constants Management and Drift Guard
+- **Centralized Constants**: Event types, emitter services, and outcomes moved to dedicated `constants.ts` file
 - **Schema Drift Protection**: Vitest tests ensure constants remain synchronized with shared audit-event schema
+- **Outcome Filter Integration**: New outcome select dropdown follows the same drift-guard pattern as other filters
 - **Maintainable Configuration**: Single source of truth for audit-related configuration
 
 **Section sources**
-- [AuditView.tsx:1-425](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L425)
-- [AuditSummaryPanel.tsx:1-107](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L1-L107)
-- [constants.ts:1-44](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts#L1-L44)
+- [AuditView.tsx:1-463](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L463)
+- [AuditSummaryPanel.tsx:1-210](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L1-L210)
+- [constants.ts:1-49](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts#L1-L49)
 
 ### Settings, Health, and Debug
 - Identity pane shows sign-in state, username, roles, subject, and groups.
@@ -358,6 +373,8 @@ Nginx --> Gateway["Platform Gateway"]
 - Client-side state: Session workspace minimizes redundant network calls by maintaining local session lists and pinning incident sessions.
 - **Lazy Loading**: Summary tab data is fetched only when the tab is activated, reducing initial page load time.
 - **Efficient Filtering**: Shared filter state prevents redundant API calls when switching between tabs.
+- **Optimized Rendering**: Collapsible sections reduce initial DOM complexity while providing rich interactivity.
+- **Progressive Enhancement**: Zero-state handling prevents unnecessary computations when no data is available.
 
 [No sources needed since this section provides general guidance]
 
@@ -368,16 +385,18 @@ Nginx --> Gateway["Platform Gateway"]
 - Health checks: Settings panel probes gateway health endpoints; if unavailable, inspect nginx proxy configuration and upstream service status.
 - **Audit View Issues**: Check role permissions (auditor/platform-admin required); verify audit service availability; review structured error messages for specific failure scenarios.
 - **CSV Export Problems**: Monitor truncation warnings; verify server-side export limits; check Content-Disposition headers for proper filename handling.
+- **Summary Tab Issues**: Verify lazy loading behavior; check filter state synchronization; ensure collapse component renders correctly.
+- **Drill-Down Navigation**: Confirm filter merging logic; verify Events tab loads with correct merged parameters; check cursor reset behavior.
 
 **Section sources**
 - [AuthContext.tsx:40-85](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L40-L85)
 - [client.ts:8-16](file://products/operator-portal/web-ui/app/src/api/client.ts#L8-L16)
 - [client.ts:25-36](file://products/operator-portal/web-ui/app/src/api/client.ts#L25-L36)
 - [nginx.conf:8-28](file://products/operator-portal/nginx.conf#L8-L28)
-- [AuditView.tsx:67-83](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L67-L83)
+- [AuditView.tsx:69-85](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L69-L85)
 
 ## Conclusion
-The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **enhanced audit trail with tabbed interface and analytics**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent enhancements to the audit trail provide operators with comprehensive event inspection capabilities and powerful summary analytics for understanding system behavior and identifying patterns.
+The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface and advanced analytics**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, proportion visualization, and decision-chain tracking.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -402,7 +421,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - Platform gateway: Proxies all /api/ calls; enforces policies and delegates to agent-platform and other services.
 - Agent platform: Provides chat sessions and streaming responses.
 - Policy center: Supplies approval queue and decision state surfaced in Approvals and Permissions views.
-- **Audit service**: Provides durable audit trail with events, summary analytics, and CSV export capabilities.
+- **Audit service**: Provides durable audit trail with events, summary analytics, CSV export capabilities, and comprehensive filtering support.
 
 **Section sources**
 - [README.md:127-133](file://products/operator-portal/README.md#L127-L133)
@@ -410,12 +429,12 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 ### UI Customization and Accessibility
 - Theme: Dark theme tokens defined in tokens.ts and applied via antd ConfigProvider; CSS custom properties mirror tokens for consistent styling.
 - Accessibility: ARIA labels on navigation and user actions; keyboard-friendly menus and controls; responsive layout adapts to narrow screens with a drawer.
-- **Enhanced Audit Interface**: Tabbed interface provides intuitive navigation between detailed events and summary analytics; shared filter toolbar ensures consistent user experience across tabs.
+- **Enhanced Audit Interface**: Sophisticated tabbed interface provides intuitive navigation between detailed events and comprehensive summary analytics; shared filter toolbar ensures consistent user experience across tabs; collapsible sections improve information density while maintaining accessibility.
 
 **Section sources**
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
 - [App.tsx:395-418](file://products/operator-portal/web-ui/app/src/App.tsx#L395-L418)
-- [AuditView.tsx:275-328](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L275-L328)
+- [AuditView.tsx:298-361](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L298-L361)
 
 ### Browser Compatibility
 - Uses modern browser APIs such as Web Speech API for voice input and standard fetch/SSE patterns.
@@ -426,24 +445,38 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - [index.html:1-14](file://products/operator-portal/web-ui/app/index.html#L1-L14)
 
 ### Enhanced Audit Trail Features
-**New** The audit trail has been significantly enhanced with advanced features:
+**Completely Redesigned** The audit trail has been completely redesigned with advanced interactive features:
 
-#### Tabbed Interface
+#### Sophisticated Tabbed Interface
 - **Events Tab**: Cursor-paginated table of audit events with expandable verbatim envelopes
-- **Summary Tab**: Deterministic aggregates showing total events, decision chain visualization, and bucketed analytics
-- **Shared Filter Toolbar**: Consistent filtering across both tabs for username, event type, service, and time ranges
+- **Summary Tab**: Comprehensive aggregates with collapsible sections, interactive drill-down, and visual analytics
+- **Shared Filter Toolbar**: Consistent filtering across both tabs for username, event type, outcome, service, and time ranges
+
+#### Interactive Drill-Down System
+- **Click-to-Navigate**: Any aggregate value in Summary tab triggers drill-down to Events tab
+- **Merged Filters**: Drill-down merges selected dimension into current filters without resetting existing filters
+- **Automatic Refresh**: Events tab automatically reloads with merged filter parameters
+- **Cursor Reset**: Navigation resets pagination cursor for clean starting point
+
+#### Advanced Summary Analytics
+- **Headline Statistics**: New statistic row showing total events plus four decision-chain steps (confirmation_decided, execution_requested, execution_completed, execution_rejected)
+- **Collapsible Sections**: Four bucket tables organized using antd Collapse component with default expansion
+- **Proportion Visualization**: Each bucket row displays percentage values with inline progress bars
+- **Interactive Elements**: All aggregate values are clickable for drill-down navigation
+- **Zero-State Handling**: Empty posture when no events match current filters
+
+#### Enhanced Filtering and Controls
+- **Outcome Select Dropdown**: New outcome filter following drift-guard pattern with schema synchronization
+- **Drift Guard Protection**: Automated tests ensure filter options stay synchronized with shared audit-event schema
+- **Real-time Updates**: Filter changes apply immediately across both tabs with optimized API calls
 
 #### CSV Export Functionality
 - Server-side blob download with proper Content-Disposition filename handling
 - Truncation warnings when export limits are exceeded (AUDIT_EXPORT_MAX_ROWS)
 - Structured error handling for permission denials and service unavailability
 
-#### Summary Analytics
-- Decision chain visualization showing confirmation → execution flow
-- Bucketed analytics by event type, outcome, service, and top actors
-- Real-time filtering with lazy loading for optimal performance
-
 **Section sources**
-- [AuditView.tsx:95-425](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L95-L425)
-- [AuditSummaryPanel.tsx:1-107](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L1-L107)
-- [constants.ts:1-44](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts#L1-L44)
+- [AuditView.tsx:98-463](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L98-L463)
+- [AuditSummaryPanel.tsx:1-210](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L1-L210)
+- [constants.ts:1-49](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts#L1-L49)
+- [__tests__/constants.test.ts:1-70](file://products/operator-portal/web-ui/app/src/views/audit/__tests__/constants.test.ts#L1-L70)

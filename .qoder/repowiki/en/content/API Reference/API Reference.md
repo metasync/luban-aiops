@@ -16,6 +16,7 @@
 - [platform-gateway/src/platform_gateway/services/tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [platform-gateway/src/platform_gateway/services/gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 - [platform-gateway/src/platform_gateway/schemas/api.py](file://products/platform-gateway/src/platform_gateway/schemas/api.py)
+- [platform-gateway/src/platform_gateway/api/routes/audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [skills-hub/src/skills_hub/api/routes/skills.py](file://products/skills-hub/src/skills_hub/api/routes/skills.py)
 - [tool-gateway/src/tool_gateway/tools/skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 - [shared/shared-contracts/schemas/policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
@@ -33,7 +34,6 @@
 - [tool-gateway/src/api_gateway/api/routes/tools.py](file://products/tool-gateway/src/api_gateway/api/routes/tools.py)
 - [tool-gateway/src/api_gateway/api/routes/auth.py](file://products/tool-gateway/src/api_gateway/api/routes/auth.py)
 - [tool-gateway/src/api_gateway/schemas/api.py](file://products/tool-gateway/src/api_gateway/schemas/api.py)
-- [platform-gateway/src/platform_gateway/api/routes/audit.py](file://products/platform-gateway/src/platform_gateway/api/routes/audit.py)
 - [audit-service/src/audit_service/api/router.py](file://products/audit-service/src/audit_service/api/router.py)
 - [audit-service/src/audit_service/api/routes/ingest.py](file://products/audit-service/src/audit_service/api/routes/ingest.py)
 - [audit-service/src/audit_service/api/routes/query.py](file://products/audit-service/src/audit_service/api/routes/query.py)
@@ -43,7 +43,9 @@
 - [audit-service/src/audit_service/core/metrics.py](file://products/audit-service/src/audit_service/core/metrics.py)
 - [audit-service/src/audit_service/schemas/audit.py](file://products/audit-service/src/audit_service/schemas/audit.py)
 - [audit-service/src/audit_service/schemas/summary.py](file://products/audit-service/src/audit_service/schemas/summary.py)
+- [audit-service/src/audit_service/services/audit_store.py](file://products/audit-service/src/audit_service/services/audit_store.py)
 - [shared/shared-contracts/schemas/audit-summary.schema.json](file://shared/shared-contracts/schemas/audit-summary.schema.json)
+- [shared/shared-contracts/schemas/audit-event.schema.json](file://shared/shared-contracts/schemas/audit-event.schema.json)
 - [shared-contracts/schemas/chat-request.schema.json](file://shared-contracts/schemas/chat-request.schema.json)
 - [shared-contracts/schemas/chat-response.schema.json](file://shared-contracts/schemas/chat-response.schema.json)
 - [shared-contracts/schemas/agent-chat-request.schema.json](file://shared-contracts/schemas/agent-chat-request.schema.json)
@@ -62,17 +64,15 @@
 - [shared-contracts/schemas/health-response.schema.json](file://shared-contracts/schemas/health-response.schema.json)
 - [shared-contracts/schemas/agent-health.schema.json](file://shared-contracts/schemas/agent-health.schema.json)
 - [shared-contracts/schemas/agent-runtime-metadata.schema.json](file://shared-contracts/schemas/agent-runtime-metadata.schema.json)
-- [shared-contracts/schemas/audit-event.schema.json](file://shared-contracts/schemas/audit-event.schema.json)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for new audit service summary aggregation endpoint (SPEC-046 R-1)
-- Added detailed documentation for new audit service CSV export endpoint (SPEC-046 R-2)
-- Updated Audit Service REST API section with new read-only endpoints
-- Enhanced audit reporting capabilities with deterministic envelope-column aggregates
-- Added bounded CSV export functionality with RFC-4180 compliance and truncation headers
-- Updated metrics and monitoring sections to include new audit reporting metrics
+- Enhanced audit API endpoints with new `outcome` query parameter support across GET /api/v1/audit/events, /api/v1/audit/summary, and /api/v1/audit/export endpoints
+- Updated Platform Gateway routes to forward outcome parameter through existing audit pass-through routes maintaining audit:read authorization posture
+- Added comprehensive documentation for outcome filtering capabilities in audit queries, summaries, and exports
+- Updated error handling and validation for outcome parameter (422 for invalid values)
+- Enhanced audit store implementation with outcome filter clause support
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -87,14 +87,14 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides a comprehensive API reference for the Luban AIOps Platform, covering REST endpoints for agent interactions, identity management, audit trail management, platform administration, workspace transparency, evidence persistence, operations document management, and **audit reporting and export**, as well as WebSocket APIs for real-time streaming and long-running operations. It includes HTTP methods, URL patterns, request/response schemas, authentication requirements, error codes, retry strategies, client examples, versioning and deprecation policies, migration guidance, testing strategies, and debugging techniques.
+This document provides a comprehensive API reference for the Luban AIOps Platform, covering REST endpoints for agent interactions, identity management, audit trail management, platform administration, workspace transparency, evidence persistence, operations document management, and **enhanced audit reporting and export with outcome filtering**, as well as WebSocket APIs for real-time streaming and long-running operations. It includes HTTP methods, URL patterns, request/response schemas, authentication requirements, error codes, retry strategies, client examples, versioning and deprecation policies, migration guidance, testing strategies, and debugging techniques.
 
 The platform exposes:
 - Agent Platform REST APIs (v2) for chat, sessions, runtime metadata, health, evidence persistence, and operations document management.
 - Identity Broker REST APIs for authentication, token issuance, and identity context.
 - Tool Gateway REST APIs for chat orchestration, session lifecycle, tool invocation, runtime configuration, and policy enforcement.
 - Platform Gateway REST APIs for workspace transparency including permission matrix, tools catalog, skills inventory, and operations document proxying.
-- **Audit Service REST APIs for durable audit trail ingestion, querying, monitoring, summary aggregation, and bounded CSV export.**
+- **Audit Service REST APIs for durable audit trail ingestion, querying with outcome filtering, monitoring, summary aggregation, and bounded CSV export.**
 - Shared JSON Schemas defining contracts across components.
 
 [No sources needed since this section doesn't analyze specific files]
@@ -105,7 +105,7 @@ At a high level, the API surface is implemented across five services:
 - Identity Broker: Authentication, token issuance, and identity context endpoints.
 - Tool Gateway: Orchestration layer that enforces policies, manages sessions, invokes tools, and proxies to agents.
 - Platform Gateway: Transparency and discovery layer providing permission matrix, tools catalog, skills inventory, and operations document proxying with proper authorization.
-- **Audit Service: Durable audit trail storage with ingestion, querying, monitoring, summary aggregation, and bounded CSV export capabilities.**
+- **Audit Service: Durable audit trail storage with ingestion, querying with outcome filtering, monitoring, summary aggregation, and bounded CSV export capabilities.**
 
 ```mermaid
 graph TB
@@ -151,7 +151,7 @@ AuditService --> Metrics["Prometheus Metrics"]
 - Identity Broker: Issues tokens and resolves identity contexts; used by clients and gateway for authorization.
 - Tool Gateway: Central entrypoint for clients; enforces policies, manages sessions, invokes tools, and streams results.
 - Platform Gateway: Workspace transparency service providing permission matrix, tools catalog, skills inventory, and operations document proxying with role-based scoping and authorization.
-- **Audit Service: Durable audit trail service providing ingestion, querying, monitoring, summary aggregation, and bounded CSV export capabilities with PostgreSQL backend support.**
+- **Audit Service: Durable audit trail service providing ingestion, querying with outcome filtering, monitoring, summary aggregation, and bounded CSV export capabilities with PostgreSQL backend support.**
 
 Key responsibilities:
 - Authentication and token handling via Identity Broker.
@@ -161,7 +161,7 @@ Key responsibilities:
 - Workspace transparency with live permission matrix, tools discovery, skills inventory access, and operations document management.
 - Evidence persistence with bounded storage, truncation markers, and session budget enforcement.
 - Operations document repository with draft/published states, owner-only visibility, and team-wide sharing.
-- **Durable audit trail storage with filtering, pagination, retention policies, summary aggregation, and bounded CSV export.**
+- **Durable audit trail storage with filtering including outcome dimension, pagination, retention policies, summary aggregation, and bounded CSV export.**
 
 **Section sources**
 - [agent-platform/src/agent_service/api/v2/routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -185,7 +185,7 @@ Key responsibilities:
 - [audit-service/src/audit_service/api/routes/export.py](file://products/audit-service/src/audit_service/api/routes/export.py)
 
 ## Architecture Overview
-The Tool Gateway acts as the primary API boundary for client operations. The Platform Gateway provides workspace transparency endpoints for administrative and portal use. Clients authenticate against the Identity Broker, then interact with the appropriate gateway based on their needs. The Gateways enforce policies, persist sessions, delegate execution to the Agent Platform and tool connectors, persist evidence frames for replay capability, manage operations documents with draft/published states and owner-only visibility, and **provide audit reporting and export capabilities**.
+The Tool Gateway acts as the primary API boundary for client operations. The Platform Gateway provides workspace transparency endpoints for administrative and portal use. Clients authenticate against the Identity Broker, then interact with the appropriate gateway based on their needs. The Gateways enforce policies, persist sessions, delegate execution to the Agent Platform and tool connectors, persist evidence frames for replay capability, manage operations documents with draft/published states and owner-only visibility, and **provide enhanced audit reporting and export capabilities with outcome filtering**.
 
 ```mermaid
 sequenceDiagram
@@ -212,12 +212,12 @@ A-->>C : "Created document"
 C->>A : "POST /api/v2/documents/{id}/publish"
 A->>DS : "Publish document"
 A-->>C : "Published document"
-Note over C,AS : Audit Reporting
-C->>AS : "GET /api/v1/audit/summary"
-AS->>AS : "Aggregate envelope columns"
-AS-->>C : "Deterministic summary"
-C->>AS : "GET /api/v1/audit/export"
-AS->>AS : "Stream bounded CSV"
+Note over C,AS : Enhanced Audit Reporting with Outcome Filtering
+C->>AS : "GET /api/v1/audit/summary?outcome=deny"
+AS->>AS : "Filter by outcome + aggregate envelope columns"
+AS-->>C : "Deterministic summary filtered by outcome"
+C->>AS : "GET /api/v1/audit/export?outcome=success"
+AS->>AS : "Stream bounded CSV filtered by outcome"
 AS-->>C : "RFC-4180 CSV with headers"
 Note over C,TG : Client Operations
 C->>I : "POST /auth/token"
@@ -549,7 +549,7 @@ Retry Strategy
 - [shared-contracts/schemas/health-response.schema.json](file://shared-contracts/schemas/health-response.schema.json)
 
 ### Audit Service REST API
-Durable audit trail service providing ingestion, querying, monitoring, **summary aggregation, and bounded CSV export capabilities**.
+Durable audit trail service providing ingestion, querying with outcome filtering, monitoring, **summary aggregation, and bounded CSV export capabilities**.
 
 - Event Ingestion
   - POST /api/v1/audit/events
@@ -563,28 +563,28 @@ Durable audit trail service providing ingestion, querying, monitoring, **summary
   - GET /api/v1/audit/events
   - Description: Query stored audit events with filtering and keyset cursor pagination.
   - Authentication: Service identity credential (client_id/client_secret).
-  - Query Parameters: username, session_id, request_id, event_type, service, since, until, cursor, limit.
+  - Query Parameters: username, session_id, request_id, event_type, service, **outcome** (new), since, until, cursor, limit.
   - Response schema: Paginated results with next_cursor for continuation.
-  - Error codes: 200 OK, 400 Bad Request (invalid cursor/filter), 401 Unauthorized.
+  - Error codes: 200 OK, 400 Bad Request (invalid cursor/filter), 401 Unauthorized, **422 Unprocessable Entity (invalid outcome value)**.
 
-**New** Summary Aggregation (SPEC-046 R-1)
+**Enhanced** Summary Aggregation (SPEC-046 R-1, SPEC-047 R-1)
 - GET /api/v1/audit/summary
-  - Description: Retrieve deterministic envelope-column aggregates over the stored audit trail.
+  - Description: Retrieve deterministic envelope-column aggregates over the stored audit trail with outcome filtering.
   - Authentication: Service identity credential (client_id/client_secret); user-level authorization enforced by platform gateway.
-  - Query Parameters: username, session_id, request_id, event_type, service, since, until (same as query endpoint).
+  - Query Parameters: username, session_id, request_id, event_type, service, **outcome** (new), since, until (same as query endpoint).
   - Response schema: AuditSummaryResponse with total_events, window, by_event_type, by_outcome, by_service, top_actors, and decision_chain.
-  - Behavior: Aggregates only envelope columns (event_type, outcome, service, username) - never details payload; deterministic sorting (count desc, name asc); decision_chain projects SPEC-037 lineage with explicit zeros.
-  - Error codes: 200 OK, 401 Unauthorized (authentication failure).
+  - Behavior: Aggregates only envelope columns (event_type, outcome, service, username) - never details payload; deterministic sorting (count desc, name asc); decision_chain projects SPEC-037 lineage with explicit zeros; **outcome filter applied to all aggregations**.
+  - Error codes: 200 OK, 401 Unauthorized (authentication failure), **422 Unprocessable Entity (invalid outcome value)**.
 
-**New** Bounded CSV Export (SPEC-046 R-2)
+**Enhanced** Bounded CSV Export (SPEC-046 R-2, SPEC-047 R-1)
 - GET /api/v1/audit/export
-  - Description: Stream filtered audit trail as RFC-4180 compliant CSV with bounded row count.
+  - Description: Stream filtered audit trail as RFC-4180 compliant CSV with bounded row count and outcome filtering.
   - Authentication: Service identity credential (client_id/client_secret); user-level authorization enforced by platform gateway.
-  - Query Parameters: username, session_id, request_id, event_type, service, since, until (same as query endpoint).
+  - Query Parameters: username, session_id, request_id, event_type, service, **outcome** (new), since, until (same as query endpoint).
   - Response: StreamingResponse with text/csv media type and fixed column set.
   - Headers: Content-Disposition with filename, X-Audit-Export-Truncated (true/false), X-Audit-Export-Rows (count).
-  - Behavior: Pages store queries in 200-row chunks up to AUDIT_EXPORT_MAX_ROWS (default 10,000); newest-first ordering; RFC-3339 UTC timestamps; sorted-key JSON details.
-  - Error codes: 200 OK (streaming), 401 Unauthorized (authentication failure).
+  - Behavior: Pages store queries in 200-row chunks up to AUDIT_EXPORT_MAX_ROWS (default 10,000); newest-first ordering; RFC-3339 UTC timestamps; sorted-key JSON details; **outcome filter applied to exported rows**.
+  - Error codes: 200 OK (streaming), 401 Unauthorized (authentication failure), **422 Unprocessable Entity (invalid outcome value)**.
 
 - Health Endpoints
   - GET /health/live
@@ -606,12 +606,14 @@ Authentication and Security
 - User-level authorization for audit queries is enforced at the Platform Gateway layer.
 - Batch size limits enforced to prevent abuse (configurable via AUDIT_MAX_BATCH).
 - Export endpoints respect AUDIT_EXPORT_MAX_ROWS configuration for bounded exports.
+- **Outcome parameter validation enforced via shared schema enum (allow, deny, success, error).**
 
 Pagination and Filtering
 - Keyset-based pagination using cursor parameter for efficient large dataset traversal.
-- Comprehensive filtering by username, session_id, request_id, event_type, service, and time ranges.
+- Comprehensive filtering by username, session_id, request_id, event_type, service, **outcome** (new), and time ranges.
 - Maximum limit of 200 events per query for performance protection.
 - Export endpoints page through results in 200-row chunks with hard cap enforcement.
+- **Outcome filtering applies consistently across query, summary, and export endpoints.**
 
 Error Handling
 - 202 Accepted for successful ingestion (async processing).
@@ -619,6 +621,7 @@ Error Handling
 - 200 OK for successful exports with streaming response.
 - 400 Bad Request for malformed requests or invalid filters.
 - 401 Unauthorized for authentication failures.
+- **422 Unprocessable Entity for invalid outcome parameter values**.
 - 503 Service Unavailable when audit service is not configured (via Platform Gateway).
 
 Retry Strategy
@@ -626,6 +629,7 @@ Retry Strategy
 - Use correlation IDs (x-request-id) for request tracing and debugging.
 - Handle pagination gracefully with cursor validation and retry logic.
 - For export endpoints, handle streaming interruptions and truncated exports appropriately.
+- **Handle 422 errors by validating outcome parameter values before retrying.**
 
 **Section sources**
 - [audit-service/src/audit_service/api/routes/ingest.py](file://products/audit-service/src/audit_service/api/routes/ingest.py)
@@ -675,10 +679,10 @@ All schemas are defined under shared-contracts and referenced by services.
 - Audit Trail
   - audit-event.schema.json: Canonical audit event envelope with event_id, occurred_at, event_type, service, request_id, outcome, and details fields.
 
-**New** Audit Summary Schema (SPEC-046)
-- **audit-summary.schema.json**: Deterministic envelope-column aggregates response contract
-  - total_events: Total number of stored envelopes matching applied filters
-  - window: Echo of applied filters (username, session_id, request_id, event_type, service, since, until)
+**Enhanced** Audit Summary Schema (SPEC-046, SPEC-047)
+- **audit-summary.schema.json**: Deterministic envelope-column aggregates response contract with outcome filtering support
+  - total_events: Total number of stored envelopes matching applied filters (including outcome filter)
+  - window: Echo of applied filters (username, session_id, request_id, event_type, service, **outcome**, since, until)
   - by_event_type: Event counts grouped by event_type (sorted by count desc, name asc)
   - by_outcome: Event counts grouped by outcome (sorted by count desc, name asc)
   - by_service: Event counts grouped by emitting service (sorted by count desc, name asc)
@@ -734,12 +738,12 @@ All schemas are defined under shared-contracts and referenced by services.
 - [shared-contracts/schemas/health-response.schema.json](file://shared-contracts/schemas/health-response.schema.json)
 - [shared-contracts/schemas/agent-health.schema.json](file://shared-contracts/schemas/agent-health.schema.json)
 - [shared-contracts/schemas/agent-runtime-metadata.schema.json](file://shared-contracts/schemas/agent-runtime-metadata.schema.json)
-- [shared-contracts/schemas/audit-event.schema.json](file://shared-contracts/schemas/audit-event.schema.json)
+- [shared-contracts/schemas/audit-event.schema.json](file://shared/contracts/schemas/audit-event.schema.json)
 - [shared/shared-contracts/schemas/policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
 - [shared/shared-contracts/schemas/audit-summary.schema.json](file://shared/shared-contracts/schemas/audit-summary.schema.json)
 
 ## Dependency Analysis
-The Tool Gateway depends on Identity Broker for authentication and on Agent Platform for execution. Policy engine and session store are integral to the gateway's orchestration flow. The Platform Gateway depends on the policy engine for authorization and provides transparency endpoints that may proxy to Tool Gateway, Skills Hub, and Operation Document Store. The Agent Platform integrates with the Evidence Store for persistent tool evidence and Operation Document Store for immutable document persistence. **The Audit Service depends on the audit store backend (memory or PostgreSQL) and provides summary aggregation and bounded CSV export capabilities with dedicated metrics tracking.**
+The Tool Gateway depends on Identity Broker for authentication and on Agent Platform for execution. Policy engine and session store are integral to the gateway's orchestration flow. The Platform Gateway depends on the policy engine for authorization and provides transparency endpoints that may proxy to Tool Gateway, Skills Hub, and Operation Document Store. The Agent Platform integrates with the Evidence Store for persistent tool evidence and Operation Document Store for immutable document persistence. **The Audit Service depends on the audit store backend (memory or PostgreSQL) and provides summary aggregation and bounded CSV export capabilities with dedicated metrics tracking and outcome filtering support.**
 
 ```mermaid
 graph LR
@@ -802,9 +806,9 @@ AS -.-> METRICS["Prometheus Metrics"]
 - Optimize operations document queries with proper indexing on owner_user_id and state fields.
 - Implement document publication caching to reduce database load for frequently accessed published documents.
 - Use asynchronous audit event emission to avoid blocking document operations.
-- **Leverage summary aggregation endpoint for quick overview statistics without scanning entire audit trails.**
-- **Use bounded CSV export with appropriate AUDIT_EXPORT_MAX_ROWS configuration to prevent memory exhaustion.**
-- **Monitor audit summary query metrics to track usage patterns and optimize filter combinations.**
+- **Leverage summary aggregation endpoint with outcome filtering for quick overview statistics without scanning entire audit trails.**
+- **Use bounded CSV export with outcome filtering and appropriate AUDIT_EXPORT_MAX_ROWS configuration to prevent memory exhaustion.**
+- **Monitor audit summary query metrics to track usage patterns and optimize filter combinations including outcome filters.**
 - **Implement client-side buffering for CSV export downloads to handle large file transfers efficiently.**
 
 [No sources needed since this section provides general guidance]
@@ -820,8 +824,9 @@ Common issues and resolutions:
 - Platform Gateway Issues: Check policy bundle loading, delegated token availability, and upstream service configuration.
 - Evidence Store Issues: Verify evidence store backend availability, check storage budgets, monitor truncation events.
 - Operations Document Issues: Verify document ownership, check publication states, monitor Provenance integrity.
-- **Audit Summary Issues: Verify filter combinations, check envelope column availability, monitor aggregation performance.**
-- **CSV Export Issues: Monitor export truncation headers, verify AUDIT_EXPORT_MAX_ROWS configuration, handle streaming interruptions.**
+- **Audit Summary Issues: Verify filter combinations including outcome values, check envelope column availability, monitor aggregation performance.**
+- **CSV Export Issues: Monitor export truncation headers, verify AUDIT_EXPORT_MAX_ROWS configuration, handle streaming interruptions, validate outcome parameter values.**
+- **Outcome Filter Issues: Validate outcome parameter against allowed values (allow, deny, success, error), check 422 errors for invalid outcomes.**
 
 Debugging techniques:
 - Enable request tracing and correlation IDs.
@@ -836,9 +841,9 @@ Debugging techniques:
 - Monitor evidence store metrics for frame persistence success rates and truncation events.
 - Verify document provenance integrity and session coverage validation.
 - Check document publication workflow and ownership enforcement.
-- **Use audit summary endpoint to quickly assess audit trail volume and distribution patterns.**
-- **Monitor CSV export headers (X-Audit-Export-Truncated, X-Audit-Export-Rows) to understand export completeness.**
-- **Validate CSV column order and RFC-4180 compliance for downstream processing systems.**
+- **Use audit summary endpoint with outcome filtering to quickly assess audit trail volume and distribution patterns by outcome.**
+- **Monitor CSV export headers (X-Audit-Export-Truncated, X-Audit-Export-Rows) to understand export completeness and validate outcome filtering.**
+- **Validate CSV column order and RFC-4180 compliance for downstream processing systems, especially when filtering by outcome.**
 
 **Section sources**
 - [shared-contracts/schemas/health-response.schema.json](file://shared-contracts/schemas/health-response.schema.json)
@@ -851,7 +856,7 @@ Debugging techniques:
 - [audit-service/src/audit_service/api/routes/export.py](file://products/audit-service/src/audit_service/api/routes/export.py)
 
 ## Conclusion
-The Luban AIOps Platform exposes a cohesive set of REST and WebSocket APIs across Tool Gateway, Agent Platform, Identity Broker, Platform Gateway, and Audit Service. The new transparency endpoints provide operators with visibility into permissions, tools, and skills while maintaining strict authorization controls. The evidence persistence system (SPEC-025) adds powerful replay capabilities for tool executions with bounded storage, truncation markers, and graceful degradation when stores are unavailable. The operations document repository (SPEC-039) introduces immutable document management with draft/published states, owner-only visibility, and team-wide sharing capabilities. **The audit reporting and export capabilities (SPEC-046) provide deterministic envelope-column aggregation and bounded CSV export functionality, enabling comprehensive audit trail analysis and offline reporting while maintaining security and performance boundaries.** By adhering to shared schemas, implementing robust retry strategies, leveraging streaming, and utilizing the durable audit trail system, clients can build resilient integrations with comprehensive observability and compliance capabilities. Follow the versioning and migration guidelines to maintain compatibility during upgrades.
+The Luban AIOps Platform exposes a cohesive set of REST and WebSocket APIs across Tool Gateway, Agent Platform, Identity Broker, Platform Gateway, and Audit Service. The new transparency endpoints provide operators with visibility into permissions, tools, and skills while maintaining strict authorization controls. The evidence persistence system (SPEC-025) adds powerful replay capabilities for tool executions with bounded storage, truncation markers, and graceful degradation when stores are unavailable. The operations document repository (SPEC-039) introduces immutable document management with draft/published states, owner-only visibility, and team-wide sharing capabilities. **The enhanced audit reporting and export capabilities (SPEC-046, SPEC-047) provide deterministic envelope-column aggregation with outcome filtering and bounded CSV export functionality, enabling comprehensive audit trail analysis and offline reporting while maintaining security and performance boundaries.** By adhering to shared schemas, implementing robust retry strategies, leveraging streaming, and utilizing the durable audit trail system with outcome filtering, clients can build resilient integrations with comprehensive observability and compliance capabilities. Follow the versioning and migration guidelines to maintain compatibility during upgrades.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -873,8 +878,8 @@ The Luban AIOps Platform exposes a cohesive set of REST and WebSocket APIs acros
 - Tool Gateway Clients: Use delegated token chains for tools catalog access; handle upstream service failures gracefully.
 - Evidence-Aware Clients: Handle evidence_turns field gracefully - treat empty arrays as no evidence, null values as degraded service, and validate frame structures for replay functionality.
 - Operations Document Clients: Implement proper document lifecycle management with draft/published states, handle ownership validation, and manage provenance integrity.
-- **Audit Summary Clients: Handle deterministic aggregate responses with proper error handling for authentication failures; implement filter optimization for large audit trails.**
-- **CSV Export Clients: Handle streaming responses with proper buffering; monitor truncation headers to understand export completeness; implement retry logic for interrupted downloads.**
+- **Audit Summary Clients: Handle deterministic aggregate responses with outcome filtering; implement proper error handling for authentication failures and 422 errors for invalid outcome values; implement filter optimization for large audit trails with outcome constraints.**
+- **CSV Export Clients: Handle streaming responses with proper buffering; monitor truncation headers to understand export completeness; implement retry logic for interrupted downloads; validate outcome parameter values before making requests.**
 
 [No sources needed since this section provides general guidance]
 
@@ -887,8 +892,8 @@ The Luban AIOps Platform exposes a cohesive set of REST and WebSocket APIs acros
 - Platform Gateway Tests: Test permission matrix generation, tools catalog proxying, skills inventory filtering, and authorization enforcement.
 - Evidence Store Tests: Test persistence round-trips, truncation markers, budget enforcement, and graceful degradation when stores are unavailable.
 - Operations Document Tests: Test document lifecycle (create/list/get/publish/delete), ownership validation, provenance integrity, and publication workflow.
-- **Audit Summary Tests: Test envelope-column aggregation accuracy, deterministic sorting, decision chain projection, and filter passthrough.**
-- **CSV Export Tests: Test RFC-4180 compliance, truncation behavior, streaming headers, and filter application.**
+- **Audit Summary Tests: Test envelope-column aggregation accuracy with outcome filtering, deterministic sorting, decision chain projection, and filter passthrough including outcome parameter validation.**
+- **CSV Export Tests: Test RFC-4180 compliance with outcome filtering, truncation behavior, streaming headers, and filter application including outcome parameter validation.**
 
 [No sources needed since this section provides general guidance]
 
@@ -991,8 +996,11 @@ The Luban AIOps Platform exposes a cohesive set of REST and WebSocket APIs acros
   - RFC-4180 compliant output with fixed column order
   - Streaming response with truncation headers
   - Deterministic timestamp formatting (RFC-3339 UTC)
+  - **Outcome filtering support across all export operations**
 
 **Section sources**
 - [audit-service/src/audit_service/core/config.py](file://products/audit-service/src/audit_service/core/config.py)
 - [audit-service/src/audit_service/api/routes/export.py](file://products/audit-service/src/audit_service/api/routes/export.py)
 - [audit-service/src/audit_service/api/routes/summary.py](file://products/audit-service/src/audit_service/api/routes/summary.py)
+- [audit-service/src/audit_service/api/routes/query.py](file://products/audit-service/src/audit_service/api/routes/query.py)
+- [audit-service/src/audit_service/services/audit_store.py](file://products/audit-service/src/audit_service/services/audit_store.py)

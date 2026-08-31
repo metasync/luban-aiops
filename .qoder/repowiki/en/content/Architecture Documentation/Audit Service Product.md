@@ -39,6 +39,8 @@
 - Added configuration for export_max_rows setting and new metrics for summary queries and exports
 - Updated platform gateway to proxy summary and export endpoints with appropriate error handling
 - Integrated operator portal with export functionality including truncation handling and user feedback
+- **Updated**: Added outcome filter dimension across all three audit read endpoints (query, summary, export) with validation against shared schema enum values
+- **Updated**: Backend implementation extends both PostgreSQL and in-memory store backends with equality predicates on outcome envelope column
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -61,6 +63,7 @@ Key capabilities:
 - Filtered, newest-first cursor-paginated queries
 - **New**: Deterministic summary aggregation over envelope columns with decision-chain projection
 - **New**: Bounded CSV export with configurable row limits and streaming delivery
+- **Enhanced**: Outcome filter dimension across all read endpoints (query, summary, export) with shared schema enum validation
 - Health/readiness endpoints backed by store readiness checks
 - Prometheus metrics and OpenTelemetry telemetry
 - Background retention task enforcing time-window and hard-cap eviction without blocking ingest
@@ -143,6 +146,7 @@ A -.-> S2
 - Query route authenticates callers, decodes cursors, applies filters, and returns paginated results
 - **New**: Summary route provides deterministic aggregation over envelope columns with decision-chain projection
 - **New**: Export route streams bounded CSV with configurable row limits and truncation headers
+- **Enhanced**: All read endpoints support outcome filtering with shared schema enum validation
 - Audit store implements a strategy pattern with in-memory and PostgreSQL backends, now including summarize() method
 - Retention task enforces retention window and hard-cap eviction on a schedule
 - Authentication supports static credentials and workload identity via OIDC/JWKS
@@ -268,6 +272,7 @@ end
 - Applies filters and keyset pagination; returns newest-first pages
 - Records metrics and logs
 - Supports filtering by new skill-related event types
+- **Enhanced**: Outcome filter dimension with shared schema enum validation
 
 ```mermaid
 sequenceDiagram
@@ -298,6 +303,7 @@ Route-->>Caller : 200 with events
 - Uses store.summarize() to compute totals, buckets, top actors, and decision chain
 - Returns JSON response bound to audit-summary.schema.json contract
 - Records metrics and structured log events for audit trail
+- **Enhanced**: Outcome filter dimension with shared schema enum validation
 
 ```mermaid
 sequenceDiagram
@@ -328,6 +334,7 @@ Route-->>Caller : 200 JSON (AuditSummaryResponse)
 - Pages through store results up to AUDIT_EXPORT_MAX_ROWS (default 10,000)
 - Sets truncation headers (X-Audit-Export-Truncated, X-Audit-Export-Rows) before streaming
 - Returns RFC-4180 CSV with Content-Disposition filename and streaming delivery
+- **Enhanced**: Outcome filter dimension with shared schema enum validation
 
 ```mermaid
 sequenceDiagram
@@ -364,6 +371,7 @@ Route-->>Caller : 200 CSV with truncation headers
 - PostgreSQL store with DDL, parameterized inserts, filtered queries, batched eviction, and grouped SQL for summaries
 - Cursor encoding uses base64 of timestamp|event_id for stable ordering
 - **Enhanced**: Both backends implement summarize() method with identical semantics
+- **Enhanced**: Outcome filter implemented as equality predicate on outcome envelope column in both backends
 
 ```mermaid
 classDiagram
@@ -476,6 +484,7 @@ Result -- No --> Err["Raise auth error -> 401"]
 - AuditQuery defines optional filters for queries
 - **New**: AuditSummaryResponse defines summary contract with total_events, window, buckets, top_actors, and decision_chain
 - EventType Literal includes skill-related events: `skill_searched`, `skill_retrieved`, `skills_synced`
+- **Enhanced**: Outcome filter uses shared schema enum values (`allow`, `deny`, `success`, `error`) across all read endpoints
 
 ```mermaid
 erDiagram
@@ -647,6 +656,7 @@ Test --> Auth
 - Query uses keyset pagination to avoid offset-based scans and reduce load
 - **New**: Summary endpoint uses grouped SQL queries over envelope columns only, avoiding payload excavation
 - **New**: Export endpoint streams CSV with configurable row limits and 200-row page sizes to prevent memory issues
+- **Enhanced**: Outcome filter uses efficient equality predicates on indexed columns in both backends
 - Retention performs batched deletions to minimize lock contention and long-running transactions
 - Metrics are lightweight counters/gauges with bounded cardinality labels
 - Skills-hub audit emission uses fire-and-forget pattern with daemon threads and short timeouts to prevent performance degradation
@@ -662,6 +672,8 @@ Common issues and signals:
 - Stale store size: Retention reconciles exact size each sweep; monitor eviction metrics and logs
 - **New**: Summary queries returning zeros: Verify filter parameters and ensure events exist matching criteria
 - **New**: Export truncation warnings: Check AUDIT_EXPORT_MAX_ROWS setting and review X-Audit-Export-* headers
+- **Enhanced**: Outcome filter validation errors: Ensure outcome values match shared schema enum (`allow`, `deny`, `success`, `error`)
+- **Enhanced**: Outcome filter not working: Verify outcome parameter is correctly passed to query, summary, and export endpoints
 - **New**: Skills usage events not appearing: Verify skills-hub audit emitter configuration and network connectivity
 
 Operational tips:
@@ -683,7 +695,7 @@ Operational tips:
 ## Conclusion
 The Audit Service provides a robust, extensible foundation for durable audit trails across the platform. Its clear boundaries, authenticated APIs, pluggable storage backends, and bounded retention make it suitable for both development and production use. Integration points with the platform gateway and other services are minimal and well-defined, enabling reliable operation and straightforward troubleshooting.
 
-**Enhanced Capabilities**: The recent updates significantly expand the service with comprehensive audit reporting and export capabilities. The new summary endpoint provides deterministic aggregation over envelope columns with decision-chain projection, while the export endpoint offers bounded CSV streaming with configurable limits and truncation awareness. These additions, combined with existing skill-related audit event support, improved test coverage reaching 95%, and enhanced authentication testing including workload identity validation, ensure the service can effectively track, analyze, and export audit data while maintaining strong security guarantees.
+**Enhanced Capabilities**: The recent updates significantly expand the service with comprehensive audit reporting and export capabilities. The new summary endpoint provides deterministic aggregation over envelope columns with decision-chain projection, while the export endpoint offers bounded CSV streaming with configurable limits and truncation awareness. **The addition of outcome filter dimension across all three read endpoints (query, summary, export) with shared schema enum validation provides consistent filtering capabilities throughout the audit trail.** These additions, combined with existing skill-related audit event support, improved test coverage reaching 95%, and enhanced authentication testing including workload identity validation, ensure the service can effectively track, analyze, and export audit data while maintaining strong security guarantees.
 
 **Important Security Note**: While the shared credential limitation is acceptable for development environments due to upstream authorization controls, production deployments should implement separate credential registries for different operation types (ingest, query, summary, export) to maintain proper separation of concerns and adhere to the principle of least privilege.
 
