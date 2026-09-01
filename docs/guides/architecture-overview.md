@@ -14,7 +14,7 @@ The platform consists of ten workloads deployed to a single Kubernetes namespace
 | **platform-gateway** | `luban-aiops/platform-gateway` | Portal-facing edge: JWT verification, action policy, chat/session proxying, token delegation, audit query proxy |
 | **agent-service** | `luban-aiops/agent-service` | AgentScope runtime kernel: LLM orchestration, session management, tool trace emission |
 | **execution-runtime** | `luban-aiops/execution-runtime` | Isolated worker executing approved mutating calls: authenticated handoff, envelope re-verification, signed receipts (SPEC-038) |
-| **tool-gateway** | `luban-aiops/tool-gateway` | Tool execution framework: connector dispatch, policy enforcement, output redaction |
+| **tool-gateway** | `luban-aiops/tool-gateway` | Tool execution framework: connector dispatch (Kubernetes, Elastic, skills-hub, incidents, browser web-checks), policy enforcement, output redaction |
 | **identity-service** | `luban-aiops/identity-service` | Enterprise identity: Keycloak OIDC login, JWT issuance, token exchange for delegation |
 | **audit-service** | `luban-aiops/audit-service` | Durable audit trail: authenticated ingest, retention-bounded store, query API (SPEC-013) |
 | **skills-hub** | `luban-aiops/skills-hub` | Federated skill ingestion and ranked retrieval for grounded guidance (SPEC-014) |
@@ -103,8 +103,10 @@ Browser → web-ui → platform-gateway → agent-service → tool-gateway → c
    directly or invoke tools. If tools are needed, it calls **tool-gateway** with the delegated
    token.
 5. **tool-gateway** verifies the delegated token, evaluates tool policy (`tools:list`,
-   `tools:invoke`), dispatches to the appropriate connector (Kubernetes, Elastic, or
-   skills-hub), redacts credential-shaped output, and returns the result with evidence
+   `tools:invoke`), dispatches to the appropriate connector (Kubernetes, Elastic,
+   skills-hub, incidents, or — for browser web-checks, SPEC-049 — a sidecar
+   browser over CDP), redacts credential-shaped output, and returns the result
+   with evidence
    metadata. For procedure or remediation questions the agent consults the read-only
    `skills.search` / `skills.get` / `skills.list` tools for team-owned guidance and
    cites the skills it relies on (SPEC-014); skill guidance is kept separate from
@@ -316,18 +318,29 @@ The policy bundle is a YAML file managed through Git:
 2. **Distribution**: copied to each gateway's packaged fallback and the dev-k8s ConfigMap source
    via `make sync-policy`
 3. **Deployment**: mounted as a ConfigMap at `/etc/luban/policy/policy.yaml` in both gateways
-4. **Validation**: `make validate-policy` checks the bundle against the JSON schema
+4. **Validation**: `make verify` runs the JSON-schema check plus a scenario-expectation
+   guard that evaluates the bundle through both engines and fails on any granted
+   (role, action) pair with no recorded expectation (SPEC-048)
+5. **Review**: `make policy-diff CANDIDATE=<bundle>` reports every per-(role, action)
+   outcome transition between the canonical bundle and a candidate
 
-Changing policy requires editing the canonical file, syncing, and redeploying. There is no
-hot-reload or UI for policy management.
+Changing policy follows the
+[Policy Bundle Rollout runbook](configuration-reference.md#policy-bundle-rollout-spec-048):
+edit the canonical file (bumping `version`), record the intent in
+`policy-scenarios.yaml`, sync, verify, diff, commit, and deploy. There is no
+hot-reload or UI for policy management — a changed ConfigMap takes effect on
+pod restart — and each gateway fingerprints the exact loaded bundle text
+(SHA-256) on its readiness surface, so a deployment can be confirmed against
+the canonical file.
 
 ## Observability
 
 Every service exposes:
 
 - **`/health/live`** — liveness probe (returns service name and version)
-- **`/health/ready`** — readiness probe (checks policy bundle load; platform-gateway also
-  checks agent-service health)
+- **`/health/ready`** — readiness probe (checks policy bundle load and carries the
+  loaded bundle's `policy_bundle_sha256` provenance fingerprint; platform-gateway
+  also checks agent-service health)
 - **`/metrics`** — Prometheus metrics endpoint (always on, independent of OTel)
 
 Structured JSON logging is emitted at INFO level with `x-request-id` correlation headers.

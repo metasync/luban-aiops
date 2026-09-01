@@ -366,14 +366,20 @@ which model served a chat turn (`chat_started` details).
 
 The live role × action matrix, evaluated from the policy bundle the
 gateway actually enforces — not hand-maintained documentation. The header
-shows the bundle version and source. Platform admins see all roles;
+shows the bundle version and source; the API response also carries a
+SHA-256 fingerprint of the exact loaded bundle text (as does each
+gateway's readiness surface), so a deployment can be confirmed against
+the canonical file. Platform admins see all roles;
 everyone else sees their own rows. Visible to every signed-in user under
 `policy:read`. Cells under an approval requirement render a third state —
 **self-approval** (`tier_1`) or **approver required** (`tier_2`, hovering
 names the decider roles) — instead of plain allow/deny.
 
 If a matrix cell surprises you, the bundle edit workflow is in
-[Approval and HITL Governance](approval-and-hitl.md#policy-bundle-workflow).
+[Approval and HITL Governance](approval-and-hitl.md#policy-bundle-workflow),
+and the full rollout runbook (edit → sync → verify → diff → deploy →
+confirm hash) lives in the
+[Configuration Reference](configuration-reference.md#policy-bundle-rollout-spec-048).
 
 ## Tools and Skills Catalogs (Workspace)
 

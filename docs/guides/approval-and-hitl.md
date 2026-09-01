@@ -122,13 +122,25 @@ there is no separate approval service yet.
 
 ### Policy bundle workflow
 
-1. Edit the canonical bundle: `shared/shared-contracts/policies/policy-default.yaml`.
-2. `make sync-policy` — refreshes the consumer copies (tool-gateway,
+1. Edit the canonical bundle: `shared/shared-contracts/policies/policy-default.yaml`,
+   bumping its `version` field (review discipline — Git history is the authority).
+2. Record the intent in `shared/shared-contracts/policies/policy-scenarios.yaml`
+   if the edit adds a grant or flips an operator-visible outcome — the scenario
+   guard fails `make verify` on any granted pair with no expectation.
+3. `make sync-policy` — refreshes the consumer copies (tool-gateway,
    platform-gateway packaged bundles) and the dev-k8s ConfigMap source.
-3. `make validate-policy` — validates every rule against
-   `policy-rule.schema.json` (also runs inside `make verify`).
-4. Commit and deploy; the ConfigMap is mounted at `GATEWAY_POLICY_PATH` /
-   `PLATFORM_GATEWAY_POLICY_PATH`.
+4. `make verify` — schema validation plus the scenario-expectation guard
+   against both engines.
+5. `make policy-diff CANDIDATE=<pre-edit copy>` — review-time report of every
+   per-(role, action) outcome transition.
+6. Commit and deploy; the ConfigMap is mounted at `GATEWAY_POLICY_PATH` /
+   `PLATFORM_GATEWAY_POLICY_PATH`. Bundles are cached keyed on the configured
+   path with no hot reload — a changed ConfigMap takes effect on pod restart.
+   Confirm the enforced bundle via the `policy_bundle_sha256` fingerprint on
+   each gateway's `/health/ready`.
+
+The full sequence with rationale lives in the
+[Policy Bundle Rollout runbook](configuration-reference.md#policy-bundle-rollout-spec-048).
 
 ### Granting or revoking `tools:mutate`
 

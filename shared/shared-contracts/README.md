@@ -78,18 +78,20 @@ Verification model:
 
 ## Policy Contract Conventions (v1)
 
-The `policy-*` schemas and `policies/policy-default.yaml` define the first enforceable slice of the Tier-1 policy design (`docs/agentic-aiops-platform/policy-specification.md`), scoped to the `action_authz` domain with `allow`/`deny` outcomes only.
+The `policy-*` schemas and `policies/policy-default.yaml` define the first enforceable slice of the Tier-1 policy design (`docs/agentic-aiops-platform/policy-specification.md`), scoped to the `action_authz` domain with `allow`, `deny`, and `require_approval` outcomes.
 
 Action naming convention:
 
 - `<resource>:<verb>` for resource operations (e.g. `session:create`, `session:read`)
 - a bare noun for the primary conversational surface (`chat`)
 
-Evaluation semantics (implemented by the consumer, currently `tool-gateway`):
+Evaluation semantics (implemented by both gateways, each over its own action vocabulary):
 
 - deny by default: no matching rule yields `deny`
-- explicit `deny` overrides `allow`; higher `priority` wins between allows; disabled rules are ignored
+- precedence: `deny` > `require_approval` > `allow`; higher `priority` wins within an outcome; disabled rules are ignored
 - the decision object carries `decision`, `matched_rule_ids`, and `reason`
+
+Rollout controls (SPEC-048): `policy-default.yaml` is the single canonical bundle — edits happen there only, with a `version` bump, and ride `make sync-policy` to the gateway packaged copies and the dev-k8s ConfigMap source. `policies/policy-scenarios.yaml` records the expected outcome for every granted (role, action) pair and is enforced by `make verify`; `make policy-diff CANDIDATE=<bundle>` reports per-(role, action) outcome transitions at review time. Each gateway fingerprints the loaded bundle (SHA-256) on its readiness and matrix surfaces so a deployment can be confirmed against the canonical file. The full procedure is the Policy Bundle Rollout runbook in `docs/guides/configuration-reference.md`.
 
 `policy-center` is currently a stub; when it becomes a service it will serve this same contract, so consumers swap a local evaluation call for a network call without contract changes.
 

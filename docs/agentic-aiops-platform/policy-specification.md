@@ -449,6 +449,13 @@ Use versioned policy files in Git, such as:
 - policy bundles are promoted through environments
 - policy tests run before deployment
 
+> **Platform status (SPEC-048):** the shipped gateways implement the
+> versioned-and-auditable floor — one canonical bundle synced by
+> `make sync-policy`, a `version` bump discipline, and a load-time SHA-256
+> provenance fingerprint on the matrix/readiness surfaces. Cross-environment
+> promotion rides a follow-on deployment-promotion slice, confirmed by the
+> hash chain across environments.
+
 ## Policy Testing Strategy
 
 ### Required Test Types
@@ -457,6 +464,14 @@ Use versioned policy files in Git, such as:
 - precedence tests for conflicting rules
 - regression tests for known approval paths
 - deny-by-default tests
+
+> **Platform status (SPEC-048):** all four types run before deployment —
+> engine unit tests cover rule matching, precedence, and deny-by-default,
+> and `policy-scenarios.yaml` pins regression expectations for every grant
+> and named denial across both engines, enforced mechanically by
+> `make verify` (a new grant with no recorded expectation fails the gate).
+> `make policy-diff` reports every per-(role, action) outcome transition
+> for review.
 
 ### Example Test Cases
 

@@ -194,9 +194,15 @@ kubectl -n dev-luban-aiops logs deployment/platform-gateway --tail=30 | grep "id
   `ops-approvers` → `approver`, `ops-operators` → `operator`,
   `ops-observers` → `read-only-observer`, `ops-auditors` → `auditor`,
   `ops-developers` → `developer`.
-- If the policy bundle is outdated: edit the canonical source
-  (`shared/shared-contracts/policies/policy-default.yaml`), validate
-  (`make validate-policy`), sync (`make sync-policy`), and redeploy.
+- If the policy bundle is outdated: follow the
+  [Policy Bundle Rollout runbook](configuration-reference.md#policy-bundle-rollout-spec-048) —
+  edit the canonical source
+  (`shared/shared-contracts/policies/policy-default.yaml`, bumping `version`),
+  record the intent in `policy-scenarios.yaml`, `make sync-policy`,
+  `make verify`, and redeploy. Confirm the enforced bundle via the
+  `policy_bundle_sha256` fingerprint on each gateway's `/health/ready`
+  (bundles are cached keyed on the configured path — a changed ConfigMap
+  takes effect on pod restart).
 - Users with no matching OIDC group default to `read-only-observer`, which has tool access
   for read-only tools.
 
@@ -259,7 +265,8 @@ shared/platform-ops/gitops/deploy-overlay.sh
 **Diagnostic:**
 
 ```bash
-# Check readiness
+# Check readiness — the policy_error field explains the failure, and
+# policy_bundle_sha256 fingerprints the exact loaded bundle text
 kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
   curl -s localhost:8000/health/ready | jq
 # Look for: policy_error field
@@ -275,6 +282,8 @@ kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
 **Resolution:**
 
 1. Validate the canonical policy file: `make validate-policy`
+   (the scenario guard `make validate-policy-scenarios` catches semantic
+   regressions the schema cannot)
 2. Re-sync to all locations: `make sync-policy`
 3. Re-apply the overlay: `make deploy`
 
