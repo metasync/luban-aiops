@@ -2,10 +2,10 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: luban-platform-team
 - created: 2026-09-01
-- approved: —
+- approved: 2026-09-01
 - delivered: —
 - release slice: R5 — Hardening and External Consumption (tenth R5
   slice, target v0.30.0)
@@ -224,3 +224,6 @@ questions are resolved here:
   of them, but chose to keep this slice pure Option B; environment
   promotion becomes a follow-on slice in the deployment-promotion
   shape (same content, hash-chain verification), recorded in Parked.
+- 2026-09-01: operator approved the draft (`draft` → `approved`)
+  with no requirement changes; delivery proceeds under the house
+  train as v0.30.0.
