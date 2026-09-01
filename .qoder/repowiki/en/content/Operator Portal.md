@@ -27,6 +27,7 @@
 - Enhanced testing coverage section with comprehensive regression tests for hook order preservation
 - Updated troubleshooting guide with v0.29.2 specific stability improvements
 - Updated conclusion to include latest hook ordering hardening and type safety enhancements
+- Added v0.29.3 initial-load recovery: the Events tab's first auto-load now retries once when the identity lifecycle moves, so a stale-session boot no longer leaves the tab stuck in its failure posture until a manual Refresh
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -250,6 +251,12 @@ GW-->>CV : Resume stream with decision
 - **Conditional Rendering Safety**: Ensures React's rules of hooks are followed even when role gates change dynamically
 - **Test Coverage**: Comprehensive regression tests verify hook order preservation across authentication state transitions
 
+#### Initial-Load Recovery After Stale-Session Boot (v0.29.3)
+- **Session-Keyed Initial Load**: The Events tab's first auto-load effect is keyed on the session object as well as the role gate, so any identity-lifecycle move (stale session cleared, fresh sign-in, silent refresh) grants one fresh attempt
+- **Latched-Error Clearing**: A failed first load no longer latches; latched error banners clear when the lifecycle moves, and the view self-heals without a manual Refresh
+- **Stale-Session Window**: Covers the boot window where an expired stored session renders the shell signed-in (cached identity fallback) until the silent refresh fails and clears it
+- **Test Coverage**: A regression test simulates the stale-session 401 → fresh sign-in sequence and asserts automatic recovery
+
 #### Enhanced Type Safety
 - **DrilldownPatch Type**: Compile-time enforcement of drill-down invariants ensures type-safe filter merging
 - **Type-Safe Filter Merging**: Prevents runtime errors when drilling down from summary to events with merged filters
@@ -417,7 +424,7 @@ Nginx --> Gateway["Platform Gateway"]
 - [AuditView.test.tsx:83-95](file://products/operator-portal/web-ui/app/src/views/__tests__/AuditView.test.tsx#L83-L95)
 
 ## Conclusion
-The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface and advanced analytics**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants, making the audit trail more reliable and maintainable.
+The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface and advanced analytics**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants, making the audit trail more reliable and maintainable. The v0.29.3 initial-load recovery ensures the Events tab self-heals after a stale-session boot instead of staying in its failure posture until a manual Refresh.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -466,7 +473,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - [index.html:1-14](file://products/operator-portal/web-ui/app/index.html#L1-L14)
 
 ### Enhanced Audit Trail Features
-**Completely Redesigned** The audit trail has been completely redesigned with advanced interactive features, further hardened in v0.29.1 for improved table stability and readability, and v0.29.2 for critical hook ordering stability during authentication state changes.
+**Completely Redesigned** The audit trail has been completely redesigned with advanced interactive features, further hardened in v0.29.1 for improved table stability and readability, v0.29.2 for critical hook ordering stability during authentication state changes, and v0.29.3 for initial-load self-healing after stale-session boots.
 
 #### Sophisticated Tabbed Interface
 - **Events Tab**: Cursor-paginated table of audit events with expandable verbatim envelopes
