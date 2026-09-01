@@ -193,6 +193,17 @@ questions are resolved here:
 - **Staged promotion (staging vs production bundles)** — parked per
   the spike: one overlay, one cluster, one operator cohort makes
   staging buy nothing; promote with the policy-center service.
+  2026-09-01 operator adjudication: dev/qa/prd environments are
+  planned, and policy changes must pass through all of them before
+  finalizing in production — but the follow-on slice should be
+  **deployment promotion of identical content** (the canonical
+  bundle rides the normal deploy pipeline; promotion is confirmed
+  by the provenance hash chain across environments), not divergent
+  per-environment bundles with a promotion flag. Environment-
+  specific differences, if any, are Kustomize overlay patches on
+  the canonical bundle, the runtime-profiles pattern. Adjudicated
+  against keeping this slice pure Option B; the promotion slice
+  lands with the qa/prd overlays.
 - **Hot reload / reload endpoint** — parked; conflicts with the
   fail-fast restart posture; revisit only with the policy-center.
 - **Bundle-lifecycle audit event** (`policy_bundle_loaded` or
@@ -208,3 +219,8 @@ questions are resolved here:
 - 2026-09-01: promoted from the spike memo (Option B) on operator
   sign-off and created as `draft` with Q-1…Q-6 resolved; pending
   operator approval of the spec itself.
+- 2026-09-01: scope adjudication — the operator confirmed planned
+  dev/qa/prd environments with policy changes promoted through all
+  of them, but chose to keep this slice pure Option B; environment
+  promotion becomes a follow-on slice in the deployment-promotion
+  shape (same content, hash-chain verification), recorded in Parked.
