@@ -16,16 +16,17 @@
 - [AuditView.tsx](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx)
 - [AuditSummaryPanel.tsx](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx)
 - [constants.ts](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts)
+- [AuditView.test.tsx](file://products/operator-portal/web-ui/app/src/views/__tests__/AuditView.test.tsx)
 - [tokens.ts](file://products/operator-portal/web-ui/app/src/theme/tokens.ts)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated audit summary tables section to reflect v0.29.1 hardening changes
-- Added documentation for removed progress bars and simplified share column display
-- Updated table layout descriptions to reflect fixed-width columns with right alignment
-- Enhanced troubleshooting guide with v0.29.1 specific issues
-- Updated conclusion to include latest audit trail improvements
+- Updated audit trail section to reflect v0.29.2 critical hook ordering fix for render stability during sign-out/token refresh scenarios
+- Added documentation for enhanced type safety with DrilldownPatch type for compile-time enforcement of drill-down invariants
+- Enhanced testing coverage section with comprehensive regression tests for hook order preservation
+- Updated troubleshooting guide with v0.29.2 specific stability improvements
+- Updated conclusion to include latest hook ordering hardening and type safety enhancements
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -46,7 +47,7 @@ Key capabilities include:
 - Chat and streaming responses with tool evidence and inline human-in-the-loop confirmations
 - Incident management with triage reports and live runs
 - Approval queue with pending decision badges and actions
-- **Enhanced read-only audit trail with sophisticated tabbed interface (Events and Summary tabs), shared filter toolbar, CSV export with truncation warnings, and comprehensive summary analytics with drill-down capabilities**
+- **Enhanced read-only audit trail with sophisticated tabbed interface (Events and Summary tabs), shared filter toolbar, CSV export with truncation warnings, comprehensive summary analytics with drill-down capabilities, and critical hook ordering stability for sign-out/token refresh scenarios**
 - Permissions matrix view sourced from policy enforcement
 - Workspace views for tools and skills catalogs
 - Settings & Debug panel showing session, identity, and platform component health
@@ -83,7 +84,7 @@ Nginx --> Dist
 - Authentication: OIDC login flow, token refresh scheduling, and session persistence; roles drive UI visibility and feature gating.
 - API client: Centralized fetch wrapper adding bearer tokens and request IDs, with configurable gateway URL override.
 - Chat workspace: Session list, message composer, model selector, voice input, streaming SSE transport, tool evidence rendering, and HITL confirmation cards.
-- Control views: Approvals inbox, **enhanced audit trail with sophisticated tabbed interface**, permissions matrix, settings & debug, incidents triage.
+- Control views: Approvals inbox, **enhanced audit trail with sophisticated tabbed interface and critical hook ordering stability**, permissions matrix, settings & debug, incidents triage.
 - Workspace views: Tools catalog and skills inventory with filters.
 - Theme and accessibility: Dark theme tokens mirrored into CSS custom properties; ARIA labels and keyboard-friendly controls.
 
@@ -93,8 +94,8 @@ Nginx --> Dist
 - [client.ts:1-101](file://products/operator-portal/web-ui/app/src/api/client.ts#L1-L101)
 - [ChatView.tsx:1-200](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L200)
 - [SettingsView.tsx:1-200](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L1-L200)
-- [AuditView.tsx:1-463](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L463)
-- [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
+- [AuditView.tsx:1-469](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L469)
+- [tokens.ts:1-43](file://products/operator-portal/web-ui/app/theme/tokens.ts#L1-L43)
 
 ## Architecture Overview
 The portal follows a thin-client architecture:
@@ -235,20 +236,31 @@ GW-->>CV : Resume stream with decision
 - [ChatView.tsx:1-200](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L200)
 - [README.md:43-126](file://products/operator-portal/README.md#L43-L126)
 
-### Enhanced Audit Trail with Sophisticated Tabbed Interface
-**Updated** The audit trail view has been completely redesigned with an advanced tabbed interface that provides both detailed event inspection and comprehensive summary analytics with interactive drill-down capabilities. The v0.29.1 patch release further hardened the audit summary tables by removing progress bars and implementing fixed-width columns for improved layout stability.
+### Enhanced Audit Trail with Critical Hook Ordering Stability
+**Updated** The audit trail view has been completely redesigned with an advanced tabbed interface that provides both detailed event inspection and comprehensive summary analytics with interactive drill-down capabilities. The v0.29.2 release includes critical React hook ordering fixes that resolve render stability issues during sign-out and token refresh scenarios, ensuring consistent behavior even when authentication state changes while the view remains mounted.
 
 #### Advanced Tabbed Interface Architecture
 - **Shared Filter Toolbar**: Both Events and Summary tabs share a common filter interface for username, event type, outcome, service, and time range filtering
 - **Events Tab**: Displays cursor-paginated audit events with expandable verbatim envelopes showing full event details
 - **Summary Tab**: Shows deterministic envelope-column aggregates with collapsible sections, interactive drill-down, and comprehensive analytics
 
+#### Critical Hook Ordering Fix (v0.29.2)
+- **Hook Order Preservation**: All hooks must run before the `!allowed` early return to maintain stable rendering during authentication state changes
+- **Sign-Out Stability**: Resolves render instability when users sign out or tokens refresh while the audit view remains mounted
+- **Conditional Rendering Safety**: Ensures React's rules of hooks are followed even when role gates change dynamically
+- **Test Coverage**: Comprehensive regression tests verify hook order preservation across authentication state transitions
+
+#### Enhanced Type Safety
+- **DrilldownPatch Type**: Compile-time enforcement of drill-down invariants ensures type-safe filter merging
+- **Type-Safe Filter Merging**: Prevents runtime errors when drilling down from summary to events with merged filters
+- **Interface Contracts**: Strict TypeScript interfaces define the shape of drill-down patches and filter parameters
+
 #### Key Features
 - **Role-Based Access**: Requires auditor or platform-admin roles with server-side enforcement
 - **Structured Error Handling**: Provides actionable error messages for different failure scenarios (403, 502, 503)
 - **CSV Export**: Server-side blob download with Content-Disposition filename support and truncation warnings
 - **Real-time Filtering**: Filters apply consistently across both tabs with lazy loading for summary data
-- **Interactive Drill-Down**: Click any aggregate value to navigate to Events tab with merged filters
+- **Interactive Drill-Down**: Click any aggregate value to navigate to Events tab with merged filters using type-safe patches
 - **Collapsible Sections**: Four bucket tables organized in antd Collapse component with default expansion
 - **Proportion Visualization**: Percentage values with simplified one-decimal display (v0.29.1: progress bars removed)
 - **Decision Chain Visualization**: New statistic row showing total events and four decision-chain steps
@@ -265,13 +277,14 @@ StatisticRow --> CollapsibleSections["Collapsible Sections<br/>(antd Collapse)"]
 CollapsibleSections --> BucketTables["Bucket Tables<br/>by Event Type, Outcome, Service, Actors"]
 BucketTables --> ProportionDisplay["Proportion Display<br/>One-decimal percentage only<br/>(v0.29.1: no progress bars)"]
 BucketTables --> FixedWidthColumns["Fixed-width columns<br/>Right-aligned count & share<br/>(v0.29.1 improvement)"]
-BucketTables --> Drilldown["Interactive Drill-Down<br/>to Events with Merged Filters"]
+BucketTables --> Drilldown["Interactive Drill-Down<br/>to Events with Merged Filters<br/>(Type-safe DrilldownPatch)"]
 ExportBtn --> BlobDownload["Server-side Blob Download"]
 BlobDownload --> TruncationWarning["Truncation Warning if Applied"]
+HookOrderFix["v0.29.2 Hook Ordering Fix<br/>Stable rendering during auth changes"] --> AllTabs["All Tabs Maintain Stability"]
 ```
 
 **Diagram sources**
-- [AuditView.tsx:98-463](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L98-L463)
+- [AuditView.tsx:98-469](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L98-L469)
 - [AuditSummaryPanel.tsx:115-210](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L115-L210)
 
 #### Summary Panel Components
@@ -289,9 +302,10 @@ BlobDownload --> TruncationWarning["Truncation Warning if Applied"]
 - **Maintainable Configuration**: Single source of truth for audit-related configuration
 
 **Section sources**
-- [AuditView.tsx:1-463](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L463)
+- [AuditView.tsx:1-469](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L469)
 - [AuditSummaryPanel.tsx:1-207](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L1-L207)
 - [constants.ts:1-49](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts#L1-L49)
+- [AuditView.test.tsx:83-95](file://products/operator-portal/web-ui/app/src/views/__tests__/AuditView.test.tsx#L83-L95)
 
 ### Settings, Health, and Debug
 - Identity pane shows sign-in state, username, roles, subject, and groups.
@@ -377,6 +391,7 @@ Nginx --> Gateway["Platform Gateway"]
 - **Optimized Rendering**: Collapsible sections reduce initial DOM complexity while providing rich interactivity.
 - **Progressive Enhancement**: Zero-state handling prevents unnecessary computations when no data is available.
 - **v0.29.1 Layout Optimization**: Fixed-width columns eliminate dynamic width recalculation overhead and prevent layout shifts during table rendering.
+- **v0.29.2 Hook Stability**: Critical hook ordering fixes eliminate render instability during authentication state changes, improving perceived performance and reliability.
 
 [No sources needed since this section provides general guidance]
 
@@ -390,6 +405,8 @@ Nginx --> Gateway["Platform Gateway"]
 - **Summary Tab Issues**: Verify lazy loading behavior; check filter state synchronization; ensure collapse component renders correctly.
 - **Drill-Down Navigation**: Confirm filter merging logic; verify Events tab loads with correct merged parameters; check cursor reset behavior.
 - **v0.29.1 Table Layout Issues**: If audit summary tables show wrapping or misalignment, verify browser viewport width and antd table configuration; the fixed-width columns should prevent wrapping but may require minimum container width.
+- **v0.29.2 Hook Ordering Issues**: If audit view exhibits unstable rendering during sign-out or token refresh, verify that all hooks execute before the role gate early return; check that authentication state changes don't cause unexpected unmounting.
+- **Type Safety Issues**: Ensure DrilldownPatch type usage is correct when implementing custom drill-down functionality; verify filter merging maintains type safety.
 
 **Section sources**
 - [AuthContext.tsx:40-85](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L40-L85)
@@ -397,9 +414,10 @@ Nginx --> Gateway["Platform Gateway"]
 - [client.ts:25-36](file://products/operator-portal/web-ui/app/src/api/client.ts#L25-L36)
 - [nginx.conf:8-28](file://products/operator-portal/nginx.conf#L8-L28)
 - [AuditView.tsx:69-85](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L69-L85)
+- [AuditView.test.tsx:83-95](file://products/operator-portal/web-ui/app/src/views/__tests__/AuditView.test.tsx#L83-L95)
 
 ## Conclusion
-The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface and advanced analytics**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts.
+The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface and advanced analytics**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants, making the audit trail more reliable and maintainable.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -432,7 +450,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 ### UI Customization and Accessibility
 - Theme: Dark theme tokens defined in tokens.ts and applied via antd ConfigProvider; CSS custom properties mirror tokens for consistent styling.
 - Accessibility: ARIA labels on navigation and user actions; keyboard-friendly menus and controls; responsive layout adapts to narrow screens with a drawer.
-- **Enhanced Audit Interface**: Sophisticated tabbed interface provides intuitive navigation between detailed events and comprehensive summary analytics; shared filter toolbar ensures consistent user experience across tabs; collapsible sections improve information density while maintaining accessibility; v0.29.1 improvements provide more stable table layouts with fixed-width columns.
+- **Enhanced Audit Interface**: Sophisticated tabbed interface provides intuitive navigation between detailed events and comprehensive summary analytics; shared filter toolbar ensures consistent user experience across tabs; collapsible sections improve information density while maintaining accessibility; v0.29.1 improvements provide more stable table layouts with fixed-width columns; v0.29.2 hook ordering ensures stable rendering during authentication state changes.
 
 **Section sources**
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
@@ -448,7 +466,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - [index.html:1-14](file://products/operator-portal/web-ui/app/index.html#L1-L14)
 
 ### Enhanced Audit Trail Features
-**Completely Redesigned** The audit trail has been completely redesigned with advanced interactive features, further hardened in v0.29.1 for improved table stability and readability.
+**Completely Redesigned** The audit trail has been completely redesigned with advanced interactive features, further hardened in v0.29.1 for improved table stability and readability, and v0.29.2 for critical hook ordering stability during authentication state changes.
 
 #### Sophisticated Tabbed Interface
 - **Events Tab**: Cursor-paginated table of audit events with expandable verbatim envelopes
@@ -460,6 +478,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - **Merged Filters**: Drill-down merges selected dimension into current filters without resetting existing filters
 - **Automatic Refresh**: Events tab automatically reloads with merged filter parameters
 - **Cursor Reset**: Navigation resets pagination cursor for clean starting point
+- **Type-Safe Patches**: DrilldownPatch type ensures compile-time enforcement of valid filter combinations
 
 #### Advanced Summary Analytics
 - **Headline Statistics**: New statistic row showing total events plus four decision-chain steps (confirmation_decided, execution_requested, execution_completed, execution_rejected)
@@ -479,8 +498,15 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - Truncation warnings when export limits are exceeded (AUDIT_EXPORT_MAX_ROWS)
 - Structured error handling for permission denials and service unavailability
 
+#### Critical Hook Ordering Stability (v0.29.2)
+- **Hook Order Preservation**: All hooks execute before role gate early returns to maintain stable rendering
+- **Authentication State Changes**: Resolves render instability during sign-out and token refresh scenarios
+- **Comprehensive Test Coverage**: Regression tests verify hook order preservation across authentication state transitions
+- **Consistent Behavior**: Ensures React's rules of hooks are followed even when role gates change dynamically
+
 **Section sources**
-- [AuditView.tsx:98-463](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L98-L463)
+- [AuditView.tsx:98-469](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L98-L469)
 - [AuditSummaryPanel.tsx:1-207](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx#L1-L207)
 - [constants.ts:1-49](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts#L1-L49)
-- [__tests__/constants.test.ts:1-70](file://products/operator-portal/web-ui/app/src/views/audit/__tests__/constants.test.ts#L1-L70)
+- [AuditView.test.tsx:83-95](file://products/operator-portal/web-ui/app/src/views/__tests__/AuditView.test.tsx#L83-L95)
+- [AuditView.test.tsx:174-226](file://products/operator-portal/web-ui/app/src/views/__tests__/AuditView.test.tsx#L174-L226)
