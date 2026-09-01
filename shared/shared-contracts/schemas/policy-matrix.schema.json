@@ -5,7 +5,7 @@
   "description": "Effective role x action authorization matrix derived from the policy bundle currently loaded by the gateway (SPEC-019 R-2). Read-only transparency surface; never a source of authority — enforcement stays with the policy engine.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "source", "scope", "roles", "actions", "matrix"],
+  "required": ["version", "source", "sha256", "scope", "roles", "actions", "matrix"],
   "properties": {
     "version": {
       "type": "integer",
@@ -15,6 +15,10 @@
       "type": "string",
       "enum": ["configured", "packaged-default"],
       "description": "Where the loaded bundle came from: the configured policy path or the packaged default."
+    },
+    "sha256": {
+      "type": "string",
+      "description": "SHA-256 hex digest of the exact loaded bundle text, computed at load time — never authored in the bundle (SPEC-048 R-1). Lets a live check confirm the enforced bundle matches the intended canonical file."
     },
     "scope": {
       "type": "string",

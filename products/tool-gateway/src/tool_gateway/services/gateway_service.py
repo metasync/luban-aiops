@@ -17,6 +17,7 @@ from tool_gateway.schemas.api import IdentityContext
 from tool_gateway.services.audit_emitter import build_audit_event, emit_audit_event
 from tool_gateway.services.policy_engine import (
     PolicyLoadError,
+    bundle_sha256,
     evaluate,
     load_bundle,
 )
@@ -45,6 +46,8 @@ async def ready_status(settings: GatewaySettings) -> dict[str, object]:
             "service": SERVICE_NAME,
             "version": SERVICE_VERSION,
             "policy_rules": len(rules),
+            # SPEC-048 R-1: bundle fingerprint on the readiness surface.
+            "policy_bundle_sha256": bundle_sha256(),
         }
     except PolicyLoadError as exc:
         return {

@@ -23,6 +23,7 @@ from platform_gateway.services.audit_emitter import build_audit_event, emit_audi
 from platform_gateway.services.policy_engine import (
     PolicyDecision,
     PolicyLoadError,
+    bundle_metadata,
     evaluate,
     load_bundle,
 )
@@ -64,6 +65,8 @@ async def ready_status(settings: PlatformGatewaySettings) -> dict[str, object]:
             "version": SERVICE_VERSION,
             "agent_service": agent_health,
             "policy_rules": len(rules),
+            # SPEC-048 R-1: bundle fingerprint on the readiness surface.
+            "policy_bundle_sha256": bundle_metadata(settings)["sha256"],
             **_gateway_tech(),
         }
     except httpx.HTTPError as exc:

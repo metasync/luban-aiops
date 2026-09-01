@@ -2,11 +2,11 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-09-01
 - approved: 2026-09-01
-- delivered: —
+- delivered: 2026-09-02
 - release slice: R5 — Hardening and External Consumption (tenth R5
   slice, target v0.30.0)
 - related ADRs: none (lineage: promotes the R5 "better policy
@@ -227,3 +227,13 @@ questions are resolved here:
 - 2026-09-01: operator approved the draft (`draft` → `approved`)
   with no requirement changes; delivery proceeds under the house
   train as v0.30.0.
+- 2026-09-02: delivered as v0.30.0 (`approved` → `delivered`) —
+  all six workstreams landed per plan.md: provenance hash on both
+  engines' matrix/readiness surfaces, the scenario harness pinned
+  into `make verify` (131 api / 19 tools expectations, full grant
+  coverage enforced), `make policy-diff` on the shared evaluation
+  path, the rollout runbook in the configuration reference, and
+  overlay copy-parity; live check confirmed the readiness hashes
+  match the canonical file byte-for-byte on both gateways and the
+  matrix surface carries the fingerprint under the unchanged
+  `policy:read` gate.

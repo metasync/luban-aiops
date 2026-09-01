@@ -13,6 +13,7 @@ matches the highest priority wins and its approval block rides the decision.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass, field
 from importlib import resources
@@ -118,6 +119,9 @@ VALID_OUTCOMES = frozenset({OUTCOME_ALLOW, OUTCOME_DENY, OUTCOME_REQUIRE_APPROVA
 _bundle: list[PolicyRule] | None = None
 _bundle_version: int = 0
 _configured_path: str | None = None
+# SPEC-048 R-1: content fingerprint of the exact loaded bundle text,
+# computed at load time — never authored in the bundle.
+_bundle_hash: str = ""
 
 
 class PolicyLoadError(Exception):
@@ -196,10 +200,11 @@ class PolicyDecision:
 
 def reset_policy_state() -> None:
     """Reset module state (for tests)."""
-    global _bundle, _bundle_version, _configured_path
+    global _bundle, _bundle_version, _configured_path, _bundle_hash
     _bundle = None
     _bundle_version = 0
     _configured_path = None
+    _bundle_hash = ""
 
 
 def _packaged_bundle_text() -> str:
@@ -325,7 +330,7 @@ def load_bundle(settings: PlatformGatewaySettings) -> list[PolicyRule]:
     Note: tool-gateway uses GATEWAY_POLICY_PATH for its own bundle; the
     PLATFORM_GATEWAY_* knobs apply to this edge service only.
     """
-    global _bundle, _bundle_version, _configured_path
+    global _bundle, _bundle_version, _configured_path, _bundle_hash
 
     path = settings.policy_path
     if _bundle is not None and _configured_path == path:
@@ -335,30 +340,39 @@ def load_bundle(settings: PlatformGatewaySettings) -> list[PolicyRule]:
         bundle_path = Path(path)
         if not bundle_path.is_file():
             raise PolicyLoadError(f"policy bundle not found at '{path}'")
-        version, rules = _parse_rules(bundle_path.read_text(encoding="utf-8"), path)
+        text = bundle_path.read_text(encoding="utf-8")
     else:
-        version, rules = _parse_rules(_packaged_bundle_text(), "<packaged default>")
+        text = _packaged_bundle_text()
+    version, rules = _parse_rules(text, path or "<packaged default>")
 
     _bundle = rules
     _bundle_version = version
     _configured_path = path
+    _bundle_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
     LOGGER.info(
         "policy bundle loaded",
-        extra={"policy_path": path or "<packaged default>", "rule_count": len(rules)},
+        extra={
+            "policy_path": path or "<packaged default>",
+            "rule_count": len(rules),
+            "bundle_sha256": _bundle_hash,
+        },
     )
     return rules
 
 
 def bundle_metadata(settings: PlatformGatewaySettings) -> dict[str, object]:
-    """Version and provenance of the loaded bundle (SPEC-019 R-2).
+    """Version and provenance of the loaded bundle (SPEC-019 R-2, SPEC-048 R-1).
 
     Lets transparency surfaces tell a configured bundle from the packaged
-    default, so policy drift and degraded loads are visible instead of silent.
+    default, so policy drift and degraded loads are visible instead of
+    silent. The ``sha256`` fingerprint covers the exact loaded text, so a
+    live check can confirm the enforced bundle matches the intended commit.
     """
     load_bundle(settings)
     return {
         "version": _bundle_version,
         "source": "configured" if settings.policy_path else "packaged-default",
+        "sha256": _bundle_hash,
     }
 
 

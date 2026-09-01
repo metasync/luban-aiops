@@ -76,6 +76,9 @@ def build_policy_matrix(
     return {
         "version": metadata["version"],
         "source": metadata["source"],
+        # SPEC-048 R-1: the content fingerprint rides the already-gated
+        # payload so a live check can confirm the enforced bundle.
+        "sha256": metadata["sha256"],
         "scope": "full" if is_admin else "own",
         "roles": visible_roles,
         "actions": actions,

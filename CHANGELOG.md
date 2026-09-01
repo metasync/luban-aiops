@@ -13,6 +13,45 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.30.0 — 2026-09-02
+
+### Added
+
+- **Policy testing and rollout controls (SPEC-048)** — the bundle
+  change workflow gains rehearsal, regression, and verification
+  controls around the existing engines, none of which touches
+  evaluation semantics:
+  - Bundle provenance: both policy engines compute a SHA-256
+    fingerprint of the exact loaded bundle text at load time (never
+    authored in the bundle). platform-gateway surfaces it on the
+    policy matrix response (unchanged `policy:read` gate) and
+    `/health/ready`; tool-gateway on `/health/ready`. A deploy can
+    now be confirmed against the canonical file without shelling
+    into the pod.
+  - Scenario-expectation harness: `policy-scenarios.yaml` pins
+    per-(role, action) outcome expectations for both engines (131
+    api / 19 tools), honoring the deliberate non-parity, and
+    `make validate-policy-scenarios` (part of `make verify`)
+    evaluates them through the exact engine evaluation path while
+    mechanically enforcing full grant coverage — a new grant with
+    no recorded intent fails the gate.
+  - `make policy-diff CANDIDATE=<bundle>`: a review-time impact
+    report enumerating every per-(role, action) outcome transition
+    (new/removed grants, allow↔deny, approval-tier changes) between
+    the canonical bundle and a candidate, unchanged pairs
+    count-summarized, sharing the harness evaluator.
+  - Rollout runbook in the configuration reference: edit →
+    `make sync-policy` → `make verify` → `make policy-diff` →
+    commit → deploy → confirm the provenance hash, plus the
+    explicit ConfigMap + pod-restart posture (no hot reload).
+  - Copy-parity contract tests now cover the GitOps overlay copy
+    under the same byte-identical posture as the packaged copies.
+  - Canonical bundle header documents the version-bump discipline
+    (bump `version` on every rule change; Git history as the
+    authority — no monotonicity machinery).
+  No new policy actions, no new audit event types, no bundle schema
+  or evaluation-semantics changes, no new env knobs.
+
 ## 0.29.3 — 2026-09-01
 
 ### Fixed

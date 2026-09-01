@@ -1,5 +1,6 @@
 """Policy engine tests (SPEC-004: deny-by-default evaluation + contract sync)."""
 
+import hashlib
 import json
 import unittest
 from pathlib import Path
@@ -13,6 +14,7 @@ from platform_gateway.services.policy_engine import (
     PROTECTED_ACTIONS,
     PolicyDecision,
     PolicyLoadError,
+    bundle_metadata,
     evaluate,
     load_bundle,
     reset_policy_state,
@@ -199,6 +201,71 @@ class BundleLoadingTests(unittest.TestCase):
         self.assertTrue(all(rule.enabled for rule in rules))
 
 
+class BundleProvenanceTests(unittest.TestCase):
+    """SPEC-048 R-1: the bundle content hash is computed, not authored."""
+
+    def setUp(self) -> None:
+        reset_policy_state()
+
+    def tearDown(self) -> None:
+        reset_policy_state()
+
+    def test_packaged_default_hash_matches_canonical_file(self) -> None:
+        settings = _settings()
+        metadata = bundle_metadata(settings)
+        expected = hashlib.sha256(
+            SHARED_BUNDLE.read_text(encoding="utf-8").encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(metadata["sha256"], expected)
+        self.assertEqual(metadata["source"], "packaged-default")
+
+    def test_hash_is_stable_across_cached_loads(self) -> None:
+        settings = _settings()
+        first = bundle_metadata(settings)["sha256"]
+        second = bundle_metadata(settings)["sha256"]
+        self.assertEqual(first, second)
+
+    def test_configured_bundle_hash_tracks_file_bytes(self) -> None:
+        bundle_path = Path("provenance-bundle.yaml")
+        text = yaml.safe_dump({"version": 1, "rules": []})
+        bundle_path.write_text(text, encoding="utf-8")
+        try:
+            settings = _settings(policy_path=str(bundle_path))
+            metadata = bundle_metadata(settings)
+            self.assertEqual(metadata["source"], "configured")
+            self.assertEqual(
+                metadata["sha256"],
+                hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            )
+        finally:
+            reset_policy_state()
+            bundle_path.unlink(missing_ok=True)
+
+    def test_one_byte_edit_changes_the_hash(self) -> None:
+        bundle_path = Path("provenance-flip-bundle.yaml")
+        text = yaml.safe_dump({"version": 1, "rules": []})
+        bundle_path.write_text(text, encoding="utf-8")
+        try:
+            settings = _settings(policy_path=str(bundle_path))
+            before = bundle_metadata(settings)["sha256"]
+            reset_policy_state()
+            bundle_path.write_text(text + "\n", encoding="utf-8")
+            settings = _settings(policy_path=str(bundle_path))
+            after = bundle_metadata(settings)["sha256"]
+            self.assertNotEqual(before, after)
+        finally:
+            reset_policy_state()
+            bundle_path.unlink(missing_ok=True)
+
+    def test_hash_empty_before_load_and_reset_clears_it(self) -> None:
+        self.assertEqual(policy_engine._bundle_hash, "")
+        settings = _settings()
+        bundle_metadata(settings)
+        self.assertNotEqual(policy_engine._bundle_hash, "")
+        reset_policy_state()
+        self.assertEqual(policy_engine._bundle_hash, "")
+
+
 class ContractAlignmentTests(unittest.TestCase):
     def setUp(self) -> None:
         reset_policy_state()
@@ -212,6 +279,24 @@ class ContractAlignmentTests(unittest.TestCase):
         ).parent.parent / "policies" / "policy-default.yaml"
         self.assertEqual(
             packaged.read_text(encoding="utf-8"),
+            SHARED_BUNDLE.read_text(encoding="utf-8"),
+        )
+
+    def test_overlay_bundle_matches_shared_contracts(self) -> None:
+        # SPEC-048 R-5: the GitOps overlay copy rides `make sync-policy`,
+        # so manual overlay drift must fail verify exactly like packaged
+        # drift — one canonical bundle, byte-identical everywhere.
+        overlay = (
+            CONTRACTS_DIR.parent
+            / "platform-ops"
+            / "gitops"
+            / "dev-k8s"
+            / "base"
+            / "shared"
+            / "policy.yaml"
+        )
+        self.assertEqual(
+            overlay.read_text(encoding="utf-8"),
             SHARED_BUNDLE.read_text(encoding="utf-8"),
         )
 

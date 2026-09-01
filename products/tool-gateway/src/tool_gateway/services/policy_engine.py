@@ -15,6 +15,7 @@ on the platform-gateway confirm path.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass, field
 from importlib import resources
@@ -53,6 +54,9 @@ VALID_OUTCOMES = frozenset({OUTCOME_ALLOW, OUTCOME_DENY, OUTCOME_REQUIRE_APPROVA
 # Module-level bundle singleton, keyed on the configured path.
 _bundle: list[PolicyRule] | None = None
 _configured_path: str | None = None
+# SPEC-048 R-1: content fingerprint of the exact loaded bundle text,
+# computed at load time — never authored in the bundle.
+_bundle_hash: str = ""
 
 
 class PolicyLoadError(Exception):
@@ -131,9 +135,10 @@ class PolicyDecision:
 
 def reset_policy_state() -> None:
     """Reset module state (for tests)."""
-    global _bundle, _configured_path
+    global _bundle, _configured_path, _bundle_hash
     _bundle = None
     _configured_path = None
+    _bundle_hash = ""
 
 
 def _packaged_bundle_text() -> str:
@@ -253,7 +258,7 @@ def load_bundle(settings: GatewaySettings) -> list[PolicyRule]:
     - path set + missing/invalid -> raise PolicyLoadError (no silent fallback)
     - path unset -> load the packaged default bundle
     """
-    global _bundle, _configured_path
+    global _bundle, _configured_path, _bundle_hash
 
     path = settings.policy_path
     if _bundle is not None and _configured_path == path:
@@ -263,17 +268,32 @@ def load_bundle(settings: GatewaySettings) -> list[PolicyRule]:
         bundle_path = Path(path)
         if not bundle_path.is_file():
             raise PolicyLoadError(f"policy bundle not found at '{path}'")
-        rules = _parse_rules(bundle_path.read_text(encoding="utf-8"), path)
+        text = bundle_path.read_text(encoding="utf-8")
     else:
-        rules = _parse_rules(_packaged_bundle_text(), "<packaged default>")
+        text = _packaged_bundle_text()
+    rules = _parse_rules(text, path or "<packaged default>")
 
     _bundle = rules
     _configured_path = path
+    _bundle_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
     LOGGER.info(
         "policy bundle loaded",
-        extra={"policy_path": path or "<packaged default>", "rule_count": len(rules)},
+        extra={
+            "policy_path": path or "<packaged default>",
+            "rule_count": len(rules),
+            "bundle_sha256": _bundle_hash,
+        },
     )
     return rules
+
+
+def bundle_sha256() -> str:
+    """Content fingerprint of the loaded bundle (SPEC-048 R-1).
+
+    Valid after ``load_bundle``; empty before. Lets the readiness surface
+    confirm the enforced bundle matches the intended commit.
+    """
+    return _bundle_hash
 
 
 def evaluate(settings: GatewaySettings, roles: list[str], action: str) -> PolicyDecision:

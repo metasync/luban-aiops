@@ -7,6 +7,24 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-02-spec-048-policy-testing-rollout-controls.md`
+  - delivers SPEC-048 (v0.30.0, tenth R5 slice): the policy bundle
+    change workflow gains rehearsal, regression, and verification
+    controls around the existing engines without touching evaluation
+    semantics — a load-time SHA-256 bundle fingerprint on both
+    gateways' readiness surfaces and the policy matrix (unchanged
+    `policy:read` gate), a scenario-expectation harness pinned into
+    `make verify` (131 api / 19 tools expectations over the exact
+    engine path, mechanical full-grant coverage so a new grant with
+    no recorded intent fails the gate), a `make policy-diff`
+    per-(role, action) outcome-transition impact report sharing the
+    harness evaluator, the rollout runbook in the configuration
+    reference (edit → sync → verify → diff → commit → deploy →
+    confirm hash, ConfigMap+restart posture), and copy-parity
+    coverage extended to the GitOps overlay copy; no new policy
+    actions, no new audit event types, bundle schema and semantics
+    unchanged; live check confirmed readiness hashes matching the
+    canonical file byte-for-byte on both gateways
 - `2026-09-01-post-live-check-audit-events-initial-load-recovery.md`
   - remediation batch (v0.29.3) from the post-v0.29.2 live-check
     observation (Events tab stuck in its initial empty posture next

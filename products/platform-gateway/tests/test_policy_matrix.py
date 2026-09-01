@@ -8,6 +8,7 @@ explicit-deny-wins, disabled rules) inherited through evaluate().
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -24,6 +25,13 @@ from platform_gateway.services.policy_engine import reset_policy_state
 
 SCHEMAS_DIR = (
     Path(__file__).resolve().parents[3] / "shared" / "shared-contracts" / "schemas"
+)
+SHARED_BUNDLE = (
+    Path(__file__).resolve().parents[3]
+    / "shared"
+    / "shared-contracts"
+    / "policies"
+    / "policy-default.yaml"
 )
 
 ALL_ROLES = [
@@ -215,6 +223,16 @@ class PolicyMatrixScopingTests(PolicyMatrixBase):
         self.assertEqual(payload["source"], "packaged-default")
         self.assertEqual(payload["version"], 1)
 
+    def test_packaged_provenance_hash_matches_canonical_file(self) -> None:
+        # SPEC-048 R-1: the matrix surface carries the fingerprint of the
+        # exact enforced bundle, so a live check can confirm the deploy.
+        with self._patch_identity(["operator"]):
+            payload = self.client.get("/api/v1/policy/matrix").json()
+        expected = hashlib.sha256(
+            SHARED_BUNDLE.read_text(encoding="utf-8").encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(payload["sha256"], expected)
+
 
 CUSTOM_BUNDLE = """
 version: 3
@@ -300,6 +318,13 @@ class PolicyMatrixConfiguredBundleTests(PolicyMatrixBase):
             payload = self.client.get("/api/v1/policy/matrix").json()
         self.assertEqual(payload["source"], "configured")
         self.assertEqual(payload["version"], 3)
+
+    def test_configured_provenance_hash_tracks_file_bytes(self) -> None:
+        # SPEC-048 R-1: a configured bundle's fingerprint tracks its bytes.
+        with self._patch_identity(["platform-admin"]):
+            payload = self.client.get("/api/v1/policy/matrix").json()
+        expected = hashlib.sha256(CUSTOM_BUNDLE.encode("utf-8")).hexdigest()
+        self.assertEqual(payload["sha256"], expected)
 
     def test_disabled_rule_and_explicit_deny_semantics(self) -> None:
         with self._patch_identity(["platform-admin"]):

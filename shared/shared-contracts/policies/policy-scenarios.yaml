@@ -1,0 +1,231 @@
+# Policy scenario expectations (SPEC-048 R-2).
+#
+# Curated but complete on grants: every granted (role, action) pair of the
+# canonical bundle must be covered by at least one expectation below — the
+# harness enforces that mechanically, so a new grant with no scenario fails
+# `make verify` until the author records the intent here in the same commit.
+# Named denials and the deny-by-default floor are pinned too, so a rule edit
+# that silently flips an operator-visible outcome can never merge unnoticed.
+#
+# Two sections honor the deliberate engine non-parity:
+#   api   — the platform-gateway 21-action vocabulary; require_approval
+#           rules evaluate to require_approval (the confirm path bridges them).
+#   tools — the tool-gateway invocation vocabulary; require_approval rules
+#           are skipped at load on that engine (SPEC-030 R-2), so the same
+#           bundle evaluates allow/deny there.
+#
+# Entry shape: `role` or `roles` (list), `action` or `actions` (list —
+# cross product), `expect` (allow | deny | require_approval), optional
+# `approval_tier` for require_approval expectations.
+
+api:
+  # allow-operators-chat: operational and developer roles use chat and
+  # manage their session workspace.
+  - roles: ["platform-admin", "approver", "operator", "developer"]
+    actions:
+      - chat
+      - session:create
+      - session:read
+      - session:list
+      - session:delete
+      - session:update
+      - models:list
+    expect: allow
+
+  # allow-observer-read-and-chat: observer joins the same surface as a
+  # read surface (chat is conversational today).
+  - role: read-only-observer
+    actions:
+      - chat
+      - session:create
+      - session:read
+      - session:list
+      - session:delete
+      - session:update
+      - models:list
+    expect: allow
+
+  # allow-chat-confirm: parked kernel confirmations are answerable by the
+  # operational and developer roles.
+  - roles: ["platform-admin", "approver", "operator", "developer"]
+    action: chat:confirm
+    expect: allow
+
+  # allow-operators-tools: read-risk invocation keeps observer's tier-0 read.
+  - roles:
+      - platform-admin
+      - approver
+      - operator
+      - developer
+      - read-only-observer
+    action: tools:invoke
+    expect: allow
+
+  # allow-operators-tools-mutate + require-approval-tools-mutate: the
+  # tier_2 requirement wins by precedence for every holder of the allow
+  # grant, and developer rides the requirement even without the grant.
+  - roles: ["platform-admin", "approver", "operator"]
+    action: tools:mutate
+    expect: require_approval
+    approval_tier: tier_2
+  - role: developer
+    action: tools:mutate
+    expect: require_approval
+    approval_tier: tier_2
+
+  # allow-operators-tools-list
+  - roles:
+      - platform-admin
+      - approver
+      - operator
+      - developer
+      - read-only-observer
+    action: tools:list
+    expect: allow
+
+  # allow-auditors-audit-read: governance roles only.
+  - roles: ["auditor", "platform-admin"]
+    action: audit:read
+    expect: allow
+
+  # allow-operators-incident-read / -create / -triage
+  - roles:
+      - platform-admin
+      - approver
+      - operator
+      - developer
+      - read-only-observer
+    action: incident:read
+    expect: allow
+  - roles: ["platform-admin", "approver", "operator", "developer"]
+    actions: ["incident:create", "incident:triage"]
+    expect: allow
+
+  # allow-all-policy-read / allow-all-skills-read
+  - roles:
+      - platform-admin
+      - approver
+      - operator
+      - developer
+      - read-only-observer
+    actions: ["policy:read", "skills:read"]
+    expect: allow
+
+  # allow-approvers-approvals-list: the tier_2 decider roles only.
+  - roles: ["approver", "platform-admin"]
+    action: approvals:list
+    expect: allow
+
+  # allow-operators-documents / -skill-draft / -incident-skill-draft:
+  # operational authoring roles only (documents-create grant pattern).
+  - roles: ["platform-admin", "approver", "operator"]
+    actions:
+      - documents:create
+      - documents:read
+      - session:skill_draft
+      - incident:skill_draft
+    expect: allow
+
+  # Named denials — auditor holds audit:read and nothing else.
+  - role: auditor
+    actions:
+      - chat
+      - session:create
+      - session:read
+      - chat:confirm
+      - tools:invoke
+      - tools:list
+      - tools:mutate
+      - models:list
+      - incident:read
+      - incident:create
+      - incident:triage
+      - policy:read
+      - skills:read
+      - approvals:list
+      - documents:create
+      - documents:read
+      - session:skill_draft
+      - incident:skill_draft
+    expect: deny
+
+  # Named denials — observer is denied every mutating, authoring, and
+  # governance surface.
+  - role: read-only-observer
+    actions:
+      - chat:confirm
+      - tools:mutate
+      - incident:create
+      - incident:triage
+      - approvals:list
+      - audit:read
+      - documents:create
+      - documents:read
+      - session:skill_draft
+      - incident:skill_draft
+    expect: deny
+
+  # Named denials — developer stays read-only on sessions and is excluded
+  # from audit, the inbox, documents, and skill drafting.
+  - role: developer
+    actions:
+      - audit:read
+      - approvals:list
+      - documents:create
+      - documents:read
+      - session:skill_draft
+      - incident:skill_draft
+    expect: deny
+
+  # Named denial — operator is not a governance role.
+  - role: operator
+    actions: ["audit:read", "approvals:list"]
+    expect: deny
+
+  # Deny-by-default floor: ungranted role, ungranted action.
+  - role: ghost-role
+    actions: ["chat", "audit:read"]
+    expect: deny
+  - role: operator
+    action: restart-service
+    expect: deny
+
+tools:
+  # allow-operators-tools: read-risk invocation, observer included.
+  - roles:
+      - platform-admin
+      - approver
+      - operator
+      - developer
+      - read-only-observer
+    action: tools:invoke
+    expect: allow
+
+  # allow-operators-tools-mutate: this engine skips require_approval rules
+  # at load (SPEC-030 R-2), so admission stays allow/deny for the holders.
+  - roles: ["platform-admin", "approver", "operator"]
+    action: tools:mutate
+    expect: allow
+
+  # Denials: developer and observer never mutate; auditor holds nothing.
+  - roles: ["developer", "read-only-observer"]
+    action: tools:mutate
+    expect: deny
+  - role: auditor
+    actions: ["tools:list", "tools:invoke", "tools:mutate"]
+    expect: deny
+
+  # allow-operators-tools-list
+  - roles:
+      - platform-admin
+      - approver
+      - operator
+      - developer
+      - read-only-observer
+    action: tools:list
+    expect: allow
+
+  # Deny-by-default floor.
+  - role: ghost-role
+    action: tools:invoke
+    expect: deny

@@ -163,6 +163,8 @@ class PolicyMatrixResponse(BaseModel):
 
     version: int
     source: Literal["configured", "packaged-default"]
+    # SPEC-048 R-1: fingerprint of the exact loaded bundle text.
+    sha256: str
     scope: Literal["full", "own"]
     roles: list[str]
     actions: list[str]

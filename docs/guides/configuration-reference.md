@@ -278,6 +278,53 @@ incident-report creation closed (503, "incident service not
 configured"); the portal incidents routes and the document surface
 degrade independently.
 
+## Policy Bundle Rollout (SPEC-048)
+
+The action-authorization bundle has exactly one canonical copy:
+`shared/shared-contracts/policies/policy-default.yaml`. It is replicated
+byte-identically to both gateways' packaged defaults and the dev-k8s
+GitOps overlay by `make sync-policy`, and contract tests fail
+`make verify` on any drift. Never edit a replica — edit the canonical
+file and follow the rollout sequence:
+
+1. **Edit** `shared/shared-contracts/policies/policy-default.yaml` and
+   bump its `version` field. Version discipline is review discipline —
+   Git history is the authority; there is no monotonicity machinery.
+2. **Record intent** in
+   `shared/shared-contracts/policies/policy-scenarios.yaml` if the edit
+   adds a grant or flips an operator-visible outcome — the scenario
+   guard fails `make verify` on any granted (role, action) pair with no
+   expectation, which is the prompt, not a nuisance.
+3. **Sync**: `make sync-policy`.
+4. **Verify**: `make verify` runs the schema check, the
+   scenario-expectation guard against both engines (the platform-gateway
+   21-action vocabulary and the tool-gateway tools:* vocabulary), and
+   the copy-parity assertions.
+5. **Review impact**: `make policy-diff CANDIDATE=<candidate.yaml>`
+   reports every per-(role, action) outcome transition between the
+   canonical bundle and the candidate for both engines (new grants,
+   removed grants, allow↔deny, approval-tier changes), with unchanged
+   pairs summarized by count. For an in-place edit, diff against the
+   pre-edit copy (`git show HEAD:shared/shared-contracts/policies/policy-default.yaml > /tmp/prev.yaml`).
+6. **Commit** the bundle, the scenario table update, and the synced
+   replicas in one commit — the reviewer reads the policy-diff report
+   in the PR description.
+7. **Deploy**: `make deploy`. Bundles are cached keyed on the configured
+   path, and there is deliberately no hot reload: a changed ConfigMap
+   takes effect on pod restart (rolling restart the gateway
+   deployments), and the packaged default changes ride the image build.
+8. **Confirm provenance**: both gateways expose a SHA-256 fingerprint
+   of the exact loaded bundle text — platform-gateway on the policy
+   matrix response (`policy:read`-gated) and `/health/ready`,
+   tool-gateway on `/health/ready`. Compare against
+   `shasum -a 256 shared/shared-contracts/policies/policy-default.yaml`
+   to confirm the enforced bundle matches the intended commit without
+   shelling into the pod.
+
+A missing or invalid bundle at a configured path fails startup
+(`PolicyLoadError`, no silent fallback to the packaged default), and
+readiness reports the degraded policy state.
+
 ## Per-Service Environment Variables
 
 ### agent-service

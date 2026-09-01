@@ -4,6 +4,13 @@
 # strict subset of the Tier-1 policy specification
 # (docs/agentic-aiops-platform/policy-specification.md).
 #
+# Version discipline (SPEC-048 R-1): bump ``version`` on every rule change.
+# Enforcement is review discipline — Git history is the authority; there is
+# no cross-commit monotonicity machinery. The running gateways additionally
+# expose a SHA-256 fingerprint of the exact loaded bundle text on the
+# matrix/readiness surfaces, so a deploy can be confirmed against the
+# canonical file without shelling into the pod.
+#
 # Semantics (enforced by the gateway policy engine):
 #   - deny by default: no matching rule => deny
 #   - explicit deny overrides require_approval and allow

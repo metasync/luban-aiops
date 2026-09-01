@@ -137,6 +137,19 @@ sync-policy: ## Copy canonical policy bundle to all consumer locations
 validate-policy: ## Validate canonical policy bundle against JSON schema
 	@cd products/tool-gateway && uv run python ../../shared/shared-contracts/scripts/validate_policy.py
 
+.PHONY: validate-policy-scenarios
+validate-policy-scenarios: ## Evaluate scenario expectations against the canonical bundle (both engines)
+	@cd products/platform-gateway && uv run python ../../shared/shared-contracts/scripts/validate_policy_scenarios.py --engine api
+	@cd products/tool-gateway && uv run python ../../shared/shared-contracts/scripts/validate_policy_scenarios.py --engine tools
+
+.PHONY: policy-diff
+policy-diff: ## Per-(role, action) outcome report: canonical vs CANDIDATE=<path> bundle
+	@if [ -z "$(CANDIDATE)" ]; then \
+		echo "usage: make policy-diff CANDIDATE=<path-to-candidate-bundle>" >&2; exit 2; \
+	fi
+	@cd products/platform-gateway && uv run python ../../shared/shared-contracts/scripts/policy_diff.py --engine api --candidate "$(abspath $(CANDIDATE))"
+	@cd products/tool-gateway && uv run python ../../shared/shared-contracts/scripts/policy_diff.py --engine tools --candidate "$(abspath $(CANDIDATE))"
+
 .PHONY: validate-version
 validate-version: ## Validate version lockstep between VERSION, products, and portal
 	@cd products/tool-gateway && uv run python ../../shared/shared-contracts/scripts/validate_version.py ../..
@@ -151,7 +164,7 @@ overlays: ## Render every GitOps overlay (kustomize build check)
 	done
 
 .PHONY: verify
-verify: test overlays validate-policy validate-version ## Verification gate: tests + overlays + policy + version lockstep
+verify: test overlays validate-policy validate-policy-scenarios validate-version ## Verification gate: tests + overlays + policy + scenarios + version lockstep
 
 .PHONY: deploy
 deploy: ## Deploy the dev-k8s overlay to the current cluster (wraps deploy.sh)

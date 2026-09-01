@@ -1,6 +1,8 @@
 """Route-level policy enforcement tests (SPEC-004 R-3)."""
 
+import hashlib
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
@@ -9,6 +11,14 @@ from platform_gateway.app import create_app
 from platform_gateway.core.config import PlatformGatewaySettings, get_settings
 from platform_gateway.schemas.api import IdentityContext
 from platform_gateway.services.policy_engine import PolicyLoadError, reset_policy_state
+
+SHARED_BUNDLE = (
+    Path(__file__).resolve().parents[3]
+    / "shared"
+    / "shared-contracts"
+    / "policies"
+    / "policy-default.yaml"
+)
 
 
 def _identity(role: str) -> IdentityContext:
@@ -164,6 +174,14 @@ class PolicyEnforcementRouteTests(unittest.TestCase):
 
         self.assertEqual(live.status_code, 200)
         self.assertEqual(ready.status_code, 200)
+        # SPEC-048 R-1: readiness carries the enforced bundle's fingerprint.
+        body = ready.json()
+        self.assertEqual(
+            body["policy_bundle_sha256"],
+            hashlib.sha256(
+                SHARED_BUNDLE.read_text(encoding="utf-8").encode("utf-8")
+            ).hexdigest(),
+        )
 
     def test_readiness_degrades_when_policy_bundle_missing(self) -> None:
         # Readiness must surface policy load failures, not report ok.

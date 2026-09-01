@@ -112,6 +112,7 @@ class ContractAlignmentTests(unittest.TestCase):
                 PolicyMatrixResponse(
                     version=1,
                     source="packaged-default",
+                    sha256="0" * 64,
                     scope="own",
                     roles=["operator"],
                     actions=["chat", "policy:read"],
