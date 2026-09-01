@@ -13,6 +13,33 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.29.2 — 2026-09-01
+
+### Fixed
+
+- **Audit view Rules-of-Hooks regression from SPEC-047** — the
+  Summary drill-down callback landed after the role-gate early
+  return in `AuditView`, so both render branches no longer ran an
+  identical hook sequence; when the gate flipped while the view
+  stayed mounted (sign-out clears the session before the redirect
+  round-trip, and scheduled token refresh can swap roles), React
+  threw "Rendered fewer hooks than during the previous render" and,
+  with no error boundary in the portal, unmounted the whole shell.
+  The callback now sits with the other hooks above the early return
+  (behavior unchanged — it already guarded `!allowed` internally),
+  is typed to the panel's exported `DrilldownPatch` contract so the
+  one-dimension-at-a-time invariant is compile-time, and a role-flip
+  re-render regression test pins the hook order (fails on the old
+  code, green on the fix; 260 portal tests).
+
+### Changed
+
+- **Doc alignment for the v0.29.1 share-bar retirement** — the
+  SPEC-047 index line, spec changelog, and delivery roadmap now
+  annotate that the progress bar was retired in the 0.29.1 patch
+  after live-review feedback (same annotation posture as the
+  SPEC-036 R-1 revert in 0.18.1).
+
 ## 0.29.1 — 2026-09-01
 
 ### Changed

@@ -28,7 +28,10 @@ import {
 import { useAuth } from "../../auth/AuthContext";
 import { AUDIT_ROLES, hasAnyRole } from "../../roles";
 import { formatTimestamp } from "../format";
-import AuditSummaryPanel, { type AuditSummary } from "./AuditSummaryPanel";
+import AuditSummaryPanel, {
+  type AuditSummary,
+  type DrilldownPatch,
+} from "./AuditSummaryPanel";
 import { EMITTER_SERVICES, EVENT_TYPES, OUTCOMES } from "./constants";
 
 interface AuditEvent {
@@ -221,6 +224,24 @@ export default function AuditView() {
     }
   }, [allowed, filters]);
 
+  // SPEC-047 R-3: Summary drill-down merges the patch into the current
+  // filters (merge, never reset — Q-3), lands on the Events tab, and
+  // triggers one refresh under the merged filters. Hook order is
+  // load-bearing (v0.29.2): every hook must run before the `!allowed`
+  // early return below, because sign-out and token refresh can flip the
+  // role gate while this view stays mounted.
+  const handleDrilldown = useCallback(
+    (patch: DrilldownPatch) => {
+      if (!allowed) return;
+      const merged = { ...filters, ...patch };
+      setFilters(merged);
+      setActiveTab("events");
+      setCursor(null);
+      void loadEvents(merged, false);
+    },
+    [allowed, filters, loadEvents],
+  );
+
   if (!allowed) {
     return (
       <Alert
@@ -248,21 +269,6 @@ export default function AuditView() {
       void load(false);
     }
   };
-
-  // SPEC-047 R-3: Summary drill-down merges the patch into the current
-  // filters (merge, never reset — Q-3), lands on the Events tab, and
-  // triggers one refresh under the merged filters.
-  const handleDrilldown = useCallback(
-    (patch: Partial<Filters>) => {
-      if (!allowed) return;
-      const merged = { ...filters, ...patch };
-      setFilters(merged);
-      setActiveTab("events");
-      setCursor(null);
-      void loadEvents(merged, false);
-    },
-    [allowed, filters, loadEvents],
-  );
 
   const columns: TableColumnsType<AuditEvent> = [
     {

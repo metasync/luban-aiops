@@ -79,6 +79,20 @@ describe("role gate", () => {
     ).toBeTruthy();
     expect(mockRequestJson).not.toHaveBeenCalled();
   });
+
+  it("keeps the hook order when the role gate flips while mounted (v0.29.2)", async () => {
+    const { rerender } = render(<AuditView />);
+    await waitFor(() => expect(mockRequestJson).toHaveBeenCalled());
+
+    // Sign-out and scheduled token refresh can flip the gate while this
+    // view stays mounted; the hook sequence must stay identical across
+    // the flip or React unmounts the whole shell.
+    mockUseAuth.mockReturnValue({ username: null, roles: [] });
+    expect(() => rerender(<AuditView />)).not.toThrow();
+    expect(
+      screen.getByText(/requires the auditor or platform-admin role/),
+    ).toBeTruthy();
+  });
 });
 
 describe("tabs and shared filters", () => {

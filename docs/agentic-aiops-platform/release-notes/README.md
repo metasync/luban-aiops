@@ -7,6 +7,17 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-01-post-review-remediation-audit-view-hooks.md`
+  - review remediation batch (v0.29.2) from the post-v0.29.1 code &
+    doc review of the SPEC-047 delivery: the drill-down `useCallback`
+    that had landed after the role-gate early return in `AuditView`
+    (a Rules-of-Hooks violation that unmounted the whole portal when
+    the gate flipped on sign-out or token refresh) moved beside the
+    other hooks and is typed to the panel's exported `DrilldownPatch`
+    contract, pinned by a role-flip regression test; the SPEC-047
+    index line, spec changelog, and delivery roadmap annotate the
+    v0.29.1 share-bar retirement — one component touched, no API /
+    contract / route changes
 - `2026-09-01-post-spec-047-hardening-audit-summary-tables.md`
   - patch hardening batch (v0.29.1) from the operator review of the
     live v0.29.0 Summary tab: the SPEC-047 share cell's progress bar

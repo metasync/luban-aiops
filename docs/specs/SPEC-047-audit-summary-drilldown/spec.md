@@ -291,3 +291,14 @@ adjudications are recorded here:
   incl. time-range-preserving drill-down, zero-count navigation,
   outcome end-to-end, collapse behavior, and the operator denial
   regression.
+- 2026-09-01: post-delivery adjustments — v0.29.1 retired the R-4
+  progress bar after the operator's live review (the one-decimal
+  percentage survives via the same shared formatter as a single
+  right-aligned non-wrapping share cell on fixed-layout bucket
+  tables); the code-and-doc review remediation shipped as v0.29.2
+  restored the Rules-of-Hooks order of the drill-down callback (it
+  had landed after the role-gate early return and could unmount the
+  shell on sign-out or token refresh), typed the callback to the
+  exported `DrilldownPatch` contract with a role-flip regression
+  pin, and annotated the bar retirement in the spec index and the
+  delivery roadmap.
