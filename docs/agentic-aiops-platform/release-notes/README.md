@@ -7,6 +7,19 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-01-post-live-check-audit-events-initial-load-recovery.md`
+  - remediation batch (v0.29.3) from the post-v0.29.2 live-check
+    observation (Events tab stuck in its initial empty posture next
+    to a populated Summary until a manual Refresh): server logs
+    proved every gateway 200 served a full page, and the gateway log
+    exposed the trigger — a stale expired stored session booting the
+    shell signed-in until the silent refresh cleared it, so the
+    first audit auto-load 401'd and the initial-load effect latched
+    (`!error` guard plus `[allowed]`-only deps). The effect is now
+    keyed on the session object as well, clearing latched errors and
+    retrying once on identity-lifecycle moves, pinned by a
+    stale-session 401 → fresh sign-in → auto-recovery test — one
+    component touched, no API / contract / route changes
 - `2026-09-01-post-review-remediation-audit-view-hooks.md`
   - review remediation batch (v0.29.2) from the post-v0.29.1 code &
     doc review of the SPEC-047 delivery: the drill-down `useCallback`

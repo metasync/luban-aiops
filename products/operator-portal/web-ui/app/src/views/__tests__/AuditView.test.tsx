@@ -93,6 +93,41 @@ describe("role gate", () => {
       screen.getByText(/requires the auditor or platform-admin role/),
     ).toBeTruthy();
   });
+
+  it("recovers the initial load when the session lifecycle moves (v0.29.3)", async () => {
+    // Stale-session boot window: the shell renders signed-in under an
+    // expired stored session, so the first auto-load can hit a 401.
+    const stale = { access_token: "stale-token" };
+    const fresh = { access_token: "fresh-token" };
+    mockUseAuth.mockReturnValue({
+      username: "luban-auditor",
+      roles: ["auditor"],
+      session: stale,
+    });
+    mockRequestJson.mockImplementation(() =>
+      Promise.reject(new ApiError(401, "Request failed: 401 Unauthorized")),
+    );
+    const { rerender } = render(<AuditView />);
+    await waitFor(() =>
+      expect(screen.getByText(/Audit request failed: 401/)).toBeTruthy(),
+    );
+
+    // Fresh sign-in swaps the session object; the view must clear the
+    // latched failure and retry without a manual Refresh.
+    mockRequestJson.mockImplementation((url: string) => jsonResponse(url));
+    mockUseAuth.mockReturnValue({
+      username: "luban-auditor",
+      roles: ["auditor"],
+      session: fresh,
+    });
+    rerender(<AuditView />);
+    await waitFor(() =>
+      expect(
+        screen.getByText(/No audit events match these filters/),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByText(/Audit request failed: 401/)).toBeNull();
+  });
 });
 
 describe("tabs and shared filters", () => {

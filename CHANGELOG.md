@@ -13,6 +13,26 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.29.3 — 2026-09-01
+
+### Fixed
+
+- **Audit Events tab stuck empty until a manual Refresh** — raised by
+  the post-v0.29.2 live-check observation (empty Events tab next to a
+  populated Summary; server logs proved every query served rows).
+  The portal can boot under a stale expired stored session — the
+  cached identity restores the signed-in shell until the silent
+  refresh fails and clears it — and the Audit view's first auto-load
+  fired in that window failed 401. The initial-load effect then
+  latched: its `!error` guard plus `[allowed]`-only deps meant the
+  effect never re-ran after the fresh sign-in (the role gate stayed
+  continuously true), so the view sat in its failure posture until a
+  manual Refresh, which bypasses the guard. The effect is now keyed
+  on the session object as well: when the identity lifecycle moves
+  it clears any latched error and retries once if not yet loaded.
+  Pinned by a stale-session 401 → fresh sign-in → auto-recovery test
+  (fails on the old code; 261 portal tests).
+
 ## 0.29.2 — 2026-09-01
 
 ### Fixed

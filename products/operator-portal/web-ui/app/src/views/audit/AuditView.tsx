@@ -99,8 +99,15 @@ function filterParams(filters: Filters): URLSearchParams {
 }
 
 export default function AuditView() {
-  const { roles } = useAuth();
+  const { roles, session } = useAuth();
   const allowed = hasAnyRole(roles, AUDIT_ROLES);
+  // v0.29.3: the session object is the identity lifecycle key for the
+  // initial-load effect. The stale-session boot window (an expired
+  // stored session restores the cached identity, so the shell renders
+  // signed-in until the silent refresh fails and clears it) can fail
+  // the very first auto-load with a 401; without this key the `!error`
+  // latch below would never retry after a fresh sign-in and the view
+  // would sit on its failure posture until a manual Refresh.
 
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [activeTab, setActiveTab] = useState<"events" | "summary">("events");
@@ -176,12 +183,20 @@ export default function AuditView() {
   );
 
   // Initial events load on first entry (role gate re-checked server-side).
+  // Keyed off the session object too (v0.29.3): when the identity
+  // lifecycle moves (stale session cleared, fresh sign-in, silent
+  // refresh), the effect gets one fresh attempt — clearing any latched
+  // failure so the view recovers without a manual Refresh.
   useEffect(() => {
-    if (allowed && !loaded && !loading && !error) {
-      void load(false);
+    if (allowed) {
+      setError(null);
+      setSummaryError(null);
+      if (!loaded && !loading) {
+        void load(false);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allowed]);
+  }, [allowed, session]);
 
   // SPEC-040 R-4 Blob download posture: the server-side export streams
   // into a client-side download under the server's Content-Disposition
