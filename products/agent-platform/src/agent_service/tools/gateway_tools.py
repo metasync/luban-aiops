@@ -43,6 +43,19 @@ DELEGATED_TOKEN: ContextVar[str | None] = ContextVar(
     default=None,
 )
 
+# Request-scoped chat session id (SPEC-049 R-1): set by the runtime kernel
+# around each turn so read-path gateway invocations forward the chat
+# session id beside the delegated token. A stateful gateway connector (the
+# browser session pool) keys on it to keep one session per chat across the
+# owner→approver HITL identity switch. It is a correlation handle injected
+# by the kernel (the route's authoritative session id), never a
+# model-supplied parameter, and carries no authority — identity and policy
+# still ride ``DELEGATED_TOKEN``.
+CHAT_SESSION_ID: ContextVar[str | None] = ContextVar(
+    "CHAT_SESSION_ID",
+    default=None,
+)
+
 # Signed execution request state for the resumed stream (SPEC-037 R-2/R-3):
 # the kernel sets EXECUTION_REQUESTS (call_id -> signed request envelope)
 # around an approved resume; tool closures verify the invoked arguments
@@ -105,6 +118,7 @@ async def invoke_gateway_tool(
     tool_name: str,
     parameters: dict[str, Any],
     bearer_token: str | None = None,
+    session_id: str | None = None,
 ) -> dict:
     """Invoke a tool through the gateway and return the result dict.
 
@@ -127,6 +141,11 @@ async def invoke_gateway_tool(
         "parameters": parameters,
         "request_id": request_id,
     }
+    # SPEC-049 R-1: forward the chat session id (correlation handle, not
+    # authority) so a stateful gateway connector keys this call onto the
+    # session that owns the flow.
+    if session_id:
+        payload["session_id"] = session_id
     async with httpx.AsyncClient(timeout=INVOKE_TIMEOUT_SECONDS) as client:
         response = await client.post(
             f"{gateway_url}/api/v2/tools/invoke",
@@ -361,6 +380,7 @@ def _make_tool_fn(
                 tool_name=name,
                 parameters=kwargs,
                 bearer_token=DELEGATED_TOKEN.get(),
+                session_id=CHAT_SESSION_ID.get(),
             )
         except httpx.TimeoutException:
             # Surface the timeout as a structured result so the evidence

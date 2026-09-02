@@ -32,8 +32,14 @@ mapping); the rest is the body.
 | `tags` | no | list of strings, ≤ 10 items, each ≤ 64 chars |
 | `version` | no | string ≤ 64 chars; author-managed marker |
 | `source_url` | no | upstream attribution link for adapted open-source content |
+| `web_target` | no | web-check flow entry URL: absolute `http(s)` URL, ≤ 2048 chars; declares the skill a browser-driven check flow (SPEC-049) |
+| `risk_class` | no | `read` or `write` — declared effect of the flow's interactive steps; requires `web_target`; treated as `read` when `web_target` is present without it |
 
 Unknown keys are rejected: frontmatter must contain only the keys above.
+The `web_target` / `risk_class` pair is additive (SPEC-049 R-3): documents
+without them ingest unchanged, and the procedural steps stay in the markdown
+body — there is no separate step format. Credentials never belong in skills;
+the browser tool surface resolves them from platform-managed credential sets.
 
 ## Size caps
 

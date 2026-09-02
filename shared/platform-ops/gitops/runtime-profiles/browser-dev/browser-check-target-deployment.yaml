@@ -1,0 +1,52 @@
+# Sample browser web-check target (SPEC-049 R-7): a static login page
+# (/) and a status page (/status) served by an unprivileged nginx. This
+# is the only origin on the dev browser allowlist
+# (GATEWAY_BROWSER_ALLOW_ORIGINS in browser.env).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: browser-check-target
+  labels:
+    app: browser-check-target
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: browser-check-target
+  template:
+    metadata:
+      labels:
+        app: browser-check-target
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: browser-check-target
+          image: nginxinc/nginx-unprivileged:1.27-alpine
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 10
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: pages
+              mountPath: /usr/share/nginx/html/index.html
+              subPath: index.html
+              readOnly: true
+            - name: pages
+              mountPath: /usr/share/nginx/html/status/index.html
+              subPath: status-index.html
+              readOnly: true
+      volumes:
+        - name: pages
+          configMap:
+            name: browser-check-target-pages

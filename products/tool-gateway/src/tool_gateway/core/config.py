@@ -14,6 +14,19 @@ DEFAULT_IDENTITY_JWKS_URL = (
     "/.well-known/jwks.json"
 )
 
+# Browser connector defaults (SPEC-049 R-1/R-2/R-4/R-5/R-6).
+DEFAULT_BROWSER_CDP_ENDPOINT = "ws://localhost:9222"
+DEFAULT_BROWSER_SESSION_TTL_SECONDS = 600
+DEFAULT_BROWSER_MAX_SESSIONS = 4
+DEFAULT_BROWSER_FLOW_MAX_STEPS = 20
+DEFAULT_BROWSER_SCREENSHOT_MAX_BYTES = 65536
+
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _env_bool(name: str, default: str) -> bool:
+    return os.getenv(name, default).strip().lower() in _TRUTHY
+
 
 @dataclass(frozen=True)
 class GatewaySettings:
@@ -46,6 +59,16 @@ class GatewaySettings:
     incidents_service_url: str = ""
     incidents_client_id: str = "tool-gateway"
     incidents_client_secret: str = ""
+    # Browser connector (SPEC-049): off by default; the engine rides a
+    # chromium-headless-shell sidecar reached over CDP (D-6).
+    browser_enabled: bool = False
+    browser_cdp_endpoint: str = DEFAULT_BROWSER_CDP_ENDPOINT
+    browser_session_ttl_seconds: int = DEFAULT_BROWSER_SESSION_TTL_SECONDS
+    browser_max_sessions: int = DEFAULT_BROWSER_MAX_SESSIONS
+    browser_allow_origins: tuple[str, ...] = ()
+    browser_flow_max_steps: int = DEFAULT_BROWSER_FLOW_MAX_STEPS
+    browser_credential_sets_path: str = ""
+    browser_screenshot_max_bytes: int = DEFAULT_BROWSER_SCREENSHOT_MAX_BYTES
 
     @classmethod
     def from_env(cls) -> "GatewaySettings":
@@ -112,6 +135,46 @@ class GatewaySettings:
             ),
             incidents_client_secret=os.getenv(
                 "GATEWAY_INCIDENTS_CLIENT_SECRET", ""
+            ),
+            # Browser connector knobs (SPEC-049). The allowlist is empty by
+            # default, which denies all navigation (deny-by-default, R-2);
+            # the credential-set knob is a secret-mounted file path only —
+            # no inline credential values are ever accepted (R-5).
+            browser_enabled=_env_bool("GATEWAY_BROWSER_ENABLED", "false"),
+            browser_cdp_endpoint=os.getenv(
+                "GATEWAY_BROWSER_CDP_ENDPOINT", DEFAULT_BROWSER_CDP_ENDPOINT
+            ),
+            browser_session_ttl_seconds=int(
+                os.getenv(
+                    "GATEWAY_BROWSER_SESSION_TTL",
+                    str(DEFAULT_BROWSER_SESSION_TTL_SECONDS),
+                )
+            ),
+            browser_max_sessions=int(
+                os.getenv(
+                    "GATEWAY_BROWSER_MAX_SESSIONS",
+                    str(DEFAULT_BROWSER_MAX_SESSIONS),
+                )
+            ),
+            browser_allow_origins=tuple(
+                part.strip()
+                for part in os.getenv("GATEWAY_BROWSER_ALLOW_ORIGINS", "").split(",")
+                if part.strip()
+            ),
+            browser_flow_max_steps=int(
+                os.getenv(
+                    "GATEWAY_BROWSER_FLOW_MAX_STEPS",
+                    str(DEFAULT_BROWSER_FLOW_MAX_STEPS),
+                )
+            ),
+            browser_credential_sets_path=os.getenv(
+                "GATEWAY_BROWSER_CREDENTIAL_SETS", ""
+            ),
+            browser_screenshot_max_bytes=int(
+                os.getenv(
+                    "GATEWAY_BROWSER_SCREENSHOT_MAX_BYTES",
+                    str(DEFAULT_BROWSER_SCREENSHOT_MAX_BYTES),
+                )
             ),
         )
 

@@ -85,6 +85,31 @@ class ExecutorTests(unittest.TestCase):
         self.assertEqual(call["json"]["parameters"], {"replicas": 3})
         self.assertEqual(call["headers"]["Authorization"], "Bearer tok")
 
+    def test_session_id_forwarded_in_payload(self) -> None:
+        # SPEC-049 R-1: the signed envelope's chat session id rides the
+        # gateway payload so a stateful connector keys the resumed write
+        # onto the owner's session, not the approver's subject.
+        self.outcomes.append(_JsonResponse({"status": "success"}))
+        _run(
+            executor.execute_tool(
+                _settings(), "web.type", {"ref": 1}, "tok", "req-s",
+                session_id="ses-flow-1",
+            )
+        )
+        self.assertEqual(self.captured[0]["json"]["session_id"], "ses-flow-1")
+
+    def test_session_id_absent_when_not_provided(self) -> None:
+        # A stateless tool call forwards no session id: the field is
+        # omitted, never sent empty.
+        self.outcomes.append(_JsonResponse({"status": "success"}))
+        _run(
+            executor.execute_tool(
+                _settings(), "k8s.scale_deployment", {"replicas": 3},
+                "tok", "req-n",
+            )
+        )
+        self.assertNotIn("session_id", self.captured[0]["json"])
+
     def test_timeout_maps_to_structured_timeout(self) -> None:
         self.outcomes.append(httpx.TimeoutException("slow"))
         result = _run(

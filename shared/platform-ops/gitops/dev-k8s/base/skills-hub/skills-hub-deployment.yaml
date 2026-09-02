@@ -99,5 +99,7 @@ spec:
                 path: guides/CrashLoopsAndOOM.md
               - key: guides-PodSchedulingFailures.md
                 path: guides/PodSchedulingFailures.md
+              - key: web-checks-InventoryHealth.md
+                path: web-checks/InventoryHealth.md
         - name: skills-data
           emptyDir: {}

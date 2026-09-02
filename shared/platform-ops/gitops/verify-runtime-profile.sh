@@ -6,9 +6,10 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 OVERLAY_DIR="$SCRIPT_DIR/dev-k8s"
 
 current_profile() {
-  # mutating-dev is the committed dev posture (SPEC-022 R-3), not a
-  # switchable LLM provider profile, so it stays out of the report.
-  grep '\.\.\/runtime-profiles\/' "$1/kustomization.yaml" | grep -v 'mutating-dev' | sed 's/.*runtime-profiles\///'
+  # mutating-dev (SPEC-022 R-3) and browser-dev (SPEC-049 R-7) are the
+  # committed dev postures, not switchable LLM provider profiles, so
+  # they stay out of the report.
+  grep '\.\.\/runtime-profiles\/' "$1/kustomization.yaml" | grep -Ev 'mutating-dev|browser-dev' | sed 's/.*runtime-profiles\///'
 }
 
 PROFILE=$(current_profile "$OVERLAY_DIR")

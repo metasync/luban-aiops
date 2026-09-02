@@ -37,3 +37,20 @@ The base keeps the flag `false`, so any overlay without the profile stays
 byte-identical to the deny-by-default posture. It is wired into `dev-k8s`
 permanently (`select-runtime-profile.sh` preserves it when switching LLM
 profiles) and is never selected as the sole runtime profile.
+
+## Browser web-check dev posture
+
+`browser-dev` is **not** an LLM provider profile: it is the committed
+browser web-check posture for dev environments (SPEC-049 R-7). It carries
+the `chromium-headless-shell` sidecar patch for the tool-gateway
+Deployment, the sample `browser-check-target` web app (static login +
+status pages), and `browser.env` — `GATEWAY_BROWSER_ENABLED=true`, the
+pod-local CDP endpoint, and the dev origin allowlist — which the `dev-k8s`
+overlay merges into the `platform-runtime-config` ConfigMap. The base keeps
+`GATEWAY_BROWSER_ENABLED=false` with no allowlist, so any overlay without
+the profile stays byte-identical to the deny-by-default posture. Like
+`mutating-dev`, it is wired into `dev-k8s` permanently
+(`select-runtime-profile.sh` preserves it when switching LLM profiles) and
+is never selected as the sole runtime profile. Named credential sets for
+web logins are synced out of band via `sync-browser-credentials.sh` into
+the `tool-gateway-browser-credentials` secret.

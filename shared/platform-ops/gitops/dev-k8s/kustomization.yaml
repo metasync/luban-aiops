@@ -5,8 +5,17 @@ resources:
   - base
   - ../runtime-profiles/default
   - ../runtime-profiles/mutating-dev
+  - ../runtime-profiles/browser-dev
 configMapGenerator:
   - name: platform-runtime-config
     behavior: merge
     envs:
       - ../runtime-profiles/mutating-dev/mutating.env
+      - ../runtime-profiles/browser-dev/browser.env
+patches:
+  # SPEC-049: chromium-headless-shell sidecar + credential-set mount on
+  # the tool-gateway pod (browser-dev posture).
+  - path: ../runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml
+    target:
+      kind: Deployment
+      name: tool-gateway

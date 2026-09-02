@@ -74,6 +74,14 @@ DEFAULT_AUTO_ALLOWED_TOOLS = frozenset({
     "skills.list",
     "incidents.list",
     "incidents.get",
+    # SPEC-049: read-class browser probes may run without an extra gate;
+    # the gateway still enforces the origin allowlist and flow guards on
+    # every call. web_click/web_type are intentionally absent — they can
+    # never satisfy the read-only invariant below.
+    "web.navigate",
+    "web.snapshot",
+    "web.screenshot",
+    "web.fill_credential",
 })
 AUTO_ALLOW_ENV = "AGENT_GATEWAY_TOOL_AUTO_ALLOW"
 

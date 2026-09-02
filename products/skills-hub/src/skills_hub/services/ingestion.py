@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 
@@ -28,7 +29,20 @@ MAX_TAG_CHARS = 64
 MAX_TAGS = 10
 MAX_VERSION_CHARS = 64
 MAX_SOURCE_URL_CHARS = 2048
-ALLOWED_KEYS = {"title", "description", "tags", "version", "source_url"}
+MAX_WEB_TARGET_CHARS = 2048
+ALLOWED_KEYS = {
+    "title",
+    "description",
+    "tags",
+    "version",
+    "source_url",
+    # SPEC-049 R-3: optional web-check flow declaration. ``web_target`` is
+    # the flow's entry URL; ``risk_class`` declares the effect of the
+    # flow's interactive steps (defaults to ``read`` when absent).
+    "web_target",
+    "risk_class",
+}
+VALID_RISK_CLASSES = ("read", "write")
 SKIPPED_BASENAMES = {"readme.md", "notice", "notice.md"}
 _SEGMENT_CLEANUP = re.compile(r"[^a-z0-9]+")
 
@@ -142,6 +156,39 @@ def _validate_frontmatter(
             source_id, rel_path, "source_url must be a string ≤ 2048 chars"
         )
 
+    # SPEC-049 R-3: web-check flow declaration (both keys optional; skills
+    # without them ingest unchanged).
+    web_target = frontmatter.get("web_target")
+    if web_target is not None:
+        if (
+            not isinstance(web_target, str)
+            or not web_target.strip()
+            or len(web_target) > MAX_WEB_TARGET_CHARS
+        ):
+            return Rejection(
+                source_id, rel_path, "web_target must be a non-empty string ≤ 2048 chars"
+            )
+        parsed = urlparse(web_target.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return Rejection(
+                source_id,
+                rel_path,
+                "web_target must be an absolute http(s) URL (scheme + host)",
+            )
+
+    risk_class = frontmatter.get("risk_class")
+    if risk_class is not None:
+        if not isinstance(risk_class, str) or risk_class not in VALID_RISK_CLASSES:
+            return Rejection(
+                source_id,
+                rel_path,
+                "risk_class must be one of: read, write",
+            )
+        if web_target is None:
+            return Rejection(
+                source_id, rel_path, "risk_class requires a web_target declaration"
+            )
+
     if len(body.encode("utf-8")) > MAX_BODY_BYTES:
         return Rejection(source_id, rel_path, "body exceeds 64 KiB")
 
@@ -234,6 +281,8 @@ def ingest_directory(
                 tags=frontmatter.get("tags"),
                 version=frontmatter.get("version"),
                 source_url=frontmatter.get("source_url"),
+                web_target=frontmatter.get("web_target"),
+                risk_class=frontmatter.get("risk_class"),
                 updated_at=updated_at,
                 body=body.lstrip("\n"),
             )

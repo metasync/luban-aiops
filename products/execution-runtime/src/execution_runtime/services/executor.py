@@ -26,6 +26,7 @@ async def execute_tool(
     arguments: dict[str, Any],
     delegated_token: str | None,
     request_id: str,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Invoke one tool through the gateway and return the result dict.
 
@@ -55,6 +56,13 @@ async def execute_tool(
         # tool_invoked events correlate with execution_completed.
         "request_id": request_id,
     }
+    # SPEC-049 R-1: forward the chat session id from the signed envelope so
+    # a stateful gateway connector (the browser pool) keys the resumed
+    # write-tier interaction onto the same session the owner's read-tier
+    # setup bound the flow to. It is a correlation handle, not authority —
+    # the bearer token still carries the approving identity.
+    if session_id:
+        payload["session_id"] = session_id
     try:
         async with httpx.AsyncClient(
             timeout=settings.gateway_timeout_seconds

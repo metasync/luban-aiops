@@ -60,6 +60,17 @@
       "maxLength": 2048,
       "description": "Upstream attribution link for adapted open-source content (optional frontmatter key)."
     },
+    "web_target": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "description": "Web-check flow entry URL: an absolute http(s) URL declaring this skill a browser-driven check flow (SPEC-049 R-3, optional frontmatter key)."
+    },
+    "risk_class": {
+      "type": "string",
+      "enum": ["read", "write"],
+      "description": "Declared effect of the flow's interactive steps (SPEC-049 R-3, optional frontmatter key; requires web_target; defaults to read when web_target is present without it)."
+    },
     "updated_at": {
       "type": "string",
       "format": "date-time",

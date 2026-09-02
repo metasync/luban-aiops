@@ -128,6 +128,10 @@ class HappyPathTests(HandoffTestBase):
         # The executor saw the forwarded delegated token.
         _args, kwargs = self.execute_tool_mock.call_args
         self.assertIn("delegated-tok", _args)
+        # SPEC-049 R-1: the signed envelope's chat session id is threaded
+        # to the executor so the gateway call carries it for stateful
+        # session continuity across the owner→approver switch.
+        self.assertEqual(kwargs["session_id"], self.envelope["session_id"])
 
     def test_handoff_closes_execution_record(self) -> None:
         client = self._start()

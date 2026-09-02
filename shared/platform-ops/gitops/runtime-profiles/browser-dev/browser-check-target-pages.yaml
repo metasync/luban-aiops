@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: browser-check-target-pages
+data:
+  index.html: |
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <title>Inventory Portal - Sign in</title>
+    </head>
+    <body>
+      <h1>Inventory Portal</h1>
+      <form id="login-form" onsubmit="return signIn(event)">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" autocomplete="off">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="off">
+        <button id="sign-in" type="submit">Sign in</button>
+      </form>
+      <p id="login-status" role="status"></p>
+      <script>
+        function signIn(event) {
+          event.preventDefault();
+          var user = document.getElementById("username").value;
+          document.getElementById("login-status").textContent =
+            "Signed in as " + user;
+          return false;
+        }
+      </script>
+    </body>
+    </html>
+  status-index.html: |
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <title>Inventory Status</title>
+    </head>
+    <body>
+      <h1>Inventory Status</h1>
+      <table>
+        <tr><td>api</td><td id="api-status">operational</td></tr>
+        <tr><td>database</td><td id="db-status">operational</td></tr>
+        <tr><td>queue</td><td id="queue-status">operational</td></tr>
+      </table>
+      <p>Last checked: <span id="checked-at">static dev fixture</span></p>
+    </body>
+    </html>

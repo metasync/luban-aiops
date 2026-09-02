@@ -27,7 +27,14 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def _skill(skill_id: str, tags=None, body: str = "body", title="T") -> Skill:
+def _skill(
+    skill_id: str,
+    tags=None,
+    body: str = "body",
+    title="T",
+    web_target=None,
+    risk_class=None,
+) -> Skill:
     return Skill(
         skill_id=skill_id,
         source_id=skill_id.split("/")[0],
@@ -36,6 +43,8 @@ def _skill(skill_id: str, tags=None, body: str = "body", title="T") -> Skill:
         title=title,
         description="summary",
         tags=tags,
+        web_target=web_target,
+        risk_class=risk_class,
         updated_at=NOW,
         body=body,
     )
@@ -179,11 +188,49 @@ class PostgresStoreAdapterTests(unittest.TestCase):
         self.assertEqual(calls[1]["params"]["tags"], None)
         self.assertEqual(len(calls), 3)
 
+    def test_replace_source_persists_web_flow_declaration(self) -> None:
+        # SPEC-049 R-3: web_target/risk_class must survive the Postgres
+        # round-trip — the gateway binds flows from the detail response.
+        calls: list[dict] = []
+        store = PostgresSkillStore(
+            "postgresql://fake", connect=self._fake_connect(calls)
+        )
+        _run(
+            store.replace_source(
+                "a",
+                [
+                    _skill(
+                        "a/check",
+                        web_target="http://target:8080/",
+                        risk_class="write",
+                    )
+                ],
+            )
+        )
+        self.assertIn("web_target", calls[1]["sql"])
+        self.assertEqual(calls[1]["params"]["web_target"], "http://target:8080/")
+        self.assertEqual(calls[1]["params"]["risk_class"], "write")
+
+    def test_get_maps_web_flow_columns(self) -> None:
+        calls: list[dict] = []
+        row = (
+            "a/check", "a", "check.md", "local", "T", "summary",
+            None, None, None, NOW, "body",
+            "http://target:8080/", "write",
+        )
+        store = PostgresSkillStore(
+            "postgresql://fake", connect=self._fake_connect(calls, rows=[row])
+        )
+        skill = _run(store.get("a/check"))
+        self.assertIsNotNone(skill)
+        self.assertEqual(skill.web_target, "http://target:8080/")
+        self.assertEqual(skill.risk_class, "write")
+
     def test_search_uses_full_text_prefilter(self) -> None:
         calls: list[dict] = []
         row = (
             "a/hit", "a", "hit.md", "local", "Pod", "summary",
-            ["pod"], None, None, NOW, "pod body",
+            ["pod"], None, None, NOW, "pod body", None, None,
         )
         store = PostgresSkillStore(
             "postgresql://fake", connect=self._fake_connect(calls, rows=[row])

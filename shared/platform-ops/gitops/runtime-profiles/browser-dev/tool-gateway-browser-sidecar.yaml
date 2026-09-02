@@ -1,0 +1,52 @@
+# Strategic merge patch applied by the dev-k8s overlay (SPEC-049 R-1,
+# R-7): adds the chromium-headless-shell sidecar that the tool-gateway
+# connects to over CDP (ws://localhost:9222, pod-local only) and mounts
+# the credential-set secret consumed by web.fill_credential.
+#
+# The gateway image itself ships the Playwright library only — no
+# browser binary — per the D-6 sidecar decision: the browser engine is
+# a deployment-level concern and stays out of the gateway image.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tool-gateway
+spec:
+  template:
+    spec:
+      containers:
+        - name: tool-gateway
+          volumeMounts:
+            - name: browser-credentials
+              mountPath: /etc/luban/browser-credentials
+              readOnly: true
+        # The image's default entrypoint exposes CDP on 0.0.0.0:9222;
+        # pod-local only (no Service references this port).
+        - name: browser
+          image: chromedp/headless-shell:stable
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+          ports:
+            - containerPort: 9222
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: browser-shm
+              mountPath: /dev/shm
+      volumes:
+        # Created by sync-browser-credentials.sh; optional so the pod
+        # still starts before credential sets are provisioned
+        # (web.fill_credential then errors fail-closed at call time).
+        - name: browser-credentials
+          secret:
+            secretName: tool-gateway-browser-credentials
+            optional: true
+        - name: browser-shm
+          emptyDir: {}

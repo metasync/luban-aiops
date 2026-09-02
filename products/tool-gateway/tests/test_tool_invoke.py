@@ -43,6 +43,7 @@ class _EchoTool(BaseTool):
                 "echo": parameters,
                 "caller": identity.get("username"),
                 "request_id": identity.get("request_id"),
+                "chat_session_id": identity.get("chat_session_id"),
             },
             evidence=build_evidence("read", "test", 5),
         )
@@ -227,6 +228,60 @@ class ToolInvokeEndpointTests(unittest.TestCase):
         # connectors can propagate correlation downstream.
         self.assertEqual(body["data"]["request_id"], "req-1")
         self.assertEqual(body["evidence"]["risk_level"], "read")
+
+    def test_invoke_forwards_chat_session_id_to_identity(self) -> None:
+        # SPEC-049 R-1: the top-level session_id body field (a trusted
+        # correlation handle, never a model parameter) reaches connectors
+        # as identity["chat_session_id"] so a stateful browser session can
+        # key on the chat rather than the caller's subject.
+        with _patch_jwks():
+            response = self.client.post(
+                "/api/v2/tools/invoke",
+                json={
+                    "tool_name": "test.echo",
+                    "parameters": {},
+                    "request_id": "req-ses",
+                    "session_id": "ses-flow-1",
+                },
+                headers={
+                    "Authorization": f"Bearer {_mint_delegated('operator')}",
+                    "x-request-id": "req-ses",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["data"]["chat_session_id"], "ses-flow-1"
+        )
+
+    def test_invoke_without_session_id_leaves_chat_session_absent(self) -> None:
+        # A non-chat caller forwards no session id: the identity carries no
+        # chat_session_id, and the browser connector falls back to subject.
+        with _patch_jwks():
+            response = self._invoke(
+                _mint_delegated("operator"), "test.echo", {}, "req-no-ses"
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["data"]["chat_session_id"])
+
+    def test_invoke_ignores_non_string_session_id(self) -> None:
+        # Defensive: a non-string session_id is dropped, never coerced into
+        # a pool key.
+        with _patch_jwks():
+            response = self.client.post(
+                "/api/v2/tools/invoke",
+                json={
+                    "tool_name": "test.echo",
+                    "parameters": {},
+                    "request_id": "req-bad-ses",
+                    "session_id": {"$gt": ""},
+                },
+                headers={
+                    "Authorization": f"Bearer {_mint_delegated('operator')}",
+                    "x-request-id": "req-bad-ses",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["data"]["chat_session_id"])
 
     def test_invoke_allowed_for_observer(self) -> None:
         # Authorization matrix: read-only-observer may perform tier-0 reads; all

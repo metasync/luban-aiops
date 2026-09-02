@@ -17,7 +17,12 @@ Content adapted from the
 2. Add YAML frontmatter per `shared/shared-contracts/skill-format.md`:
    `title` and `description` are required; set `source_url` for adapted
    upstream content.
-3. Pre-flight locally before opening a PR:
+3. Web-check skills (SPEC-049) live under `web-checks/` instead of
+   `guides/`. They additionally set `web_target` (the allowlisted origin
+   the check runs against) and `risk_class` (`read` for snapshot-only
+   probes, `write` when the flow clicks or types, which requires the HITL
+   gate). See `web-checks/InventoryHealth.md` for the sample.
+4. Pre-flight locally before opening a PR:
 
    ```sh
    python -m skills_hub.validate shared/platform-ops/skills/platform-runbooks

@@ -36,6 +36,7 @@ configMapGenerator:
       - guides-DebugServices.md=../../../skills/platform-runbooks/guides/DebugServices.md
       - guides-CrashLoopsAndOOM.md=../../../skills/platform-runbooks/guides/CrashLoopsAndOOM.md
       - guides-PodSchedulingFailures.md=../../../skills/platform-runbooks/guides/PodSchedulingFailures.md
+      - web-checks-InventoryHealth.md=../../../skills/platform-runbooks/web-checks/InventoryHealth.md
   - name: postgres-initdb
     files:
       - infra/create-skills-db.sql

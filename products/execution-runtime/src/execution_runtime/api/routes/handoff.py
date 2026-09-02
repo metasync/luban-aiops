@@ -216,6 +216,10 @@ async def _execute_and_close(
         arguments,
         delegated_token,
         request_id,
+        # SPEC-049 R-1: the signed envelope's chat session id keeps a
+        # stateful gateway connector on the owner's session across the
+        # owner→approver identity switch (correlation, not authority).
+        session_id=envelope.get("session_id"),
     )
     status = map_result_status(result)
     receipt = build_receipt(envelope, status, result, request_id,

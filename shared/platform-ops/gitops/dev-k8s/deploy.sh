@@ -36,6 +36,12 @@ NAMESPACE=${NAMESPACE:-dev-luban-aiops}
 # Set SKIP_INCIDENT_SECRETS=true when secrets are injected externally (e.g. CI).
 "$SCRIPT_DIR/../sync-incident-secrets.sh" "$NAMESPACE"
 
+# Provision the browser credential sets (SPEC-049 R-5) unless skipped.
+# Set SKIP_BROWSER_CREDENTIALS=true when secrets are injected externally
+# (e.g. CI). Without the secret web.fill_credential fails closed at call
+# time; read-class browser checks still work.
+"$SCRIPT_DIR/../sync-browser-credentials.sh" "$NAMESPACE"
+
 # Provision the sessions database for the agent-platform session store
 # (SPEC-016). Idempotent; no secrets involved.
 "$SCRIPT_DIR/../sync-sessions-db.sh" "$NAMESPACE"

@@ -1,5 +1,6 @@
 import logging
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 
@@ -15,8 +16,13 @@ from tool_gateway.tools.registry import ToolRegistry
 LOGGER = logging.getLogger(__name__)
 
 
-def _build_tool_registry() -> ToolRegistry:
-    """Build and populate the tool registry from enabled connectors."""
+def _build_tool_registry() -> tuple[ToolRegistry, object | None]:
+    """Build and populate the tool registry from enabled connectors.
+
+    Returns the registry plus the browser connector (SPEC-049) when the
+    browser flag is on — the connector needs app-lifecycle hooks for its
+    eager CDP connection, which the registry itself does not own.
+    """
     settings = get_settings()
     # Risk-tier admission (SPEC-021 R-1): mutating (write/admin) tools are
     # only admitted when GATEWAY_MUTATING_TOOLS_ENABLED is true; otherwise
@@ -68,13 +74,48 @@ def _build_tool_registry() -> ToolRegistry:
         connector.register_tools(registry)
         LOGGER.info("incidents connector registered")
 
-    return registry
+    browser_connector = None
+    if settings.browser_enabled:
+        from tool_gateway.tools.browser_connector import BrowserConnector
+
+        browser_connector = BrowserConnector(
+            cdp_endpoint=settings.browser_cdp_endpoint,
+            allow_origins=settings.browser_allow_origins,
+            session_ttl_seconds=settings.browser_session_ttl_seconds,
+            max_sessions=settings.browser_max_sessions,
+            flow_max_steps=settings.browser_flow_max_steps,
+            credential_sets_path=settings.browser_credential_sets_path,
+            screenshot_max_bytes=settings.browser_screenshot_max_bytes,
+            skills_service_url=settings.skills_service_url,
+            skills_client_id=settings.skills_client_id,
+            skills_client_secret=settings.skills_client_secret,
+        )
+        browser_connector.register_tools(registry)
+        LOGGER.info("browser connector registered")
+
+    return registry, browser_connector
 
 
 def create_app() -> FastAPI:
     configure_logging()
-    app = FastAPI(title=SERVICE_TITLE, version=SERVICE_VERSION)
-    app.state.tool_registry = _build_tool_registry()
+    registry, browser_connector = _build_tool_registry()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # SPEC-049 R-1: with the flag on, connect eagerly to the sidecar
+        # so first-navigate latency is paid at pod start, not first use.
+        if browser_connector is not None:
+            await browser_connector.start()
+        yield
+        if browser_connector is not None:
+            await browser_connector.stop()
+
+    app = FastAPI(
+        title=SERVICE_TITLE, version=SERVICE_VERSION, lifespan=lifespan
+    )
+    app.state.tool_registry = registry
+    if browser_connector is not None:
+        app.state.browser_connector = browser_connector
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):

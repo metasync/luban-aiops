@@ -174,6 +174,19 @@ class AllowListTests(unittest.TestCase):
         with patch.dict(os.environ, {AUTO_ALLOW_ENV: ""}):
             self.assertEqual(_load_auto_allowed_tools(), frozenset())
 
+    def test_browser_read_tools_in_default_list_but_not_write_tools(
+        self,
+    ) -> None:
+        """SPEC-049: read-class browser probes are auto-allowed; the
+        write-class web_click/web_type are deliberately never listed."""
+        allow = _load_auto_allowed_tools()
+        self.assertIn("web_navigate", allow)
+        self.assertIn("web_snapshot", allow)
+        self.assertIn("web_screenshot", allow)
+        self.assertIn("web_fill_credential", allow)
+        self.assertNotIn("web_click", allow)
+        self.assertNotIn("web_type", allow)
+
 
 class GatewayPermissionMiddlewareTests(unittest.TestCase):
     def _decide(self, middleware, tool, next_decision=None, tool_call=None):
@@ -226,6 +239,24 @@ class GatewayPermissionMiddlewareTests(unittest.TestCase):
         decision, calls = self._decide(mw, tool)
         self.assertEqual(decision.behavior, PermissionBehavior.ASK)
         self.assertEqual(calls, [])
+
+    def test_browser_write_tools_never_auto_allowed_even_if_forced(
+        self,
+    ) -> None:
+        """SPEC-049 invariant: even if web_click/web_type were forced onto
+        the allow-list, they cannot pass the read-only invariant and must
+        still park on ASK."""
+        from agentscope.permission import PermissionBehavior
+
+        mw = GatewayPermissionMiddleware(
+            auto_allowed=frozenset({"web_click", "web_type"}),
+        )
+        for name in ("web_click", "web_type"):
+            decision, calls = self._decide(
+                mw, _StubTool(name, is_read_only=False),
+            )
+            self.assertEqual(decision.behavior, PermissionBehavior.ASK)
+            self.assertEqual(calls, [])
 
     def test_missing_tool_still_delegates_to_builtin(self) -> None:
         """Without a tool surface there is nothing to policy-check; the

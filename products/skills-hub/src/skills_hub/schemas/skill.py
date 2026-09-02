@@ -24,6 +24,11 @@ class Skill(BaseModel):
     tags: list[str] | None = None
     version: str | None = Field(default=None, max_length=64)
     source_url: str | None = Field(default=None, max_length=2048)
+    # SPEC-049 R-3: optional web-check flow declaration. ``risk_class``
+    # defaults to ``read`` for consumers when ``web_target`` is present
+    # without it; the envelope stores the declaration verbatim.
+    web_target: str | None = Field(default=None, max_length=2048)
+    risk_class: str | None = Field(default=None, pattern="^(read|write)$")
     updated_at: datetime
     body: str = Field(max_length=65536)
 

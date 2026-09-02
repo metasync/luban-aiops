@@ -168,6 +168,18 @@ async def invoke_tool(
     body = await request.json()
     tool_name = body.get("tool_name", "")
     parameters = body.get("parameters", {})
+    # Chat-session correlation handle (SPEC-049 R-1). Injected by trusted
+    # internal callers only — the agent-platform kernel forwards the
+    # turn's session id and the execution worker forwards it from the
+    # signed envelope — never taken from model-controlled ``parameters``.
+    # It carries no authority (identity and policy still ride the bearer
+    # token); the browser connector uses it to keep one stateful session
+    # per chat across the owner→approver HITL identity switch.
+    raw_session_id = body.get("session_id")
+    chat_session_id = (
+        raw_session_id if isinstance(raw_session_id, str) and raw_session_id
+        else None
+    )
 
     # Policy enforcement.
     if identity is None:
@@ -273,6 +285,8 @@ async def invoke_tool(
         "roles": identity.roles,
         "request_id": request_id,
     }
+    if chat_session_id is not None:
+        identity_dict["chat_session_id"] = chat_session_id
     result = await registry.invoke(tool_name, parameters, identity_dict)
 
     # Redaction (SPEC-009 R-1/R-2): applied at the single choke point before

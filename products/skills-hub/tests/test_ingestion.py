@@ -178,5 +178,115 @@ class IngestionTests(unittest.TestCase):
         self.assertEqual(len(result.rejections), 1)
 
 
+class WebFlowDeclarationTests(unittest.TestCase):
+    """SPEC-049 R-3: optional web_target / risk_class frontmatter keys."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _ingest(self):
+        return ingest_directory("team-a", self.root, "local", NOW)
+
+    @staticmethod
+    def _doc(extra_frontmatter: str) -> str:
+        return (
+            "---\ntitle: Inventory Health Check\ndescription: Verify the "
+            "inventory app status page.\n"
+            f"{extra_frontmatter}---\n\nLog in and open the status page.\n"
+        )
+
+    def test_valid_declaration_round_trips(self) -> None:
+        _write(
+            self.root,
+            "web/InventoryHealth.md",
+            self._doc(
+                "web_target: https://inventory.internal:8443/login\n"
+                "risk_class: write\n"
+            ),
+        )
+        result = self._ingest()
+        self.assertEqual(result.rejections, [])
+        (skill,) = result.records
+        self.assertEqual(skill.web_target, "https://inventory.internal:8443/login")
+        self.assertEqual(skill.risk_class, "write")
+        # The declaration rides beside the existing frontmatter fields.
+        summary = skill.summary()
+        self.assertEqual(summary["web_target"], "https://inventory.internal:8443/login")
+        self.assertEqual(summary["risk_class"], "write")
+
+    def test_web_target_without_risk_class_defaults_read_semantics(self) -> None:
+        # The envelope stores the declaration verbatim (risk_class absent);
+        # consumers treat a web_target without risk_class as read-class.
+        _write(
+            self.root,
+            "web/StatusCheck.md",
+            self._doc("web_target: https://status.internal/health\n"),
+        )
+        result = self._ingest()
+        self.assertEqual(result.rejections, [])
+        (skill,) = result.records
+        self.assertEqual(skill.web_target, "https://status.internal/health")
+        self.assertIsNone(skill.risk_class)
+        self.assertNotIn("risk_class", skill.summary())
+
+    def test_invalid_risk_class_rejected(self) -> None:
+        _write(
+            self.root,
+            "web/Bad.md",
+            self._doc(
+                "web_target: https://inventory.internal/login\n"
+                "risk_class: destroy\n"
+            ),
+        )
+        result = self._ingest()
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn("risk_class must be one of", result.rejections[0].reason)
+
+    def test_risk_class_without_web_target_rejected(self) -> None:
+        _write(self.root, "web/Bad.md", self._doc("risk_class: write\n"))
+        result = self._ingest()
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn("risk_class requires a web_target", result.rejections[0].reason)
+
+    def test_malformed_web_target_rejected(self) -> None:
+        for bad_target in (
+            "not a url",
+            "ftp://inventory.internal/login",
+            "https://",
+        ):
+            with self.subTest(target=bad_target):
+                _write(
+                    self.root,
+                    "web/Bad.md",
+                    self._doc(f"web_target: \"{bad_target}\"\n"),
+                )
+                result = self._ingest()
+                self.assertEqual(len(result.rejections), 1)
+                self.assertIn("web_target", result.rejections[0].reason)
+
+    def test_oversize_web_target_rejected(self) -> None:
+        long_path = "x" * 2048
+        _write(
+            self.root,
+            "web/Bad.md",
+            self._doc(f"web_target: https://inventory.internal/{long_path}\n"),
+        )
+        result = self._ingest()
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn("≤ 2048 chars", result.rejections[0].reason)
+
+    def test_documents_without_declaration_ingest_unchanged(self) -> None:
+        _write(self.root, "alerts/KubePodNotReady.md", VALID_DOC)
+        result = self._ingest()
+        self.assertEqual(result.rejections, [])
+        (skill,) = result.records
+        self.assertIsNone(skill.web_target)
+        self.assertIsNone(skill.risk_class)
+
+
 if __name__ == "__main__":
     unittest.main()

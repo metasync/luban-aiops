@@ -167,8 +167,15 @@ CREATE TABLE IF NOT EXISTS skills (
     version     TEXT,
     source_url  TEXT,
     updated_at  TIMESTAMPTZ NOT NULL,
-    body        TEXT NOT NULL
+    body        TEXT NOT NULL,
+    web_target  TEXT,
+    risk_class  TEXT
 );
+-- SPEC-049 R-3: web-check declaration columns; the idempotent ALTERs
+-- migrate tables created before 0.31.0 (CREATE TABLE IF NOT EXISTS never
+-- adds columns to an existing table).
+ALTER TABLE skills ADD COLUMN IF NOT EXISTS web_target TEXT;
+ALTER TABLE skills ADD COLUMN IF NOT EXISTS risk_class TEXT;
 CREATE INDEX IF NOT EXISTS idx_skills_source_id
     ON skills (source_id);
 -- The GIN expression must only use IMMUTABLE functions; array_to_string /
@@ -183,11 +190,11 @@ CREATE INDEX IF NOT EXISTS idx_skills_search
 _INSERT = """
 INSERT INTO skills (
     skill_id, source_id, source_path, source_ref, title, description,
-    tags, version, source_url, updated_at, body
+    tags, version, source_url, updated_at, body, web_target, risk_class
 ) VALUES (
     %(skill_id)s, %(source_id)s, %(source_path)s, %(source_ref)s,
     %(title)s, %(description)s, %(tags)s, %(version)s, %(source_url)s,
-    %(updated_at)s, %(body)s
+    %(updated_at)s, %(body)s, %(web_target)s, %(risk_class)s
 )
 ON CONFLICT (skill_id) DO UPDATE SET
     source_path = EXCLUDED.source_path,
@@ -198,12 +205,14 @@ ON CONFLICT (skill_id) DO UPDATE SET
     version = EXCLUDED.version,
     source_url = EXCLUDED.source_url,
     updated_at = EXCLUDED.updated_at,
-    body = EXCLUDED.body
+    body = EXCLUDED.body,
+    web_target = EXCLUDED.web_target,
+    risk_class = EXCLUDED.risk_class
 """
 
 _ROW_COLUMNS = (
     "skill_id, source_id, source_path, source_ref, title, description, "
-    "tags, version, source_url, updated_at, body"
+    "tags, version, source_url, updated_at, body, web_target, risk_class"
 )
 
 # The tsvector half mirrors idx_skills_search exactly so the GIN index can
@@ -237,6 +246,8 @@ def _row_to_skill(row: dict[str, Any]) -> Skill:
         source_url=row["source_url"],
         updated_at=row["updated_at"],
         body=row["body"],
+        web_target=row["web_target"],
+        risk_class=row["risk_class"],
     )
 
 
@@ -305,6 +316,8 @@ class PostgresSkillStore:
                             "source_url": payload.get("source_url"),
                             "updated_at": skill.updated_at,
                             "body": payload["body"],
+                            "web_target": payload.get("web_target"),
+                            "risk_class": payload.get("risk_class"),
                         },
                     )
             await conn.commit()

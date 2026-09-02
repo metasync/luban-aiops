@@ -13,6 +13,7 @@ from agent_service.services.execution_worker_client import (
 )
 from agent_service.services.kernel_middleware import AUTO_ALLOW_ENV
 from agent_service.tools.gateway_tools import (
+    CHAT_SESSION_ID,
     CURRENT_CALL_ID,
     DELEGATED_TOKEN,
     EXECUTION_AUDIT_CONTEXT,
@@ -123,6 +124,29 @@ class InvokeGatewayToolTests(unittest.TestCase):
         self.assertIn("request_id", payload)
         # identity_context must never appear in the body (SPEC-008 R-5).
         self.assertNotIn("identity_context", payload)
+        # No chat session forwarded by default (SPEC-049 R-1): the field is
+        # omitted, never sent empty.
+        self.assertNotIn("session_id", payload)
+
+    def test_invoke_forwards_session_id_in_body(self) -> None:
+        # SPEC-049 R-1: the chat session id rides the payload as a
+        # top-level correlation handle (never inside parameters) so a
+        # stateful gateway connector can key on the chat.
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"status": "success", "data": {}}
+        with patch("agent_service.tools.gateway_tools.httpx.AsyncClient") as mock_client_cls:
+            mock_client = _mock_client(response=mock_response)
+            mock_client_cls.return_value = mock_client
+            _run(invoke_gateway_tool(
+                gateway_url="http://gateway:8080",
+                tool_name="web.navigate",
+                parameters={"url": "https://app.internal/login"},
+                bearer_token="delegated-token",
+                session_id="ses-flow-1",
+            ))
+        payload = mock_client.post.call_args[1]["json"]
+        self.assertEqual(payload["session_id"], "ses-flow-1")
+        self.assertNotIn("session_id", payload["parameters"])
 
     def test_invoke_without_token_returns_structured_error(self) -> None:
         with patch("agent_service.tools.gateway_tools.httpx.AsyncClient") as mock_client_cls:
@@ -175,6 +199,7 @@ class MakeToolFnTests(unittest.TestCase):
             tool_name="k8s.list_pods",
             parameters={"namespace": "test"},
             bearer_token="user-token",
+            session_id=None,
         )
         # The ToolChunk carries the gateway result on its metadata for the
         # evidence middleware, and the model-visible text is the JSON result.
@@ -193,6 +218,26 @@ class MakeToolFnTests(unittest.TestCase):
             mock_invoke.return_value = {"status": "error"}
             _run(fn())
         self.assertIsNone(mock_invoke.call_args[1]["bearer_token"])
+
+    def test_closure_reads_chat_session_contextvar(self) -> None:
+        """SPEC-049 R-1: the read path forwards the turn's chat session id
+        from CHAT_SESSION_ID (set per turn by the kernel) so a stateful
+        gateway connector keys on the chat across the HITL identity
+        switch."""
+        fn = _make_tool_fn("http://gw:8080", "web.snapshot", "d")
+        with patch(
+            "agent_service.tools.gateway_tools.invoke_gateway_tool",
+            new_callable=AsyncMock,
+        ) as mock_invoke:
+            mock_invoke.return_value = {"status": "success"}
+            session_var = CHAT_SESSION_ID.set("ses-flow-1")
+            try:
+                _run(fn())
+            finally:
+                CHAT_SESSION_ID.reset(session_var)
+        self.assertEqual(
+            mock_invoke.call_args[1]["session_id"], "ses-flow-1"
+        )
 
 
 class BuildFunctionToolsTests(unittest.TestCase):

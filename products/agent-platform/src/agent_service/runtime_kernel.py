@@ -768,7 +768,10 @@ class AgentKernel:
         if not self.is_configured():
             return self.build_unconfigured_message(message, session_id), None
 
-        from agent_service.tools.gateway_tools import DELEGATED_TOKEN
+        from agent_service.tools.gateway_tools import (
+            CHAT_SESSION_ID,
+            DELEGATED_TOKEN,
+        )
 
         serving_model: str | None = None
         try:
@@ -779,6 +782,7 @@ class AgentKernel:
             # (SPEC-018 R-2). No evidence sink is set: blocking turns emit
             # no trace frames.
             token_var = DELEGATED_TOKEN.set(bearer_token)
+            session_var = CHAT_SESSION_ID.set(session_id)
             try:
                 reply_msg = await agent.reply(
                     user_msg_cls(name=user_name, content=message),
@@ -786,6 +790,7 @@ class AgentKernel:
                 )
             finally:
                 DELEGATED_TOKEN.reset(token_var)
+                CHAT_SESSION_ID.reset(session_var)
             self.clear_error()
             structured = getattr(reply_msg, "structured_output", None)
             if not isinstance(structured, dict):
@@ -870,7 +875,10 @@ class AgentKernel:
             return
 
         from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
-        from agent_service.tools.gateway_tools import DELEGATED_TOKEN
+        from agent_service.tools.gateway_tools import (
+            CHAT_SESSION_ID,
+            DELEGATED_TOKEN,
+        )
 
         bound_model_id: str | None = None
         try:
@@ -911,6 +919,7 @@ class AgentKernel:
             trace_queue: asyncio.Queue = asyncio.Queue()
             sink_var = TOOL_EVIDENCE_SINK.set(trace_queue)
             token_var = DELEGATED_TOKEN.set(bearer_token)
+            session_var = CHAT_SESSION_ID.set(session_id)
             try:
                 async for event in agent.reply_stream(
                     user_msg_cls(name=user_name, content=effective_message)
@@ -964,6 +973,7 @@ class AgentKernel:
                     yield decorated
             finally:
                 DELEGATED_TOKEN.reset(token_var)
+                CHAT_SESSION_ID.reset(session_var)
                 TOOL_EVIDENCE_SINK.reset(sink_var)
 
             # Persist the turn's evidence frames best-effort (SPEC-025 R-1)
@@ -1381,6 +1391,7 @@ class AgentKernel:
 
         from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
         from agent_service.tools.gateway_tools import (
+            CHAT_SESSION_ID,
             DELEGATED_TOKEN,
             EXECUTION_AUDIT_CONTEXT,
             EXECUTION_REJECTION,
@@ -1418,6 +1429,7 @@ class AgentKernel:
         trace_queue: asyncio.Queue = asyncio.Queue()
         sink_var = TOOL_EVIDENCE_SINK.set(trace_queue)
         token_var = DELEGATED_TOKEN.set(bearer_token)
+        session_var = CHAT_SESSION_ID.set(session_id)
         requests_var = EXECUTION_REQUESTS.set(execution_requests or None)
         rejection_var = EXECUTION_REJECTION.set(execution_rejection)
         audit_var = EXECUTION_AUDIT_CONTEXT.set(
@@ -1483,6 +1495,7 @@ class AgentKernel:
                 session_id, request_id, turn_index, evidence_frames
             )
             DELEGATED_TOKEN.reset(token_var)
+            CHAT_SESSION_ID.reset(session_var)
             EXECUTION_REQUESTS.reset(requests_var)
             EXECUTION_REJECTION.reset(rejection_var)
             EXECUTION_AUDIT_CONTEXT.reset(audit_var)

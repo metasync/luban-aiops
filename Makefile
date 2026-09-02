@@ -23,7 +23,8 @@ GITOPS_DIR := shared/platform-ops/gitops
 E2E_DIR := shared/platform-ops/e2e
 OVERLAYS := dev-k8s \
 	runtime-profiles/default \
-	runtime-profiles/mutating-dev
+	runtime-profiles/mutating-dev \
+	runtime-profiles/browser-dev
 
 # Coordinated deploy build state (written by `make build`, read by `make deploy`).
 IMAGE_STATE := $(GITOPS_DIR)/dev-k8s/.images.env

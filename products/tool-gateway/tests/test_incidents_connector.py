@@ -382,7 +382,8 @@ class RegistryGatingTests(unittest.TestCase):
         with patch.dict(os.environ, env, clear=True):
             get_settings.cache_clear()
             try:
-                return {d.name for d in _build_tool_registry().list_definitions()}
+                registry, _ = _build_tool_registry()
+                return {d.name for d in registry.list_definitions()}
             finally:
                 get_settings.cache_clear()
 
