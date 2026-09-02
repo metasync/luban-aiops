@@ -1,7 +1,7 @@
 # Strategic merge patch applied by the dev-k8s overlay (SPEC-049 R-1,
 # R-7): adds the chromium-headless-shell sidecar that the tool-gateway
-# connects to over CDP (ws://localhost:9222, pod-local only) and mounts
-# the credential-set secret consumed by web.fill_credential.
+# connects to over CDP (ws://localhost:9222, bound to loopback) and
+# mounts the credential-set secret consumed by web.fill_credential.
 #
 # The gateway image itself ships the Playwright library only — no
 # browser binary — per the D-6 sidecar decision: the browser engine is
@@ -19,11 +19,25 @@ spec:
             - name: browser-credentials
               mountPath: /etc/luban/browser-credentials
               readOnly: true
-        # The image's default entrypoint exposes CDP on 0.0.0.0:9222;
-        # pod-local only (no Service references this port).
+        # C-1 (SPEC-049): the chromedp/headless-shell entrypoint defaults
+        # to --remote-debugging-address=0.0.0.0, exposing CDP on the pod
+        # IP (cluster-routable) so any pod could drive the browser and
+        # bypass the gateway's allowlist, flow binding, and credential
+        # masking. Pin command/args to bind CDP to loopback only: the
+        # gateway reaches it over ws://localhost:9222 in the shared pod
+        # netns, and no off-pod client can. The port is pinned too so a
+        # floating :stable default (it drifted to 9223) can't silently
+        # diverge from GATEWAY_BROWSER_CDP_ENDPOINT.
         - name: browser
           image: chromedp/headless-shell:stable
           imagePullPolicy: IfNotPresent
+          command: ["/headless-shell/headless-shell"]
+          args:
+            - --no-sandbox
+            - --use-gl=angle
+            - --use-angle=swiftshader
+            - --remote-debugging-address=127.0.0.1
+            - --remote-debugging-port=9222
           securityContext:
             allowPrivilegeEscalation: false
             seccompProfile:

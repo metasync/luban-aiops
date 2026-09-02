@@ -11,7 +11,10 @@ Enforcement surfaces (all server-side, never model-trusted):
 
 - Origin allowlist (R-2): navigation to an origin outside
   ``GATEWAY_BROWSER_ALLOW_ORIGINS`` is denied; redirects landing outside
-  halt the page and error. An empty allowlist denies everything.
+  halt the page and error, and every read-tier capture re-checks the live
+  origin first, so a post-load client-side redirect can't be snapshotted
+  or screenshotted off-allowlist (or off the bound flow). An empty
+  allowlist denies everything.
 - Flow binding + deviation guard (R-4): ``web.navigate`` with a
   ``skill_id`` validates the skill's ``web_target``/``risk_class``
   declaration against skills-hub and binds the flow to the session.
@@ -123,11 +126,13 @@ _SCREENSHOT_UNMASK_JS = """
 def _path_under(url_path: str, target_path: str) -> bool:
     """True when ``url_path`` equals ``target_path`` or sits under it as
     whole path segments — a declared ``/login`` admits ``/login`` and
-    ``/login/sso`` but not ``/loginfoo``. A root target (``/``) admits
-    every path on the origin."""
-    if url_path == target_path:
+    ``/login/sso`` but not ``/loginfoo``. A trailing slash on the declared
+    target is insignificant (``/login/`` still admits ``/login``), and a
+    root target (``/``) admits every path on the origin."""
+    target = target_path.rstrip("/")
+    if not target:  # a root target ("/") admits every path on the origin
         return True
-    return url_path.startswith(target_path.rstrip("/") + "/")
+    return url_path == target or url_path.startswith(target + "/")
 
 
 def origin_of(url: str) -> str | None:
@@ -386,6 +391,48 @@ class BrowserConnector:
             )
         return None
 
+    async def gate_capture(
+        self, entry: BrowserSessionEntry, tool_name: str
+    ) -> ToolResult | None:
+        """Read-tier origin re-check (R-2/R-4): a snapshot/screenshot never
+        captures a page that drifted off the allowlist or off the bound
+        flow's origin.
+
+        ``web.navigate`` re-checks the landing origin at goto time, but a
+        post-load client-side redirect is not otherwise caught before the
+        next navigate — so the read tier re-validates the live origin here,
+        the mirror of the write-tier deviation guard (``gate_interaction``).
+        An off-allowlist page is halted (as the navigate redirect guard
+        does) and refused; an off-flow but allowlisted page is refused
+        without a halt. Returns None when the capture may proceed.
+        """
+        live_url = entry.page.url
+        if not self.is_origin_allowed(live_url):
+            offending = origin_of(live_url) or live_url
+            try:
+                await entry.page.goto("about:blank")
+            except Exception:  # noqa: BLE001 - halt is best effort
+                pass
+            entry.reset_page_state()
+            entry.flow = None
+            return make_error_result(
+                tool_name, "BROWSER_REDIRECT_NOT_ALLOWED",
+                f"The current page ('{offending}') is not on the browser "
+                "origin allowlist; the page was halted and the capture "
+                "refused. Navigate to an allowed target first.",
+                risk_level="read", source_system=SOURCE_SYSTEM,
+            )
+        flow = entry.flow
+        if flow is not None and origin_of(live_url) != flow.origin:
+            return _denied(
+                tool_name, "BROWSER_FLOW_ORIGIN_DEVIATED",
+                "The current page origin does not match the bound flow's "
+                f"approved origin '{flow.origin}'; the capture is refused. "
+                "Navigate back to the flow's target first.",
+                "read",
+            )
+        return None
+
 
 def _invalid_ref(tool_name: str, ref: object) -> ToolResult:
     return make_error_result(
@@ -559,12 +606,19 @@ class WebSnapshotTool(BaseTool):
 
     async def execute(self, parameters: dict, identity: dict) -> ToolResult:
         start = time.perf_counter()
-        entry, error = await self._connector._resolve_session(
+        connector = self._connector
+        entry, error = await connector._resolve_session(
             "web.snapshot", identity, "read"
         )
         if error is not None:
             return error
         assert entry is not None
+        # C-2: re-check the live origin before capturing. A post-load
+        # client-side redirect could otherwise produce a snapshot of a
+        # page that drifted off the allowlist or off the bound flow.
+        gate = await connector.gate_capture(entry, "web.snapshot")
+        if gate is not None:
+            return gate
         try:
             snapshot_text, count = await _build_snapshot(entry)
         except Exception as exc:
@@ -651,6 +705,10 @@ class WebScreenshotTool(BaseTool):
         if error is not None:
             return error
         assert entry is not None
+        # C-2: re-check the live origin before capturing.
+        gate = await connector.gate_capture(entry, "web.screenshot")
+        if gate is not None:
+            return gate
         try:
             raw = await _capture_screenshot(
                 entry.page, connector._screenshot_max_bytes,
@@ -723,8 +781,14 @@ async def _capture_screenshot(
         if masked:
             try:
                 await page.evaluate(_SCREENSHOT_UNMASK_JS)
-            except Exception:  # noqa: BLE001 - unmask is best effort
-                pass
+            except Exception as exc:  # noqa: BLE001 - unmask is best effort
+                # The secret stays masked (fail-safe) but the page keeps its
+                # dot mask; log the class only (never a value) so a stuck
+                # mask is visible.
+                LOGGER.warning(
+                    "screenshot credential unmask failed: %s",
+                    exc.__class__.__name__,
+                )
 
 
 class _WebInteractionTool(BaseTool):
@@ -961,11 +1025,12 @@ class WebFillCredentialTool(_WebInteractionTool):
             )
         credential = connector.credentials.get(set_name)
         if credential is None:
-            available = connector.credentials.names()
-            hint = f" Available sets: {', '.join(available)}." if available else ""
+            # W-3: do not enumerate available set names to the model — the
+            # list is an information disclosure that lets the model probe
+            # which sets exist. A generic message is sufficient.
             return make_error_result(
                 self.tool_name, "CREDENTIAL_SET_NOT_FOUND",
-                f"Credential set '{set_name}' is not configured.{hint}",
+                f"Credential set '{set_name}' is not configured.",
                 source_system=SOURCE_SYSTEM,
             )
 

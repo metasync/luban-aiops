@@ -932,7 +932,10 @@ class CredentialTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "error")
         self.assertEqual(result.error["code"], "CREDENTIAL_SET_NOT_FOUND")
-        self.assertIn("inventory-app", result.error["message"])
+        # W-3: the error must name the unknown set but must NOT enumerate
+        # the available sets (information disclosure).
+        self.assertIn("ghost", result.error["message"])
+        self.assertNotIn("inventory-app", result.error["message"])
 
     def test_invalid_field_rejected(self) -> None:
         result = _run(

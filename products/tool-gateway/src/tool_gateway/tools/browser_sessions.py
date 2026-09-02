@@ -63,10 +63,12 @@ class FlowState:
     under ``tools:invoke`` with no extra gate) and recorded when the first
     interaction of a ``write``-class flow executes — an interaction can
     only reach the gateway through the SPEC-020/037 confirmation and
-    signing path, so its execution is evidence of approval. ``denied``
-    marks a flow whose interactions must be refused outright; the
-    deviation guard consults bound/approved/denied/steps on every
-    interaction.
+    signing path, so its execution is evidence of approval, not a gate the
+    deviation guard re-checks (the guard consults bound/denied/origin/
+    risk_class/steps). ``denied`` is a reserved gateway-side kill-switch
+    the guard honors, but the HITL path enforces denial upstream — the
+    SPEC-020 bridge refuses the write so it never reaches the gateway to
+    flip this flag — so it is not currently set in production.
     """
 
     skill_id: str
@@ -153,7 +155,14 @@ class BrowserSessionPool:
         A missing sidecar logs and returns False; the tool surface stays
         registered and fails closed with BROWSER_NOT_READY until the
         connection comes up (a lazy retry runs on each session request).
+        The bootstrap runs under the create lock so it can't race a
+        concurrent lazy retry into spawning two Playwright hosts (W-1).
         """
+        async with self._create_lock:
+            return await self._connect()
+
+    async def _connect(self) -> bool:
+        """Idempotent CDP bootstrap; the caller holds ``_create_lock``."""
         if self._browser is not None:
             return True
         try:
@@ -210,20 +219,24 @@ class BrowserSessionPool:
         sessions when the cap is exceeded, so both TTL and cap hold even
         without a background timer.
         """
-        if not self.connected:
-            if not await self.start():
-                raise BrowserNotReady(self._cdp_endpoint)
-        self.sweep_expired()
-        entry = self._sessions.get(session_key)
-        if entry is not None:
-            entry.last_used = self._clock()
-            return entry
-        # Slow path only: serialize creation so two concurrent first-use
-        # callers for the same key can't each build a browser context (the
-        # second insert would orphan the first until pod shutdown). The
-        # double-check inside the lock returns a context another coroutine
-        # created while we waited.
+        # Fast path (unlocked): already connected and the session exists.
+        if self.connected:
+            self.sweep_expired()
+            entry = self._sessions.get(session_key)
+            if entry is not None:
+                entry.last_used = self._clock()
+                return entry
+        # Slow path: hold the create lock across BOTH the CDP bootstrap and
+        # the context creation. Two concurrent cold callers must not each
+        # spawn a Playwright host (W-1) nor each build a context for one key
+        # (the second insert would orphan the first until pod shutdown). The
+        # double-checks inside the lock return work another coroutine did
+        # while we waited.
         async with self._create_lock:
+            if not self.connected:
+                if not await self._connect():
+                    raise BrowserNotReady(self._cdp_endpoint)
+            self.sweep_expired()
             entry = self._sessions.get(session_key)
             if entry is not None:
                 entry.last_used = self._clock()
@@ -286,15 +299,21 @@ class BrowserNotReady(Exception):
         self.endpoint = endpoint
 
 
+# Strong refs to in-flight best-effort close tasks: asyncio keeps only a
+# weak reference to a task, so an unreferenced close task can be garbage
+# collected mid-flight and silently skip the context close (S-5).
+_PENDING_CLOSES: set = set()
+
+
 def _schedule_close(context: Any) -> None:
     """Best-effort async close from a sync path (the TTL sweep)."""
-    import asyncio
-
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    loop.create_task(_close_quietly(context))
+    task = loop.create_task(_close_quietly(context))
+    _PENDING_CLOSES.add(task)
+    task.add_done_callback(_PENDING_CLOSES.discard)
 
 
 async def _close_quietly(target: Any) -> None:

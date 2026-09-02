@@ -1,0 +1,29 @@
+# C-1 (SPEC-049): defense-in-depth NetworkPolicy for the browser sidecar.
+#
+# The headless-shell CDP port is already bound to 127.0.0.1 via the
+# sidecar's command/args (tool-gateway-browser-sidecar.yaml), so no
+# cross-pod traffic can reach it at the network level. This policy is
+# a second layer: even if the bind address is accidentally relaxed,
+# the NetworkPolicy denies ingress to the CDP port from other pods.
+#
+# Ingress on the gateway's HTTP port (8080) is left to other policies
+# (the platform-wide default-deny plus the Service-level policy that
+# admits the platform-gateway).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tool-gateway-browser-sidecar-deny-cdp
+spec:
+  podSelector:
+    matchLabels:
+      app: tool-gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    # Only allow ingress on the gateway HTTP port (8080); ingress on
+    # the CDP port (9222) is deliberately absent so it is denied by
+    # omission. The gateway reaches the sidecar over the shared pod
+    # loopback, which NetworkPolicy does not restrict.
+    - ports:
+        - protocol: TCP
+          port: 8080

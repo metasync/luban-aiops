@@ -25,3 +25,4 @@ resources:
   - browser-check-target-deployment.yaml
   - browser-check-target-service.yaml
   - browser-check-target-pages.yaml
+  - browser-sidecar-network-policy.yaml
