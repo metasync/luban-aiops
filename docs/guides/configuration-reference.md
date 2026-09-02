@@ -16,6 +16,7 @@ activate them. A feature is **active** when all required variables are set to no
 | **Token delegation** | `PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET` ↔ `IDENTITY_SERVICE_CLIENTS` | platform-gateway ↔ identity-service | **must be provisioned** |
 | **Kubernetes tools** | `GATEWAY_K8S_ENABLED=true`, `GATEWAY_K8S_NAMESPACE` | tool-gateway | enabled (`dev-luban-aiops`) |
 | **Mutating tools (`k8s.delete_pod`)** | `GATEWAY_MUTATING_TOOLS_ENABLED=true`, `GATEWAY_K8S_ENABLED=true`, `AGENT_HITL_CONFIRM_TIMEOUT>0`, `tools:mutate` policy grant, opt-in pod-delete RBAC | tool-gateway, agent-service, policy bundle | disabled (`false`) |
+| **Browser web-checks (`web.*`, SPEC-049)** | `GATEWAY_BROWSER_ENABLED=true`, `GATEWAY_BROWSER_ALLOW_ORIGINS` (deny-by-default), reachable `GATEWAY_BROWSER_CDP_ENDPOINT`; write-class flows additionally need `GATEWAY_MUTATING_TOOLS_ENABLED=true` + `AGENT_HITL_CONFIRM_TIMEOUT>0`; credentials via `GATEWAY_BROWSER_CREDENTIAL_SETS` | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `browser-dev` profile |
 | **Signed execution (SPEC-037)** | `AGENT_EXECUTION_SIGNING_KEY` ↔ `execution-signing-secret` | agent-service | **must be provisioned** (`sync-execution-signing-secret.sh`); absent key fails mutating resumes closed |
 | **Isolated execution worker (SPEC-038)** | `AGENT_EXECUTION_WORKER_URL` + `AGENT_EXECUTION_HANDOFF_TOKEN` ↔ `execution-handoff-secret` | agent-service, execution-runtime | **must be provisioned** (`sync-execution-handoff-secret.sh` + worker URL); absent config or any transport error fails mutating resumes closed (`worker_unavailable`) |
 | **Elastic observability** | `GATEWAY_ELASTIC_ENABLED=true`, `GATEWAY_ELASTIC_URL`, auth (`_API_KEY` or `_USERNAME`+`_PASSWORD`) | tool-gateway | disabled |
@@ -477,6 +478,14 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-c
 | `GATEWAY_INCIDENTS_SERVICE_URL` | incident-service base URL (unset = connector off) | *(none)* | runtime-config |
 | `GATEWAY_INCIDENTS_CLIENT_ID` | Incidents query client id | `tool-gateway` | code default |
 | `GATEWAY_INCIDENTS_CLIENT_SECRET` | Incidents query credential | *(none)* | **runtime-secrets** |
+| `GATEWAY_BROWSER_ENABLED` | Enable the browser connector (`web.*`, SPEC-049); while `false` no web tool registers | `false` | runtime-config (dev-k8s merges `true` via `browser-dev`) |
+| `GATEWAY_BROWSER_CDP_ENDPOINT` | CDP websocket endpoint of the browser sidecar; a bare `ws://`/`wss://` endpoint (no path) is dialed as its `http(s)://` DevTools discovery base, a full `/devtools/browser/<id>` URL passes through verbatim | `ws://localhost:9222` | runtime-config |
+| `GATEWAY_BROWSER_ALLOW_ORIGINS` | Comma-separated origin allowlist; empty denies all navigation; redirect landings re-checked | *(empty)* | runtime-config |
+| `GATEWAY_BROWSER_SESSION_TTL` | Idle seconds before a chat session's browser context is swept | `600` | code default |
+| `GATEWAY_BROWSER_MAX_SESSIONS` | Session-pool cap (oldest-idle eviction) | `4` | code default |
+| `GATEWAY_BROWSER_FLOW_MAX_STEPS` | Interaction step budget per bound flow | `20` | code default |
+| `GATEWAY_BROWSER_CREDENTIAL_SETS` | Secret-mounted credential-sets JSON path; empty = `web.fill_credential` fails closed | *(none)* | **runtime-secrets** (mounted file) |
+| `GATEWAY_BROWSER_SCREENSHOT_MAX_BYTES` | Byte cap for base64 JPEG screenshots (compressed to fit) | `65536` | code default |
 | `IDENTITY_SERVICE_URL` | Identity broker URL | `http://identity-service:8000` | shared/runtime.env |
 
 ### identity-service
@@ -635,6 +644,12 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 | `GATEWAY_INCIDENTS_CLIENT_SECRET` | Incidents query credential | `sync-incident-secrets.sh` |
 | `OTEL_EXPORTER_OTLP_HEADERS` | OTLP ingest auth (Basic) for the OTel push pipeline | `sync-otel-secrets.sh` |
 
+### `tool-gateway-browser-credentials`
+
+| Key | Purpose | How to Provision |
+|---|---|---|
+| `credential-sets.json` | Named credential sets for `web.fill_credential` (JSON map `set`→`{"username", "password"}`); mounted at `GATEWAY_BROWSER_CREDENTIAL_SETS`; values never travel through skills, prompts, or tool results (SPEC-049 R-5) | `sync-browser-credentials.sh` (or `BROWSER_CREDENTIAL_SETS_FILE=<path>`) |
+
 ### `audit-service-runtime-secrets`
 
 | Key | Purpose | How to Provision |
@@ -675,6 +690,13 @@ Switch profiles with:
 ```bash
 shared/platform-ops/gitops/select-runtime-profile.sh <profile-name>
 ```
+
+Two non-LLM postures ride alongside the active profile permanently:
+`mutating-dev` (SPEC-022 R-3, pod-delete RBAC + `GATEWAY_MUTATING_TOOLS_ENABLED=true`)
+and `browser-dev` (SPEC-049 R-7, `GATEWAY_BROWSER_ENABLED=true` + the
+chromium-headless-shell sidecar on tool-gateway + the sample
+browser-check-target app). Neither is switchable; both merge their env
+into `platform-runtime-config`, and the base stays deny-by-default.
 
 The profile's `runtime-secrets.example.env` documents the active provider key plus the
 multi-model catalog knobs: every supported provider (`deepseek`, `dashscope`, `openai`,

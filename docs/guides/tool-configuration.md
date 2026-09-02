@@ -45,6 +45,34 @@ covered in the [Approval and HITL Governance Guide](approval-and-hitl.md).
 | `incidents.list` | List tracked incidents (summary fields, newest first) with optional status/severity/source filters | `status` (optional: `new`, `triaging`, `triaged`, `triage_failed`, `resolved`), `severity` (optional: `critical`, `warning`, `info`), `source` (optional: `alertmanager`, `manual`), `limit` (default 20), `offset` (default 0) | read |
 | `incidents.get` | Fetch one full incident record including the latest triage report and connector dispatch outcomes | `incident_id` (required, `inc-...`) | read |
 
+### Browser Connector Tools (SPEC-049)
+
+Bounded web-application checks through a headless browser. The tools
+run in the per-chat-session browser context whose page state they
+share — the pool is keyed by the chat session id (forwarded as a
+trusted correlation handle with an identity-subject fallback), so a
+flow the owner binds on the read path survives the approver's HITL
+resume on the write path. Navigation is deny-by-default: only origins
+in `GATEWAY_BROWSER_ALLOW_ORIGINS` are visited (redirect landings are
+re-checked too).
+
+| Tool | Description | Parameters | Risk |
+|---|---|---|---|
+| `web.navigate` | Open a URL in the session's browser and wait for load; optionally bind a skill's declared flow (`web_target`/`risk_class`) | `url` (required), `skill_id` (optional) | read |
+| `web.snapshot` | Enumerate the page's interactive elements with addressable refs (`[n] <tag> ...`); values are masked for password fields and filled credentials | none | read |
+| `web.screenshot` | Capture a bounded JPEG screenshot (base64), with `title`/`url` beside it | none | read |
+| `web.fill_credential` | Fill a ref's field from a platform-managed credential set; never echoes the value, never runs without a bound flow | `ref` (required), `credential_set` (required), `field` (required: `username`/`password`) | read |
+| `web.click` | Click a snapshot ref inside a bound `write`-class flow; one HITL gate per flow, step budget enforced | `ref` (required) | write |
+| `web.type` | Type text into a snapshot ref inside a bound `write`-class flow | `ref` (required), `text` (required) | write |
+
+> **Browser checks are layered with the HITL model (SPEC-049).** Read-class
+> tools (`web.navigate`, `web.snapshot`, `web.screenshot`, `web.fill_credential`)
+> are auto-allowed; write-class tools (`web.click`, `web.type`) always park for
+> confirmation and only execute inside a bound flow whose `risk_class` is
+> `write`. The deviation guard refuses interactions when the flow is unbound,
+> denied, read-only, or past `GATEWAY_BROWSER_FLOW_MAX_STEPS` — it never runs
+> silently.
+
 > **Mutating tools are triple-gated (SPEC-021).** A `write`/`admin` tool registers only when
 > `GATEWAY_MUTATING_TOOLS_ENABLED=true`, invokes only for roles granted the deny-by-default
 > `tools:mutate` policy action, and never executes without an operator confirmation through
@@ -69,6 +97,33 @@ covered in the [Approval and HITL Governance Guide](approval-and-hitl.md).
       (`GET /api/v1/policy/matrix`) matches your intent
 - [ ] **`chat:confirm` grants reviewed** — the confirmer needs `chat:confirm` (granted to
       `platform-admin`, `approver`, `operator`, `developer` by default)
+
+### Browser Tool Activation Checklist (`web.*`, SPEC-049)
+
+- [ ] **`GATEWAY_BROWSER_ENABLED=true`** — the base commits `false`
+      (while false, `web.*` tools are absent from discovery and invoke);
+      dev-k8s opts in through the `runtime-profiles/browser-dev` profile,
+      which merges the flag into the runtime ConfigMap and adds the
+      `chromium-headless-shell` sidecar
+- [ ] **`GATEWAY_BROWSER_ALLOW_ORIGINS=<origins>`** — comma-separated;
+      deny-by-default: an empty list refuses all navigation
+- [ ] **CDP endpoint reachable** — `GATEWAY_BROWSER_CDP_ENDPOINT`
+      (default `ws://localhost:9222`); the dev sidecar runs in the
+      tool-gateway pod, so the default works in the `browser-dev`
+      posture
+- [ ] **Credential sets (optional)** — `GATEWAY_BROWSER_CREDENTIAL_SETS`
+      points at a secret-mounted JSON file; dev provides
+      `sync-browser-credentials.sh`; without it `web.fill_credential`
+      fails closed at call time
+- [ ] **HITL confirmation enabled for write-class flows** —
+      `AGENT_HITL_CONFIRM_TIMEOUT > 0` on agent-platform; `web.click` and
+      `web.type` are write-tier, so a `write`-class flow parks exactly one
+      confirmation card before its first interaction, on top of the
+      write-tier admission (`GATEWAY_MUTATING_TOOLS_ENABLED`) and the
+      `tools:mutate` policy grant
+- [ ] **Skills with `web_target`/`risk_class`** — flows bind to a
+      skill's declared target; see the Skills Guide's frontmatter
+      section
 
 ## Kubernetes Connector
 

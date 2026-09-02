@@ -1,29 +1,29 @@
-# Policy Rollout Controls Spike
+# Policy Rollout Controls - Production Ready
 
 <cite>
 **Referenced Files in This Document**
-- [policy-rollout-controls-spike.md](file://docs/workspace/policy-rollout-controls-spike.md)
 - [SPEC-048 spec.md](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md)
-- [policy_engine.py (platform-gateway)](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
-- [policy_engine.py (tool-gateway)](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
+- [policy-engine.py (platform-gateway)](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [policy-engine.py (tool-gateway)](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
 - [policy.py (routes)](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py)
 - [Makefile](file://Makefile)
 - [validate_policy.py](file://shared/shared-contracts/scripts/validate_policy.py)
-- [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
+- [validate_policy_scenarios.py](file://shared/shared-contracts/scripts/validate_policy_scenarios.py)
+- [policy_diff.py](file://shared/shared-contracts/scripts/policy_diff.py)
 - [policy-scenarios.yaml](file://shared/shared-contracts/policies/policy-scenarios.yaml)
+- [2026-09-02-release-note.md](file://docs/agentic-aiops-platform/release-notes/2026-09-02-spec-048-policy-testing-rollout-controls.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated to reflect SPEC-048 promotion from spike memo to approved formal specification with concrete implementation requirements
-- Enhanced bundle provenance section with SHA-256 content hash implementation details across both engines
-- Added scenario-expectation harness specifications and implementation guidance with curated test cases
-- Expanded policy-diff impact report requirements and workflow integration
-- Updated rollout runbook references and operational procedures
-- Clarified out-of-scope items and future promotion triggers based on operator adjudication
-- Added comprehensive testing coverage for provenance hash verification
+- Updated title and status to reflect SPEC-048 promotion from spike to delivered specification
+- Enhanced all sections to reflect production-ready implementation with concrete examples
+- Added comprehensive coverage of all four deliverables: bundle provenance, scenario harnessing, policy-diff reporting, and rollout procedures
+- Updated architecture diagrams to show actual implementation details
+- Enhanced troubleshooting guide with real-world scenarios
+- Added validation and testing information based on release notes
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -38,15 +38,12 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document synthesizes the Policy Rollout Controls Spike into a practical, code-mapped guide for testing and controlling policy rollouts across the platform's two gateways. The spike has evolved into **SPEC-048: Policy Testing and Rollout Controls**, an approved formal specification that defines four repo-native, CI-runnable controls: bundle provenance with content hashing, scenario-expectation harnessing, policy-diff impact reporting, and documented rollout procedures. These controls make policy changes testable, reviewable, and verifiable without building a separate policy-center service or introducing staged promotion.
+This document provides comprehensive documentation for **SPEC-048: Policy Testing and Rollout Controls**, which has been successfully delivered as part of v0.30.0. The specification defines four repo-native, CI-runnable controls that make policy changes testable, reviewable, and verifiable without requiring a separate policy-center service or staged promotion. All four deliverables are now production-ready: bundle provenance with content hashing, scenario-expectation harnessing, policy-diff impact reporting, and documented rollout procedures.
+
+The implementation closes the gap between policy authoring and safe deployment by adding provenance tracking, regression protection through scenario expectations, impact assessment tools, and operational guidance. These controls maintain backward compatibility while significantly enhancing operational confidence for policy management.
 
 ## Project Structure
-The implementation centers on:
-- A canonical policy bundle under shared contracts with versioned rules and explicit deny-by-default semantics
-- Two gateway policy engines that parse and evaluate rules with enhanced metadata exposure
-- A live permission matrix route exposing effective permissions with provenance information
-- Make targets to sync, validate, verify scenarios, and generate impact reports
-- Scenario expectation tables and validation scripts for regression protection
+The implementation centers on a canonical policy bundle under shared contracts with versioned rules and explicit deny-by-default semantics, two gateway policy engines with enhanced metadata exposure, and comprehensive tooling for validation and impact assessment.
 
 ```mermaid
 graph TB
@@ -58,11 +55,14 @@ F["Make Targets<br/>Makefile"] --> G["Sync Policy<br/>sync-policy"]
 F --> H["Validate Policy<br/>validate-policy"]
 F --> I["Verify Gate<br/>verify"]
 F --> J["Policy Diff<br/>policy-diff"]
+K["Scenario Harness<br/>validate_policy_scenarios.py"] --> L["Scenario Table<br/>policy-scenarios.yaml"]
+M["Policy Diff Tool<br/>policy_diff.py"] --> N["Impact Reports"]
 G --> B
 G --> C
-H --> K["Validator Script<br/>scripts/validate_policy.py"]
-J --> L["Scenario Harness<br/>validate_policy_scenarios.py"]
-M["Scenario Table<br/>policy-scenarios.yaml"] --> L
+H --> O["Validator Script<br/>scripts/validate_policy.py"]
+I --> K
+J --> M
+L --> K
 ```
 
 **Diagram sources**
@@ -73,31 +73,33 @@ M["Scenario Table<br/>policy-scenarios.yaml"] --> L
 - [policy_matrix.py:1-88](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L88)
 - [Makefile:122-178](file://Makefile#L122-L178)
 - [validate_policy.py:1-91](file://shared/shared-contracts/scripts/validate_policy.py#L1-L91)
+- [validate_policy_scenarios.py:1-165](file://shared/shared-contracts/scripts/validate_policy_scenarios.py#L1-L165)
+- [policy_diff.py:1-188](file://shared/shared-contracts/scripts/policy_diff.py#L1-L188)
 
 **Section sources**
-- [policy-rollout-controls-spike.md:23-58](file://docs/workspace/policy-rollout-controls-spike.md#L23-L58)
-- [SPEC-048 spec.md:44-121](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L44-L121)
-- [Makefile:122-178](file://Makefile#L122-L178)
+- [SPEC-048 spec.md:19-42](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L19-L42)
+- [2026-09-02-release-note.md:7-56](file://docs/agentic-aiops-platform/release-notes/2026-09-02-spec-048-policy-testing-rollout-controls.md#L7-L56)
 
 ## Core Components
-- **Enhanced bundle provenance**: Both engines now expose SHA-256 content hashes alongside version and source information, computed at load time rather than authored in the bundle
-- **Scenario-expectation harness**: Curated YAML table defining expected outcomes for sentinel role-action pairs, preventing silent grant flips during rule edits
-- **Policy-diff impact report**: Review-time tooling that compares bundles and emits per-(role, action) outcome transitions across both vocabularies
-- **Rollout runbook**: Documented procedure for editing, validating, reviewing, deploying, and confirming policy changes
-- **Copy-parity enforcement**: Extended contract tests to include overlay copies, preventing manual drift
+The implementation consists of four key components that work together to provide comprehensive policy rollout controls:
 
-Key responsibilities:
-- Parse and cache bundles per configured path with enhanced metadata tracking
-- Enforce precedence: deny > require_approval > allow; highest priority within outcome class
-- Render caller-scoped matrix with third-state approval details and provenance information
-- Provide CI hooks to validate schema, scenarios, and verify policy integrity
-- Generate human-readable impact reports for review workflows
+### Bundle Provenance with Content Hashing
+Both policy engines compute SHA-256 content hashes at load time, providing immutable fingerprints of the exact bundle text being enforced. This enables operators to verify which bundle is actually running without shelling into pods.
+
+### Scenario-Expectation Harness
+A curated YAML table (`policy-scenarios.yaml`) defines expected outcomes for sentinel role-action pairs across both engine vocabularies. The harness enforces full grant coverage, ensuring no new grants can be added without explicit expectation recording.
+
+### Policy-Diff Impact Reporting
+Review-time tooling compares bundles and emits per-(role, action) outcome transitions across both vocabularies, showing allow→deny, allow→require_approval, new grants, and removed grants with unchanged pair summaries.
+
+### Rollout Runbook and Operational Procedures
+Documented procedure covering editing, validating, reviewing, deploying, and confirming policy changes with explicit restart posture and provenance verification steps.
 
 **Section sources**
-- [policy_engine.py (platform-gateway):352-362](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L352-L362)
-- [policy_engine.py (tool-gateway):279-287](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L279-L287)
-- [policy_matrix.py:1-88](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L88)
-- [SPEC-048 spec.md:46-121](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L46-L121)
+- [SPEC-048 spec.md:46-115](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L46-L115)
+- [policy_engine.py (platform-gateway):352-376](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L352-L376)
+- [policy_engine.py (tool-gateway):279-297](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L279-L297)
+- [policy-scenarios.yaml:1-232](file://shared/shared-contracts/policies/policy-scenarios.yaml#L1-L232)
 
 ## Architecture Overview
 Policy changes flow through an enhanced pipeline with provenance tracking, scenario validation, and impact assessment before reaching production gateways.
@@ -135,20 +137,20 @@ PG-->>Dev : matrix + approval_requirements + provenance
 ```
 
 **Diagram sources**
-- [SPEC-048 spec.md:46-121](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L46-L121)
-- [policy_engine.py (platform-gateway):352-362](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L352-L362)
-- [policy_engine.py (tool-gateway):279-287](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L279-L287)
+- [SPEC-048 spec.md:46-115](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L46-L115)
+- [policy_engine.py (platform-gateway):352-376](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L352-L376)
+- [policy_engine.py (tool-gateway):279-297](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L279-L297)
 - [policy.py (routes):30-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L30-L55)
 - [Makefile:122-178](file://Makefile#L122-L178)
 
 ## Detailed Component Analysis
 
 ### Enhanced Policy Engines with Provenance
-Both engines implement deny-by-default with three outcomes and strict parsing, now enhanced with content hash computation:
+Both engines implement deny-by-default with three outcomes and strict parsing, enhanced with content hash computation and metadata exposure:
 
-- **Platform gateway engine**: Evaluates API actions, supports require_approval tiers, exposes metadata including version/source/content-hash
-- **Tool gateway engine**: Evaluates tool invocation actions; skips unenforceable require_approval rules at load time with warnings
-- **Enhanced metadata**: `bundle_metadata()` now includes SHA-256 content hash computed at load time, never authored in bundle
+- **Platform gateway engine**: Evaluates API actions, supports require_approval tiers, exposes metadata including version/source/content-hash via `bundle_metadata()`
+- **Tool gateway engine**: Evaluates tool invocation actions; skips unenforceable require_approval rules at load time with warnings; provides `bundle_sha256()` function
+- **Enhanced metadata**: Both engines compute SHA-256 content hash at load time, never authored in bundle, exposed via appropriate interfaces
 
 ```mermaid
 classDiagram
@@ -185,12 +187,13 @@ class PlatformGatewayEngine {
 }
 class ToolGatewayEngine {
 +load_bundle(settings) list
++bundle_sha256() string
 +evaluate(settings, roles, action) PolicyDecision
 }
 class BundleMetadata {
 +string version
 +string source
-+string hash
++string sha256
 +effective_source() string
 }
 PlatformGatewayEngine --> PolicyRule : "parses"
@@ -220,7 +223,7 @@ The matrix route builds a caller-scoped view of effective permissions, mapping r
 ```mermaid
 flowchart TD
 Start(["GET /api/v1/policy/matrix"]) --> Load["Load bundle + metadata"]
-Load --> Prov["Compute provenance<br/>(version, source, hash)"]
+Load --> Prov["Compute provenance<br/>(version, source, sha256)"]
 Prov --> Roles{"Admin or own roles?"}
 Roles --> |Admin| Full["Use all roles from bundle"]
 Roles --> |User| Own["Use caller roles"]
@@ -237,14 +240,13 @@ Build --> Return["Return JSON payload with provenance"]
 **Section sources**
 - [policy.py (routes):30-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L30-L55)
 - [policy_matrix.py:1-88](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L88)
-- [test_policy_matrix.py:316-340](file://products/platform-gateway/tests/test_policy_matrix.py#L316-L340)
 
 ### Bundle Provenance and Content Hashing
-**Updated** Enhanced with SPEC-048 requirements for content hash computation and exposure:
+Enhanced with SPEC-048 requirements for content hash computation and exposure:
 
 Current state:
 - The bundle carries a version field parsed and exposed via metadata
-- **New**: SHA-256 content hash computed at load time, never authored in bundle
+- SHA-256 content hash computed at load time, never authored in bundle
 - Hash exposed via `bundle_metadata()` and rendered on matrix/readiness surfaces
 - Rollout remains ConfigMap mount plus restart; engines cache bundle keyed on path
 
@@ -255,19 +257,18 @@ Implementation details:
 - Provenance block available under existing `policy:read` gate
 
 **Section sources**
-- [policy_engine.py (platform-gateway):352-362](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L352-L362)
-- [policy_engine.py (tool-gateway):279-287](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L279-L287)
+- [policy_engine.py (platform-gateway):352-376](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L352-L376)
+- [policy_engine.py (tool-gateway):279-297](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L279-L297)
 - [SPEC-048 spec.md:46-63](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L46-L63)
-- [policy-rollout-controls-spike.md:70-80](file://docs/workspace/policy-rollout-controls-spike.md#L70-L80)
 
 ### Scenario-Based Testing Harness
-**Updated** Enhanced with SPEC-048 scenario expectation specifications:
+Enhanced with SPEC-048 scenario expectation specifications:
 
 Current state:
-- Schema validation exists and runs in verify; no scenario expectations existed previously
-- **New**: Curated scenario table (`policy-scenarios.yaml`) beside canonical bundle
-- **New**: Validation script evaluates scenarios using exact engine semantics
-- **New**: Integrated into `make verify` to prevent unintended grant/deny flips
+- Schema validation exists and runs in verify
+- Curated scenario table (`policy-scenarios.yaml`) beside canonical bundle
+- Validation script evaluates scenarios using exact engine semantics
+- Integrated into `make verify` to prevent unintended grant/deny flips
 
 Recommended shape:
 - Place YAML scenario file beside canonical bundle with expected outcomes for sentinel (role, action) pairs
@@ -290,22 +291,20 @@ CheckTG --> |Yes| Next
 Next --> Done(["Pass or fail"])
 ```
 
-[No diagram sources needed since this diagram shows conceptual workflow, not actual code structure]
-
 **Section sources**
 - [SPEC-048 spec.md:65-90](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L65-L90)
-- [policy-rollout-controls-spike.md:82-97](file://docs/workspace/policy-rollout-controls-spike.md#L82-L97)
 - [validate_policy.py:32-86](file://shared/shared-contracts/scripts/validate_policy.py#L32-L86)
+- [validate_policy_scenarios.py:100-165](file://shared/shared-contracts/scripts/validate_policy_scenarios.py#L100-L165)
 - [policy-scenarios.yaml:1-232](file://shared/shared-contracts/policies/policy-scenarios.yaml#L1-L232)
 
 ### Impact Reporting (policy-diff)
-**Updated** Enhanced with SPEC-048 impact report specifications:
+Enhanced with SPEC-048 impact report specifications:
 
 Current state:
-- **New**: `make policy-diff CANDIDATE=<path>` target for comparing bundles
-- **New**: Per-(role, action) outcome transition reporting across both vocabularies
-- **New**: Human-readable transitions (allow→deny, allow→require_approval, new grant, removed grant)
-- **New**: Integration into review workflows before merge
+- `make policy-diff CANDIDATE=<path>` target for comparing bundles
+- Per-(role, action) outcome transition reporting across both vocabularies
+- Human-readable transitions (allow→deny, allow→require_approval, new grant, removed grant)
+- Integration into review workflows before merge
 
 Implementation details:
 - Reuses engine modules to compute outcomes for both baseline and candidate bundles
@@ -323,20 +322,18 @@ Diff --> Report["Emit transition report"]
 Report --> DEnd(["Review output"])
 ```
 
-[No diagram sources needed since this diagram shows conceptual workflow, not actual code structure]
-
 **Section sources**
 - [SPEC-048 spec.md:91-105](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L91-L105)
-- [policy-rollout-controls-spike.md:99-109](file://docs/workspace/policy-rollout-controls-spike.md#L99-L109)
+- [policy_diff.py:117-188](file://shared/shared-contracts/scripts/policy_diff.py#L117-L188)
 
 ### Rollout Runbook and Operational Procedures
-**Updated** Enhanced with SPEC-048 rollout procedures:
+Enhanced with SPEC-048 rollout procedures:
 
 Current state:
-- **New**: Documented rollout runbook in configuration reference
-- **New**: Explicit restart posture documentation (bundles cached keyed on path)
-- **New**: Hot reload deliberately absent from scope
-- **New**: Verified deployment confirmation via provenance hash on matrix/readiness surfaces
+- Documented rollout runbook in configuration reference
+- Explicit restart posture documentation (bundles cached keyed on path)
+- Hot reload deliberately absent from scope
+- Verified deployment confirmation via provenance hash on matrix/readiness surfaces
 
 Operational workflow:
 1. Edit canonical bundle
@@ -349,10 +346,9 @@ Operational workflow:
 
 **Section sources**
 - [SPEC-048 spec.md:106-115](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L106-L115)
-- [policy-rollout-controls-spike.md:107-109](file://docs/workspace/policy-rollout-controls-spike.md#L107-L109)
 
 ## Dependency Analysis
-**Updated** Enhanced with SPEC-048 dependencies and coupling:
+Enhanced with SPEC-048 dependencies and coupling:
 
 Coupling and cohesion:
 - Both engines depend on their product settings and YAML parsing; they are cohesive around rule evaluation with enhanced metadata
@@ -389,7 +385,8 @@ SC["policy-scenarios.yaml"] --> SH
 
 **Diagram sources**
 - [validate_policy.py:1-91](file://shared/shared-contracts/scripts/validate_policy.py#L1-L91)
-- [SPEC-048 spec.md:65-105](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L65-L105)
+- [validate_policy_scenarios.py:1-165](file://shared/shared-contracts/scripts/validate_policy_scenarios.py#L1-L165)
+- [policy_diff.py:1-188](file://shared/shared-contracts/scripts/policy_diff.py#L1-L188)
 - [Makefile:122-178](file://Makefile#L122-L178)
 - [policy_engine.py (platform-gateway):1-433](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L433)
 - [policy_engine.py (tool-gateway):1-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L1-L355)
@@ -399,7 +396,6 @@ SC["policy-scenarios.yaml"] --> SH
 **Section sources**
 - [SPEC-048 spec.md:116-187](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L116-L187)
 - [Makefile:122-178](file://Makefile#L122-L178)
-- [policy_rollout_controls_spike.md:23-58](file://docs/workspace/policy-rollout-controls-spike.md#L23-L58)
 
 ## Performance Considerations
 - Bundle loading is cached per process; changes require restart due to ConfigMap mounting semantics
@@ -408,10 +404,8 @@ SC["policy-scenarios.yaml"] --> SH
 - Policy-diff tool computes outcomes for both bundles but only runs during review, not runtime
 - Content hash computation adds minimal overhead during bundle load (single SHA-256 operation)
 
-[No sources needed since this section provides general guidance]
-
 ## Troubleshooting Guide
-**Updated** Enhanced with SPEC-048 troubleshooting scenarios:
+Enhanced with SPEC-048 troubleshooting scenarios:
 
 Common issues and mitigations:
 - Missing or invalid bundle path: matrix route returns 503; ensure sync-policy ran and ConfigMap mounted correctly
@@ -432,18 +426,17 @@ Operational checks:
 - [policy_engine.py (platform-gateway):284-299](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L284-L299)
 - [policy_engine.py (tool-gateway):212-225](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L212-L225)
 - [validate_policy.py:66-86](file://shared/shared-contracts/scripts/validate_policy.py#L66-L86)
-- [test_policy_matrix.py:316-340](file://products/platform-gateway/tests/test_policy_matrix.py#L316-L340)
 - [SPEC-048 spec.md:102-105](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L102-L105)
 
 ## Conclusion
-The spike has successfully evolved into **SPEC-048: Policy Testing and Rollout Controls**, providing a comprehensive set of repo-native, CI-runnable controls that make policy changes testable, reviewable, and verifiable. The specification defines four key deliverables: bundle provenance with content hashing, scenario-expectation harnessing, policy-diff impact reporting, and documented rollout procedures. These controls close the gap between policy authoring and safe deployment without requiring a separate policy-center service, staged promotion, or hot reload capabilities. The implementation maintains backward compatibility while adding significant operational confidence for policy management.
+SPEC-048: Policy Testing and Rollout Controls has been successfully delivered as part of v0.30.0, providing a comprehensive set of repo-native, CI-runnable controls that make policy changes testable, reviewable, and verifiable. The specification defines four key deliverables: bundle provenance with content hashing, scenario-expectation harnessing, policy-diff impact reporting, and documented rollout procedures. These controls close the gap between policy authoring and safe deployment without requiring a separate policy-center service, staged promotion, or hot reload capabilities. The implementation maintains backward compatibility while adding significant operational confidence for policy management.
 
-[No sources needed since this section summarizes without analyzing specific files]
+All four deliverables are now production-ready and validated through comprehensive testing, including live deployment verification and regression testing. The system provides operators with the tools needed to safely manage policy changes in production environments.
 
 ## Appendices
 
 ### Current Workflow Summary
-**Updated** Enhanced with SPEC-048 workflow steps:
+Enhanced with SPEC-048 workflow steps:
 
 - Edit canonical bundle
 - Run `make sync-policy` to propagate to all consumers
@@ -456,10 +449,9 @@ The spike has successfully evolved into **SPEC-048: Policy Testing and Rollout C
 **Section sources**
 - [Makefile:122-178](file://Makefile#L122-L178)
 - [SPEC-048 spec.md:106-115](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L106-L115)
-- [policy-rollout-controls-spike.md:99-109](file://docs/workspace/policy-rollout-controls-spike.md#L99-L109)
 
 ### Out-of-Scope Items and Future Promotions
-**Updated** Based on SPEC-048 design decisions:
+Based on SPEC-048 design decisions:
 
 Deliberately out of scope for this slice:
 - Staged promotion (staging vs production bundles)
@@ -479,4 +471,16 @@ Future promotion triggers:
 
 **Section sources**
 - [SPEC-048 spec.md:191-205](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L191-L205)
-- [policy-rollout-controls-spike.md:111-118](file://docs/workspace/policy-rollout-controls-spike.md#L111-L118)
+
+### Validation and Testing Status
+Based on release notes and implementation:
+
+- `make verify` green before and after `make build` at v0.30.0
+- All product suites, overlays, schema check, scenario guard (131 api / 19 tools, full grant coverage), and version lockstep passing
+- Harness self-tests pinned in both products' suites: a deliberately flipped grant exits non-zero, the identical bundle exits zero
+- Diff self-tests cover every transition category plus the hard-error paths
+- Live check on canonical deployment: both gateways' `/health/ready` carry fingerprint matching canonical file byte-for-byte
+- Matrix surface carries provenance hash under unchanged `policy:read` gate
+
+**Section sources**
+- [2026-09-02-release-note.md:61-76](file://docs/agentic-aiops-platform/release-notes/2026-09-02-spec-048-policy-testing-rollout-controls.md#L61-L76)

@@ -7,6 +7,26 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-02-spec-049-browser-web-check-tools.md`
+  - delivers SPEC-049 (v0.31.0, eleventh R5 slice): a bounded,
+    deny-by-default `web.*` tool surface lets the agent verify
+    internal web applications — navigate, read pages via ref-minted
+    snapshots, bounded JPEG screenshots, and (behind the existing
+    HITL gate + signed execution) sign in and click. tool-gateway
+    gains a stateful Playwright-over-CDP `BrowserConnector` (library
+    only, no browser binary in the image; sessions pooled per chat
+    session id so an owner-bound flow survives the approver's HITL
+    resume), a server-side origin allowlist
+    (`BROWSER_ORIGIN_NOT_ALLOWED` denial), flow binding with a
+    deviation guard and one HITL approval per mutating flow, named
+    credential sets whose secrets never enter prompts or snapshots
+    (leak-asserted tests), skills-hub `web_target`/`risk_class`
+    frontmatter, a committed `browser-dev` runtime profile
+    (`chromedp/headless-shell` sidecar + `browser-check-target`
+    sample app + credential-secret sync + `browser-check-demo.sh`),
+    and agent-platform invariant tests pinning that the write-class
+    web tools can never auto-allow; the base deployment stays
+    byte-identical
 - `2026-09-02-spec-048-policy-testing-rollout-controls.md`
   - delivers SPEC-048 (v0.30.0, tenth R5 slice): the policy bundle
     change workflow gains rehearsal, regression, and verification

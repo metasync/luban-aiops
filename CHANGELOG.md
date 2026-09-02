@@ -13,6 +13,64 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.31.0 — 2026-09-02
+
+### Added
+
+- **Browser-based web application check tools (SPEC-049)** — the
+  agent can now verify internal web applications the way an operator
+  would: navigate, read the page, and (behind the existing HITL
+  gate) sign in and click. Every layer fails closed and stays off
+  unless explicitly enabled:
+  - tool-gateway gains a stateful `BrowserConnector` (Playwright,
+    connecting over CDP to an out-of-process browser — no browser
+    binary ships in the image). Sessions are pooled per chat session
+    id (the id rides the invoke payload as a trusted correlation
+    handle — never model-supplied, carrying no authority, with an
+    identity-subject fallback), so a flow the owner binds survives
+    the approver's HITL resume; the connector is registered only
+    when `GATEWAY_BROWSER_ENABLED=true` and a CDP endpoint is
+    configured.
+  - Six bounded `web.*` tools: `web.navigate`, `web.snapshot`,
+    `web.screenshot`, `web.fill_credential` (read tier) and
+    `web.click`, `web.type` (write tier — they ride the existing
+    `GATEWAY_MUTATING_TOOLS_ENABLED` + signed-execution + HITL
+    posture, never auto-allowed). Element refs are minted only by
+    `web.snapshot`; interactions resolve against the last snapshot.
+  - Server-side origin allowlist (`GATEWAY_BROWSER_ALLOW_ORIGINS`,
+    empty = deny all): every navigation is re-checked gateway-side
+    and off-allowlist origins are denied with
+    `BROWSER_ORIGIN_NOT_ALLOWED`, regardless of what a skill or the
+    model asks for.
+  - Flow binding with a deviation guard: a write-class check binds
+    to the target origin for the whole flow, one HITL approval
+    covers the bound mutating flow, and any off-flow navigation or
+    interaction is denied.
+  - Named credential sets (`GATEWAY_BROWSER_CREDENTIAL_SETS`, a
+    secret-synced JSON file): `web.fill_credential` takes a set
+    *name* only — secrets never enter the prompt, tool arguments, or
+    snapshots, and filled values are masked (`value=***`) in every
+    subsequent snapshot. Leak-asserted tests pin the redaction.
+  - Screenshots are bounded base64 JPEGs with an explicit size cap.
+  - skills-hub skill frontmatter gains optional `web_target` and
+    `risk_class` fields (validated, carried through ingestion and
+    search) so web-check runbooks declare their target and risk
+    class; the sample `platform-runbooks/web-checks/InventoryHealth.md`
+    ships with the overlay.
+  - New committed `browser-dev` runtime profile (like `mutating-dev`,
+    wired into `dev-k8s` permanently): `chromium-headless-shell`
+    sidecar for tool-gateway, the `browser-check-target` sample web
+    app (static login + status pages), the dev env fragment, and
+    `sync-browser-credentials.sh` for the credential-set secret
+    (hooked into `make deploy`). `shared/platform-ops/e2e/browser-check-demo.sh`
+    exercises the full chain: deny-by-default controls, discovery,
+    origin denials, snapshot/screenshot, and an opt-in HITL chat leg.
+  - agent-platform auto-allow list gains the four read-class web
+    tools; invariant tests pin that `web_click`/`web_type` can never
+    satisfy the read-only auto-allow contract even if force-listed.
+  The base deployment stays byte-identical: browser off, no
+  allowlist, no sidecar.
+
 ## 0.30.0 — 2026-09-02
 
 ### Added

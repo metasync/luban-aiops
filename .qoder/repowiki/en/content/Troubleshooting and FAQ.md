@@ -28,6 +28,8 @@
 - [agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
 - [platform-gateway/src/platform_gateway/services/gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 - [platform-gateway/tests/test_session_workspace.py](file://products/platform-gateway/tests/test_session_workspace.py)
+- [platform-gateway/src/platform_gateway/services/policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [platform-gateway/src/platform_gateway/schemas/api.py](file://products/platform-gateway/src/platform_gateway/schemas/api.py)
 - [identity-broker/src/identity_service/app.py](file://products/identity-broker/src/identity_service/app.py)
 - [identity-broker/src/identity_service/api/routes/auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
 - [identity-broker/src/identity_service/api/routes/identity.py](file://products/identity-broker/src/identity_service/api/routes/identity.py)
@@ -56,15 +58,19 @@
 - [.ooq2.py](file://.ooq2.py)
 - [docs/guides/configuration-reference.md](file://docs/guides/configuration-reference.md)
 - [docs/guides/troubleshooting.md](file://docs/guides/troubleshooting.md)
+- [docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md)
+- [docs/specs/SPEC-048-policy-testing-rollout-controls/plan.md](file://docs/specs/SPEC-048-policy-testing-rollout-controls/plan.md)
+- [docs/agentic-aiops-platform/release-notes/2026-09-02-spec-048-policy-testing-rollout-controls.md](file://docs/agentic-aiops-platform/release-notes/2026-09-02-spec-048-policy-testing-rollout-controls.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated bounded pane troubleshooting section to reflect v0.25.1/v0.25.2 improvements including single-sourced height and post-motion re-measure race fix
-- Enhanced portal UI troubleshooting with comprehensive guidance for bounded pane behavior and overflow detection
-- Added detailed explanation of the 320px bounded pane constraint and expand/collapse affordance behavior
-- Updated stale UI troubleshooting to include new content-hashed asset caching strategy details
-- Enhanced voice input troubleshooting with browser compatibility information
+- Updated policy bundle troubleshooting section to reflect complete SPEC-048 workflow including edit → sync → verify → diff → commit → deploy → confirm provenance hash
+- Enhanced outdated bundle handling with comprehensive guidance for policy_bundle_sha256 fingerprint checking and bundle caching behavior
+- Added detailed explanation of path-keyed bundle caching and restart requirements (no hot reload)
+- Updated policy enforcement troubleshooting with scenario-expectation harness and policy-diff impact reporting
+- Enhanced deployment verification procedures using provenance fingerprints across both gateways
+- Added comprehensive guidance for handling stale or outdated policy bundles through the complete SPEC-048 lifecycle
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -79,7 +85,7 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides comprehensive troubleshooting guidance for the Luban AIOps Platform, focusing on deployment issues, service connectivity problems, performance bottlenecks, configuration mistakes, and integration failures. It includes step-by-step diagnostic procedures, log analysis techniques, metric interpretation, trace correlation, and platform-specific FAQs covering agent execution, policy enforcement, identity integration, OpenObserve telemetry pipeline issues, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, voice input microphone issues, OIDC callback hostname behavior, and bounded pane rendering issues. Escalation procedures and community resources are also included to help you resolve issues efficiently.
+This document provides comprehensive troubleshooting guidance for the Luban AIOps Platform, focusing on deployment issues, service connectivity problems, performance bottlenecks, configuration mistakes, and integration failures. It includes step-by-step diagnostic procedures, log analysis techniques, metric interpretation, trace correlation, and platform-specific FAQs covering agent execution, policy enforcement, identity integration, OpenObserve telemetry pipeline issues, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, voice input microphone issues, OIDC callback hostname behavior, bounded pane rendering issues, and **SPEC-048 policy bundle rollout controls**. Escalation procedures and community resources are also included to help you resolve issues efficiently.
 
 ## Project Structure
 The platform is organized into multiple products:
@@ -140,6 +146,7 @@ Common areas where issues occur:
 - **Voice input microphone issues** due to browser compatibility or permission problems
 - **OIDC callback hostname confusion** between canonical and fallback origins
 - **Bounded pane rendering issues** with overflow detection and expand/collapse affordances
+- **Outdated policy bundles** requiring complete SPEC-048 workflow resolution
 
 **Section sources**
 - [agent-platform/README.md](file://products/agent-platform/README.md)
@@ -969,6 +976,103 @@ kubectl -n dev-luban-aiops exec deployment/operator-portal -- \
 - [docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md:14-31](file://docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md#L14-L31)
 - [docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md:17-37](file://docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md#L17-L37)
 
+### Outdated Policy Bundle Resolution
+
+#### Symptom: Policy bundle appears outdated or stale after deployment
+**Most likely cause:** The policy bundle is cached keyed on the configured path, and bundles require pod restart to take effect — there is no hot reload. The bundle change workflow was enhanced with SPEC-048 to include complete rollout controls with provenance verification.
+
+**Understanding the SPEC-048 workflow:**
+- **Path-keyed caching**: Bundles are cached in memory keyed on the configured path (`PLATFORM_GATEWAY_POLICY_PATH` or `GATEWAY_POLICY_PATH`)
+- **Restart requirement**: Changed ConfigMaps take effect only on pod restart — hot reload is deliberately absent
+- **Provenance verification**: Each gateway exposes SHA-256 fingerprints of the exact loaded bundle text
+- **Complete workflow**: Edit → `make sync-policy` → `make verify` → `make policy-diff` → commit → deploy → confirm provenance hash
+
+**Diagnostic:**
+
+```bash
+# Check current policy bundle fingerprint on both gateways
+kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
+  curl -s localhost:8000/health/ready | jq '.policy_bundle_sha256'
+
+kubectl -n dev-luban-aiops exec deployment/platform-gateway -- \
+  curl -s localhost:8000/health/ready | jq '.policy_bundle_sha256'
+
+# Compare against the canonical bundle file
+shasum -a 256 shared/shared-contracts/policies/policy-default.yaml
+
+# Check if bundles are cached by examining process memory
+kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
+  ps aux | grep policy
+
+# Verify the mounted policy file matches expected version
+kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
+  head -5 /etc/luban/policy/policy.yaml
+```
+
+**Resolution:**
+
+1. **Follow the complete SPEC-048 workflow**:
+   ```bash
+   # Edit the canonical bundle (bump version field)
+   vi shared/shared-contracts/policies/policy-default.yaml
+   
+   # Sync to all locations
+   make sync-policy
+   
+   # Validate schema and run scenario guard
+   make verify
+   
+   # Review impact with policy-diff
+   make policy-diff CANDIDATE=/tmp/new-bundle.yaml
+   
+   # Commit changes
+   git add . && git commit -m "Update policy bundle with new rules"
+   
+   # Deploy with rolling restart
+   make deploy
+   ```
+
+2. **Verify provenance hash matches**:
+   ```bash
+   # Expected hash from canonical file
+   EXPECTED_HASH=$(shasum -a 256 shared/shared-contracts/policies/policy-default.yaml | awk '{print $1}')
+   
+   # Actual hash from tool-gateway
+   ACTUAL_TOOL_HASH=$(kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
+     curl -s localhost:8000/health/ready | jq -r '.policy_bundle_sha256')
+   
+   # Actual hash from platform-gateway  
+   ACTUAL_PLATFORM_HASH=$(kubectl -n dev-luban-aiops exec deployment/platform-gateway -- \
+     curl -s localhost:8000/health/ready | jq -r '.policy_bundle_sha256')
+   
+   # Verify both match expected
+   if [ "$EXPECTED_HASH" == "$ACTUAL_TOOL_HASH" ] && [ "$EXPECTED_HASH" == "$ACTUAL_PLATFORM_HASH" ]; then
+     echo "✓ Policy bundles verified across both gateways"
+   else
+     echo "✗ Hash mismatch detected!"
+     echo "Expected: $EXPECTED_HASH"
+     echo "Tool Gateway: $ACTUAL_TOOL_HASH"
+     echo "Platform Gateway: $ACTUAL_PLATFORM_HASH"
+   fi
+   ```
+
+3. **Handle stale bundle scenarios**:
+   - If bundles don't update after ConfigMap changes, perform rolling restart:
+     ```bash
+     kubectl rollout restart deployment/tool-gateway deployment/platform-gateway
+     ```
+   - Verify the restart took effect by checking readiness endpoints
+   - Use `make policy-diff` to understand what changed between versions
+
+**Updated** Enhanced policy bundle troubleshooting with complete SPEC-048 workflow including provenance verification and path-keyed caching behavior
+
+**Section sources**
+- [docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md:46-63](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L46-L63)
+- [docs/specs/SPEC-048-policy-testing-rollout-controls/plan.md:101-114](file://docs/specs/SPEC-048-policy-testing-rollout-controls/plan.md#L101-L114)
+- [docs/agentic-aiops-platform/release-notes/2026-09-02-spec-048-policy-testing-rollout-controls.md:16-25](file://docs/agentic-aiops-platform/release-notes/2026-09-02-spec-048-policy-testing-rollout-controls.md#L16-L25)
+- [products/platform-gateway/src/platform_gateway/services/policy_engine.py:323-360](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L323-L360)
+- [products/tool-gateway/src/tool-gateway/services/policy_engine.py:254-296](file://products/tool-gateway/src/tool-gateway/services/policy_engine.py#L254-L296)
+
 ### Log Analysis Techniques
 - Centralize logs and use structured formats
 - Correlate logs by request IDs and trace spans
@@ -990,6 +1094,7 @@ kubectl -n dev-luban-aiops exec deployment/operator-portal -- \
 - **Analyze asset caching hit rates and portal performance metrics**
 - **Track voice recognition success rates and browser compatibility metrics**
 - **Monitor bounded pane rendering performance and overflow detection accuracy**
+- **Monitor policy bundle provenance hashes and deployment verification**
 
 **Section sources**
 - [agent-platform/src/agent_platform/core/metrics.py](file://products/agent-platform/src/agent_platform/core/metrics.py)
@@ -1075,6 +1180,7 @@ Resolution:
 - **For voice input issues, include browser version, OS, and microphone permission status**
 - **For OIDC issues, include redirect URI configuration and hostname behavior details**
 - **For bounded pane issues, include browser console logs and overflow detection timing**
+- **For policy bundle issues, include provenance hash comparison and SPEC-048 workflow completion status**
 
 ### Community Resources
 - Repository documentation and specs
@@ -1086,7 +1192,7 @@ Resolution:
 - [CONTRIBUTING.md](file://CONTRIBUTING.md)
 
 ## Conclusion
-This troubleshooting guide equips you with systematic approaches to diagnose and resolve common issues across the Luban AIOps Platform. By leveraging logs, metrics, and traces, and following the step-by-step resolutions provided, you can quickly address deployment, connectivity, performance, configuration, integration, OpenObserve telemetry challenges, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, voice input microphone issues, OIDC callback hostname behavior, and bounded pane rendering issues. For further assistance, consult community resources and escalate with comprehensive diagnostics when necessary.
+This troubleshooting guide equips you with systematic approaches to diagnose and resolve common issues across the Luban AIOps Platform. By leveraging logs, metrics, and traces, and following the step-by-step resolutions provided, you can quickly address deployment, connectivity, performance, configuration, integration, OpenObserve telemetry challenges, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, voice input microphone issues, OIDC callback hostname behavior, bounded pane rendering issues, and **SPEC-048 policy bundle rollout controls**. For further assistance, consult community resources and escalate with comprehensive diagnostics when necessary.
 
 ## Appendices
 
@@ -1123,6 +1229,8 @@ This troubleshooting guide equips you with systematic approaches to diagnose and
   - Check browser microphone permissions, verify audio device availability, and switch recognition language in the composer selector.
 - **Why isn't the "Expand to full height" affordance appearing for long content?**
   - The bounded pane uses a 320px constraint with delayed overflow detection (300ms) to account for animations; wait for the post-motion re-measure to trigger the affordance.
+- **How do I handle outdated policy bundles?**
+  - Follow the complete SPEC-048 workflow: edit → `make sync-policy` → `make verify` → `make policy-diff` → commit → deploy → confirm provenance hash via `policy_bundle_sha256` fingerprints.
 
 ### OpenObserve Configuration Reference
 **Environment Variables:**
@@ -1238,3 +1346,49 @@ This troubleshooting guide equips you with systematic approaches to diagnose and
 - [operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx:1074-1143](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1074-L1143)
 - [docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md:14-31](file://docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md#L14-L31)
 - [docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md:17-37](file://docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md#L17-L37)
+
+### Policy Bundle Rollout Reference (SPEC-048)
+**Complete Workflow:**
+1. **Edit**: Modify `shared/shared-contracts/policies/policy-default.yaml` (bump version field)
+2. **Sync**: `make sync-policy` copies to all locations (packaged, overlay, etc.)
+3. **Verify**: `make verify` runs schema validation and scenario-expectation guard
+4. **Review**: `make policy-diff CANDIDATE=<bundle>` reports per-(role, action) transitions
+5. **Commit**: Include bundle, scenario updates, and synced replicas in one commit
+6. **Deploy**: `make deploy` with rolling restart of gateway deployments
+7. **Confirm**: Verify `policy_bundle_sha256` fingerprints match expected hash
+
+**Bundle Caching Behavior:**
+- **Path-keyed caching**: Bundles cached in memory keyed on configured path
+- **No hot reload**: Changed ConfigMaps require pod restart to take effect
+- **Provenance tracking**: SHA-256 fingerprint computed at load time, never authored
+- **Verification surfaces**: Available on both gateways' `/health/ready` endpoints
+
+**Fingerprint Verification:**
+```bash
+# Expected hash from canonical file
+EXPECTED_HASH=$(shasum -a 256 shared/shared-contracts/policies/policy-default.yaml | awk '{print $1}')
+
+# Actual hashes from gateways
+TOOL_HASH=$(kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
+  curl -s localhost:8000/health/ready | jq -r '.policy_bundle_sha256')
+  
+PLATFORM_HASH=$(kubectl -n dev-luban-aiops exec deployment/platform-gateway -- \
+  curl -s localhost:8000/health/ready | jq -r '.policy_bundle_sha256')
+
+# Verify both match expected
+echo "Expected: $EXPECTED_HASH"
+echo "Tool Gateway: $TOOL_HASH"
+echo "Platform Gateway: $PLATFORM_HASH"
+```
+
+**Scenario-Expectation Harness:**
+- **Full grant coverage**: Every canonical rule's grants covered by expectations
+- **Deliberate denials**: Named denial scenarios enforced (auditor, observer, developer restrictions)
+- **Mechanical enforcement**: Any new grant without recorded expectation fails the gate
+- **Shared evaluator**: Uses real engine modules, no re-implementation
+
+**Section sources**
+- [docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md:46-63](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L46-L63)
+- [docs/specs/SPEC-048-policy-testing-rollout-controls/plan.md:101-114](file://docs/specs/SPEC-048-policy-testing-rollout-controls/plan.md#L101-L114)
+- [docs/agentic-aiops-platform/release-notes/2026-09-02-spec-048-policy-testing-rollout-controls.md:16-25](file://docs/agentic-aiops-platform/release-notes/2026-09-02-spec-048-policy-testing-rollout-controls.md#L16-L25)
+- [docs/guides/configuration-reference.md:300-323](file://docs/guides/configuration-reference.md#L300-L323)

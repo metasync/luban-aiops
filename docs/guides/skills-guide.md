@@ -55,12 +55,22 @@ Rules that matter for day-2 operations:
 - `title` (≤ 200 chars) and `description` (≤ 500 chars) are **required**;
   `tags` (≤ 10), `version`, `source_url` are optional. Unknown keys are
   rejected.
+- **Web-check skills (SPEC-049):** the optional `web_target` key declares
+  the flow's target URL (absolute http/https, ≤ 2048 chars) and
+  `risk_class` (`read` or `write`) declares whether the flow needs
+  interactions. `risk_class` requires `web_target`; without `risk_class`
+  the flow defaults to `read`. When the agent opens `web_target` with
+  `web.navigate(skill_id=...)`, the gateway binds the flow and enforces
+  its risk class (write-class flows get exactly one HITL gate before any
+  interaction).
 - Body ≤ 64 KiB. Split long guides.
 - Moving or renaming a file changes its `skill_id` — intentionally, so stale
   citations become visible. Duplicate slugs within one source are rejected;
   across sources they are fine (ids are namespaced).
 - `README.md` and `NOTICE` files are skipped by ingestion.
-- No secrets, hostnames, or customer data in skill bodies.
+- No secrets in skill bodies. `web_target` may name the check target's
+  host, but credentials always come from the gateway's credential sets
+  (`web.fill_credential`) — never from a skill.
 - Adapted open-source content must keep `source_url` pointing upstream and a
   `NOTICE` file in the source root (project, URL, license).
 

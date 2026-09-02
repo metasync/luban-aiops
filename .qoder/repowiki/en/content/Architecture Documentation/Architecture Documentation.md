@@ -15,6 +15,8 @@
 - [policy-specification.md](file://docs/agentic-aiops-platform/policy-specification.md)
 - [delivery-roadmap.md](file://docs/agentic-aiops-platform/delivery-roadmap.md)
 - [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
+- [SPEC-048-policy-testing-rollout-controls/spec.md](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md)
+- [SPEC-049-browser-web-check-tools/spec.md](file://docs/specs/SPEC-049-browser-web-check-tools/spec.md)
 - [main.py](file://products/platform-gateway/src/platform_gateway/main.py)
 - [app.py](file://products/platform-gateway/src/platform_gateway/app.py)
 - [router.py](file://products/platform-gateway/src/platform_gateway/api/router.py)
@@ -22,6 +24,7 @@
 - [token_verifier.py](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py)
 - [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [metadata.py](file://products/platform-gateway/src/platform_gateway/metadata.py)
+- [policy-default.yaml](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml)
 - [main.py](file://products/tool-gateway/src/tool_gateway/main.py)
 - [app.py](file://products/tool-gateway/src/tool_gateway/app.py)
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -30,6 +33,8 @@
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [metadata.py](file://products/tool-gateway/src/tool_gateway/metadata.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 - [main.py](file://products/agent-platform/src/agent_service/main.py)
 - [app.py](file://products/agent-platform/src/agent_service/app.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -86,11 +91,11 @@
 
 ## Update Summary
 **Changes Made**
-- Updated version lockstep to v0.25.2 across all platform services (platform-gateway, tool-gateway, execution-runtime, agent-service, audit-service)
-- Enhanced portal rendering documentation with bounded-pane single-sourced height and post-motion re-measure race fix
-- Added detailed operator portal polish changes including pinned chrome for bounded panes and digest tab renaming
-- Updated deployment topology to reflect current service versions and runtime configurations
-- Enhanced troubleshooting guide with latest known issues and resolution strategies
+- Enhanced policy configuration section with detailed 5-step lifecycle including provenance fingerprinting and explicit no hot-reload capability statement
+- Expanded tool-gateway description to include new connector types for incidents and browser web-checks (SPEC-049)
+- Updated architecture overview to reflect enhanced policy enforcement capabilities
+- Added comprehensive documentation for browser-based web application check tools
+- Enhanced deployment topology to support browser sidecar containers and credential management
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -98,16 +103,18 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
-10. [Appendices](#appendices)
+6. [Policy Configuration and Enforcement](#policy-configuration-and-enforcement)
+7. [Tool Gateway Connectors](#tool-gateway-connectors)
+8. [Dependency Analysis](#dependency-analysis)
+9. [Performance Considerations](#performance-considerations)
+10. [Troubleshooting Guide](#troubleshooting-guide)
+11. [Conclusion](#conclusion)
+12. [Appendices](#appendices)
 
 ## Introduction
 This document provides a comprehensive architectural overview of the Luban AIOps Platform. It describes the microservices-based design, service boundaries, data flows, and integration points. The platform has undergone significant architectural evolution with the introduction of an **isolated execution worker service** that fundamentally changes how approved mutating actions are executed, shifting from in-process to isolated worker execution model. This change enhances security boundaries, reduces blast radius, and improves operational reliability. The platform now features a dual-gateway pattern (platform-gateway for portal-facing operations and tool-gateway for tool execution) combined with a dedicated execution-runtime worker for secure mutation execution. Key architectural decisions are captured in Architectural Decision Records (ADRs), technology stack choices include FastAPI, Redis, Kubernetes, and OIDC integration, along with system context diagrams showing external dependencies and internal service communication. The platform uses a canonical hostname strategy with `https://aiops.luban.metasync.cc` as the primary entry point and `https://aiops.luban.k8s.orb.local` as a fallback, with OIDC callbacks pinned to the canonical hostname for reliable authentication flows.
 
-**Updated** - Version 0.25.2 brings refined portal rendering capabilities with single-sourced bounded pane heights and improved overflow detection, ensuring consistent user experience across different content types while maintaining the core architectural integrity established in previous releases.
+**Updated** - Version 0.25.2 brings refined portal rendering capabilities with single-sourced bounded pane heights and improved overflow detection, ensuring consistent user experience across different content types while maintaining the core architectural integrity established in previous releases. The platform now includes enhanced policy configuration with provenance fingerprinting and expanded tool-gateway capabilities including browser-based web application checks.
 
 ## Project Structure
 The repository is organized into product services, shared contracts, platform operations, and documentation:
@@ -126,7 +133,7 @@ The repository is organized into product services, shared contracts, platform op
 - Docs:
   - adr: Architectural Decision Records.
   - agentic-aiops-platform: Reference architecture, identity/authorization design, policy specification, and runtime options.
-  - specs: Feature specifications and plans including SPEC-038 for isolated execution worker.
+  - specs: Feature specifications and plans including SPEC-038 for isolated execution worker and SPEC-049 for browser web-check tools.
 
 ```mermaid
 graph TB
@@ -148,6 +155,7 @@ OIDC["OIDC Provider"]
 K8S["Kubernetes Cluster"]
 REDIS["Redis"]
 POSTGRES["PostgreSQL"]
+BROWSER["Browser Sidecar"]
 end
 OP --> PG
 PG --> AP
@@ -165,6 +173,7 @@ SC --> AP
 SC --> IB
 SC --> ERW
 AS --> POSTGRES
+TG --> BROWSER
 ```
 
 **Diagram sources**
@@ -251,6 +260,7 @@ participant Agent as "Agent Platform"
 participant Worker as "Execution Runtime Worker"
 participant ToolGW as "Tool Gateway"
 participant K8S as "Kubernetes"
+participant Browser as "Browser Sidecar"
 participant Redis as "Redis"
 participant Postgres as "PostgreSQL"
 Client->>Portal : HTTP Request (Chat/Sessions)
@@ -263,7 +273,9 @@ Agent->>Worker : Handoff Signed Execution (approved mutation)
 Worker->>Worker : Verify Signature & Digest
 Worker->>ToolGW : Execute Tool (with delegated token)
 ToolGW->>K8S : Execute Tool
+ToolGW->>Browser : Execute Web Check (if applicable)
 K8S-->>ToolGW : Execution Result
+Browser-->>ToolGW : Web Check Result
 ToolGW-->>Worker : Tool Result
 Worker->>Postgres : Write Signed Receipt
 Worker-->>Agent : Execution Result
@@ -283,6 +295,7 @@ Portal-->>Client : Final Response
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 
 **Section sources**
 - [part-2-reference-architecture.md](file://docs/agentic-aiops-platform/part-2-reference-architecture.md)
@@ -326,6 +339,7 @@ class TokenVerifier {
 class PolicyEngine {
 +evaluate(settings, roles, action) Decision
 +record_decision(action, decision) void
++bundle_metadata() dict
 }
 class AgentClient {
 +health(settings) dict
@@ -351,18 +365,19 @@ PlatformGatewayService --> AgentClient : "uses"
 - [metadata.py](file://products/platform-gateway/src/platform_gateway/metadata.py)
 
 ### Tool Gateway (Tool Execution Framework)
-**Updated** - Now focused exclusively on tool execution and connector management
+**Updated** - Now focused exclusively on tool execution and connector management with expanded connector types
 
 **Responsibilities:**
 - Manages tool registry and connector implementations.
 - Provides tools:list and tools:invoke endpoints with strict policy enforcement.
 - Implements deterministic redaction choke point for security-sensitive outputs.
 - Orchestrates tool execution via Kubernetes connector with proper audit trails.
+- Supports browser-based web application checks with flow binding and deviation guards.
 
 **Key modules:**
 - API router with health and tools endpoints only.
 - Services: gateway service with tool invocation orchestration, policy enforcement, and redaction.
-- Tools: registry, base classes, Kubernetes connector, and redaction utilities.
+- Tools: registry, base classes, Kubernetes connector, incidents connector, browser connector, and redaction utilities.
 
 ```mermaid
 flowchart TD
@@ -371,8 +386,13 @@ Validate --> ResolveIdentity["Resolve Identity Context"]
 ResolveIdentity --> PolicyCheck{"Policy Allows?"}
 PolicyCheck -- "No" --> Deny["Return Denied Response"]
 PolicyCheck -- "Yes" --> Dispatch["Dispatch to Tool Registry"]
-Dispatch --> Execute["Execute Tool via Connector"]
-Execute --> Redact["Apply Redaction"]
+Dispatch --> ConnectorType{"Connector Type"}
+ConnectorType -- "Kubernetes" --> K8SExec["Execute K8s Operation"]
+ConnectorType -- "Incidents" --> IncidentsExec["Query Incident Service"]
+ConnectorType -- "Browser" --> BrowserExec["Execute Web Check"]
+K8SExec --> Redact["Apply Redaction"]
+IncidentsExec --> Redact
+BrowserExec --> Redact
 Redact --> Audit["Audit Log Entry"]
 Audit --> Return["Return Response"]
 ```
@@ -381,6 +401,9 @@ Audit --> Return["Return Response"]
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
+- [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 
 **Section sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -388,6 +411,8 @@ Audit --> Return["Return Response"]
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 - [metadata.py](file://products/tool-gateway/src/tool_gateway/metadata.py)
 
 ### Execution Runtime Worker (Isolated Mutation Executor)
@@ -531,12 +556,147 @@ IdentityBroker-->>Client : Token Status
 - [config.py](file://products/identity-broker/src/identity_service/core/config.py)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 
+## Policy Configuration and Enforcement
+**New** - Comprehensive policy configuration system with provenance tracking and controlled rollout
+
+The platform implements a sophisticated policy configuration system with a 5-step lifecycle that ensures safe and auditable policy changes:
+
+### 5-Step Policy Lifecycle
+
+#### Step 1: Bundle Authoring and Version Management
+- Policy bundles are YAML files defining rules for action authorization
+- Each bundle contains a `version` field that must be bumped on every rule change
+- Bundles follow a strict schema with role-based access control rules
+- Default bundled policies provide baseline security posture
+
+#### Step 2: Bundle Loading and Validation
+- Policy engines load bundles at startup with path-keyed caching
+- Bundles are validated against schema constraints during loading
+- Invalid bundles cause immediate startup failure (fail-fast posture)
+- Both platform-gateway and tool-gateway maintain separate policy engines
+
+#### Step 3: Provenance Fingerprinting
+- SHA-256 content hash computed at load time for exact bundle text
+- Hash exposed through transparency surfaces (`GET /api/v1/policy/matrix`)
+- Readiness/health endpoints include bundle provenance metadata
+- Enables operators to verify deployed bundle matches intended version
+
+#### Step 4: Scenario Testing and Rollout Controls
+- Scenario-expectation harness validates policy changes don't silently alter grants
+- `make verify` runs scenario tests alongside existing validation
+- `make policy-diff` generates impact reports comparing bundle versions
+- Explicitly documented no hot-reload capability - requires pod restart
+
+#### Step 5: Live Enforcement and Monitoring
+- Loaded bundles cached per configured path for performance
+- Policy evaluation happens on each request with deny-by-default semantics
+- Approval tiers (tier_1, tier_2) gate sensitive operations
+- Audit trails capture all policy decisions and approval workflows
+
+### Key Security Features
+
+**Provenance Tracking**: Every loaded bundle gets a unique SHA-256 hash computed from its exact content, enabling operators to verify which policy bundle is actually enforced at runtime.
+
+**Controlled Rollout**: The explicit no hot-reload capability ensures policy changes go through proper review and testing processes before deployment.
+
+**Scenario Testing**: Automated testing prevents accidental grant changes by validating expected outcomes for all role-action combinations.
+
+**Approval Workflows**: Multi-tier approval system for sensitive operations, with tier_2 requiring designated approvers distinct from requesters.
+
+```mermaid
+flowchart TD
+A["Author Policy Bundle"] --> B["Bump Version Number"]
+B --> C["Run make verify<br/>Scenario Tests"]
+C --> D{"Tests Pass?"}
+D -- "No" --> E["Fix Policy Rules"]
+E --> C
+D -- "Yes" --> F["Run make policy-diff<br/>Review Changes"]
+F --> G["Commit & Deploy"]
+G --> H["Pod Restart Required<br/>(No Hot Reload)"]
+H --> I["Bundle Loaded & Cached"]
+I --> J["SHA-256 Hash Computed"]
+J --> K["Live Enforcement Active"]
+```
+
+**Diagram sources**
+- [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
+- [policy-default.yaml](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml)
+
+**Section sources**
+- [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
+- [policy-default.yaml](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml)
+- [SPEC-048-policy-testing-rollout-controls/spec.md](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md)
+
+## Tool Gateway Connectors
+**New** - Expanded connector ecosystem supporting diverse external systems
+
+The tool-gateway now supports multiple connector types, each providing specialized functionality for different external systems:
+
+### Kubernetes Connector
+- **Purpose**: Execute Kubernetes operations with RBAC enforcement
+- **Risk Levels**: Read operations (list, get) vs. Mutating operations (delete, create)
+- **Security**: Strict parameter validation, resource scoping, and audit logging
+- **Use Cases**: Pod management, service discovery, configuration inspection
+
+### Incidents Connector (SPEC-015)
+- **Purpose**: Read-only access to incident management system
+- **Tools**: `incidents.list`, `incidents.get`
+- **Features**: Filtered listing by status/severity/source, detailed incident retrieval
+- **Security**: Parameter validation, upstream error mapping, structured evidence
+- **Integration**: Authenticates with incident-service using gateway-held credentials
+
+### Browser Connector (SPEC-049)
+- **Purpose**: Stateful browser automation for web application health checks
+- **Architecture**: Chromium headless shell sidecar container with CDP communication
+- **Security**: Origin allowlists, flow binding, deviation guards, credential sets
+- **Tools**: 
+  - Read tier: `web.navigate`, `web.snapshot`, `web.screenshot`, `web.fill_credential`
+  - Write tier: `web.click`, `web.type` (require approval)
+- **Flow Management**: Skill-declared flows with risk classification and step budgets
+- **Evidence**: Screenshots, snapshots, and interaction logs in audit trail
+
+### Connector Registration and Risk Management
+Each connector registers its tools with the registry, specifying risk levels and categories. The platform enforces risk-tier admission controls:
+- **Read tools**: Require `tools:invoke` permission
+- **Write tools**: Require `tools:mutate` permission plus mutating flag enabled
+- **Auto-allow exclusion**: Interaction tools cannot be auto-allowed
+
+```mermaid
+graph LR
+subgraph "Tool Gateway Connectors"
+KC["Kubernetes Connector"]
+IC["Incidents Connector"]
+BC["Browser Connector"]
+end
+subgraph "External Systems"
+K8S["Kubernetes API"]
+INC["Incident Service"]
+WEB["Web Applications"]
+end
+KC --> K8S
+IC --> INC
+BC --> WEB
+```
+
+**Diagram sources**
+- [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+
+**Section sources**
+- [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [SPEC-049-browser-web-check-tools/spec.md](file://docs/specs/SPEC-049-browser-web-check-tools/spec.md)
+
 ## Dependency Analysis
 **Updated** - Reflects the new triple-layer architecture with execution-runtime worker and enhanced hostname routing
 
 The platform exhibits clear separation of concerns with well-defined interfaces:
 - **Platform Gateway** depends on Token Verifier, Policy Engine, and Agent Client for portal operations.
-- **Tool Gateway** depends on Tool Registry, Policy Engine, and Kubernetes Connector for tool execution.
+- **Tool Gateway** depends on Tool Registry, Policy Engine, and multiple connectors (Kubernetes, Incidents, Browser) for tool execution.
 - **Execution Runtime Worker** depends on Tool Gateway, Execution Signing, and PostgreSQL for record storage.
 - **Agent Platform** depends on Session Store (Redis), AI Providers, and Execution Worker Client.
 - **Identity Broker** depends on OIDC Provider with canonical hostname callback configuration.
@@ -550,6 +710,8 @@ PG --> AC["Agent Client"]
 TG["Tool Gateway"] --> TR["Tool Registry"]
 TG --> PE2["Policy Engine"]
 TG --> KC["K8s Connector"]
+TG --> IC["Incidents Connector"]
+TG --> BC["Browser Connector"]
 ERW["Execution Runtime Worker"] --> TG
 ERW --> ES["Execution Signing"]
 ERW --> PG2["PostgreSQL"]
@@ -561,6 +723,7 @@ PG --> AP
 PG --> IB
 AP --> ERW
 ERW --> TG
+BC --> BROWSER["Browser Sidecar"]
 ```
 
 **Diagram sources**
@@ -572,6 +735,8 @@ ERW --> TG
 - [token_verifier.py](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py)
 - [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
+- [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
 - [config.py](file://products/identity-broker/src/identity_service/core/config.py)
@@ -593,6 +758,8 @@ ERW --> TG
 - Bounded timeouts prevent resource exhaustion during worker unavailability scenarios.
 - **Updated** - Canonical hostname routing ensures optimal DNS resolution and avoids unnecessary redirects, improving authentication flow performance.
 - **Updated** - Bounded pane rendering optimizations reduce DOM manipulation overhead and improve portal responsiveness for large documents.
+- **Updated** - Browser connector uses connection pooling and session TTL management to optimize resource usage.
+- **Updated** - Policy bundle caching eliminates repeated file I/O and parsing overhead.
 
 ## Troubleshooting Guide
 Common issues and strategies:
@@ -607,6 +774,8 @@ Common issues and strategies:
 - **Observability gaps**: ensure metrics and logs are emitted consistently across all services.
 - **Updated** - **Hostname-related issues**: Ensure canonical hostname `https://aiops.luban.metasync.cc` is properly configured in DNS and SSL certificates. If using fallback hostname `https://aiops.luban.k8s.orb.local`, note that OIDC callbacks will still redirect to the canonical hostname due to browser PKCE storage limitations.
 - **Updated** - **Portal rendering issues**: Check bounded pane CSS custom properties and overflow detection. The 320px bound is now single-sourced via `--bounded-pane-max-height` custom property, eliminating drift between presentation and affordance logic.
+- **Updated** - **Policy configuration issues**: Verify bundle version numbers match expectations, check provenance hashes on transparency surfaces, and ensure scenario tests pass before deployment.
+- **Updated** - **Browser connector issues**: Check origin allowlist configuration, skill declarations, and credential set mounting. Verify chromium-headless-shell sidecar is running and accessible via CDP.
 
 **Section sources**
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
@@ -619,7 +788,7 @@ Common issues and strategies:
 - [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
 
 ## Conclusion
-The Luban AIOps Platform has evolved to a robust microservices architecture centered around a **triple-layer execution model**. The **platform-gateway** serves as the portal-facing edge with authentication, authorization, and agent interaction capabilities, the **tool-gateway** specializes in secure tool execution and connector management, and the **execution-runtime worker** provides isolated execution of approved mutating actions with tamper-evident signatures and single-flight idempotency. This architectural evolution significantly improves security boundaries, reduces blast radius, and enhances operational reliability. The use of Redis for session durability, PostgreSQL for execution records, Kubernetes for orchestration, and OIDC for secure authentication ensures scalability, reliability, and security. Clear ADRs guide architectural evolution, while shared contracts and observability conventions promote consistency across services. **Updated** - Version 0.25.2 brings refined portal rendering capabilities with single-sourced bounded pane heights and improved overflow detection, ensuring consistent user experience across different content types while maintaining the core architectural integrity established in previous releases.
+The Luban AIOps Platform has evolved to a robust microservices architecture centered around a **triple-layer execution model**. The **platform-gateway** serves as the portal-facing edge with authentication, authorization, and agent interaction capabilities, the **tool-gateway** specializes in secure tool execution and connector management, and the **execution-runtime worker** provides isolated execution of approved mutating actions with tamper-evident signatures and single-flight idempotency. This architectural evolution significantly improves security boundaries, reduces blast radius, and enhances operational reliability. The use of Redis for session durability, PostgreSQL for execution records, Kubernetes for orchestration, and OIDC for secure authentication ensures scalability, reliability, and security. Clear ADRs guide architectural evolution, while shared contracts and observability conventions promote consistency across services. **Updated** - Version 0.25.2 brings refined portal rendering capabilities with single-sourced bounded pane heights and improved overflow detection, ensuring consistent user experience across different content types while maintaining the core architectural integrity established in previous releases. The platform now includes enhanced policy configuration with provenance fingerprinting and expanded tool-gateway capabilities including browser-based web application checks.
 
 ## Appendices
 
@@ -636,6 +805,8 @@ The Luban AIOps Platform has evolved to a robust microservices architecture cent
 - **Updated** - DNS configuration for both `aiops.luban.metasync.cc` (canonical) and `aiops.luban.k8s.orb.local` (fallback) hostnames.
 - **Updated** - SSL certificates covering both hostnames for HTTPS access.
 - **Updated** - Version lockstep maintained at 0.25.2 across all platform services.
+- **Updated** - Optional chromium-headless-shell sidecar container for browser connector functionality.
+- **Updated** - Credential set secret mounts for browser connector authentication.
 
 ```mermaid
 graph TB
@@ -649,6 +820,7 @@ UI["Operator Portal Deployment"]
 AS["Audit Service Deployment"]
 REDIS["Redis Service"]
 POSTGRES["PostgreSQL Service"]
+BROWSER["Browser Sidecar Container"]
 end
 subgraph "External"
 OIDC["OIDC Provider"]
@@ -664,6 +836,7 @@ AG --> REDIS
 ERW --> TGW
 ERW --> POSTGRES
 TGW --> OIDC
+TGW --> BROWSER
 AS --> POSTGRES
 ```
 
@@ -694,6 +867,7 @@ AS --> POSTGRES
 - **New**: Platform gateway extraction separates portal-facing operations from tool execution for improved security and maintainability.
 - **New**: Isolated execution worker provides infrastructure-enforced isolation for approved mutating actions with tamper-evident signatures and single-flight idempotency.
 - **New**: Canonical hostname strategy with OIDC callback pinning ensures reliable authentication flows while supporting fallback access patterns.
+- **New**: Policy configuration system with provenance tracking and controlled rollout procedures.
 
 **Section sources**
 - [adr/0001-adopt-spec-driven-development.md](file://docs/adr/0001-adopt-spec-driven-development.md)
@@ -708,11 +882,14 @@ AS --> POSTGRES
 - PostgreSQL: Durable execution record storage with first-write-wins semantics.
 - Kubernetes: Container orchestration with scaling and self-healing capabilities.
 - OIDC: Standardized identity and authorization flow with canonical hostname support.
+- **Updated**: Playwright/Chromium: Headless browser automation for web application health checks.
+- **Updated**: YAML: Policy configuration format with schema validation and provenance tracking.
 
 **Section sources**
 - [agent-platform-runtime-options.md](file://docs/agentic-aiops-platform/agent-platform-runtime-options.md)
 - [policy-specification.md](file://docs/agentic-aiops-platform/policy-specification.md)
 - [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
+- [SPEC-049-browser-web-check-tools/spec.md](file://docs/specs/SPEC-049-browser-web-check-tools/spec.md)
 - [delivery-roadmap.md](file://docs/agentic-aiops-platform/delivery-roadmap.md)
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 

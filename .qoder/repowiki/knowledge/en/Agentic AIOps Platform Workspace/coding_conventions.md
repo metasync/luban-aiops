@@ -1,6 +1,6 @@
-- Each product exposes a FastAPI-style app via `src/<pkg>/app.py` and a CLI entrypoint in `main.py`, paired with a `metadata.py` describing service identity.
-- Product source trees follow a fixed layout of `api/` (routes + router), `services/` (business logic), `core/` (config, observability, runtime bootstrap), and `schemas/` (Pydantic models or contract references).
-- Cross-product contracts are defined once as JSON Schema files under `shared/shared-contracts/schemas/` and consumed by multiple products rather than redefined locally.
-- Policy configuration is centralized in `shared/shared-contracts/policies/policy-default.yaml` and synchronized into each consumer product via the `make sync-policy` target.
-- Every Python product pins its interpreter version in a local `.python-version` file alongside a `pyproject.toml` and `uv.lock`, so container builds honor the same Python target.
-- Per-product `Dockerfile` and `Makefile` are self-contained and invoked from the root Makefile via `$(MAKE) -C products/$$p <target>`, keeping cross-cutting orchestration out of individual products.
+- Each product exposes a `create_app()` factory in `src/<service>/app.py` that configures logging, mounts an HTTP middleware that logs method/path/status/duration with an `x-request-id` correlation ID, includes the router, and wires up metrics and telemetry before returning the FastAPI instance.
+- Per-service metadata (`SERVICE_NAME`, `SERVICE_TITLE`, `SERVICE_VERSION`) is read from a local `metadata.py` module rather than hard-coded in `app.py`, enabling coordinated versioning via the root `VERSION` file.
+- Cross-service communication uses JSON Schema files under `shared/shared-contracts/schemas/` as the single source of truth for request/response/event shapes, validated by scripts in `shared/shared-contracts/scripts/`.
+- Policy enforcement is centralized around a canonical `policies/policy-default.yaml` copied into each consuming product via `make sync-policy`, with evaluation semantics defined in `shared/shared-contracts/README.md` (deny-by-default, explicit deny overrides allow, priority wins).
+- Connectors and optional features are registered lazily inside `_build_tool_registry()` based on settings flags (e.g. `k8s_enabled`, `elastic_enabled`, `skills_service_url`), keeping unused dependencies out of the process until needed.
+- Observability follows the shared conventions: Prometheus `/metrics` is always enabled, OTLP push is opt-in via `OTEL_ENABLED`, and `x-request-id` is bridged into trace context across gateway-to-service calls.
