@@ -41,7 +41,11 @@ every guard enforced server-side in tool-gateway:
    (empty = deny all): every navigation is re-checked gateway-side
    and off-allowlist origins are denied with
    `BROWSER_ORIGIN_NOT_ALLOWED`, regardless of what a skill or the
-   model requests.
+   model requests. Read-tier captures (`web.snapshot`,
+   `web.screenshot`) also re-check the live origin before producing
+   output, so a post-load client-side redirect cannot produce a
+   capture of a page that drifted off the allowlist or off the bound
+   flow.
 3. **Skill authoring fields (R-3).** skills-hub frontmatter gains
    optional `web_target` and `risk_class` fields, validated and
    carried through ingestion and search, so web-check runbooks
@@ -65,7 +69,9 @@ every guard enforced server-side in tool-gateway:
    into `dev-k8s` permanently, merges `GATEWAY_BROWSER_ENABLED=true`
    plus the dev allowlist into the ConfigMap, applies the
    strategic-merge patch adding a pod-local
-   `chromedp/headless-shell` sidecar (CDP on 9222, no Service) to
+   `chromedp/headless-shell` sidecar (CDP pinned to loopback:9222,
+   no Service, defense-in-depth NetworkPolicy denies cross-pod
+   ingress on the CDP port) to
    tool-gateway, and ships the `browser-check-target` sample app
    (static login + status pages) with the sample
    `platform-runbooks/web-checks/InventoryHealth.md` skill.
