@@ -1,0 +1,1 @@
+Each spec directory ships its own `plan.md` and `tasks.md` alongside `spec.md`; delivery gates include `make verify` (product suites, overlay rendering, policy/version checks), `make sync-policy`/`make validate-policy` for policy bundle updates, and Kustomize overlay validation for both enabled/disabled Elastic configuration.

@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: specs/browser_tools_specs
+title: Browser Web-Check Tools Specifications (SPEC-049 & SPEC-050)
+scope:
+    - docs/specs/SPEC-049-browser-web-check-tools/
+    - docs/specs/SPEC-050-browser-tools-expansion-and-samples/
+source_files: []
+depends_on: []
+related_to:
+    - path: specs/agent_execution_specs

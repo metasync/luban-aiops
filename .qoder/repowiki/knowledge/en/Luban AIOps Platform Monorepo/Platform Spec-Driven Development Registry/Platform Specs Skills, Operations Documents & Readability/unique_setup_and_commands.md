@@ -1,0 +1,1 @@
+Each spec directory ships with a `plan.md`, `spec.md`, and `tasks.md` triad; delivery requires running `make deploy` followed by the e2e smoke script `shared/platform-ops/e2e/skills-demo.sh` (SPEC-014 R-6) and updating living-state docs via `make sync-policy` when new policy actions are introduced (SPEC-039).

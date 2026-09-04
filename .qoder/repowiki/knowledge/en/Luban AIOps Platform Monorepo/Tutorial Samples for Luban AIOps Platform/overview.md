@@ -1,0 +1,1 @@
+Self-contained tutorial samples that package skill documents, demo scripts, and optional target infrastructure to demonstrate end-to-end automation patterns installable into a running cluster via `make deploy-samples`.

@@ -1,0 +1,1 @@
+Each spec directory ships a `plan.md`, `spec.md`, and `tasks.md` triad consumed by the project's living-spec workflow; delivery is gated by `make verify` and CI runs across all three products, with dev Kustomize overlays adding Prometheus scrape annotations and `OTEL_*` env entries defaulting `OTEL_ENABLED=false`.

@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: specs/content_knowledge_specs
+title: 'Platform Specs: Skills, Operations Documents & Readability'
+scope:
+    - docs/specs/SPEC-014-skills-and-grounded-guidance/
+    - docs/specs/SPEC-039-operations-document-repository/
+    - docs/specs/SPEC-041-documents-readability-and-digest-reference/
+source_files: []
+depends_on: []
+related_to: []

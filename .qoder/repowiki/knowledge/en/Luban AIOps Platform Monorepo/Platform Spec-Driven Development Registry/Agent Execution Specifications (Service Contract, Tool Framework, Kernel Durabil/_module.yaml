@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: specs/agent_execution_specs
+title: Agent Execution Specifications (Service Contract, Tool Framework, Kernel Durability)
+scope:
+    - docs/specs/SPEC-002-agent-service-contract/
+    - docs/specs/SPEC-007-tool-execution-framework/
+    - docs/specs/SPEC-017-agent-kernel-utilization-and-durability/
+source_files: []
+depends_on: []
+related_to:
+    - path: specs/browser_tools_specs

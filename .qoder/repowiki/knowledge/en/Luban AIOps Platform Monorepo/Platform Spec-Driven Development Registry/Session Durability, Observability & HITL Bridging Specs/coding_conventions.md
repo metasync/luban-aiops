@@ -1,0 +1,5 @@
+- Specs follow a fixed structure: Status header (status/owner/created/delivered/release slice/related risks), Summary, Motivation, numbered Requirements with Acceptance Criteria, Non-Goals, Impact, Open Questions, and Changelog.
+- Requirements are enumerated R-1, R-2, ... and each carries concrete acceptance criteria that can be verified by tests or CI, rather than narrative prose.
+- Cross-product changes are coordinated through shared JSON schemas under `shared/shared-contracts/schemas/` (e.g., `agent-stream-event.schema.json`, `audit-event.schema.json`, `chat-confirm.schema.json`) instead of ad-hoc payloads.
+- New runtime capabilities are gated behind environment variables (e.g., `SESSION_STORE_BACKEND`, `GATEWAY_ELASTIC_ENABLED`, `AGENT_HITL_CONFIRM_TIMEOUT`) so features can be toggled without code changes.
+- Backward-compatible contract growth uses version bumps on stream schemas (v3→v4→v5) while preserving `additionalProperties: false` discipline and keeping existing frame types byte-stable.

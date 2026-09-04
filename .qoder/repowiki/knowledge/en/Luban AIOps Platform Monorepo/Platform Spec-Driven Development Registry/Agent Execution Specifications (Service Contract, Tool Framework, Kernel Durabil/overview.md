@@ -1,0 +1,1 @@
+Specification documents defining the platform-owned agent-service contract, the read-only tool execution framework bridging AgentScope to Kubernetes, and kernel utilization plus conversation durability via Postgres-backed state persistence.

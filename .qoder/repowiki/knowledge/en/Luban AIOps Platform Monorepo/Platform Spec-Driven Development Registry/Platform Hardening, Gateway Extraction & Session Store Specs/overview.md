@@ -1,0 +1,1 @@
+Specification documents defining Release 1 platform hardening, the split of tool-gateway into platform-gateway and tool-gateway, and migration of agent-platform session storage from Redis to Postgres.

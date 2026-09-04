@@ -1,0 +1,1 @@
+Specification documents defining per-session runtime model switching, a multi-model provider catalog, and a self-hosted Luban OpenAI-compatible provider for the agent platform.

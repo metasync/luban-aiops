@@ -1,0 +1,1 @@
+Playwright (Python) as the automation layer driving a chromium-headless-shell sidecar container via Chrome DevTools Protocol (CDP); skills-hub frontmatter keys web_target and risk_class; Kubernetes overlays (browser-dev) for opt-in deployment with NetworkPolicy and secret-sync wiring.

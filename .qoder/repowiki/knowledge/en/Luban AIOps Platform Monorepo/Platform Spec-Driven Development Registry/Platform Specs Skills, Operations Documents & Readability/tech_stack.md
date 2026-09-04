@@ -1,0 +1,1 @@
+Markdown-based spec format with YAML frontmatter status/metadata; specifications target a FastAPI `skills-hub` service, a Postgres-backed document store behind an interface matching SPEC-013 conventions, and an operator portal using antd dark-theme components.

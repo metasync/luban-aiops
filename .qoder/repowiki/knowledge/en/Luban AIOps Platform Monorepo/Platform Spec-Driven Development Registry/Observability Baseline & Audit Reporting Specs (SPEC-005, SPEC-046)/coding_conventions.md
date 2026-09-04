@@ -1,0 +1,5 @@
+- Specs follow a fixed plan/spec/tasks triad with status/metadata headers and a changelog section recording approved decisions and delivery deviations.
+- Requirements are enumerated as R-N blocks with explicit acceptance criteria, paired with a Design Decisions section that records resolved questions (Q-N) and their trade-offs.
+- New capabilities are gated behind existing policies rather than introducing new actions — SPEC-046 reuses `audit:read` for both summary and export routes.
+- Report shapes are pinned to JSON schemas in `shared/shared-contracts/schemas/` and enforced by contract tests binding Pydantic models to those schemas.
+- Frontend filter vocabularies are derived from shared schema enums and guarded by drift tests so new enum values cannot silently drop out of UI selects.

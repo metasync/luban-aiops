@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: specs/ops_workflow_specs
+title: Operator Workflow Specifications (SPEC-012/015/022)
+scope:
+    - docs/specs/SPEC-012-operator-guide/
+    - docs/specs/SPEC-015-incident-triage-and-collaboration/
+    - docs/specs/SPEC-022-multi-session-operator-workspace/
+source_files: []
+depends_on: []
+related_to: []

@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: specs/ui_portal_specs
+title: Portal Transparency, Framework Rebuild & Confirmation Anchoring Specs
+scope:
+    - docs/specs/SPEC-019-portal-transparency-navigation/
+    - docs/specs/SPEC-023-portal-framework-rebuild/
+    - docs/specs/SPEC-033-confirmation-card-turn-anchoring/
+source_files: []
+depends_on: []
+related_to:
+    - path: specs/remaining_specs

@@ -1,0 +1,5 @@
+- Read-tier browser tools implement observation-only behavior and enforce flow binding via gate_capture rather than consuming step budget or requiring HITL approval.
+- Write-tier browser tools extend _WebInteractionTool to inherit deviation guarding, ref resolution, step counting, and a single flow-level HITL confirmation gate.
+- All browser tools return the standard ToolResult envelope with an evidence block carrying risk_level, duration_ms, executed_at, and source_system=browser — no new result schema is introduced.
+- Credentials are never embedded in skills; they are resolved at runtime from named sets in a secret-mounted JSON file and masked (e.g., *** ) in snapshots and results.
+- Tutorial content is organized as self-contained samples/<name>/ directories containing skill/, demo/, and README/WALKTHROUGH.md, with shared infrastructure referenced from shared/platform-ops/gitops/ rather than duplicated.

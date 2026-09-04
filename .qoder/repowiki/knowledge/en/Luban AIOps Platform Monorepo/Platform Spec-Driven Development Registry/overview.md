@@ -1,0 +1,1 @@
+Central registry of numbered feature specifications that drive the platform's evolution, each authored as a plan/spec/tasks triad following shared templates and tracked through delivery.

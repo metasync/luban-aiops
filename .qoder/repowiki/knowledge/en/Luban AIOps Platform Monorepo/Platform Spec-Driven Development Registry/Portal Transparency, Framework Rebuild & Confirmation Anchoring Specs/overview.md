@@ -1,0 +1,1 @@
+Specification documents for three delivered portal features: a transparency navigation with live permission matrix and workspace inventories, a React/Ant Design X framework rebuild of the operator portal, and confirmation-card anchoring to the user turn that parked each request.

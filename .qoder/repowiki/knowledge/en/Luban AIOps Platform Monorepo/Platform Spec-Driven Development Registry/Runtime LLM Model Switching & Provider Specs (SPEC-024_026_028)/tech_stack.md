@@ -1,0 +1,1 @@
+AgentScope runtime kernel with OpenAI-compatible adapters; environment-driven provider configuration via `AGENTSCOPE_*` and per-provider `*_API_KEY` / `*_MODEL_NAME` / `*_MODELS` knobs; kustomize overlays under `shared/platform-ops/gitops/runtime-profiles/`.

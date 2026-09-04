@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: samples
+title: Tutorial Samples for Luban AIOps Platform
+scope:
+    - samples/
+source_files: []
+depends_on: []
+related_to: []

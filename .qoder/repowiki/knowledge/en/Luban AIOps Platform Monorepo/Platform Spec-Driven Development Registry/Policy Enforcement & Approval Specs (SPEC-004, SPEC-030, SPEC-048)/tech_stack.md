@@ -1,0 +1,1 @@
+YAML-based versioned policy bundles consumed by Python policy engines in `products/platform-gateway` and `products/tool-gateway`; schemas defined as JSON Schema files under `shared/shared-contracts/schemas/`; make targets (`sync-policy`, `verify`, `policy-diff`) orchestrate validation and deployment.

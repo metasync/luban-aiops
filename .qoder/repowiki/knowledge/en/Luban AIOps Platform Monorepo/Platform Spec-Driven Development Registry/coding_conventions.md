@@ -1,0 +1,4 @@
+- Every feature spec follows the three-file structure: plan.md for context and scope, spec.md for requirements and contracts, tasks.md for implementation steps.
+- Specs are named with a leading numeric prefix (SPEC-NNN-) to preserve chronological ordering and enable cross-referencing between related capabilities.
+- Cross-cutting themes group multiple specs into cohesive child modules (e.g., identity & security, policy & approval, observability & audit) rather than treating each spec in isolation.
+- Templates under docs/specs/templates/ define the canonical layout and headings that each spec must follow to remain consistent across the registry.

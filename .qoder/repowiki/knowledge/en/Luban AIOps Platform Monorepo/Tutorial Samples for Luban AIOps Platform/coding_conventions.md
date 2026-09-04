@@ -1,0 +1,5 @@
+- Each sample follows the fixed `<category>/<name>/` layout with `skill/`, `demo/`, and optional `target/` subdirectories, documented in the root README as the canonical structure.
+- Sample skills are pure Markdown documents with YAML frontmatter declaring `title`, `description`, `tags`, `version`, `web_target`, and `risk_class`; they contain no executable code and are installed solely by packing into the `skills-samples` ConfigMap.
+- Deployment scripts are idempotent shell scripts driven by environment variables (`NAMESPACE`, `ACTION`, `SAMPLE`) with `set -eu` and explicit error paths, keeping cluster coupling minimal and testable.
+- Demo scripts assert each prerequisite step sequentially with clear `[N/M]` section headers and fail-fast `fail()` calls, separating deterministic checks from the optional model-driven chat leg guarded by `RUN_CHAT_LEG`.
+- Write-class skills enforce a single-HITL-gate-per-flow invariant by restricting `web.click`/`web.type` to exactly one interaction per flow and using read-tier alternatives (`web.fill_credential`, URL parameters) for all other mutations.

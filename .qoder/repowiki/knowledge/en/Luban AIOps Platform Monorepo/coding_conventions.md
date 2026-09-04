@@ -1,0 +1,5 @@
+- Each product follows the same package layout (`src/<product>/api/`, `core/`, `services/`, `schemas/`, plus `app.py`/`main.py`/`metadata.py`) and ships its own `Dockerfile`, `Makefile`, `pyproject.toml`, and `tests/` suite.
+- Inter-service contracts are defined as JSON schemas in `shared/shared-contracts/schemas/` and validated by shared scripts rather than hand-written client code.
+- Policy enforcement uses a single canonical bundle in `shared/shared-contracts/policies/` that is copied verbatim to both `platform-gateway` and `tool-gateway` via `make sync-policy`.
+- Feature work is scoped to numbered specs under `docs/specs/SPEC-NNN-*`, each authored as a plan/spec/tasks triad derived from the shared templates.
+- Container images are tagged with a coordinated semver-derived IMAGE_TAG computed once by the root Makefile and reused across all products and the dev-k8s overlay.

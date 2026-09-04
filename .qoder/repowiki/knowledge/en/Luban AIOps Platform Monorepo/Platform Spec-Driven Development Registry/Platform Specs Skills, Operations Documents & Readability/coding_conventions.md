@@ -1,0 +1,4 @@
+- Specs use a fixed YAML frontmatter block (`status`, `owner`, `created`, `approved`, `delivered`, `release slice`, `related ADRs`) to track lifecycle state across draft/approved/delivered transitions.
+- Requirements are numbered R-N with explicit acceptance criteria written as testable bullet lists, separating stable requirements from Non-Goals and Open Questions sections.
+- New product capabilities are scoped to existing trust surfaces by routing through established choke points (tool execution framework, policy actions, audit emitter) rather than introducing new authorization or identity paths.
+- Cross-product boundaries are declared via a shared contract schema under `shared/shared-contracts/schemas/` and mirrored in the spec's Impact section listing every touched product and contract.

@@ -1,0 +1,1 @@
+JSON Schema contracts in `shared/shared-contracts/schemas/`; Python `kubernetes-client` for read-only K8s access; AgentScope 2.0.6 kernel with `ReActConfig`/`ContextConfig`/`InjectionConfig`/`ModelConfig`; synchronous `psycopg[binary]` driver for Postgres-backed `AgentState` persistence.

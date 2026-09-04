@@ -1,0 +1,1 @@
+Each spec is tracked by status fields (`draft` → `approved` → `delivered`) and release slices (`R1`–`R5`); delivery gates include updating `CHANGELOG.md`, the spec index, product READMEs, and `make verify` against dev-k8s overlays.

@@ -1,0 +1,1 @@
+Specification documents for three delivered platform capabilities: Redis-backed session durability, Elastic observability connector with evidence panels, and kernel ASK-to-portal confirmation bridging.

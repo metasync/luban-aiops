@@ -1,0 +1,1 @@
+Each spec is tracked through a lifecycle documented in its `spec.md` changelog (draft → approved → delivered); delivery is validated via `make verify` running unit suites across all three Python products plus Kustomize overlay rendering, and SPEC-037 additionally exercises a live HITL leg via `mutating-demo.sh` against the `mutating-dev` profile.

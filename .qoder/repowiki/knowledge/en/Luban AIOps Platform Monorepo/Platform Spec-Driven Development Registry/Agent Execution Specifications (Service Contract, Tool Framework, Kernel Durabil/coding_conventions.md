@@ -1,0 +1,4 @@
+- Specs follow a fixed triad layout — `plan.md`, `spec.md`, `tasks.md` — with status metadata, requirements numbered R-N, acceptance criteria per requirement, and a Changelog tracking draft/approved/in-progress/delivered transitions.
+- Requirements are written as verifiable acceptance criteria prefixed with 'Acceptance criteria:' rather than prose, enabling direct mapping to tests or CI checks.
+- Cross-cutting concerns (identity forwarding, policy actions, audit logging) are declared as explicit requirements (e.g. R-4 identity headers, R-4 `tools:invoke` audit entry, R-3 snapshot timing) instead of being left implicit.
+- Non-goals sections explicitly enumerate deferred work (e.g. write operations, MCP integration, Redis PV) to bound scope and prevent feature creep within a single spec.

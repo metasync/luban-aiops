@@ -1,0 +1,5 @@
+- Specs follow a fixed plan/spec/tasks triad per directory, with status/metadata headers and numbered Requirements (R-N) each carrying testable acceptance criteria.
+- Requirements are paired with explicit Non-Goals sections to constrain scope and defer related work to later release slices.
+- External HTTP contracts are preserved across refactors: byte-compatible request/response shapes and unchanged schema files are enforced via contract tests between gateway and shared schemas.
+- Configuration switches use environment variables with documented defaults (e.g. `GATEWAY_REQUIRE_AUTH`, `SESSION_STORE_BACKEND`, `SESSION_DB_URL`) and fail-open or backward-compatible behavior when underlying dependencies are unavailable.
+- Observability is required for every new capability: structured log events, Prometheus gauges/counters, and `/health` fields must be added alongside functional changes.

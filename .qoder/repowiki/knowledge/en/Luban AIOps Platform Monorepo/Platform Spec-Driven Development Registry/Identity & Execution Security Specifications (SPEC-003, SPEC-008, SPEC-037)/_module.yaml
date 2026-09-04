@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: specs/identity_security_specs
+title: Identity & Execution Security Specifications (SPEC-003, SPEC-008, SPEC-037)
+scope:
+    - docs/specs/SPEC-003-identity-trust-hardening/
+    - docs/specs/SPEC-008-service-to-service-identity/
+    - docs/specs/SPEC-037-signed-execution-requests/
+source_files: []
+depends_on: []
+related_to: []
