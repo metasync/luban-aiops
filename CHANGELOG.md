@@ -11,6 +11,93 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.33.0 — 2026-09-04
+
+### Fixed
+
+- **One HITL gate per mutating browser flow, enforced platform-side
+  (SPEC-051)** — completes SPEC-049 R-4, which specified that "approval
+  unlocks the bound flow's interactions for that session" but was only
+  ever half-implemented (the tool-gateway flow binding, origin allowlist,
+  `risk_class`, and step-budget deviation guard shipped; the
+  agent-platform kernel never collapsed the per-write ASKs). A live
+  password-reset test on v0.32.0 parked an approval card for *every*
+  write-tier browser interaction. The kernel now enforces the invariant:
+  - The first write-tier browser interaction in a `write`-class flow
+    parks exactly one confirmation card through the existing SPEC-020
+    bridge. On approval the kernel records a session-scoped flow
+    authority (`services/flow_approvals.py`) keyed on the chat session
+    **and** the approved flow's identity (`skill_id` + `origin`), and
+    every subsequent write-tier `web.*` interaction in that same flow is
+    admitted without a further card.
+  - Each unlocked write is auto-signed under the approving card's
+    authority (`build_flow_request`: fresh `execution_id`, the call's own
+    `args_digest`, reusing the card's `confirm_id`/`decider_user_id` and
+    the platform signing key) and stays persisted (`execution_requested`),
+    audited, receipted, and gateway-guarded — identical to an
+    approved-card execution (SPEC-037/038).
+  - The kernel maintains the flow identity as a session-scoped
+    `FlowContext` updated from each `web.navigate` result, so the
+    authority is scoped to a real flow: if the session rebinds to a
+    *different* `write`-class flow, `_sign_flow_execution`'s identity
+    guard re-parks a fresh card rather than auto-signing — the ADR-0007
+    cross-flow-rebind trade-off is eliminated, not merely bounded.
+  - Fail-safe by construction: browser write tools never join any
+    auto-allow list (the `test_browser_write_tools_never_auto_allowed_even_if_forced`
+    invariant stays green); a missing precondition, an expired authority,
+    or a rebind makes the signer return `None` and the write parks (ASK).
+    Non-browser mutating tools (`k8s.*`) are unaffected and continue to
+    gate per SPEC-021/030/037.
+- **Password-reset sample reconciled to a single gate (SPEC-051 R-4)** —
+  the sample was internally inconsistent (skill/README/WALKTHROUGH named
+  the admin sign-in click as the single write while the target pages
+  auto-submitted both the login and the reset). The reset form now
+  pre-fills from the URL and does **not** auto-submit, so the sole
+  write-tier interaction — and the single HITL gate — lands on the
+  destructive "Confirm reset" click; login stays read-tier auto-submit.
+  The skill (`ResetUserPassword.md`, v1.1 → v1.2), README, WALKTHROUGH,
+  and `demo.sh` all agree, and the demo's second-card tolerance is
+  removed in favor of a one-card assertion.
+
+### Added
+
+- **Flow-semantic confirmation card (SPEC-051 R-6)** — realizes the
+  second half of SPEC-049 R-4 ("the card names the skill, target origin,
+  and declared steps"). The single card a `write`-class browser flow
+  parks now headlines the **workflow** the operator is approving — the
+  bound skill's declared `title`, `description`, target `origin`, and
+  `risk_class` (e.g. "Reset User Password in Admin Portal") — instead of
+  a bare tool action like `web.click` on "Sign in". The triggering tool
+  action is retained as secondary detail. The headline is assembled from
+  frontmatter that already rides `web.navigate`'s `data["flow"]`:
+  tool-gateway `FlowState` gains `title`/`description` (populated at
+  `bind_flow`, exposed in `to_dict()`), the kernel renders the card from
+  the same maintained `FlowContext` R-1 keys on and carries a
+  `flow_summary` on the confirmation-request frame, and the portal decodes
+  it onto the card. Durable and replayed cards (approvals inbox, session
+  detail) render the same headline via a new nullable `flow_summary`
+  JSONB column on `confirmation_records`. When no flow is bound the card
+  falls back to today's tool-level rendering — no regression. No new
+  contract, policy action, audit event type, or shared schema; no
+  skill-format change.
+- **`AGENT_BROWSER_FLOW_APPROVAL_TTL`** (agent-service, default `900`
+  seconds, `>= 0`) bounds how long a recorded flow approval unlocks
+  writes; an expired approval no longer unlocks (the next write parks
+  again) and `0` disables flow-unlock entirely, restoring the
+  pre-SPEC-051 posture. The tool-gateway deviation guard still bounds
+  every unlocked write regardless of this knob.
+
+### Governance
+
+- Delivered under **ADR-0008** (spec delivery requires requirement-to-test
+  traceability and exercised samples), the gate that would have caught
+  R-4 shipping unimplemented: every SPEC-051 acceptance criterion maps to
+  at least one asserting test in `tasks.md`, and the password-reset
+  `demo.sh` chat leg is exercised in the verification path. **ADR-0007**
+  records the flow-gate trust-model decision (one operator decision per
+  mutating flow, each unlocked write still signed and gateway-guarded).
+  Both ADRs are `accepted`; SPEC-051 is `delivered`.
+
 ## 0.32.0 — 2026-09-04
 
 ### Added

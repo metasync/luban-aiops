@@ -7,6 +7,29 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-04-browser-flow-hitl-gate-enforcement.md`
+  - delivers SPEC-051 (v0.33.0, thirteenth R5 slice): completes SPEC-049
+    R-4 platform-side — one HITL gate per mutating browser flow. The
+    agent-platform kernel now parks exactly one confirmation card for a
+    `write`-class flow's first write-tier interaction, records a
+    session-scoped flow authority keyed on the session **and** the flow
+    identity (`skill_id` + `origin`), and auto-signs every subsequent
+    unlocked `web.*` write under the approving card (still persisted,
+    audited, receipted, and bounded by the gateway origin/risk_class/
+    step-budget deviation guard). A `FlowContext` maintained from each
+    `web.navigate` makes the authority flow-scoped, so a rebind re-parks
+    (the ADR-0007 cross-flow trade-off eliminated);
+    `AGENT_BROWSER_FLOW_APPROVAL_TTL` (default `900`, `0` disables) bounds
+    it. Makes the card flow-semantic (R-6): the headline names the bound
+    skill's title/description/target origin/risk class (e.g. "Reset User
+    Password in Admin Portal") rather than a bare `web.click`, carried
+    from the gateway flow binding through the kernel confirmation frame
+    (and a new durable `flow_summary` JSONB column) to the portal card,
+    with the tool action kept as secondary detail. Reconciles the
+    password-reset sample to a single gate on the destructive "Confirm
+    reset" click. Delivered under ADR-0008 (requirement-to-test
+    traceability + exercised sample); tracked with ADR-0007. No new
+    policy actions, no new audit event types, contracts unchanged
 - `2026-09-04-spec-050-browser-tools-expansion-and-samples.md`
   - delivers SPEC-050 (v0.32.0, twelfth R5 slice): the browser tool
     surface grows from six to fifteen tools — nine new `web.*` tools

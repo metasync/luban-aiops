@@ -81,6 +81,11 @@ What changes are expected to carry:
   [Adding a Tool to the Tool Gateway](docs/guides/adding-a-tool.md)
 - there is no numeric coverage bar; reviewers judge whether the risky
   branches of the change are exercised
+- per ADR-0008, a spec advances to `delivered` only when every `R-x`
+  acceptance criterion maps to at least one asserting test (recorded in the
+  spec's `tasks.md`) and any `samples/` demo the spec ships is exercised by
+  its own demo script in the verification path — "declared delivered" must
+  equal "demonstrably delivered"
 
 ## Change Principles
 
@@ -128,3 +133,5 @@ Use this checklist when a change crosses product boundaries:
 - does the change preserve the three-zone trust model?
 - is user identity preserved for approvals, execution, and audit?
 - is the change aligned to a named release slice?
+- does every acceptance criterion map to a test, and is any shipped sample
+  exercised in the verification path (ADR-0008)?
