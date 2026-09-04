@@ -326,6 +326,45 @@ describe("transcriptToTurns confirmation replay (SPEC-031 R-2)", () => {
   });
 });
 
+// --- Browser-flow headline replay (SPEC-051 R-6) ---
+
+describe("transcriptToTurns browser-flow headline (SPEC-051 R-6)", () => {
+  it("replays the durable flow_summary onto the card as camelCase", () => {
+    const card = transcriptToTurns(TWO_TURNS, null, [
+      recordOf({
+        flow_summary: {
+          skill_id: "samples/password-reset",
+          origin: "http://admin.local",
+          title: "Reset User Password",
+          description: "Reset a user's password in the admin portal",
+          risk_class: "write",
+        },
+      }),
+    ])[1].confirmations[0];
+    expect(card.flowSummary).toEqual({
+      skillId: "samples/password-reset",
+      origin: "http://admin.local",
+      title: "Reset User Password",
+      description: "Reset a user's password in the admin portal",
+      riskClass: "write",
+    });
+  });
+
+  it("leaves flowSummary undefined for a non-browser or pre-spec record", () => {
+    // recordOf() carries no flow_summary — a plain k8s card, and the shape
+    // every record parked before SPEC-051 has. The card falls back to
+    // tool-action rendering.
+    const card = transcriptToTurns(TWO_TURNS, null, [recordOf()])[1]
+      .confirmations[0];
+    expect(card.flowSummary).toBeUndefined();
+    // An explicit null (the durable column's default) maps the same way.
+    const nullCard = transcriptToTurns(TWO_TURNS, null, [
+      recordOf({ flow_summary: null }),
+    ])[1].confirmations[0];
+    expect(nullCard.flowSummary).toBeUndefined();
+  });
+});
+
 // --- Turn-anchored cards (SPEC-033 R-3) ---
 
 describe("transcriptToTurns card turn anchoring (SPEC-033 R-3)", () => {

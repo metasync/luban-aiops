@@ -23,6 +23,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from agent_service.services.flow_approvals import FlowApproval
 from agent_service.services.hitl_confirmations import PendingConfirmation
 
 # Rejection reasons carried by ``execution_rejected`` audit events and
@@ -95,6 +96,42 @@ def build_requests(
         envelope["signature"] = sign_envelope(envelope, key)
         requests.append(envelope)
     return requests
+
+
+def build_flow_request(
+    call_id: str,
+    tool_name: str,
+    parameters: dict[str, Any],
+    flow_approval: FlowApproval,
+    key: str,
+) -> dict[str, Any]:
+    """Sign one auto-unlocked browser write under a flow authority (SPEC-051 R-3).
+
+    A single-call sibling to ``build_requests`` for the kernel's flow-unlock
+    path: after an operator approves a mutating flow's first parked write, each
+    subsequent ``web.*`` write in that same flow is admitted by the permission
+    middleware and signed here under the approving card's authority. The
+    envelope reuses the card's ``confirm_id``/``owner_user_id``/
+    ``decider_user_id`` (ADR-0007 — one operator decision per flow) but carries
+    a fresh ``execution_id``/``call_id`` and the *new* call's ``args_digest``,
+    so the worker's verification (token, required fields, HMAC signature,
+    ``args_digest``, single-flight on ``execution_id``) accepts it exactly like
+    a card-signed request. ``tool_name`` is the canonical dotted gateway name;
+    the tool-gateway deviation guard still bounds the invocation.
+    """
+    envelope: dict[str, Any] = {
+        "execution_id": str(uuid.uuid4()),
+        "confirm_id": flow_approval.confirm_id,
+        "call_id": call_id,
+        "session_id": flow_approval.session_id,
+        "owner_user_id": flow_approval.owner_user_id,
+        "decider_user_id": flow_approval.decider_user_id,
+        "tool_name": tool_name,
+        "args_digest": canonical_digest(parameters),
+        "requested_at": _utc_now_iso(),
+    }
+    envelope["signature"] = sign_envelope(envelope, key)
+    return envelope
 
 
 def build_receipt(

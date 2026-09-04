@@ -63,6 +63,13 @@ class PendingConfirmation:
     # maps ref numbers to human-readable element descriptions so confirmation
     # cards show what element will be clicked/typed into, not just the raw ref.
     browser_element_map: dict[int, str] = field(default_factory=dict)
+    # Flow-semantic card headline (SPEC-051 R-6): the bound browser flow's
+    # summary (skill_id, origin, title, description, risk_class) captured from
+    # the kernel's session-scoped FlowContext at park time. Empty when no flow
+    # is bound (a per-action confirmation), so the card falls back to today's
+    # tool-level rendering. Also the source of the approved flow identity that
+    # ``resume_confirmation`` scopes the FlowApproval to (R-1).
+    browser_flow: dict = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
     resolved: bool = False
     # Single-flight guard set by ``claim`` before a decision streams back:
@@ -132,6 +139,17 @@ class PendingConfirmation:
             str(getattr(tool_call, "name", "") or "")
             for tool_call in self.tool_calls
         ]
+
+    def flow_summary(self) -> dict | None:
+        """The card-level flow headline payload (SPEC-051 R-6), or ``None``.
+
+        Present only when a browser flow is bound to this confirmation, so the
+        portal renders the workflow headline above the per-call tool detail and
+        falls back to tool-level rendering otherwise. Carries the approved flow
+        identity (``skill_id``/``origin``) that ``resume_confirmation`` scopes
+        the flow authority to (R-1).
+        """
+        return dict(self.browser_flow) if self.browser_flow else None
 
 
 def _parse_parameters(tool_call) -> dict:
@@ -212,6 +230,7 @@ class ConfirmationRegistry:
         risk_levels: dict | None = None,
         gateway_names: dict | None = None,
         browser_element_map: dict[int, str] | None = None,
+        browser_flow: dict | None = None,
     ) -> PendingConfirmation:
         pending = PendingConfirmation(
             confirm_id=str(uuid.uuid4()),
@@ -222,6 +241,7 @@ class ConfirmationRegistry:
             risk_levels=dict(risk_levels or {}),
             gateway_names=dict(gateway_names or {}),
             browser_element_map=dict(browser_element_map or {}),
+            browser_flow=dict(browser_flow or {}),
         )
         self._by_session[session_id] = pending
         return pending

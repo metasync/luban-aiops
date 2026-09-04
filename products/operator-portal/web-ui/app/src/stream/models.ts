@@ -67,6 +67,17 @@ export interface PendingCall {
   displayHint?: string;
 }
 
+// SPEC-051 R-6: the card-level browser-flow headline. Mirrors the kernel's
+// FlowContext.summary() — the workflow the operator is approving, named by
+// the skill's human-readable intent rather than a bare tool action.
+export interface FlowSummary {
+  skillId?: string;
+  origin?: string;
+  title?: string;
+  description?: string;
+  riskClass?: string;
+}
+
 export interface ConfirmationRequestFrame {
   kind: "confirmation_request";
   confirmId: string;
@@ -74,6 +85,10 @@ export interface ConfirmationRequestFrame {
   pendingCalls: PendingCall[];
   // SPEC-021 R-3: any non-read pending call makes the batch mutating.
   mutating: boolean;
+  // SPEC-051 R-6: browser-flow headline. When present the card leads with
+  // the workflow intent (skill title/description + origin) instead of a
+  // bare tool action like web.click; absent for non-browser cards.
+  flowSummary?: FlowSummary;
 }
 
 export interface ConfirmationResultFrame {

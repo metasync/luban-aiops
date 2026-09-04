@@ -16,16 +16,22 @@
 # Optional chat leg (RUN_CHAT_LEG=true): a scripted chat asks the
 # agent to reset a user's password via the ResetUserPassword skill.
 # The agent drives the browser through the admin login, user list,
-# and reset form. The admin sign-in web.click parks the first HITL
-# confirmation card; the demo approves it. After approval, the agent
-# navigates to the reset URL with the new password; the admin panel
-# auto-fills and auto-submits. If the model also tries to click
-# "Confirm reset" on the auto-submitting form, a second card is
-# parked and approved. The demo then verifies the "Password reset
-# successfully" outcome and the durable proof (approved card(s)
-# carrying signed web.click execution receipts). The chat leg depends
-# on the model choosing the right tools, so it is opt-in like the
-# other demos' chat legs.
+# and reset form. Authentication is read-tier: the agent fills the
+# admin credentials and the login form auto-submits (legacy SSO), so
+# no click parks a card there. The agent then navigates to the reset
+# URL (the form pre-fills but does not submit) and performs its
+# write-tier interactions (e.g. clicking "Confirm reset"). The FIRST
+# write-tier browser interaction parks exactly one HITL confirmation
+# card; the demo approves it and the kernel resumes the flow.
+# SPEC-051 enforces the one-gate-per-flow invariant kernel-side: every
+# subsequent write-tier web.* interaction in the same flow is
+# auto-signed under that one approval rather than parking its own
+# card, so even a deviating model (which may mix web.click with
+# web.evaluate) yields a single card. The demo then verifies the
+# "Password reset successfully" outcome and the durable proof: exactly
+# one approved card whose write-tier executions ALL carry signed
+# receipts. The chat leg depends on the model choosing the right
+# tools, so it is opt-in like the other demos' chat legs.
 #
 # Prerequisites:
 #   - kubectl context pointed at the dev cluster
@@ -214,8 +220,8 @@ print(urllib.parse.quote(sys.argv[1]))" "$CHAT_MESSAGE")") \
     || fail "chat stream request failed"
 
   printf '%s' "$STREAM_OUTPUT" | grep -q '"type": *"confirmation_request"\|"type":"confirmation_request"' \
-    || fail "no confirmation_request frame (did the model reach the admin sign-in web.click?)"
-  echo "admin sign-in write-tier interaction parked the first confirmation card"
+    || fail "no confirmation_request frame (did the model reach a write-tier browser interaction?)"
+  echo "the first write-tier browser interaction parked the single confirmation card"
 
   CONFIRM_ID=$(printf '%s' "$STREAM_OUTPUT" | python3 -c "
 import json, sys
@@ -240,44 +246,17 @@ for line in sys.stdin:
     "$GATEWAY_URL/api/v1/chat/confirm") || fail "approver approve call failed"
   printf '%s' "$CONFIRM_OUTPUT" | grep -q '"status": *"approved"\|"status":"approved"' \
     || fail "confirmation_result did not report the approval: $CONFIRM_OUTPUT"
-  echo "first approval applied; the kernel resumed the password-reset flow"
+  echo "approval applied; the kernel resumed and completed the password reset"
 
+  # SPEC-051: exactly one gate per flow. The single approval above
+  # resumes the flow to completion — there is no second card to handle.
   FINAL_OUTPUT="$CONFIRM_OUTPUT"
-
-  # The model may park a second card if it tries to click "Confirm reset"
-  # on the auto-submitting form. Handle both cases.
-  SECOND_CONFIRM_ID=$(printf '%s' "$CONFIRM_OUTPUT" | python3 -c "
-import json, sys
-for line in sys.stdin:
-    line = line.strip()
-    if not line.startswith('data:'):
-        continue
-    try:
-        frame = json.loads(line[5:].strip())
-    except ValueError:
-        continue
-    if frame.get('type') == 'confirmation_request':
-        print(frame.get('confirm_id', ''))
-        break
-")
-
-  if [ -n "$SECOND_CONFIRM_ID" ]; then
-    echo "model parked a second confirmation card; approving"
-    FINAL_OUTPUT=$(curl -fsS --max-time 300 -X POST \
-      -H "Authorization: Bearer $APPROVER_PLATFORM_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d "{\"session_id\": \"$CHAT_SESSION\", \"confirm_id\": \"$SECOND_CONFIRM_ID\", \"decision\": \"approve\"}" \
-      "$GATEWAY_URL/api/v1/chat/confirm") || fail "second approve call failed"
-    printf '%s' "$FINAL_OUTPUT" | grep -q '"status": *"approved"\|"status":"approved"' \
-      || fail "second confirmation_result did not report approval"
-    echo "second approval applied"
-  fi
 
   printf '%s' "$FINAL_OUTPUT" | grep -qi 'reset successfully\|Password for' \
     || fail "the resumed turn did not reach the password-reset confirmation"
   echo "the confirm stream carried the resumed turn to the password-reset confirmation"
 
-  # Durable proof: approved card(s) with signed execution receipts.
+  # Durable proof: exactly one approved card with a signed execution receipt.
   SESSION_DETAIL=$(curl -fsS --max-time 30 \
     -H "Authorization: Bearer $OPERATOR_PLATFORM_TOKEN" \
     "$GATEWAY_URL/api/v1/sessions/$CHAT_SESSION") \
@@ -288,19 +267,28 @@ detail = json.load(sys.stdin)
 assert detail.get('pending_confirmation') is not True, \
     'the session still parks a confirmation after the resume completed'
 cards = detail.get('confirmations') or []
-assert len(cards) >= 1, \
-    'expected at least one confirmation card, got %d' % len(cards)
+assert len(cards) == 1, \
+    'expected exactly one confirmation card (SPEC-051 one-gate-per-flow), got %d' % len(cards)
 card = cards[0]
 assert card.get('status') == 'approved', \
     'card status is %r, expected approved' % card.get('status')
 executions = card.get('executions') or []
 assert executions, 'approved card carries no execution rows'
-row = executions[0]
-assert row.get('tool_name') == 'web.click', \
-    'execution row names %r, expected web.click' % row.get('tool_name')
-assert row.get('receipt', {}).get('signature'), 'receipt carries no signature'" \
-    || fail "session detail lacks approved web.click card with signed receipt"
-  echo "session detail carries approved card(s) with signed receipt(s)"
+# SPEC-051 R-1/R-3: every write-tier browser interaction in the flow rode
+# the ONE approval, so each execution is auto-signed under the approving
+# card's authority and carries a signed receipt. The model may drive the
+# reset with any write-tier web.* tool (web.click, web.evaluate, ...), so
+# assert the tier and the signature — not one specific tool name.
+WRITE_TIER = {'web.click', 'web.type', 'web.select', 'web.press_key', 'web.upload_file', 'web.evaluate'}
+for row in executions:
+    assert row.get('tool_name') in WRITE_TIER, \
+        'execution row names %r, expected a write-tier web.* tool' % row.get('tool_name')
+    assert row.get('receipt', {}).get('signature'), \
+        'execution %r carries no signed receipt' % row.get('tool_name')
+print('  %d write-tier execution(s) all signed under the one card: %s' % (
+    len(executions), ', '.join(sorted({r.get('tool_name') for r in executions}))))" \
+    || fail "session detail lacks the single approved card with all write-tier executions signed"
+  echo "session detail carries exactly one approved card (SPEC-051 one-gate-per-flow); all its write-tier executions are signed"
   
   echo ""
   echo "==> [CHAT] verification URLs (open in your browser to see the reset result):"

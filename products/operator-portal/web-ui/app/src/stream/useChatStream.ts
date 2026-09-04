@@ -8,6 +8,7 @@ import type {
   ConfirmationStatus,
   DecodedEvent,
   ExecutionReceipt,
+  FlowSummary,
   PendingCall,
   ToolCallFrame,
   ToolResultFrame,
@@ -40,6 +41,10 @@ export interface ConfirmationCard {
   // session-detail execution rows; undefined on live cards, legacy
   // decided rows, and inbox records (decision-metadata-only surface).
   executions?: ExecutionReceipt[];
+  // SPEC-051 R-6: the browser-flow headline (workflow intent + origin),
+  // live from the confirmation_request frame or replayed from the durable
+  // record; undefined for non-browser cards.
+  flowSummary?: FlowSummary;
 }
 
 export interface ChatTurn {
@@ -199,6 +204,7 @@ export function useChatStream(): ChatStreamApi {
             mutating: frame.mutating,
             status: "pending",
             sessionId: sessionIdRef.current,
+            flowSummary: frame.flowSummary,
           });
           turn.confirmationPending = true;
           break;

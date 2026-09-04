@@ -359,6 +359,145 @@ class GatewayPermissionMiddlewareTests(unittest.TestCase):
             self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
 
 
+# --- SPEC-051 R-1: browser-flow unlock --------------------------------------
+
+
+class FlowUnlockPermissionTests(unittest.TestCase):
+    """One HITL gate per mutating browser flow (SPEC-051 R-1).
+
+    The middleware admits a mutating ``web.*`` call inside an already-approved
+    flow via the optional ``flow_signer`` (the kernel's ``_sign_flow_execution``)
+    and ALLOWs it only when the signer returns an envelope; every other path
+    keeps the explicit ASK. The signer is a stub here — its real approval /
+    identity / execution-state gating is exercised in ``test_runtime_kernel``.
+    """
+
+    def _decide(self, middleware, tool, tool_call=None, next_decision=None):
+        from agentscope.permission import PermissionBehavior, PermissionDecision
+
+        if next_decision is None:
+            next_decision = PermissionDecision(
+                behavior=PermissionBehavior.ASK, message="stub-ask",
+            )
+        calls = []
+        input_kwargs = {"tool": tool, "tool_call": tool_call, "tool_input": {}}
+        decision = _run(
+            middleware.on_check_permission(
+                None, input_kwargs, _permission_next(next_decision, calls),
+            )
+        )
+        return decision, calls
+
+    @staticmethod
+    def _pending_call(call_id="call-1", name="web_click"):
+        from agentscope.message import ToolCallState
+
+        return SimpleNamespace(
+            id=call_id, name=name, input='{"ref": 12}',
+            state=ToolCallState.PENDING,
+        )
+
+    @staticmethod
+    def _recording_signer(result):
+        """A ``flow_signer`` stub returning ``result`` and recording its calls."""
+        seen = []
+
+        def signer(tool_call, gateway_tool_name):
+            seen.append((tool_call, gateway_tool_name))
+            return result
+
+        return signer, seen
+
+    def test_browser_write_unlocked_by_flow_authority_allows(self) -> None:
+        """Recorded approval + armed execution state ⇒ the signer returns an
+        envelope ⇒ ALLOW, consulted with the canonical gateway tool name; the
+        built-in engine is bypassed so the unlocked write never re-parks."""
+        from agentscope.permission import PermissionBehavior
+
+        envelope = {"execution_id": "e1", "tool_name": "web.click", "signature": "s"}
+        signer, seen = self._recording_signer(envelope)
+        mw = GatewayPermissionMiddleware(flow_signer=signer)
+        tool = _StubTool(
+            "web_click", gateway_tool_name="web.click", is_read_only=False,
+        )
+        tool_call = self._pending_call()
+
+        decision, calls = self._decide(mw, tool, tool_call=tool_call)
+
+        self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
+        self.assertEqual(calls, [])  # built-in resolution never reached
+        self.assertEqual(seen, [(tool_call, "web.click")])
+
+    def test_browser_write_without_flow_authority_asks(self) -> None:
+        """No live authority ⇒ the signer returns None ⇒ the write parks (ASK)."""
+        from agentscope.permission import PermissionBehavior
+
+        signer, seen = self._recording_signer(None)
+        mw = GatewayPermissionMiddleware(flow_signer=signer)
+        tool = _StubTool(
+            "web_click", gateway_tool_name="web.click", is_read_only=False,
+        )
+
+        decision, calls = self._decide(mw, tool, tool_call=self._pending_call())
+
+        self.assertEqual(decision.behavior, PermissionBehavior.ASK)
+        self.assertEqual(calls, [])
+        self.assertEqual(len(seen), 1)  # signer consulted, returned None
+
+    def test_non_browser_write_never_consults_flow_signer(self) -> None:
+        """A ``k8s.*`` write is not a browser write: even with a signer that
+        would unlock it, the ``BROWSER_WRITE_TOOLS`` guard short-circuits, so
+        flow-unlock can never admit a non-browser mutation (signer uncalled)."""
+        from agentscope.permission import PermissionBehavior
+
+        envelope = {"execution_id": "e1", "tool_name": "k8s.delete_pod"}
+        signer, seen = self._recording_signer(envelope)
+        mw = GatewayPermissionMiddleware(flow_signer=signer)
+        tool = _StubTool(
+            "k8s_delete_pod", gateway_tool_name="k8s.delete_pod", is_read_only=False,
+        )
+
+        decision, _ = self._decide(mw, tool, tool_call=self._pending_call())
+
+        self.assertEqual(decision.behavior, PermissionBehavior.ASK)
+        self.assertEqual(seen, [])  # never consulted for a non-browser write
+
+    def test_browser_write_fails_safe_when_signer_returns_none(self) -> None:
+        """Fail-safe: the kernel signer returns None when ``EXECUTION_REQUESTS``
+        is not armed for the turn, so an unlocked-looking write (web.evaluate)
+        still parks rather than running unsigned."""
+        from agentscope.permission import PermissionBehavior
+
+        signer, seen = self._recording_signer(None)
+        mw = GatewayPermissionMiddleware(flow_signer=signer)
+        tool = _StubTool(
+            "web_evaluate", gateway_tool_name="web.evaluate", is_read_only=False,
+        )
+
+        decision, _ = self._decide(mw, tool, tool_call=self._pending_call())
+
+        self.assertEqual(decision.behavior, PermissionBehavior.ASK)
+        self.assertEqual(len(seen), 1)
+
+    def test_read_only_browser_probe_uses_allow_list_not_flow_signer(self) -> None:
+        """A read-tier probe (web.navigate) is auto-allowed by the static
+        read-only allow-list before the flow branch; the signer is never
+        consulted, so flow-unlock cannot widen read-tier behavior."""
+        from agentscope.permission import PermissionBehavior
+
+        signer, seen = self._recording_signer(None)
+        mw = GatewayPermissionMiddleware(flow_signer=signer)
+        tool = _StubTool(
+            "web_navigate", gateway_tool_name="web.navigate", is_read_only=True,
+        )
+
+        decision, calls = self._decide(mw, tool, tool_call=self._pending_call())
+
+        self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
+        self.assertEqual(calls, [])
+        self.assertEqual(seen, [])  # allow-listed read path, signer untouched
+
+
 # --- R-2: evidence middleware ------------------------------------------------
 
 

@@ -385,6 +385,54 @@ export function ConfirmationCardView({
           <Tag color="blue">operator confirmation</Tag>
         )}
       </div>
+      {/* SPEC-051 R-6: a bound browser flow headlines the card with the
+          workflow intent (skill title/description + origin) so the operator
+          approves "reset a user's password on <origin>", not a bare
+          web.click. The per-call list below stays as the tool detail. */}
+      {card.flowSummary &&
+      (card.flowSummary.title || card.flowSummary.origin) ? (
+        <div
+          className="confirm-flow"
+          style={{
+            margin: "6px 0 8px",
+            padding: "8px 10px",
+            borderRadius: 6,
+            background: "rgba(127,127,127,0.08)",
+            borderLeft: "3px solid var(--accent)",
+          }}
+        >
+          {card.flowSummary.title ? (
+            <div style={{ fontWeight: 600 }}>{card.flowSummary.title}</div>
+          ) : null}
+          {card.flowSummary.description ? (
+            <div style={{ opacity: 0.75, fontSize: 13, marginTop: 2 }}>
+              {card.flowSummary.description}
+            </div>
+          ) : null}
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              marginTop: 6,
+              flexWrap: "wrap",
+            }}
+          >
+            {card.flowSummary.origin ? (
+              <Tag color="geekblue">{card.flowSummary.origin}</Tag>
+            ) : null}
+            {card.flowSummary.riskClass ? (
+              <Tag
+                color={
+                  card.flowSummary.riskClass === "read" ? "default" : "warning"
+                }
+              >
+                {card.flowSummary.riskClass} flow
+              </Tag>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       {card.message ? <div>{card.message}</div> : null}
       {card.pendingCalls.map((call, index) => (
         <div className="confirm-call" key={call.callId ?? index}>

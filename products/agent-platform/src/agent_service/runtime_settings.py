@@ -171,6 +171,14 @@ class RuntimeSettings:
     execution_worker_url: str | None = None
     execution_handoff_token: str | None = None
     execution_worker_timeout_seconds: float = 60.0
+    # Browser flow-unlock authority TTL (SPEC-051 R-2): seconds an operator's
+    # approval of a mutating browser flow unlocks subsequent web.* writes in
+    # that same flow — scoped to the session and the approved flow's identity
+    # (skill_id + origin) and auto-signed under the approving card (ADR-0007).
+    # 0 disables flow-unlock entirely (every browser write parks — the
+    # pre-SPEC-051 posture). The tool-gateway deviation guard still bounds
+    # every unlocked write regardless of this knob.
+    browser_flow_approval_ttl: int = 900
     # Durable audit trail emission (SPEC-037 R-5): fire-and-forget
     # events to the audit-service. An unset URL keeps the historical
     # log-only posture; emission never degrades the chat stream.
@@ -262,6 +270,9 @@ class RuntimeSettings:
             raise ValueError(
                 "AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS must be > 0."
             )
+        # Browser flow-unlock authority validation (SPEC-051 R-2).
+        if self.browser_flow_approval_ttl < 0:
+            raise ValueError("AGENT_BROWSER_FLOW_APPROVAL_TTL must be >= 0.")
         # Incident client validation (SPEC-043 R-3).
         if self.incident_client_timeout_seconds <= 0:
             raise ValueError(
@@ -426,6 +437,9 @@ class RuntimeSettings:
             ),
             execution_worker_timeout_seconds=float(
                 os.getenv("AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS", "60")
+            ),
+            browser_flow_approval_ttl=int(
+                os.getenv("AGENT_BROWSER_FLOW_APPROVAL_TTL", "900")
             ),
             audit_service_url=_optional_str("AGENT_AUDIT_SERVICE_URL"),
             audit_client_id=os.getenv("AGENT_AUDIT_CLIENT_ID", "agent-service"),

@@ -14,6 +14,7 @@ import type {
 } from "../api/sessions";
 import type {
   ExecutionReceipt,
+  FlowSummary,
   PendingCall,
   ToolCallFrame,
   ToolResultFrame,
@@ -112,6 +113,25 @@ function attributionNote(record: ConfirmationRecord): string {
   return `${verb}${who}${when}.`;
 }
 
+// SPEC-051 R-6: map the durable record's browser-flow headline (wire
+// snake_case) to the card's view-model (camelCase). Returns undefined for
+// a non-browser card or a record that predates the field, so the card
+// falls back to plain tool-action rendering.
+function toFlowSummary(
+  summary: ConfirmationRecord["flow_summary"],
+): FlowSummary | undefined {
+  if (!summary) {
+    return undefined;
+  }
+  return {
+    skillId: summary.skill_id,
+    origin: summary.origin,
+    title: summary.title,
+    description: summary.description,
+    riskClass: summary.risk_class,
+  };
+}
+
 // Shared by transcript seeding and the approvals inbox (SPEC-031 R-5):
 // both surfaces render the same durable record through one card mapping.
 export function confirmationRecordToCard(
@@ -144,6 +164,10 @@ export function confirmationRecordToCard(
     sessionId: record.session_id,
     deciderUserId: record.decider_user_id ?? undefined,
     decidedAt: record.decided_at ?? undefined,
+    // SPEC-051 R-6: replay the browser-flow headline so a re-login renders
+    // the same workflow framing the live card showed; absent for
+    // non-browser cards and records that predate the field.
+    flowSummary: toFlowSummary(record.flow_summary),
   };
   if (record.status !== "pending") {
     card.note = attributionNote(record);

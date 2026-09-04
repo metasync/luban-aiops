@@ -1,8 +1,22 @@
 import asyncio
 from types import SimpleNamespace
 
+from agentscope.message import ToolCallBlock
+
 from agent_service.runtime_kernel import AgentKernel
 from agent_service.runtime_settings import RuntimeSettings
+from agent_service.services.execution_records import EXECUTION_RECORD_STORE
+from agent_service.services.execution_signing import (
+    canonical_digest,
+    verify_envelope,
+)
+from agent_service.services.flow_approvals import FLOW_APPROVALS, FLOW_CONTEXTS
+from agent_service.services.hitl_confirmations import CONFIRMATION_REGISTRY
+from agent_service.tools.gateway_tools import (
+    CHAT_SESSION_ID,
+    EXECUTION_AUDIT_CONTEXT,
+    EXECUTION_REQUESTS,
+)
 
 
 def test_placeholder_reply_without_credentials():
@@ -966,3 +980,343 @@ class TestEvidencePersistenceHook:
 
         kernel._persist_evidence("ses-1", "req-1", 0, [])
         assert store.saved == []
+
+
+# --- SPEC-051 R-1/R-3: browser-flow unlock authority + auto-signing ----------
+
+FLOW_SIGNING_KEY = "test-flow-execution-key"
+
+_BROWSER_FLOW = {
+    "skill_id": "samples/password-reset",
+    "origin": "http://admin.local",
+    "title": "Reset User Password",
+    "description": "Reset a user's password in the admin portal",
+    "risk_class": "write",
+}
+
+
+def _capture_flow_audits(monkeypatch) -> list:
+    """Capture audit events the kernel emits (no audit URL is configured)."""
+    events: list = []
+
+    def fake_emit(settings, event):
+        events.append(event)
+
+    monkeypatch.setattr("agent_service.runtime_kernel.emit_audit_event", fake_emit)
+    return events
+
+
+def _register_flow_pending(session_id, tool_calls, gateway_names, browser_flow):
+    return CONFIRMATION_REGISTRY.register(
+        session_id,
+        "alice",
+        "reply-1",
+        tool_calls,
+        600,
+        gateway_names=gateway_names,
+        browser_flow=browser_flow,
+    )
+
+
+def _record_authority(
+    session_id,
+    *,
+    skill_id="samples/password-reset",
+    origin="http://admin.local",
+    confirm_id="conf-approving",
+    owner="alice",
+    decider="bob-approver",
+    ttl=900.0,
+):
+    FLOW_APPROVALS.record(
+        session_id=session_id,
+        confirm_id=confirm_id,
+        owner_user_id=owner,
+        decider_user_id=decider,
+        skill_id=skill_id,
+        origin=origin,
+        ttl=ttl,
+    )
+
+
+def _record_context(
+    session_id,
+    *,
+    skill_id="samples/password-reset",
+    origin="http://admin.local",
+):
+    FLOW_CONTEXTS.record(
+        session_id,
+        {
+            "skill_id": skill_id,
+            "origin": origin,
+            "title": "Reset User Password",
+            "description": "Reset a user's password in the admin portal",
+            "risk_class": "write",
+        },
+    )
+
+
+def _run_signer(kernel, tool_call, gateway_tool_name, session_id, requests):
+    """Invoke ``_sign_flow_execution`` with the execution contextvars armed
+    exactly as ``stream_events``/``resume_confirmation`` arm them for a turn."""
+    session_token = CHAT_SESSION_ID.set(session_id)
+    requests_token = EXECUTION_REQUESTS.set(requests)
+    audit_token = EXECUTION_AUDIT_CONTEXT.set(
+        {"request_id": "req-9", "session_id": session_id}
+    )
+    try:
+        return kernel._sign_flow_execution(tool_call, gateway_tool_name)
+    finally:
+        EXECUTION_AUDIT_CONTEXT.reset(audit_token)
+        EXECUTION_REQUESTS.reset(requests_token)
+        CHAT_SESSION_ID.reset(session_token)
+
+
+class TestRecordFlowApproval:
+    """SPEC-051 R-1: approving a card whose batch holds a browser write records
+    a session+identity-scoped flow authority; anything else records nothing."""
+
+    def _kernel(self, **overrides):
+        return AgentKernel(settings=RuntimeSettings(api_key="test-key", **overrides))
+
+    def test_browser_write_batch_records_flow_authority(self):
+        FLOW_APPROVALS.clear_all()
+        kernel = self._kernel(browser_flow_approval_ttl=900)
+        pending = _register_flow_pending(
+            "ses-rec-1",
+            [ToolCallBlock(id="call-1", name="web_click", input='{"ref": 12}')],
+            {"web_click": "web.click"},
+            dict(_BROWSER_FLOW),
+        )
+
+        kernel._record_flow_approval(pending, "bob-approver", "ses-rec-1")
+
+        approval = FLOW_APPROVALS.get("ses-rec-1")
+        assert approval is not None
+        assert approval.confirm_id == pending.confirm_id
+        assert approval.owner_user_id == "alice"
+        assert approval.decider_user_id == "bob-approver"
+        assert approval.identity() == (
+            "samples/password-reset",
+            "http://admin.local",
+        )
+        assert approval.ttl == 900
+
+    def test_non_browser_write_batch_records_nothing(self):
+        """A k8s.* write must never arm browser flow-unlock."""
+        FLOW_APPROVALS.clear_all()
+        kernel = self._kernel(browser_flow_approval_ttl=900)
+        pending = _register_flow_pending(
+            "ses-rec-2",
+            [ToolCallBlock(id="call-1", name="k8s_restart_service", input="{}")],
+            {"k8s_restart_service": "k8s.restart_service"},
+            dict(_BROWSER_FLOW),
+        )
+
+        kernel._record_flow_approval(pending, "bob-approver", "ses-rec-2")
+
+        assert FLOW_APPROVALS.get("ses-rec-2") is None
+
+    def test_read_tier_browser_batch_records_nothing(self):
+        """A batch of only read-tier browser probes is not a mutating flow."""
+        FLOW_APPROVALS.clear_all()
+        kernel = self._kernel(browser_flow_approval_ttl=900)
+        pending = _register_flow_pending(
+            "ses-rec-3",
+            [ToolCallBlock(id="call-1", name="web_snapshot", input="{}")],
+            {"web_snapshot": "web.snapshot"},
+            dict(_BROWSER_FLOW),
+        )
+
+        kernel._record_flow_approval(pending, "bob", "ses-rec-3")
+
+        assert FLOW_APPROVALS.get("ses-rec-3") is None
+
+    def test_browser_write_without_flow_identity_records_nothing(self):
+        """No bound skill/origin ⇒ nothing to scope the authority to, so the
+        browser write records nothing and every later write keeps parking."""
+        FLOW_APPROVALS.clear_all()
+        kernel = self._kernel(browser_flow_approval_ttl=900)
+        pending = _register_flow_pending(
+            "ses-rec-4",
+            [ToolCallBlock(id="call-1", name="web_click", input='{"ref": 1}')],
+            {"web_click": "web.click"},
+            {},
+        )
+
+        kernel._record_flow_approval(pending, "bob", "ses-rec-4")
+
+        assert FLOW_APPROVALS.get("ses-rec-4") is None
+
+    def test_ttl_zero_records_disabled_authority(self):
+        """AGENT_BROWSER_FLOW_APPROVAL_TTL=0 disables flow-unlock: the recorded
+        authority is immediately expired (the pre-fix posture)."""
+        FLOW_APPROVALS.clear_all()
+        kernel = self._kernel(browser_flow_approval_ttl=0)
+        pending = _register_flow_pending(
+            "ses-rec-5",
+            [ToolCallBlock(id="call-1", name="web_click", input='{"ref": 1}')],
+            {"web_click": "web.click"},
+            dict(_BROWSER_FLOW),
+        )
+
+        kernel._record_flow_approval(pending, "bob", "ses-rec-5")
+
+        assert FLOW_APPROVALS.has_approval("ses-rec-5") is False
+
+
+class TestSignFlowExecution:
+    """SPEC-051 R-1/R-3: the kernel's ``flow_signer`` auto-signs a subsequent
+    browser write under a live, identity-matched flow authority — injecting the
+    envelope into ``EXECUTION_REQUESTS`` and auditing ``execution_requested`` —
+    and fails safe (returns ``None`` ⇒ the write parks) on every missing
+    precondition. Returning an envelope is what lets the permission middleware
+    ALLOW the call instead of parking a second card."""
+
+    def _kernel(self, **overrides):
+        kwargs = dict(
+            api_key="test-key",
+            execution_signing_key=FLOW_SIGNING_KEY,
+            browser_flow_approval_ttl=900,
+        )
+        kwargs.update(overrides)
+        return AgentKernel(settings=RuntimeSettings(**kwargs))
+
+    def test_auto_signs_injects_and_audits(self, monkeypatch):
+        audits = _capture_flow_audits(monkeypatch)
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        kernel = self._kernel()
+        session_id = "ses-sign-1"
+        _record_authority(session_id, confirm_id="conf-approving")
+        _record_context(session_id)
+        requests: dict = {}
+        tool_call = ToolCallBlock(id="call-77", name="web_click", input='{"ref": 12}')
+
+        envelope = _run_signer(kernel, tool_call, "web.click", session_id, requests)
+
+        assert envelope is not None
+        # Injected so the tool closure verifies + hands off like a card call.
+        assert requests["call-77"] is envelope
+        assert envelope["tool_name"] == "web.click"
+        assert envelope["call_id"] == "call-77"
+        assert envelope["args_digest"] == canonical_digest({"ref": 12})
+        # Reuses the approving card's correlation + identity (ADR-0007).
+        assert envelope["confirm_id"] == "conf-approving"
+        assert envelope["owner_user_id"] == "alice"
+        assert envelope["decider_user_id"] == "bob-approver"
+        assert verify_envelope(envelope, envelope["signature"], FLOW_SIGNING_KEY)
+        # Durable + audited exactly like a card-signed request.
+        rows = EXECUTION_RECORD_STORE.load_for_session(session_id)
+        assert [row["execution_id"] for row in rows] == [envelope["execution_id"]]
+        assert rows[0]["status"] == "requested"
+        requested = [a for a in audits if a["event_type"] == "execution_requested"]
+        assert len(requested) == 1
+        assert requested[0]["details"]["call_id"] == "call-77"
+        assert requested[0]["details"]["confirm_id"] == "conf-approving"
+        assert requested[0]["request_id"] == "req-9"
+        assert requested[0]["session_id"] == session_id
+
+    def test_fails_safe_on_identity_mismatch(self, monkeypatch):
+        """A rebind to a different origin since approval ⇒ the identity guard
+        fails safe (None ⇒ the write re-parks). This eliminates the ADR-0007
+        cross-flow auto-sign window."""
+        _capture_flow_audits(monkeypatch)
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        kernel = self._kernel()
+        session_id = "ses-sign-2"
+        _record_authority(session_id, origin="http://admin.local")
+        _record_context(session_id, origin="http://other.local")  # rebound
+        requests: dict = {}
+        tool_call = ToolCallBlock(id="call-1", name="web_click", input='{"ref": 1}')
+
+        envelope = _run_signer(kernel, tool_call, "web.click", session_id, requests)
+
+        assert envelope is None
+        assert requests == {}
+
+    def test_fails_safe_without_approval(self, monkeypatch):
+        _capture_flow_audits(monkeypatch)
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        kernel = self._kernel()
+        session_id = "ses-sign-3"
+        _record_context(session_id)  # bound flow, but no approval recorded
+        requests: dict = {}
+        tool_call = ToolCallBlock(id="call-1", name="web_click", input='{"ref": 1}')
+
+        assert _run_signer(kernel, tool_call, "web.click", session_id, requests) is None
+        assert requests == {}
+
+    def test_fails_safe_without_flow_context(self, monkeypatch):
+        _capture_flow_audits(monkeypatch)
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        kernel = self._kernel()
+        session_id = "ses-sign-4"
+        _record_authority(session_id)  # approval, but the flow context dropped
+        requests: dict = {}
+        tool_call = ToolCallBlock(id="call-1", name="web_click", input='{"ref": 1}')
+
+        assert _run_signer(kernel, tool_call, "web.click", session_id, requests) is None
+        assert requests == {}
+
+    def test_fails_safe_when_execution_requests_unset(self, monkeypatch):
+        """``EXECUTION_REQUESTS`` not armed for the turn ⇒ nothing to inject
+        into, so the write cannot be verified/handed off and must park."""
+        _capture_flow_audits(monkeypatch)
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        kernel = self._kernel()
+        session_id = "ses-sign-5"
+        _record_authority(session_id)
+        _record_context(session_id)
+        tool_call = ToolCallBlock(id="call-1", name="web_click", input='{"ref": 1}')
+
+        assert _run_signer(kernel, tool_call, "web.click", session_id, None) is None
+
+    def test_fails_safe_without_signing_key(self, monkeypatch):
+        _capture_flow_audits(monkeypatch)
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        kernel = self._kernel(execution_signing_key=None)
+        session_id = "ses-sign-6"
+        _record_authority(session_id)
+        _record_context(session_id)
+        requests: dict = {}
+        tool_call = ToolCallBlock(id="call-1", name="web_click", input='{"ref": 1}')
+
+        assert _run_signer(kernel, tool_call, "web.click", session_id, requests) is None
+        assert requests == {}
+
+    def test_fails_safe_without_session_id(self, monkeypatch):
+        _capture_flow_audits(monkeypatch)
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        kernel = self._kernel()
+        _record_authority("ses-sign-7")
+        _record_context("ses-sign-7")
+        requests: dict = {}
+        tool_call = ToolCallBlock(id="call-1", name="web_click", input='{"ref": 1}')
+
+        # CHAT_SESSION_ID unset (None) ⇒ no session to scope an authority to.
+        assert _run_signer(kernel, tool_call, "web.click", None, requests) is None
+        assert requests == {}
+
+    def test_expired_authority_fails_safe(self, monkeypatch):
+        """A TTL-disabled (ttl=0) authority reads as absent ⇒ the write parks."""
+        _capture_flow_audits(monkeypatch)
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        kernel = self._kernel()
+        session_id = "ses-sign-8"
+        _record_authority(session_id, ttl=0)
+        _record_context(session_id)
+        requests: dict = {}
+        tool_call = ToolCallBlock(id="call-1", name="web_click", input='{"ref": 1}')
+
+        assert _run_signer(kernel, tool_call, "web.click", session_id, requests) is None
+        assert requests == {}
+

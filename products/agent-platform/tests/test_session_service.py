@@ -313,3 +313,51 @@ def test_delete_session_survives_evidence_store_failure(monkeypatch):
     created = session_service.create_session("alice")
     # Fail-open: evidence cleanup never fails the session delete.
     assert session_service.delete_session(created.session_id, "alice") is True
+
+
+def test_delete_session_clears_browser_flow_stores(monkeypatch):
+    # SPEC-051 R-1/R-2: the session-scoped browser-flow stores are in-memory
+    # and their FlowContext entries never expire on their own, so a deleted
+    # session must drop both to bound per-process growth — mirroring how every
+    # other per-session store cascades with the session.
+    from agent_service.services.flow_approvals import (
+        FlowApprovalStore,
+        FlowContextStore,
+    )
+
+    monkeypatch.setattr(session_service, "SESSION_STORE", InMemorySessionStore())
+    monkeypatch.setattr(
+        session_service, "AGENT_STATE_STORE", InMemoryAgentStateStore()
+    )
+    contexts = FlowContextStore()
+    approvals = FlowApprovalStore()
+    monkeypatch.setattr(session_service, "FLOW_CONTEXTS", contexts)
+    monkeypatch.setattr(session_service, "FLOW_APPROVALS", approvals)
+
+    created = session_service.create_session("alice")
+    contexts.record(
+        created.session_id,
+        {
+            "skill_id": "samples/password-reset-resetuserpassword",
+            "origin": "http://browser-check-target:8080",
+            "title": "Reset User Password in Admin Portal",
+            "risk_class": "write",
+        },
+    )
+    approvals.record(
+        created.session_id,
+        confirm_id="cf-flow-1",
+        owner_user_id="alice",
+        decider_user_id="bob-approver",
+        skill_id="samples/password-reset-resetuserpassword",
+        origin="http://browser-check-target:8080",
+        ttl=900,
+    )
+    assert contexts.get(created.session_id) is not None
+    assert approvals.has_approval(created.session_id) is True
+
+    assert session_service.delete_session(created.session_id, "alice") is True
+    # Both session-scoped flow stores dropped with the session.
+    assert contexts.get(created.session_id) is None
+    assert approvals.has_approval(created.session_id) is False
+

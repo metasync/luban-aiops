@@ -44,7 +44,7 @@ kubectl port-forward -n dev-luban-aiops svc/browser-check-target 9090:8080 &
 Open **http://localhost:9090/admin/** in your browser. You'll see:
 - A login form with username/password fields and a "Sign In" button
 - After login: a user table with "Reset Password" links
-- The reset page auto-fills from URL parameters and auto-submits
+- The reset page pre-fills from URL parameters and waits for a "Confirm reset" click
 
 This is the "legacy admin panel" the agent will automate.
 
@@ -68,24 +68,27 @@ the right skill based on your request. The agent should:
 2. Navigate to the admin login page via `web.navigate` (binding the flow)
 3. Take a snapshot via `web.snapshot` to see the login form
 4. Fill the username via `web.fill_credential` (from `admin-portal` set)
-5. Fill the password via `web.fill_credential` (from `admin-portal` set)
-6. **Click "Sign In"** ← this parks a HITL confirmation card
+5. Fill the password via `web.fill_credential` (from `admin-portal` set) —
+   the login form auto-submits (legacy SSO) and redirects, no click needed
+6. Navigate to the reset page via `web.navigate` with the new password as a
+   URL parameter (the form pre-fills but does not submit)
+7. **Click "Confirm reset"** ← this parks the single HITL confirmation card
 
 ## Step 5: Approve the HITL Gate
 
-When the agent reaches step 6 (clicking "Sign In"), a **confirmation card**
-appears in the chat. It shows:
-- The tool being called: `web.click`
-- The element being clicked: the Sign In button
+When the agent reaches step 7 (clicking "Confirm reset"), a **confirmation
+card** appears in the chat. It shows:
+- The **flow headline**: the workflow intent ("Reset User Password in Admin
+  Portal") and the target origin — so you approve the reset, not a bare click
+- The tool being called: `web.click` on the "Confirm reset" button
 - The risk level: **write**
 
 Click **Approve** on the confirmation card.
 
 After approval, the agent:
-- Clicks Sign In (the admin panel loads the user table)
-- Navigates to the reset page with the new password as a URL parameter
-- The reset page auto-fills and auto-submits
-- The agent takes a final snapshot to verify "Password reset successfully"
+- Clicks "Confirm reset" (the admin panel performs the password reset)
+- Takes a final snapshot to verify "Password reset successfully"
+- Captures a screenshot as visual evidence
 
 ## Step 6: Verify the Result
 
@@ -126,16 +129,16 @@ Operator                  Agent                     Admin Panel
    │                        │──────────────────────────>│
    │                        │  web.fill_credential (×2) │
    │                        │──────────────────────────>│
+   │                        │       (login auto-submits)│
+   │                        │  web.navigate (reset URL) │
+   │                        │──────────────────────────>│
    │                        │  web.click → HITL card    │
-   │  ┌─────────────────┐   │                           │
-   │  │ Approve sign-in │   │                           │
-   │  └─────────────────┘   │                           │
+   │  ┌──────────────────┐  │      (Confirm reset)      │
+   │  │ Approve reset    │  │                           │
+   │  └──────────────────┘  │                           │
    │───────────────────────>│                           │
    │                        │  web.click (approved)     │
    │                        │──────────────────────────>│
-   │                        │  web.navigate (reset URL) │
-   │                        │──────────────────────────>│
-   │                        │         (auto-submit)     │
    │                        │  web.snapshot (verify)    │
    │                        │──────────────────────────>│
    │  "Password reset OK"   │                           │
@@ -144,8 +147,9 @@ Operator                  Agent                     Admin Panel
 
 ## Key Observations
 
-1. **Single HITL gate**: Only the Sign In click required approval. The
-   reset itself was a read-tier navigation (URL-based auto-fill + auto-submit).
+1. **Single HITL gate**: Only the "Confirm reset" click required approval —
+   the destructive mutation itself. Login and the reset-form navigation were
+   read-tier (credential fill + SSO auto-submit, then a URL-based pre-fill).
 
 2. **Credential masking**: The admin password never appeared in any tool
    output, snapshot, or screenshot — it was filled directly from the

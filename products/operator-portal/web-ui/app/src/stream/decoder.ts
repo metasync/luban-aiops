@@ -1,7 +1,7 @@
 // SSE frame decoder (SPEC-023 R-2). Ports the legacy app.js dispatch 1:1:
 // events are separated by "\n\n", only lines starting with "data: " carry
 // payloads, and the frame kind rides in `type` (or `event`), lowercased.
-import type { DecodedEvent, PendingCall, StreamFrame } from "./models";
+import type { DecodedEvent, FlowSummary, PendingCall, StreamFrame } from "./models";
 
 type RawPayload = Record<string, unknown>;
 
@@ -34,6 +34,23 @@ function asRecord(value: unknown): RawPayload | undefined {
 function isMutating(calls: PendingCall[]): boolean {
   // SPEC-021 R-3: any non-read pending call makes this a mutating batch.
   return calls.some((call) => Boolean(call.riskLevel) && call.riskLevel !== "read");
+}
+
+// SPEC-051 R-6: parse the card-level browser-flow headline. Returns
+// undefined for a non-browser card (no flow_summary on the wire) so the
+// card falls back to plain tool-action rendering.
+function toFlowSummary(value: unknown): FlowSummary | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  return {
+    skillId: asString(record.skill_id),
+    origin: asString(record.origin),
+    title: asString(record.title),
+    description: asString(record.description),
+    riskClass: asString(record.risk_class),
+  };
 }
 
 function toFrame(payload: RawPayload): StreamFrame | null {
@@ -99,6 +116,9 @@ function toFrame(payload: RawPayload): StreamFrame | null {
       message: asString(payload.message),
       pendingCalls,
       mutating: isMutating(pendingCalls),
+      // SPEC-051 R-6: the browser-flow headline rides the frame when the
+      // parked batch belongs to a bound web-check flow; absent otherwise.
+      flowSummary: toFlowSummary(payload.flow_summary),
     };
   }
   if (eventType === "confirmation_result") {

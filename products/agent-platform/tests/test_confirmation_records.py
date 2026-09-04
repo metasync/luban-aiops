@@ -43,6 +43,7 @@ def _record(
     owner: str = "alice",
     parked_at: datetime | None = None,
     turn_index: int | None = None,
+    flow_summary: dict | None = None,
 ) -> dict:
     record = make_record(
         confirm_id,
@@ -51,6 +52,7 @@ def _record(
         [{"call_id": "call-1", "tool_name": "k8s.restart_service"}],
         "tools:mutate",
         turn_index=turn_index,
+        flow_summary=flow_summary,
     )
     if parked_at is not None:
         record["parked_at"] = _iso(parked_at)
@@ -90,6 +92,26 @@ class TestInMemoryStore:
         assert rows[0]["turn_index"] == 4
         assert rows[1]["turn_index"] is None
         assert store.load_pending_for_session("ses-1")["turn_index"] is None
+
+    def test_save_and_load_round_trips_flow_summary(self) -> None:
+        """SPEC-051 R-6: the card-level browser-flow headline survives the
+        store so the inbox and session detail replay the same workflow
+        framing; a non-browser (or pre-spec) card round-trips None."""
+        store = InMemoryConfirmationRecordStore()
+        summary = {
+            "skill_id": "samples/password-reset",
+            "origin": "http://admin.local",
+            "title": "Reset User Password",
+            "description": "Reset a user's password in the admin portal",
+            "risk_class": "write",
+        }
+        store.save_parked(_record("cf-1", flow_summary=summary))
+        store.save_parked(_record("cf-2"))
+        rows = store.load_for_session("ses-1")
+        assert rows[0]["flow_summary"] == summary
+        assert rows[1]["flow_summary"] is None
+        assert store.load_pending_for_session("ses-1")["flow_summary"] is None
+        assert store.load_record("ses-1", "cf-1")["flow_summary"] == summary
 
     def test_mark_resolved_attributes_decider_and_outcome(self) -> None:
         store = InMemoryConfirmationRecordStore()
@@ -290,6 +312,10 @@ class TestPostgresStore:
         assert any(
             "ADD COLUMN IF NOT EXISTS turn_index" in s for s in sqls
         )
+        # SPEC-051 R-6: the browser-flow headline column migrates in place too.
+        assert any(
+            "ADD COLUMN IF NOT EXISTS flow_summary" in s for s in sqls
+        )
         sweep = next(
             call
             for call in calls
@@ -327,11 +353,44 @@ class TestPostgresStore:
         assert isinstance(insert["params"]["pending_calls"], Jsonb)
         # SPEC-033 R-1: the parking turn ordinal rides the insert.
         assert insert["params"]["turn_index"] == 2
+        # SPEC-051 R-6: an absent flow headline inserts as SQL NULL — never a
+        # bare dict, which psycopg3 cannot adapt to a JSONB column.
+        assert insert["params"]["flow_summary"] is None
         assert any("OFFSET" in call["sql"] for call in executed[1:])
         assert any("status <> 'pending'" in call["sql"] for call in executed[1:])
 
+    def test_save_parked_wraps_flow_summary_in_jsonb(self) -> None:
+        """SPEC-051 R-6: a browser-flow headline is wrapped in ``Jsonb`` so
+        psycopg3 adapts it to the JSONB column (a bare dict raises
+        ``cannot adapt type 'dict'``)."""
+        from psycopg.types.json import Jsonb
+
+        calls: list[dict] = []
+        store = PostgresConfirmationRecordStore(
+            db_url="postgresql://fake", connect=_fake_connect(calls)
+        )
+        summary = {
+            "skill_id": "samples/password-reset",
+            "origin": "http://admin.local",
+            "title": "Reset User Password",
+            "description": "Reset a user's password in the admin portal",
+            "risk_class": "write",
+        }
+        store.save_parked(_record("cf-1", flow_summary=summary))
+        insert = next(call for call in calls if "sql" in call)
+        wrapped = insert["params"]["flow_summary"]
+        assert isinstance(wrapped, Jsonb)
+        assert wrapped.obj == summary
+
     def test_load_record_maps_row_to_record(self) -> None:
         calls: list[dict] = []
+        summary = {
+            "skill_id": "samples/password-reset",
+            "origin": "http://admin.local",
+            "title": "Reset User Password",
+            "description": "Reset a user's password in the admin portal",
+            "risk_class": "write",
+        }
         row = (
             "cf-1",
             "ses-1",
@@ -344,6 +403,7 @@ class TestPostgresStore:
             "approve",
             datetime(2026, 8, 25, 10, 5, 0, tzinfo=timezone.utc),
             3,
+            summary,
         )
         store = PostgresConfirmationRecordStore(
             db_url="postgresql://fake", connect=_fake_connect(calls, rows=[row])
@@ -354,10 +414,13 @@ class TestPostgresStore:
         assert record["decided_at"] == "2026-08-25T10:05:00Z"
         assert record["status"] == "approved"
         assert record["turn_index"] == 3
+        # SPEC-051 R-6: the browser-flow headline maps from the new column.
+        assert record["flow_summary"] == summary
 
     def test_load_record_maps_legacy_row_without_turn_index(self) -> None:
-        """SPEC-033 R-1: rows parked before the column existed load with
-        ``turn_index=None`` and keep the legacy newest-turn anchoring."""
+        """SPEC-033 R-1 / SPEC-051 R-6: rows parked before the columns existed
+        load with ``turn_index=None`` and ``flow_summary=None`` and keep the
+        legacy newest-turn anchoring."""
         calls: list[dict] = []
         row = (
             "cf-1",
@@ -371,12 +434,14 @@ class TestPostgresStore:
             None,
             None,
             None,
+            None,
         )
         store = PostgresConfirmationRecordStore(
             db_url="postgresql://fake", connect=_fake_connect(calls, rows=[row])
         )
         record = store.load_record("ses-1", "cf-1")
         assert record["turn_index"] is None
+        assert record["flow_summary"] is None
 
     def test_load_record_returns_none_without_row(self) -> None:
         calls: list[dict] = []

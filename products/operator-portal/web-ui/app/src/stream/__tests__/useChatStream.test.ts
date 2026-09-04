@@ -183,6 +183,48 @@ describe("useChatStream", () => {
     expect(after?.completed).toBe(true);
   });
 
+  it("carries the browser-flow headline onto the parked card (SPEC-051 R-6)", async () => {
+    // The live card-push path: useChatStream threads frame.flowSummary
+    // (decoded from the wire flow_summary) onto the ConfirmationCard so the
+    // card headlines the workflow intent, not a bare web.click.
+    queueFetch(
+      okStream(
+        sse({
+          type: "confirmation_request",
+          confirm_id: "cf-flow",
+          session_id: "s-1",
+          pending_calls: [
+            { tool_name: "web.click", call_id: "c-1", risk_level: "write" },
+          ],
+          flow_summary: {
+            skill_id: "samples/password-reset",
+            origin: "http://admin.local",
+            title: "Reset User Password",
+            description: "Reset a user's password in the admin portal",
+            risk_class: "write",
+          },
+        }),
+      ),
+    );
+
+    const { result } = renderHook(() => useChatStream());
+    await act(async () => {
+      await result.current.send("reset alice's password", { userId: "amy" });
+    });
+
+    expect(result.current.turns[0]?.confirmationPending).toBe(true);
+    expect(result.current.turns[0]?.confirmations[0]).toMatchObject({
+      confirmId: "cf-flow",
+      flowSummary: {
+        skillId: "samples/password-reset",
+        origin: "http://admin.local",
+        title: "Reset User Password",
+        description: "Reset a user's password in the admin portal",
+        riskClass: "write",
+      },
+    });
+  });
+
   // SPEC-035 R-2: text segments separated by tool frames accumulate with
   // exactly one paragraph break at each boundary, so block markdown at a
   // segment start (a `## Heading`) still renders as a heading live.

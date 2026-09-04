@@ -21,39 +21,51 @@ approval gate.
 
 ## How it works
 
-The skill encodes a six-step flow:
+The skill encodes a seven-step flow:
 
 1. **Navigate** to the admin panel login page (binds the flow)
 2. **Snapshot** the page to enumerate interactive elements
-3. **Fill username** from the `admin-portal` credential set
-4. **Fill password** from the `admin-portal` credential set
-5. **Click "Sign In"** — this is the single HITL gate (write-tier)
-6. **Navigate** to the user's reset page with the new password as a URL parameter
+3. **Fill username** from the `admin-portal` credential set (read-tier)
+4. **Fill password** from the `admin-portal` credential set (read-tier) —
+   the login form then auto-submits (legacy SSO) and redirects, so
+   authentication needs no click
+5. **Navigate** to the user's reset page with the new password as a URL
+   parameter; the form pre-fills both fields but does not submit
+6. **Click "Confirm reset"** — this is the single HITL gate (write-tier),
+   landing on the destructive mutation itself
+7. **Snapshot + screenshot** to verify the reset succeeded
 
-The admin panel's reset page auto-fills the password fields from the URL
-parameter and auto-submits, so no second `web.click` is needed. This keeps
-the flow at exactly one HITL gate (the sign-in click), satisfying the
-one-gate-per-flow invariant (SPEC-049 D-3).
+The admin panel's reset page pre-fills the password fields from the URL
+parameter but waits for the operator's click, so the "Confirm reset" action is
+the flow's only write-tier interaction. This keeps the flow at exactly one HITL
+gate — on the mutation the operator actually approves — satisfying the
+one-gate-per-flow invariant (SPEC-049 R-4/D-3, enforced kernel-side by
+SPEC-051).
 
 ## Key design decisions
 
-### Why admin login is the HITL gate (not the reset)
+### Why the reset is the HITL gate (not admin login)
 
-The sign-in click is the access control boundary. Once the operator approves
-"sign in as admin", the subsequent navigation and auto-submit are read-tier
-operations that don't need additional gates.
+The gate belongs on the action the operator actually means to approve — the
+destructive mutation. Resetting a password is the mutation; signing in is not.
+So authentication stays read-tier (`web.fill_credential` plus the page's legacy
+SSO auto-submit) and the sole write-tier interaction is the "Confirm reset"
+click. The confirmation card headlines the workflow intent ("reset a user's
+password on <origin>") rather than a bare sign-in click (SPEC-051 R-6).
 
 ### Why `web.fill_credential` instead of `web.type`
 
-`web.type` is write-tier — each call parks its own HITL card. Using
+`web.type` is write-tier — each call would park its own HITL card. Using
 `web.fill_credential` (read-tier) for form filling keeps the HITL count at
 one. Credentials also never appear in tool outputs or logs (SPEC-049 R-5).
 
 ### Why the new password is a URL parameter
 
-Passing the new password as a URL parameter lets the admin panel auto-fill
-and auto-submit the reset form. This avoids a second `web.click` (which would
-be a second HITL gate) and a `web.type` (which would be write-tier).
+Passing the new password as a URL parameter lets the admin panel pre-fill the
+reset form through a read-tier `web.navigate`, avoiding a write-tier `web.type`
+for the password fields. The form pre-fills but does not auto-submit, so the
+"Confirm reset" click stays the flow's single gate. The gateway redacts the
+`newpw` parameter from results, evidence, and audit (SPEC-049 R-5).
 
 ## Running the demo
 

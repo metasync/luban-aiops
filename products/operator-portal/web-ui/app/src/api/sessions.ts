@@ -55,6 +55,16 @@ export interface ConfirmationCallPayload {
   display_hint?: string;
 }
 
+// SPEC-051 R-6: the card-level browser-flow headline on the durable
+// record (wire shape mirrors the kernel's FlowContext.summary()).
+export interface ConfirmationFlowSummary {
+  skill_id?: string;
+  origin?: string;
+  title?: string;
+  description?: string;
+  risk_class?: string;
+}
+
 export interface ConfirmationRecord {
   confirm_id: string;
   session_id: string;
@@ -68,6 +78,11 @@ export interface ConfirmationRecord {
   // convention as evidence_turns.turn_index); absent/null for records
   // parked before the field existed.
   turn_index?: number | null;
+  // SPEC-051 R-6: card-level browser-flow headline captured at park time;
+  // absent/null for non-browser cards and records parked before the field
+  // existed. Both the session-detail and inbox surfaces carry it so the
+  // approvals inbox replays the same workflow framing.
+  flow_summary?: ConfirmationFlowSummary | null;
   status: "pending" | "approved" | "denied" | "expired";
   parked_at?: string | null;
   decider_user_id?: string | null;

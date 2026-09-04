@@ -406,6 +406,12 @@ class BrowserConnector:
             origin=url_origin,
             risk_class=risk_class,
             max_steps=self._flow_max_steps,
+            # SPEC-051 R-6: carry the skill's human-readable frontmatter so the
+            # flow dict riding web.navigate's result can headline the kernel's
+            # confirmation card with the workflow intent (e.g. "Reset a user's
+            # password"), not a bare tool action like web.click.
+            title=str(skill.get("title") or ""),
+            description=str(skill.get("description") or ""),
             approved=(risk_class == "read"),
         )
         entry.reset_page_state()

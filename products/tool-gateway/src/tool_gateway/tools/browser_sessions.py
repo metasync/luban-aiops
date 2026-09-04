@@ -75,6 +75,14 @@ class FlowState:
     origin: str
     risk_class: str  # "read" | "write"
     max_steps: int
+    # Human-readable skill metadata for the flow-semantic confirmation card
+    # (SPEC-051 R-6): populated at bind_flow from the fetched skill's
+    # frontmatter (title/description) and surfaced on to_dict() so it rides
+    # web.navigate's data["flow"] to the kernel, which renders it as the card
+    # headline above the per-call tool detail. Empty when the skill declares
+    # none — the kernel card then falls back to tool-level rendering.
+    title: str = ""
+    description: str = ""
     steps_used: int = 0
     approved: bool = False
     denied: bool = False
@@ -84,6 +92,8 @@ class FlowState:
             "skill_id": self.skill_id,
             "origin": self.origin,
             "risk_class": self.risk_class,
+            "title": self.title,
+            "description": self.description,
             "steps_used": self.steps_used,
             "max_steps": self.max_steps,
             "approved": self.approved,

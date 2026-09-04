@@ -56,6 +56,7 @@ def make_record(
     pending_calls: list[dict[str, Any]],
     action: str | None,
     turn_index: int | None = None,
+    flow_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Shape the parked record written before the request frame flows."""
     return {
@@ -68,6 +69,11 @@ def make_record(
         # SPEC-025 evidence turn_index) so seeded cards anchor under the
         # exchange that parked them. None for pre-spec records.
         "turn_index": turn_index,
+        # SPEC-051 R-6: the card-level browser-flow headline (skill intent,
+        # origin, risk_class) captured at park time so the approvals inbox
+        # and session detail replay the same workflow framing after any
+        # re-login. None for non-browser cards and pre-spec records.
+        "flow_summary": flow_summary,
         "status": "pending",
         "parked_at": _utc_now_iso(),
         "decider_user_id": None,
@@ -253,7 +259,8 @@ CREATE TABLE IF NOT EXISTS confirmation_records (
     decider_user_id TEXT,
     decision        TEXT,
     decided_at      TIMESTAMPTZ,
-    turn_index      INTEGER
+    turn_index      INTEGER,
+    flow_summary    JSONB
 );
 CREATE INDEX IF NOT EXISTS idx_confirmation_records_session
     ON confirmation_records (session_id, parked_at);
@@ -269,14 +276,22 @@ ALTER TABLE confirmation_records
     ADD COLUMN IF NOT EXISTS turn_index INTEGER
 """
 
+# SPEC-051 R-6: clusters whose table predates the flow-headline column
+# migrate in place at startup; pre-spec rows stay NULL and render with
+# the legacy tool-action framing (no flow headline).
+_ADD_FLOW_SUMMARY_COLUMN = """
+ALTER TABLE confirmation_records
+    ADD COLUMN IF NOT EXISTS flow_summary JSONB
+"""
+
 _INSERT_PARKED = """
 INSERT INTO confirmation_records (
     confirm_id, session_id, owner_user_id, pending_calls, action,
-    status, parked_at, turn_index
+    status, parked_at, turn_index, flow_summary
 )
 VALUES (
     %(confirm_id)s, %(session_id)s, %(owner_user_id)s, %(pending_calls)s,
-    %(action)s, 'pending', now(), %(turn_index)s
+    %(action)s, 'pending', now(), %(turn_index)s, %(flow_summary)s
 )
 ON CONFLICT (confirm_id) DO NOTHING
 """
@@ -308,7 +323,7 @@ UPDATE confirmation_records
 _LOAD_FOR_SESSION = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
-       turn_index
+       turn_index, flow_summary
   FROM confirmation_records
  WHERE session_id = %(session_id)s
  ORDER BY parked_at ASC
@@ -317,7 +332,7 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
 _LOAD_RECORD = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
-       turn_index
+       turn_index, flow_summary
   FROM confirmation_records
  WHERE session_id = %(session_id)s
    AND confirm_id = %(confirm_id)s
@@ -326,7 +341,7 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
 _LOAD_PENDING_FOR_SESSION = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
-       turn_index
+       turn_index, flow_summary
   FROM confirmation_records
  WHERE session_id = %(session_id)s
    AND status = 'pending'
@@ -341,7 +356,7 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
 _LOAD_INBOX_PENDING = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
-       turn_index
+       turn_index, flow_summary
   FROM confirmation_records
  WHERE status = 'pending'
  ORDER BY parked_at DESC
@@ -351,7 +366,7 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
 _LOAD_INBOX_HISTORY = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
-       turn_index
+       turn_index, flow_summary
   FROM confirmation_records
  WHERE status <> 'pending'
    AND decided_at >= now() - make_interval(days => %(history_days)s)
@@ -415,6 +430,7 @@ def _row_to_record(row: Any) -> dict[str, Any]:
         decision,
         decided_at,
         turn_index,
+        flow_summary,
     ) = row
     return {
         "confirm_id": confirm_id,
@@ -428,6 +444,7 @@ def _row_to_record(row: Any) -> dict[str, Any]:
         "decision": decision,
         "decided_at": _iso(decided_at),
         "turn_index": turn_index,
+        "flow_summary": flow_summary,
     }
 
 
@@ -484,6 +501,7 @@ class PostgresConfirmationRecordStore:
             with conn.cursor() as cur:
                 cur.execute(_CONFIRMATION_RECORDS_DDL)
                 cur.execute(_ADD_TURN_INDEX_COLUMN)
+                cur.execute(_ADD_FLOW_SUMMARY_COLUMN)
                 cur.execute(
                     _CLOSE_STALE_PENDING,
                     {"stale_after_seconds": max(stale_after_seconds, 0)},
@@ -504,6 +522,13 @@ class PostgresConfirmationRecordStore:
                         "pending_calls": Jsonb(record["pending_calls"]),
                         "action": record["action"],
                         "turn_index": record.get("turn_index"),
+                        # psycopg cannot adapt a bare dict; wrap the flow
+                        # headline as JSONB when present, else SQL NULL.
+                        "flow_summary": (
+                            Jsonb(record["flow_summary"])
+                            if record.get("flow_summary") is not None
+                            else None
+                        ),
                     },
                 )
                 cur.execute(

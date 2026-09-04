@@ -33,8 +33,14 @@ from agent_service.services.execution_records import (
 from agent_service.services.execution_signing import (
     REASON_ARGS_DIGEST_MISMATCH,
     REASON_SIGNING_UNAVAILABLE,
+    build_flow_request,
     build_receipt,
     build_requests,
+)
+from agent_service.services.flow_approvals import (
+    BROWSER_WRITE_TOOLS,
+    FLOW_APPROVALS,
+    FLOW_CONTEXTS,
 )
 from agent_service.services.hitl_confirmations import (
     CONFIRMATION_REGISTRY,
@@ -414,7 +420,7 @@ class AgentKernel:
 
         settings = self.settings
         middlewares: list = [
-            GatewayPermissionMiddleware(),
+            GatewayPermissionMiddleware(flow_signer=self._sign_flow_execution),
             ToolEvidenceMiddleware(
                 data_summary_max_chars=settings.tool_data_summary_max_chars,
                 data_max_chars=settings.tool_data_max_chars,
@@ -878,6 +884,8 @@ class AgentKernel:
         from agent_service.tools.gateway_tools import (
             CHAT_SESSION_ID,
             DELEGATED_TOKEN,
+            EXECUTION_AUDIT_CONTEXT,
+            EXECUTION_REQUESTS,
         )
 
         bound_model_id: str | None = None
@@ -917,24 +925,43 @@ class AgentKernel:
             # rebuild; the delegated token is exposed the same way for the
             # cached tool closures.
             trace_queue: asyncio.Queue = asyncio.Queue()
+            # SPEC-051 R-1: arm the same execution plumbing the resume path uses
+            # so a browser write unlocked by a flow authority recorded in an
+            # EARLIER turn can auto-sign, execute, and receipt here. Both are
+            # inert for turns without a live flow authority: the empty requests
+            # map is never consulted (mutating tools still park) and the audit
+            # context stays None, so the common hot path is behavior-preserving.
+            execution_requests: dict[str, dict] = {}
+            flow_approval = FLOW_APPROVALS.get(session_id)
+            flow_audit_context = (
+                {
+                    "settings": self.settings,
+                    "confirm_id": flow_approval.confirm_id,
+                    "session_id": session_id,
+                    "request_id": request_id,
+                    "decider_user_id": flow_approval.decider_user_id,
+                }
+                if flow_approval is not None
+                else None
+            )
             sink_var = TOOL_EVIDENCE_SINK.set(trace_queue)
             token_var = DELEGATED_TOKEN.set(bearer_token)
             session_var = CHAT_SESSION_ID.set(session_id)
+            requests_var = EXECUTION_REQUESTS.set(execution_requests)
+            audit_var = EXECUTION_AUDIT_CONTEXT.set(flow_audit_context)
             try:
                 async for event in agent.reply_stream(
                     user_msg_cls(name=user_name, content=effective_message)
                 ):
                     self.clear_error()
                     # Drain any accumulated trace events before yielding text.
-                    while not trace_queue.empty():
-                        trace = trace_queue.get_nowait()
-                        decorated = {
-                            **trace,
-                            "request_id": request_id,
-                            "session_id": session_id,
-                        }
-                        if decorated.get("type") in EVIDENCE_FRAME_TYPES:
-                            evidence_frames.append(decorated)
+                    for decorated in self._drain_trace_queue(
+                        trace_queue,
+                        request_id,
+                        session_id,
+                        evidence_frames,
+                        execution_requests,
+                    ):
                         yield decorated
                     # SPEC-020 R-2: a kernel ASK park surfaces as a
                     # confirmation_request frame and ends the stream without
@@ -962,19 +989,19 @@ class AgentKernel:
                     yield frame
 
                 # Drain any remaining trace events after the stream completes.
-                while not trace_queue.empty():
-                    trace = trace_queue.get_nowait()
-                    decorated = {
-                        **trace,
-                        "request_id": request_id,
-                        "session_id": session_id,
-                    }
-                    if decorated.get("type") in EVIDENCE_FRAME_TYPES:
-                        evidence_frames.append(decorated)
+                for decorated in self._drain_trace_queue(
+                    trace_queue,
+                    request_id,
+                    session_id,
+                    evidence_frames,
+                    execution_requests,
+                ):
                     yield decorated
             finally:
                 DELEGATED_TOKEN.reset(token_var)
                 CHAT_SESSION_ID.reset(session_var)
+                EXECUTION_REQUESTS.reset(requests_var)
+                EXECUTION_AUDIT_CONTEXT.reset(audit_var)
                 TOOL_EVIDENCE_SINK.reset(sink_var)
 
             # Persist the turn's evidence frames best-effort (SPEC-025 R-1)
@@ -1029,6 +1056,12 @@ class AgentKernel:
         browser_element_map = self._extract_browser_element_map(
             evidence_frames or []
         )
+        # SPEC-051 R-6: render the card from the maintained session FlowContext
+        # (populated by _drain_trace_queue from web.navigate), not a park-time
+        # frame walk — authoritative and correct across turns and frame order.
+        # Empty when no flow is bound, so the card falls back to tool-level.
+        flow_context = FLOW_CONTEXTS.get(session_id)
+        browser_flow = flow_context.summary() if flow_context is not None else {}
         pending = CONFIRMATION_REGISTRY.register(
             session_id=session_id,
             user_id=user_name,
@@ -1038,6 +1071,7 @@ class AgentKernel:
             risk_levels=self._toolkit_risk_map(toolkit),
             gateway_names=self._toolkit_gateway_name_map(toolkit),
             browser_element_map=browser_element_map,
+            browser_flow=browser_flow,
         )
         # SPEC-031 R-1: the durable record is written before the frame
         # below reaches the client, so the card survives re-login and
@@ -1054,6 +1088,9 @@ class AgentKernel:
                     # SPEC-033 R-1: anchor the durable card under the
                     # parking turn (same ordinal convention as evidence).
                     turn_index=turn_index,
+                    # SPEC-051 R-6: persist the flow headline so the inbox
+                    # and session detail replay the same workflow framing.
+                    flow_summary=pending.flow_summary(),
                 )
             )
         except Exception as exc:
@@ -1070,12 +1107,18 @@ class AgentKernel:
                 "tool_names": pending.tool_names(),
             },
         )
-        return {
+        frame: dict[str, object] = {
             "type": "confirmation_request",
             "confirm_id": pending.confirm_id,
             "pending_calls": pending.pending_calls_payload(),
             "message": self._confirmation_message(event),
         }
+        # SPEC-051 R-6: card-level flow headline rendered above the per-call
+        # tool detail; absent when no flow is bound (tool-level fallback).
+        flow_summary = pending.flow_summary()
+        if flow_summary is not None:
+            frame["flow_summary"] = flow_summary
+        return frame
 
     @staticmethod
     def _extract_browser_element_map(
@@ -1210,6 +1253,119 @@ class AgentKernel:
                 exc,
             )
 
+    def _sign_flow_execution(
+        self, tool_call: object, gateway_tool_name: str
+    ) -> dict | None:
+        """Auto-sign one unlocked browser write under a flow authority (SPEC-051 R-1/R-3).
+
+        Armed as ``GatewayPermissionMiddleware``'s ``flow_signer``. Returns a
+        signed execution envelope — injecting it into the shared
+        ``EXECUTION_REQUESTS`` map so the tool closure verifies and hands off
+        exactly like a card-approved call — or ``None`` to fail safe and let the
+        write park. ``None`` (→ ASK) whenever: the session id is absent; no live
+        flow authority exists (TTL lapse or ``ttl <= 0`` disable); the bound
+        ``FlowContext`` identity no longer matches the approval (a rebind — the
+        guard that eliminates the ADR-0007 cross-flow window); the execution
+        state is not armed (``EXECUTION_REQUESTS`` is not a dict); or no signing
+        key is provisioned. Each unlocked write is still individually signed,
+        persisted, and audited (``execution_requested``), and the tool-gateway
+        deviation guard still bounds it on invocation.
+        """
+        from agent_service.tools.gateway_tools import (
+            CHAT_SESSION_ID,
+            EXECUTION_AUDIT_CONTEXT,
+            EXECUTION_REQUESTS,
+        )
+
+        session_id = CHAT_SESSION_ID.get()
+        if not session_id:
+            return None
+        approval = FLOW_APPROVALS.get(session_id)
+        if approval is None:
+            return None
+        context = FLOW_CONTEXTS.get(session_id)
+        if context is None or context.identity() != approval.identity():
+            # No bound flow, or the flow was rebound to a different skill/origin
+            # since approval — fail safe and re-park (SPEC-051 R-1 identity
+            # guard). This is what eliminates the cross-flow auto-sign window.
+            return None
+        requests = EXECUTION_REQUESTS.get()
+        if not isinstance(requests, dict):
+            # Execution state not armed for this turn — nothing to inject into,
+            # so the write cannot be verified/handed off; park it instead.
+            return None
+        key = self.settings.execution_signing_key
+        if not key:
+            return None
+        call_id = str(getattr(tool_call, "id", "") or "")
+        if not call_id:
+            return None
+        # Parse the parked arguments exactly as the card path does, so the
+        # args_digest matches what the tool closure recomputes from the invoked
+        # kwargs (SPEC-037 R-3). Display enrichment never touches parameters.
+        raw = getattr(tool_call, "input", "") or ""
+        try:
+            parsed = json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
+            parsed = {}
+        parameters = parsed if isinstance(parsed, dict) else {}
+        envelope = build_flow_request(
+            call_id=call_id,
+            tool_name=gateway_tool_name,
+            parameters=parameters,
+            flow_approval=approval,
+            key=key,
+        )
+        # Inject BEFORE the tool closure runs (the permission check precedes
+        # acting), so _verify_execution_request finds it by call_id and
+        # _handoff_execution presents it to the worker.
+        requests[call_id] = envelope
+        self._persist_execution_request(envelope)
+        audit_context = EXECUTION_AUDIT_CONTEXT.get() or {}
+        self._emit_execution_event(
+            "execution_requested",
+            "success",
+            {
+                "confirm_id": envelope["confirm_id"],
+                "execution_id": envelope["execution_id"],
+                "call_id": envelope["call_id"],
+                "tool_name": envelope["tool_name"],
+                "args_digest": envelope["args_digest"],
+                "decider_user_id": envelope["decider_user_id"],
+                "owner_user_id": envelope["owner_user_id"],
+            },
+            str(audit_context.get("request_id") or ""),
+            session_id,
+            envelope["decider_user_id"],
+        )
+        return envelope
+
+    @staticmethod
+    def _observe_flow_binding(frame: dict[str, object], session_id: str) -> None:
+        """Record the session's FlowContext from a web.navigate result (SPEC-051 R-1/R-6).
+
+        The tool-gateway binds a flow on ``web.navigate`` and rides it back on
+        ``data["flow"]``; this is the single population point for the kernel's
+        reflection of that binding (both the live and resumed streams drain
+        through ``_drain_trace_queue``). A successful navigate binding a
+        different skill/origin overwrites the context — exactly how a rebind is
+        detected and the next write re-parks. Non-navigate frames, failures, and
+        results without a flow dict are ignored.
+        """
+        if frame.get("type") != "tool_result":
+            return
+        if frame.get("tool_name") != "web.navigate":
+            return
+        if frame.get("status") != "success":
+            return
+        data = frame.get("data")
+        if not isinstance(data, dict):
+            return
+        flow = data.get("flow")
+        if not isinstance(flow, dict):
+            return
+        FLOW_CONTEXTS.record(session_id, flow)
+
     def _drain_trace_queue(
         self,
         trace_queue: asyncio.Queue,
@@ -1229,6 +1385,10 @@ class AgentKernel:
             }
             if decorated.get("type") in EVIDENCE_FRAME_TYPES:
                 evidence_frames.append(decorated)
+            # SPEC-051 R-1/R-6: keep the session FlowContext current before any
+            # later write in this turn parks (card headline) or auto-signs
+            # (identity guard). Single population point for both streams.
+            self._observe_flow_binding(decorated, session_id)
             self._observe_tool_result(decorated, execution_requests)
             frames.append(decorated)
         return frames
@@ -1401,6 +1561,56 @@ class AgentKernel:
                 return message
         return "Tool execution requires your confirmation."
 
+    @staticmethod
+    def _batch_has_browser_write(pending: PendingConfirmation) -> bool:
+        """True when the parked batch contains a write-tier browser tool (R-1).
+
+        Uses the canonical dotted gateway names captured at park time (the
+        model-visible names are sanitized) matched against
+        ``BROWSER_WRITE_TOOLS``. A batch of only non-browser writes
+        (``k8s.*``, etc.) or only read-tier browser probes does not arm
+        flow-unlock.
+        """
+        for sanitized in pending.tool_names():
+            gateway_name = pending.gateway_names.get(sanitized, sanitized)
+            if gateway_name in BROWSER_WRITE_TOOLS:
+                return True
+        return False
+
+    def _record_flow_approval(
+        self,
+        pending: PendingConfirmation,
+        decider_user_id: str,
+        session_id: str,
+    ) -> None:
+        """Record the flow authority when an approved batch holds a browser write.
+
+        SPEC-051 R-1: the authority is scoped to the session AND the approved
+        flow's identity (``skill_id`` + ``origin``) captured on the parked
+        card's ``browser_flow`` (R-6), so only that flow's subsequent browser
+        writes unlock. With no bound flow identity there is nothing to scope to,
+        and a batch without a browser write must not arm browser flow-unlock —
+        either way nothing is recorded and every write keeps parking. TTL comes
+        from settings; ``0`` records an immediately-expired authority
+        (flow-unlock disabled — the pre-fix posture).
+        """
+        if not self._batch_has_browser_write(pending):
+            return
+        browser_flow = pending.browser_flow or {}
+        skill_id = str(browser_flow.get("skill_id") or "")
+        origin = str(browser_flow.get("origin") or "")
+        if not skill_id and not origin:
+            return
+        FLOW_APPROVALS.record(
+            session_id=session_id,
+            confirm_id=pending.confirm_id,
+            owner_user_id=pending.user_id,
+            decider_user_id=decider_user_id,
+            skill_id=skill_id,
+            origin=origin,
+            ttl=self.settings.browser_flow_approval_ttl,
+        )
+
     async def resume_confirmation(
         self,
         session_id: str,
@@ -1467,6 +1677,16 @@ class AgentKernel:
         execution_requests, execution_rejection = self._prepare_executions(
             pending, user_name, confirmed, request_id, session_id
         )
+
+        # SPEC-051 R-1: approving a card whose batch contains a browser write
+        # records a session+identity-scoped flow authority BEFORE the resumed
+        # stream, so same-turn subsequent writes in that flow unlock (auto-sign)
+        # instead of re-parking. Denials and non-browser batches record nothing;
+        # a batch rejected fail-closed (e.g. ``signing_unavailable``) records
+        # nothing either, so the authority is never broader than the batch that
+        # actually executed.
+        if confirmed and execution_rejection is None:
+            self._record_flow_approval(pending, user_name, session_id)
 
         trace_queue: asyncio.Queue = asyncio.Queue()
         sink_var = TOOL_EVIDENCE_SINK.set(trace_queue)

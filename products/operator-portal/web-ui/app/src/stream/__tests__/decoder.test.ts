@@ -196,6 +196,55 @@ describe("decodeEventBlock", () => {
     });
   });
 
+  it("maps the browser-flow headline on a confirmation_request frame (SPEC-051 R-6)", () => {
+    const decoded = decodeEventBlock(
+      sseBlock({
+        type: "confirmation_request",
+        confirm_id: "cf-flow",
+        message: "Approve this browser flow?",
+        pending_calls: [
+          { tool_name: "web.click", call_id: "c-1", risk_level: "write" },
+        ],
+        flow_summary: {
+          skill_id: "samples/password-reset",
+          origin: "http://admin.local",
+          title: "Reset User Password",
+          description: "Reset a user's password in the admin portal",
+          risk_class: "write",
+        },
+      }),
+    );
+    expect(decoded?.frame).toMatchObject({
+      kind: "confirmation_request",
+      confirmId: "cf-flow",
+      flowSummary: {
+        skillId: "samples/password-reset",
+        origin: "http://admin.local",
+        title: "Reset User Password",
+        description: "Reset a user's password in the admin portal",
+        riskClass: "write",
+      },
+    });
+  });
+
+  it("leaves flowSummary undefined when the frame carries no flow_summary (SPEC-051 R-6)", () => {
+    const decoded = decodeEventBlock(
+      sseBlock({
+        type: "confirmation_request",
+        confirm_id: "cf-plain",
+        pending_calls: [
+          { tool_name: "k8s.restart_pod", call_id: "c-1", risk_level: "write" },
+        ],
+      }),
+    );
+    const frame = decoded?.frame;
+    expect(frame?.kind).toBe("confirmation_request");
+    // A non-browser card falls back to plain tool-action rendering.
+    if (frame?.kind === "confirmation_request") {
+      expect(frame.flowSummary).toBeUndefined();
+    }
+  });
+
   it("maps confirmation_result frames", () => {
     const decoded = decodeEventBlock(
       sseBlock({ type: "confirmation_result", confirm_id: "cf-1", status: "approved" }),

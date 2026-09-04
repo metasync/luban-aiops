@@ -10,6 +10,7 @@ from agent_service.services.agent_state_store import AGENT_STATE_STORE
 from agent_service.services.confirmation_records import CONFIRMATION_RECORD_STORE
 from agent_service.services.evidence_store import EVIDENCE_STORE
 from agent_service.services.execution_records import EXECUTION_RECORD_STORE
+from agent_service.services.flow_approvals import FLOW_APPROVALS, FLOW_CONTEXTS
 from agent_service.services.session_store import SESSION_STORE
 
 LOGGER = logging.getLogger(__name__)
@@ -152,6 +153,12 @@ def delete_session(session_id: str, user_id: str | None = None) -> bool:
     _assert_session_owner(session, user_id)
     deleted = SESSION_STORE.delete_session(session_id)
     if deleted:
+        # SPEC-051 R-1/R-2: the session-scoped browser-flow stores are
+        # in-memory and their context entries never expire on their own, so
+        # drop both here to bound per-process growth alongside every other
+        # per-session store. Plain dict pops — best-effort by construction.
+        FLOW_CONTEXTS.clear(session_id)
+        FLOW_APPROVALS.clear(session_id)
         try:
             AGENT_STATE_STORE.delete_state(session_id)
         except Exception:

@@ -59,6 +59,11 @@ data:
   # legacy SSO behaviour common in old internal tools) so the agent
   # never needs a write-tier click to authenticate — the HITL gate
   # lands exclusively on the final "Confirm reset" button.
+  #
+  # The reset form likewise pre-fills its password fields from the URL
+  # (legacy batch-operation pattern) but does NOT auto-submit: it waits
+  # for the operator's "Confirm reset" click, which is the flow's single
+  # write-tier interaction and therefore the one HITL gate (SPEC-051).
   admin-index.html: |
     <!doctype html>
     <html lang="en">
@@ -242,17 +247,10 @@ data:
           } catch(e) {}
           return false;
         }
-        /* Auto-submit when both fields are pre-filled via URL params
-           (legacy batch-operation pattern). */
-        if (newPw && targetUser !== "unknown") {
-          setTimeout(function() {
-            var np = document.getElementById("new-password").value;
-            var cp = document.getElementById("confirm-password").value;
-            if (np && np === cp) {
-              doReset(new Event("submit"));
-            }
-          }, 200);
-        }
+        /* SPEC-051 Design 1: the form pre-fills from the URL but does NOT
+           auto-submit. The operator's "Confirm reset" click is the flow's
+           single write-tier interaction — the one HITL gate — so the
+           destructive reset never runs without an explicit approval. */
       </script>
     </body>
     </html>

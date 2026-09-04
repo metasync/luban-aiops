@@ -341,12 +341,21 @@ def _stub_skill(connector: BrowserConnector, record: dict | None) -> None:
     connector.fetch_skill = _fetch  # type: ignore[method-assign]
 
 
-def _web_skill(risk_class: str | None = "write") -> dict:
-    return {
+def _web_skill(
+    risk_class: str | None = "write", title: str = "", description: str = ""
+) -> dict:
+    skill = {
         "skill_id": "team-a/web/inventoryhealth",
         "web_target": f"{ALLOWED_ORIGIN}/login",
         "risk_class": risk_class,
     }
+    # SPEC-051 R-6: optional human-readable frontmatter; only present when the
+    # caller supplies it so the default shape stays byte-for-byte unchanged.
+    if title:
+        skill["title"] = title
+    if description:
+        skill["description"] = description
+    return skill
 
 
 # --- Settings ---------------------------------------------------------------
@@ -683,6 +692,56 @@ class SecretQueryRedactionTests(unittest.TestCase):
         self.assertEqual(_redact_secret_query(url), url)
 
 
+# --- FlowState serialization (SPEC-051 R-6) ---------------------------------
+
+
+class FlowStateSerializationTests(unittest.TestCase):
+    def test_to_dict_surfaces_headline_and_omits_denied(self) -> None:
+        """``to_dict()`` carries the human-readable title/description to the
+        kernel card and deliberately omits the gateway-internal ``denied``
+        kill-switch (the HITL path enforces denial upstream, so it never rides
+        the flow dict to the kernel)."""
+        flow = FlowState(
+            skill_id="team-a/web/inventoryhealth",
+            origin="https://inventory.internal:8443",
+            risk_class="write",
+            max_steps=20,
+            title="Reset User Password",
+            description="Reset a user's password in the admin portal",
+            steps_used=3,
+            approved=False,
+        )
+        self.assertEqual(
+            flow.to_dict(),
+            {
+                "skill_id": "team-a/web/inventoryhealth",
+                "origin": "https://inventory.internal:8443",
+                "risk_class": "write",
+                "title": "Reset User Password",
+                "description": "Reset a user's password in the admin portal",
+                "steps_used": 3,
+                "max_steps": 20,
+                "approved": False,
+            },
+        )
+        self.assertNotIn("denied", flow.to_dict())
+
+    def test_to_dict_defaults_headline_empty(self) -> None:
+        """A flow bound from a skill without frontmatter serializes empty
+        headline strings — the kernel card then falls back to tool-level
+        rendering rather than dropping the flow framing entirely."""
+        flow = FlowState(
+            skill_id="s",
+            origin="https://a.internal",
+            risk_class="read",
+            max_steps=20,
+        )
+        payload = flow.to_dict()
+        self.assertEqual(payload["title"], "")
+        self.assertEqual(payload["description"], "")
+        self.assertFalse(payload["approved"])
+
+
 # --- Navigate + flow binding ------------------------------------------------
 
 
@@ -738,6 +797,43 @@ class FlowBindingTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "success")
         self.assertTrue(result.data["flow"]["approved"])
+
+    def test_navigate_flow_carries_skill_headline(self) -> None:
+        """SPEC-051 R-6: the bound flow dict surfaces the skill's human-readable
+        frontmatter so the kernel card headlines the workflow intent (e.g.
+        "Reset a user's password") above the bare per-call tool action."""
+        _stub_skill(
+            self.connector,
+            _web_skill(
+                "write",
+                title="Reset User Password",
+                description="Reset a user's password in the admin portal",
+            ),
+        )
+        result = self._navigate(
+            {"url": f"{ALLOWED_ORIGIN}/login", "skill_id": "team-a/web/inventoryhealth"}
+        )
+        self.assertEqual(result.status, "success")
+        flow = result.data["flow"]
+        self.assertEqual(flow["title"], "Reset User Password")
+        self.assertEqual(
+            flow["description"], "Reset a user's password in the admin portal"
+        )
+        # The same headline rides the session's FlowState for later interactions.
+        self.assertEqual(
+            self.connector.pool.get("dev.operator").flow.title, "Reset User Password"
+        )
+
+    def test_navigate_flow_headline_defaults_empty_without_frontmatter(self) -> None:
+        """A skill with no title/description frontmatter yields empty strings —
+        the kernel card then falls back to tool-level rendering (SPEC-051 R-6)."""
+        _stub_skill(self.connector, _web_skill("write"))
+        result = self._navigate(
+            {"url": f"{ALLOWED_ORIGIN}/login", "skill_id": "team-a/web/inventoryhealth"}
+        )
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.data["flow"]["title"], "")
+        self.assertEqual(result.data["flow"]["description"], "")
 
     def test_risk_class_defaults_read_when_absent(self) -> None:
         skill = _web_skill(None)

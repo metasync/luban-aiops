@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Callable
 from contextvars import ContextVar
 from typing import Any
 
@@ -30,6 +31,8 @@ from agentscope.message import ToolCallBlock, ToolCallState
 from agentscope.middleware import MiddlewareBase
 from agentscope.permission import PermissionBehavior, PermissionDecision
 from agentscope.tool import ToolResponse
+
+from agent_service.services.flow_approvals import BROWSER_WRITE_TOOLS
 
 LOGGER = logging.getLogger(__name__)
 
@@ -162,12 +165,31 @@ class GatewayPermissionMiddleware(MiddlewareBase):
     chain again on resume (state ALLOWED); they are delegated to the
     built-in resolution, which short-circuits ALLOWED calls — re-ASKing
     them would park the resumed reply forever.
+
+    SPEC-051 R-1 adds one narrow runtime exception for browser flows: a
+    mutating ``web.*`` call inside a flow the operator already approved is
+    ALLOWed and auto-signed via the optional ``flow_signer`` (scoped to the
+    session and the approved flow's identity), so a multi-step mutating flow
+    parks a single card instead of one per write. This is runtime flow
+    authority, not an allow-list entry — the read-only auto-allow invariant
+    is unchanged, and the tool-gateway deviation guard still bounds the write.
     """
 
-    def __init__(self, auto_allowed: frozenset[str] | None = None) -> None:
+    def __init__(
+        self,
+        auto_allowed: frozenset[str] | None = None,
+        flow_signer: Callable[[Any, str], dict | None] | None = None,
+    ) -> None:
         self._allow_list = (
             auto_allowed if auto_allowed is not None else _load_auto_allowed_tools()
         )
+        # SPEC-051 R-1: optional callback the kernel arms to auto-sign an
+        # unlocked browser write. ``flow_signer(tool_call, gateway_tool_name)``
+        # returns a signed execution envelope when the session holds a live
+        # flow authority whose identity still matches the bound flow, else
+        # ``None`` (→ the write parks as before). Never set for non-browser
+        # writes; the static read-only allow-list above is untouched.
+        self._flow_signer = flow_signer
 
     async def on_check_permission(
         self,
@@ -212,6 +234,32 @@ class GatewayPermissionMiddleware(MiddlewareBase):
         if tool is None:
             # No tool surface to reason about; keep the built-in resolution.
             return await next_handler(**input_kwargs)
+        # SPEC-051 R-1: one HITL gate per mutating browser flow. A browser
+        # write (web.click/type/select/press_key/upload_file/evaluate) inside a
+        # flow the operator already approved is admitted here and auto-signed
+        # by ``flow_signer`` under the approving card's authority — never via
+        # the static read-only allow-list above, and never for non-browser
+        # writes (k8s.*, etc.). The signer returns None (fail-safe → ASK) when
+        # no live authority exists, the signing key/execution state is unset,
+        # or the bound flow's identity no longer matches the approval (a
+        # rebind). The tool-gateway deviation guard still bounds the write.
+        gateway_tool_name = getattr(tool, "gateway_tool_name", None)
+        if (
+            self._flow_signer is not None
+            and gateway_tool_name in BROWSER_WRITE_TOOLS
+            and not getattr(tool, "is_read_only", False)
+        ):
+            envelope = self._flow_signer(tool_call, gateway_tool_name)
+            if envelope is not None:
+                return PermissionDecision(
+                    behavior=PermissionBehavior.ALLOW,
+                    message=(
+                        f"{gateway_tool_name} is unlocked by an approved "
+                        "browser flow (SPEC-051 R-1); auto-signed under the "
+                        "approving card and still bounded by the gateway "
+                        "deviation guard."
+                    ),
+                )
         # Explicit ASK instead of delegating to agentscope's
         # PermissionEngine: its read-only fast path auto-allows read-only
         # invocations in every mode, which would silently bypass the

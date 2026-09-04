@@ -38,17 +38,25 @@ def _load_agent_signing():
         "agent_service",
         "agent_service.services",
         "agent_service.services.hitl_confirmations",
+        "agent_service.services.flow_approvals",
     ]
     saved = {name: sys.modules.get(name) for name in stubbed}
     package = types.ModuleType("agent_service")
     services = types.ModuleType("agent_service.services")
     hitl = types.ModuleType("agent_service.services.hitl_confirmations")
     hitl.PendingConfirmation = object  # type annotation target only
+    # SPEC-051 R-3: build_flow_request annotates its flow authority with
+    # FlowApproval (a lazy ``from __future__ import annotations`` string), so
+    # the isolated load only needs the name to resolve — mirror the hitl stub.
+    flow_approvals = types.ModuleType("agent_service.services.flow_approvals")
+    flow_approvals.FlowApproval = object  # type annotation target only
     package.services = services
     services.hitl_confirmations = hitl
+    services.flow_approvals = flow_approvals
     sys.modules["agent_service"] = package
     sys.modules["agent_service.services"] = services
     sys.modules["agent_service.services.hitl_confirmations"] = hitl
+    sys.modules["agent_service.services.flow_approvals"] = flow_approvals
     try:
         spec = importlib.util.spec_from_file_location(
             "agent_execution_signing_under_test", AGENT_SIGNING_PATH

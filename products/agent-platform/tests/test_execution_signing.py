@@ -17,6 +17,7 @@ import jsonschema
 from agentscope.message import ToolCallBlock
 
 from agent_service.services.execution_signing import (
+    build_flow_request,
     build_receipt,
     build_requests,
     canonical_digest,
@@ -24,6 +25,7 @@ from agent_service.services.execution_signing import (
     sign_envelope,
     verify_envelope,
 )
+from agent_service.services.flow_approvals import FlowApproval
 from agent_service.services.hitl_confirmations import (
     ConfirmationRegistry,
 )
@@ -176,6 +178,141 @@ class BuildRequestsTests(unittest.TestCase):
 
     def test_empty_batch_builds_nothing(self) -> None:
         self.assertEqual(build_requests(_parked([]), "bob", KEY), [])
+
+
+def _flow_authority(**overrides):
+    """A recorded flow authority (SPEC-051 R-1) as ``build_flow_request`` keys on."""
+    kwargs = dict(
+        session_id="ses-1",
+        confirm_id="conf-flow-1",
+        owner_user_id="alice",
+        decider_user_id="bob-approver",
+        skill_id="samples/password-reset",
+        origin="http://admin.local",
+        ttl=900.0,
+    )
+    kwargs.update(overrides)
+    return FlowApproval(**kwargs)
+
+
+class BuildFlowRequestTests(unittest.TestCase):
+    """SPEC-051 R-3: signing one auto-unlocked browser write under a flow
+    authority — a single-call sibling to ``build_requests`` that reuses the
+    approving card's correlation/identity but binds the *new* call's args."""
+
+    def test_envelope_shape_and_signature_verifies(self) -> None:
+        request = build_flow_request(
+            call_id="call-9",
+            tool_name="web.click",
+            parameters={"ref": 12},
+            flow_approval=_flow_authority(),
+            key=KEY,
+        )
+        for field in (
+            "execution_id",
+            "confirm_id",
+            "call_id",
+            "session_id",
+            "owner_user_id",
+            "decider_user_id",
+            "tool_name",
+            "args_digest",
+            "requested_at",
+            "signature",
+        ):
+            self.assertIn(field, request)
+        self.assertEqual(request["call_id"], "call-9")
+        self.assertEqual(request["tool_name"], "web.click")
+        self.assertTrue(verify_envelope(request, request["signature"], KEY))
+
+    def test_correlation_and_identity_come_from_flow_authority(self) -> None:
+        """ADR-0007: one operator decision per flow — the envelope reuses the
+        approving card's confirm_id/session/owner/decider, not the new call's."""
+        authority = _flow_authority(
+            confirm_id="conf-approving-card",
+            session_id="ses-flow",
+            owner_user_id="owner-op",
+            decider_user_id="approver-op",
+        )
+        request = build_flow_request(
+            call_id="call-9",
+            tool_name="web.click",
+            parameters={"ref": 1},
+            flow_approval=authority,
+            key=KEY,
+        )
+        self.assertEqual(request["confirm_id"], "conf-approving-card")
+        self.assertEqual(request["session_id"], "ses-flow")
+        self.assertEqual(request["owner_user_id"], "owner-op")
+        self.assertEqual(request["decider_user_id"], "approver-op")
+
+    def test_args_digest_binds_the_new_call_parameters(self) -> None:
+        """Each unlocked write is individually bound to its own arguments —
+        the digest is over the new call's parameters, not the approving card's."""
+        request = build_flow_request(
+            call_id="call-9",
+            tool_name="web.click",
+            parameters={"ref": 12, "double_click": False},
+            flow_approval=_flow_authority(),
+            key=KEY,
+        )
+        self.assertEqual(
+            request["args_digest"],
+            canonical_digest({"ref": 12, "double_click": False}),
+        )
+        # Reordered parameters produce the identical digest.
+        reordered = build_flow_request(
+            call_id="call-9",
+            tool_name="web.click",
+            parameters={"double_click": False, "ref": 12},
+            flow_approval=_flow_authority(),
+            key=KEY,
+        )
+        self.assertEqual(reordered["args_digest"], request["args_digest"])
+        # Changed parameters produce a different digest.
+        changed = build_flow_request(
+            call_id="call-9",
+            tool_name="web.click",
+            parameters={"ref": 13, "double_click": False},
+            flow_approval=_flow_authority(),
+            key=KEY,
+        )
+        self.assertNotEqual(changed["args_digest"], request["args_digest"])
+
+    def test_execution_id_is_fresh_per_call(self) -> None:
+        authority = _flow_authority()
+        first = build_flow_request("call-1", "web.click", {"ref": 1}, authority, KEY)
+        second = build_flow_request("call-2", "web.type", {"ref": 2}, authority, KEY)
+        self.assertNotEqual(first["execution_id"], second["execution_id"])
+        self.assertEqual(first["call_id"], "call-1")
+        self.assertEqual(second["call_id"], "call-2")
+        # Both still reuse the same approving card's confirm_id.
+        self.assertEqual(first["confirm_id"], second["confirm_id"])
+
+    def test_validates_against_execution_request_contract(self) -> None:
+        """The auto-signed envelope is indistinguishable from a card-signed one
+        at the contract boundary, so the worker verifies it identically."""
+        request = build_flow_request(
+            call_id="call-9",
+            tool_name="web.click",
+            parameters={"ref": 12},
+            flow_approval=_flow_authority(),
+            key=KEY,
+        )
+        jsonschema.validate(
+            request, _load_schema("execution-request.schema.json")
+        )
+
+    def test_tampered_envelope_rejected(self) -> None:
+        request = build_flow_request(
+            call_id="call-9",
+            tool_name="web.click",
+            parameters={"ref": 12},
+            flow_approval=_flow_authority(),
+            key=KEY,
+        )
+        forged = {**request, "tool_name": "web.evaluate"}
+        self.assertFalse(verify_envelope(forged, forged["signature"], KEY))
 
 
 class BuildReceiptTests(unittest.TestCase):

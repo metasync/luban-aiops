@@ -218,6 +218,10 @@ class ConfirmationRecordModel(BaseModel):
     # SPEC-033 R-2: additive parking-turn ordinal; null for records that
     # predate the column.
     turn_index: int | None = Field(default=None, ge=0)
+    # SPEC-051 R-6: additive card-level browser-flow headline (skill intent,
+    # origin, risk_class) captured at park time; null for non-browser cards
+    # and for records that predate the column.
+    flow_summary: dict[str, Any] | None = None
     status: Literal["pending", "approved", "denied", "expired"] = "pending"
     parked_at: str | None = None
     decider_user_id: str | None = None
