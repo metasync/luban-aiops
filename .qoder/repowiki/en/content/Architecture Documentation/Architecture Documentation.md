@@ -17,6 +17,15 @@
 - [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
 - [SPEC-048-policy-testing-rollout-controls/spec.md](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md)
 - [SPEC-049-browser-web-check-tools/spec.md](file://docs/specs/SPEC-049-browser-web-check-tools/spec.md)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
+- [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
+- [browser.env](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
+- [browser-check-target-deployment.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-check-target-deployment.yaml)
+- [browser-check-target-pages.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-check-target-pages.yaml)
 - [main.py](file://products/platform-gateway/src/platform_gateway/main.py)
 - [app.py](file://products/platform-gateway/src/platform_gateway/app.py)
 - [router.py](file://products/platform-gateway/src/platform_gateway/api/router.py)
@@ -28,25 +37,8 @@
 - [main.py](file://products/tool-gateway/src/tool_gateway/main.py)
 - [app.py](file://products/tool-gateway/src/tool_gateway/app.py)
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
-- [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
-- [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
-- [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
-- [metadata.py](file://products/tool-gateway/src/tool_gateway/metadata.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
-- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
-- [main.py](file://products/agent-platform/src/agent_service/main.py)
-- [app.py](file://products/agent-platform/src/agent_service/app.py)
-- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
-- [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
-- [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
-- [config.py](file://products/agent-platform/src/agent_service/core/config.py)
-- [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
-- [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
-- [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
-- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [metadata.py](file://products/agent-platform/src/agent_service/metadata.py)
 - [main.py](file://products/execution-runtime/src/execution_runtime/main.py)
 - [app.py](file://products/execution-runtime/src/execution_runtime/app.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
@@ -91,11 +83,12 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced policy configuration section with detailed 5-step lifecycle including provenance fingerprinting and explicit no hot-reload capability statement
-- Expanded tool-gateway description to include new connector types for incidents and browser web-checks (SPEC-049)
-- Updated architecture overview to reflect enhanced policy enforcement capabilities
-- Added comprehensive documentation for browser-based web application check tools
-- Enhanced deployment topology to support browser sidecar containers and credential management
+- Enhanced browser connector security model with NetworkPolicy-based defense-in-depth to prevent cross-pod CDP access
+- Updated CDP port binding to loopback address (127.0.0.1:9222) for improved isolation
+- Improved origin validation for read-tier captures with live origin re-checking before snapshots and screenshots
+- Added comprehensive NetworkPolicy configuration to deny ingress on CDP port from other pods
+- Enhanced browser session security with flow deviation guards and origin mismatch detection
+- Updated deployment topology to reflect enhanced security boundaries and network policies
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -105,35 +98,37 @@
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Policy Configuration and Enforcement](#policy-configuration-and-enforcement)
 7. [Tool Gateway Connectors](#tool-gateway-connectors)
-8. [Dependency Analysis](#dependency-analysis)
-9. [Performance Considerations](#performance-considerations)
-10. [Troubleshooting Guide](#troubleshooting-guide)
-11. [Conclusion](#conclusion)
-12. [Appendices](#appendices)
+8. [Browser Connector Architecture](#browser-connector-architecture)
+9. [Security Model and Defense-in-Depth](#security-model-and-defense-in-depth)
+10. [Dependency Analysis](#dependency-analysis)
+11. [Performance Considerations](#performance-considerations)
+12. [Troubleshooting Guide](#troubleshooting-guide)
+13. [Conclusion](#conclusion)
+14. [Appendices](#appendices)
 
 ## Introduction
-This document provides a comprehensive architectural overview of the Luban AIOps Platform. It describes the microservices-based design, service boundaries, data flows, and integration points. The platform has undergone significant architectural evolution with the introduction of an **isolated execution worker service** that fundamentally changes how approved mutating actions are executed, shifting from in-process to isolated worker execution model. This change enhances security boundaries, reduces blast radius, and improves operational reliability. The platform now features a dual-gateway pattern (platform-gateway for portal-facing operations and tool-gateway for tool execution) combined with a dedicated execution-runtime worker for secure mutation execution. Key architectural decisions are captured in Architectural Decision Records (ADRs), technology stack choices include FastAPI, Redis, Kubernetes, and OIDC integration, along with system context diagrams showing external dependencies and internal service communication. The platform uses a canonical hostname strategy with `https://aiops.luban.metasync.cc` as the primary entry point and `https://aiops.luban.k8s.orb.local` as a fallback, with OIDC callbacks pinned to the canonical hostname for reliable authentication flows.
+This document provides a comprehensive architectural overview of the Luban AIOps Platform. It describes the microservices-based design, service boundaries, data flows, and integration points. The platform has undergone significant architectural evolution with the introduction of an **isolated execution worker service** that fundamentally changes how approved mutating actions are executed, shifting from in-process to isolated worker execution model. This change enhances security boundaries, reduces blast radius, and improves operational reliability. The platform now features a dual-gateway pattern (platform-gateway for portal-facing operations and tool-gateway for tool execution) combined with a dedicated execution-runtime worker for secure mutation execution. Key architectural decisions are captured in Architectural Decision Records (ADRs), technology stack choices include FastAPI, Redis, Kubernetes, OIDC integration, and **Playwright/Chromium headless browser automation** for web application health checks and browser-based tool execution. The platform uses a canonical hostname strategy with `https://aiops.luban.metasync.cc` as the primary entry point and `https://aiops.luban.k8s.orb.local` as a fallback, with OIDC callbacks pinned to the canonical hostname for reliable authentication flows.
 
-**Updated** - Version 0.25.2 brings refined portal rendering capabilities with single-sourced bounded pane heights and improved overflow detection, ensuring consistent user experience across different content types while maintaining the core architectural integrity established in previous releases. The platform now includes enhanced policy configuration with provenance fingerprinting and expanded tool-gateway capabilities including browser-based web application checks.
+**Updated** - Version 0.25.2 brings refined portal rendering capabilities with single-sourced bounded pane heights and improved overflow detection, ensuring consistent user experience across different content types while maintaining the core architectural integrity established in previous releases. The platform now includes enhanced policy configuration with provenance fingerprinting, expanded tool-gateway capabilities including browser-based web application checks, and comprehensive browser automation support for web application health monitoring and troubleshooting. **Enhanced Security**: The browser connector now implements a robust defense-in-depth security model with NetworkPolicy-based restrictions, loopback-only CDP binding, and improved origin validation to prevent unauthorized access and ensure secure browser automation.
 
 ## Project Structure
 The repository is organized into product services, shared contracts, platform operations, and documentation:
 - Products:
   - **platform-gateway**: Portal-facing API edge with token verification, policy enforcement, chat/session proxying, and identity delegation.
-  - **tool-gateway**: Tool execution framework with registry, connectors, redaction, and audit capabilities.
+  - **tool-gateway**: Tool execution framework with registry, connectors, redaction, audit capabilities, and **enhanced browser automation support with security hardening**.
   - **execution-runtime**: Isolated worker service for secure execution of approved mutating actions with signature verification and single-flight idempotency.
   - agent-platform: Agent runtime kernel, session management, provider integrations, and observability with execution worker client integration.
   - identity-broker: Identity and token services for OIDC integration and service-to-service trust.
   - operator-portal: Web UI for operators with enhanced bounded pane rendering and improved UX.
   - audit-service: Durable audit trail with authenticated event ingest, retention-bounded store, and permission-scoped query API.
 - Shared:
-  - platform-ops: GitOps overlays and Kubernetes manifests for dev environment including execution-runtime deployment.
+  - platform-ops: GitOps overlays and Kubernetes manifests for dev environment including execution-runtime deployment and **enhanced browser sidecar configuration with NetworkPolicy**.
   - shared-contracts: JSON schemas and policy definitions used across services.
   - shared-sdk: SDK reference (placeholder).
 - Docs:
   - adr: Architectural Decision Records.
   - agentic-aiops-platform: Reference architecture, identity/authorization design, policy specification, and runtime options.
-  - specs: Feature specifications and plans including SPEC-038 for isolated execution worker and SPEC-049 for browser web-check tools.
+  - specs: Feature specifications and plans including SPEC-038 for isolated execution worker and **SPEC-049 for browser web-check tools with enhanced security**.
 
 ```mermaid
 graph TB
@@ -149,6 +144,7 @@ end
 subgraph "Shared"
 SC["Shared Contracts"]
 OPS["Platform Ops (GitOps/K8s)"]
+NP["Network Policies"]
 end
 subgraph "External"
 OIDC["OIDC Provider"]
@@ -156,6 +152,7 @@ K8S["Kubernetes Cluster"]
 REDIS["Redis"]
 POSTGRES["PostgreSQL"]
 BROWSER["Browser Sidecar"]
+WEBAPP["Web Applications"]
 end
 OP --> PG
 PG --> AP
@@ -174,6 +171,10 @@ SC --> IB
 SC --> ERW
 AS --> POSTGRES
 TG --> BROWSER
+TG --> WEBAPP
+BROWSER --> WEBAPP
+NP --> TG
+NP --> BROWSER
 ```
 
 **Diagram sources**
@@ -183,6 +184,8 @@ TG --> BROWSER
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
 - [redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
+- [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 
 **Section sources**
 - [README.md](file://README.md)
@@ -198,8 +201,8 @@ The platform now features three specialized services that replaced the original 
 - **Version**: 0.25.2
 
 ### Tool Gateway (Tool Execution Framework)
-- **Responsibilities**: Tool registry management, connector standardization, tools:list/invoke endpoints, deterministic redaction, tool audit, and Kubernetes connector integration.
-- **Key Features**: Tool execution isolation, security-focused redaction choke point, and service-to-service trust via delegated tokens.
+- **Responsibilities**: Tool registry management, connector standardization, tools:list/invoke endpoints, deterministic redaction, tool audit, Kubernetes connector integration, and **enhanced browser automation capabilities with security hardening**.
+- **Key Features**: Tool execution isolation, security-focused redaction choke point, service-to-service trust via delegated tokens, and **stateful browser session management with Chromium headless automation and NetworkPolicy protection**.
 - **Version**: 0.25.2
 
 ### Execution Runtime Worker (Isolated Mutation Executor)
@@ -224,10 +227,6 @@ The platform now features three specialized services that replaced the original 
 - [main.py](file://products/tool-gateway/src/tool_gateway/main.py)
 - [app.py](file://products/tool-gateway/src/tool_gateway/app.py)
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
-- [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
-- [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
-- [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
-- [metadata.py](file://products/tool-gateway/src/tool_gateway/metadata.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [main.py](file://products/execution-runtime/src/execution_runtime/main.py)
 - [app.py](file://products/execution-runtime/src/execution_runtime/app.py)
@@ -248,7 +247,7 @@ The platform now features three specialized services that replaced the original 
 ## Architecture Overview
 The platform follows a microservices architecture with a **triple-layer execution model**. Clients interact with the **platform-gateway** for portal-facing operations, which enforces policies and verifies tokens before delegating to the Agent Platform. The **execution-runtime worker** handles secure execution of approved mutating actions through an authenticated handoff mechanism, while the **tool-gateway** handles internal tool execution requests from agent services. The Agent Platform manages agent sessions and interacts with external AI providers and Kubernetes for tool execution. Identity Broker centralizes OIDC flows and token management. Redis provides session durability and caching, while PostgreSQL stores execution records and receipts.
 
-**Updated** - The platform uses a canonical hostname strategy where `https://aiops.luban.metasync.cc` serves as the primary entry point with OIDC callbacks pinned to this hostname, while `https://aiops.luban.k8s.orb.local` provides fallback access. The identity broker's OIDC callback is explicitly configured to use the canonical hostname, ensuring reliable authentication flows even when users access the portal through alternative hostnames.
+**Updated** - The platform uses a canonical hostname strategy where `https://aiops.luban.metasync.cc` serves as the primary entry point with OIDC callbacks pinned to this hostname, while `https://aiops.luban.k8s.orb.local` provides fallback access. The identity broker's OIDC callback is explicitly configured to use the canonical hostname, ensuring reliable authentication flows even when users access the portal through alternative hostnames. The tool-gateway now includes **enhanced browser automation capabilities** through a chromium-headless-shell sidecar container with NetworkPolicy protection, enabling secure web application health checks and browser-based troubleshooting workflows with defense-in-depth security measures.
 
 ```mermaid
 sequenceDiagram
@@ -259,10 +258,11 @@ participant Policy as "Policy Engine"
 participant Agent as "Agent Platform"
 participant Worker as "Execution Runtime Worker"
 participant ToolGW as "Tool Gateway"
-participant K8S as "Kubernetes"
 participant Browser as "Browser Sidecar"
+participant K8S as "Kubernetes"
 participant Redis as "Redis"
 participant Postgres as "PostgreSQL"
+participant NetPol as "Network Policy"
 Client->>Portal : HTTP Request (Chat/Sessions)
 Portal->>Auth : Verify Token
 Auth-->>Portal : Validated Context
@@ -272,10 +272,12 @@ Portal->>Agent : Forward Request
 Agent->>Worker : Handoff Signed Execution (approved mutation)
 Worker->>Worker : Verify Signature & Digest
 Worker->>ToolGW : Execute Tool (with delegated token)
-ToolGW->>K8S : Execute Tool
-ToolGW->>Browser : Execute Web Check (if applicable)
-K8S-->>ToolGW : Execution Result
+ToolGW->>NetPol : Check Network Policy
+NetPol-->>ToolGW : Allow/Deny
+ToolGW->>Browser : Navigate/Interact (if web check)
+Browser->>K8S : Execute Tool
 Browser-->>ToolGW : Web Check Result
+K8S-->>ToolGW : Execution Result
 ToolGW-->>Worker : Tool Result
 Worker->>Postgres : Write Signed Receipt
 Worker-->>Agent : Execution Result
@@ -289,13 +291,14 @@ Portal-->>Client : Final Response
 - [executor.py](file://products/execution-runtime/src/execution_runtime/services/executor.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
-- [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [token_verifier.py](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py)
 - [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 
 **Section sources**
 - [part-2-reference-architecture.md](file://docs/agentic-aiops-platform/part-2-reference-architecture.md)
@@ -365,19 +368,19 @@ PlatformGatewayService --> AgentClient : "uses"
 - [metadata.py](file://products/platform-gateway/src/platform_gateway/metadata.py)
 
 ### Tool Gateway (Tool Execution Framework)
-**Updated** - Now focused exclusively on tool execution and connector management with expanded connector types
+**Updated** - Now focused exclusively on tool execution and connector management with expanded connector types including **enhanced browser automation with security hardening**
 
 **Responsibilities:**
 - Manages tool registry and connector implementations.
 - Provides tools:list and tools:invoke endpoints with strict policy enforcement.
 - Implements deterministic redaction choke point for security-sensitive outputs.
 - Orchestrates tool execution via Kubernetes connector with proper audit trails.
-- Supports browser-based web application checks with flow binding and deviation guards.
+- Supports **secure browser-based web application checks with flow binding, deviation guards, credential management, and NetworkPolicy protection**.
 
 **Key modules:**
 - API router with health and tools endpoints only.
 - Services: gateway service with tool invocation orchestration, policy enforcement, and redaction.
-- Tools: registry, base classes, Kubernetes connector, incidents connector, browser connector, and redaction utilities.
+- Tools: registry, base classes, Kubernetes connector, incidents connector, **enhanced browser connector**, and redaction utilities.
 
 ```mermaid
 flowchart TD
@@ -392,7 +395,8 @@ ConnectorType -- "Incidents" --> IncidentsExec["Query Incident Service"]
 ConnectorType -- "Browser" --> BrowserExec["Execute Web Check"]
 K8SExec --> Redact["Apply Redaction"]
 IncidentsExec --> Redact
-BrowserExec --> Redact
+BrowserExec --> SecurityCheck["NetworkPolicy & Origin Validation"]
+SecurityCheck --> Redact
 Redact --> Audit["Audit Log Entry"]
 Audit --> Return["Return Response"]
 ```
@@ -404,6 +408,7 @@ Audit --> Return["Return Response"]
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 
 **Section sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -648,9 +653,9 @@ The tool-gateway now supports multiple connector types, each providing specializ
 - **Integration**: Authenticates with incident-service using gateway-held credentials
 
 ### Browser Connector (SPEC-049)
-- **Purpose**: Stateful browser automation for web application health checks
+- **Purpose**: Stateful browser automation for web application health checks and troubleshooting
 - **Architecture**: Chromium headless shell sidecar container with CDP communication
-- **Security**: Origin allowlists, flow binding, deviation guards, credential sets
+- **Security**: Origin allowlists, flow binding, deviation guards, credential sets, **NetworkPolicy protection, and loopback-only CDP binding**
 - **Tools**: 
   - Read tier: `web.navigate`, `web.snapshot`, `web.screenshot`, `web.fill_credential`
   - Write tier: `web.click`, `web.type` (require approval)
@@ -691,8 +696,214 @@ BC --> WEB
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 - [SPEC-049-browser-web-check-tools/spec.md](file://docs/specs/SPEC-049-browser-web-check-tools/spec.md)
 
+## Browser Connector Architecture
+**New** - Comprehensive browser automation capability for web application health checks and troubleshooting with enhanced security
+
+The browser connector implements a sophisticated headless browser automation system built on Playwright and Chromium, designed specifically for web application health checks and troubleshooting workflows with **defense-in-depth security measures**.
+
+### Core Architecture Components
+
+#### Browser Session Pool
+- **Purpose**: Manages stateful browser sessions with connection pooling and resource management
+- **Features**: Session TTL management, idle eviction, concurrent session limits, and graceful cleanup
+- **Configuration**: Configurable session TTL (default 600s), max sessions (default 4), and CDP endpoint
+- **Security**: Sessions keyed by chat session ID to maintain flow continuity across identity switches
+
+#### Flow Binding and Deviation Guards
+- **Purpose**: Ensures browser interactions stay within approved skill-defined flows
+- **Features**: URL origin validation, risk class enforcement, step budget limits, and deviation detection
+- **Security**: Prevents unauthorized navigation and interaction outside approved contexts
+- **Audit**: Complete audit trail of flow bindings, deviations, and approvals
+
+#### Credential Management
+- **Purpose**: Secure handling of web application credentials without exposing them in logs or results
+- **Features**: Named credential sets from secret-mounted files, automatic masking in screenshots and snapshots
+- **Security**: Credentials never appear in tool results, snapshots, evidence frames, or audit events
+- **Validation**: Structured error handling for unknown credential sets and invalid field names
+
+#### Tool Surface Design
+The connector exposes a bounded set of tools organized by risk level:
+
+**Read Tier Tools** (require `tools:invoke`):
+- `web.navigate(url, skill_id?)`: Navigate to URLs with optional skill binding
+- `web.snapshot()`: Generate accessibility tree snapshots with interactive element references
+- `web.screenshot()`: Capture bounded JPEG screenshots with automatic compression
+- `web.fill_credential(ref, credential_set, field)`: Fill forms with secure credentials
+
+**Write Tier Tools** (require `tools:mutate` + approval):
+- `web.click(ref)`: Click interactive elements within approved flows
+- `web.type(ref, text)`: Type text into form fields within approved flows
+
+### Security Model
+
+#### Origin Allowlisting
+- **Deny-by-default**: Empty allowlist denies all navigation
+- **Pattern matching**: Supports domain patterns like `https://inventory.internal:8443`
+- **Redirect protection**: Validates final landing origins after redirects
+- **Flow binding**: Ensures interactions stay within approved flow origins
+
+#### Flow-Based Authorization
+- **Skill declarations**: Skills declare `web_target` and `risk_class` in frontmatter
+- **Deviation guards**: Prevent interactions outside bound flows or beyond step budgets
+- **HITL integration**: Write-class flows require operator approval through confirmation bridge
+- **Step budgets**: Configurable limits prevent runaway automation loops
+
+#### Evidence and Audit Trail
+- **Screenshot capture**: Base64-encoded JPEG images with automatic size reduction
+- **Snapshot generation**: Text-based accessibility trees with masked sensitive values
+- **Interaction logging**: Complete audit of navigation, clicks, typing, and credential usage
+- **Evidence framing**: All browser activities framed as standard tool_result payloads
+
+### Deployment Configuration
+
+#### Sidecar Container Pattern
+- **Architecture**: Chromium headless shell runs as separate container in tool-gateway pod
+- **Communication**: Chrome DevTools Protocol (CDP) over WebSocket
+- **Resource isolation**: Separate CPU/memory limits and security contexts
+- **Health monitoring**: Connection readiness checks and graceful degradation
+
+#### Environment Configuration
+```yaml
+GATEWAY_BROWSER_ENABLED=true
+GATEWAY_BROWSER_CDP_ENDPOINT=ws://localhost:9222
+GATEWAY_BROWSER_ALLOW_ORIGINS=http://browser-check-target:8080
+GATEWAY_BROWSER_SESSION_TTL=600
+GATEWAY_BROWSER_MAX_SESSIONS=4
+GATEWAY_BROWSER_FLOW_MAX_STEPS=20
+GATEWAY_BROWSER_CREDENTIAL_SETS=/etc/luban/browser-credentials/credential-sets.json
+GATEWAY_BROWSER_SCREENSHOT_MAX_BYTES=65536
+```
+
+#### Kubernetes Deployment
+- **Sidecar container**: `chromedp/headless-shell:stable` image with security hardening
+- **Volume mounts**: Secret-mounted credential sets and shared memory for browser
+- **Resource limits**: CPU and memory constraints to prevent resource exhaustion
+- **Network policy**: Pod-local CDP communication only (no external exposure)
+
+```mermaid
+flowchart TD
+subgraph "Tool Gateway Pod"
+TG["Tool Gateway Process"]
+BS["Browser Sidecar"]
+end
+subgraph "External Systems"
+WA["Web Applications"]
+SH["Skills Hub"]
+end
+TG --> |CDP| BS
+BS --> |HTTP| WA
+TG --> |HTTP| SH
+TG --> |Policy| PolicyEngine
+TG --> |Audit| AuditService
+```
+
+**Diagram sources**
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
+
+**Section sources**
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
+- [SPEC-049-browser-web-check-tools/spec.md](file://docs/specs/SPEC-049-browser-web-check-tools/spec.md)
+- [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
+- [browser.env](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
+
+## Security Model and Defense-in-Depth
+**New** - Comprehensive security model with multiple layers of protection for browser automation
+
+The browser connector implements a multi-layered security approach combining application-level controls with infrastructure-level protections to ensure secure browser automation.
+
+### NetworkPolicy-Based Defense-in-Depth
+
+#### Loopback-Only CDP Binding
+- **Primary Protection**: CDP port (9222) bound exclusively to loopback address (127.0.0.1)
+- **Implementation**: Explicit command-line arguments force `--remote-debugging-address=127.0.0.1`
+- **Port Pinning**: Fixed port 9222 prevents drift from default stable image behavior
+- **Access Control**: Only tool-gateway process can communicate via shared pod network namespace
+
+#### NetworkPolicy Restrictions
+- **Ingress Denial**: NetworkPolicy explicitly denies all ingress traffic except HTTP port 8080
+- **CDP Port Blocking**: Port 9222 deliberately omitted from allowed ports list
+- **Defense Layer**: Second layer of protection if loopback binding is accidentally relaxed
+- **Compliance**: Works with platform-wide default-deny policies for consistent security posture
+
+### Enhanced Origin Validation
+
+#### Live Origin Re-checking
+- **Pre-Capture Validation**: Every snapshot and screenshot validates current page origin before capture
+- **Redirect Protection**: Detects and blocks client-side redirects to off-allowlist destinations
+- **Flow Deviation Detection**: Ensures captures occur within approved flow boundaries
+- **Automatic Remediation**: Halts pages and resets flow state when violations detected
+
+#### Flow Binding Security
+- **Skill Declaration Validation**: Confirms skill declares appropriate `web_target` and `risk_class`
+- **Origin Matching**: Validates navigated URL matches skill's declared target origin
+- **Path Underlying**: Ensures URL path sits under or equals declared target path
+- **Step Budget Enforcement**: Limits number of interactions per flow to prevent abuse
+
+### Credential Security
+
+#### Secure Credential Management
+- **Named Sets Only**: Credentials stored in named sets from secret-mounted files
+- **Never in Logs**: Credential values never appear in tool results, snapshots, or audit events
+- **Automatic Masking**: Password fields and filled values masked in visual evidence
+- **Runtime Resolution**: Credentials resolved at fill time, not passed as parameters
+
+### Application-Level Security Controls
+
+#### Deviation Guards
+- **Flow Boundary Enforcement**: Interactions only execute within bound flow context
+- **Origin Mismatch Detection**: Blocks interactions when current page differs from approved origin
+- **Risk Class Validation**: Prevents write-tier actions on read-only flows
+- **Exhaustion Protection**: Stops interactions after step budget exceeded
+
+#### Authentication and Authorization
+- **Identity Keying**: Browser sessions keyed by chat session ID for flow continuity
+- **Subject Fallback**: Falls back to verified subject when chat session ID unavailable
+- **Policy Enforcement**: All browser tools subject to platform policy engine
+- **Approval Workflow**: Write-tier actions require HITL approval through confirmation bridge
+
+```mermaid
+flowchart TD
+subgraph "Application Layer"
+OA["Origin Allowlist"]
+FB["Flow Binding"]
+DG["Deviation Guards"]
+CS["Credential Security"]
+end
+subgraph "Infrastructure Layer"
+LB["Loopback Binding"]
+NP["NetworkPolicy"]
+RB["Resource Limits"]
+end
+subgraph "External"
+WEB["Web Applications"]
+end
+OA --> FB
+FB --> DG
+DG --> CS
+LB --> NP
+NP --> RB
+CS --> WEB
+```
+
+**Diagram sources**
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sidecar_network_policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
+- [tool_gateway_browser_sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
+
+**Section sources**
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sidecar_network_policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
+- [tool_gateway_browser_sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+
 ## Dependency Analysis
-**Updated** - Reflects the new triple-layer architecture with execution-runtime worker and enhanced hostname routing
+**Updated** - Reflects the new triple-layer architecture with execution-runtime worker, enhanced hostname routing, browser connector dependencies, and NetworkPolicy integration
 
 The platform exhibits clear separation of concerns with well-defined interfaces:
 - **Platform Gateway** depends on Token Verifier, Policy Engine, and Agent Client for portal operations.
@@ -700,6 +911,7 @@ The platform exhibits clear separation of concerns with well-defined interfaces:
 - **Execution Runtime Worker** depends on Tool Gateway, Execution Signing, and PostgreSQL for record storage.
 - **Agent Platform** depends on Session Store (Redis), AI Providers, and Execution Worker Client.
 - **Identity Broker** depends on OIDC Provider with canonical hostname callback configuration.
+- **Browser Connector** depends on Playwright, Chromium sidecar, Skills Hub, Credential Set Store, and **NetworkPolicy enforcement**.
 - All services share common schemas and observability conventions.
 
 ```mermaid
@@ -723,7 +935,11 @@ PG --> AP
 PG --> IB
 AP --> ERW
 ERW --> TG
-BC --> BROWSER["Browser Sidecar"]
+BC --> PW["Playwright"]
+BC --> CH["Chromium Sidecar"]
+BC --> SH["Skills Hub"]
+BC --> CS["Credential Store"]
+BC --> NP["NetworkPolicy"]
 ```
 
 **Diagram sources**
@@ -737,9 +953,11 @@ BC --> BROWSER["Browser Sidecar"]
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
 - [config.py](file://products/identity-broker/src/identity_service/core/config.py)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 
 **Section sources**
 - [part-2-reference-architecture.md](file://docs/agentic-aiops-platform/part-2-reference-architecture.md)
@@ -760,6 +978,11 @@ BC --> BROWSER["Browser Sidecar"]
 - **Updated** - Bounded pane rendering optimizations reduce DOM manipulation overhead and improve portal responsiveness for large documents.
 - **Updated** - Browser connector uses connection pooling and session TTL management to optimize resource usage.
 - **Updated** - Policy bundle caching eliminates repeated file I/O and parsing overhead.
+- **Updated** - Browser session pool implements idle eviction and maximum session limits to prevent memory leaks.
+- **Updated** - Screenshot compression algorithms automatically adjust quality and clipping to meet byte limits.
+- **Updated** - Chromium sidecar container shares memory with tool-gateway process for efficient inter-process communication.
+- **Updated** - NetworkPolicy enforcement adds minimal overhead while providing critical security boundaries.
+- **Updated** - Loopback-only CDP binding eliminates network stack overhead for cross-pod communication attempts.
 
 ## Troubleshooting Guide
 Common issues and strategies:
@@ -776,6 +999,11 @@ Common issues and strategies:
 - **Updated** - **Portal rendering issues**: Check bounded pane CSS custom properties and overflow detection. The 320px bound is now single-sourced via `--bounded-pane-max-height` custom property, eliminating drift between presentation and affordance logic.
 - **Updated** - **Policy configuration issues**: Verify bundle version numbers match expectations, check provenance hashes on transparency surfaces, and ensure scenario tests pass before deployment.
 - **Updated** - **Browser connector issues**: Check origin allowlist configuration, skill declarations, and credential set mounting. Verify chromium-headless-shell sidecar is running and accessible via CDP.
+- **Updated** - **Browser session issues**: Monitor session TTL expiration, maximum session limits, and connection pool health. Check for orphaned browser contexts and memory usage.
+- **Updated** - **Credential management issues**: Verify credential set file format, permissions, and secret mounting. Check for masked values in screenshots and snapshots.
+- **Updated** - **Flow binding issues**: Ensure skills have proper `web_target` and `risk_class` declarations. Check for origin mismatches and deviation guard violations.
+- **Updated** - **NetworkPolicy issues**: Verify NetworkPolicy is applied correctly and CDP port 9222 is blocked from external access. Check that tool-gateway can still communicate with browser sidecar via loopback.
+- **Updated** - **CDP binding issues**: Confirm browser sidecar binds to 127.0.0.1:9222 and not 0.0.0.0:9222. Verify tool-gateway connects to ws://localhost:9222.
 
 **Section sources**
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
@@ -786,14 +1014,16 @@ Common issues and strategies:
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 - [dev-k8s README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 - [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
+- [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
 
 ## Conclusion
-The Luban AIOps Platform has evolved to a robust microservices architecture centered around a **triple-layer execution model**. The **platform-gateway** serves as the portal-facing edge with authentication, authorization, and agent interaction capabilities, the **tool-gateway** specializes in secure tool execution and connector management, and the **execution-runtime worker** provides isolated execution of approved mutating actions with tamper-evident signatures and single-flight idempotency. This architectural evolution significantly improves security boundaries, reduces blast radius, and enhances operational reliability. The use of Redis for session durability, PostgreSQL for execution records, Kubernetes for orchestration, and OIDC for secure authentication ensures scalability, reliability, and security. Clear ADRs guide architectural evolution, while shared contracts and observability conventions promote consistency across services. **Updated** - Version 0.25.2 brings refined portal rendering capabilities with single-sourced bounded pane heights and improved overflow detection, ensuring consistent user experience across different content types while maintaining the core architectural integrity established in previous releases. The platform now includes enhanced policy configuration with provenance fingerprinting and expanded tool-gateway capabilities including browser-based web application checks.
+The Luban AIOps Platform has evolved to a robust microservices architecture centered around a **triple-layer execution model**. The **platform-gateway** serves as the portal-facing edge with authentication, authorization, and agent interaction capabilities, the **tool-gateway** specializes in secure tool execution and connector management, and the **execution-runtime worker** provides isolated execution of approved mutating actions with tamper-evident signatures and single-flight idempotency. This architectural evolution significantly improves security boundaries, reduces blast radius, and enhances operational reliability. The use of Redis for session durability, PostgreSQL for execution records, Kubernetes for orchestration, and OIDC for secure authentication ensures scalability, reliability, and security. Clear ADRs guide architectural evolution, while shared contracts and observability conventions promote consistency across services. **Updated** - Version 0.25.2 brings refined portal rendering capabilities with single-sourced bounded pane heights and improved overflow detection, ensuring consistent user experience across different content types while maintaining the core architectural integrity established in previous releases. The platform now includes enhanced policy configuration with provenance fingerprinting, expanded tool-gateway capabilities including browser-based web application checks, and comprehensive browser automation support for web application health monitoring and troubleshooting through Playwright/Chromium integration. **Enhanced Security**: The browser connector now implements a robust defense-in-depth security model with NetworkPolicy-based restrictions, loopback-only CDP binding, and improved origin validation to prevent unauthorized access and ensure secure browser automation.
 
 ## Appendices
 
 ### Deployment Topology and Infrastructure Requirements
-**Updated** - Reflects the new triple-layer deployment architecture with execution-runtime worker and dual-hostname routing
+**Updated** - Reflects the new triple-layer deployment architecture with execution-runtime worker, dual-hostname routing, browser sidecar integration, and enhanced NetworkPolicy security
 
 - Kubernetes cluster with RBAC enabled.
 - Redis instance or cluster for session storage.
@@ -807,6 +1037,8 @@ The Luban AIOps Platform has evolved to a robust microservices architecture cent
 - **Updated** - Version lockstep maintained at 0.25.2 across all platform services.
 - **Updated** - Optional chromium-headless-shell sidecar container for browser connector functionality.
 - **Updated** - Credential set secret mounts for browser connector authentication.
+- **Updated** - Network policies allowing CDP communication between tool-gateway and browser sidecar while denying external access.
+- **Updated** - Loopback-only CDP binding enforced via command-line arguments and NetworkPolicy restrictions.
 
 ```mermaid
 graph TB
@@ -821,6 +1053,7 @@ AS["Audit Service Deployment"]
 REDIS["Redis Service"]
 POSTGRES["PostgreSQL Service"]
 BROWSER["Browser Sidecar Container"]
+NP["Network Policies"]
 end
 subgraph "External"
 OIDC["OIDC Provider"]
@@ -837,7 +1070,10 @@ ERW --> TGW
 ERW --> POSTGRES
 TGW --> OIDC
 TGW --> BROWSER
+BROWSER --> |CDP| TGW
 AS --> POSTGRES
+NP --> TGW
+NP --> BROWSER
 ```
 
 **Diagram sources**
@@ -850,15 +1086,19 @@ AS --> POSTGRES
 - [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
 - [web-ui-httproute.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-httproute.yaml)
 - [redis-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml)
+- [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 
 **Section sources**
 - [deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
 - [web-ui-httproute.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-httproute.yaml)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
+- [browser.env](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 
 ### Architectural Decision Records (ADRs) Summary
-**Updated** - Includes the new execution-runtime worker and platform gateway extraction ADRs
+**Updated** - Includes the new execution-runtime worker, platform gateway extraction, browser automation ADRs, and enhanced security measures
 
 - Spec-driven development ensures contracts are defined before implementation.
 - Agentscope runtime kernel reaffirmed for agent execution stability.
@@ -868,6 +1108,8 @@ AS --> POSTGRES
 - **New**: Isolated execution worker provides infrastructure-enforced isolation for approved mutating actions with tamper-evident signatures and single-flight idempotency.
 - **New**: Canonical hostname strategy with OIDC callback pinning ensures reliable authentication flows while supporting fallback access patterns.
 - **New**: Policy configuration system with provenance tracking and controlled rollout procedures.
+- **New**: Browser automation architecture using Playwright/Chromium sidecar pattern for web application health checks and troubleshooting.
+- **New**: Defense-in-depth security model with NetworkPolicy-based restrictions and loopback-only CDP binding for browser automation.
 
 **Section sources**
 - [adr/0001-adopt-spec-driven-development.md](file://docs/adr/0001-adopt-spec-driven-development.md)
@@ -882,8 +1124,10 @@ AS --> POSTGRES
 - PostgreSQL: Durable execution record storage with first-write-wins semantics.
 - Kubernetes: Container orchestration with scaling and self-healing capabilities.
 - OIDC: Standardized identity and authorization flow with canonical hostname support.
-- **Updated**: Playwright/Chromium: Headless browser automation for web application health checks.
-- **Updated**: YAML: Policy configuration format with schema validation and provenance tracking.
+- **New**: Playwright/Chromium: Headless browser automation for web application health checks and troubleshooting.
+- **New**: Chrome DevTools Protocol (CDP): Communication protocol for browser automation.
+- **New**: YAML: Policy configuration format with schema validation and provenance tracking.
+- **New**: Kubernetes NetworkPolicy: Infrastructure-level security enforcement for browser automation isolation.
 
 **Section sources**
 - [agent-platform-runtime-options.md](file://docs/agentic-aiops-platform/agent-platform-runtime-options.md)
@@ -951,3 +1195,52 @@ The v0.25.1/v0.25.2 releases bring significant improvements to the operator port
 **Section sources**
 - [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
 - [DocumentsView.test.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/__tests__/DocumentsView.test.tsx)
+
+### Browser Connector Configuration Reference
+**New** - Comprehensive configuration guide for browser connector setup and tuning with enhanced security
+
+#### Environment Variables
+- `GATEWAY_BROWSER_ENABLED`: Enable/disable browser connector (default: false)
+- `GATEWAY_BROWSER_CDP_ENDPOINT`: Chromium CDP endpoint URL (default: ws://localhost:9222)
+- `GATEWAY_BROWSER_SESSION_TTL`: Session idle timeout in seconds (default: 600)
+- `GATEWAY_BROWSER_MAX_SESSIONS`: Maximum concurrent browser sessions (default: 4)
+- `GATEWAY_BROWSER_ALLOW_ORIGINS`: Comma-separated list of allowed origins
+- `GATEWAY_BROWSER_FLOW_MAX_STEPS`: Maximum steps per browser flow (default: 20)
+- `GATEWAY_BROWSER_CREDENTIAL_SETS`: Path to credential sets JSON file
+- `GATEWAY_BROWSER_SCREENSHOT_MAX_BYTES`: Maximum screenshot size in bytes (default: 65536)
+
+#### Credential Sets Format
+```json
+{
+  "application-name": {
+    "username": "user@example.com",
+    "password": "secure-password"
+  }
+}
+```
+
+#### Skill Declaration Frontmatter
+```yaml
+---
+web_target: https://app.example.com/login
+risk_class: write
+---
+```
+
+#### Security Best Practices
+- Always configure origin allowlists explicitly
+- Use named credential sets instead of inline credentials
+- Set appropriate session TTL and maximum session limits
+- Monitor browser memory usage and adjust resource limits accordingly
+- Regularly rotate credentials and audit browser activity logs
+- **New**: Verify NetworkPolicy is applied to block external CDP access
+- **New**: Confirm loopback-only CDP binding is enforced via command-line arguments
+- **New**: Test origin validation with client-side redirects to ensure protection works
+
+**Section sources**
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [browser.env](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
+- [SPEC-049-browser-web-check-tools/spec.md](file://docs/specs/SPEC-049-browser-web-check-tools/spec.md)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
+- [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)

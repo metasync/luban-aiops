@@ -12,6 +12,9 @@
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
@@ -35,20 +38,24 @@
 - [test_elastic_connector.py](file://products/tool-gateway/tests/test_elastic_connector.py)
 - [test_incidents_connector.py](file://products/tool-gateway/tests/test_incidents_connector.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
+- [test_browser_connector.py](file://products/tool-gateway/tests/test_browser_connector.py)
 - [mutating-demo.sh](file://shared/platform-ops/e2e/mutating-demo.sh)
 - [0005-platform-gateway-extraction.md](file://docs/adr/0005-platform-gateway-extraction.md)
 - [SPEC-010 spec.md](file://docs/specs/SPEC-010-platform-gateway-extraction/spec.md)
 - [2026-08-10-r1-hardening-grounded-responses-and-evidence-ux.md](file://docs/agentic-aiops-platform/release-notes/2026-08-10-r1-hardening-grounded-responses-and-evidence-ux.md)
+- [2026-09-02-spec-049-browser-web-check-tools.md](file://docs/agentic-aiops-platform/release-notes/2026-09-02-spec-049-browser-web-check-tools.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated to reflect v0.25.1/v0.25.2 release synchronization with enhanced request correlation capabilities
-- Enhanced skills connector implementation with x-request-id header forwarding for end-to-end audit trail tracking
-- Updated gateway service to include request_id in identity dictionary passed to tools
-- Added comprehensive testing for x-request-id header forwarding behavior including missing request ID scenarios
-- Updated architecture diagrams to reflect enhanced correlation capabilities across the tool execution pipeline
-- Documented SPEC-029 implementation for skills usage audit trail with request correlation
+- Added comprehensive browser connector tools documentation including web.navigate, web.snapshot, web.screenshot, web.fill_credential, web.click, and web.type
+- Documented Playwright-based headless browser automation with stateful session management
+- Added browser session pool implementation details with CDP connectivity and TTL-based eviction
+- Integrated credential set management for secure login flows with automatic masking
+- Added flow binding and deviation guard mechanisms for security enforcement
+- Updated architecture diagrams to include browser connector components
+- Enhanced policy configuration for browser tool risk tiers and approval workflows
+- Added comprehensive testing coverage for browser connector functionality
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -71,12 +78,13 @@ Key responsibilities (current):
 - Internal HTTP API surface for tool discovery and invocation (`/api/v2/tools`)
 - Policy evaluation for tool-specific actions using YAML-based definitions with enhanced `tools:list`, `tools:invoke`, and `tools:mutate` permissions
 - Secure token verification with audience validation for `tool-gateway` audience
-- Multi-source tool registry supporting Kubernetes, Elastic, Incidents, and Skills connectors with safe discovery and invocation
+- Multi-source tool registry supporting Kubernetes, Elastic, Incidents, Skills, and Browser connectors with safe discovery and invocation
 - **Enhanced request correlation** enabling end-to-end audit trail tracking through x-request-id header propagation to downstream services
 - **Risk-tier admission control** preventing unauthorized access to mutating tools through GATEWAY_MUTATING_TOOLS_ENABLED
 - Comprehensive output redaction system preventing credential leakage
 - **Enhanced Kubernetes integration via cluster-wide read-only ClusterRole enabling cross-namespace diagnostic capabilities**
 - **New bounded mutating tool support** with k8s.delete_pod for controlled pod restart operations
+- **Browser connector tools** providing web application interaction capabilities through Playwright-based headless browser automation
 - Elastic connector integration for observability data access including log search, service health metrics, and alert management
 - Incidents connector integration for querying incident data through the new incident service
 - Skills connector integration for accessing team-owned operational skills and runbooks with full audit trail correlation
@@ -88,7 +96,7 @@ Key responsibilities (current):
 The Tool Gateway is implemented as a Python service under products/tool-gateway. Core modules include:
 - API layer: FastAPI routers and route handlers for tools and health endpoints
 - Services: Gateway orchestration, policy engine, and token verifier
-- Tools: Base tool abstraction, registry, Kubernetes connector, Elastic connector, Incidents connector, Skills connector, and output redaction system
+- Tools: Base tool abstraction, registry, Browser connector, Kubernetes connector, Elastic connector, Incidents connector, Skills connector, and output redaction system
 - Core: Configuration, runtime, observability, metrics, telemetry, request context, dependencies
 - Schemas: Shared contract schemas for tool invocations and results
 - Policies: Default YAML policy definitions with enhanced tool permissions including mutating actions
@@ -104,16 +112,19 @@ E["Policy Engine<br/>services/policy_engine.py"]
 F["Token Verifier<br/>services/token_verifier.py"]
 G["Tool Registry<br/>tools/registry.py"]
 H["Base Tool<br/>tools/base.py"]
-I["K8s Connector<br/>tools/k8s_connector.py"]
-J["Elastic Connector<br/>tools/elastic_connector.py"]
-K["Incidents Connector<br/>tools/incidents_connector.py"]
-L["Skills Connector<br/>tools/skills_connector.py"]
-M["Output Redaction<br/>tools/redaction.py"]
-N["Policies YAML<br/>policies/policy-default.yaml"]
-O["Schemas<br/>schemas/api.py + shared contracts"]
-P["Core Config/Runtime<br/>core/config.py, core/runtime.py"]
-Q["Observability/Metrics/Telemetry<br/>core/*"]
-R["Dependencies<br/>core/dependencies.py"]
+I["Browser Connector<br/>tools/browser_connector.py"]
+J["Browser Sessions<br/>tools/browser_sessions.py"]
+K["Credential Sets<br/>tools/credential_sets.py"]
+L["K8s Connector<br/>tools/k8s_connector.py"]
+M["Elastic Connector<br/>tools/elastic_connector.py"]
+N["Incidents Connector<br/>tools/incidents_connector.py"]
+O["Skills Connector<br/>tools/skills_connector.py"]
+P["Output Redaction<br/>tools/redaction.py"]
+Q["Policies YAML<br/>policies/policy-default.yaml"]
+R["Schemas<br/>schemas/api.py + shared contracts"]
+S["Core Config/Runtime<br/>core/config.py, core/runtime.py"]
+T["Observability/Metrics/Telemetry<br/>core/*"]
+U["Dependencies<br/>core/dependencies.py"]
 end
 A --> B
 A --> C
@@ -122,21 +133,24 @@ C --> D
 D --> E
 D --> F
 D --> G
-F --> M
+F --> P
 G --> H
 G --> I
 G --> J
 G --> K
 G --> L
 G --> M
-E --> N
-D --> O
-D --> P
-D --> Q
+G --> N
+G --> O
+G --> P
+E --> Q
 D --> R
+D --> S
+D --> T
+D --> U
 ```
 
-**Updated** Architecture diagram reflects the current structure with all four connectors and enhanced request correlation capabilities
+**Updated** Architecture diagram reflects the current structure with all five connectors including the new browser connector and enhanced request correlation capabilities
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -147,6 +161,9 @@ D --> R
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
@@ -174,13 +191,14 @@ D --> R
 - Output Redaction System: Automatically detects and redacts sensitive information from tool outputs using pattern matching and key-list filtering.
 - **Enhanced Request Correlation**: Propagates x-request-id headers through the entire tool execution pipeline to enable end-to-end audit trail tracking from initial tool invocation through downstream service calls.
 - **Enhanced Kubernetes Connector**: Provides safe abstractions for interacting with Kubernetes clusters across all namespaces using cluster-wide read-only ClusterRole permissions, enabling comprehensive diagnostic capabilities while maintaining strict read-only access controls, plus bounded mutating operations through k8s.delete_pod.
+- **Browser Connector**: Provides web application interaction capabilities through Playwright-based headless browser automation with stateful session management, origin allowlist enforcement, flow binding, and credential set management.
 - Elastic Connector: Provides read-only access to Elasticsearch for observability data including log search, service health metrics, and active alerts.
 - Incidents Connector: Provides read-only access to the incident-service query API for listing and retrieving incident data with proper authentication and parameter validation.
 - Skills Connector: Provides read-only access to the skills-hub retrieval API for searching and retrieving team-owned operational skills and runbooks with full audit trail correlation.
 - Schemas and Contracts: Enforce consistent request/response shapes for tool invocations and results.
 - Core Utilities: Configuration, runtime settings, observability, metrics, telemetry, request context propagation, and dependency injection.
 
-**Updated** Component descriptions reflect the current implementation with enhanced request correlation capabilities and all four connectors integrated
+**Updated** Component descriptions reflect the current implementation with enhanced request correlation capabilities and all five connectors integrated including the new browser connector
 
 **Section sources**
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
@@ -188,6 +206,9 @@ D --> R
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
@@ -206,7 +227,7 @@ The Tool Gateway follows a streamlined architecture focused on multi-source tool
 **Current Architecture:**
 - API Layer: FastAPI routers expose endpoints for tool discovery and invocation only.
 - Service Layer: Gateway orchestrates tool invocation flows; policy engine enforces rules for tool actions with enhanced permissions including mutating actions; token verifier authenticates with audience validation for `tool-gateway`.
-- Tool Layer: Registry discovers and executes tools from multiple connectors with risk-tier admission control; **enhanced request correlation propagates x-request-id headers through the entire pipeline**; **enhanced Kubernetes connector provides cluster-wide read-only access plus bounded mutating operations**; Elastic connector provides observability data access; incidents connector provides incident data access; skills connector provides skills and runbook access; output redaction ensures sensitive data never leaves the service.
+- Tool Layer: Registry discovers and executes tools from multiple connectors with risk-tier admission control; **enhanced request correlation propagates x-request-id headers through the entire pipeline**; **enhanced Kubernetes connector provides cluster-wide read-only access plus bounded mutating operations**; **browser connector provides web application interaction capabilities with stateful sessions and flow binding**; Elastic connector provides observability data access; incidents connector provides incident data access; skills connector provides skills and runbook access; output redaction ensures sensitive data never leaves the service.
 - Core Layer: Configuration, runtime, observability, metrics, telemetry, and request context support cross-cutting concerns.
 
 ```mermaid
@@ -218,6 +239,7 @@ participant Gateway as "Gateway Service"
 participant Policy as "Policy Engine"
 participant Token as "Token Verifier"
 participant Registry as "Tool Registry"
+participant Browser as "Browser Connector"
 participant K8s as "K8s Connector"
 participant Elastic as "Elastic Connector"
 participant Incidents as "Incidents Connector"
@@ -233,7 +255,11 @@ Policy-->>Gateway : "Decision"
 alt "Allow"
 Gateway->>Registry : "Resolve tool by name"
 Registry-->>Gateway : "Tool instance"
-alt "Kubernetes Tool"
+alt "Browser Tool"
+Gateway->>Registry : "Execute browser tool with validated inputs"
+Registry->>Browser : "Call web.* operations with session management"
+Browser-->>Registry : "Web result with evidence"
+else "Kubernetes Tool"
 Gateway->>Registry : "Execute k8s tool with validated inputs"
 Registry->>K8s : "Call k8s operations (cluster-wide read-only or bounded mutate)"
 K8s-->>Registry : "Result"
@@ -261,7 +287,7 @@ ToolsRoute-->>Client : "403 Forbidden"
 end
 ```
 
-**Updated** Sequence diagram reflects the current architecture with enhanced request correlation and all four connectors integrated
+**Updated** Sequence diagram reflects the current architecture with enhanced request correlation and all five connectors integrated including the new browser connector
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -270,6 +296,8 @@ end
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
@@ -350,6 +378,23 @@ class BaseTool {
 +description string
 +execute(params, identity) Result
 }
+class BrowserConnector {
++register_tools(registry) void
++is_origin_allowed(url) bool
++bind_flow(entry, skill_id, url, skill) ToolResult
++gate_interaction(entry, tool_name, require_write_class) ToolResult
+}
+class BrowserSessionPool {
++start() bool
++stop() void
++get_or_create(session_key) BrowserSessionEntry
++sweep_expired() list
+}
+class CredentialSetStore {
++configured bool
++names() list
++get(name) dict
+}
 class K8sConnector {
 +list_resources(kind, namespace) list
 +get_resource(kind, name, namespace) object
@@ -376,13 +421,16 @@ GatewayService --> ToolRegistry : "uses"
 GatewayService --> OutputRedaction : "uses"
 ToolRegistry --> BaseTool : "manages"
 ToolRegistry --> OutputRedaction : "uses"
+BaseTool --> BrowserConnector : "may use"
 BaseTool --> K8sConnector : "may use"
 BaseTool --> ElasticConnector : "may use"
 BaseTool --> IncidentsConnector : "may use"
 BaseTool --> SkillsConnector : "may use"
+BrowserConnector --> BrowserSessionPool : "uses"
+BrowserConnector --> CredentialSetStore : "uses"
 ```
 
-**Updated** Streamlined architecture with enhanced request correlation, risk-tier admission control, and all four connectors integrated
+**Updated** Streamlined architecture with enhanced request correlation, risk-tier admission control, and all five connectors integrated including the new browser connector with session management
 
 **Diagram sources**
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
@@ -390,6 +438,9 @@ BaseTool --> SkillsConnector : "may use"
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
@@ -515,6 +566,9 @@ class BaseTool {
 +schema dict
 +execute(params, identity) Result
 }
+class BrowserTool {
++execute(params, identity) Result
+}
 class K8sTool {
 +execute(params, identity) Result
 }
@@ -533,17 +587,19 @@ class OutputRedaction {
 }
 ToolRegistry --> BaseTool : "manages"
 ToolRegistry --> OutputRedaction : "uses"
+BrowserTool --|> BaseTool : "extends"
 K8sTool --|> BaseTool : "extends"
 ElasticTool --|> BaseTool : "extends"
 IncidentsTool --|> BaseTool : "extends"
 SkillsTool --|> BaseTool : "extends"
 ```
 
-**Updated** Integrated with risk-tier admission control, output redaction system, and enhanced request correlation supporting all four tool providers
+**Updated** Integrated with risk-tier admission control, output redaction system, and enhanced request correlation supporting all five tool providers including the new browser connector
 
 **Diagram sources**
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
@@ -587,6 +643,64 @@ Deny --> Return
 **Section sources**
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
+
+### Browser Connector with Stateful Session Management and Flow Binding
+Provides web application interaction capabilities through Playwright-based headless browser automation with comprehensive security controls:
+
+**Core Features**:
+- **Stateful Browser Sessions**: Manages browser contexts per chat session ID with TTL-based expiration and capacity limits
+- **Origin Allowlist Enforcement**: Server-side URL allowlist prevents navigation to unauthorized origins with deny-by-default posture
+- **Flow Binding and Deviation Guard**: Validates skill-declared web targets and prevents off-flow interactions
+- **Credential Set Management**: Secure login flows using named credential sets with automatic value masking
+- **Screenshot Capabilities**: Bounded JPEG screenshots with quality adjustment and size limits
+- **Interactive Element Handling**: Snapshot-based element references for click and type operations
+
+**Security Controls**:
+- Origin allowlist validation prevents navigation outside authorized domains
+- Flow binding ensures interactions occur only within approved web-check flows
+- Credential values are masked in snapshots and screenshots to prevent leaks
+- Write-tier operations require explicit mutation approval through existing HITL gates
+- Deviation guard prevents interactions on pages that drift from approved flow origins
+
+**Tool Surface**:
+- **Read Tier**: `web.navigate`, `web.snapshot`, `web.screenshot`, `web.fill_credential`
+- **Write Tier**: `web.click`, `web.type` (require GATEWAY_MUTATING_TOOLS_ENABLED)
+
+```mermaid
+flowchart TD
+Navigate["web.navigate"] --> CheckOrigin["Check Origin Allowlist"]
+CheckOrigin --> Allowed{"Allowed?"}
+Allowed --> |No| Deny["Return BROWSER_ORIGIN_NOT_ALLOWED"]
+Allowed --> |Yes| BindFlow["Bind Skill Flow if Provided"]
+BindFlow --> NavigatePage["Navigate to URL"]
+NavigatePage --> CheckRedirect["Check Redirect Target"]
+CheckRedirect --> RedirectAllowed{"Redirect Allowed?"}
+RedirectAllowed --> |No| Halt["Halt Page & Clear Flow"]
+RedirectAllowed --> |Yes| Success["Return Success with URL & Title"]
+Snapshot["web.snapshot"] --> GetElements["Get Interactive Elements"]
+GetElements --> BuildSnapshot["Build Text Snapshot with Refs"]
+BuildSnapshot --> MaskCredentials["Mask Credential Values"]
+MaskCredentials --> ReturnSnapshot["Return Snapshot with Elements"]
+ClickType["web.click/web.type"] --> CheckFlow["Check Flow Bound & Approved"]
+CheckFlow --> ValidFlow{"Valid Flow?"}
+ValidFlow --> |No| DenyFlow["Return Flow Error"]
+ValidFlow --> |Yes| ResolveRef["Resolve Element Reference"]
+ResolveRef --> ExecuteAction["Execute Click/Type Action"]
+ExecuteAction --> IncrementSteps["Increment Flow Steps"]
+IncrementSteps --> ReturnAction["Return Action Result"]
+```
+
+**New** Browser connector provides comprehensive web application interaction capabilities with stateful sessions and security enforcement
+
+**Diagram sources**
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
+
+**Section sources**
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 
 ### Elastic Connector for Observability Data
 Provides read-only access to Elasticsearch for observability data with three main tools:
@@ -706,12 +820,13 @@ BuildEvidence --> ReturnResult["Return Tool Result"]
 ### Core Configuration and Runtime
 - Configuration loads environment variables including audience validation settings and **incidents service configuration**
 - **Added GATEWAY_MUTATING_TOOLS_ENABLED** environment variable for controlling mutating tool registration
+- **Added browser connector configuration** including CDP endpoint, session management, and origin allowlist
 - Runtime settings manage service lifecycle and dependencies
 - Observability, metrics, and telemetry provide monitoring and tracing
 - Redaction configuration with enable/disable switches and overflow thresholds
 - Dependency injection framework for service components
 
-**Updated** Added incidents service configuration options and enhanced dependency injection with mutating tools control
+**Updated** Added incidents service configuration options, browser connector configuration, and enhanced dependency injection with mutating tools control
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
@@ -728,6 +843,7 @@ The Tool Gateway has clear dependency boundaries with focused security component
 - Services depend on policy engine, token verifier, tool registry, and output redaction
 - Tool registry depends on base tool implementations, connectors, and redaction system
 - **Enhanced Kubernetes connector depends on cluster-wide RBAC permissions and policy enforcement**
+- **Browser connector depends on Playwright, CDP connectivity, and credential set management**
 - Elastic connector depends on Elasticsearch client and configuration
 - **Incidents connector depends on incident-service HTTP API and Basic authentication**
 - **Skills connector depends on skills-hub HTTP API, Basic authentication, and request correlation**
@@ -742,6 +858,7 @@ Services --> Registry["Tool Registry"]
 Services --> Redaction["Output Redaction"]
 Registry --> Tools["Base Tool Implementations"]
 Registry --> Redaction
+Tools --> Browser["Browser Connector (with Sessions & Credentials)"]
 Tools --> K8s["Kubernetes Connector (Cluster-Wide)"]
 Tools --> Elastic["Elastic Connector"]
 Tools --> Incidents["Incidents Connector"]
@@ -750,7 +867,7 @@ Services --> Schemas["Schemas & Contracts"]
 Services --> Core["Core Config/Runtime/Observability"]
 ```
 
-**Updated** Simplified dependency graph reflecting all four connectors with enhanced Kubernetes permissions, risk-tier admission control, and request correlation capabilities
+**Updated** Simplified dependency graph reflecting all five connectors with enhanced Kubernetes permissions, browser connector with session management, risk-tier admission control, and request correlation capabilities
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -759,6 +876,9 @@ Services --> Core["Core Config/Runtime/Observability"]
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
@@ -773,6 +893,9 @@ Services --> Core["Core Config/Runtime/Observability"]
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
@@ -800,6 +923,10 @@ Services --> Core["Core Config/Runtime/Observability"]
 - **Result limit enforcement for skills queries (max 20 entries)**
 - **Minimal header overhead for request correlation (conditional x-request-id forwarding)**
 - **Risk-tier admission control minimizes policy evaluation overhead for read-only tools**
+- **Browser session pooling with TTL-based expiration to manage memory usage**
+- **Screenshot quality adjustment loop to meet byte size constraints efficiently**
+- **Lazy browser connection establishment to avoid startup delays when disabled**
+- **Element reference caching in browser sessions to optimize interaction operations**
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -813,8 +940,15 @@ Common issues and resolutions:
 - **Mutating tools disabled**: Check GATEWAY_MUTATING_TOOLS_ENABLED environment variable is set to true for write/admin tools
 - **k8s.delete_pod not found**: Verify GATEWAY_MUTATING_TOOLS_ENABLED is enabled and proper RBAC permissions are granted
 - **Permission denied for pod deletion**: Ensure tool-gateway service account has pod-delete RBAC permissions
-- Elastic connectivity: Check Elastic URL, authentication credentials, and network connectivity
-- Elastic configuration: Verify `GATEWAY_ELASTIC_ENABLED` and related environment variables
+- **Browser connector not working**: Check GATEWAY_BROWSER_ENABLED flag and CDP endpoint connectivity
+- **Browser sidecar unreachable**: Verify chromium-headless-shell sidecar is running and accessible at configured CDP endpoint
+- **Origin allowlist denials**: Ensure target URLs match configured GATEWAY_BROWSER_ALLOW_ORIGINS
+- **Flow binding errors**: Verify skill declarations include valid web_target and risk_class fields
+- **Credential set not found**: Check GATEWAY_BROWSER_CREDENTIAL_SETS file path and format
+- **Screenshot too large**: Adjust GATEWAY_BROWSER_SCREENSHOT_MAX_BYTES or reduce page complexity
+- **Session expiration**: Monitor browser session TTL and adjust based on workflow duration
+- **Elastic connectivity**: Check Elastic URL, authentication credentials, and network connectivity
+- **Elastic configuration**: Verify `GATEWAY_ELASTIC_ENABLED` and related environment variables
 - **Incidents connectivity**: Check incidents service URL, Basic authentication credentials, and network connectivity
 - **Incidents configuration**: Verify `GATEWAY_INCIDENTS_SERVICE_URL`, `GATEWAY_INCIDENTS_CLIENT_ID`, and `GATEWAY_INCIDENTS_CLIENT_SECRET`
 - **Incidents parameter validation**: Ensure incident IDs match the expected pattern (inc-<lowercase alphanumeric>)
@@ -826,12 +960,15 @@ Common issues and resolutions:
 - Output redaction issues: Check redaction configuration and overflow thresholds
 - Dependency injection problems: Verify service initialization and configuration
 
-**Updated** Added troubleshooting guidance for risk-tier admission control, mutating tools, request correlation, and common issues
+**Updated** Added troubleshooting guidance for browser connector, risk-tier admission control, mutating tools, request correlation, and common issues
 
 **Section sources**
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
@@ -844,9 +981,9 @@ Common issues and resolutions:
 ## Conclusion
 The Tool Gateway Service provides a focused, secure, and extensible platform for internal tool execution with policy enforcement, secure tool invocation, comprehensive output redaction, and enhanced request correlation. Its streamlined architecture enables easy extension with new tools while maintaining strong security and observability standards. The service now operates exclusively as an internal component, receiving requests from other platform services through well-defined APIs with delegated token authentication.
 
-The platform-gateway extraction has successfully separated portal-facing responsibilities into the new `platform-gateway` service, allowing tool-gateway to focus solely on its core mandate of connector standardization and tool execution. Recent enhancements include the addition of Elastic connector for observability data access, incidents connector for querying incident data through the new incident service, **skills connector for accessing team-owned operational skills and runbooks with full audit trail correlation**, **enhanced RBAC permissions with cluster-wide read-only access enabling comprehensive diagnostic capabilities across all namespaces**, **risk-tier admission control with GATEWAY_MUTATING_TOOLS_ENABLED for secure mutating tool registration**, **bounded mutating tool support with k8s.delete_pod for controlled pod restart operations**, and **enhanced request correlation through x-request-id header forwarding enabling end-to-end audit trail tracking**.
+The platform-gateway extraction has successfully separated portal-facing responsibilities into the new `platform-gateway` service, allowing tool-gateway to focus solely on its core mandate of connector standardization and tool execution. Recent enhancements include the addition of Elastic connector for observability data access, incidents connector for querying incident data through the new incident service, **skills connector for accessing team-owned operational skills and runbooks with full audit trail correlation**, **browser connector for web application interaction capabilities with stateful sessions and flow binding**, **enhanced RBAC permissions with cluster-wide read-only access enabling comprehensive diagnostic capabilities across all namespaces**, **risk-tier admission control with GATEWAY_MUTATING_TOOLS_ENABLED for secure mutating tool registration**, **bounded mutating tool support with k8s.delete_pod for controlled pod restart operations**, and **enhanced request correlation through x-request-id header forwarding enabling end-to-end audit trail tracking**.
 
-This architectural change improves ownership alignment, security boundaries, and maintainability while preserving all external contracts and functionality. The transition from namespaced Role to cluster-wide ClusterRole significantly enhances operational capabilities while maintaining strict read-only access controls. The introduction of risk-tier admission control ensures that mutating operations require explicit authorization through both environment configuration and policy enforcement. The enhanced request correlation capabilities ensure that every tool invocation can be traced end-to-end through downstream services, providing comprehensive audit trail visibility.
+This architectural change improves ownership alignment, security boundaries, and maintainability while preserving all external contracts and functionality. The transition from namespaced Role to cluster-wide ClusterRole significantly enhances operational capabilities while maintaining strict read-only access controls. The introduction of risk-tier admission control ensures that mutating operations require explicit authorization through both environment configuration and policy enforcement. The enhanced request correlation capabilities ensure that every tool invocation can be traced end-to-end through downstream services, providing comprehensive audit trail visibility. The new browser connector extends the platform's capabilities to interact with web applications through a bounded, secure interface with comprehensive security controls including origin allowlisting, flow binding, and credential masking.
 
 ## Appendices
 
@@ -859,7 +996,7 @@ The platform-gateway extraction (ADR-0005, SPEC-010) has been completed successf
 
 **Component Separation:**
 - **Moved to platform-gateway**: Token verification, policy engine, chat routes, session routes, auth routes, identity routes, runtime routes, delegation client, agent client
-- **Remaining in tool-gateway**: Tool registry, base tool framework, k8s connector, elastic connector, incidents connector, skills connector, output redaction, tools routes, health endpoints
+- **Remaining in tool-gateway**: Tool registry, base tool framework, browser connector, k8s connector, elastic connector, incidents connector, skills connector, output redaction, tools routes, health endpoints
 
 **Impact Assessment:**
 - External HTTP contracts remain unchanged for portal callers
@@ -933,6 +1070,48 @@ The enhanced request correlation system enables end-to-end audit trail tracking 
 - [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 - [test_skills_connector.py](file://products/tool-gateway/tests/test_skills_connector.py)
 
+### Browser Connector Implementation with Stateful Sessions and Flow Binding
+The browser connector provides web application interaction capabilities through Playwright-based headless browser automation with comprehensive security controls:
+
+**Core Architecture**:
+- **Stateful Session Management**: Browser contexts are keyed by chat session ID, surviving owner→approver identity switches during HITL workflows
+- **CDP Connectivity**: Connects to chromium-headless-shell sidecar over Chrome DevTools Protocol for headless browser automation
+- **Origin Allowlist Enforcement**: Server-side URL allowlist prevents navigation to unauthorized origins with deny-by-default posture
+- **Flow Binding and Deviation Guard**: Validates skill-declared web targets and prevents off-flow interactions
+- **Credential Set Management**: Secure login flows using named credential sets with automatic value masking
+- **Screenshot Capabilities**: Bounded JPEG screenshots with quality adjustment and size limits
+
+**Security Controls**:
+- Origin allowlist validation prevents navigation outside authorized domains
+- Flow binding ensures interactions occur only within approved web-check flows
+- Credential values are masked in snapshots and screenshots to prevent leaks
+- Write-tier operations require explicit mutation approval through existing HITL gates
+- Deviation guard prevents interactions on pages that drift from approved flow origins
+
+**Configuration Options**:
+- `GATEWAY_BROWSER_ENABLED`: Enable/disable browser connector
+- `GATEWAY_BROWSER_CDP_ENDPOINT`: CDP endpoint for browser sidecar
+- `GATEWAY_BROWSER_SESSION_TTL`: Session timeout in seconds
+- `GATEWAY_BROWSER_MAX_SESSIONS`: Maximum concurrent browser sessions
+- `GATEWAY_BROWSER_ALLOW_ORIGINS`: Comma-separated origin allowlist
+- `GATEWAY_BROWSER_FLOW_MAX_STEPS`: Maximum steps per web-check flow
+- `GATEWAY_BROWSER_CREDENTIAL_SETS`: Path to credential set file
+- `GATEWAY_BROWSER_SCREENSHOT_MAX_BYTES`: Maximum screenshot size in bytes
+
+**Testing Coverage**:
+- Session pool lifecycle tests (create/reuse/TTL/eviction)
+- Origin allowlist matrix validation
+- Flow binding and deviation guard state machine
+- Credential set handling with leak assertions
+- Screenshot byte cap enforcement
+- Concurrent session creation safety
+
+**Section sources**
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
+- [test_browser_connector.py](file://products/tool-gateway/tests/test_browser_connector.py)
+
 ### Policy Definition Examples
 YAML-based policy definitions control access to tools and operations with enhanced permissions:
 - Rule-based access control with conditions
@@ -950,6 +1129,7 @@ Tools are registered dynamically with metadata and schemas from multiple connect
 - Input parameter schemas for validation
 - Execution functions with error handling
 - Integration with Kubernetes connector for cluster-wide operations
+- Integration with Browser connector for web application interaction
 - Integration with Elastic connector for observability data access
 - Integration with Incidents connector for incident data access
 - Integration with Skills connector for skills and runbook access with request correlation
@@ -958,6 +1138,7 @@ Tools are registered dynamically with metadata and schemas from multiple connect
 **Section sources**
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
@@ -970,6 +1151,7 @@ When developing custom tools:
 - Implement error handling and logging
 - **Set appropriate risk_level** (read/write/admin) for admission control
 - Integrate with Kubernetes connector for cluster-wide operations
+- Integrate with Browser connector for web application interaction
 - Integrate with Elastic connector for observability data access
 - Integrate with Incidents connector for incident data access
 - Integrate with Skills connector for skills and runbook access with request correlation
@@ -977,12 +1159,14 @@ When developing custom tools:
 - Be aware that all tool outputs will be automatically redacted for security
 - **Understand that write/admin tools require GATEWAY_MUTATING_TOOLS_ENABLED and tools:mutate policy permission**
 - **For skills tools, request_id will be automatically forwarded to downstream services for audit correlation**
+- **For browser tools, understand flow binding requirements and origin allowlist constraints**
 
-**Updated** Added guidance for risk-level classification, mutating tool requirements, and request correlation capabilities
+**Updated** Added guidance for risk-level classification, mutating tool requirements, request correlation capabilities, and browser connector integration
 
 **Section sources**
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
@@ -994,6 +1178,7 @@ When developing custom tools:
 - **Enhanced RBAC enforcement with cluster-wide read-only access via `luban-tool-gateway-readonly` ClusterRole**
 - **Risk-tier admission control preventing unauthorized access to mutating tools**
 - **Enhanced request correlation with x-request-id header forwarding for audit trail continuity**
+- **Browser connector security controls including origin allowlist, flow binding, and credential masking**
 - Input validation and sanitization
 - Policy-based access control with enhanced tool permissions including tools:mutate
 - Secure configuration management
@@ -1006,12 +1191,17 @@ When developing custom tools:
 - **Strict incident ID validation to prevent path injection attacks**
 - **Strict skill ID validation to prevent path injection attacks**
 - **Strict read-only access controls ensuring no mutating operations are permitted without explicit opt-in**
+- **Browser flow deviation guard preventing off-origin interactions**
+- **Credential set validation and secure file loading**
 
-**Updated** Enhanced security model with risk-tier admission control, improved cluster-wide RBAC permissions, and enhanced request correlation capabilities
+**Updated** Enhanced security model with risk-tier admission control, improved cluster-wide RBAC permissions, enhanced request correlation capabilities, and comprehensive browser connector security controls
 
 **Section sources**
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
@@ -1033,8 +1223,11 @@ When developing custom tools:
 - **Monitor cluster-wide resource access patterns and API call volumes**
 - **Monitor risk-tier admission control effectiveness and mutating tool attempts**
 - **Monitor request correlation header forwarding and downstream service correlation**
+- **Monitor browser session pool utilization and expiration rates**
+- **Track browser connector origin allowlist violations and flow deviations**
+- **Monitor credential set access patterns and file reload events**
 
-**Updated** Enhanced monitoring strategies with risk-tier admission control, cluster-wide access monitoring, and request correlation monitoring
+**Updated** Enhanced monitoring strategies with risk-tier admission control, cluster-wide access monitoring, request correlation monitoring, and browser connector metrics
 
 **Section sources**
 - [metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
@@ -1054,6 +1247,25 @@ The output redaction system provides comprehensive protection against credential
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
+
+### Browser Connector Configuration
+The browser connector provides web application interaction capabilities with comprehensive configuration options:
+- **Enable/Disable**: `GATEWAY_BROWSER_ENABLED` environment variable
+- **CDP Endpoint**: `GATEWAY_BROWSER_CDP_ENDPOINT` for chromium-headless-shell sidecar
+- **Session Management**: `GATEWAY_BROWSER_SESSION_TTL` and `GATEWAY_BROWSER_MAX_SESSIONS`
+- **Origin Allowlist**: `GATEWAY_BROWSER_ALLOW_ORIGINS` comma-separated list
+- **Flow Limits**: `GATEWAY_BROWSER_FLOW_MAX_STEPS` for web-check flows
+- **Credential Sets**: `GATEWAY_BROWSER_CREDENTIAL_SETS` path to credential file
+- **Screenshot Limits**: `GATEWAY_BROWSER_SCREENSHOT_MAX_BYTES` for size constraints
+- **Skills Integration**: `GATEWAY_SKILLS_SERVICE_URL` and credentials for flow validation
+
+**New** Browser connector configuration options for web application interaction capabilities
+
+**Section sources**
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 
 ### Elastic Connector Configuration
 The Elastic connector provides observability data access with flexible configuration:
@@ -1178,3 +1390,36 @@ The SPEC-029 implementation provides comprehensive audit trail correlation betwe
 - [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 - [test_skills_connector.py](file://products/tool-gateway/tests/test_skills_connector.py)
 - [spec.md](file://docs/specs/SPEC-029-skills-usage-audit-trail/spec.md)
+
+### SPEC-049 Browser Web Check Tools Implementation
+The SPEC-049 implementation provides bounded web application interaction capabilities through Playwright-based headless browser automation:
+
+**Implementation Details**:
+- Stateful browser sessions keyed by chat session ID for flow persistence
+- Origin allowlist enforcement preventing navigation to unauthorized domains
+- Flow binding with skill-declared web_target and risk_class validation
+- Deviation guard preventing interactions on off-origin pages
+- Named credential sets for secure login flows with automatic value masking
+- Bounded screenshot capabilities with quality adjustment and size limits
+
+**Security Controls**:
+- Deny-by-default origin allowlist posture
+- Flow binding ensures interactions occur only within approved web-check flows
+- Credential values masked in snapshots and screenshots to prevent leaks
+- Write-tier operations require explicit mutation approval through existing HITL gates
+- Deviation guard prevents interactions on pages that drift from approved flow origins
+
+**Testing Coverage**:
+- Session pool lifecycle tests (create/reuse/TTL/eviction)
+- Origin allowlist matrix validation
+- Flow binding and deviation guard state machine
+- Credential set handling with leak assertions
+- Screenshot byte cap enforcement
+- Concurrent session creation safety
+
+**Section sources**
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
+- [test_browser_connector.py](file://products/tool-gateway/tests/test_browser_connector.py)
+- [2026-09-02-spec-049-browser-web-check-tools.md](file://docs/agentic-aiops-platform/release-notes/2026-09-02-spec-049-browser-web-check-tools.md)

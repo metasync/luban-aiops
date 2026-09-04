@@ -18,6 +18,11 @@
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [app.py](file://products/tool-gateway/src/tool_gateway/app.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
+- [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
+- [policy_engine.py](file://products/tool-gateway/src/tool-gateway/services/policy_engine.py)
 - [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [sync-delegation-secrets.sh](file://shared/platform-ops/gitops/sync-delegation-secrets.sh)
@@ -39,21 +44,26 @@
 - [spec.md](file://docs/specs/SPEC-027-live-model-discovery/spec.md)
 - [spec.md](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
 - [spec.md](file://docs/specs/SPEC-043-incident-report-document-type/spec.md)
+- [spec.md](file://docs/specs/SPEC-049-browser-web-check-tools/spec.md)
 - [approval-and-hitl.md](file://docs/guides/approval-and-hitl.md)
 - [tool-configuration.md](file://docs/guides/tool-configuration.md)
 - [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 - [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 - [troubleshooting.md](file://docs/guides/troubleshooting.md)
+- [browser.env](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
+- [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced OIDC configuration documentation to clarify that extra redirect URIs are registered with Keycloak for reachability only, not selected as callbacks
-- Updated identity broker configuration section to explain canonical vs fallback behavior for redirect URIs
-- Added detailed explanation of how the identity broker always uses OIDC_REDIRECT_URI as the flow's callback regardless of which origin initiates login
-- Updated troubleshooting section with clearer guidance on redirect URI mismatch scenarios
-- Enhanced configuration reference with additional context about redirect URI behavior
+- Added comprehensive documentation for NetworkPolicy enforcement configuration for browser sidecar connectivity
+- Enhanced credential set enumeration prevention with improved security measures and generic error messages
+- Updated screenshot unmask failure logging to log exception class only (never values) for security
+- Added new security configuration options for browser connector with enhanced protection mechanisms
+- Updated troubleshooting guide with new security-related issues and solutions
+- Enhanced security considerations for credential handling and information disclosure prevention
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -70,10 +80,10 @@
 ## Introduction
 This document explains how the Platform Gateway Service manages configuration and environment setup across layers: environment variables, configuration files, and runtime overrides. It details available options, defaults, validation rules, and deployment-specific settings for development, staging, and production. It also provides examples for Docker and Kubernetes (ConfigMaps/Secrets), and outlines security best practices for secrets management and consistent configuration across environments.
 
-**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations, risk-tier admission gates for mutating tools via GATEWAY_MUTATING_TOOLS_ENABLED, configurable HITL confirmation timeouts through AGENT_HITL_CONFIRM_TIMEOUT, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, the new mutating-dev kustomize profile that provides a committed, environment-scoped development posture for enabling mutating tools safely with bounded RBAC permissions while preserving configuration across LLM provider switches, the live model discovery feature controlled by AGENT_MODEL_DISCOVERY_ENABLED, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS, and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS that enables automatic model catalog updates from provider endpoints with fail-soft fallback mechanisms, the new execution signing system with AGENT_EXECUTION_SIGNING_KEY that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions via AGENT_AUDIT_SERVICE_URL, and durable execution record persistence using AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL settings, plus comprehensive incident service connectivity configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables that enable incident report document assembly and triage capabilities with Basic authentication flows, and enhanced OIDC configuration documentation clarifying that extra redirect URIs are registered with Keycloak for reachability only, not selected as callbacks.
+**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations, risk-tier admission gates for mutating tools via GATEWAY_MUTATING_TOOLS_ENABLED, configurable HITL confirmation timeouts through AGENT_HITL_CONFIRM_TIMEOUT, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, the new mutating-dev kustomize profile that provides a committed, environment-scoped development posture for enabling mutating tools safely with bounded RBAC permissions while preserving configuration across LLM provider switches, the live model discovery feature controlled by AGENT_MODEL_DISCOVERY_ENABLED, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS, and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS that enables automatic model catalog updates from provider endpoints with fail-soft fallback mechanisms, the new execution signing system with AGENT_EXECUTION_SIGNING_KEY that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions via AGENT_AUDIT_SERVICE_URL, and durable execution record persistence using AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL settings, plus comprehensive incident service connectivity configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables that enable incident report document assembly and triage capabilities with Basic authentication flows, comprehensive browser tool configuration through seven new GATEWAY_BROWSER_* environment variables that enable web-check capabilities with Chromium headless sidecar, enhanced NetworkPolicy enforcement for browser sidecar connectivity, improved credential set enumeration prevention with generic error messages, and enhanced logging for screenshot unmask failures that logs exception classes only without sensitive data exposure.
 
 ## Project Structure
-The Platform Gateway Service is implemented under products/platform-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/platform-gateway. The service includes workspace resource integration features that proxy requests to tool-gateway and skills-hub services for read-only inventory access, plus enhanced OpenTelemetry configuration with durable secret management. The new mutating-dev profile provides a dedicated development posture for enabling mutating tools with appropriate RBAC controls. The agent platform component now includes live model discovery capabilities that automatically refresh model catalogs from provider endpoints, along with execution signing and audit trail capabilities for tamper-evident execution records.
+The Platform Gateway Service is implemented under products/platform-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/platform-gateway. The service includes workspace resource integration features that proxy requests to tool-gateway and skills-hub services for read-only inventory access, plus enhanced OpenTelemetry configuration with durable secret management. The new mutating-dev profile provides a dedicated development posture for enabling mutating tools with appropriate RBAC controls. The agent platform component now includes live model discovery capabilities that automatically refresh model catalogs from provider endpoints, along with execution signing and audit trail capabilities for tamper-evident execution records. The tool-gateway component now includes browser connector capabilities with Chromium headless sidecar integration for web-check operations, enhanced with NetworkPolicy enforcement and improved security measures.
 
 ```mermaid
 graph TB
@@ -115,91 +125,107 @@ DD["registry.py"]
 EE["GATEWAY_MUTATING_TOOLS_ENABLED"]
 FF["Risk-Tier Admission Gate"]
 GG["Policy Enforcement"]
+HH["Browser Connector"]
+II["GATEWAY_BROWSER_*"]
+JJ["Chromium Sidecar"]
+KK["CDP Endpoint"]
+LL["Session Pool"]
+MM["Credential Sets"]
+NN["NetworkPolicy Enforcement"]
+OO["Enumeration Prevention"]
+PP["Screenshot Security"]
 end
 subgraph "Workspace Resource Integration"
-HH["tool_gateway_url"]
-II["skills_hub_url"]
-JJ["skills_client_id"]
-KK["skills_client_secret"]
-LL["Delegated Token Flow"]
-MM["Basic Auth Flow"]
+QQ["tool_gateway_url"]
+RR["skills_hub_url"]
+SS["skills_client_id"]
+TT["skills_client_secret"]
+UU["Delegated Token Flow"]
+VV["Basic Auth Flow"]
+WW["Incident Service"]
+XX["PLATFORM_GATEWAY_INCIDENT_*"]
 end
 subgraph "Enhanced OTel Secret Management"
-NN["sync-otel-secrets.sh"]
-OO["OTEL_EXPORTER_OTLP_HEADERS"]
-PP["Cluster Secret Merge"]
-QQ["Local File Preservation"]
-RR["Sibling Script Hooks"]
+YY["sync-otel-secrets.sh"]
+ZZ["OTEL_EXPORTER_OTLP_HEADERS"]
+AAA["Cluster Secret Merge"]
+BBB["Local File Preservation"]
+CCC["Sibling Script Hooks"]
 end
 subgraph "Mutating Dev Profile"
-SS["dev-k8s/kustomization.yaml"]
-TT["runtime-profiles/mutating-dev/"]
-UU["mutating.env"]
-VV["tool-gateway-pod-delete.yaml"]
-WW["RBAC Role/RoleBinding"]
-XX["ConfigMap Merge"]
+DDD["dev-k8s/kustomization.yaml"]
+EEE["runtime-profiles/mutating-dev/"]
+FFF["mutating.env"]
+GGG["tool-gateway-pod-delete.yaml"]
+HHH["RBAC Role/RoleBinding"]
+III["ConfigMap Merge"]
+end
+subgraph "Browser Development Profile"
+JJJ["runtime-profiles/browser-dev/"]
+KKK["browser.env"]
+LLL["tool-gateway-browser-sidecar.yaml"]
+MMM["chromedp/headless-shell"]
+NNN["CDP ws://localhost:9222"]
+OOO["Credential Sets Secret"]
+PPP["Allow Origins"]
+QQQ["NetworkPolicy"]
 end
 subgraph "Execution Signing & Audit"
-YY["sync-execution-signing-secret.sh"]
-ZZ["execution-signing-secret"]
-AAA["HMAC-SHA256 Signing"]
-BBB["Durable Audit Trail"]
-CCC["Fire-and-Forget Emission"]
-DDD["Postgres Persistence"]
-EEE["Retention Scanning"]
+RRR["sync-execution-signing-secret.sh"]
+SSS["execution-signing-secret"]
+TTT["HMAC-SHA256 Signing"]
+UUU["Durable Audit Trail"]
+VVV["Fire-and-Forget Emission"]
+WWW["Postgres Persistence"]
+XXX["Retention Scanning"]
 end
 subgraph "OIDC Configuration"
-FFF["Identity Broker"]
-GGG["OIDC_REDIRECT_URI"]
-HHH["OIDC_EXTRA_REDIRECT_URIS"]
-III["Keycloak Client"]
-JJJ["Canonical Callback"]
-KKK["Reachability Only"]
+YYY["Identity Broker"]
+ZZZ["OIDC_REDIRECT_URI"]
+AAA["OIDC_EXTRA_REDIRECT_URIS"]
+BBB["Keycloak Client"]
+CCC["Canonical Callback"]
+DDD["Reachability Only"]
 end
-A --> RR
-B --> SS
-C --> NN
+A --> YY
+B --> DDD
+C --> YY
 D --> F
 E --> G
-F --> HH
-G --> II
-H --> BB
-RR --> SS
-TT --> UU
+F --> QQ
+G --> RR
+H --> WW
+YY --> DDD
+EEE --> FFF
+FFF --> GGG
+GGG --> HHH
+HHH --> III
+III --> RRR
+RRR --> SSS
+SSS --> TTT
+TTT --> UUU
+UUU --> VVV
+VVV --> WWW
+WWW --> XXX
+II --> HH
+HH --> JJ
+JJ --> KK
+KK --> LL
+LL --> MM
+MM --> GG
+NN --> QQ
+OO --> PP
+QQ --> RR
+SS --> TT
 UU --> VV
-VV --> WW
 WW --> XX
-XX --> YY
 YY --> ZZ
 ZZ --> AAA
 AAA --> BBB
 BBB --> CCC
-CCC --> DDD
-DDD --> EEE
-I --> LL
-J --> MM
-K --> NN
-O --> PP
-O --> QQ
-R --> S
-T --> U
-V --> W
-V --> X
-Y --> Z
-AA --> BB
-CC --> EE
-DD --> FF
-EE --> GG
-HH --> II
-JJ --> KK
-LL --> MM
-NN --> OO
-OO --> PP
-PP --> QQ
-QQ --> RR
-FFF --> III
-GGG --> JJJ
-HHH --> KKK
+YYY --> BBB
+ZZZ --> CCC
+AAA --> DDD
 ```
 
 **Diagram sources**
@@ -218,6 +244,9 @@ HHH --> KKK
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
@@ -235,6 +264,9 @@ HHH --> KKK
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
 - [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 - [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
+- [browser.env](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
+- [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -252,6 +284,9 @@ HHH --> KKK
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
@@ -284,7 +319,11 @@ HHH --> KKK
 - **New**: Audit service integration with fire-and-forget emission pattern for durable audit trails.
 - **New**: Execution record persistence with Postgres backend and retention scanning for compliance requirements.
 - **New**: Incident service connectivity with Basic authentication for incident report document assembly and triage capabilities.
+- **New**: Browser connector with Chromium headless sidecar integration for web-check operations controlled by seven GATEWAY_BROWSER_* environment variables.
 - **New**: Enhanced OIDC configuration with clear distinction between canonical callback URIs and reachability-only extra URIs.
+- **New**: NetworkPolicy enforcement for browser sidecar connectivity ensuring secure communication channels.
+- **New**: Enhanced credential set enumeration prevention with generic error messages to prevent information disclosure.
+- **New**: Improved screenshot unmask failure logging that logs exception classes only without exposing sensitive data.
 
 Key responsibilities:
 - Provide a single source of truth for configuration via typed models.
@@ -302,9 +341,13 @@ Key responsibilities:
 - **New**: Integrate audit service emissions with fire-and-forget pattern that never degrades the chat stream while maintaining durable audit trails.
 - **New**: Persist execution records with Postgres backend and retention scanning to ensure compliance requirements are met without impacting performance.
 - **New**: Establish incident service connectivity with Basic authentication for incident report document assembly and triage operations, supporting both agent-platform and platform-gateway incident service clients.
+- **New**: Configure browser connector with Chromium headless sidecar for web-check operations, including session management, origin allowlisting, flow binding, and credential set support.
 - **New**: Clarify OIDC redirect URI behavior where extra URIs serve reachability purposes only while canonical URIs handle actual authentication flows.
+- **New**: Enforce NetworkPolicy restrictions for browser sidecar connectivity to ensure secure communication channels.
+- **New**: Prevent credential set enumeration attacks by returning generic error messages instead of revealing available set names.
+- **New**: Log screenshot unmask failures with exception class information only, never exposing sensitive data or stack traces.
 
-**Updated** Enhanced core components to include comprehensive workspace resource integration capabilities with read-only proxies for tools catalog and skills inventory, supporting both delegated token flow for tools and Basic authentication for skills, risk-tier admission gates for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus durable OpenTelemetry secret provisioning that persists authentication headers across deployment operations, the new mutating-dev kustomize profile that provides a safe, committed development posture for enabling mutating tools with appropriate RBAC controls, the live model discovery service that automatically refreshes model catalogs from provider endpoints with robust fallback mechanisms, the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions, and durable execution record persistence with retention scanning, plus comprehensive incident service connectivity configuration that enables incident report document assembly and triage capabilities through Basic authentication flows, and enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs.
+**Updated** Enhanced core components to include comprehensive workspace resource integration capabilities with read-only proxies for tools catalog and skills inventory, supporting both delegated token flow for tools and Basic authentication for skills, risk-tier admission gates for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus durable OpenTelemetry secret provisioning that persists authentication headers across deployment operations, the new mutating-dev kustomize profile that provides a safe, committed development posture for enabling mutating tools with appropriate RBAC controls, the live model discovery service that automatically refreshes model catalogs from provider endpoints with robust fallback mechanisms, the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions, and durable execution record persistence with retention scanning, comprehensive browser connector capabilities with Chromium headless sidecar integration for web-check operations, comprehensive incident service connectivity configuration that enables incident report document assembly and triage capabilities through Basic authentication flows, enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs, NetworkPolicy enforcement for secure browser sidecar connectivity, enhanced credential set enumeration prevention with generic error messages, and improved screenshot unmask failure logging that logs exception classes only without exposing sensitive data.
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -322,11 +365,27 @@ Key responsibilities:
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
+- [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
+- [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
+- [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
+- [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
+- [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
+- [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
+- [kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
+- [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
+- [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)
+- [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
 
 ## Architecture Overview
-The configuration system follows a layered approach with enhanced workspace resource integration, risk-tier admission gates, durable secret management, live model discovery, execution signing, incident service connectivity, and clarified OIDC redirect URI behavior:
+The configuration system follows a layered approach with enhanced workspace resource integration, risk-tier admission gates, durable secret management, live model discovery, execution signing, incident service connectivity, browser connector capabilities, NetworkPolicy enforcement, enhanced credential security, and clarified OIDC redirect URI behavior:
 - Defaults: defined in code or default YAML policies.
 - Config files: loaded from container filesystem or mounted volumes.
 - Environment variables: injected at runtime via platform orchestration (e.g., Kubernetes).
@@ -343,6 +402,10 @@ The configuration system follows a layered approach with enhanced workspace reso
 - **New**: Audit service integration: fire-and-forget emission pattern for durable audit trails.
 - **New**: Execution record persistence: Postgres-backed storage with retention scanning for compliance.
 - **New**: Incident service connectivity: Basic authentication for incident report document assembly and triage operations.
+- **New**: Browser connector: Chromium headless sidecar integration for web-check operations with session management and credential handling.
+- **New**: NetworkPolicy enforcement: secure communication channels for browser sidecar connectivity.
+- **New**: Enhanced credential security: prevention of credential set enumeration attacks with generic error messages.
+- **New**: Improved screenshot security: enhanced logging for unmask failures that logs exception classes only.
 - **New**: Enhanced OIDC configuration: canonical callback URIs vs reachability-only extra URIs with clear behavioral distinctions.
 
 ```mermaid
@@ -351,6 +414,8 @@ participant Portal as "Operator Portal"
 participant Agent as "Agent Platform"
 participant Gateway as "Platform Gateway"
 participant ToolGW as "Tool Gateway"
+participant Browser as "Browser Connector"
+participant Sidecar as "Chromium Sidecar"
 participant Identity as "Identity Broker"
 participant Keycloak as "Keycloak"
 participant Skills as "Skills Hub"
@@ -363,6 +428,7 @@ participant ModelDisc as "Model Discovery Service"
 participant ExecSign as "Execution Signing Service"
 participant Audit as "Audit Service"
 participant ExecStore as "Execution Record Store"
+participant NetPol as "NetworkPolicy"
 Note over Portal,Agent : Agent Auto-Allow List & HITL Timeout
 Note over Agent,ModelDisc : Live Model Discovery
 Note over Agent,ExecSign : Execution Signing
@@ -370,7 +436,9 @@ Note over Agent,Audit : Audit Emission
 Note over Agent,Incident : Incident Report Assembly
 Note over Gateway,Incident : Incident Service Proxy
 Note over Agent,ExecStore : Execution Record Persistence
+Note over Browser,Sidecar : CDP Connection
 Note over Identity,Keycloak : OIDC Redirect URI Behavior
+Note over Browser,NetPol : NetworkPolicy Enforcement
 Portal->>Agent : Tool Call Request
 Agent->>Agent : Check Auto-Allow List
 Agent->>Agent : Apply HITL Timeout
@@ -382,8 +450,13 @@ ToolGW->>MutDev : Check GATEWAY_MUTATING_TOOLS_ENABLED
 MutDev-->>ToolGW : Enabled/Disabled
 ToolGW->>Policy : enforce_policy(tools : mutate)
 Policy-->>ToolGW : Allow/Deny
-ToolGW-->>Gateway : Tool Result
-Gateway-->>Agent : Response
+ToolGW->>Browser : Check Browser Enabled
+Browser->>NetPol : Verify NetworkPolicy
+NetPol-->>Browser : Allowed/Blocked
+Browser->>Sidecar : Connect via CDP
+Sidecar-->>Browser : Ready/Not Ready
+Browser-->>ToolGW : Tool Result
+ToolGW-->>Gateway : Response
 Agent->>ExecSign : Sign Execution Request (if mutating)
 ExecSign->>ExecStore : Save Execution Record
 ExecSign->>Audit : Emit execution_requested event
@@ -434,6 +507,8 @@ Identity-->>Portal : Platform JWT
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [telemetry.py](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
@@ -441,10 +516,12 @@ Identity-->>Portal : Platform JWT
 - [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 - [spec.md](file://docs/specs/SPEC-019-portal-transparency-navigation/spec.md)
 - [spec.md](file://docs/specs/SPEC-027-live-model-discovery/spec.md)
 - [spec.md](file://docs/specs/SPEC-037-signed-execution-requests/spec.md)
 - [spec.md](file://docs/specs/SPEC-043-incident-report-document-type/spec.md)
+- [spec.md](file://docs/specs/SPEC-049-browser-web-check-tools/spec.md)
 
 ## Detailed Component Analysis
 
@@ -455,7 +532,7 @@ Identity-->>Portal : Platform JWT
 - Error handling: Aggregates validation errors and surfaces actionable messages.
 - Service discovery: Uses DNS-based resolution for inter-service communication.
 
-**Updated** Enhanced to support workspace resource integration with new configuration fields for tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret, enabling read-only proxies for tools catalog and skills inventory, plus risk-tier admission gate configuration for mutating tools, integration with the mutating-dev profile, live model discovery configuration through AGENT_MODEL_DISCOVERY_* environment variables, execution signing configuration through AGENT_EXECUTION_SIGNING_KEY and audit service configuration through AGENT_AUDIT_SERVICE_URL, and incident service connectivity configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables for incident report document assembly and triage capabilities, plus enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs.
+**Updated** Enhanced to support workspace resource integration with new configuration fields for tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret, enabling read-only proxies for tools catalog and skills inventory, plus risk-tier admission gate configuration for mutating tools, integration with the mutating-dev profile, live model discovery configuration through AGENT_MODEL_DISCOVERY_* environment variables, execution signing configuration through AGENT_EXECUTION_SIGNING_KEY and audit service configuration through AGENT_AUDIT_SERVICE_URL, comprehensive browser connector configuration through seven GATEWAY_BROWSER_* environment variables for Chromium headless sidecar integration, incident service connectivity configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables for incident report document assembly and triage capabilities, NetworkPolicy enforcement configuration for secure browser sidecar connectivity, enhanced credential set enumeration prevention with generic error messages, and enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs.
 
 ```mermaid
 flowchart TD
@@ -476,6 +553,130 @@ Expose --> End
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+
+### Browser Connector Configuration
+- Purpose: Enable web-check capabilities through Chromium headless sidecar integration with comprehensive session management and security controls.
+- **GATEWAY_BROWSER_ENABLED**: Master switch to enable/disable browser connector (default: false)
+- **GATEWAY_BROWSER_CDP_ENDPOINT**: WebSocket endpoint for Chromium sidecar connection (default: ws://localhost:9222)
+- **GATEWAY_BROWSER_SESSION_TTL**: Session idle timeout in seconds (default: 600)
+- **GATEWAY_BROWSER_MAX_SESSIONS**: Maximum concurrent browser sessions (default: 4)
+- **GATEWAY_BROWSER_ALLOW_ORIGINS**: Comma-separated list of allowed origins for navigation (deny-by-default when empty)
+- **GATEWAY_BROWSER_FLOW_MAX_STEPS**: Maximum steps per web-check flow (default: 20)
+- **GATEWAY_BROWSER_CREDENTIAL_SETS**: Path to JSON file containing named credential sets for login automation
+- **GATEWAY_BROWSER_SCREENSHOT_MAX_BYTES**: Maximum screenshot size in bytes (default: 65536)
+
+Security features include origin allowlisting, flow binding with skill declarations, credential masking in screenshots, bounded session lifecycle management, NetworkPolicy enforcement for secure communication, enhanced credential set enumeration prevention, and improved screenshot unmask failure logging. The connector implements a deviation guard that prevents interactions outside approved flows and enforces read/write tier separation.
+
+```mermaid
+flowchart TD
+Enabled{"GATEWAY_BROWSER_ENABLED"} --> |false| Disabled["Browser tools unavailable"]
+Enabled --> |true| Connect["Connect to Chromium Sidecar"]
+Connect --> NetPol{"NetworkPolicy Check"}
+NetPol --> |blocked| NotReady["Return BROWSER_NOT_READY"]
+NetPol --> |allowed| CDP{"CDP Endpoint Reachable?"}
+CDP --> |no| NotReady
+CDP --> |yes| Sessions["Initialize Session Pool"]
+Sessions --> AllowOrigins["Configure Origin Allowlist"]
+AllowOrigins --> CredentialSets["Load Credential Sets"]
+CredentialSets --> Tools["Register web.* Tools"]
+Tools --> Ready["Browser Connector Ready"]
+```
+
+**Diagram sources**
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
+
+**Section sources**
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
+
+### Enhanced Credential Set Enumeration Prevention
+- Purpose: Prevent information disclosure attacks by avoiding enumeration of available credential set names.
+- Implementation: Returns generic error messages when credential sets are not found instead of revealing specific set names.
+- Security: Prevents malicious actors from probing which credential sets exist in the system.
+- Error Handling: Uses structured error codes (CREDENTIAL_SET_NOT_FOUND) with generic messages.
+- Logging: Logs only exception classes, never credential values or set names.
+
+**New Section** Comprehensive credential set enumeration prevention implementation that protects against information disclosure attacks.
+
+```mermaid
+flowchart TD
+Request["Credential Access Request"] --> CheckSet{"Credential Set Exists?"}
+CheckSet --> |no| GenericError["Return generic error message"]
+CheckSet --> |yes| AccessCreds["Access credentials"]
+GenericError --> Deny["Deny with CREDENTIAL_SET_NOT_FOUND"]
+AccessCreds --> UseCreds["Use credentials for operation"]
+Deny --> End(["Operation Denied"])
+UseCreds --> Complete["Operation Complete"]
+Complete --> End
+```
+
+**Diagram sources**
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
+
+**Section sources**
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
+
+### Enhanced Screenshot Unmask Failure Logging
+- Purpose: Improve security by logging screenshot unmask failures without exposing sensitive data.
+- Implementation: Logs only exception class names, never exception messages or stack traces.
+- Security: Prevents accidental leakage of sensitive information through error logs.
+- Best Effort: Unmask operation is best-effort; if it fails, secrets remain masked (fail-safe).
+- Visibility: Stuck masks become visible through warning logs without exposing sensitive data.
+
+**New Section** Enhanced screenshot unmask failure logging that prioritizes security by logging exception classes only.
+
+```mermaid
+flowchart TD
+Screenshot["Screenshot Capture"] --> Mask["Apply Password Masking"]
+Mask --> Capture["Capture Screenshot"]
+Capture --> Unmask["Attempt Unmask"]
+Unmask --> Success{"Unmask Success?"}
+Success --> |yes| Clean["Clean Page State"]
+Success --> |no| LogClass["Log Exception Class Only"]
+LogClass --> Safe["Secrets Remain Masked"]
+Clean --> Complete["Screenshot Complete"]
+Safe --> Complete
+```
+
+**Diagram sources**
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+
+**Section sources**
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+
+### NetworkPolicy Enforcement for Browser Sidecar
+- Purpose: Ensure secure communication channels between platform-gateway and browser sidecar through NetworkPolicy enforcement.
+- Configuration: Managed through browser-sidecar-network-policy.yaml in the browser-dev profile.
+- Security: Restricts network access to only authorized connections between services.
+- Isolation: Prevents unauthorized network access to browser sidecar resources.
+- Compliance: Ensures browser connector operates within defined security boundaries.
+
+**New Section** NetworkPolicy enforcement configuration for browser sidecar connectivity ensuring secure communication channels.
+
+```mermaid
+flowchart TD
+Request["Browser Sidecar Request"] --> CheckPolicy{"NetworkPolicy Check"}
+CheckPolicy --> |allowed| Connect["Establish CDP Connection"]
+CheckPolicy --> |denied| Block["Block Connection"]
+Connect --> Secure["Secure Communication Channel"]
+Block --> Deny["Connection Denied"]
+Secure --> Complete["Operation Complete"]
+Deny --> End(["Connection Blocked"])
+```
+
+**Diagram sources**
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
+
+**Section sources**
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 
 ### OIDC Configuration and Redirect URI Behavior
 - Purpose: Manages OIDC authentication flow with clear distinction between canonical callback URIs and reachability-only extra URIs.
@@ -1022,9 +1223,11 @@ SkillsHubClient --> PlatformGatewaySettings
 - **New**: Execution signing secret provisioning through execution-signing-secret with optional secretKeyRef.
 - **New**: Audit service configuration through AGENT_AUDIT_SERVICE_URL and related client credentials.
 - **New**: Incident service configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables for incident report document assembly and triage capabilities.
+- **New**: Browser connector configuration through seven GATEWAY_BROWSER_* environment variables for Chromium headless sidecar integration.
 - **New**: Enhanced OIDC configuration with clear separation between canonical callback URIs and reachability-only extra URIs.
+- **New**: NetworkPolicy enforcement configuration for browser sidecar connectivity.
 
-**Updated** Enhanced deployment configuration with workspace resource integration, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list settings, plus durable OpenTelemetry secret provisioning that maintains authentication headers across deployment operations, the new mutating-dev profile that provides a committed development posture for enabling mutating tools safely, live model discovery configuration for automatic catalog updates, execution signing secret provisioning for tamper-evident execution records, audit service configuration for durable audit trails, incident service configuration for incident report document assembly and triage capabilities, and enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs.
+**Updated** Enhanced deployment configuration with workspace resource integration, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list settings, plus durable OpenTelemetry secret provisioning that maintains authentication headers across deployment operations, the new mutating-dev profile that provides a committed development posture for enabling mutating tools safely, live model discovery configuration for automatic catalog updates, execution signing secret provisioning for tamper-evident execution records, audit service configuration for durable audit trails, comprehensive browser connector configuration for web-check operations with Chromium headless sidecar, incident service configuration for incident report document assembly and triage capabilities, enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs, and NetworkPolicy enforcement for secure browser sidecar connectivity.
 
 ```mermaid
 graph TB
@@ -1038,10 +1241,12 @@ Secrets["Secrets"] --> WorkspaceCreds["Workspace Resource Credentials"]
 Secrets --> OTelCreds["OTel Authentication Headers"]
 Secrets --> ExecSigning["Execution Signing Key"]
 Secrets --> IncidentCreds["Incident Service Credentials"]
+Secrets --> BrowserCreds["Browser Credential Sets"]
 WorkspaceCreds --> APP
 OTelCreds --> APP
 ExecSigning --> APP
 IncidentCreds --> APP
+BrowserCreds --> APP
 AppEnv["PLATFORM_GATEWAY_* Variables"] --> APP
 APP --> ToolsProxy["Tools Catalog Proxy"]
 APP --> SkillsProxy["Skills Inventory Proxy"]
@@ -1053,6 +1258,10 @@ APP --> OTelExport["OTel Export Pipeline"]
 OTelExport --> Backend["OpenObserve Backend"]
 ToolGWEnv["GATEWAY_* Variables"] --> ToolGW["Tool Gateway"]
 ToolGW --> RiskGate["Risk-Tier Admission Gate"]
+ToolGW --> BrowserConn["Browser Connector"]
+BrowserConn --> Sidecar["Chromium Sidecar"]
+BrowserConn --> NetPol["NetworkPolicy"]
+NetPol --> Sidecar
 AgentEnv["AGENT_* Variables"] --> Agent["Agent Platform"]
 Agent --> AutoAllow["Auto-Allow List"]
 Agent --> HITLTimeout["HITL Confirmation Timeout"]
@@ -1068,6 +1277,7 @@ MutDev["Mutating Dev Profile"] --> ConfigMerge["ConfigMap Merge"]
 ConfigMerge --> ToolGWEnv
 ExecSigning --> ExecSign
 IncidentSecrets --> IncidentAssembly
+BrowserSecrets --> BrowserConn
 OIDCConfig["OIDC Configuration"] --> CanonicalURI["OIDC_REDIRECT_URI"]
 OIDCConfig --> ExtraURIs["OIDC_EXTRA_REDIRECT_URIS"]
 CanonicalURI --> IdentityBroker["Identity Broker"]
@@ -1087,6 +1297,9 @@ Keycloak --> ReachabilityOnly["Reachability Only"]
 - [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
+- [browser.env](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
+- [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 - [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 
@@ -1100,7 +1313,7 @@ Keycloak --> ReachabilityOnly["Reachability Only"]
 ## Dependency Analysis
 Configuration components depend on environment variables and files, while the runtime settings handle DNS-based service discovery. The Docker image encapsulates runtime dependencies, and Kubernetes manifests inject configuration at deployment time. Workspace resource integration adds dependencies on tool-gateway and skills-hub services with appropriate authentication mechanisms.
 
-**Updated** Added dependencies for workspace resource integration including tool-gateway delegation flow and skills-hub Basic authentication, risk-tier admission gate enforcement, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus enhanced OpenTelemetry secret provisioning dependencies that ensure authentication headers persist across deployment operations, the new mutating-dev profile dependencies that provide committed development posture for enabling mutating tools safely, live model discovery dependencies that connect to provider endpoints with robust fallback mechanisms, execution signing dependencies that require execution-signing-secret provisioning, audit service dependencies for durable audit trail emission, execution record store dependencies for Postgres-backed persistence with retention scanning, incident service dependencies that require incident-query-client configuration and credential provisioning through sync-incident-secrets.sh, and OIDC configuration dependencies that distinguish between canonical callback URIs and reachability-only extra URIs.
+**Updated** Added dependencies for workspace resource integration including tool-gateway delegation flow and skills-hub Basic authentication, risk-tier admission gate enforcement, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus enhanced OpenTelemetry secret provisioning dependencies that ensure authentication headers persist across deployment operations, the new mutating-dev profile dependencies that provide committed development posture for enabling mutating tools safely, live model discovery dependencies that connect to provider endpoints with robust fallback mechanisms, execution signing dependencies that require execution-signing-secret provisioning, audit service dependencies for durable audit trail emission, execution record store dependencies for Postgres-backed persistence with retention scanning, comprehensive browser connector dependencies that require Chromium headless sidecar integration with CDP connectivity, incident service dependencies that require incident-query-client configuration and credential provisioning through sync-incident-secrets.sh, OIDC configuration dependencies that distinguish between canonical callback URIs and reachability-only extra URIs, and NetworkPolicy enforcement dependencies for secure browser sidecar connectivity.
 
 ```mermaid
 graph TB
@@ -1140,6 +1353,11 @@ Audit --> AuditBackend["Audit Service Backend"]
 IncidentAssembly --> IncidentBackend["Incident Service Backend"]
 ExecStore --> Postgres["Postgres Database"]
 ToolGW["tool-gateway config.py"] --> RiskGate["Risk-Tier Gate"]
+ToolGW --> BrowserConn["Browser Connector"]
+BrowserConn --> Sidecar["Chromium Sidecar"]
+BrowserConn --> CredSets["Credential Sets"]
+BrowserConn --> NetPol["NetworkPolicy"]
+NetPol --> Sidecar
 RiskGate --> Policy["Policy Enforcement"]
 MutDev["mutating-dev profile"] --> ConfigMerge["ConfigMap Merge"]
 MutDev --> RBAC["RBAC Role/RoleBinding"]
@@ -1149,6 +1367,10 @@ ExecSigning["sync-execution-signing-secret.sh"] --> ExecSigningSecret["execution
 ExecSigningSecret --> ExecSign
 IncidentSecrets["sync-incident-secrets.sh"] --> IncidentSecrets["incident-query-clients"]
 IncidentSecrets --> IncidentAssembly
+BrowserProfile["browser-dev profile"] --> BrowserEnv["browser.env"]
+BrowserEnv --> BrowserConn
+BrowserSidecar["tool-gateway-browser-sidecar.yaml"] --> Sidecar
+BrowserNetPol["browser-sidecar-network-policy.yaml"] --> NetPol
 OIDC["identity_service.py"] --> CanonicalURI["OIDC_REDIRECT_URI"]
 OIDC --> ExtraURIs["OIDC_EXTRA_REDIRECT_URIS"]
 CanonicalURI --> Keycloak["Keycloak"]
@@ -1171,6 +1393,9 @@ Keycloak --> CanonicalCallback["Canonical Callback"]
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
@@ -1180,6 +1405,9 @@ Keycloak --> CanonicalCallback["Canonical Callback"]
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
+- [browser.env](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
+- [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -1196,6 +1424,9 @@ Keycloak --> CanonicalCallback["Canonical Callback"]
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
@@ -1234,7 +1465,16 @@ Keycloak --> CanonicalCallback["Canonical Callback"]
 - **New**: Incident service connectivity uses timeout-based HTTP clients to prevent hanging requests.
 - **New**: Incident report assembly performs efficient Basic authentication with configured credentials.
 - **New**: Incident service proxy operations use connection pooling and timeout controls for optimal performance.
+- **New**: Browser connector uses session pooling with TTL-based expiration to manage Chromium sidecar resources efficiently.
+- **New**: Browser session eviction removes oldest-idle sessions when maximum capacity is reached to prevent memory leaks.
+- **New**: Screenshot capture implements quality loop and clipping strategies to stay within configured byte limits.
+- **New**: Credential sets are loaded lazily and reloaded on file modification to avoid unnecessary I/O operations.
+- **New**: Origin allowlist comparisons use normalized lowercase strings for efficient matching.
+- **New**: Flow state tracking minimizes memory footprint by storing only essential metadata per session.
 - **New**: OIDC redirect URI resolution uses efficient fallback logic to minimize authentication flow overhead.
+- **New**: NetworkPolicy enforcement adds minimal overhead through fast packet filtering.
+- **New**: Credential set enumeration prevention uses efficient hash-based lookups.
+- **New**: Screenshot unmask failure logging uses lightweight exception class extraction.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -1288,11 +1528,25 @@ Common issues and resolutions:
 - **New**: Incident service 503 errors: Indicates incident service is not configured; verify AGENT_INCIDENT_SERVICE_URL and AGENT_INCIDENT_CLIENT_SECRET are set.
 - **New**: Incident service 502 errors: Indicates upstream service failures; check incident-service health and connectivity.
 - **New**: Incident service 4xx errors: Indicates client-side issues; verify incident query client credentials and request parameters.
+- **New**: Browser connector not available: Verify GATEWAY_BROWSER_ENABLED is set to true; check Chromium sidecar is deployed and reachable at configured CDP endpoint.
+- **New**: Browser sidecar connection failures: Check GATEWAY_BROWSER_CDP_ENDPOINT configuration; verify chromium-headless-shell sidecar is running and accessible.
+- **New**: Browser sessions expiring too quickly: Adjust GATEWAY_BROWSER_SESSION_TTL to longer duration; monitor session usage patterns.
+- **New**: Browser session limit reached: Increase GATEWAY_BROWSER_MAX_SESSIONS; investigate session leak patterns and cleanup procedures.
+- **New**: Navigation denied due to origin restrictions: Configure GATEWAY_BROWSER_ALLOW_ORIGINS with permitted origins; remember that empty allowlist denies all navigation.
+- **New**: Web-check flow step limit exceeded: Increase GATEWAY_BROWSER_FLOW_MAX_STEPS for complex workflows; review flow design for optimization opportunities.
+- **New**: Credential sets not loading: Verify GATEWAY_BROWSER_CREDENTIAL_SETS points to valid JSON file; check file permissions and format.
+- **New**: Screenshots too large: Adjust GATEWAY_BROWSER_SCREENSHOT_MAX_BYTES; consider reducing viewport size or quality settings.
+- **New**: Browser tools not registered: Check GATEWAY_BROWSER_ENABLED flag; verify browser connector initialization in application startup.
 - **New**: OIDC redirect URI mismatch: Verify OIDC_REDIRECT_URI covers the browser-accessible URL; remember that OIDC_EXTRA_REDIRECT_URIS are registered for reachability only and never selected as callbacks.
 - **New**: OIDC login completes but redirects to wrong origin: Check that OIDC_REDIRECT_URI is the canonical hostname; extra URIs are only for reachability and will redirect back to canonical hostname.
 - **New**: Keycloak client reconciliation issues: Run reconcile-portal-oidc-client.sh to ensure both canonical and extra URIs are properly registered with Keycloak.
+- **New**: NetworkPolicy blocking browser sidecar: Verify browser-sidecar-network-policy.yaml is applied; check namespace and service account configuration.
+- **New**: Browser sidecar connection blocked by NetworkPolicy: Check NetworkPolicy rules; verify traffic is allowed between platform-gateway and browser sidecar.
+- **New**: Credential set enumeration detected: Review logs for CREDENTIAL_SET_NOT_FOUND errors; ensure generic error messages are being returned.
+- **New**: Screenshot unmask failures: Check logs for "screenshot credential unmask failed" warnings; verify exception class information is logged without sensitive data.
+- **New**: Browser connector security issues: Review NetworkPolicy configuration; verify origin allowlists and credential set access controls.
 
-**Updated** Added comprehensive troubleshooting guidance for workspace resource integration including proxy configuration, authentication issues, and downstream service connectivity problems, risk-tier admission gate configuration issues, HITL confirmation timeout problems, enhanced agent auto-allow list misconfiguration detection, plus detailed guidance for OpenTelemetry secret provisioning and authentication issues, new troubleshooting steps for the mutating-dev profile integration including profile activation, RBAC verification, and triple-gate enforcement issues, comprehensive guidance for live model discovery configuration, provider connectivity, and fallback behavior troubleshooting, new troubleshooting steps for execution signing including secret provisioning, signing failures, argument digest mismatches, audit service connectivity, and execution record persistence issues, comprehensive troubleshooting guidance for incident service connectivity including URL configuration, credential provisioning, authentication failures, and service availability issues, and enhanced OIDC troubleshooting guidance that clarifies the distinction between canonical callback URIs and reachability-only extra URIs, helping users understand why login from extra origins redirects back to canonical hostname.
+**Updated** Added comprehensive troubleshooting guidance for workspace resource integration including proxy configuration, authentication issues, and downstream service connectivity problems, risk-tier admission gate configuration issues, HITL confirmation timeout problems, enhanced agent auto-allow list misconfiguration detection, plus detailed guidance for OpenTelemetry secret provisioning and authentication issues, new troubleshooting steps for the mutating-dev profile integration including profile activation, RBAC verification, and triple-gate enforcement issues, comprehensive guidance for live model discovery configuration, provider connectivity, and fallback behavior troubleshooting, new troubleshooting steps for execution signing including secret provisioning, signing failures, argument digest mismatches, audit service connectivity, and execution record persistence issues, comprehensive troubleshooting guidance for incident service connectivity including URL configuration, credential provisioning, authentication failures, and service availability issues, comprehensive browser connector troubleshooting including sidecar connectivity, session management, origin allowlisting, flow binding, credential set configuration, and screenshot sizing, enhanced OIDC troubleshooting guidance that clarifies the distinction between canonical callback URIs and reachability-only extra URIs, helping users understand why login from extra origins redirects back to canonical hostname, NetworkPolicy troubleshooting for browser sidecar connectivity issues, credential set enumeration prevention troubleshooting, and screenshot unmask failure logging diagnostics.
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -1310,6 +1564,9 @@ Common issues and resolutions:
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [tool_gateway_client.py](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py)
 - [skills_hub_client.py](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py)
 - [sync-execution-signing-secret.sh](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh)
@@ -1319,20 +1576,21 @@ Common issues and resolutions:
 - [agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
 - [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 
 ## Conclusion
 The Platform Gateway Service employs a robust, layered configuration system that integrates environment variables, configuration files, and runtime overrides with strict validation. By following the outlined best practices for Docker and Kubernetes deployments, teams can maintain secure, consistent configurations across environments while ensuring reliability and performance. The architectural shift to DNS-based service discovery eliminates service-link conflicts and provides more reliable inter-service communication patterns. The addition of workspace resource integration enables operators to gain self-service visibility into their workspace resources through read-only proxies for tools catalog and skills inventory, enhancing operational transparency and reducing dependency on agent-mediated resource discovery.
 
-**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive workspace resource integration capabilities that provide operators with direct visibility into their workspace resources, risk-tier admission gates that provide fine-grained control over mutating tool access, configurable HITL confirmation timeouts that balance operational efficiency with safety requirements, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, plus durable OpenTelemetry secret provisioning that ensures authentication headers persist across all deployment operations, maintaining consistent telemetry collection regardless of deployment sequence or environment regeneration, the new mutating-dev kustomize profile that provides a committed, safe development posture for enabling mutating tools with appropriate RBAC controls and triple-gate security enforcement, the live model discovery service that automatically keeps model catalogs current through periodic provider endpoint polling with robust fail-soft fallback mechanisms, the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions for durable audit trails, and execution record persistence with retention scanning for compliance requirements, plus comprehensive incident service connectivity configuration that enables incident report document assembly and triage capabilities through Basic authentication flows with proper credential management and service availability monitoring, and enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs, providing operators with predictable authentication behavior across different browser origins.
+**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive workspace resource integration capabilities that provide operators with direct visibility into their workspace resources, risk-tier admission gates that provide fine-grained control over mutating tool access, configurable HITL confirmation timeouts that balance operational efficiency with safety requirements, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, plus durable OpenTelemetry secret provisioning that ensures authentication headers persist across all deployment operations, maintaining consistent telemetry collection regardless of deployment sequence or environment regeneration, the new mutating-dev kustomize profile that provides a committed, safe development posture for enabling mutating tools with appropriate RBAC controls and triple-gate security enforcement, the live model discovery service that automatically keeps model catalogs current through periodic provider endpoint polling with robust fail-soft fallback mechanisms, the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions for durable audit trails, and execution record persistence with retention scanning for compliance requirements, comprehensive browser connector capabilities with Chromium headless sidecar integration for web-check operations including session management, origin allowlisting, flow binding, and credential set support, comprehensive incident service connectivity configuration that enables incident report document assembly and triage capabilities through Basic authentication flows with proper credential management and service availability monitoring, enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs, NetworkPolicy enforcement for secure browser sidecar connectivity, enhanced credential set enumeration prevention with generic error messages, and improved screenshot unmask failure logging that prioritizes security by logging exception classes only without exposing sensitive data.
 
 ## Appendices
 
 ### Environment-Specific Settings
-- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable workspace resource proxies with local tool-gateway and skills-hub instances, configure OTel with dev OpenObserve credentials, set GATEWAY_MUTATING_TOOLS_ENABLED=false for safety, configure AGENT_HITL_CONFIRM_TIMEOUT=600 for reasonable confirmation windows, enable enhanced agent auto-allow list with vetted read-only tools, **new**: Include the mutating-dev profile permanently for safe development access to mutating tools with bounded RBAC permissions, **new**: Enable live model discovery with shorter refresh intervals (e.g., 300 seconds) for rapid testing of new provider models, **new**: Provision execution signing secret for testing tamper-evident execution records, **new**: Configure audit service URL for durable audit trail testing, **new**: Configure incident service connectivity with AGENT_INCIDENT_SERVICE_URL and AGENT_INCIDENT_CLIENT_SECRET for incident report document assembly testing, **new**: Configure OIDC with both canonical callback URI and extra URIs for reachability testing across different browser origins.
-- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure workspace resource proxies with staging backend services, provision OTel secrets with staging OpenObserve credentials, carefully evaluate GATEWAY_MUTATING_TOOLS_ENABLED for testing scenarios, tune AGENT_HITL_CONFIRM_TIMEOUT for staging workflows, monitor auto-allow list effectiveness, **new**: Consider including mutating-dev profile selectively for staging testing scenarios with appropriate RBAC scoping, **new**: Configure model discovery with moderate refresh intervals (e.g., 900 seconds) to balance freshness with stability, **new**: Enable execution signing with staging audit service for end-to-end testing of tamper-evident execution records, **new**: Configure incident service connectivity with staging credentials for incident report document assembly testing, **new**: Configure OIDC with canonical callback URI and extra URIs for staging browser origin testing.
-- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure workspace resource proxies with production backend services and proper authentication, ensure OTel secrets are provisioned with production OpenObserve credentials, keep GATEWAY_MUTATING_TOOLS_ENABLED=false unless absolutely necessary, set AGENT_HITL_CONFIRM_TIMEOUT appropriately for production SLAs, audit auto-allow list regularly for security compliance, **new**: Never include mutating-dev profile in production deployments; use separate controlled overlays if mutating tools are absolutely required, **new**: Configure model discovery with conservative refresh intervals (e.g., 1800 seconds) and longer timeouts to minimize provider load and ensure stability, **new**: Always provision execution signing secret for production tamper-evident execution records, **new**: Configure audit service integration for comprehensive audit trail compliance, **new**: Configure incident service connectivity with production credentials for incident report document assembly and triage operations, **new**: Configure OIDC with canonical callback URI as the sole authentication endpoint and extra URIs only for reachability testing.
+- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable workspace resource proxies with local tool-gateway and skills-hub instances, configure OTel with dev OpenObserve credentials, set GATEWAY_MUTATING_TOOLS_ENABLED=false for safety, configure AGENT_HITL_CONFIRM_TIMEOUT=600 for reasonable confirmation windows, enable enhanced agent auto-allow list with vetted read-only tools, **new**: Include the mutating-dev profile permanently for safe development access to mutating tools with bounded RBAC permissions, **new**: Enable live model discovery with shorter refresh intervals (e.g., 300 seconds) for rapid testing of new provider models, **new**: Provision execution signing secret for testing tamper-evident execution records, **new**: Configure audit service URL for durable audit trail testing, **new**: Configure incident service connectivity with AGENT_INCIDENT_SERVICE_URL and AGENT_INCIDENT_CLIENT_SECRET for incident report document assembly testing, **new**: Enable browser connector with browser-dev profile for web-check testing with Chromium headless sidecar, **new**: Configure NetworkPolicy for browser sidecar connectivity, **new**: Test credential set enumeration prevention with generic error messages, **new**: Monitor screenshot unmask failure logging for security compliance, **new**: Configure OIDC with both canonical callback URI and extra URIs for reachability testing across different browser origins.
+- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure workspace resource proxies with staging backend services, provision OTel secrets with staging OpenObserve credentials, carefully evaluate GATEWAY_MUTATING_TOOLS_ENABLED for testing scenarios, tune AGENT_HITL_CONFIRM_TIMEOUT for staging workflows, monitor auto-allow list effectiveness, **new**: Consider including mutating-dev profile selectively for staging testing scenarios with appropriate RBAC scoping, **new**: Configure model discovery with moderate refresh intervals (e.g., 900 seconds) to balance freshness with stability, **new**: Enable execution signing with staging audit service for end-to-end testing of tamper-evident execution records, **new**: Configure incident service connectivity with staging credentials for incident report document assembly testing, **new**: Enable browser connector with restricted origin allowlists for staging web-check testing, **new**: Apply NetworkPolicy enforcement for staging browser sidecar connectivity, **new**: Test credential enumeration prevention and screenshot security logging, **new**: Configure OIDC with canonical callback URI and extra URIs for staging browser origin testing.
+- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure workspace resource proxies with production backend services and proper authentication, ensure OTel secrets are provisioned with production OpenObserve credentials, keep GATEWAY_MUTATING_TOOLS_ENABLED=false unless absolutely necessary, set AGENT_HITL_CONFIRM_TIMEOUT appropriately for production SLAs, audit auto-allow list regularly for security compliance, **new**: Never include mutating-dev profile in production deployments; use separate controlled overlays if mutating tools are absolutely required, **new**: Configure model discovery with conservative refresh intervals (e.g., 1800 seconds) and longer timeouts to minimize provider load and ensure stability, **new**: Always provision execution signing secret for production tamper-evident execution records, **new**: Configure audit service integration for comprehensive audit trail compliance, **new**: Configure incident service connectivity with production credentials for incident report document assembly and triage operations, **new**: Enable browser connector only for specific production use cases with strict origin allowlists and session limits, **new**: Apply strict NetworkPolicy enforcement for browser sidecar connectivity, **new**: Monitor credential enumeration prevention and screenshot security logging for compliance, **new**: Configure OIDC with canonical callback URI as the sole authentication endpoint and extra URIs only for reachability testing.
 
-**Updated** Added guidance for workspace resource proxy configuration across environments, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration recommendations, HITL confirmation timeout tuning guidelines, enhanced agent auto-allow list configuration, plus comprehensive OTel secret provisioning requirements for each environment, new guidance for the mutating-dev profile usage patterns across different deployment environments, detailed recommendations for live model discovery configuration including refresh intervals, timeout settings, and monitoring strategies across different deployment environments, comprehensive guidance for execution signing and audit service configuration across development, staging, and production environments, comprehensive guidance for incident service connectivity configuration including URL setup, credential provisioning, and authentication configuration across different deployment environments, and enhanced OIDC configuration guidance that clarifies the role of canonical callback URIs versus reachability-only extra URIs across different deployment environments.
+**Updated** Added guidance for workspace resource proxy configuration across environments, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration recommendations, HITL confirmation timeout tuning guidelines, enhanced agent auto-allow list configuration, plus comprehensive OTel secret provisioning requirements for each environment, new guidance for the mutating-dev profile usage patterns across different deployment environments, detailed recommendations for live model discovery configuration including refresh intervals, timeout settings, and monitoring strategies across different deployment environments, comprehensive guidance for execution signing and audit service configuration across development, staging, and production environments, comprehensive guidance for incident service connectivity configuration including URL setup, credential provisioning, and authentication configuration across different deployment environments, comprehensive browser connector configuration guidance including sidecar deployment, origin allowlisting, session management, and credential set configuration across different deployment environments, NetworkPolicy enforcement configuration for secure browser sidecar connectivity across environments, credential enumeration prevention testing and monitoring, screenshot security logging validation, and enhanced OIDC configuration guidance that clarifies the role of canonical callback URIs versus reachability-only extra URIs across different deployment environments.
 
 ### Security and Secrets Management
 - Store secrets in Kubernetes Secrets or external vaults; never hardcode.
@@ -1379,14 +1637,25 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - **New**: Audit incident service access patterns for security monitoring and compliance.
 - **New**: Rotate incident service credentials regularly and monitor for unauthorized access.
 - **New**: Implement alerting for incident service authentication failures and connectivity issues.
+- **New**: Secure browser connector configuration with strict origin allowlists; never use wildcard origins in production.
+- **New**: Protect browser credential sets files with appropriate file permissions and Kubernetes Secret mounting.
+- **New**: Monitor browser session usage and implement alerts for unusual session patterns or resource consumption.
+- **New**: Validate browser flow bindings to ensure web-check operations stay within approved targets and risk classes.
+- **New**: Implement screenshot size limits and content filtering to prevent sensitive data leakage in browser captures.
 - **New**: Secure OIDC configuration with canonical callback URIs as the sole authentication endpoint; treat extra URIs as reachability-only and never expose them as authentication endpoints.
 - **New**: Monitor OIDC authentication flows to ensure only canonical URIs receive authentication responses.
 - **New**: Validate Keycloak client configuration to ensure extra URIs are registered only for reachability purposes.
+- **New**: Apply NetworkPolicy enforcement for browser sidecar connectivity to prevent unauthorized network access.
+- **New**: Monitor NetworkPolicy violations and blocked connections for security incidents.
+- **New**: Implement credential set enumeration prevention by using generic error messages instead of revealing set names.
+- **New**: Audit credential access patterns to detect potential enumeration attacks.
+- **New**: Monitor screenshot unmask failure logs for security indicators and operational issues.
+- **New**: Ensure screenshot logging only includes exception class information, never sensitive data or stack traces.
 
-**Updated** Enhanced security guidance with workspace resource integration security considerations, including credential management, authentication monitoring, and access pattern auditing, risk-tier admission gate security controls, HITL confirmation timeout security implications, enhanced agent auto-allow list security enforcement, plus comprehensive OpenTelemetry secret management security practices, new security considerations for the mutating-dev profile including profile integrity, RBAC scoping, and triple-gate enforcement monitoring, comprehensive security guidance for live model discovery including provider credential management, endpoint access monitoring, and fallback behavior auditing, comprehensive security guidance for execution signing including secret protection, key rotation, tamper-evident record verification, audit service credential management, and execution record retention compliance, comprehensive security guidance for incident service connectivity including credential management, authentication monitoring, access pattern auditing, and service availability monitoring, and enhanced OIDC security guidance that emphasizes the security implications of distinguishing between canonical callback URIs and reachability-only extra URIs.
+**Updated** Enhanced security guidance with workspace resource integration security considerations, including credential management, authentication monitoring, and access pattern auditing, risk-tier admission gate security controls, HITL confirmation timeout security implications, enhanced agent auto-allow list security enforcement, plus comprehensive OpenTelemetry secret management security practices, new security considerations for the mutating-dev profile including profile integrity, RBAC scoping, and triple-gate enforcement monitoring, comprehensive security guidance for live model discovery including provider credential management, endpoint access monitoring, and fallback behavior auditing, comprehensive security guidance for execution signing including secret protection, key rotation, tamper-evident record verification, audit service credential management, and execution record retention compliance, comprehensive security guidance for incident service connectivity including credential management, authentication monitoring, access pattern auditing, and service availability monitoring, comprehensive security guidance for browser connector including origin allowlist security, credential set protection, session management, and screenshot sanitization, enhanced OIDC security guidance that emphasizes the security implications of distinguishing between canonical callback URIs and reachability-only extra URIs, NetworkPolicy security enforcement for browser sidecar connectivity, credential enumeration prevention security measures, and screenshot security logging best practices.
 
 ### Complete Environment Variables Reference
-**Updated** Comprehensive reference including workspace resource integration variables for tools catalog and skills inventory access, risk-tier admission gate configuration, HITL confirmation timeout settings, enhanced agent auto-allow list configuration, plus enhanced OpenTelemetry configuration variables, new variables related to the mutating-dev profile integration, comprehensive live model discovery configuration variables, execution signing and audit service configuration variables, comprehensive incident service connectivity configuration variables for both agent-platform and platform-gateway incident service clients, and enhanced OIDC configuration variables that clearly distinguish between canonical callback URIs and reachability-only extra URIs.
+**Updated** Comprehensive reference including workspace resource integration variables for tools catalog and skills inventory access, risk-tier admission gate configuration, HITL confirmation timeout settings, enhanced agent auto-allow list configuration, plus enhanced OpenTelemetry configuration variables, new variables related to the mutating-dev profile integration, comprehensive live model discovery configuration variables, execution signing and audit service configuration variables, comprehensive incident service connectivity configuration variables for both agent-platform and platform-gateway incident service clients, comprehensive browser connector configuration variables for Chromium headless sidecar integration, NetworkPolicy enforcement configuration variables, enhanced credential set enumeration prevention settings, improved screenshot security logging configuration, and enhanced OIDC configuration variables that clearly distinguish between canonical callback URIs and reachability-only extra URIs.
 
 #### Core Configuration
 - `AGENT_SERVICE_URL`: Agent service endpoint URL (DNS-based)
@@ -1456,6 +1725,20 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - `AGENT_STATE_DB_URL`: Postgres DSN for execution records (required for postgres backend)
 - **Note**: Shares configuration with agent state store for unified persistence strategy
 
+#### Browser Connector Configuration
+- `GATEWAY_BROWSER_ENABLED`: Enable/disable browser connector (default: false)
+- `GATEWAY_BROWSER_CDP_ENDPOINT`: Chromium sidecar CDP endpoint (default: ws://localhost:9222)
+- `GATEWAY_BROWSER_SESSION_TTL`: Browser session idle timeout in seconds (default: 600)
+- `GATEWAY_BROWSER_MAX_SESSIONS`: Maximum concurrent browser sessions (default: 4)
+- `GATEWAY_BROWSER_ALLOW_ORIGINS`: Comma-separated list of allowed origins for navigation (deny-by-default when empty)
+- `GATEWAY_BROWSER_FLOW_MAX_STEPS`: Maximum steps per web-check flow (default: 20)
+- `GATEWAY_BROWSER_CREDENTIAL_SETS`: Path to JSON file containing named credential sets for login automation
+- `GATEWAY_BROWSER_SCREENSHOT_MAX_BYTES`: Maximum screenshot size in bytes (default: 65536)
+
+#### NetworkPolicy Configuration
+- **Note**: NetworkPolicy enforcement is managed through browser-sidecar-network-policy.yaml in the browser-dev profile
+- **Note**: No additional environment variables needed; NetworkPolicy rules are applied through Kubernetes manifests
+
 #### Mutating Dev Profile Configuration
 - **Note**: The mutating-dev profile automatically sets `GATEWAY_MUTATING_TOOLS_ENABLED=true` through kustomize ConfigMap merge in the dev-k8s overlay
 - **Note**: No additional environment variables needed; the profile handles configuration merge and RBAC application automatically
@@ -1484,6 +1767,8 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - [sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
 - [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
+- [browser.env](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 - [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 - [troubleshooting.md](file://docs/guides/troubleshooting.md)
@@ -1852,6 +2137,85 @@ data:
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [spec.md](file://docs/specs/SPEC-027-live-model-discovery/spec.md)
 
+### Browser Connector Configuration Guide
+**New Section** Comprehensive guide for configuring and managing the browser connector with Chromium headless sidecar for web-check operations.
+
+#### Prerequisites
+- Chromium headless-shell sidecar deployed alongside tool-gateway
+- Network connectivity to target web applications within allowed origins
+- Proper RBAC permissions for browser sidecar resources
+- Optional: Credential sets file for automated login flows
+
+#### Configuration Options
+- `GATEWAY_BROWSER_ENABLED=true`: Enable browser connector functionality
+- `GATEWAY_BROWSER_CDP_ENDPOINT=ws://localhost:9222`: Chromium sidecar CDP endpoint
+- `GATEWAY_BROWSER_SESSION_TTL=600`: Session idle timeout in seconds
+- `GATEWAY_BROWSER_MAX_SESSIONS=4`: Maximum concurrent browser sessions
+- `GATEWAY_BROWSER_ALLOW_ORIGINS=https://target.internal`: Comma-separated allowed origins
+- `GATEWAY_BROWSER_FLOW_MAX_STEPS=20`: Maximum steps per web-check flow
+- `GATEWAY_BROWSER_CREDENTIAL_SETS=/etc/luban/browser-credentials/credential-sets.json`: Path to credential sets file
+- `GATEWAY_BROWSER_SCREENSHOT_MAX_BYTES=65536`: Maximum screenshot size in bytes
+
+#### Security Features
+- **Origin allowlisting**: Deny-by-default navigation to unauthorized origins
+- **Flow binding**: Web-check flows bound to skill declarations with risk class enforcement
+- **Credential masking**: Password values masked in snapshots and screenshots
+- **Session management**: TTL-based expiration and maximum session limits
+- **Screenshot compression**: Quality loop and clipping to stay within byte limits
+- **NetworkPolicy enforcement**: Secure communication channels for browser sidecar
+- **Credential enumeration prevention**: Generic error messages prevent information disclosure
+- **Enhanced logging**: Screenshot unmask failures log exception classes only
+
+#### Example Configuration
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-runtime-config
+data:
+  GATEWAY_BROWSER_ENABLED: "true"
+  GATEWAY_BROWSER_CDP_ENDPOINT: "ws://localhost:9222"
+  GATEWAY_BROWSER_ALLOW_ORIGINS: "https://app.internal,https://dashboard.internal"
+  GATEWAY_BROWSER_SESSION_TTL: "600"
+  GATEWAY_BROWSER_MAX_SESSIONS: "4"
+  GATEWAY_BROWSER_FLOW_MAX_STEPS: "20"
+  GATEWAY_BROWSER_SCREENSHOT_MAX_BYTES: "65536"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tool-gateway-browser-credentials
+type: Opaque
+stringData:
+  credential-sets.json: |
+    {
+      "inventory-app": {"username": "svc-check", "password": "..."},
+      "legacy-crm": {"username": "checker", "password": "..."}
+    }
+```
+
+#### Deployment with Browser Sidecar
+The browser-dev profile includes a Chromium headless-shell sidecar deployment that connects to the tool-gateway over CDP. The sidecar runs in the same pod as the tool-gateway and communicates via localhost:9222. NetworkPolicy enforcement ensures secure communication channels.
+
+#### Monitoring and Diagnostics
+- Monitor browser session count and expiration events
+- Check CDP connectivity and sidecar health
+- Review origin allowlist violations and navigation denials
+- Track screenshot sizes and compression effectiveness
+- Monitor credential set file changes and reload events
+- Verify NetworkPolicy enforcement for browser sidecar connectivity
+- Monitor credential enumeration prevention effectiveness
+- Check screenshot unmask failure logs for security indicators
+
+**Section sources**
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
+- [browser.env](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
+- [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
+
 ### Workspace Resource Troubleshooting Guide
 **New Section** Comprehensive troubleshooting guide for workspace resource integration configuration and connectivity issues.
 
@@ -2024,3 +2388,124 @@ data:
 - [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 - [troubleshooting.md](file://docs/guides/troubleshooting.md)
+
+### NetworkPolicy Enforcement Guide
+**New Section** Comprehensive guide for understanding and managing NetworkPolicy enforcement for browser sidecar connectivity.
+
+#### Prerequisites
+- Kubernetes cluster with NetworkPolicy support
+- Browser sidecar deployed in the same namespace as platform-gateway
+- Proper RBAC permissions for NetworkPolicy management
+- Understanding of network traffic patterns between services
+
+#### Configuration Components
+- **browser-sidecar-network-policy.yaml**: Defines NetworkPolicy rules for browser sidecar connectivity
+- **Namespace isolation**: Ensures browser sidecar only accepts connections from authorized sources
+- **Traffic restrictions**: Limits network access to only required ports and protocols
+- **Security boundaries**: Prevents unauthorized network access to browser sidecar resources
+
+#### NetworkPolicy Rules
+The NetworkPolicy enforces the following security boundaries:
+- Allows ingress traffic only from platform-gateway service
+- Restricts egress traffic to only required destinations
+- Blocks all other network access to browser sidecar
+- Ensures secure CDP communication channels
+
+#### Deployment and Verification
+```bash
+# Apply NetworkPolicy
+kubectl apply -f shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml
+
+# Verify NetworkPolicy is active
+kubectl get networkpolicy -n dev-luban-aiops
+
+# Test connectivity from platform-gateway
+kubectl exec deployment/platform-gateway -n dev-luban-aiops -- \
+  curl -s http://tool-gateway:8000/api/v2/tools | jq '.[].name' | grep web.
+```
+
+#### Security Considerations
+- **Least Privilege**: NetworkPolicy should only allow minimum required network access
+- **Regular Auditing**: Monitor NetworkPolicy violations and blocked connections
+- **Change Management**: Any NetworkPolicy modifications require security review
+- **Testing**: Verify connectivity after NetworkPolicy changes
+- **Monitoring**: Alert on NetworkPolicy violations and blocked connections
+
+#### Troubleshooting Common Issues
+- **Connection blocked**: Verify NetworkPolicy rules allow traffic from platform-gateway
+- **Service discovery issues**: Check DNS resolution and service endpoints
+- **Namespace isolation**: Ensure both services are in the same namespace
+- **RBAC permissions**: Verify proper permissions for NetworkPolicy management
+- **Traffic patterns**: Monitor network traffic to identify blocked connections
+
+**Section sources**
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
+
+### Credential Enumeration Prevention Guide
+**New Section** Comprehensive guide for understanding and managing credential set enumeration prevention security measures.
+
+#### Security Threat
+Credential enumeration attacks attempt to discover available credential set names through systematic probing of the credential access API. This can reveal sensitive information about which systems and applications have credentials configured.
+
+#### Prevention Measures
+- **Generic Error Messages**: Return generic "not configured" messages instead of revealing specific set names
+- **Structured Error Codes**: Use CREDENTIAL_SET_NOT_FOUND error code for consistent error handling
+- **Information Hiding**: Never log or expose actual credential set names in error responses
+- **Rate Limiting**: Implement rate limiting to prevent systematic enumeration attempts
+
+#### Implementation Details
+The browser connector implements enumeration prevention through:
+- Generic error messages when credential sets are not found
+- Structured error responses with appropriate error codes
+- Logging only exception classes, never credential values or set names
+- Consistent error handling across all credential access points
+
+#### Monitoring and Detection
+- Monitor for repeated CREDENTIAL_SET_NOT_FOUND errors
+- Alert on suspicious patterns of credential access attempts
+- Track error rates and patterns that may indicate enumeration attacks
+- Review logs for any attempts to extract credential set information
+
+#### Security Best Practices
+- **Defense in Depth**: Combine enumeration prevention with other security measures
+- **Regular Auditing**: Review credential access patterns and error logs
+- **Incident Response**: Have procedures for responding to suspected enumeration attacks
+- **Training**: Educate developers about enumeration attack vectors and prevention
+
+**Section sources**
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
+
+### Screenshot Security Logging Guide
+**New Section** Comprehensive guide for understanding and managing screenshot unmask failure logging security measures.
+
+#### Security Concern
+Screenshot unmask failures can occur when attempting to restore page state after taking screenshots with masked credentials. Improper logging could expose sensitive information through error messages or stack traces.
+
+#### Security Measures
+- **Exception Class Only**: Log only the exception class name, never exception messages or stack traces
+- **Fail-Safe Design**: If unmask fails, secrets remain masked (security is preserved)
+- **Best Effort Approach**: Unmask operation is best-effort; failures don't impact screenshot capture
+- **Minimal Information**: Log only what's necessary for debugging without exposing sensitive data
+
+#### Implementation Details
+The screenshot capture process implements security through:
+- Logging only `exc.__class__.__name__` in unmask failure scenarios
+- Maintaining secret masking even when unmask fails
+- Providing visibility into stuck masks through warning logs
+- Never exposing actual credential values in any logs
+
+#### Monitoring and Diagnostics
+- Monitor for "screenshot credential unmask failed" warnings
+- Track unmask failure rates to identify potential issues
+- Investigate patterns of unmask failures that may indicate security concerns
+- Verify that logs contain only exception class information
+
+#### Security Best Practices
+- **Principle of Least Disclosure**: Log only what's necessary for operational visibility
+- **Fail-Secure Design**: When in doubt, err on the side of security
+- **Regular Reviews**: Periodically review logging practices for security compliance
+- **Incident Response**: Have procedures for investigating potential security incidents
+
+**Section sources**
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)

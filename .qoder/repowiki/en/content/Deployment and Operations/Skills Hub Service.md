@@ -19,6 +19,7 @@
 - [skill.schema.json](file://shared/shared-contracts/schemas/skill.schema.json)
 - [audit-event.schema.json](file://shared/shared-contracts/schemas/audit-event.schema.json)
 - [skills-guide.md](file://docs/guides/skills-guide.md)
+- [SPEC-049 spec.md](file://docs/specs/SPEC-049-browser-web-check-tools/spec.md)
 - [test_audit_emitter.py](file://products/skills-hub/tests/test_audit_emitter.py)
 </cite>
 
@@ -30,6 +31,7 @@
 - Enhanced sync monitoring with improved error handling and credential scrubbing
 - Added Prometheus metrics for audit emission tracking
 - Updated API routes to emit usage audit events for skill searches and retrievals
+- **New**: Added support for optional web_target and risk_class frontmatter fields for declaring web-check flows with interactive step risk levels per SPEC-049
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -53,6 +55,7 @@ Key responsibilities:
 - Deterministic ranking and provenance-aware search results
 - Query authentication via static Basic credentials or projected workload tokens
 - **Enhanced**: Durable audit trail integration with fire-and-forget audit event emission for all user-facing operations and sync cycles
+- **New**: Web-check flow declaration support with optional web_target and risk_class frontmatter fields for browser-driven interactive steps
 - Operational status reporting and metrics
 
 **Section sources**
@@ -111,8 +114,9 @@ K --> M["shared/shared-contracts/schemas/skill.schema.json"]
 - Sync: per-source async loop materializing git or local sources with subpath support, ingesting, atomically replacing store slices, tracking status and metrics, emitting audit events.
 - Query auth: supports HTTP Basic against a static registry and projected workload tokens validated against cluster OIDC issuer JWKS.
 - **Enhanced**: Audit emitter: fire-and-forget delivery of usage events to the audit service with non-blocking thread-based emission and comprehensive error handling.
+- **New**: Web-check flow support: optional web_target and risk_class frontmatter fields for declaring browser-driven check flows with interactive step risk levels.
 
-**Updated** Enhanced with comprehensive audit emitter service providing durable audit trail integration, new configuration options for audit service connectivity, and improved sync monitoring with credential scrubbing.
+**Updated** Enhanced with comprehensive audit emitter service providing durable audit trail integration, new configuration options for audit service connectivity, improved sync monitoring with credential scrubbing, and new web-check flow declaration support per SPEC-049.
 
 **Section sources**
 - [runtime.py:19-30](file://products/skills-hub/src/skills_hub/core/runtime.py#L19-L30)
@@ -140,7 +144,7 @@ participant Agent as "Agent"
 Note over Team,Hub : Periodic sync with subpath support
 Team->>Hub : Local dir / Git repo (with optional subpath)
 Hub->>Hub : Materialize source (git checkout + subpath validation)
-Hub->>Hub : Ingest & validate docs
+Hub->>Hub : Ingest & validate docs (including web-check flow declarations)
 Hub->>Store : Atomic replace_source(source_id, records)
 Note over Agent,GW : Query path with audit emission
 Agent->>GW : tools.skills.search/list/get
@@ -192,6 +196,41 @@ Get -- Not found --> Err404["Return 404 SKILL_NOT_FOUND<br/>emit_audit_event('sk
 - [router.py:1-11](file://products/skills-hub/src/skills_hub/api/router.py#L1-L11)
 - [skills.py:1-172](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L1-L172)
 
+### Web-Check Flow Declaration Support
+- **New Feature**: Optional web_target and risk_class frontmatter fields for declaring browser-driven web-check flows per SPEC-049.
+- web_target: Absolute http(s) URL declaring this skill as a browser-driven check flow entry point (≤2048 chars).
+- risk_class: Declares the effect of the flow's interactive steps - either "read" (default when web_target present without risk_class) or "write" (requires HITL approval).
+- Validation ensures web_target is a valid absolute URL with proper scheme and host.
+- risk_class must be one of the allowed values and requires web_target to be present.
+- Skills without these fields ingest unchanged - backward compatibility maintained.
+
+```mermaid
+flowchart TD
+FM["Frontmatter"] --> CheckWT{"web_target present?"}
+CheckWT -- No --> CheckRC{"risk_class present?"}
+CheckRC -- Yes --> RejectRC["Reject: risk_class requires web_target"]
+CheckRC -- No --> ValidNoFlow["Valid: Regular skill"]
+CheckWT -- Yes --> ValidateWT["Validate web_target URL"]
+ValidateWT --> WTOK{"Valid URL?"}
+WTOK -- No --> RejectWT["Reject: Invalid web_target"]
+WTOK -- Yes --> CheckRC2{"risk_class present?"}
+CheckRC2 -- No --> DefaultRead["Default: read class"]
+CheckRC2 -- Yes --> ValidateRC["Validate risk_class value"]
+ValidateRC --> RCOK{"Valid value?"}
+RCOK -- No --> RejectRC2["Reject: Invalid risk_class"]
+RCOK -- Yes --> ValidFlow["Valid: Web-check flow"]
+```
+
+**Diagram sources**
+- [ingestion.py:159-191](file://products/skills-hub/src/skills_hub/services/ingestion.py#L159-L191)
+- [skill.py:27-31](file://products/skills-hub/src/skills_hub/schemas/skill.py#L27-L31)
+
+**Section sources**
+- [ingestion.py:33-45](file://products/skills-hub/src/skills_hub/services/ingestion.py#L33-L45)
+- [ingestion.py:159-191](file://products/skills-hub/src/skills_hub/services/ingestion.py#L159-L191)
+- [skill.py:27-31](file://products/skills-hub/src/skills_hub/schemas/skill.py#L27-L31)
+- [skill.schema.json:63-73](file://shared/shared-contracts/schemas/skill.schema.json#L63-L73)
+
 ### Audit Emitter Service
 - Fire-and-forget delivery pattern using daemon threads for non-blocking audit event emission.
 - Configurable via `SKILLS_AUDIT_SERVICE_URL`, `SKILLS_AUDIT_CLIENT_ID`, `SKILLS_AUDIT_CLIENT_SECRET`.
@@ -228,6 +267,7 @@ LogOnly --> Done
 - Parses YAML frontmatter, enforces allowed keys and length constraints, validates body size.
 - Derives deterministic slugs from file paths; rejects duplicate slugs within a source.
 - Produces an IngestResult with accepted records and bounded rejection details.
+- **New**: Validates web-check flow declarations including web_target URL format and risk_class values.
 
 ```mermaid
 flowchart TD
@@ -258,7 +298,7 @@ NextFile --> End
 - [ingestion.py:151-229](file://products/skills-hub/src/skills_hub/services/ingestion.py#L151-L229)
 
 **Section sources**
-- [ingestion.py:1-229](file://products/skills-hub/src/skills_hub/services/ingestion.py#L1-L229)
+- [ingestion.py:1-291](file://products/skills-hub/src/skills_hub/services/ingestion.py#L1-L291)
 
 ### Storage Backends
 - Strategy interface defines initialize, replace_source, prune_sources, get, list, search, count, ready, close.
@@ -439,8 +479,8 @@ AE --> METRICS["core/metrics.py"]
 - [skill_store.py:30-67](file://products/skills-hub/src/skills_hub/services/skill_store.py#L30-L67)
 - [scoring.py:1-97](file://products/skills-hub/src/skills_hub/services/scoring.py#L1-L97)
 - [sync.py:1-316](file://products/skills-hub/src/skills_hub/services/sync.py#L1-L316)
-- [ingestion.py:1-229](file://products/skills-hub/src/skills_hub/services/ingestion.py#L1-L229)
-- [app.py:20-86](file://products/skills-hub/src/skills_hub/app.py#L20-L86)
+- [ingestion.py:1-291](file://products/skills-hub/src/skills_hub/services/ingestion.py#L1-L291)
+- [app.py:20-86](file://products/skills-hub/src/skills_hub/app.py#L20-86)
 - [config.py:1-209](file://products/skills-hub/src/skills_hub/core/config.py#L1-L209)
 - [audit_emitter.py:1-98](file://products/skills-hub/src/skills_hub/services/audit_emitter.py#L1-L98)
 - [metrics.py:1-113](file://products/skills-hub/src/skills_hub/core/metrics.py#L1-L113)
@@ -473,6 +513,8 @@ Common operational issues and resolutions:
   - Inspect /api/v1/skills/status for rejection reasons; fix frontmatter or size violations; use the pre-flight validator CLI.
 - Source reports last_error:
   - Check unreachable Git URL, invalid token, or unreadable path; previous snapshot remains served until recovery.
+- **New**: Web-check flow validation errors:
+  - Verify web_target is a valid absolute http(s) URL; ensure risk_class is either "read" or "write"; note that risk_class requires web_target to be present.
 - **New**: Git subpath errors:
   - Verify configured subpath exists in the Git repository; check for path traversal attempts being rejected.
 - Search returns no matches:
@@ -498,13 +540,14 @@ Operational endpoints and metrics:
 ## Conclusion
 The Skills Hub Service provides a robust, deterministic, and secure foundation for serving grounded guidance to agents. Its design emphasizes fail-fast configuration, resilient per-source sync, deterministic ranking, and clear operational surfaces. Integration through the tool-gateway ensures consistent policy enforcement, auditability, and evidence presentation.
 
-**Updated** The recent enhancements add comprehensive Git repository support with subpath specification for monorepo scenarios, robust security validation, improved error handling with credential scrubbing, and a complete audit trail integration through the fire-and-forget audit emitter service. These improvements make it suitable for enterprise-scale federated skill management with durable usage tracking and enhanced observability.
+**Updated** The recent enhancements add comprehensive Git repository support with subpath specification for monorepo scenarios, robust security validation, improved error handling with credential scrubbing, a complete audit trail integration through the fire-and-forget audit emitter service, and new web-check flow declaration support per SPEC-049. These improvements make it suitable for enterprise-scale federated skill management with durable usage tracking, enhanced observability, and browser-driven interactive workflow capabilities.
 
 ## Appendices
 
 ### Data Model: Skill Envelope
 - Fields include identifiers, provenance, human-readable metadata, optional version/attribution, timestamps, and body.
 - Constraints and formats are defined by the shared schema.
+- **New**: Optional web_target and risk_class fields for web-check flow declarations.
 
 ```mermaid
 erDiagram
@@ -520,16 +563,63 @@ string version
 string source_url
 datetime updated_at
 string body
+string web_target
+string risk_class
 }
 ```
 
 **Diagram sources**
-- [skill.schema.json:1-76](file://shared/shared-contracts/schemas/skill.schema.json#L1-L76)
+- [skill.schema.json:1-87](file://shared/shared-contracts/schemas/skill.schema.json#L1-L87)
 - [skill.py:15-33](file://products/skills-hub/src/skills_hub/schemas/skill.py#L15-L33)
 
 **Section sources**
-- [skill.schema.json:1-76](file://shared/shared-contracts/schemas/skill.schema.json#L1-L76)
-- [skill.py:1-33](file://products/skills-hub/src/skills_hub/schemas/skill.py#L1-L33)
+- [skill.schema.json:1-87](file://shared/shared-contracts/schemas/skill.schema.json#L1-L87)
+- [skill.py:1-38](file://products/skills-hub/src/skills_hub/schemas/skill.py#L1-L38)
+
+### Web-Check Flow Declaration Examples
+
+#### Regular Skill (No Web-Check Flow)
+```yaml
+---
+title: "Database Health Check"
+description: "Verify database connectivity and basic health metrics"
+tags: ["database", "health"]
+---
+
+# Database Health Check
+
+Connect to the database and run basic health checks...
+```
+
+#### Read-Only Web-Check Flow
+```yaml
+---
+title: "Application Dashboard Check"
+description: "Navigate to the application dashboard and verify key metrics are displayed"
+tags: ["application", "dashboard"]
+web_target: "https://app.example.com/dashboard"
+risk_class: "read"
+---
+
+# Application Dashboard Check
+
+Open the dashboard and verify the following metrics...
+```
+
+#### Mutating Web-Check Flow (Requires Approval)
+```yaml
+---
+title: "User Account Management"
+description: "Perform administrative actions on user accounts in the management portal"
+tags: ["admin", "user-management"]
+web_target: "https://admin.example.com/users"
+risk_class: "write"
+---
+
+# User Account Management
+
+Navigate to the user management interface and perform administrative actions...
+```
 
 ### Audit Event Schema
 - Events follow the shared audit-event schema with correlation via x-request-id.
