@@ -11,7 +11,57 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
-## Unreleased
+## 0.32.0 — 2026-09-04
+
+### Added
+
+- **Browser tools expansion and samples reorganization (SPEC-050)** —
+  the browser tool surface grows from six to fifteen tools, and
+  tutorial content moves into a top-level `samples/` directory:
+  - Nine new `web.*` tools: `web.select`, `web.press_key`,
+    `web.upload_file`, and `web.evaluate` (write tier — HITL gated)
+    plus `web.extract`, `web.wait_for`, `web.hover`, `web.scroll`,
+    and `web.switch_frame` (read tier). Each follows the existing
+    enforcement patterns: write-tier tools inherit the deviation
+    guard and HITL confirmation; read-tier tools use the origin
+    re-check capture gate.
+  - `web.select` selects a dropdown option by snapshot ref.
+  - `web.press_key` presses a keyboard key with optional element
+    focus. `web.upload_file` uploads a file from an allowlisted
+    directory to a file input element.
+  - `web.extract` pulls structured data from tables or lists by
+    CSS selector (bounded to 500 rows, 50 columns).
+  - `web.wait_for` waits for an element to reach a state (attached,
+    detached, visible, hidden) with a server-capped 30s timeout.
+  - `web.hover` hovers over an element to reveal tooltips or menus.
+  - `web.evaluate` runs a JavaScript expression in the page context
+    with result bounding (16K chars). It is write tier — arbitrary JS
+    can mutate the DOM and read back masked secrets, so each call parks
+    for HITL confirmation; a pre-execution mutation guard
+    (`BROWSER_EVAL_MUTATION_BLOCKED`) is defense-in-depth only, never
+    the security boundary.
+  - `web.scroll` scrolls the page by pixel offsets, centering the
+    cursor over the active frame first when an iframe is in scope.
+  - `web.switch_frame` switches into an iframe with cross-origin
+    denial; `web.navigate` resets to the main frame.
+  - New config knob `GATEWAY_BROWSER_UPLOAD_DIR` (default
+    `/tmp/browser-uploads`) for the file upload allowlist.
+  - `samples/web-checks/password-reset/` bundles the password-reset
+    tutorial as a self-contained leaf: skill document, demo script,
+    README, and WALKTHROUGH, *referencing* — never duplicating — the
+    shared browser target pages, credential secret, and NetworkPolicy
+    that stay in `shared/platform-ops/gitops/`. The dependency arrow is
+    always tutorial → platform.
+  - Sample skills install out-of-band via `make deploy-samples`
+    (and remove via `make undeploy-samples`): the base overlay declares
+    one *generic* `samples` local source — an optional `skills-samples`
+    ConfigMap mounted read-only at `/skills/samples` — that ingests
+    nothing until the target packs the selected samples' `skill/*.md`
+    into it, so the skill lands as `samples/password-reset-resetuserpassword`
+    with zero system → tutorial coupling. The former
+    `platform-runbooks/web-checks/ResetUserPassword.md` copy and its
+    base-overlay wiring are removed; the base overlay deploys cleanly
+    with zero samples installed.
 
 ## 0.31.0 — 2026-09-02
 

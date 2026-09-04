@@ -7,6 +7,28 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-04-spec-050-browser-tools-expansion-and-samples.md`
+  - delivers SPEC-050 (v0.32.0, twelfth R5 slice): the browser tool
+    surface grows from six to fifteen tools — nine new `web.*` tools
+    (`web.select`, `web.press_key`, `web.upload_file`, `web.evaluate`
+    write tier; `web.extract`, `web.wait_for`, `web.hover`,
+    `web.scroll`, `web.switch_frame` read tier), each inheriting the
+    SPEC-049 server-side guards (origin allowlist, flow binding,
+    deviation guard, HITL gate, credential masking). `web.evaluate`
+    is HITL-gated write tier with result bounding and a
+    defense-in-depth mutation guard (never the security boundary);
+    `web.upload_file` allowlists paths under the new
+    `GATEWAY_BROWSER_UPLOAD_DIR`; `web.switch_frame` denies
+    cross-origin frames and `web.navigate` resets to the main frame.
+    Tutorial content moves into a self-contained top-level `samples/`
+    tree under a strict tutorial → platform arrow: sample skills
+    install out-of-band via `make deploy-samples` /
+    `make undeploy-samples` into a generic `skills-samples` ConfigMap
+    mounted at `/skills/samples` (skill id
+    `samples/password-reset-resetuserpassword`), the base overlay
+    names no specific sample, and the former `platform-runbooks`
+    ResetUserPassword copy plus its base wiring are removed; no new
+    policy actions, no new audit event types, contracts unchanged
 - `2026-09-02-spec-049-browser-web-check-tools.md`
   - delivers SPEC-049 (v0.31.0, eleventh R5 slice): a bounded,
     deny-by-default `web.*` tool surface lets the agent verify
