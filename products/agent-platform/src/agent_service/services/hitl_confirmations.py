@@ -59,6 +59,10 @@ class PendingConfirmation:
     # the registry knows — without this map an approved mutating call fails
     # closed with TOOL_NOT_FOUND at the gateway.
     gateway_names: dict = field(default_factory=dict)
+    # Browser element map from the last web.snapshot (SPEC-050 follow-up):
+    # maps ref numbers to human-readable element descriptions so confirmation
+    # cards show what element will be clicked/typed into, not just the raw ref.
+    browser_element_map: dict[int, str] = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
     resolved: bool = False
     # Single-flight guard set by ``claim`` before a decision streams back:
@@ -71,6 +75,11 @@ class PendingConfirmation:
 
     def pending_calls_payload(self) -> list[dict]:
         """Serialize the parked calls for the confirmation_request frame."""
+        # Browser interaction tools that reference snapshot elements.
+        browser_ref_tools = {
+            "web.click", "web.type", "web.select",
+            "web.press_key", "web.upload_file",
+        }
         payload = []
         for tool_call in self.tool_calls:
             sanitized = str(getattr(tool_call, "name", "") or "")
@@ -78,11 +87,19 @@ class PendingConfirmation:
             # records, audit events, and the signed execution envelope all
             # agree on the name the registry resolves.
             tool_name = self.gateway_names.get(sanitized, sanitized)
+            parameters = _parse_parameters(tool_call)
             entry = {
                 "call_id": str(getattr(tool_call, "id", "") or ""),
                 "tool_name": tool_name,
-                "parameters": _parse_parameters(tool_call),
+                "parameters": parameters,
             }
+            # SPEC-050 follow-up: add a display hint for browser tools that
+            # reference snapshot elements. This is separate from parameters
+            # so the args_digest for signing/verification stays unchanged.
+            if tool_name in browser_ref_tools and self.browser_element_map:
+                ref = parameters.get("ref")
+                if isinstance(ref, int) and ref in self.browser_element_map:
+                    entry["display_hint"] = self.browser_element_map[ref]
             risk_level = self.risk_levels.get(sanitized)
             if risk_level:
                 entry["risk_level"] = risk_level
@@ -129,6 +146,46 @@ def _parse_parameters(tool_call) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def parse_snapshot_elements(snapshot_text: str) -> dict[int, str]:
+    """Parse a web.snapshot text into a ref -> element description map.
+
+    The snapshot format is ``[ref] <tag type=... role=...> "label"``.
+    This extracts the ref number and a human-readable description for
+    use in confirmation cards (SPEC-050 follow-up: show what element
+    will be clicked, not just the raw ref number).
+    """
+    elements: dict[int, str] = {}
+    for line in snapshot_text.splitlines():
+        line = line.strip()
+        if not line.startswith("["):
+            continue
+        try:
+            bracket_end = line.index("]")
+            ref = int(line[1:bracket_end])
+        except (ValueError, IndexError):
+            continue
+        # Extract the element description after the ref
+        rest = line[bracket_end + 1:].strip()
+        # Format: <tag type=... role=...> "label"
+        # We want to show: tag + label (if present)
+        description = rest
+        # Try to extract the label in quotes
+        if '"' in rest:
+            try:
+                label_start = rest.index('"')
+                label_end = rest.rindex('"')
+                if label_start < label_end:
+                    label = rest[label_start + 1:label_end]
+                    # Extract the tag part
+                    tag_end = rest.index(">")
+                    tag_part = rest[:tag_end + 1]
+                    description = f"{tag_part} \"{label}\""
+            except ValueError:
+                pass
+        elements[ref] = description
+    return elements
+
+
 class ConfirmationRegistry:
     """Per-process map of session_id -> pending confirmation.
 
@@ -154,6 +211,7 @@ class ConfirmationRegistry:
         timeout: float,
         risk_levels: dict | None = None,
         gateway_names: dict | None = None,
+        browser_element_map: dict[int, str] | None = None,
     ) -> PendingConfirmation:
         pending = PendingConfirmation(
             confirm_id=str(uuid.uuid4()),
@@ -163,6 +221,7 @@ class ConfirmationRegistry:
             tool_calls=list(tool_calls),
             risk_levels=dict(risk_levels or {}),
             gateway_names=dict(gateway_names or {}),
+            browser_element_map=dict(browser_element_map or {}),
         )
         self._by_session[session_id] = pending
         return pending

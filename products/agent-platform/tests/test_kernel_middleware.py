@@ -178,7 +178,9 @@ class AllowListTests(unittest.TestCase):
         self,
     ) -> None:
         """SPEC-049: read-class browser probes are auto-allowed; the
-        write-class web_click/web_type are deliberately never listed."""
+        write-class web_click/web_type are deliberately never listed.
+        web_evaluate is write-tier too (arbitrary JS can mutate the DOM and
+        read masked secrets), so it is likewise never auto-allowed."""
         allow = _load_auto_allowed_tools()
         self.assertIn("web_navigate", allow)
         self.assertIn("web_snapshot", allow)
@@ -186,6 +188,7 @@ class AllowListTests(unittest.TestCase):
         self.assertIn("web_fill_credential", allow)
         self.assertNotIn("web_click", allow)
         self.assertNotIn("web_type", allow)
+        self.assertNotIn("web_evaluate", allow)
 
 
 class GatewayPermissionMiddlewareTests(unittest.TestCase):

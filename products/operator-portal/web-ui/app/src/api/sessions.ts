@@ -50,6 +50,9 @@ export interface ConfirmationCallPayload {
   parameters?: Record<string, unknown>;
   risk_level?: string;
   action?: string;
+  // SPEC-050 follow-up: human-readable element description for browser
+  // interaction tools (web.click, web.type, etc.).
+  display_hint?: string;
 }
 
 export interface ConfirmationRecord {

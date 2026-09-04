@@ -12,9 +12,11 @@
 #     1. no web.* tool in discovery for an operator
 #     2. web.navigate invoke fails closed with TOOL_NOT_FOUND
 #   enabled (browser-dev posture):
-#     1. all six web.* tools present in discovery with the right risk
-#        tiers (read: navigate/snapshot/screenshot/fill_credential;
-#        write: click/type)
+#     1. the six SPEC-049 baseline web.* tools present in discovery with
+#        the right risk tiers (read: navigate/snapshot/screenshot/
+#        fill_credential; write: click/type). SPEC-050 later expands the
+#        web.* surface; this smoke test regression-checks that the
+#        original six stay present and correctly tiered.
 #     2. navigation outside the allowlist is denied server-side
 #        (BROWSER_ORIGIN_NOT_ALLOWED) even for an operator
 #     3. navigation to the sample target succeeds and reports the page
@@ -165,7 +167,7 @@ if [ "$BROWSER_ENABLED" != "true" ]; then
   exit 0
 fi
 
-echo "==> [3/5] browser-dev: six web.* tools with correct risk tiers"
+echo "==> [3/5] browser-dev: SPEC-049 baseline six web.* tools with correct risk tiers"
 
 printf '%s' "$DISCOVERY" | python3 -c "
 import json, sys
@@ -185,8 +187,8 @@ for name, risk in expect.items():
         '%s risk_level is %r, expected %s' % (name, tool.get('risk_level'), risk)
     assert tool.get('category') == 'browser', \
         '%s category is %r, expected browser' % (name, tool.get('category'))" \
-  || fail "discovery does not carry the six web.* tools with expected risk tiers"
-echo "all six web.* tools registered (4 read, 2 write)"
+  || fail "discovery does not carry the six SPEC-049 baseline web.* tools with expected risk tiers"
+echo "the six SPEC-049 baseline web.* tools are present and correctly tiered (4 read, 2 write)"
 
 echo "==> [4/5] origin allowlist: outside denied, sample target admitted"
 
@@ -343,7 +345,7 @@ fi
 echo ""
 echo "Browser web-check smoke test passed (browser-dev posture):"
 echo "  - unauthenticated callers rejected"
-echo "  - six web.* tools registered with correct risk tiers"
+echo "  - the six SPEC-049 baseline web.* tools registered with correct risk tiers"
 echo "  - off-allowlist navigation denied server-side"
 echo "  - allowed navigation and snapshot succeeded on the sample target"
 echo "  - CDP sidecar reachable from the gateway pod"

@@ -378,6 +378,7 @@ export function useChatStream(): ChatStreamApi {
         // A resumed stream that closes without a terminal frame still
         // completes the parked turn (legacy parity).
         turn.completed = true;
+        turn.confirmationPending = false;
       } catch (error) {
         if (error instanceof StreamOpenError && error.status === 410) {
           lockCard(
@@ -385,6 +386,7 @@ export function useChatStream(): ChatStreamApi {
             "expired",
             "This confirmation expired before a decision was applied.",
           );
+          turn.confirmationPending = false;
         } else if (error instanceof StreamOpenError && error.status === 409) {
           // SPEC-031 R-4 race: another approver decided first. The card
           // flips to the winner's outcome with attribution instead of
@@ -403,6 +405,7 @@ export function useChatStream(): ChatStreamApi {
           } else {
             decided.note = `Confirm request failed (409).`;
           }
+          turn.confirmationPending = false;
         } else if (error instanceof StreamOpenError) {
           // Legacy parity: the card stays pending so the operator can retry.
           decided.note = `Confirm request failed (${error.status}).`;

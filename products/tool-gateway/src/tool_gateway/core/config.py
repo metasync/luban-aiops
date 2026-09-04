@@ -14,12 +14,13 @@ DEFAULT_IDENTITY_JWKS_URL = (
     "/.well-known/jwks.json"
 )
 
-# Browser connector defaults (SPEC-049 R-1/R-2/R-4/R-5/R-6).
+# Browser connector defaults (SPEC-049 R-1/R-2/R-4/R-5/R-6, SPEC-050).
 DEFAULT_BROWSER_CDP_ENDPOINT = "ws://localhost:9222"
 DEFAULT_BROWSER_SESSION_TTL_SECONDS = 600
 DEFAULT_BROWSER_MAX_SESSIONS = 4
 DEFAULT_BROWSER_FLOW_MAX_STEPS = 20
 DEFAULT_BROWSER_SCREENSHOT_MAX_BYTES = 65536
+DEFAULT_BROWSER_UPLOAD_DIR = "/tmp/browser-uploads"
 
 _TRUTHY = {"1", "true", "yes", "on"}
 
@@ -69,6 +70,7 @@ class GatewaySettings:
     browser_flow_max_steps: int = DEFAULT_BROWSER_FLOW_MAX_STEPS
     browser_credential_sets_path: str = ""
     browser_screenshot_max_bytes: int = DEFAULT_BROWSER_SCREENSHOT_MAX_BYTES
+    browser_upload_dir: str = DEFAULT_BROWSER_UPLOAD_DIR
 
     @classmethod
     def from_env(cls) -> "GatewaySettings":
@@ -175,6 +177,9 @@ class GatewaySettings:
                     "GATEWAY_BROWSER_SCREENSHOT_MAX_BYTES",
                     str(DEFAULT_BROWSER_SCREENSHOT_MAX_BYTES),
                 )
+            ),
+            browser_upload_dir=os.getenv(
+                "GATEWAY_BROWSER_UPLOAD_DIR", DEFAULT_BROWSER_UPLOAD_DIR
             ),
         )
 

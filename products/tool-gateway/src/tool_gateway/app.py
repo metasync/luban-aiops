@@ -89,6 +89,7 @@ def _build_tool_registry() -> tuple[ToolRegistry, object | None]:
             skills_service_url=settings.skills_service_url,
             skills_client_id=settings.skills_client_id,
             skills_client_secret=settings.skills_client_secret,
+            upload_dir=settings.browser_upload_dir,
         )
         browser_connector.register_tools(registry)
         LOGGER.info("browser connector registered")

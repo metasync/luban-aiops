@@ -74,14 +74,21 @@ DEFAULT_AUTO_ALLOWED_TOOLS = frozenset({
     "skills.list",
     "incidents.list",
     "incidents.get",
-    # SPEC-049: read-class browser probes may run without an extra gate;
-    # the gateway still enforces the origin allowlist and flow guards on
-    # every call. web_click/web_type are intentionally absent — they can
-    # never satisfy the read-only invariant below.
+    # SPEC-049/SPEC-050: read-class browser probes may run without an extra
+    # gate; the gateway still enforces the origin allowlist and flow guards
+    # on every call. web.click/web.type/web.select/web.press_key/web.upload_file
+    # are intentionally absent — they can never satisfy the read-only
+    # invariant below. web.evaluate is also absent: arbitrary JS can mutate
+    # the DOM and read masked secrets, so it inherits the write-tier HITL gate.
     "web.navigate",
     "web.snapshot",
     "web.screenshot",
     "web.fill_credential",
+    "web.extract",
+    "web.wait_for",
+    "web.hover",
+    "web.scroll",
+    "web.switch_frame",
 })
 AUTO_ALLOW_ENV = "AGENT_GATEWAY_TOOL_AUTO_ALLOW"
 
@@ -118,13 +125,16 @@ def _make_data_summary(
     return {"_truncated": True, "_preview": serialized[:max_chars], "_original_length": len(serialized)}
 
 
-def _make_full_data(data: Any, max_chars: int = 32000) -> Any:
+def _make_full_data(data: Any, max_chars: int = 128000) -> Any:
     """Return the full tool payload for evidence frames, size-guarded.
 
     Streams stay bounded: when the serialized payload exceeds
     ``max_chars`` the field is omitted from the frame entirely — the
     truncated ``data_summary`` still surfaces and the full result stays
     in the audit trail. Returns None when data is None.
+
+    The default limit (128KB) accommodates base64-encoded screenshots
+    from web.screenshot (up to 64KB raw → ~87KB base64).
     """
     if data is None:
         return None
@@ -239,7 +249,7 @@ class ToolEvidenceMiddleware(MiddlewareBase):
     def __init__(
         self,
         data_summary_max_chars: int = 2000,
-        data_max_chars: int = 32000,
+        data_max_chars: int = 128000,
     ) -> None:
         self._max_chars = data_summary_max_chars
         self._data_max_chars = data_max_chars

@@ -43,17 +43,22 @@ if [ -n "$SOURCE_FILE" ]; then
   fi
   CRED_FILE="$SOURCE_FILE"
 else
-  # Dev default: one credential set for the sample target app shipped by
-  # runtime-profiles/browser-dev. Random password; stays inside the
+  # Dev default: two credential sets for the sample target apps shipped
+  # by runtime-profiles/browser-dev. Random passwords; stay inside the
   # cluster secret.
   CRED_FILE=$(mktemp)
   CLEANUP="$CRED_FILE"
   PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
+  ADMIN_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
   cat > "$CRED_FILE" <<EOF
 {
   "browser-check-target": {
     "username": "svc-check",
     "password": "${PASSWORD}"
+  },
+  "admin-portal": {
+    "username": "admin",
+    "password": "${ADMIN_PASSWORD}"
   }
 }
 EOF

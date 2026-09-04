@@ -48,3 +48,237 @@ data:
       <p>Last checked: <span id="checked-at">static dev fixture</span></p>
     </body>
     </html>
+  # --- Admin portal pages (password-reset tutorial demo) ---
+  #
+  # These pages simulate a legacy internal admin panel that operators
+  # use to manage user accounts. The panel has no self-service password
+  # reset, so operators must reset passwords manually through this UI.
+  # The browser web-check tools automate this flow end-to-end.
+  #
+  # The login auto-submits when both fields are filled (simulating
+  # legacy SSO behaviour common in old internal tools) so the agent
+  # never needs a write-tier click to authenticate — the HITL gate
+  # lands exclusively on the final "Confirm reset" button.
+  admin-index.html: |
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <title>Admin Portal - Sign in</title>
+    </head>
+    <body>
+      <h1>Admin Portal</h1>
+      <p id="admin-auth-status"></p>
+      <form id="admin-login-form" onsubmit="return adminSignIn(event)">
+        <label for="admin-username">Username</label>
+        <input id="admin-username" name="username" type="text" autocomplete="off">
+        <label for="admin-password">Password</label>
+        <input id="admin-password" name="password" type="password" autocomplete="off">
+        <button id="admin-sign-in" type="submit">Sign in</button>
+      </form>
+      <p id="admin-login-status" role="status"></p>
+      <script>
+        function adminSignIn(event) {
+          event.preventDefault();
+          adminDoLogin();
+          return false;
+        }
+        function adminDoLogin() {
+          var user = document.getElementById("admin-username").value;
+          if (!user) return;
+          document.getElementById("admin-login-form").style.display = "none";
+          document.getElementById("admin-auth-status").textContent =
+            "Signed in as " + user;
+          document.getElementById("admin-login-status").textContent =
+            "Redirecting to user management...";
+          setTimeout(function() {
+            window.location.href = "/admin/users/";
+          }, 200);
+        }
+        /* Legacy SSO auto-login: when both fields are pre-filled
+           (e.g., by an automation tool), submit automatically. */
+        var _autoLoginTimer = setInterval(function() {
+          var u = document.getElementById("admin-username");
+          var p = document.getElementById("admin-password");
+          if (u && u.value && p && p.value) {
+            clearInterval(_autoLoginTimer);
+            adminDoLogin();
+          }
+        }, 100);
+      </script>
+    </body>
+    </html>
+  admin-users-index.html: |
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <title>Admin Portal - User Management</title>
+    </head>
+    <body>
+      <h1>User Management</h1>
+      <p><a href="/admin/">Back to login</a></p>
+      
+      <!-- Recent Password Resets section - always visible for demo verification -->
+      <div style="background:#1e293b;border:1px solid #475569;border-radius:4px;padding:12px;margin-bottom:16px;">
+        <h3 style="margin:0 0 8px 0;color:#e2e8f0;">Recent Password Resets</h3>
+        <div id="last-reset-status" style="background:#2d4a2b;border:1px solid #4a7;border-radius:4px;padding:8px 12px;display:none;color:#fff;">
+          <strong>Last reset:</strong>
+          <span id="last-reset-user"></span>
+          <span id="last-reset-time"></span>
+        </div>
+        <div id="no-resets" style="color:#94a3b8;font-style:italic;">
+          No recent password resets.
+        </div>
+      </div>
+      
+      <table id="user-table" border="1">
+        <thead>
+          <tr><th>Name</th><th>Email</th><th>Role</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Alice Johnson</td><td>alice@example.com</td><td>viewer</td>
+              <td><a class="reset-link" href="/admin/users/reset/?user=alice@example.com">Reset password</a></td></tr>
+          <tr><td>Bob Smith</td><td>bob@example.com</td><td>editor</td>
+              <td><a class="reset-link" href="/admin/users/reset/?user=bob@example.com">Reset password</a></td></tr>
+          <tr><td>Carol Williams</td><td>carol@example.com</td><td>admin</td>
+              <td><a class="reset-link" href="/admin/users/reset/?user=carol@example.com">Reset password</a></td></tr>
+        </tbody>
+      </table>
+      <script>
+        /* Show the last reset status from URL params or localStorage.
+           URL params allow cross-browser verification (e.g., after an
+           automation tool performs the reset in a headless browser). */
+        (function() {
+          var params = new URLSearchParams(window.location.search);
+          var resetUser = params.get("reset");
+          var resetTime = params.get("at");
+          var statusDiv = document.getElementById("last-reset-status");
+          var noResetsDiv = document.getElementById("no-resets");
+          
+          if (resetUser) {
+            document.getElementById("last-reset-user").textContent =
+              " " + resetUser + " ";
+            document.getElementById("last-reset-time").textContent =
+              resetTime ? "at " + decodeURIComponent(resetTime) : "";
+            statusDiv.style.display = "block";
+            noResetsDiv.style.display = "none";
+          } else {
+            /* Fallback to localStorage for same-browser flows */
+            var lastReset = localStorage.getItem("lastPasswordReset");
+            if (lastReset) {
+              try {
+                var data = JSON.parse(lastReset);
+                document.getElementById("last-reset-user").textContent =
+                  " " + data.user + " ";
+                document.getElementById("last-reset-time").textContent =
+                  "at " + new Date(data.timestamp).toLocaleString();
+                statusDiv.style.display = "block";
+                noResetsDiv.style.display = "none";
+              } catch(e) {}
+            }
+          }
+        })();
+      </script>
+    </body>
+    </html>
+  admin-reset-index.html: |
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <title>Admin Portal - Reset Password</title>
+    </head>
+    <body>
+      <h1>Reset Password</h1>
+      <p>Resetting password for: <strong id="target-user">unknown</strong></p>
+      <p><a href="/admin/users/">Back to user list</a></p>
+      <form id="reset-form" onsubmit="return doReset(event)">
+        <label for="new-password">New password</label>
+        <input id="new-password" name="new_password" type="password" autocomplete="off">
+        <label for="confirm-password">Confirm password</label>
+        <input id="confirm-password" name="confirm_password" type="password" autocomplete="off">
+        <button id="confirm-reset" type="submit">Confirm reset</button>
+      </form>
+      <p id="reset-status" role="status"></p>
+      <script>
+        /* Read the target user and new password from the query string.
+           Legacy admin panels often accept pre-filled URLs for batch
+           operations — the operator constructs the URL and the page
+           auto-fills the form. */
+        var params = new URLSearchParams(window.location.search);
+        var targetUser = params.get("user") || "unknown";
+        var newPw = params.get("newpw") || "";
+        document.getElementById("target-user").textContent = targetUser;
+        if (newPw) {
+          document.getElementById("new-password").value = newPw;
+          document.getElementById("confirm-password").value = newPw;
+        }
+        function doReset(event) {
+          event.preventDefault();
+          var np = document.getElementById("new-password").value;
+          var cp = document.getElementById("confirm-password").value;
+          if (!np || np !== cp) {
+            document.getElementById("reset-status").textContent =
+              "Error: passwords do not match.";
+            return false;
+          }
+          document.getElementById("reset-form").style.display = "none";
+          document.getElementById("reset-status").textContent =
+            "Password for " + targetUser + " has been reset successfully.";
+          var resetTime = new Date().toISOString();
+          var link = document.createElement("a");
+          link.href = "/admin/users/reset/done/?user=" + encodeURIComponent(targetUser) + "&at=" + encodeURIComponent(resetTime);
+          link.textContent = "View confirmation";
+          document.getElementById("reset-status").appendChild(document.createElement("br"));
+          document.getElementById("reset-status").appendChild(link);
+          /* Record the reset so the user management page can show it.
+             Uses both localStorage (same-browser) and URL params (cross-browser). */
+          try {
+            localStorage.setItem("lastPasswordReset", JSON.stringify({
+              user: targetUser,
+              timestamp: resetTime
+            }));
+          } catch(e) {}
+          return false;
+        }
+        /* Auto-submit when both fields are pre-filled via URL params
+           (legacy batch-operation pattern). */
+        if (newPw && targetUser !== "unknown") {
+          setTimeout(function() {
+            var np = document.getElementById("new-password").value;
+            var cp = document.getElementById("confirm-password").value;
+            if (np && np === cp) {
+              doReset(new Event("submit"));
+            }
+          }, 200);
+        }
+      </script>
+    </body>
+    </html>
+  admin-reset-done-index.html: |
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <title>Admin Portal - Password Reset Confirmation</title>
+    </head>
+    <body>
+      <h1>Password Reset Confirmation</h1>
+      <p id="confirmation-message">Password has been reset successfully.</p>
+      <p>Timestamp: <span id="reset-timestamp"></span></p>
+      <p><a id="back-to-users" href="/admin/users/">Back to user list</a></p>
+      <script>
+        var params = new URLSearchParams(window.location.search);
+        var targetUser = params.get("user") || "unknown";
+        var resetTime = params.get("at") || new Date().toISOString();
+        document.getElementById("confirmation-message").textContent =
+          "Password for " + targetUser + " has been reset successfully.";
+        document.getElementById("reset-timestamp").textContent =
+          new Date(resetTime).toISOString();
+        /* Link back to user list with the reset info in URL for cross-browser verification */
+        document.getElementById("back-to-users").href =
+          "/admin/users/?reset=" + encodeURIComponent(targetUser) + "&at=" + encodeURIComponent(resetTime);
+      </script>
+    </body>
+    </html>

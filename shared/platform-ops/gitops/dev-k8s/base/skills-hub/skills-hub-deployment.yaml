@@ -64,6 +64,14 @@ spec:
             - name: skills-platform-runbooks
               mountPath: /skills/platform-runbooks
               readOnly: true
+            # Tutorial sample skills (SPEC-050 R-11): an optional ConfigMap
+            # populated out-of-band by `make deploy-samples`, not by the base
+            # overlay. Absent by default so the platform deploys cleanly with
+            # no samples installed; the `samples` local source ingests
+            # whatever lands here.
+            - name: skills-samples
+              mountPath: /skills/samples
+              readOnly: true
             # Disposable cache for git-source checkouts (empty by default in
             # dev; no persistence needed — sync re-materializes on startup).
             - name: skills-data
@@ -101,5 +109,13 @@ spec:
                 path: guides/PodSchedulingFailures.md
               - key: web-checks-InventoryHealth.md
                 path: web-checks/InventoryHealth.md
+        # Tutorial sample skills (SPEC-050 R-11): optional ConfigMap created
+        # out-of-band by `make deploy-samples`. Keys mount flat (no `items`)
+        # so the base stays sample-agnostic; absent by default, which leaves
+        # /skills/samples empty and the `samples` source ingests nothing.
+        - name: skills-samples
+          configMap:
+            name: skills-samples
+            optional: true
         - name: skills-data
           emptyDir: {}

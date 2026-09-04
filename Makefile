@@ -21,6 +21,13 @@ GITOPS_DIR := shared/platform-ops/gitops
 
 # End-to-end demo scripts run against a deployed cluster via `make e2e`.
 E2E_DIR := shared/platform-ops/e2e
+
+# Self-contained tutorial samples; installed into the dev cluster out-of-band
+# via `make deploy-samples` so the base overlay never names a sample (SPEC-050 R-11).
+SAMPLES_DIR := samples
+# Target namespace for cluster-facing sample helpers.
+NAMESPACE ?= dev-luban-aiops
+
 OVERLAYS := dev-k8s \
 	runtime-profiles/default \
 	runtime-profiles/mutating-dev \
@@ -170,6 +177,14 @@ verify: test overlays validate-policy validate-policy-scenarios validate-version
 .PHONY: deploy
 deploy: ## Deploy the dev-k8s overlay to the current cluster (wraps deploy.sh)
 	@$(GITOPS_DIR)/dev-k8s/deploy.sh
+
+.PHONY: deploy-samples
+deploy-samples: ## Install tutorial sample skills into the dev cluster (SAMPLE=<path> selects one; default all)
+	@SAMPLE="$(SAMPLE)" $(SAMPLES_DIR)/deploy-samples.sh $(NAMESPACE)
+
+.PHONY: undeploy-samples
+undeploy-samples: ## Remove all tutorial sample skills from the dev cluster
+	@ACTION=undeploy $(SAMPLES_DIR)/deploy-samples.sh $(NAMESPACE)
 
 .PHONY: e2e
 e2e: ## Run the e2e demo scripts against the deployed dev cluster

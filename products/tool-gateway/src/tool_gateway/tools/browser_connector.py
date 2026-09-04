@@ -40,10 +40,12 @@ caller) the connector falls back to the verified subject.
 from __future__ import annotations
 
 import base64
+import json
 import logging
+import os
 import re
 import time
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse, urlsplit, urlunsplit
 
 import httpx
 
@@ -146,6 +148,59 @@ def origin_of(url: str) -> str | None:
     return f"{parsed.scheme}://{parsed.netloc}".lower()
 
 
+# Query-string parameter names whose values are secret-bearing and must
+# never enter results, evidence, or the audit trail in plaintext
+# (SPEC-049 R-5). Matched case-insensitively as a substring of the
+# parameter name, so ``newpw``/``newPassword``/``user_password`` all match.
+_SECRET_QUERY_PARAMS: tuple[str, ...] = (
+    "password", "passwd", "pwd", "newpw", "oldpw", "secret", "token",
+    "apikey", "api_key", "accesskey", "access_key", "privatekey",
+    "private_key", "credential", "otp", "cvv", "ssn", "sessionid",
+    "session_id", "signature",
+)
+
+
+def _is_secret_param(name: str) -> bool:
+    lowered = name.lower()
+    return any(secret in lowered for secret in _SECRET_QUERY_PARAMS)
+
+
+def _redact_secret_query(url: str) -> str:
+    """Mask secret-bearing query-param values in a URL for evidence.
+
+    The password-reset demo passes the new password as a query parameter
+    (``?newpw=...``) so the legacy target can auto-fill it; the real value
+    must reach the page but must never be serialized into results,
+    evidence, or the audit trail (SPEC-049 R-5). Only the value is masked
+    (to ``***``); the key stays so the URL shape is still visible. The raw
+    query is rewritten segment-by-segment so every non-secret byte is
+    preserved exactly (no re-encoding). A URL with no secret-bearing params
+    is returned unchanged.
+    """
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return url
+    if not parsed.query:
+        return url
+    changed = False
+    segments: list[str] = []
+    for segment in parsed.query.split("&"):
+        key, sep, _value = segment.partition("=")
+        # A bare key with no '=' carries no value to leak; leave it as-is.
+        if sep and _is_secret_param(unquote(key)):
+            segments.append(f"{key}{sep}***")
+            changed = True
+        else:
+            segments.append(segment)
+    if not changed:
+        return url
+    return urlunsplit((
+        parsed.scheme, parsed.netloc, parsed.path,
+        "&".join(segments), parsed.fragment,
+    ))
+
+
 def _denied(tool_name: str, code: str, message: str, risk_level: str) -> ToolResult:
     """Denial envelope with a connector-specific code (R-2/R-4)."""
     return ToolResult(
@@ -172,6 +227,7 @@ class BrowserConnector:
         skills_client_id: str = "",
         skills_client_secret: str = "",
         playwright_factory=None,
+        upload_dir: str = "/tmp/browser-uploads",
     ) -> None:
         # Origins compare normalized and lowercase; patterns in config are
         # trusted operator input but normalized defensively.
@@ -180,6 +236,7 @@ class BrowserConnector:
         )
         self._flow_max_steps = flow_max_steps
         self._screenshot_max_bytes = screenshot_max_bytes
+        self._upload_dir = upload_dir
         self._skills_url = skills_service_url
         self._skills_client_id = skills_client_id
         self._skills_client_secret = skills_client_secret
@@ -205,13 +262,30 @@ class BrowserConnector:
         The write-tier interaction tools are offered unconditionally; the
         registry's risk-tier admission (SPEC-021 R-1) refuses them when
         GATEWAY_MUTATING_TOOLS_ENABLED is off, exactly like k8s.delete_pod.
+        SPEC-050 adds nine more tools (web.select, web.press_key,
+        web.upload_file, web.evaluate as write; web.extract, web.wait_for,
+        web.hover, web.scroll, web.switch_frame as read).
         """
+        # Original six (SPEC-049).
         registry.register(WebNavigateTool(self))
         registry.register(WebSnapshotTool(self))
         registry.register(WebScreenshotTool(self))
         registry.register(WebFillCredentialTool(self))
         registry.register(WebClickTool(self))
         registry.register(WebTypeTool(self))
+        # SPEC-050: write-tier interaction tools. web.evaluate is write-tier
+        # because arbitrary JS can mutate the DOM and read back masked
+        # secrets, so it inherits the HITL gate (SPEC-050 R-6).
+        registry.register(WebSelectTool(self))
+        registry.register(WebPressKeyTool(self))
+        registry.register(WebUploadFileTool(self))
+        registry.register(WebEvaluateTool(self))
+        # SPEC-050: read-tier observation tools.
+        registry.register(WebExtractTool(self))
+        registry.register(WebWaitForTool(self))
+        registry.register(WebHoverTool(self))
+        registry.register(WebScrollTool(self))
+        registry.register(WebSwitchFrameTool(self))
 
     # --- Enforcement surfaces ---
 
@@ -365,9 +439,11 @@ class BrowserConnector:
         # R-4 deviation guard: the interaction must land on the origin the
         # flow was bound to (and the operator approved). A plain navigate to
         # another allowlisted origin leaves the flow bound, so re-check the
-        # live page origin here — an off-origin interaction is refused, never
-        # run under an approval that named a different target.
-        current_origin = origin_of(entry.page.url)
+        # live origin here — an off-origin interaction is refused, never run
+        # under an approval that named a different target. Uses
+        # ``entry.active_target`` so a frame-switched session checks the
+        # frame's origin, not the top-level page's (SPEC-050 R-9).
+        current_origin = origin_of(entry.active_target.url)
         if current_origin is None or current_origin != flow.origin:
             return _denied(
                 tool_name, "BROWSER_FLOW_ORIGIN_DEVIATED",
@@ -405,8 +481,11 @@ class BrowserConnector:
         An off-allowlist page is halted (as the navigate redirect guard
         does) and refused; an off-flow but allowlisted page is refused
         without a halt. Returns None when the capture may proceed.
+
+        Uses ``entry.active_target`` so frame-switched reads check the
+        frame's URL (SPEC-050 R-9).
         """
-        live_url = entry.page.url
+        live_url = entry.active_target.url
         if not self.is_origin_allowed(live_url):
             offending = origin_of(live_url) or live_url
             try:
@@ -575,7 +654,14 @@ class WebNavigateTool(BaseTool):
             )
 
         entry.reset_page_state()
-        data: dict = {"url": final_url, "title": await entry.page.title()}
+        # Redact secret-bearing query params (e.g. the demo's ``?newpw=...``)
+        # so a plaintext credential never enters results/evidence/audit
+        # (SPEC-049 R-5). The page still navigated with the real value; only
+        # the reported URL is masked.
+        data: dict = {
+            "url": _redact_secret_query(final_url),
+            "title": await entry.page.title(),
+        }
         if entry.flow is not None:
             data["flow"] = entry.flow.to_dict()
         return ToolResult(
@@ -633,8 +719,8 @@ class WebSnapshotTool(BaseTool):
             tool_name="web.snapshot",
             status="success",
             data={
-                "url": entry.page.url,
-                "title": await entry.page.title(),
+                "url": entry.active_target.url,
+                "title": await entry.active_target.title(),
                 "elements": count,
                 "snapshot": snapshot_text,
             },
@@ -643,11 +729,16 @@ class WebSnapshotTool(BaseTool):
 
 
 async def _build_snapshot(entry: BrowserSessionEntry) -> tuple[str, int]:
-    """Enumerate interactive elements into addressable, masked refs (R-5)."""
-    elements = await entry.page.query_selector_all(INTERACTIVE_SELECTOR)
+    """Enumerate interactive elements into addressable, masked refs (R-5).
+
+    Uses ``entry.active_target`` so a frame-switched session snapshots the
+    frame's interactive elements rather than the main page (SPEC-050 R-9).
+    """
+    target = entry.active_target
+    elements = await target.query_selector_all(INTERACTIVE_SELECTOR)
     elements = elements[:MAX_SNAPSHOT_ELEMENTS]
     entry.refs = elements
-    lines = [f"URL: {entry.page.url}", ""]
+    lines = [f"URL: {target.url}", ""]
     for index, element in enumerate(elements, start=1):
         info = await element.evaluate(_ELEMENT_INSPECT_JS)
         if not isinstance(info, dict):
@@ -732,8 +823,8 @@ class WebScreenshotTool(BaseTool):
             tool_name="web.screenshot",
             status="success",
             data={
-                "title": await entry.page.title(),
-                "url": entry.page.url,
+                "title": await entry.active_target.title(),
+                "url": entry.active_target.url,
                 "format": "jpeg",
                 "bytes": len(raw),
                 "screenshot": base64.b64encode(raw).decode("ascii"),
@@ -820,7 +911,10 @@ class _WebInteractionTool(BaseTool):
         flow.approved = True
         duration_ms = int((time.perf_counter() - start) * 1000)
         data = {
-            "url": entry.page.url,
+            # Report the frame the interaction actually landed on, not the
+            # top-level page, so evidence matches a frame-switched session
+            # (SPEC-050 R-9).
+            "url": entry.active_target.url,
             "steps_used": flow.steps_used,
             "steps_budget": flow.max_steps,
         }
@@ -1059,4 +1153,1038 @@ class WebFillCredentialTool(_WebInteractionTool):
             entry.secret_values.add(value)
         return self._step_result(
             entry, start, {"filled": field, "credential_set": set_name}
+        )
+
+
+# --- SPEC-050: write-tier interaction tools ---------------------------------
+
+
+class WebSelectTool(_WebInteractionTool):
+    """Select a dropdown option by snapshot ref (SPEC-050 R-1)."""
+
+    tool_name = "web.select"
+    risk_level = "write"
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="web.select",
+            description=(
+                "Select an option from a <select> element identified by a "
+                "web.snapshot ref inside a bound, approved write-class "
+                "web-check flow. This is a mutating action and requires "
+                "operator confirmation."
+            ),
+            risk_level="write",
+            category=CATEGORY,
+            parameters_schema={
+                "type": "object",
+                "required": ["ref", "value"],
+                "properties": {
+                    "ref": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Element ref from the latest web.snapshot.",
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": (
+                            "Option value or visible text to select."
+                        ),
+                    },
+                },
+            },
+        )
+
+    async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+        start = time.perf_counter()
+        entry, error = await self._connector._resolve_session(
+            self.tool_name, identity, "write"
+        )
+        if error is not None:
+            return error
+        assert entry is not None
+        value = parameters.get("value")
+        if not isinstance(value, str) or not value:
+            return make_error_result(
+                self.tool_name, "INVALID_PARAMETERS",
+                "Parameter 'value' must be a non-empty string.",
+                risk_level="write", source_system=SOURCE_SYSTEM,
+            )
+        handle, guard = await self._guarded_handle(entry, parameters)
+        if guard is not None:
+            return guard
+        try:
+            await handle.select_option(value)
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            msg = str(exc)
+            code = "BROWSER_ACTION_ERROR"
+            if "not a select" in msg.lower():
+                code = "BROWSER_SELECT_NOT_A_SELECT"
+            elif "not found" in msg.lower():
+                code = "BROWSER_SELECT_OPTION_NOT_FOUND"
+            LOGGER.warning("web.select failed: %s", exc)
+            return make_error_result(
+                self.tool_name, code, msg,
+                risk_level="write", source_system=SOURCE_SYSTEM,
+                duration_ms=duration_ms,
+            )
+        return self._step_result(
+            entry, start, {"selected": value},
+        )
+
+
+class WebPressKeyTool(BaseTool):
+    """Press a keyboard key (SPEC-050 R-4).
+
+    Write tier: parks a HITL confirmation card. Accepts an optional ref;
+    when present the element is focused first. Without a ref the key is
+    pressed on the active page/frame target.
+    """
+
+    tool_name = "web.press_key"
+    risk_level = "write"
+
+    def __init__(self, connector: BrowserConnector) -> None:
+        self._connector = connector
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="web.press_key",
+            description=(
+                "Press a keyboard key or combination inside a bound, "
+                "approved write-class web-check flow. Optionally focus "
+                "an element by snapshot ref first. This is a mutating "
+                "action and requires operator confirmation."
+            ),
+            risk_level="write",
+            category=CATEGORY,
+            parameters_schema={
+                "type": "object",
+                "required": ["key"],
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": (
+                            "Playwright key name (e.g. Enter, Escape, Tab)."
+                        ),
+                    },
+                    "ref": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": (
+                            "Optional element ref to focus before pressing."
+                        ),
+                    },
+                },
+            },
+        )
+
+    async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+        start = time.perf_counter()
+        connector = self._connector
+        entry, error = await connector._resolve_session(
+            self.tool_name, identity, "write"
+        )
+        if error is not None:
+            return error
+        assert entry is not None
+        key = parameters.get("key")
+        if not isinstance(key, str) or not key:
+            return make_error_result(
+                self.tool_name, "INVALID_PARAMETERS",
+                "Parameter 'key' must be a non-empty string.",
+                risk_level="write", source_system=SOURCE_SYSTEM,
+            )
+        # Deviation guard (flow binding, origin, step budget).
+        gate = connector.gate_interaction(
+            entry, self.tool_name, require_write_class=True,
+        )
+        if gate is not None:
+            return gate
+        ref = parameters.get("ref")
+        if ref is not None:
+            handle, ref_error = _resolve_ref(entry, self.tool_name, ref)
+            if ref_error is not None:
+                return ref_error
+            try:
+                await handle.focus()
+            except Exception:  # noqa: BLE001 - focus is best-effort
+                pass
+        target = entry.active_target
+        try:
+            # Keyboard input always dispatches through the Page object;
+            # it reaches the focused element regardless of frame context.
+            # Playwright Frame objects do not expose .keyboard.
+            await entry.page.keyboard.press(key)
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            LOGGER.warning("web.press_key failed: %s", exc)
+            return make_error_result(
+                self.tool_name, "BROWSER_ACTION_ERROR", str(exc),
+                risk_level="write", source_system=SOURCE_SYSTEM,
+                duration_ms=duration_ms,
+            )
+        flow = entry.flow
+        assert flow is not None
+        flow.steps_used += 1
+        flow.approved = True
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        return ToolResult(
+            tool_name=self.tool_name,
+            status="success",
+            data={
+                "url": target.url,
+                "key": key,
+                "steps_used": flow.steps_used,
+                "steps_budget": flow.max_steps,
+            },
+            evidence=build_evidence("write", SOURCE_SYSTEM, duration_ms),
+        )
+
+
+class WebUploadFileTool(_WebInteractionTool):
+    """Upload a file via an <input type=file> (SPEC-050 R-8).
+
+    The filename is resolved against the configured upload directory;
+    path traversal is denied.
+    """
+
+    tool_name = "web.upload_file"
+    risk_level = "write"
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="web.upload_file",
+            description=(
+                "Upload a file to an <input type=file> element identified "
+                "by a web.snapshot ref inside a bound, approved write-class "
+                "web-check flow. The file must reside in the configured "
+                "upload directory. This is a mutating action and requires "
+                "operator confirmation."
+            ),
+            risk_level="write",
+            category=CATEGORY,
+            parameters_schema={
+                "type": "object",
+                "required": ["ref", "filename"],
+                "properties": {
+                    "ref": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Element ref from the latest web.snapshot.",
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": (
+                            "Name of a file in the configured upload directory."
+                        ),
+                    },
+                },
+            },
+        )
+
+    async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+        start = time.perf_counter()
+        entry, error = await self._connector._resolve_session(
+            self.tool_name, identity, "write"
+        )
+        if error is not None:
+            return error
+        assert entry is not None
+        filename = parameters.get("filename")
+        if not isinstance(filename, str) or not filename:
+            return make_error_result(
+                self.tool_name, "INVALID_PARAMETERS",
+                "Parameter 'filename' must be a non-empty string.",
+                risk_level="write", source_system=SOURCE_SYSTEM,
+            )
+        if "/" in filename or "\\" in filename or ".." in filename:
+            return make_error_result(
+                self.tool_name, "BROWSER_UPLOAD_PATH_NOT_ALLOWED",
+                "Filename must not contain path separators or traversal.",
+                risk_level="write", source_system=SOURCE_SYSTEM,
+            )
+        handle, guard = await self._guarded_handle(entry, parameters)
+        if guard is not None:
+            return guard
+        # Verify the element is a file input.
+        info = await handle.evaluate(_ELEMENT_INSPECT_JS)
+        if not isinstance(info, dict) or info.get("type") != "file":
+            return make_error_result(
+                self.tool_name, "BROWSER_UPLOAD_NOT_A_FILE_INPUT",
+                "The referenced element is not an <input type=file>.",
+                risk_level="write", source_system=SOURCE_SYSTEM,
+            )
+        upload_dir = self._connector._upload_dir
+        if not upload_dir:
+            return make_error_result(
+                self.tool_name, "BROWSER_UPLOAD_NOT_CONFIGURED",
+                "No upload directory is configured.",
+                risk_level="write", source_system=SOURCE_SYSTEM,
+            )
+        file_path = os.path.realpath(
+            os.path.join(upload_dir, filename)
+        )
+        allowed_dir = os.path.realpath(upload_dir)
+        if not file_path.startswith(allowed_dir + os.sep) and file_path != allowed_dir:
+            return make_error_result(
+                self.tool_name, "BROWSER_UPLOAD_PATH_NOT_ALLOWED",
+                "The file path escapes the configured upload directory.",
+                risk_level="write", source_system=SOURCE_SYSTEM,
+            )
+        if not os.path.isfile(file_path):
+            return make_error_result(
+                self.tool_name, "BROWSER_UPLOAD_FILE_NOT_FOUND",
+                f"File '{filename}' was not found in the upload directory.",
+                risk_level="write", source_system=SOURCE_SYSTEM,
+            )
+        try:
+            await handle.set_input_files(file_path)
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            LOGGER.warning("web.upload_file failed: %s", exc)
+            return make_error_result(
+                self.tool_name, "BROWSER_ACTION_ERROR", str(exc),
+                risk_level="write", source_system=SOURCE_SYSTEM,
+                duration_ms=duration_ms,
+            )
+        return self._step_result(
+            entry, start, {"uploaded": filename},
+        )
+
+
+# --- SPEC-050: read-tier observation tools ----------------------------------
+
+
+class WebExtractTool(BaseTool):
+    """Extract structured data from DOM elements (SPEC-050 R-2)."""
+
+    tool_name = "web.extract"
+    risk_level = "read"
+
+    def __init__(self, connector: BrowserConnector) -> None:
+        self._connector = connector
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="web.extract",
+            description=(
+                "Extract structured data from DOM elements matching a CSS "
+                "selector. For <table> elements returns headers and rows; "
+                "for other elements returns a list of text items."
+            ),
+            risk_level="read",
+            category=CATEGORY,
+            parameters_schema={
+                "type": "object",
+                "required": ["selector"],
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector for the elements to extract.",
+                    },
+                    "max_rows": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "description": (
+                            "Maximum rows to extract (default 100, cap 500)."
+                        ),
+                    },
+                },
+            },
+        )
+
+    async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+        start = time.perf_counter()
+        connector = self._connector
+        entry, error = await connector._resolve_session(
+            self.tool_name, identity, "read"
+        )
+        if error is not None:
+            return error
+        assert entry is not None
+        selector = parameters.get("selector")
+        if not isinstance(selector, str) or not selector:
+            return make_error_result(
+                self.tool_name, "INVALID_PARAMETERS",
+                "Parameter 'selector' must be a non-empty string.",
+                source_system=SOURCE_SYSTEM,
+            )
+        max_rows = min(
+            int(parameters.get("max_rows", 100) or 100), 500
+        )
+        gate = await connector.gate_capture(entry, self.tool_name)
+        if gate is not None:
+            return gate
+        target = entry.active_target
+        try:
+            elements = await target.query_selector_all(selector)
+            elements = elements[:max_rows]
+            if not elements:
+                data = {"items": [], "count": 0}
+            else:
+                # Check if the first element is a table.
+                first_info = await elements[0].evaluate(_ELEMENT_INSPECT_JS)
+                tag = (
+                    first_info.get("tag", "")
+                    if isinstance(first_info, dict) else ""
+                )
+                if tag == "table":
+                    data = await _extract_table(elements[0], max_rows)
+                else:
+                    items = []
+                    for el in elements:
+                        info = await el.evaluate(_ELEMENT_INSPECT_JS)
+                        text = (
+                            info.get("text", "")
+                            if isinstance(info, dict) else ""
+                        )
+                        items.append(text[:200])
+                    data = {"items": items, "count": len(items)}
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            LOGGER.warning("web.extract failed: %s", exc)
+            return make_error_result(
+                self.tool_name, "BROWSER_EXTRACT_ERROR", str(exc),
+                source_system=SOURCE_SYSTEM, duration_ms=duration_ms,
+            )
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        return ToolResult(
+            tool_name=self.tool_name,
+            status="success",
+            data=data,
+            evidence=build_evidence("read", SOURCE_SYSTEM, duration_ms),
+        )
+
+
+async def _extract_table(table_el, max_rows: int) -> dict:
+    """Extract headers and rows from a <table> element."""
+    extract_js = """
+    table => {
+        const headers = [];
+        const rows = [];
+        const ths = table.querySelectorAll('thead th, tr:first-child th');
+        ths.forEach(th => headers.push((th.innerText || '').trim().slice(0, 200)));
+        const trs = table.querySelectorAll('tbody tr, tr');
+        let count = 0;
+        for (const tr of trs) {
+            if (count >= %MAX_ROWS%) break;
+            const cells = tr.querySelectorAll('td');
+            if (cells.length === 0) continue;
+            const row = [];
+            cells.forEach(td => row.push((td.innerText || '').trim().slice(0, 200)));
+            rows.push(row);
+            count++;
+        }
+        return {headers, rows, count};
+    }
+    """.replace("%MAX_ROWS%", str(max_rows))
+    result = await table_el.evaluate(extract_js)
+    if not isinstance(result, dict):
+        return {"headers": [], "rows": [], "count": 0}
+    # Bound columns to 50.
+    headers = result.get("headers", [])[:50]
+    rows = [row[:50] for row in result.get("rows", [])]
+    return {
+        "headers": headers,
+        "rows": rows,
+        "count": result.get("count", len(rows)),
+    }
+
+
+class WebWaitForTool(BaseTool):
+    """Wait for an element state (SPEC-050 R-3)."""
+
+    tool_name = "web.wait_for"
+    risk_level = "read"
+
+    def __init__(self, connector: BrowserConnector) -> None:
+        self._connector = connector
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="web.wait_for",
+            description=(
+                "Wait for an element matching a CSS selector to reach a "
+                "specific state (attached, detached, visible, hidden). "
+                "Useful for pages that load data asynchronously."
+            ),
+            risk_level="read",
+            category=CATEGORY,
+            parameters_schema={
+                "type": "object",
+                "required": ["selector"],
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector to wait for.",
+                    },
+                    "state": {
+                        "type": "string",
+                        "enum": ["attached", "detached", "visible", "hidden"],
+                        "description": (
+                            "Element state to wait for (default: visible)."
+                        ),
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 100,
+                        "maximum": 30000,
+                        "description": (
+                            "Timeout in milliseconds (default 5000, cap 30000)."
+                        ),
+                    },
+                },
+            },
+        )
+
+    async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+        start = time.perf_counter()
+        connector = self._connector
+        entry, error = await connector._resolve_session(
+            self.tool_name, identity, "read"
+        )
+        if error is not None:
+            return error
+        assert entry is not None
+        selector = parameters.get("selector")
+        if not isinstance(selector, str) or not selector:
+            return make_error_result(
+                self.tool_name, "INVALID_PARAMETERS",
+                "Parameter 'selector' must be a non-empty string.",
+                source_system=SOURCE_SYSTEM,
+            )
+        state = parameters.get("state", "visible")
+        if state not in ("attached", "detached", "visible", "hidden"):
+            return make_error_result(
+                self.tool_name, "INVALID_PARAMETERS",
+                "Parameter 'state' must be one of: attached, detached, "
+                "visible, hidden.",
+                source_system=SOURCE_SYSTEM,
+            )
+        timeout_ms = min(
+            int(parameters.get("timeout_ms", 5000) or 5000), 30000
+        )
+        gate = await connector.gate_capture(entry, self.tool_name)
+        if gate is not None:
+            return gate
+        target = entry.active_target
+        try:
+            handle = await target.wait_for_selector(
+                selector, state=state, timeout=timeout_ms,
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            LOGGER.warning("web.wait_for timed out: %s", exc)
+            return make_error_result(
+                self.tool_name, "BROWSER_WAIT_TIMEOUT",
+                f"Element '{selector}' did not reach state '{state}' "
+                f"within {timeout_ms}ms.",
+                source_system=SOURCE_SYSTEM, duration_ms=duration_ms,
+            )
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        text = ""
+        if handle is not None:
+            info = await handle.evaluate(_ELEMENT_INSPECT_JS)
+            if isinstance(info, dict):
+                text = info.get("text", "")[:200]
+        return ToolResult(
+            tool_name=self.tool_name,
+            status="success",
+            data={
+                "selector": selector,
+                "state": state,
+                "text": text,
+            },
+            evidence=build_evidence("read", SOURCE_SYSTEM, duration_ms),
+        )
+
+
+class WebHoverTool(BaseTool):
+    """Hover over an element (SPEC-050 R-5)."""
+
+    tool_name = "web.hover"
+    risk_level = "read"
+
+    def __init__(self, connector: BrowserConnector) -> None:
+        self._connector = connector
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="web.hover",
+            description=(
+                "Hover over an element identified by a web.snapshot ref "
+                "to reveal tooltips, dropdown menus, or popover actions."
+            ),
+            risk_level="read",
+            category=CATEGORY,
+            parameters_schema={
+                "type": "object",
+                "required": ["ref"],
+                "properties": {
+                    "ref": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Element ref from the latest web.snapshot.",
+                    },
+                },
+            },
+        )
+
+    async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+        start = time.perf_counter()
+        connector = self._connector
+        entry, error = await connector._resolve_session(
+            self.tool_name, identity, "read"
+        )
+        if error is not None:
+            return error
+        assert entry is not None
+        gate = await connector.gate_capture(entry, self.tool_name)
+        if gate is not None:
+            return gate
+        handle, ref_error = _resolve_ref(entry, self.tool_name, parameters.get("ref"))
+        if ref_error is not None:
+            return ref_error
+        try:
+            await handle.hover()
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            LOGGER.warning("web.hover failed: %s", exc)
+            return make_error_result(
+                self.tool_name, "BROWSER_ACTION_ERROR", str(exc),
+                source_system=SOURCE_SYSTEM, duration_ms=duration_ms,
+            )
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        info = await handle.evaluate(_ELEMENT_INSPECT_JS)
+        tag = info.get("tag", "element") if isinstance(info, dict) else "element"
+        return ToolResult(
+            tool_name=self.tool_name,
+            status="success",
+            data={
+                "url": entry.active_target.url,
+                "tag": tag,
+            },
+            evidence=build_evidence("read", SOURCE_SYSTEM, duration_ms),
+        )
+
+
+class WebEvaluateTool(BaseTool):
+    """Execute JavaScript in the page context (SPEC-050 R-6).
+
+    Write tier: arbitrary JS can mutate the DOM and read back masked
+    credential values, so every invocation inherits the SPEC-020/037 HITL
+    gate — the operator confirms before any script runs. The pre-execution
+    mutation guard below is defense-in-depth only: it rejects expressions
+    containing known state-changing DOM APIs to steer the agent toward the
+    dedicated ref-addressed write tools, but it is NOT the security
+    boundary (a regex denylist over arbitrary JS source cannot be).
+    """
+
+    tool_name = "web.evaluate"
+    risk_level = "write"
+
+    # Patterns that indicate a mutating operation. Checked case-insensitively
+    # against the raw expression before execution as defense-in-depth (the
+    # write-tier HITL gate is the real boundary). Deliberately broad: a
+    # false-positive (rejecting a benign read) is safe and merely steers the
+    # agent to the dedicated write tools.
+    _MUTATION_PATTERNS: tuple[str, ...] = (
+        # DOM action methods
+        r"\.click\s*\(",
+        r"\.submit\s*\(",
+        r"\.requestSubmit\s*\(",
+        r"\.focus\s*\(",
+        r"\.blur\s*\(",
+        r"\.reset\s*\(",
+        r"\.remove\s*\(",
+        r"\.appendChild\s*\(",
+        r"\.append\s*\(",
+        r"\.prepend\s*\(",
+        r"\.insertBefore\s*\(",
+        r"\.insertAdjacentHTML\s*\(",
+        r"\.insertAdjacentElement\s*\(",
+        r"\.replaceChild\s*\(",
+        r"\.replaceWith\s*\(",
+        r"\.setAttribute\s*\(",
+        r"\.removeAttribute\s*\(",
+        # Assignment patterns: single = only (not == or ===)
+        r"\.value\s*=(?!=)",
+        r"\.checked\s*=(?!=)",
+        r"\.disabled\s*=(?!=)",
+        r"\.selected\s*=(?!=)",
+        r"\.selectedIndex\s*=(?!=)",
+        r"\.innerHTML\s*=(?!=)",
+        r"\.outerHTML\s*=(?!=)",
+        r"\.textContent\s*=(?!=)",
+        r"\.innerText\s*=(?!=)",
+        r"\.href\s*=(?!=)",
+        r"\.src\s*=(?!=)",
+        r"\.action\s*=(?!=)",
+        r"\.className\s*=(?!=)",
+        r"\.id\s*=(?!=)",
+        r"\.title\s*=(?!=)",
+        # classList mutating methods only (contains/item are reads)
+        r"\.classList\.(add|remove|toggle|replace)\s*\(",
+        # Network / side-effect APIs
+        r"\bfetch\s*\(",
+        r"\bXMLHttpRequest\b",
+        r"\bsendBeacon\s*\(",
+        r"\.dispatchEvent\s*\(",
+        # Scroll methods (mutate viewport)
+        r"\.scrollTo\s*\(",
+        r"\.scrollBy\s*\(",
+        r"\.scrollIntoView\s*\(",
+        # Navigation
+        r"\bwindow\.location\s*=(?!=)",
+        r"\blocation\.assign\s*\(",
+        r"\blocation\.replace\s*\(",
+        r"\blocation\.reload\s*\(",
+        r"\bhistory\.(pushState|replaceState|go|back|forward)\s*\(",
+        r"\bwindow\.open\s*\(",
+        # Document mutation
+        r"\bdocument\.write\s*\(",
+        r"\bdocument\.writeln\s*\(",
+        # Dialogs (block execution, social engineering vector)
+        r"\balert\s*\(",
+        r"\bconfirm\s*\(",
+        r"\bprompt\s*\(",
+        # Dynamic code execution
+        r"\bnew\s+Function\b",
+        r"\beval\s*\(",
+        r"\bsetTimeout\s*\(",
+        r"\bsetInterval\s*\(",
+        r"\brequestAnimationFrame\s*\(",
+        r"\bimport\s*\(",
+        # Storage writes
+        r"\blocalStorage\.(setItem|removeItem|clear)\s*\(",
+        r"\bsessionStorage\.(setItem|removeItem|clear)\s*\(",
+        r"\bdocument\.cookie\s*=(?!=)",
+    )
+
+    def __init__(self, connector: BrowserConnector) -> None:
+        self._connector = connector
+        self._mutation_re = re.compile(
+            "|".join(self._MUTATION_PATTERNS), re.IGNORECASE
+        )
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="web.evaluate",
+            description=(
+                "Execute a JavaScript expression in the page context and "
+                "return the result (bounded to 16000 chars). Write tier: "
+                "arbitrary JS can mutate the DOM and read masked secrets, "
+                "so each call requires operator confirmation."
+            ),
+            risk_level="write",
+            category=CATEGORY,
+            parameters_schema={
+                "type": "object",
+                "required": ["expression"],
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "JavaScript expression to evaluate.",
+                    },
+                },
+            },
+        )
+
+    async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+        start = time.perf_counter()
+        connector = self._connector
+        entry, error = await connector._resolve_session(
+            self.tool_name, identity, self.risk_level
+        )
+        if error is not None:
+            return error
+        assert entry is not None
+        expression = parameters.get("expression")
+        if not isinstance(expression, str) or not expression:
+            return make_error_result(
+                self.tool_name, "INVALID_PARAMETERS",
+                "Parameter 'expression' must be a non-empty string.",
+                risk_level=self.risk_level, source_system=SOURCE_SYSTEM,
+            )
+        # Pre-execution mutation guard (defense-in-depth): reject expressions
+        # that contain known state-changing DOM APIs so the agent is steered
+        # to the dedicated ref-addressed write tools. The write-tier HITL
+        # gate — not this regex — is the actual security boundary.
+        match = self._mutation_re.search(expression)
+        if match:
+            return make_error_result(
+                self.tool_name, "BROWSER_EVAL_MUTATION_BLOCKED",
+                f"Expression rejected: contains mutating operation "
+                f"'{match.group(0).strip()}'. Use the dedicated write-tier "
+                f"tools (web.click, web.type, etc.) for DOM mutations so "
+                f"the action is ref-addressed and auditable.",
+                risk_level=self.risk_level, source_system=SOURCE_SYSTEM,
+            )
+        gate = await connector.gate_capture(entry, self.tool_name)
+        if gate is not None:
+            return gate
+        target = entry.active_target
+        try:
+            raw = await target.evaluate(expression)
+        except TypeError:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            return make_error_result(
+                self.tool_name, "BROWSER_EVAL_NOT_SERIALIZABLE",
+                "The expression result is not JSON-serializable.",
+                risk_level=self.risk_level, source_system=SOURCE_SYSTEM,
+                duration_ms=duration_ms,
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            LOGGER.warning("web.evaluate failed: %s", exc)
+            return make_error_result(
+                self.tool_name, "BROWSER_EVAL_ERROR", str(exc),
+                risk_level=self.risk_level, source_system=SOURCE_SYSTEM,
+                duration_ms=duration_ms,
+            )
+        # Serialize and bound the result.
+        try:
+            serialized = json.dumps(raw, default=str)
+        except (TypeError, ValueError):
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            return make_error_result(
+                self.tool_name, "BROWSER_EVAL_NOT_SERIALIZABLE",
+                "The expression result could not be serialized to JSON.",
+                risk_level=self.risk_level, source_system=SOURCE_SYSTEM,
+                duration_ms=duration_ms,
+            )
+        if len(serialized) > SNAPSHOT_MAX_CHARS:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            return make_error_result(
+                self.tool_name, "BROWSER_EVAL_RESULT_TOO_LARGE",
+                f"The result ({len(serialized)} chars) exceeds the "
+                f"{SNAPSHOT_MAX_CHARS}-char cap.",
+                risk_level=self.risk_level, source_system=SOURCE_SYSTEM,
+                duration_ms=duration_ms,
+            )
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        return ToolResult(
+            tool_name=self.tool_name,
+            status="success",
+            data={
+                "url": entry.active_target.url,
+                "result": raw,
+                "bytes": len(serialized),
+            },
+            evidence=build_evidence(self.risk_level, SOURCE_SYSTEM, duration_ms),
+        )
+
+
+class WebScrollTool(BaseTool):
+    """Scroll the page (SPEC-050 R-7)."""
+
+    tool_name = "web.scroll"
+    risk_level = "read"
+
+    def __init__(self, connector: BrowserConnector) -> None:
+        self._connector = connector
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="web.scroll",
+            description=(
+                "Scroll the page by the given pixel offsets."
+            ),
+            risk_level="read",
+            category=CATEGORY,
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "delta_x": {
+                        "type": "integer",
+                        "description": "Horizontal scroll offset (default 0).",
+                    },
+                    "delta_y": {
+                        "type": "integer",
+                        "description": "Vertical scroll offset (default 300).",
+                    },
+                },
+            },
+        )
+
+    async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+        start = time.perf_counter()
+        connector = self._connector
+        entry, error = await connector._resolve_session(
+            self.tool_name, identity, "read"
+        )
+        if error is not None:
+            return error
+        assert entry is not None
+        delta_x = parameters.get("delta_x", 0)
+        delta_y = parameters.get("delta_y", 300)
+        if not isinstance(delta_x, int) or not isinstance(delta_y, int):
+            return make_error_result(
+                self.tool_name, "INVALID_PARAMETERS",
+                "Parameters 'delta_x' and 'delta_y' must be integers.",
+                source_system=SOURCE_SYSTEM,
+            )
+        gate = await connector.gate_capture(entry, self.tool_name)
+        if gate is not None:
+            return gate
+        target = entry.active_target
+        try:
+            # A Page-level mouse wheel scrolls whatever is under the cursor.
+            # When an iframe is the active target, move the cursor to the
+            # frame's center first so the wheel scrolls the frame rather than
+            # the top-level page. Playwright Frame objects do not expose
+            # .mouse, so both the move and the wheel dispatch via the Page.
+            if entry.frame_stack:
+                frame_element = await target.frame_element()
+                box = await frame_element.bounding_box()
+                if box:
+                    await entry.page.mouse.move(
+                        box["x"] + box["width"] / 2,
+                        box["y"] + box["height"] / 2,
+                    )
+            await entry.page.mouse.wheel(delta_x, delta_y)
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            LOGGER.warning("web.scroll failed: %s", exc)
+            return make_error_result(
+                self.tool_name, "BROWSER_ACTION_ERROR", str(exc),
+                source_system=SOURCE_SYSTEM, duration_ms=duration_ms,
+            )
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        return ToolResult(
+            tool_name=self.tool_name,
+            status="success",
+            data={
+                "url": entry.active_target.url,
+                "delta_x": delta_x,
+                "delta_y": delta_y,
+            },
+            evidence=build_evidence("read", SOURCE_SYSTEM, duration_ms),
+        )
+
+
+class WebSwitchFrameTool(BaseTool):
+    """Switch into an iframe (SPEC-050 R-9)."""
+
+    tool_name = "web.switch_frame"
+    risk_level = "read"
+
+    def __init__(self, connector: BrowserConnector) -> None:
+        self._connector = connector
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="web.switch_frame",
+            description=(
+                "Switch the browser context into an iframe identified by "
+                "a CSS selector. Subsequent operations target the frame's "
+                "document. A web.navigate call resets to the main frame."
+            ),
+            risk_level="read",
+            category=CATEGORY,
+            parameters_schema={
+                "type": "object",
+                "required": ["selector"],
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector for the iframe element.",
+                    },
+                },
+            },
+        )
+
+    async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+        start = time.perf_counter()
+        connector = self._connector
+        entry, error = await connector._resolve_session(
+            self.tool_name, identity, "read"
+        )
+        if error is not None:
+            return error
+        assert entry is not None
+        selector = parameters.get("selector")
+        if not isinstance(selector, str) or not selector:
+            return make_error_result(
+                self.tool_name, "INVALID_PARAMETERS",
+                "Parameter 'selector' must be a non-empty string.",
+                source_system=SOURCE_SYSTEM,
+            )
+        gate = await connector.gate_capture(entry, self.tool_name)
+        if gate is not None:
+            return gate
+        target = entry.active_target
+        try:
+            frame_el = await target.query_selector(selector)
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            LOGGER.warning("web.switch_frame failed: %s", exc)
+            return make_error_result(
+                self.tool_name, "BROWSER_FRAME_NOT_FOUND",
+                f"No element matching '{selector}' was found.",
+                source_system=SOURCE_SYSTEM, duration_ms=duration_ms,
+            )
+        if frame_el is None:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            return make_error_result(
+                self.tool_name, "BROWSER_FRAME_NOT_FOUND",
+                f"No element matching '{selector}' was found.",
+                source_system=SOURCE_SYSTEM, duration_ms=duration_ms,
+            )
+        try:
+            frame = await frame_el.content_frame()
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            LOGGER.warning("web.switch_frame: not a frame element: %s", exc)
+            return make_error_result(
+                self.tool_name, "BROWSER_FRAME_NOT_FOUND",
+                "The matched element does not contain a frame.",
+                source_system=SOURCE_SYSTEM, duration_ms=duration_ms,
+            )
+        if frame is None:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            return make_error_result(
+                self.tool_name, "BROWSER_FRAME_NOT_FOUND",
+                "The matched element does not contain a frame.",
+                source_system=SOURCE_SYSTEM, duration_ms=duration_ms,
+            )
+        # Check the frame's origin against the flow's bound origin.
+        frame_url = frame.url
+        frame_origin = origin_of(frame_url)
+        flow = entry.flow
+        if (
+            flow is not None
+            and frame_origin is not None
+            and frame_origin != flow.origin
+        ):
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            return _denied(
+                self.tool_name, "BROWSER_FRAME_ORIGIN_MISMATCH",
+                f"Frame origin '{frame_origin}' does not match the bound "
+                f"flow's origin '{flow.origin}'.",
+                "read",
+            )
+        entry.reset_page_state()  # drop stale refs (clears frame_stack too)
+        entry.frame_stack.append(frame)
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        return ToolResult(
+            tool_name=self.tool_name,
+            status="success",
+            data={
+                "url": frame_url,
+                "frame_depth": len(entry.frame_stack),
+            },
+            evidence=build_evidence("read", SOURCE_SYSTEM, duration_ms),
         )

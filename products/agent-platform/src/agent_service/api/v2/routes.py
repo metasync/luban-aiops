@@ -578,6 +578,12 @@ def _coerce_pending_calls(value: object) -> list[dict[str, object]] | None:
         action = item.get("action")
         if isinstance(action, str) and action in _PENDING_CALL_ACTIONS:
             entry["action"] = action
+        # SPEC-050 follow-up: pass the element description for browser
+        # interaction tools so the portal shows what element will be
+        # affected, not just the raw ref number.
+        display_hint = item.get("display_hint")
+        if isinstance(display_hint, str) and display_hint:
+            entry["display_hint"] = display_hint
         calls.append(entry)
     return calls or None
 

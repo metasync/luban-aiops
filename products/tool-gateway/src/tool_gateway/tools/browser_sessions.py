@@ -111,10 +111,22 @@ class BrowserSessionEntry:
     # deliberately NOT here — seeing who the flow signed in as is the point
     # of the visual evidence.
     secret_values: set = field(default_factory=set)
+    # Frame stack for web.switch_frame (SPEC-050 R-9): when non-empty the
+    # top entry is the active frame target for subsequent operations.
+    # web.navigate resets this to the main frame (empty stack).
+    frame_stack: list = field(default_factory=list)
 
     def reset_page_state(self) -> None:
         """Drop refs bound to a page that navigated or re-snapshotted."""
         self.refs = []
+        self.frame_stack = []
+
+    @property
+    def active_target(self) -> Any:
+        """The current page or frame target for operations."""
+        if self.frame_stack:
+            return self.frame_stack[-1]
+        return self.page
 
 
 class BrowserSessionPool:

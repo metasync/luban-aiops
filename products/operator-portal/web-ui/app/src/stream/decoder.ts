@@ -88,6 +88,9 @@ function toFrame(payload: RawPayload): StreamFrame | null {
           | undefined,
         riskLevel: asString(record.risk_level),
         action: action && PENDING_CALL_ACTIONS.has(action) ? action : undefined,
+        // SPEC-050 follow-up: pass through the element description for
+        // browser interaction tools.
+        displayHint: asString(record.display_hint),
       };
     });
     return {

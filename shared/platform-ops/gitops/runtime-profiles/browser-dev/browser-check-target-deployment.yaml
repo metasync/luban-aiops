@@ -46,6 +46,23 @@ spec:
               mountPath: /usr/share/nginx/html/status/index.html
               subPath: status-index.html
               readOnly: true
+            # Admin portal pages (password-reset tutorial demo)
+            - name: pages
+              mountPath: /usr/share/nginx/html/admin/index.html
+              subPath: admin-index.html
+              readOnly: true
+            - name: pages
+              mountPath: /usr/share/nginx/html/admin/users/index.html
+              subPath: admin-users-index.html
+              readOnly: true
+            - name: pages
+              mountPath: /usr/share/nginx/html/admin/users/reset/index.html
+              subPath: admin-reset-index.html
+              readOnly: true
+            - name: pages
+              mountPath: /usr/share/nginx/html/admin/users/reset/done/index.html
+              subPath: admin-reset-done-index.html
+              readOnly: true
       volumes:
         - name: pages
           configMap:

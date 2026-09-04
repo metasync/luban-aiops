@@ -61,6 +61,10 @@ export interface PendingCall {
   // SPEC-030 R-5: the policy action the call was parked under; drives the
   // approval-tier badge (tools:mutate => tier_2 "approver required").
   action?: string;
+  // SPEC-050 follow-up: human-readable element description for browser
+  // interaction tools (web.click, web.type, etc.) so the confirmation card
+  // shows what element will be affected, not just the raw ref number.
+  displayHint?: string;
 }
 
 export interface ConfirmationRequestFrame {

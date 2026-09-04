@@ -6,9 +6,10 @@
 # a second layer: even if the bind address is accidentally relaxed,
 # the NetworkPolicy denies ingress to the CDP port from other pods.
 #
-# Ingress on the gateway's HTTP port (8080) is left to other policies
-# (the platform-wide default-deny plus the Service-level policy that
-# admits the platform-gateway).
+# Ingress on the gateway's HTTP port (8000) is allowed so the
+# platform-gateway and other authorized callers can reach the tool
+# API. The CDP port (9222) is deliberately absent so it is denied by
+# omission.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -20,10 +21,10 @@ spec:
   policyTypes:
     - Ingress
   ingress:
-    # Only allow ingress on the gateway HTTP port (8080); ingress on
+    # Allow ingress on the gateway HTTP port (8000); ingress on
     # the CDP port (9222) is deliberately absent so it is denied by
     # omission. The gateway reaches the sidecar over the shared pod
     # loopback, which NetworkPolicy does not restrict.
     - ports:
         - protocol: TCP
-          port: 8080
+          port: 8000

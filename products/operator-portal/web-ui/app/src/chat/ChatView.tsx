@@ -241,9 +241,49 @@ function EvidenceCard({
       !(result.data === null && result.truncated) ? (
         <details>
           <summary>Result data</summary>
-          <pre className="evidence-pre">
-            {JSON.stringify(result.data, null, 2)}
-          </pre>
+          {/* SPEC-050 follow-up: render web.screenshot base64 as an
+              actual image so operators can see the capture. */}
+          {entry.tool === "web.screenshot" &&
+           typeof result.data === "object" &&
+           result.data !== null &&
+           "screenshot" in result.data &&
+           typeof (result.data as Record<string, unknown>).screenshot === "string" ? (
+            <div style={{ marginTop: 8 }}>
+              {(() => {
+                const d = result.data as Record<string, unknown>;
+                const fmt = typeof d.format === "string" ? d.format : "jpeg";
+                const b64 = d.screenshot as string;
+                const title = typeof d.title === "string" ? d.title : undefined;
+                const url = typeof d.url === "string" ? d.url : undefined;
+                const bytes = typeof d.bytes === "number" ? d.bytes : undefined;
+                return (
+                  <>
+                    {title || url ? (
+                      <div className="evidence-meta" style={{ marginBottom: 4 }}>
+                        {title ? <span>{title}</span> : null}
+                        {url ? <span>{url}</span> : null}
+                        {bytes !== undefined ? <span>{bytes} bytes</span> : null}
+                      </div>
+                    ) : null}
+                    <img
+                      src={`data:image/${fmt};base64,${b64}`}
+                      alt={title ?? "Screenshot"}
+                      style={{
+                        maxWidth: "100%",
+                        maxHeight: 400,
+                        border: "1px solid var(--border)",
+                        borderRadius: "var(--radius)",
+                      }}
+                    />
+                  </>
+                );
+              })()}
+            </div>
+          ) : (
+            <pre className="evidence-pre">
+              {JSON.stringify(result.data, null, 2)}
+            </pre>
+          )}
         </details>
       ) : result && result.dataSummary !== undefined ? (
         <details>
@@ -356,6 +396,13 @@ export function ConfirmationCardView({
               {call.riskLevel ?? "unknown"}
             </Tag>
           </div>
+          {/* SPEC-050 follow-up: show element description for browser
+              interaction tools so the card is human-readable. */}
+          {call.displayHint ? (
+            <pre className="evidence-pre" style={{ color: "var(--accent)" }}>
+              {call.displayHint}
+            </pre>
+          ) : null}
           <pre className="evidence-pre">
             {JSON.stringify(call.parameters ?? {}, null, 2)}
           </pre>
@@ -426,6 +473,7 @@ function TurnGroup({
   onDecide,
   justArrived,
   revealFromChars,
+  agentWorking,
 }: {
   turn: ChatTurn;
   canDecide: boolean;
@@ -436,6 +484,9 @@ function TurnGroup({
   // char offset so the operator watches the new content land instead of
   // meeting a silent wall of text. Evidence and cards render at once.
   revealFromChars?: number;
+  // Post-approval activity indicator: the decision was applied and the
+  // agent is executing the resumed stream in the background.
+  agentWorking?: boolean;
 }) {
   // v0.27.4 (broadened v0.27.5): every rendered surface shows the
   // registry's dotted canonical tool names (see toolNames.ts).
@@ -513,7 +564,7 @@ function TurnGroup({
       <Bubble
         placement="start"
         variant="outlined"
-        loading={loading}
+        loading={loading && !displayReply}
         content={displayReply}
         contentRender={(content) => (
           // Safe by construction: renderMarkdown escapes every source
@@ -536,6 +587,12 @@ function TurnGroup({
           live streams and replayed (SPEC-025) evidence share this path. */}
       {turn.toolCalls.length > 0 || turn.toolResults.length > 0 ? (
         <EvidencePanel turn={turn} />
+      ) : null}
+      {/* Post-approval activity indicator: animated dots between the
+          evidence and the confirmation card so the operator sees the
+          agent is executing the resumed stream after granting approval. */}
+      {agentWorking ? (
+        <Bubble placement="start" variant="outlined" loading content="" />
       ) : null}
       {turn.confirmations.map((card) => (
         <ConfirmationCardView
@@ -649,6 +706,7 @@ function SessionPanel({
   loading,
   error,
   authenticated,
+  localDecisionApplied,
   onSelect,
   onCreate,
   onDelete,
@@ -659,6 +717,9 @@ function SessionPanel({
   loading: boolean;
   error: string | null;
   authenticated: boolean;
+  // When true, the active session's local turn state shows all cards
+  // decided — suppress the stale backend pending_confirmation tag.
+  localDecisionApplied: boolean;
   onSelect: (sessionId: string) => void;
   onCreate: () => void;
   onDelete: (session: SessionSummary) => void;
@@ -722,7 +783,13 @@ function SessionPanel({
                   {session.title ?? session.session_id}
                 </span>
                 <span className="session-item-meta">
-                  {dayjs(session.last_active_at ?? session.created_at).fromNow()}
+                  <span className="session-item-time">
+                    {dayjs(session.last_active_at ?? session.created_at).fromNow()}
+                  </span>
+                  {session.pending_confirmation &&
+                  !(localDecisionApplied && session.session_id === activeSessionId) ? (
+                    <Tag color="warning" className="session-pending-tag">awaiting approval</Tag>
+                  ) : null}
                 </span>
                 {/* SPEC-039 R-8: truncated id with full value on hover. */}
                 <span className="session-item-id">
@@ -730,9 +797,6 @@ function SessionPanel({
                   <CopyIdButton id={session.session_id} />
                 </span>
               </div>
-              {session.pending_confirmation ? (
-                <Tag color="warning">awaiting approval</Tag>
-              ) : null}
               <Button
                 type="text"
                 size="small"
@@ -951,7 +1015,7 @@ export default function ChatView({
   // goes through reseedTurns (not setSession): for the session already on
   // screen, setSession's stash-then-restore would hand back the stale
   // cached turns and shadow the fresh state.
-  usePendingDecisionPoll({
+  const { settling } = usePendingDecisionPoll({
     sessionId: chat.sessionId,
     turns: chat.turns,
     streaming: chat.streaming,
@@ -1008,6 +1072,21 @@ export default function ChatView({
     prevPendingCountRef.current = pendingCardCount;
     if (authenticated) void refresh();
   }, [pendingCardCount, authenticated, refresh]);
+
+  // The backend's pending_confirmation flag stays true until the resumed
+  // stream completes (resolve() fires in the finally block). For the
+  // active session, override the tag from local turn state: if all cards
+  // are decided locally, suppress the stale backend flag immediately.
+  const localDecisionApplied =
+    pendingCardCount === 0 &&
+    chat.turns.some((turn) =>
+      turn.confirmations.some(
+        (card) =>
+          card.status === "approved" ||
+          card.status === "denied" ||
+          card.status === "expired",
+      ),
+    );
 
   // Keep the newest turn visible while streaming. While an arrival reveal
   // is active the scroll-into-view effect below owns positioning, so this
@@ -1114,6 +1193,7 @@ export default function ChatView({
         loading={workspace.loading}
         error={workspace.error}
         authenticated={authenticated}
+        localDecisionApplied={localDecisionApplied}
         onSelect={setActiveSessionId}
         onCreate={() => void workspace.createAndOpen()}
         onDelete={confirmDelete}
@@ -1168,6 +1248,9 @@ export default function ChatView({
                   arrival !== null && index === arrival.from
                     ? arrival.prevReplyChars
                     : undefined
+                }
+                agentWorking={
+                  settling && index === chat.turns.length - 1
                 }
                 onDecide={(confirmId, decision) =>
                   void chat.decide(confirmId, decision)

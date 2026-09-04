@@ -66,6 +66,19 @@ function toToolResultFrame(frame: EvidenceFrame): ToolResultFrame {
 }
 
 function attachEvidence(turns: ChatTurn[], groups: EvidenceTurn[]): void {
+  // The backend turn_index is the exchange ordinal: it equals the count of
+  // user messages that preceded this exchange (0 for the first, 1 for the
+  // second, etc.).  Both the original stream and the confirmation/resumed
+  // stream produce the same turn_index for a given exchange (the backend
+  // uses max(0, count_user_turns - 1) for the resumed stream), and the
+  // evidence store merges all frames for the same turn_index into one
+  // group.
+  //
+  // Frontend ChatTurn layout mirrors this exactly:
+  //   ChatTurn 0 = user msg 1 + assistant reply 1
+  //   ChatTurn 1 = user msg 2 + assistant reply 2
+  //
+  // Mapping: backend turn_index k → ChatTurn k (direct index).
   for (const group of groups ?? []) {
     const target = turns[group.turn_index];
     // Out-of-range groups (evidence outliving a truncated transcript) are
@@ -114,6 +127,9 @@ export function confirmationRecordToCard(
       // batch's highest action and keeps the tier badge alive when the
       // payload predates per-call actions.
       action: call.action ?? record.action ?? undefined,
+      // SPEC-050 follow-up: pass through the element description for
+      // browser interaction tools.
+      displayHint: call.display_hint,
     }),
   );
   const card: ConfirmationCard = {

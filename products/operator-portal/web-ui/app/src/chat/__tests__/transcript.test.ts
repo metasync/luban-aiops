@@ -126,17 +126,19 @@ function evidenceGroup(turnIndex: number): EvidenceTurn {
 }
 
 describe("transcriptToTurns evidence replay", () => {
-  it("attaches a group to the assistant turn at its turn_index", () => {
-    const turns = transcriptToTurns(TWO_TURNS, [evidenceGroup(1)]);
-    expect(turns[0].toolCalls).toEqual([]);
-    expect(turns[1].toolCalls).toHaveLength(1);
-    expect(turns[1].toolResults).toHaveLength(1);
-    expect(turns[1].requestId).toBe("req-1");
+  it("attaches a group to the ChatTurn at its turn_index", () => {
+    // Backend turn_index is the exchange ordinal: 0 → ChatTurn 0.
+    const turns = transcriptToTurns(TWO_TURNS, [evidenceGroup(0)]);
+    expect(turns[0].toolCalls).toHaveLength(1);
+    expect(turns[0].toolResults).toHaveLength(1);
+    expect(turns[0].requestId).toBe("req-1");
+    expect(turns[1].toolCalls).toEqual([]);
   });
 
   it("maps frames to the exact live-stream frame shape", () => {
     // Prop-identical to what the SSE decoder produces for the same
     // frames — one component renders both, so the shapes must match.
+    // Backend turn_index 1 → ChatTurn 1 (second exchange).
     const [, replayed] = transcriptToTurns(TWO_TURNS, [evidenceGroup(1)]);
     expect(replayed.toolCalls[0]).toEqual({
       kind: "tool_call",

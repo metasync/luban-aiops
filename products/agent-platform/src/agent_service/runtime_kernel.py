@@ -945,6 +945,7 @@ class AgentKernel:
                         user_name,
                         agent.toolkit,
                         turn_index=turn_index,
+                        evidence_frames=evidence_frames,
                     )
                     if frame is not None:
                         yield {
@@ -1007,6 +1008,7 @@ class AgentKernel:
         user_name: str,
         toolkit: object | None = None,
         turn_index: int = 0,
+        evidence_frames: list[dict[str, object]] | None = None,
     ) -> dict[str, object] | None:
         """Register a kernel ASK park and build its confirmation_request frame.
 
@@ -1021,6 +1023,12 @@ class AgentKernel:
 
         if not isinstance(event, RequireUserConfirmEvent):
             return None
+        # SPEC-050 follow-up: extract browser element map from the last
+        # web.snapshot so confirmation cards show what element will be
+        # clicked/typed into, not just the raw ref number.
+        browser_element_map = self._extract_browser_element_map(
+            evidence_frames or []
+        )
         pending = CONFIRMATION_REGISTRY.register(
             session_id=session_id,
             user_id=user_name,
@@ -1029,6 +1037,7 @@ class AgentKernel:
             timeout=self.settings.hitl_confirm_timeout,
             risk_levels=self._toolkit_risk_map(toolkit),
             gateway_names=self._toolkit_gateway_name_map(toolkit),
+            browser_element_map=browser_element_map,
         )
         # SPEC-031 R-1: the durable record is written before the frame
         # below reaches the client, so the card survives re-login and
@@ -1067,6 +1076,35 @@ class AgentKernel:
             "pending_calls": pending.pending_calls_payload(),
             "message": self._confirmation_message(event),
         }
+
+    @staticmethod
+    def _extract_browser_element_map(
+        evidence_frames: list[dict[str, object]],
+    ) -> dict[int, str]:
+        """Extract element map from the last web.snapshot result (SPEC-050).
+
+        Confirmation cards for browser interaction tools (web.click, web.type,
+        etc.) show the element description from the snapshot, not just the
+        raw ref number. Returns an empty dict if no snapshot is found.
+        """
+        from agent_service.services.hitl_confirmations import (
+            parse_snapshot_elements,
+        )
+
+        # Walk backwards to find the last web.snapshot result.
+        for frame in reversed(evidence_frames):
+            if (
+                frame.get("type") == "tool_result"
+                and frame.get("tool_name") == "web.snapshot"
+                and frame.get("status") == "success"
+            ):
+                # The snapshot text is in data.snapshot.
+                data = frame.get("data")
+                if isinstance(data, dict):
+                    snapshot_text = data.get("snapshot")
+                    if isinstance(snapshot_text, str):
+                        return parse_snapshot_elements(snapshot_text)
+        return {}
 
     @staticmethod
     def _record_resolution(
@@ -1405,8 +1443,12 @@ class AgentKernel:
         )
         # SPEC-025 R-1: resumed frames belong to the same assistant turn as
         # the pre-park frames — no user message was added by the park, so
-        # the count reproduces the original turn ordinal.
-        turn_index = self._count_user_turns(agent)
+        # the count reproduces the original turn ordinal.  The original
+        # stream captured its turn_index BEFORE the user message entered
+        # the context (stream_events line ~892); the confirmation stream
+        # runs AFTER the user message is already in context, so subtract 1
+        # to align with the pre-park ordinal.
+        turn_index = max(0, self._count_user_turns(agent) - 1)
         evidence_frames: list[dict[str, object]] = []
         confirmed = decision == "approve"
         confirm_event = UserConfirmResultEvent(
@@ -1471,6 +1513,7 @@ class AgentKernel:
                     user_name,
                     agent.toolkit,
                     turn_index=turn_index,
+                    evidence_frames=evidence_frames,
                 )
                 if frame is not None:
                     yield {
