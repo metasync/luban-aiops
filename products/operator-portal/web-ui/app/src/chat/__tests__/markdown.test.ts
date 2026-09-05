@@ -157,6 +157,71 @@ describe("renderMarkdown", () => {
     expect(html).toContain('href="https://example.com"');
   });
 
+  // SPEC-052 skill-viewer finding: real skill bodies wrap item text onto
+  // indented continuation lines and blank-separate ordered items, which the
+  // old column-0-only list pass split into one single-item list per marker
+  // (so every number rendered "1") while orphaning the wrapped text.
+  it("folds a wrapped continuation line into its list item", () => {
+    const html = renderMarkdown(
+      "1. First line of the step\n   wrapped continuation of the step",
+    );
+    expect(html).toBe(
+      "<ol><li>First line of the step wrapped continuation of the step</li></ol>",
+    );
+  });
+
+  it("keeps blank-separated ordered items in one continuously numbered list", () => {
+    const html = renderMarkdown("1. First step\n\n2. Second step\n\n3. Third step");
+    expect(html.match(/<ol>/g)?.length).toBe(1);
+    expect(html).toBe(
+      "<ol><li>First step</li><li>Second step</li><li>Third step</li></ol>",
+    );
+  });
+
+  it("handles loose items that also wrap, without leaking bare text", () => {
+    const html = renderMarkdown(
+      "1. First step with a wrapped\n   continuation line\n\n2. Second step",
+    );
+    expect(html.match(/<ol>/g)?.length).toBe(1);
+    expect(html.match(/<li>/g)?.length).toBe(2);
+    expect(html).toContain("First step with a wrapped continuation line");
+    expect(html).not.toContain("</ol>   ");
+    expect(html).not.toContain("<p>");
+  });
+
+  it("nests a sub-bullet under a multi-line item", () => {
+    const html = renderMarkdown(
+      "1. Step one\n   continued here\n   - sub point\n2. Step two",
+    );
+    expect(html).toBe(
+      "<ol><li>Step one continued here<ul><li>sub point</li></ul></li><li>Step two</li></ol>",
+    );
+  });
+
+  it("ends a list at a blank line before a non-indented paragraph", () => {
+    const html = renderMarkdown("- item one\n  wrapped\n\nA following paragraph.");
+    expect(html).toContain("<ul><li>item one wrapped</li></ul>");
+    expect(html).toContain("<p>A following paragraph.</p>");
+  });
+
+  it("soft-wraps consecutive prose lines into one flowing paragraph", () => {
+    // The old line-by-line pass emitted one <p> per source line, shattering a
+    // wrapped paragraph into short blocks that left the right margin empty.
+    const html = renderMarkdown(
+      "Automate the password reset workflow. This is a\nreal-life scenario that an operator runs\nthrough the admin portal UI.",
+    );
+    expect(html).toBe(
+      "<p>Automate the password reset workflow. This is a real-life scenario that an operator runs through the admin portal UI.</p>",
+    );
+  });
+
+  it("keeps distinct paragraphs separate on a blank line", () => {
+    const html = renderMarkdown("First paragraph line\nwrapped here.\n\nSecond paragraph.");
+    expect(html.match(/<p>/g)?.length).toBe(2);
+    expect(html).toContain("<p>First paragraph line wrapped here.</p>");
+    expect(html).toContain("<p>Second paragraph.</p>");
+  });
+
   it("returns empty string for empty input", () => {
     expect(renderMarkdown("")).toBe("");
   });
