@@ -35,15 +35,17 @@
 - [SPEC-024 spec.md](file://docs/specs/SPEC-024-runtime-llm-model-switching/spec.md)
 - [SPEC-039 spec.md](file://docs/specs/SPEC-039-operations-document-repository/spec.md)
 - [SPEC-043 spec.md](file://docs/specs/SPEC-043-incident-report-document-type/spec.md)
+- [SPEC-052 spec.md](file://docs/specs/SPEC-052-skill-content-viewer/spec.md)
 - [ADR-0005](file://docs/adr/0005-platform-gateway-extraction.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated runtime endpoint to expose platform version through /api/v1/runtime by merging SERVICE_VERSION into payload
-- Enhanced runtime status functionality to provide better version tracking and monitoring capabilities across the platform
-- Added comprehensive documentation for the new runtime metadata endpoint with version information
-- Updated architecture diagrams to reflect the enhanced runtime endpoint functionality
+- Added new single-skill detail proxy endpoint GET /api/v1/skills/{skill_id:path} for SPEC-052 implementation with skills-hub client integration
+- Enhanced skills inventory functionality to support full skill record retrieval including body content
+- Updated skills hub client with get_skill method for detailed skill access
+- Added comprehensive testing for the new single-skill detail endpoint
+- Updated architecture diagrams to reflect the enhanced skills capability
 
 ## Table of Contents
 1. Introduction
@@ -57,7 +59,7 @@
 9. Conclusion
 
 ## Introduction
-The Platform Gateway Service is the portal-facing edge service for the Luban AIOps platform. It authenticates portal users via JWT verification, enforces deny-by-default action policies, proxies chat and session requests to the agent-platform service, mediates short-lived delegated tokens through the identity-broker for downstream tool access, provides unified API access to the incident service with policy enforcement for incident operations, exposes live permission matrix evaluation, offers workspace inventory discovery for tools and skills, handles human-in-the-loop (HITL) confirmations with durable audit trails, manages session workspace lifecycle with server-side scoping to caller's own sessions, provides credential-gated model catalog discovery with per-turn model selection passthrough, implements operations document repository functionality with trusted foreign-session coverage decisions supporting both shift_summary and incident_report document types, and now exposes platform version information through the /api/v1/runtime endpoint for enhanced version tracking and monitoring capabilities across the platform. It exposes health, metrics, and runtime endpoints and maintains request correlation across hops.
+The Platform Gateway Service is the portal-facing edge service for the Luban AIOps platform. It authenticates portal users via JWT verification, enforces deny-by-default action policies, proxies chat and session requests to the agent-platform service, mediates short-lived delegated tokens through the identity-broker for downstream tool access, provides unified API access to the incident service with policy enforcement for incident operations, exposes live permission matrix evaluation, offers workspace inventory discovery for tools and skills, handles human-in-the-loop (HITL) confirmations with durable audit trails, manages session workspace lifecycle with server-side scoping to caller's own sessions, provides credential-gated model catalog discovery with per-turn model selection passthrough, implements operations document repository functionality with trusted foreign-session coverage decisions supporting both shift_summary and incident_report document types, exposes platform version information through the /api/v1/runtime endpoint for enhanced version tracking and monitoring capabilities across the platform, and now includes a single-skill detail proxy endpoint for reading full skill records including body content. It exposes health, metrics, and runtime endpoints and maintains request correlation across hops.
 
 Key responsibilities:
 - Verify portal bearer tokens (issuer/audience JWKS validation; audience bound to platform-gateway).
@@ -66,10 +68,10 @@ Key responsibilities:
 - Handle HITL confirmations via POST /api/v1/chat/confirm with identity delegation and SSE streaming, emitting confirmation_decided audit events when decisions are applied.
 - Provide unified API access to incident-service with per-action policy enforcement (incident:read, incident:create, incident:triage) and Basic credential authentication upstream.
 - Serve live permission matrix via GET /api/v1/policy/matrix with role-scoped visibility (full vs own).
-- Proxy workspace inventory discovery to tool-gateway (tools:list) and skills-hub (skills:read) with appropriate authentication patterns.
+- Proxy workspace inventory discovery to tool-gateway (tools:list) and skills-hub (skills:read) with appropriate authentication patterns, including single-skill detail retrieval.
 - Proxy model catalog discovery to agent-service (GET /api/v2/models) behind `models:list` policy action with credential gating.
 - Implement operations document repository with policy enforcement for documents:create, documents:read actions, trusted foreign-session coverage computation, and support for both shift_summary and incident_report document types with dual-action authorization for incident reports.
-- **Enhanced**: Expose platform version through /api/v1/runtime endpoint by merging SERVICE_VERSION into payload, enabling better version tracking and monitoring capabilities across the platform.
+- Expose platform version through /api/v1/runtime endpoint by merging SERVICE_VERSION into payload, enabling better version tracking and monitoring capabilities across the platform.
 - Session workspace management now includes owner-only session rename capability behind `session:update` action with server-side ownership verification.
 - Manage session workspace lifecycle (create, list, read, delete, update title) with server-side scoping to caller's own sessions and deny-by-default policy enforcement.
 - Relay auth/identity/runtime endpoints to identity-broker and agent-platform as needed.
@@ -81,6 +83,7 @@ Key responsibilities:
 - [SPEC-024 spec.md:1-187](file://docs/specs/SPEC-024-runtime-llm-model-switching/spec.md#L1-L187)
 - [SPEC-039 spec.md:1-268](file://docs/specs/SPEC-039-operations-document-repository/spec.md#L1-L268)
 - [SPEC-043 spec.md:1-293](file://docs/specs/SPEC-043-incident-report-document-type/spec.md#L1-L293)
+- [SPEC-052 spec.md:1-185](file://docs/specs/SPEC-052-skill-content-viewer/spec.md#L1-L185)
 - [ADR-0005:1-47](file://docs/adr/0005-platform-gateway-extraction.md#L1-L47)
 
 ## Project Structure
@@ -171,7 +174,7 @@ A --> RTS
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
-- [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
+- [skills.py:1-79](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L79)
 - [models.py:1-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L1-L46)
 - [runtime.py:1-14](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L1-L14)
 - [health.py:1-17](file://products/platform-gateway/src/platform_gateway/api/routes/health.py#L1-L17)
@@ -183,7 +186,7 @@ A --> RTS
 - [policy_engine.py:1-405](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L405)
 - [policy_matrix.py:1-62](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L62)
 - [tool_gateway_client.py:1-76](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py#L1-L76)
-- [skills_hub_client.py:1-79](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L1-L79)
+- [skills_hub_client.py:1-110](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L1-L110)
 - [audit_emitter.py:1-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L1-L99)
 - [policy-default.yaml:1-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L267)
 - [config.py:1-117](file://products/platform-gateway/src/platform_gateway/core/config.py#L1-L117)
@@ -204,9 +207,9 @@ A --> RTS
   - Operations document repository routes (create, list, fetch, publish, delete) with policy enforcement, trusted foreign-session coverage computation, and support for both shift_summary and incident_report document types with dual-action authorization for incident reports.
   - Incident proxy routes providing unified API access to incident-service with per-action policy enforcement.
   - Policy matrix endpoint serving live permission evaluation with role-scoped visibility.
-  - Workspace proxy endpoints for tools catalog discovery and skills inventory listing.
+  - Workspace proxy endpoints for tools catalog discovery and skills inventory listing, including single-skill detail retrieval.
   - Model catalog proxy endpoint for credential-gated model discovery behind `models:list` policy action.
-  - **Enhanced**: Runtime endpoint exposing platform version information through /api/v1/runtime by merging SERVICE_VERSION into payload for enhanced version tracking and monitoring.
+  - Runtime endpoint exposing platform version information through /api/v1/runtime by merging SERVICE_VERSION into payload for enhanced version tracking and monitoring.
 - Gateway service:
   - Identity resolution, policy enforcement, proxying to agent-platform, streaming chat support.
   - Session workspace proxy with proper error handling (upstream 4xx passthrough, transport failures map to 502).
@@ -214,7 +217,7 @@ A --> RTS
   - Document repository proxy with trusted foreign-session coverage decision computation, dual-action authorization for incident reports, and type-specific payload handling.
   - Model catalog proxy with consistent error handling patterns matching other proxy endpoints.
   - Chat streaming with comprehensive audit trail coverage including fallback model attribution for streams closing without message_end frames.
-  - **Enhanced**: Runtime status function that merges platform version from SERVICE_VERSION into the runtime payload for enhanced version tracking.
+  - Runtime status function that merges platform version from SERVICE_VERSION into the runtime payload for enhanced version tracking.
 - External clients:
   - Agent client for agent-platform v2 endpoints including runtime_metadata method.
   - Document repository methods (create_document, list_documents, fetch_document, publish_document, delete_document) with foreign coverage header support and type-specific payload handling.
@@ -224,7 +227,7 @@ A --> RTS
   - Incident client for incident-service with Basic credential authentication and error mapping.
   - Delegation client for broker-mediated token exchange with per-user cache and workload-token preference.
   - Tool gateway client for tool catalog discovery with delegated token forwarding.
-  - Skills hub client for skills inventory with Basic credential authentication.
+  - Skills hub client for skills inventory with Basic credential authentication, including single-skill detail retrieval.
 - Token verifier:
   - Local JWT verification using JWKS with issuer/audience checks and actor extraction.
 - Policy engine:
@@ -248,7 +251,7 @@ A --> RTS
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
-- [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
+- [skills.py:1-79](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L79)
 - [models.py:1-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L1-L46)
 - [runtime.py:1-14](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L1-L14)
 - [health.py:1-17](file://products/platform-gateway/src/platform_gateway/api/routes/health.py#L1-L17)
@@ -260,12 +263,12 @@ A --> RTS
 - [policy_engine.py:1-405](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L405)
 - [policy_matrix.py:1-62](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L62)
 - [tool_gateway_client.py:1-76](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py#L1-L76)
-- [skills_hub_client.py:1-79](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L1-L79)
+- [skills_hub_client.py:1-110](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L1-L110)
 - [audit_emitter.py:1-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L1-L99)
 - [policy-default.yaml:1-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L267)
 
 ## Architecture Overview
-The gateway sits between the portal and backend services. It authenticates users, authorizes actions, proxies requests, obtains delegated tokens for tool execution paths, serves live permission matrices, provides workspace inventory discovery, handles HITL confirmations with durable audit trails, manages session workspace lifecycle with server-side scoping, provides credential-gated model catalog discovery with per-turn model selection passthrough, implements operations document repository functionality with trusted foreign-session coverage decisions supporting both shift_summary and incident_report document types with dual-action authorization for incident reports, and now exposes platform version information through the /api/v1/runtime endpoint for enhanced version tracking and monitoring capabilities across the platform. The architecture includes comprehensive transparency features, workspace capability visibility, human-in-the-loop confirmation bridging, complete session workspace management, enhanced audit trail coverage with model attribution for complete operational visibility, secure document repository operations with cross-session coverage capabilities, and enhanced runtime version exposure.
+The gateway sits between the portal and backend services. It authenticates users, authorizes actions, proxies requests, obtains delegated tokens for tool execution paths, serves live permission matrices, provides workspace inventory discovery, handles HITL confirmations with durable audit trails, manages session workspace lifecycle with server-side scoping, provides credential-gated model catalog discovery with per-turn model selection passthrough, implements operations document repository functionality with trusted foreign-session coverage decisions supporting both shift_summary and incident_report document types with dual-action authorization for incident reports, exposes platform version information through the /api/v1/runtime endpoint for enhanced version tracking and monitoring capabilities across the platform, and now includes single-skill detail proxy functionality for reading full skill records including body content. The architecture includes comprehensive transparency features, workspace capability visibility, human-in-the-loop confirmation bridging, complete session workspace management, enhanced audit trail coverage with model attribution for complete operational visibility, secure document repository operations with cross-session coverage capabilities, enhanced runtime version exposure, and enhanced skills content viewing capabilities.
 
 ```mermaid
 sequenceDiagram
@@ -277,18 +280,17 @@ participant IS as "Incident Service"
 participant TG as "Tool Gateway"
 participant SH as "Skills Hub"
 participant AUD as "Audit Service"
-Note over Portal,AUD : Runtime Version Exposure
-Portal->>GW : GET /api/v1/runtime
-GW->>AG : GET /api/v2/runtime
-AG-->>GW : Runtime metadata
-GW->>GW : Merge SERVICE_VERSION into payload
-GW-->>Portal : Runtime info with platform version
+Note over Portal,AUD : Single-Skill Detail Access
+Portal->>GW : GET /api/v1/skills/{skill_id : path}
+GW->>GW : Enforce skills : read policy
+GW->>SH : GET /api/v1/skills/{skill_id : path}
+SH-->>GW : Full skill record with body
+GW-->>Portal : Skill detail response
 ```
 
 **Diagram sources**
-- [runtime.py:9-13](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L9-L13)
-- [gateway_service.py:87-92](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L87-L92)
-- [agent_client.py:471-477](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L471-L477)
+- [skills.py:55-78](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L55-L78)
+- [skills_hub_client.py:81-109](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L81-L109)
 
 ## Detailed Component Analysis
 
@@ -299,9 +301,9 @@ GW-->>Portal : Runtime info with platform version
 - Operations document repository routes provide create, list, fetch, publish, and delete functionality with policy enforcement, trusted foreign-session coverage computation, and support for both shift_summary and incident_report document types with dual-action authorization for incident reports.
 - Chat Confirm route for HITL confirmation bridging with identity delegation and SSE streaming.
 - Policy routes provide live permission matrix evaluation with role-scoped visibility.
-- Workspace proxy routes provide tools catalog discovery and skills inventory listing with appropriate authentication patterns.
+- Workspace proxy routes provide tools catalog discovery and skills inventory listing with appropriate authentication patterns, including single-skill detail retrieval.
 - Model catalog proxy route provides credential-gated model discovery behind `models:list` policy action.
-- **Enhanced**: Runtime route exposes platform version information through /api/v1/runtime endpoint by merging SERVICE_VERSION into payload for enhanced version tracking and monitoring.
+- Runtime route exposes platform version information through /api/v1/runtime endpoint by merging SERVICE_VERSION into payload for enhanced version tracking and monitoring.
 
 ```mermaid
 classDiagram
@@ -355,6 +357,7 @@ class ToolsRoutes {
 }
 class SkillsRoutes {
 +GET /api/v1/skills
++GET /api/v1/skills/{skill_id : path}
 }
 class ModelsRoutes {
 +GET /api/v1/models
@@ -381,7 +384,7 @@ Router --> RuntimeRoutes : "includes"
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
-- [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
+- [skills.py:1-79](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L79)
 - [models.py:1-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L1-L46)
 - [runtime.py:1-14](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L1-L14)
 
@@ -393,9 +396,67 @@ Router --> RuntimeRoutes : "includes"
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
-- [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
+- [skills.py:1-79](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L79)
 - [models.py:1-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L1-L46)
 - [runtime.py:1-14](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L1-L14)
+
+### Enhanced Skills Inventory with Single-Skill Detail Access
+**Updated** - Enhanced skills inventory functionality to support full skill record retrieval including body content through the new single-skill detail proxy endpoint.
+
+#### Single-Skill Detail Endpoint
+- **Endpoint**: GET /api/v1/skills/{skill_id:path}
+- **Authentication**: Requires `skills:read` action enforcement with identity verification
+- **Functionality**: Retrieves full skill record including body content from skills-hub
+- **Response**: Complete skill record with metadata and body content
+- **Purpose**: Enables operators to read the actual content of ingested skills that drive tool behavior and HITL gates
+
+#### Implementation Details
+- **Route Order**: Declared after the exact `/api/v1/skills` list route to prevent greedy path matching
+- **Skill ID Format**: Accepts namespaced `<source_id>/<slug>` form with embedded slashes preserved literally
+- **Credential Handling**: Uses gateway-held Basic credentials (`skills_client_id`/`skills_client_secret`) - never forwards user token
+- **Error Mapping**: Consistent with list proxy - unknown id → 404 passthrough, unconfigured → 503, transport/5xx → 502
+- **Audit Trail**: Logs `skill_detail_proxied` event with request_id, user_id, and skill_id
+
+Key capabilities:
+- Reuses existing `skills:read` policy action - no new policy surface
+- Maintains same security posture as skills list endpoint
+- Supports full skill content viewing for operator transparency
+- Preserves URL-safe character set for skill IDs
+- Integrates seamlessly with existing skills infrastructure
+- Provides lazy loading pattern where detail is only fetched when View is invoked
+
+```mermaid
+flowchart TD
+Start(["Single-Skill Request"]) --> ResolveId["Resolve Request Identity"]
+ResolveId --> AuthCheck{"Auth Required?"}
+AuthCheck --> |Yes & No Token| Deny401["HTTP 401"]
+AuthCheck --> |No Token & Optional| Synthetic["Create Synthetic Dev Identity"]
+AuthCheck --> |Has Token| Verify["Verify JWT Locally"]
+Verify --> Valid{"Valid?"}
+Valid --> |No| Deny401
+Valid --> |Yes| PolicyEnf["Enforce skills:read"]
+PolicyEnf --> Allowed{"Allowed?"}
+Allowed --> |No| Deny403["HTTP 403"]
+Allowed --> |Yes| BuildUrl["Build URL with skill_id:path"]
+BuildUrl --> CallHub["Call skills-hub /api/v1/skills/{skill_id:path}"]
+CallHub --> Response{"Upstream Response?"}
+Response --> |404| Pass404["Pass Through 404"]
+Response --> |5xx| Map502["Map to 502"]
+Response --> |Success| ReturnDetail["Return Full Skill Record"]
+Pass404 --> Return(["Return Response"])
+Map502 --> Return
+ReturnDetail --> LogEvent["Log skill_detail_proxied"]
+LogEvent --> Return
+```
+
+**Diagram sources**
+- [skills.py:55-78](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L55-L78)
+- [skills_hub_client.py:81-109](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L81-L109)
+
+**Section sources**
+- [skills.py:1-79](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L79)
+- [skills_hub_client.py:1-110](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L1-L110)
+- [SPEC-052 spec.md:57-82](file://docs/specs/SPEC-052-skill-content-viewer/spec.md#L57-L82)
 
 ### Enhanced Runtime Endpoint
 **Updated** - Provides platform version information through /api/v1/runtime endpoint by merging SERVICE_VERSION into payload for enhanced version tracking and monitoring capabilities across the platform.
@@ -432,7 +493,7 @@ ReturnPayload --> End(["Response with version info"])
 **Diagram sources**
 - [runtime.py:9-13](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L9-L13)
 - [gateway_service.py:87-92](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L87-L92)
-- [metadata.py:1-6](file://products/platform-gateway/src/platform_gateway/metadata.py#L1-L6)
+- [agent_client.py:471-477](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L471-L477)
 
 **Section sources**
 - [runtime.py:1-14](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L1-L14)
@@ -846,17 +907,26 @@ OwnMatrix --> Return
 - **Validation**: Query parameters validated (limit 1-100, offset ≥ 0)
 - **Error Handling**: 503 when unconfigured, 502 on transport failures, 4xx passthrough
 
+#### Single-Skill Detail Retrieval (New)
+- **Endpoint**: GET /api/v1/skills/{skill_id:path}
+- **Authentication**: Requires `skills:read` action + Basic credentials (SKILLS_QUERY_CLIENTS)
+- **Upstream**: Forwards to skills-hub's `/api/v1/skills/{skill_id:path}` with Basic auth
+- **Validation**: Skill ID accepts namespaced format with embedded slashes
+- **Error Handling**: 503 when unconfigured, 502 on transport failures, 4xx passthrough
+
 Key capabilities:
 - Consistent error mapping across all workspace proxies
 - Configurable timeouts (10 seconds default)
 - Request correlation via x-request-id headers
 - Comprehensive audit logging with operation context
+- Support for full skill content retrieval with body preservation
 
 ```mermaid
 flowchart TD
 Start(["Workspace Request"]) --> Type{"Request Type?"}
 Type --> |Tools| ToolsFlow["Tools Catalog Flow"]
 Type --> |Skills| SkillsFlow["Skills Inventory Flow"]
+Type --> |SkillDetail| DetailFlow["Single-Skill Detail Flow"]
 subgraph ToolsFlow
 T1["Enforce tools:list"] --> T2["Obtain Delegated Token"]
 T2 --> T3{"Token Available?"}
@@ -870,19 +940,26 @@ S2 --> S3["Use Basic Credentials"]
 S3 --> SProxy["Proxy to Skills Hub"]
 SProxy --> SReturn["Return Skills Inventory"]
 end
+subgraph DetailFlow
+D1["Enforce skills:read"] --> D2["Validate Skill ID"]
+D2 --> D3["Use Basic Credentials"]
+D3 --> DProxy["Proxy to Skills Hub"]
+DProxy --> DReturn["Return Full Skill Record"]
+end
 ```
 
 **Diagram sources**
 - [tools.py:39-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L39-L69)
-- [skills.py:27-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L27-L53)
+- [skills.py:27-78](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L27-L78)
+- [skills_hub_client.py:58-109](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L58-L109)
 - [tool_gateway_client.py:54-76](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py#L54-L76)
 - [skills_hub_client.py:58-79](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L58-L79)
 
 **Section sources**
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
-- [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
+- [skills.py:1-79](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L79)
 - [tool_gateway_client.py:1-76](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py#L1-L76)
-- [skills_hub_client.py:1-79](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L1-L79)
+- [skills_hub_client.py:1-110](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L1-L110)
 
 ### Incident Proxy Routes
 **Existing** - Provides unified API access to the incident-service with comprehensive policy enforcement and credential management.
@@ -933,7 +1010,7 @@ Proxy --> Return(["Return Response"])
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 
 ### Enhanced Gateway Service
-**Enhanced** - Enhanced with document repository proxy functionality, session title update capability, enhanced chat streaming with robust state tracking and fallback model attribution, dual-action authorization for incident reports, improved error handling, and enhanced runtime version exposure.
+**Enhanced** - Enhanced with document repository proxy functionality, session title update capability, enhanced chat streaming with robust state tracking and fallback model attribution, dual-action authorization for incident reports, improved error handling, enhanced runtime version exposure, and single-skill detail proxy functionality.
 
 - Identity resolution supports local JWT verification and synthetic dev identity when auth is optional.
 - Policy enforcement uses evaluate() from the policy engine; denies by default and records decisions.
@@ -944,7 +1021,7 @@ Proxy --> Return(["Return Response"])
 - Document repository proxy with trusted foreign-session coverage computation, dual-action authorization for incident reports, and type-specific payload handling.
 - Model catalog proxy with consistent error handling pattern matching other proxy endpoints.
 - Chat streaming with robust state tracking (saw_delta, parked, last_frame_session) and fallback model attribution for streams closing without message_end frames.
-- **Enhanced**: Runtime status function that merges platform version from SERVICE_VERSION into the runtime payload for enhanced version tracking and monitoring capabilities.
+- Runtime status function that merges platform version from SERVICE_VERSION into the runtime payload for enhanced version tracking and monitoring capabilities.
 - Enhanced streaming architecture with improved error propagation using helper functions (_frame_type, _frame_session_id).
 
 ```mermaid
@@ -967,6 +1044,7 @@ CheckType --> |Documents| DocProxy["Proxy Document Operations with Dual-Action G
 CheckType --> |Stream| OpenStream["Open Chat Stream with State Tracking"]
 CheckType --> |Models| ModelProxy["Proxy Model Catalog"]
 CheckType --> |Runtime| RuntimeProxy["Proxy Runtime with Version Merge"]
+CheckType --> |SkillDetail| SkillProxy["Proxy Single-Skill Detail"]
 Delegate --> Proxy
 DocProxy --> DocService["Document Service with Foreign Coverage & Type Validation"]
 OpenStream --> StreamProxy["Stream Proxy with Robust Audit Coverage"]
@@ -974,6 +1052,7 @@ ModelProxy --> Return(["Return Response/Stream"])
 StreamProxy --> Return
 DocService --> Return
 RuntimeProxy --> Return
+SkillProxy --> Return
 ```
 
 **Diagram sources**
@@ -1050,7 +1129,7 @@ MW-->>Uvicorn : response with logs/metrics
 - [app.py:1-44](file://products/platform-gateway/src/platform_gateway/app.py#L1-L44)
 
 ## Dependency Analysis
-**Enhanced** - Enhanced with new runtime endpoint dependencies and improved error handling patterns.
+**Enhanced** - Enhanced with new single-skill detail proxy dependencies and improved error handling patterns.
 
 High-level dependencies:
 - main.py depends on app.py and runtime settings.
@@ -1060,9 +1139,10 @@ High-level dependencies:
 - Documents route depends on gateway_service for document repository operations with dual-action authorization and audit_emitter for document lifecycle events.
 - Chat confirm route depends on gateway_service for confirm handling and audit_emitter for confirmation_decided events.
 - Policy routes depend on policy_engine and policy_matrix for live permission evaluation.
-- Workspace proxy routes depend on tool_gateway_client and skills_hub_client for inventory discovery.
+- Workspace proxy routes depend on tool_gateway_client and skills_hub_client for inventory discovery, including single-skill detail retrieval.
 - Model catalog route depends on gateway_service for model catalog proxy and audit_emitter for models_listed events.
-- **Enhanced**: Runtime route depends on gateway_service for runtime status with version merging and agent_client for runtime metadata retrieval.
+- Runtime route depends on gateway_service for runtime status with version merging and agent_client for runtime metadata retrieval.
+- **Enhanced**: Skills route depends on gateway_service for policy enforcement and skills_hub_client for both list and detail operations.
 - gateway_service depends on agent_client, delegation_client, token_verifier, and policy_engine.
 - agent_client includes document repository methods with type-specific payload handling, session title update method, open_chat_confirm_stream method, list_models method, runtime_metadata method, and enhanced session workspace methods for confirm handling.
 - incident_client depends on httpx and config for incident-service communication.
@@ -1100,6 +1180,7 @@ GwSvc --> Audit["services/audit_emitter.py"]
 IncClient --> Config["core/config.py"]
 App --> Config
 App --> RuntimeSettings["core/runtime.py"]
+ShClient --> SkillsHub["skills-hub service"]
 ```
 
 **Diagram sources**
@@ -1112,7 +1193,7 @@ App --> RuntimeSettings["core/runtime.py"]
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
-- [skills.py:1-53](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L53)
+- [skills.py:1-79](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L79)
 - [models.py:1-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L1-L46)
 - [runtime.py:1-14](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L1-L14)
 - [gateway_service.py:1-1238](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L1238)
@@ -1123,7 +1204,7 @@ App --> RuntimeSettings["core/runtime.py"]
 - [policy_engine.py:1-405](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L405)
 - [policy_matrix.py:1-62](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L62)
 - [tool_gateway_client.py:1-76](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py#L1-L76)
-- [skills_hub_client.py:1-79](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L1-L79)
+- [skills_hub_client.py:1-110](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L1-L110)
 - [audit_emitter.py:1-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L1-L99)
 - [policy-default.yaml:1-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L267)
 - [config.py:1-117](file://products/platform-gateway/src/platform_gateway/core/config.py#L1-L117)
@@ -1133,7 +1214,7 @@ App --> RuntimeSettings["core/runtime.py"]
 - [README.md:1-46](file://products/platform-gateway/README.md#L1-L46)
 
 ## Performance Considerations
-**Enhanced** - Enhanced with new runtime endpoint performance considerations and improved error handling efficiency.
+**Enhanced** - Enhanced with new single-skill detail proxy performance considerations and improved error handling efficiency.
 
 - JWKS client caching reduces repeated key fetches; lifespan controlled by environment.
 - Delegated token per-user cache avoids frequent broker exchanges; refresh fraction triggers early renewal.
@@ -1161,14 +1242,17 @@ App --> RuntimeSettings["core/runtime.py"]
 - Document operations benefit from deny-by-default policy enforcement to minimize unauthorized access attempts.
 - Type-specific payload validation occurs at schema level to prevent unnecessary upstream calls.
 - Session title update operations have minimal overhead due to simple ownership verification.
-- **Enhanced**: Runtime endpoint has minimal performance overhead with single HTTP call to agent-platform plus simple dictionary merge operation.
-- **Enhanced**: Runtime version exposure enables efficient version discovery without additional authentication overhead.
-- **Enhanced**: Platform version merging occurs in memory with negligible computational cost.
+- Runtime endpoint has minimal performance overhead with single HTTP call to agent-platform plus simple dictionary merge operation.
+- Runtime version exposure enables efficient version discovery without additional authentication overhead.
+- Platform version merging occurs in memory with negligible computational cost.
+- **Enhanced**: Single-skill detail proxy has minimal overhead with single HTTP call to skills-hub plus policy enforcement.
+- **Enhanced**: Skill detail retrieval reuses existing skills:read policy action without additional authentication overhead.
+- **Enhanced**: Namespaced skill ID format preserves slashes without additional encoding overhead.
 
 [No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
-**Enhanced** - Enhanced with new runtime endpoint troubleshooting with specific guidance on version exposure issues and enhanced error handling patterns.
+**Enhanced** - Enhanced with new single-skill detail proxy troubleshooting with specific guidance on skill content viewing issues and enhanced error handling patterns.
 
 Common issues and diagnostics:
 - Authentication failures:
@@ -1216,18 +1300,27 @@ Common issues and diagnostics:
   - Robust state tracking (saw_delta, parked, last_frame_session) ensures proper audit coverage even for streams closing without message_end frames.
   - Helper functions (_frame_type, _frame_session_id) provide graceful handling of malformed SSE frames.
   - Fallback model attribution mechanism ensures complete audit coverage per SPEC-024 requirements.
-- **Enhanced**: Runtime endpoint issues:
+- Runtime endpoint issues:
   - Agent-platform connectivity failures result in 502 errors with appropriate detail messages.
   - Agent-platform runtime endpoint failures propagate upstream errors appropriately.
   - Version merging failures are handled gracefully with fallback to agent-platform version only.
   - Network timeouts (10 seconds) prevent hanging requests during version discovery.
   - Service version constant (SERVICE_VERSION) must be properly configured in metadata.py.
+- **Enhanced**: Single-skill detail proxy issues:
+  - Skills-hub connectivity failures result in 502 errors with "skills hub unavailable" detail.
+  - Unknown skill IDs result in 404 passthrough with structured error messages.
+  - Missing skills-hub configuration results in 503 with "skills hub not configured" detail.
+  - Invalid skill ID formats may cause routing issues with namespaced paths.
+  - Basic credential authentication failures result in 401 passthrough from skills-hub.
+  - Network timeouts (10 seconds) prevent hanging requests during skill detail retrieval.
+  - Name preservation of slashes in skill IDs is critical for proper routing to skills-hub.
 - Audit trail issues:
   - `session_created` and `session_deleted` events are emitted for session lifecycle operations.
   - `confirmation_decided` events are only emitted when confirmation_result frames are received from upstream.
   - `chat_completed` events now include serving model attribution from message_end frames with fallback support.
   - `models_listed` events capture model count and user context for catalog operations.
   - Document repository audit events (`document_created`, `document_published`, `document_deleted`) include foreign coverage information, document_type, and incident_id for incident reports.
+  - Single-skill detail operations emit `skill_detail_proxied` events with request_id, user_id, and skill_id.
   - Audit service connectivity failures are non-fatal and don't affect session or confirm operations.
   - Event emission uses fire-and-forget pattern to avoid blocking operations.
 - Policy matrix endpoint issues:
@@ -1268,10 +1361,15 @@ Operational tips:
 - Validate document repository upstream connectivity and error handling patterns for both shift_summary and incident_report types.
 - Monitor session title update operations and verify proper ownership enforcement.
 - Monitor dual-action authorization failures for incident reports and verify proper error messaging.
-- **Enhanced**: Monitor runtime endpoint performance and verify proper version exposure through /api/v1/runtime.
-- **Enhanced**: Check agent-platform connectivity and runtime endpoint availability for version discovery.
-- **Enhanced**: Validate SERVICE_VERSION constant configuration in metadata.py for accurate version reporting.
-- **Enhanced**: Monitor runtime endpoint error rates and verify proper error handling for agent-platform connectivity issues.
+- Monitor runtime endpoint performance and verify proper version exposure through /api/v1/runtime.
+- Check agent-platform connectivity and runtime endpoint availability for version discovery.
+- Validate SERVICE_VERSION constant configuration in metadata.py for accurate version reporting.
+- Monitor runtime endpoint error rates and verify proper error handling for agent-platform connectivity issues.
+- **Enhanced**: Monitor single-skill detail proxy performance and verify proper skill content retrieval through /api/v1/skills/{skill_id:path}.
+- **Enhanced**: Check skills-hub connectivity and skill detail endpoint availability for content viewing.
+- **Enhanced**: Validate skills:read policy rules and role assignments for skill content access workflows.
+- **Enhanced**: Monitor skill_detail_proxied audit events and verify proper skill_id tracking with namespaced paths.
+- **Enhanced**: Check skills-hub Basic credential configuration (SKILLS_CLIENT_ID, SKILLS_CLIENT_SECRET) for skill detail access.
 
 **Section sources**
 - [gateway_service.py:159-254](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L159-L254)
@@ -1297,9 +1395,11 @@ Operational tips:
 - [runtime.py:9-13](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L9-L13)
 - [gateway_service.py:87-92](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L87-L92)
 - [metadata.py:1-6](file://products/platform-gateway/src/platform_gateway/metadata.py#L1-L6)
+- [skills.py:55-78](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L55-L78)
+- [skills_hub_client.py:81-109](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L81-L109)
 
 ## Conclusion
-The Platform Gateway Service cleanly separates portal-facing security and control-plane concerns from tool execution capabilities. It enforces strong authentication and authorization, proxies to agent-platform securely with least-privilege delegated tokens, provides unified API access to the incident service with comprehensive policy enforcement and credential management, offers transparency through live permission matrix evaluation, workspace inventory discovery, Human-in-the-Loop confirmation bridging with durable audit trails, credential-gated model catalog discovery, operations document repository functionality with trusted foreign-session coverage decisions supporting both shift_summary and incident_report document types with dual-action authorization for incident reports, and now exposes platform version information through the /api/v1/runtime endpoint for enhanced version tracking and monitoring capabilities across the platform. The addition of complete session workspace lifecycle management including owner-only session rename demonstrates the gateway's extensibility in supporting complex interactive workflows while maintaining consistent security patterns and operational visibility.
+The Platform Gateway Service cleanly separates portal-facing security and control-plane concerns from tool execution capabilities. It enforces strong authentication and authorization, proxies to agent-platform securely with least-privilege delegated tokens, provides unified API access to the incident service with comprehensive policy enforcement and credential management, offers transparency through live permission matrix evaluation, workspace inventory discovery, Human-in-the-Loop confirmation bridging with durable audit trails, credential-gated model catalog discovery, operations document repository functionality with trusted foreign-session coverage decisions supporting both shift_summary and incident_report document types with dual-action authorization for incident reports, exposes platform version information through the /api/v1/runtime endpoint for enhanced version tracking and monitoring capabilities across the platform, and now includes single-skill detail proxy functionality for reading full skill records including body content. The addition of complete session workspace lifecycle management including owner-only session rename demonstrates the gateway's extensibility in supporting complex interactive workflows while maintaining consistent security patterns and operational visibility.
 
 The enhanced streaming architecture represents a significant improvement in error handling and reliability. The renaming of `stream_chat` to `open_chat_stream` reflects the more explicit nature of the function's purpose and its enhanced error propagation capabilities. By eagerly checking upstream status before any SSE frames are yielded, the gateway now properly distinguishes between client errors (4xx) and server errors (5xx), mapping them appropriately to HTTP status codes rather than returning empty streams. This change eliminates the previous issue where upstream errors would only be detected after the response had already been committed, resulting in confusing 200 responses with no content. The improved error handling ensures that clients receive meaningful HTTP status codes that accurately reflect the underlying conditions, making debugging and troubleshooting significantly more straightforward.
 
@@ -1313,4 +1413,6 @@ The enhanced error handling patterns ensure consistent behavior across all proxy
 
 The enhanced runtime endpoint functionality provides platform version information through the /api/v1/runtime endpoint by merging SERVICE_VERSION into the payload retrieved from agent-platform. This enhancement enables better version tracking and monitoring capabilities across the platform by exposing platform version information alongside runtime metadata. The implementation leverages the existing agent-client runtime_metadata method and simply merges the platform version from SERVICE_VERSION into the response payload, providing a centralized location for version discovery without requiring additional authentication or complex routing logic.
 
-These enhancements collectively demonstrate the platform's commitment to providing secure, observable, and reliable AI operations infrastructure while maintaining flexibility for evolving requirements and operational needs. The robust streaming audit system ensures that all chat operations are properly attributed and audited, regardless of how they terminate, providing operators with complete visibility into model usage and stream behavior for effective monitoring and troubleshooting. The operations document repository with trusted foreign-session coverage enables secure collaborative documentation while protecting sensitive session data, and the enhanced session workspace management provides comprehensive session lifecycle control with proper ownership enforcement and audit coverage. The dual-action authorization for incident reports ensures that incident data remains protected while enabling comprehensive incident reporting capabilities. The enhanced runtime version exposure provides essential infrastructure information for platform monitoring and version management across distributed components.
+The new single-skill detail proxy functionality addresses a critical gap in operator transparency by enabling direct access to full skill records including body content. This enhancement reuses the existing `skills:read` policy action and skills-hub's existing `get_skill` endpoint, maintaining consistency with the established security and operational patterns. The implementation supports namespaced skill IDs with embedded slashes, preserves URL safety, and provides consistent error handling that matches the existing skills list proxy. This capability is essential for operators to understand what skills actually do, particularly for validating where HITL gates land in browser-flow tests and ensuring proper skill behavior validation.
+
+These enhancements collectively demonstrate the platform's commitment to providing secure, observable, and reliable AI operations infrastructure while maintaining flexibility for evolving requirements and operational needs. The robust streaming audit system ensures that all chat operations are properly attributed and audited, regardless of how they terminate, providing operators with complete visibility into model usage and stream behavior for effective monitoring and troubleshooting. The operations document repository with trusted foreign-session coverage enables secure collaborative documentation while protecting sensitive session data, and the enhanced session workspace management provides comprehensive session lifecycle control with proper ownership enforcement and audit coverage. The dual-action authorization for incident reports ensures that incident data remains protected while enabling comprehensive incident reporting capabilities. The enhanced runtime version exposure provides essential infrastructure information for platform monitoring and version management across distributed components. The single-skill detail proxy completes the skills transparency picture by enabling operators to read the actual content of ingested skills that drive tool behavior and HITL gates, addressing a critical need identified during live browser-flow testing.

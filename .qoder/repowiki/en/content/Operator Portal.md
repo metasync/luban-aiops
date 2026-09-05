@@ -24,17 +24,21 @@
 - [AuditView.test.tsx](file://products/operator-portal/web-ui/app/src/views/__tests__/AuditView.test.tsx)
 - [tokens.ts](file://products/operator-portal/web-ui/app/src/theme/tokens.ts)
 - [sessions.ts](file://products/operator-portal/web-ui/app/src/api/sessions.ts)
+- [SkillContentViewer.tsx](file://products/operator-portal/web-ui/app/src/chat/SkillContentViewer.tsx)
+- [SkillsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SkillsView.tsx)
+- [markdown.ts](file://products/operator-portal/web-ui/app/src/chat/markdown.ts)
+- [SkillContentViewer.test.tsx](file://products/operator-portal/web-ui/app/src/chat/__tests__/SkillContentViewer.test.tsx)
+- [SkillsView.test.tsx](file://products/operator-portal/web-ui/app/src/views/control/__tests__/SkillsView.test.tsx)
 - [agent-stream-event.schema.json](file://shared/shared-contracts/schemas/agent-stream-event.schema.json)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced browser approval card UX with parsed element labels displayed as human-readable prose instead of raw technical details
-- Implemented hidden technical details behind collapsible expanders for improved operator readability
-- Added comprehensive flow context rendering with skill titles, descriptions, target origins, and risk classifications
-- Updated confirmation card system to prioritize workflow intent over individual tool actions
-- Enhanced visual styling with background highlighting, origin tags, and risk classification displays
-- Improved browser automation workflow understanding through meaningful element descriptions
+- Added new SkillContentViewer component for read-only skill content inspection with Rendered/Raw toggle functionality
+- Enhanced Skills view with lazy View action per row that fetches skill details on-demand
+- Integrated secure markdown rendering with escape-first approach for safe skill content display
+- Added comprehensive testing coverage for both the Skills view and SkillContentViewer components
+- Updated skills API integration to support lazy loading of full skill records
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -49,7 +53,7 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-The Operator Portal is the operator-facing web application for platform administration and monitoring. It provides a modern SPA shell with role-based navigation, chat-driven interactions, incident triage, approval workflows, enhanced audit trail viewing with tabbed interface, permissions inspection, and workspace resource browsing. The portal authenticates via OIDC through the identity broker, proxies API calls to the platform gateway, and serves a static bundle via nginx with immutable asset caching and SPA fallback.
+The Operator Portal is the operator-facing web application for platform administration and monitoring. It provides a modern SPA shell with role-based navigation, chat-driven interactions, incident triage, approval workflows, enhanced audit trail viewing with tabbed interface, permissions inspection, workspace resource browsing, and **enhanced skills inventory with lazy loading and read-only content inspection**. The portal authenticates via OIDC through the identity broker, proxies API calls to the platform gateway, and serves a static bundle via nginx with immutable asset caching and SPA fallback.
 
 Key capabilities include:
 - Chat and streaming responses with tool evidence and inline human-in-the-loop confirmations
@@ -59,6 +63,7 @@ Key capabilities include:
 - **Enhanced read-only audit trail with sophisticated tabbed interface (Events and Summary tabs), shared filter toolbar, CSV export with truncation warnings, comprehensive summary analytics with drill-down capabilities, critical hook ordering stability for sign-out/token refresh scenarios, and automatic recovery from stale session transitions**
 - Permissions matrix view sourced from policy enforcement
 - Workspace views for tools and skills catalogs
+- **Enhanced Skills inventory with lazy View action per row and new SkillContentViewer component for read-only skill content inspection with Rendered/Raw toggle functionality**
 - Settings & Debug panel showing session, identity, and platform component health
 
 **Section sources**
@@ -94,7 +99,7 @@ Nginx --> Dist
 - API client: Centralized fetch wrapper adding bearer tokens and request IDs, with configurable gateway URL override.
 - Chat workspace: Session list, message composer, model selector, voice input, streaming SSE transport, tool evidence rendering, and **enhanced HITL confirmation cards with browser flow context, parsed element labels as prose, and metadata visualization**.
 - Control views: Approvals inbox, **enhanced audit trail with sophisticated tabbed interface, critical hook ordering stability, and automatic recovery from stale session transitions**, permissions matrix, settings & debug, incidents triage.
-- Workspace views: Tools catalog and skills inventory with filters.
+- Workspace views: Tools catalog and **enhanced skills inventory with lazy loading and read-only content viewer**.
 - Theme and accessibility: Dark theme tokens mirrored into CSS custom properties; ARIA labels and keyboard-friendly controls.
 
 **Section sources**
@@ -319,6 +324,70 @@ SkipHeadline --> ToolDetails
 - [agent-stream-event.schema.json:59-70](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L59-L70)
 - [sessions.ts:53-66](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L53-L66)
 
+### Enhanced Skills Inventory with Lazy Loading and Content Viewer
+**New** The Skills inventory view has been enhanced with lazy loading capabilities and a new read-only content viewer component that allows operators to inspect skill contents safely before trusting them to drive tool behavior and HITL gates.
+
+#### Lazy View Action Per Row
+- **On-Demand Loading**: Each skill row includes a "View" button that triggers lazy fetching of the full skill record only when invoked
+- **Optimized Performance**: The list payload omits the skill body by contract, reducing initial load time and network usage
+- **Loading States**: Individual row loading indicators provide feedback during skill detail retrieval
+- **Error Handling**: Inline error messages are displayed if skill detail fetching fails, without opening the viewer
+
+#### SkillContentViewer Component
+- **Read-Only Modal**: Opens in a modal dialog with skill metadata (title, source, version, tags, web_target) displayed prominently
+- **Rendered/Raw Toggle**: Segmented control allows switching between rendered markdown view and raw source view
+- **Secure Rendering**: Uses escape-first markdown renderer that prevents XSS attacks by escaping all HTML characters before processing markup
+- **Safe Link Handling**: Only http(s) links are rendered as clickable URLs; other protocols are displayed as plain text
+- **Bounded Scrolling**: Content area has maximum height with scrollable overflow for large skill documents
+
+#### Markdown Rendering Security
+- **Escape-First Approach**: All HTML characters are escaped before any markdown processing occurs
+- **Code Block Protection**: Fenced code blocks and inline code spans are protected from markdown transformation
+- **Link Validation**: Only http(s) protocol links are allowed; javascript:, data:, and other dangerous protocols are stripped
+- **XSS Prevention**: Hostile content like `<script>` tags and event handlers are safely escaped and displayed as literal text
+
+#### API Integration
+- **Namespaced Skill IDs**: Supports namespaced skill IDs (e.g., "sre-alerting/reset-password") with proper URL encoding
+- **Gateway Proxy**: Integrates with platform gateway's `/api/v1/skills/{skill_id:path}` endpoint for skill detail retrieval
+- **Type Safety**: TypeScript interfaces define the shape of skill records and details for compile-time validation
+
+```mermaid
+flowchart TD
+SkillsList["Skills List View"] --> Filter["Source/Tag Filters"]
+Filter --> LoadList["Load Skills List"]
+LoadList --> SkillTable["Skill Table with View Buttons"]
+SkillTable --> ViewAction{"User clicks View?"}
+ViewAction --> |Yes| FetchDetail["Fetch Skill Detail"]
+FetchDetail --> Success{"Success?"}
+Success --> |Yes| OpenViewer["Open SkillContentViewer"]
+Success --> |No| ShowError["Show Error Message"]
+OpenViewer --> RenderedView["Rendered Markdown View"]
+OpenViewer --> RawView["Raw Source View"]
+RenderedView --> Toggle{"Toggle View?"}
+RawView --> Toggle
+Toggle --> |Rendered| RenderedView
+Toggle --> |Raw| RawView
+ViewAction --> |No| SkillTable
+```
+
+**Diagram sources**
+- [SkillsView.tsx:34-175](file://products/operator-portal/web-ui/app/src/views/control/SkillsView.tsx#L34-L175)
+- [SkillContentViewer.tsx:29-131](file://products/operator-portal/web-ui/app/src/chat/SkillContentViewer.tsx#L29-L131)
+- [markdown.ts:77-198](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L77-L198)
+
+#### Testing Coverage
+- **Component Tests**: Comprehensive test coverage for both SkillsView and SkillContentViewer components
+- **Security Testing**: Tests verify hostile content is properly escaped and not executed
+- **Integration Testing**: Tests validate lazy loading behavior and API integration
+- **User Experience Testing**: Tests ensure proper loading states, error handling, and view toggling
+
+**Section sources**
+- [SkillsView.tsx:1-175](file://products/operator-portal/web-ui/app/src/views/control/SkillsView.tsx#L1-L175)
+- [SkillContentViewer.tsx:1-131](file://products/operator-portal/web-ui/app/src/chat/SkillContentViewer.tsx#L1-L131)
+- [markdown.ts:1-198](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L198)
+- [SkillsView.test.tsx:1-107](file://products/operator-portal/web-ui/app/src/views/control/__tests__/SkillsView.test.tsx#L1-L107)
+- [SkillContentViewer.test.tsx:1-86](file://products/operator-portal/web-ui/app/src/chat/__tests__/SkillContentViewer.test.tsx#L1-L86)
+
 ### Enhanced Audit Trail with Automatic Recovery Capabilities
 **Updated** The audit trail view has been completely redesigned with an advanced tabbed interface that provides both detailed event inspection and comprehensive summary analytics with interactive drill-down capabilities. The v0.29.3 release includes critical improvements for session lifecycle handling that prevent empty state rendering during stale session transitions, ensuring robust automatic recovery without manual intervention.
 
@@ -486,6 +555,8 @@ Nginx --> Gateway["Platform Gateway"]
 - **v0.29.3 Recovery Efficiency**: Automatic recovery from stale session transitions eliminates need for manual refresh operations, improving user experience and reducing support burden.
 - **Enhanced Confirmation Card Performance**: Flow headline rendering uses conditional checks to avoid unnecessary DOM manipulation when flow metadata is absent, maintaining optimal performance for non-browser confirmation scenarios.
 - **Parsed Element Labels Optimization**: Display hints are conditionally rendered only when available, preventing unnecessary DOM operations for non-browser tools.
+- **Skills View Performance**: Lazy loading of skill details reduces initial page load time and network usage; only fetches full skill records when users explicitly click View.
+- **Markdown Rendering Efficiency**: Escape-first markdown rendering optimizes security without sacrificing performance; code blocks and inline code are protected from transformation overhead.
 
 [No sources needed since this section provides general guidance]
 
@@ -506,6 +577,10 @@ Nginx --> Gateway["Platform Gateway"]
 - **AgentStreamEvent Schema v9 Issues**: If flow_summary fields are missing from confirmation cards, verify that the backend is sending the new schema version and that decoder functions are properly parsing the flow metadata.
 - **Display Hint Issues**: If parsed element labels aren't appearing, verify that browser automation tools are generating display_hint fields; check that the decoder is properly extracting display_hint from pending_calls; ensure the ChatView is rendering the displayHint property correctly.
 - **Technical Details Expander Issues**: If technical details aren't collapsing properly, verify that the `<details>` element structure is correct and that the "Technical details" summary text is displaying as expected.
+- **Skills View Issues**: Verify that the Skills inventory view loads correctly; check for network errors when clicking View buttons; ensure skill detail API endpoints are accessible.
+- **SkillContentViewer Issues**: If skill content doesn't display properly, verify that the markdown renderer is working correctly; check for XSS protection issues; ensure the Rendered/Raw toggle functions properly.
+- **Markdown Security Issues**: If skill content appears broken or unsafe, verify that the escape-first renderer is properly sanitizing HTML; check that hostile content like script tags are being escaped correctly.
+- **Lazy Loading Performance**: If skills view feels slow, verify that skill details are only being fetched when View is clicked; check for excessive API calls; ensure loading states are displayed appropriately.
 
 **Section sources**
 - [AuthContext.tsx:40-85](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L40-L85)
@@ -514,9 +589,11 @@ Nginx --> Gateway["Platform Gateway"]
 - [nginx.conf:8-28](file://products/operator-portal/nginx.conf#L8-L28)
 - [AuditView.tsx:101-199](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L101-L199)
 - [AuditView.test.tsx:97-131](file://products/operator-portal/web-ui/app/src/views/__tests__/AuditView.test.tsx#L97-L131)
+- [SkillsView.test.tsx:94-107](file://products/operator-portal/web-ui/app/src/views/control/__tests__/SkillsView.test.tsx#L94-L107)
+- [SkillContentViewer.test.tsx:65-77](file://products/operator-portal/web-ui/app/src/chat/__tests__/SkillContentViewer.test.tsx#L65-L77)
 
 ## Conclusion
-The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface, advanced analytics, and automatic recovery from stale session transitions**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants. The v0.29.3 session lifecycle enhancement adds automatic recovery capabilities that prevent empty state rendering during stale session transitions, eliminating the need for manual refresh operations and providing a more resilient user experience. **The enhanced confirmation card system with browser flow context and parsed element labels provides operators with meaningful workflow descriptions, visual styling with background highlighting and tags, improved situational awareness when approving automated browser actions, and hidden technical details behind expanders for cleaner presentation.** The AgentStreamEvent schema v9 enhancement enables consistent flow summary support across both live streaming and durable record scenarios, ensuring operators see the same workflow context regardless of how they encounter confirmation requests.
+The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface, advanced analytics, and automatic recovery from stale session transitions**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants. The v0.29.3 session lifecycle enhancement adds automatic recovery capabilities that prevent empty state rendering during stale session transitions, eliminating the need for manual refresh operations and providing a more resilient user experience. **The enhanced confirmation card system with browser flow context and parsed element labels provides operators with meaningful workflow descriptions, visual styling with background highlighting and tags, improved situational awareness when approving automated browser actions, and hidden technical details behind expanders for cleaner presentation.** The AgentStreamEvent schema v9 enhancement enables consistent flow summary support across both live streaming and durable record scenarios, ensuring operators see the same workflow context regardless of how they encounter confirmation requests. **The new Skills inventory enhancements with lazy loading and read-only content viewer provide operators with safe, performant access to skill documentation, enabling informed decisions about trusting skills to drive automated actions while maintaining security through escape-first markdown rendering and comprehensive testing coverage.**
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -542,6 +619,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - Agent platform: Provides chat sessions and streaming responses.
 - Policy center: Supplies approval queue and decision state surfaced in Approvals and Permissions views.
 - **Audit service**: Provides durable audit trail with events, summary analytics, CSV export capabilities, and comprehensive filtering support.
+- **Skills hub**: Provides skills inventory and detail endpoints for the enhanced Skills view with lazy loading capabilities.
 
 **Section sources**
 - [README.md:127-133](file://products/operator-portal/README.md#L127-L133)
@@ -551,11 +629,14 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - Accessibility: ARIA labels on navigation and user actions; keyboard-friendly menus and controls; responsive layout adapts to narrow screens with a drawer.
 - **Enhanced Audit Interface**: Sophisticated tabbed interface provides intuitive navigation between detailed events and comprehensive summary analytics; shared filter toolbar ensures consistent user experience across tabs; collapsible sections improve information density while maintaining accessibility; v0.29.1 improvements provide more stable table layouts with fixed-width columns; v0.29.2 hook ordering ensures stable rendering during authentication state changes; v0.29.3 automatic recovery prevents empty states during session transitions.
 - **Enhanced Confirmation Cards**: Browser flow context provides meaningful workflow descriptions with visual styling including background highlighting, origin tags, and risk classification indicators; parsed element labels display human-readable descriptions instead of raw technical details; technical implementation details are hidden behind collapsible expanders for cleaner presentation; accessible semantic HTML structure with appropriate heading levels and descriptive text; responsive design adapts to different screen sizes while maintaining readability.
+- **Enhanced Skills Interface**: Lazy loading provides better performance and user experience; read-only content viewer ensures safe inspection of skill contents; Rendered/Raw toggle offers flexibility for different use cases; comprehensive accessibility support with ARIA labels and keyboard navigation; responsive modal design adapts to different screen sizes.
 
 **Section sources**
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
 - [App.tsx:395-418](file://products/operator-portal/web-ui/app/src/App.tsx#L395-L418)
 - [AuditView.tsx:298-361](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L298-L361)
+- [SkillsView.tsx:121-175](file://products/operator-portal/web-ui/app/src/views/control/SkillsView.tsx#L121-L175)
+- [SkillContentViewer.tsx:45-131](file://products/operator-portal/web-ui/app/src/chat/SkillContentViewer.tsx#L45-L131)
 
 ### Browser Compatibility
 - Uses modern browser APIs such as Web Speech API for voice input and standard fetch/SSE patterns.
@@ -649,3 +730,43 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - [constants.ts:1-49](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts#L1-L49)
 - [AuditView.test.tsx:97-131](file://products/operator-portal/web-ui/app/src/views/__tests__/AuditView.test.tsx#L97-L131)
 - [AuditView.test.tsx:174-226](file://products/operator-portal/web-ui/app/src/views/__tests__/AuditView.test.tsx#L174-L226)
+
+### Enhanced Skills Inventory Features
+**New** The Skills inventory has been enhanced with lazy loading capabilities and a comprehensive read-only content viewer that provides safe inspection of skill documentation before trusting them to drive automated actions.
+
+#### Lazy Loading Architecture
+- **On-Demand Detail Fetching**: Skill details (including full body content) are only fetched when users explicitly click the View button
+- **Optimized Network Usage**: List payloads omit skill bodies by contract, reducing initial load time and bandwidth usage
+- **Individual Loading States**: Each skill row displays its own loading indicator during detail retrieval
+- **Error Isolation**: Failed detail fetches display inline errors without affecting the rest of the skills list
+
+#### SkillContentViewer Component
+- **Read-Only Modal Interface**: Opens skill details in a modal dialog with prominent metadata display (title, source, version, tags, web_target)
+- **Dual View Modes**: Segmented control switches between rendered markdown view and raw source view
+- **Secure Markdown Rendering**: Uses escape-first renderer that prevents XSS attacks while preserving formatting
+- **Bounded Scrolling**: Content area has maximum height with scrollable overflow for large skill documents
+- **Accessibility Support**: ARIA labels and keyboard navigation throughout the viewer interface
+
+#### Security Features
+- **Escape-First Rendering**: All HTML characters are escaped before markdown processing to prevent XSS attacks
+- **Code Block Protection**: Fenced code blocks and inline code are protected from markdown transformation
+- **Link Validation**: Only http(s) protocol links are rendered as clickable URLs; other protocols are displayed as plain text
+- **Hostile Content Handling**: Script tags, event handlers, and other malicious content are safely escaped and displayed as literal text
+
+#### API Integration
+- **Namespaced Skill Support**: Handles namespaced skill IDs (e.g., "sre-alerting/reset-password") with proper URL encoding
+- **Gateway Proxy Integration**: Connects with platform gateway's `/api/v1/skills/{skill_id:path}` endpoint
+- **Type Safety**: TypeScript interfaces define skill record shapes for compile-time validation and IDE support
+
+#### Testing and Quality Assurance
+- **Component Testing**: Comprehensive test coverage for both SkillsView and SkillContentViewer components
+- **Security Testing**: Validates that hostile content is properly escaped and never executed
+- **Integration Testing**: Verifies lazy loading behavior and API integration patterns
+- **User Experience Testing**: Ensures proper loading states, error handling, and view toggling functionality
+
+**Section sources**
+- [SkillsView.tsx:1-175](file://products/operator-portal/web-ui/app/src/views/control/SkillsView.tsx#L1-L175)
+- [SkillContentViewer.tsx:1-131](file://products/operator-portal/web-ui/app/src/chat/SkillContentViewer.tsx#L1-L131)
+- [markdown.ts:1-198](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L198)
+- [SkillsView.test.tsx:1-107](file://products/operator-portal/web-ui/app/src/views/control/__tests__/SkillsView.test.tsx#L1-L107)
+- [SkillContentViewer.test.tsx:1-86](file://products/operator-portal/web-ui/app/src/chat/__tests__/SkillContentViewer.test.tsx#L1-L86)
