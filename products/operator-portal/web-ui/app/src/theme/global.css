@@ -337,6 +337,25 @@ body {
   }
 }
 
+/* #3: post-approval "still working" indicator — a labelled spinner row
+   shown under the reply and above the tool evidence so the operator can
+   tell the agent resumed the stream after a remote approval landed. */
+.agent-working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: 0.8rem;
+}
+
+.agent-working-label {
+  color: var(--text-muted);
+}
+
 /* SPEC-034 R-4: approvals inbox entries render as separated cards with a
    two-line provenance header (session title, then owner/timing). */
 .approvals-entry {
@@ -577,6 +596,27 @@ body {
   padding: 8px 10px;
   margin-top: 6px;
   font-size: 0.85rem;
+}
+
+/* #2(c): the parsed element label reads as prose (not a raw code block) so
+   the operator sees what a browser action targets at a glance. */
+.confirm-call-hint {
+  margin-top: 6px;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+/* #2(c): raw per-call arguments fold behind a native expander, mirroring
+   the evidence card's "Parameters" details. The muted summary reads as
+   optional audit detail rather than the thing to decide on. */
+.confirm-call-details {
+  margin-top: 6px;
+}
+
+.confirm-call-details > summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }
 
 .confirm-note {

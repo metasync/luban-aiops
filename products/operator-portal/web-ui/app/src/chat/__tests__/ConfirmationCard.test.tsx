@@ -198,3 +198,56 @@ describe("ConfirmationCardView execution receipts (SPEC-037 R-6)", () => {
     ).toBeTruthy();
   });
 });
+
+describe("ConfirmationCardView technical-detail expander (#2c)", () => {
+  // A browser write action: the parsed element label (displayHint) is the
+  // one human-readable line, and the raw arguments are audit detail that
+  // should fold behind an expander instead of dominating the card.
+  const browserCard = cardOf([
+    {
+      callId: "c-1",
+      toolName: "web.click",
+      riskLevel: "write",
+      action: "tools:mutate",
+      displayHint: "Reset password button",
+      parameters: { ref: "e42", origin: "https://admin.example.com" },
+    },
+  ]);
+
+  it("keeps the tool name and risk tier on the card face", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    renderCard(browserCard);
+    expect(screen.getByText("web.click")).toBeTruthy();
+    expect(screen.getByText("write")).toBeTruthy();
+  });
+
+  it("renders the element label as prose, not a raw code block", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    renderCard(browserCard);
+    const hint = screen.getByText("Reset password button");
+    expect(hint.classList.contains("confirm-call-hint")).toBe(true);
+    // A <pre> reads as technical; the hint is now a plain prose line.
+    expect(hint.tagName).not.toBe("PRE");
+  });
+
+  it("folds the raw arguments behind a 'Technical details' expander", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const { container } = renderCard(browserCard);
+    const summary = screen.getByText("Technical details");
+    expect(summary.tagName).toBe("SUMMARY");
+    const details = summary.closest("details");
+    expect(details).toBeTruthy();
+    // The full parameters survive inside the expander — never dropped, so
+    // the audit detail stays one click away.
+    const pre = details!.querySelector("pre.evidence-pre");
+    expect(pre).toBeTruthy();
+    expect(pre!.textContent).toContain("e42");
+    expect(pre!.textContent).toContain("https://admin.example.com");
+    // No raw <pre> sits directly on the card face anymore: both the hint
+    // (prose) and the arguments (expander) moved off the always-visible
+    // code-block presentation.
+    expect(
+      container.querySelectorAll(".confirm-call > pre.evidence-pre").length,
+    ).toBe(0);
+  });
+});

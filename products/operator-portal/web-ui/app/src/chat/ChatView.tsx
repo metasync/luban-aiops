@@ -444,16 +444,23 @@ export function ConfirmationCardView({
               {call.riskLevel ?? "unknown"}
             </Tag>
           </div>
-          {/* SPEC-050 follow-up: show element description for browser
-              interaction tools so the card is human-readable. */}
+          {/* SPEC-050 follow-up: the parsed element label is the one
+              human-readable line for a browser interaction, so keep it
+              visible as prose rather than buried in a raw code block. */}
           {call.displayHint ? (
-            <pre className="evidence-pre" style={{ color: "var(--accent)" }}>
-              {call.displayHint}
-            </pre>
+            <div className="confirm-call-hint">{call.displayHint}</div>
           ) : null}
-          <pre className="evidence-pre">
-            {JSON.stringify(call.parameters ?? {}, null, 2)}
-          </pre>
+          {/* Post-live-test #2(c): the raw per-call arguments are audit
+              detail, not what the operator reads to decide. Fold them
+              behind an expander so the card stays readable; the full
+              parameters remain one click away and still travel to the
+              audit trail unchanged. */}
+          <details className="confirm-call-details">
+            <summary>Technical details</summary>
+            <pre className="evidence-pre">
+              {JSON.stringify(call.parameters ?? {}, null, 2)}
+            </pre>
+          </details>
         </div>
       ))}
       {card.executions && card.executions.length > 0 ? (
@@ -514,7 +521,10 @@ export function ConfirmationCardView({
 const ARRIVAL_WINDOW_MS = 6000;
 const REVEAL_TICK_MS = 25;
 
-function TurnGroup({
+// Exported for tests: the render order (reply → post-approval "working"
+// indicator → tool evidence → confirmation cards) is a UX requirement
+// (#3), so TurnGroup.test.tsx asserts it directly.
+export function TurnGroup({
   turn,
   canDecide,
   busy,
@@ -631,16 +641,21 @@ function TurnGroup({
       {turn.error ? (
         <Alert type="error" showIcon title={turn.error} />
       ) : null}
+      {/* Post-approval activity indicator (#3): once a remote decision
+          lands, show a clearly labelled "working" row directly under the
+          reply and above the tool evidence so the operator sees the agent
+          resumed the stream. It sits above the evidence because the new
+          tool frames land below it as the resumed stream progresses. */}
+      {agentWorking ? (
+        <div className="agent-working" data-testid="agent-working-indicator">
+          <Spin size="small" />
+          <span className="agent-working-label">Agent is working…</span>
+        </div>
+      ) : null}
       {/* Evidence panel renders whenever a turn carries tool frames —
           live streams and replayed (SPEC-025) evidence share this path. */}
       {turn.toolCalls.length > 0 || turn.toolResults.length > 0 ? (
         <EvidencePanel turn={turn} />
-      ) : null}
-      {/* Post-approval activity indicator: animated dots between the
-          evidence and the confirmation card so the operator sees the
-          agent is executing the resumed stream after granting approval. */}
-      {agentWorking ? (
-        <Bubble placement="start" variant="outlined" loading content="" />
       ) : null}
       {turn.confirmations.map((card) => (
         <ConfirmationCardView
