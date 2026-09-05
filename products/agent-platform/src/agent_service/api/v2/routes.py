@@ -497,7 +497,16 @@ _PENDING_CALL_ACTIONS = frozenset({"tools:invoke", "tools:mutate"})
 # v9 (SPEC-051 R-6): the card-level browser-flow headline fields the
 # stream schema allows on a confirmation_request frame. Mirrors the
 # kernel's FlowContext.summary() and the durable record's flow_summary.
-_FLOW_SUMMARY_FIELDS = ("skill_id", "origin", "title", "description", "risk_class")
+# v10 (SPEC-053 R-2) adds ``flow_intent`` — the author-written gated-step
+# intent the card renders as its lead decision line (display-only).
+_FLOW_SUMMARY_FIELDS = (
+    "skill_id",
+    "origin",
+    "title",
+    "description",
+    "flow_intent",
+    "risk_class",
+)
 
 
 def _normalize_stream_event(

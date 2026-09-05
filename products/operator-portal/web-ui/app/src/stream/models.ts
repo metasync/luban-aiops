@@ -75,6 +75,9 @@ export interface FlowSummary {
   origin?: string;
   title?: string;
   description?: string;
+  // SPEC-053 R-3: the skill-authored sentence describing what the flow's
+  // gated mutating step achieves — rendered as the card's lead decision line.
+  flowIntent?: string;
   riskClass?: string;
 }
 

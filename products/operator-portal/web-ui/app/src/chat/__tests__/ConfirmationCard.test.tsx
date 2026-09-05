@@ -251,3 +251,91 @@ describe("ConfirmationCardView technical-detail expander (#2c)", () => {
     ).toBe(0);
   });
 });
+
+describe("ConfirmationCardView flow-intent lead line (SPEC-053 R-3)", () => {
+  // A bound browser write flow whose skill declares a ``flow_intent``: the
+  // card leads with the plain, author-written decision line (what approving
+  // this flow actually does) above the muted DOM-level per-call detail.
+  function flowCard(
+    flowSummary: ConfirmationCard["flowSummary"],
+  ): ConfirmationCard {
+    return {
+      ...cardOf([
+        {
+          callId: "c-1",
+          toolName: "web.click",
+          riskLevel: "write",
+          action: "tools:mutate",
+          displayHint: "Reset password button",
+        },
+      ]),
+      flowSummary,
+    };
+  }
+
+  it("renders the skill-authored intent as the lead decision line", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const { container } = renderCard(
+      flowCard({
+        title: "Reset User Password",
+        description: "Click the submit button on the reset form",
+        flowIntent: "Submit the password reset for the user.",
+        riskClass: "write",
+      }),
+    );
+    const intent = container.querySelector(".confirm-flow-intent");
+    expect(intent).toBeTruthy();
+    expect(intent!.textContent).toBe("Submit the password reset for the user.");
+    // The intent sits between the bold title and the muted description.
+    expect(screen.getByText("Reset User Password")).toBeTruthy();
+    expect(
+      screen.getByText("Click the submit button on the reset form"),
+    ).toBeTruthy();
+  });
+
+  it("renders the flow frame when only flow_intent is present (widened guard)", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const { container } = renderCard(
+      flowCard({ flowIntent: "Submit the password reset for the user." }),
+    );
+    // SPEC-053 R-3: the guard admits a flow that carries an intent but no
+    // title/origin, so the decision line is never dropped.
+    expect(container.querySelector(".confirm-flow")).toBeTruthy();
+    expect(container.querySelector(".confirm-flow-intent")!.textContent).toBe(
+      "Submit the password reset for the user.",
+    );
+  });
+
+  it("omits the intent node when the skill declares none (renders as pre-SPEC-053)", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const { container } = renderCard(
+      flowCard({
+        title: "Reset User Password",
+        origin: "http://admin.local",
+        riskClass: "write",
+      }),
+    );
+    // The flow frame still headlines the card, but there is no intent line —
+    // the change is strictly additive for skills without a flow_intent.
+    expect(container.querySelector(".confirm-flow")).toBeTruthy();
+    expect(container.querySelector(".confirm-flow-intent")).toBeNull();
+  });
+
+  it("escapes markup in the intent so it can never inject HTML", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const { container } = renderCard(
+      flowCard({
+        flowIntent: "<img src=x onerror=alert(1)> Submit the reset",
+      }),
+    );
+    const intent = container.querySelector(".confirm-flow-intent");
+    expect(intent).toBeTruthy();
+    // JSX text interpolation escapes the author string: it shows verbatim...
+    expect(intent!.textContent).toBe(
+      "<img src=x onerror=alert(1)> Submit the reset",
+    );
+    // ...and no <img> element is ever constructed from it (display-only, never
+    // dangerouslySetInnerHTML).
+    expect(intent!.querySelector("img")).toBeNull();
+  });
+});

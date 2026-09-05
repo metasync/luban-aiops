@@ -62,6 +62,8 @@ export interface ConfirmationFlowSummary {
   origin?: string;
   title?: string;
   description?: string;
+  // SPEC-053 R-3: skill-authored gated-step intent (the card's lead line).
+  flow_intent?: string;
   risk_class?: string;
 }
 

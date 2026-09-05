@@ -29,6 +29,11 @@ class Skill(BaseModel):
     # without it; the envelope stores the declaration verbatim.
     web_target: str | None = Field(default=None, max_length=2048)
     risk_class: str | None = Field(default=None, pattern="^(read|write)$")
+    # SPEC-053 R-1: optional author-written intent for the flow's gated
+    # mutating step, carried card-level on the flow_summary path and shown as
+    # the confirmation card's lead decision line. Requires ``web_target``;
+    # display-only (never a security input).
+    flow_intent: str | None = Field(default=None, max_length=200)
     updated_at: datetime
     body: str = Field(max_length=65536)
 

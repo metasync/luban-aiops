@@ -80,6 +80,9 @@ When the agent reaches step 7 (clicking "Confirm reset"), a **confirmation
 card** appears in the chat. It shows:
 - The **flow headline**: the workflow intent ("Reset User Password in Admin
   Portal") and the target origin — so you approve the reset, not a bare click
+- The **decision line** (SPEC-053): the skill's authored `flow_intent` —
+  "Submit the password reset for the target user, permanently changing their
+  admin-portal credentials." — what approving this gate actually does
 - The tool being called: `web.click` on the "Confirm reset" button
 - The risk level: **write**
 

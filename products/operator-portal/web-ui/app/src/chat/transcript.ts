@@ -128,6 +128,7 @@ function toFlowSummary(
     origin: summary.origin,
     title: summary.title,
     description: summary.description,
+    flowIntent: summary.flow_intent,
     riskClass: summary.risk_class,
   };
 }

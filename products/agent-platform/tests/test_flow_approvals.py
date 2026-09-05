@@ -32,6 +32,7 @@ def _flow_dict(**overrides):
         "origin": "http://admin.local",
         "title": "Reset User Password",
         "description": "Reset a user's password in the admin portal",
+        "flow_intent": "Submit the password reset for the user.",
         "risk_class": "write",
         "steps_used": 3,
         "max_steps": 20,
@@ -68,6 +69,7 @@ class FlowContextTests(unittest.TestCase):
             origin="http://x",
             title="Reset Password",
             description="Reset a user's password",
+            flow_intent="Submit the password reset for the user.",
             risk_class="write",
         )
         self.assertEqual(
@@ -77,19 +79,21 @@ class FlowContextTests(unittest.TestCase):
                 "origin": "http://x",
                 "title": "Reset Password",
                 "description": "Reset a user's password",
+                "flow_intent": "Submit the password reset for the user.",
                 "risk_class": "write",
             },
         )
 
     def test_summary_keeps_empty_headline_defaults(self) -> None:
-        """An empty title/description survive as empty strings so the portal
-        can fall back gracefully rather than dropping the keys."""
+        """An empty title/description/flow_intent survive as empty strings so
+        the portal can fall back gracefully rather than dropping the keys."""
         context = FlowContext(
             session_id="ses-1", skill_id="skill-a", origin="http://x",
         )
         summary = context.summary()
         self.assertEqual(summary["title"], "")
         self.assertEqual(summary["description"], "")
+        self.assertEqual(summary["flow_intent"], "")
         self.assertEqual(summary["risk_class"], "read")
 
 
@@ -103,6 +107,7 @@ class FlowContextStoreTests(unittest.TestCase):
         self.assertEqual(context.skill_id, "samples/password-reset")
         self.assertEqual(context.origin, "http://admin.local")
         self.assertEqual(context.title, "Reset User Password")
+        self.assertEqual(context.flow_intent, "Submit the password reset for the user.")
         self.assertEqual(context.risk_class, "write")
         self.assertEqual(context.steps_used, 3)
         self.assertEqual(context.max_steps, 20)
@@ -129,6 +134,7 @@ class FlowContextStoreTests(unittest.TestCase):
         self.assertEqual(context.identity(), ("s", "o"))
         self.assertEqual(context.title, "")
         self.assertEqual(context.description, "")
+        self.assertEqual(context.flow_intent, "")
         self.assertEqual(context.risk_class, "read")
         self.assertEqual(context.steps_used, 0)
         self.assertEqual(context.max_steps, 0)

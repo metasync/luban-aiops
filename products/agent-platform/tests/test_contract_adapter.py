@@ -7,7 +7,7 @@ import jsonschema
 import pytest
 from fastapi.testclient import TestClient
 
-from agent_service.api.v2.routes import _normalize_stream_event
+from agent_service.api.v2.routes import _FLOW_SUMMARY_FIELDS, _normalize_stream_event
 from agent_service.app import create_app
 
 SCHEMAS_DIR = (
@@ -251,11 +251,12 @@ def test_pending_calls_pass_through_schema_conformant_risk_level() -> None:
 
 
 def test_confirmation_request_frame_preserves_flow_summary() -> None:
-    """v9 (SPEC-051 R-6): the live operator card reads its browser-flow
-    headline off the confirmation_request frame, so the route must carry
-    every contract field through — especially ``description``, whose loss
-    left the live card blank while the durable record (approver inbox)
-    still showed it. The frame must stay schema-conformant."""
+    """v10 (SPEC-051 R-6 / SPEC-053 R-2): the live operator card reads its
+    browser-flow headline off the confirmation_request frame, so the route must
+    carry every contract field through — especially ``description``, whose loss
+    left the live card blank while the durable record (approver inbox) still
+    showed it, and the SPEC-053 ``flow_intent`` lead decision line. The frame
+    must stay schema-conformant."""
     raw = {
         "type": "confirmation_request",
         "confirm_id": "cf-flow",
@@ -271,6 +272,7 @@ def test_confirmation_request_frame_preserves_flow_summary() -> None:
             "origin": "browser-flow",
             "title": "Reset the check target",
             "description": "Clears the SPEC-051 Design 1 form and re-runs the check.",
+            "flow_intent": "Submit the password reset for the user.",
             "risk_class": "write",
         },
         "message": "Tool execution requires your confirmation.",
@@ -284,14 +286,15 @@ def test_confirmation_request_frame_preserves_flow_summary() -> None:
     assert summary["skill_id"] == "browser.check.reset"
     assert summary["origin"] == "browser-flow"
     assert summary["title"] == "Reset the check target"
+    assert summary["flow_intent"] == "Submit the password reset for the user."
     assert summary["risk_class"] == "write"
     jsonschema.validate(dumped, load_schema("agent-stream-event.schema.json"))
 
 
 def test_flow_summary_coercion_drops_malformed_and_unknown_fields() -> None:
-    """v9 (SPEC-051 R-6): a non-dict summary degrades to absent (the card
-    falls back to plain tool-action rendering) and a dict keeps only the
-    contract's string fields, so a malformed or over-eager summary can
+    """v10 (SPEC-051 R-6 / SPEC-053 R-2): a non-dict summary degrades to absent
+    (the card falls back to plain tool-action rendering) and a dict keeps only
+    the contract's string fields, so a malformed or over-eager summary can
     never fail the frame's additionalProperties:false validation."""
     for malformed in ("not-a-dict", ["skill_id"], 7):
         raw = {
@@ -313,6 +316,7 @@ def test_flow_summary_coercion_drops_malformed_and_unknown_fields() -> None:
         "flow_summary": {
             "title": "Reset the check target",
             "description": "Clears the form.",
+            "flow_intent": "Submit the reset.",
             "skill_id": 99,
             "origin": None,
             "risk_class": "write",
@@ -324,16 +328,18 @@ def test_flow_summary_coercion_drops_malformed_and_unknown_fields() -> None:
     assert dumped["flow_summary"] == {
         "title": "Reset the check target",
         "description": "Clears the form.",
+        "flow_intent": "Submit the reset.",
         "risk_class": "write",
     }
     jsonschema.validate(dumped, load_schema("agent-stream-event.schema.json"))
 
 
 def test_confirmation_record_with_flow_summary_conforms_to_session_contract() -> None:
-    """v9 (SPEC-051 R-6): the durable card model carries flow_summary, so the
-    session-detail contract must allow it — a browser-flow card served to the
-    approver inbox / owner transcript would otherwise fail the confirmation
-    item's additionalProperties:false. Locks the model<->schema parity."""
+    """v10 (SPEC-051 R-6 / SPEC-053 R-2): the durable card model carries
+    flow_summary, so the session-detail contract must allow it — a browser-flow
+    card served to the approver inbox / owner transcript would otherwise fail the
+    confirmation item's additionalProperties:false. Locks the model<->schema
+    parity, including the SPEC-053 ``flow_intent`` lead line."""
     from agent_service.schemas.v2 import ConfirmationRecordModel
 
     card = ConfirmationRecordModel(
@@ -347,6 +353,7 @@ def test_confirmation_record_with_flow_summary_conforms_to_session_contract() ->
             "origin": "browser-flow",
             "title": "Reset the check target",
             "description": "Clears the SPEC-051 Design 1 form.",
+            "flow_intent": "Submit the password reset for the user.",
             "risk_class": "write",
         },
     )
@@ -358,6 +365,33 @@ def test_confirmation_record_with_flow_summary_conforms_to_session_contract() ->
     assert dumped["flow_summary"]["description"] == (
         "Clears the SPEC-051 Design 1 form."
     )
+    assert dumped["flow_summary"]["flow_intent"] == (
+        "Submit the password reset for the user."
+    )
+
+
+def test_flow_summary_field_parity_across_coercion_and_both_schemas() -> None:
+    """SPEC-053 R-2: three sources of truth define the flow-summary shape — the
+    route's ``_FLOW_SUMMARY_FIELDS`` coercion allow-list, the live
+    ``agent-stream-event`` schema, and the durable ``agent-session``
+    confirmation-item schema. A name-only parity check elsewhere missed drift, so
+    pin all three property sets to the same field names: adding ``flow_intent`` to
+    one but not another would silently drop it (coercion) or reject the frame
+    (additionalProperties:false)."""
+    expected = set(_FLOW_SUMMARY_FIELDS)
+
+    stream_props = set(
+        load_schema("agent-stream-event.schema.json")["properties"]["flow_summary"][
+            "properties"
+        ]
+    )
+    assert stream_props == expected
+
+    session_item = load_schema("agent-session.schema.json")["properties"][
+        "confirmations"
+    ]["items"]
+    session_props = set(session_item["properties"]["flow_summary"]["properties"])
+    assert session_props == expected
 
 
 def test_chat_confirm_request_conforms_to_contract() -> None:

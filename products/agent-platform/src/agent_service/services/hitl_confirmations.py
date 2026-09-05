@@ -64,8 +64,9 @@ class PendingConfirmation:
     # cards show what element will be clicked/typed into, not just the raw ref.
     browser_element_map: dict[int, str] = field(default_factory=dict)
     # Flow-semantic card headline (SPEC-051 R-6): the bound browser flow's
-    # summary (skill_id, origin, title, description, risk_class) captured from
-    # the kernel's session-scoped FlowContext at park time. Empty when no flow
+    # summary (skill_id, origin, title, description, flow_intent, risk_class —
+    # flow_intent added by SPEC-053 R-2, display-only) captured from the
+    # kernel's session-scoped FlowContext at park time. Empty when no flow
     # is bound (a per-action confirmation), so the card falls back to today's
     # tool-level rendering. Also the source of the approved flow identity that
     # ``resume_confirmation`` scopes the FlowApproval to (R-1).

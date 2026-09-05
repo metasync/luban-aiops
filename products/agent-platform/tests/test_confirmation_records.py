@@ -103,6 +103,7 @@ class TestInMemoryStore:
             "origin": "http://admin.local",
             "title": "Reset User Password",
             "description": "Reset a user's password in the admin portal",
+            "flow_intent": "Submit the password reset for the user.",
             "risk_class": "write",
         }
         store.save_parked(_record("cf-1", flow_summary=summary))
@@ -374,6 +375,7 @@ class TestPostgresStore:
             "origin": "http://admin.local",
             "title": "Reset User Password",
             "description": "Reset a user's password in the admin portal",
+            "flow_intent": "Submit the password reset for the user.",
             "risk_class": "write",
         }
         store.save_parked(_record("cf-1", flow_summary=summary))
@@ -389,6 +391,7 @@ class TestPostgresStore:
             "origin": "http://admin.local",
             "title": "Reset User Password",
             "description": "Reset a user's password in the admin portal",
+            "flow_intent": "Submit the password reset for the user.",
             "risk_class": "write",
         }
         row = (

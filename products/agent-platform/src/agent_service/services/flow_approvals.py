@@ -58,8 +58,10 @@ class FlowContext:
     Updated from each successful ``web.navigate`` result's ``data["flow"]``.
     ``skill_id`` + ``origin`` form the flow *identity* the unlock authority is
     scoped to; ``title``/``description``/``risk_class`` feed the R-6 card
-    headline; ``steps_used``/``max_steps`` mirror the gateway step budget for
-    observability (the gateway, not the kernel, enforces it).
+    headline and ``flow_intent`` (SPEC-053 R-2) the card's lead decision line;
+    ``steps_used``/``max_steps`` mirror the gateway step budget for
+    observability (the gateway, not the kernel, enforces it). ``flow_intent``
+    is display-only: the unlock authority and identity guard never read it.
     """
 
     session_id: str
@@ -67,6 +69,7 @@ class FlowContext:
     origin: str
     title: str = ""
     description: str = ""
+    flow_intent: str = ""
     risk_class: str = "read"
     steps_used: int = 0
     max_steps: int = 0
@@ -81,14 +84,15 @@ class FlowContext:
 
         Carried on the confirmation-request frame as ``flow_summary`` and on
         the parked confirmation as ``browser_flow``; the portal renders it
-        above the per-call tool detail. Empty title/description are kept as
-        empty strings so the portal can fall back gracefully.
+        above the per-call tool detail. Empty title/description/flow_intent are
+        kept as empty strings so the portal can fall back gracefully.
         """
         return {
             "skill_id": self.skill_id,
             "origin": self.origin,
             "title": self.title,
             "description": self.description,
+            "flow_intent": self.flow_intent,
             "risk_class": self.risk_class,
         }
 
@@ -118,6 +122,7 @@ class FlowContextStore:
             origin=str(flow.get("origin") or ""),
             title=str(flow.get("title") or ""),
             description=str(flow.get("description") or ""),
+            flow_intent=str(flow.get("flow_intent") or ""),
             risk_class=str(flow.get("risk_class") or "read"),
             steps_used=_as_int(flow.get("steps_used")),
             max_steps=_as_int(flow.get("max_steps")),

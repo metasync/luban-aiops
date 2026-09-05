@@ -83,6 +83,11 @@ class FlowState:
     # none — the kernel card then falls back to tool-level rendering.
     title: str = ""
     description: str = ""
+    # SPEC-053 R-1/R-2: author-written intent for the flow's gated mutating
+    # step, carried card-level alongside title/description on web.navigate's
+    # data["flow"]. Display-only — the deviation guard never reads it. Empty
+    # when the skill declares none.
+    flow_intent: str = ""
     steps_used: int = 0
     approved: bool = False
     denied: bool = False
@@ -94,6 +99,7 @@ class FlowState:
             "risk_class": self.risk_class,
             "title": self.title,
             "description": self.description,
+            "flow_intent": self.flow_intent,
             "steps_used": self.steps_used,
             "max_steps": self.max_steps,
             "approved": self.approved,

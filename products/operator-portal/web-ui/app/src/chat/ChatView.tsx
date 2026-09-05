@@ -390,7 +390,9 @@ export function ConfirmationCardView({
           approves "reset a user's password on <origin>", not a bare
           web.click. The per-call list below stays as the tool detail. */}
       {card.flowSummary &&
-      (card.flowSummary.title || card.flowSummary.origin) ? (
+      (card.flowSummary.title ||
+        card.flowSummary.origin ||
+        card.flowSummary.flowIntent) ? (
         <div
           className="confirm-flow"
           style={{
@@ -403,6 +405,19 @@ export function ConfirmationCardView({
         >
           {card.flowSummary.title ? (
             <div style={{ fontWeight: 600 }}>{card.flowSummary.title}</div>
+          ) : null}
+          {/* SPEC-053 R-3: the skill-authored gated-step intent is the lead
+              decision line — the plain sentence describing what approving this
+              flow actually does. Rendered as escaped JSX text (never markup),
+              set apart from the bold title above and the muted description
+              below. Absent for skills that declare none (renders as today). */}
+          {card.flowSummary.flowIntent ? (
+            <div
+              className="confirm-flow-intent"
+              style={{ fontSize: 13, fontWeight: 500, marginTop: 4 }}
+            >
+              {card.flowSummary.flowIntent}
+            </div>
           ) : null}
           {card.flowSummary.description ? (
             <div style={{ opacity: 0.75, fontSize: 13, marginTop: 2 }}>

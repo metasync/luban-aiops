@@ -337,6 +337,7 @@ describe("transcriptToTurns browser-flow headline (SPEC-051 R-6)", () => {
           origin: "http://admin.local",
           title: "Reset User Password",
           description: "Reset a user's password in the admin portal",
+          flow_intent: "Submit the password reset for the user.",
           risk_class: "write",
         },
       }),
@@ -346,6 +347,7 @@ describe("transcriptToTurns browser-flow headline (SPEC-051 R-6)", () => {
       origin: "http://admin.local",
       title: "Reset User Password",
       description: "Reset a user's password in the admin portal",
+      flowIntent: "Submit the password reset for the user.",
       riskClass: "write",
     });
   });

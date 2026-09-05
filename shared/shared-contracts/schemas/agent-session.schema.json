@@ -126,13 +126,14 @@
           },
           "flow_summary": {
             "type": ["object", "null"],
-            "description": "SPEC-051 R-6: card-level browser-flow headline captured at park time (skill intent, origin, risk_class) so the durable confirmation card renders the same workflow framing on the approver inbox and the owner transcript as the live operator card; null for non-browser cards and for records parked before the column existed.",
+            "description": "SPEC-051 R-6: card-level browser-flow headline captured at park time (skill intent, origin, risk_class) so the durable confirmation card renders the same workflow framing on the approver inbox and the owner transcript as the live operator card; SPEC-053 R-2 adds flow_intent, the skill-authored gated-step decision line (display-only). Null for non-browser cards and for records parked before the column existed.",
             "additionalProperties": false,
             "properties": {
               "skill_id": { "type": "string" },
               "origin": { "type": "string" },
               "title": { "type": "string" },
               "description": { "type": "string" },
+              "flow_intent": { "type": "string" },
               "risk_class": { "type": "string" }
             }
           },

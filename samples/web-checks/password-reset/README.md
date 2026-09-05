@@ -51,7 +51,11 @@ destructive mutation. Resetting a password is the mutation; signing in is not.
 So authentication stays read-tier (`web.fill_credential` plus the page's legacy
 SSO auto-submit) and the sole write-tier interaction is the "Confirm reset"
 click. The confirmation card headlines the workflow intent ("reset a user's
-password on <origin>") rather than a bare sign-in click (SPEC-051 R-6).
+password on <origin>") rather than a bare sign-in click (SPEC-051 R-6), and
+leads with the skill's authored `flow_intent` — "Submit the password reset for
+the target user, permanently changing their admin-portal credentials." — so the
+operator reads what the gated mutation actually achieves before the demoted
+DOM/technical detail (SPEC-053).
 
 ### Why `web.fill_credential` instead of `web.type`
 
@@ -87,7 +91,8 @@ undeploy-samples` removes them all again.
 
 1. Copy this directory to `samples/web-checks/<your-sample>/`
 2. Replace the admin panel HTML pages with your target's pages
-3. Update the skill document's frontmatter (`web_target`, `risk_class`)
+3. Update the skill document's frontmatter (`web_target`, `risk_class`,
+   and the optional `flow_intent` decision line for your gated step)
 4. Update the credential set name in the skill and `sync-browser-credentials.sh`
 5. Update the demo script's skill ID and target URLs
 6. Install your skill with `make deploy-samples SAMPLE=web-checks/<your-sample>`

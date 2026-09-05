@@ -11,7 +11,11 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from skills_hub.services.ingestion import ingest_directory, slug_from_path
+from skills_hub.services.ingestion import (
+    ingest_directory,
+    slug_from_path,
+    validate_document,
+)
 
 NOW = datetime(2026, 8, 15, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -286,6 +290,156 @@ class WebFlowDeclarationTests(unittest.TestCase):
         (skill,) = result.records
         self.assertIsNone(skill.web_target)
         self.assertIsNone(skill.risk_class)
+
+
+class FlowIntentDeclarationTests(unittest.TestCase):
+    """SPEC-053 R-1: optional flow_intent frontmatter key — a card-level,
+    display-only intent line that requires web_target and is ≤ 200 chars."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _ingest(self):
+        return ingest_directory("team-a", self.root, "local", NOW)
+
+    @staticmethod
+    def _doc(extra_frontmatter: str) -> str:
+        return (
+            "---\ntitle: Reset User Password\ndescription: Reset a password.\n"
+            f"{extra_frontmatter}---\n\nConfirm the reset.\n"
+        )
+
+    def test_valid_flow_intent_round_trips(self) -> None:
+        _write(
+            self.root,
+            "web/ResetPassword.md",
+            self._doc(
+                "web_target: https://admin.internal/login\n"
+                "risk_class: write\n"
+                "flow_intent: Submit the password reset for the user.\n"
+            ),
+        )
+        result = self._ingest()
+        self.assertEqual(result.rejections, [])
+        (skill,) = result.records
+        self.assertEqual(
+            skill.flow_intent, "Submit the password reset for the user."
+        )
+        # The intent rides beside the other flow-declaration fields, and
+        # summary() (the list/search shape, body omitted) carries it.
+        summary = skill.summary()
+        self.assertEqual(
+            summary["flow_intent"], "Submit the password reset for the user."
+        )
+
+    def test_flow_intent_allowed_without_write_risk_class(self) -> None:
+        # flow_intent requires web_target but not risk_class: write — a
+        # read-declared flow may still author an intent line.
+        _write(
+            self.root,
+            "web/StatusCheck.md",
+            self._doc(
+                "web_target: https://status.internal/health\n"
+                "flow_intent: Refresh the health dashboard for the region.\n"
+            ),
+        )
+        result = self._ingest()
+        self.assertEqual(result.rejections, [])
+        (skill,) = result.records
+        self.assertEqual(
+            skill.flow_intent, "Refresh the health dashboard for the region."
+        )
+        self.assertIsNone(skill.risk_class)
+
+    def test_flow_intent_without_web_target_rejected(self) -> None:
+        _write(
+            self.root,
+            "web/Bad.md",
+            self._doc("flow_intent: Do the mutating thing.\n"),
+        )
+        result = self._ingest()
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn(
+            "flow_intent requires a web_target", result.rejections[0].reason
+        )
+
+    def test_oversize_flow_intent_rejected(self) -> None:
+        long_intent = "x" * 201
+        _write(
+            self.root,
+            "web/Bad.md",
+            self._doc(
+                "web_target: https://admin.internal/login\n"
+                f"flow_intent: {long_intent}\n"
+            ),
+        )
+        result = self._ingest()
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn("≤ 200 chars", result.rejections[0].reason)
+
+    def test_non_string_flow_intent_rejected(self) -> None:
+        for bad in ("[a, b]", "123"):
+            with self.subTest(value=bad):
+                _write(
+                    self.root,
+                    "web/Bad.md",
+                    self._doc(
+                        "web_target: https://admin.internal/login\n"
+                        f"flow_intent: {bad}\n"
+                    ),
+                )
+                result = self._ingest()
+                self.assertEqual(len(result.rejections), 1)
+                self.assertIn(
+                    "flow_intent must be a non-empty string",
+                    result.rejections[0].reason,
+                )
+
+    def test_blank_flow_intent_rejected(self) -> None:
+        _write(
+            self.root,
+            "web/Bad.md",
+            self._doc(
+                "web_target: https://admin.internal/login\n"
+                'flow_intent: "   "\n'
+            ),
+        )
+        result = self._ingest()
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn(
+            "flow_intent must be a non-empty string",
+            result.rejections[0].reason,
+        )
+
+    def test_documents_without_flow_intent_ingest_unchanged(self) -> None:
+        _write(
+            self.root,
+            "web/NoIntent.md",
+            self._doc("web_target: https://admin.internal/login\n"),
+        )
+        result = self._ingest()
+        self.assertEqual(result.rejections, [])
+        (skill,) = result.records
+        self.assertIsNone(skill.flow_intent)
+        self.assertNotIn("flow_intent", skill.summary())
+
+    def test_validate_document_parity(self) -> None:
+        # validate_document shares _validate_frontmatter (SPEC-044 R-2), so it
+        # accepts a valid flow_intent and rejects a bad one with the same
+        # reason vocabulary the ingestion report uses.
+        good = self._doc(
+            "web_target: https://admin.internal/login\n"
+            "flow_intent: Submit the reset.\n"
+        )
+        self.assertEqual(validate_document(good), (True, None))
+        bad = self._doc("flow_intent: Submit the reset.\n")  # no web_target
+        valid, reason = validate_document(bad)
+        self.assertFalse(valid)
+        self.assertIn("flow_intent requires a web_target", reason or "")
 
 
 if __name__ == "__main__":

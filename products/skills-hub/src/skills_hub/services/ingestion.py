@@ -30,6 +30,7 @@ MAX_TAGS = 10
 MAX_VERSION_CHARS = 64
 MAX_SOURCE_URL_CHARS = 2048
 MAX_WEB_TARGET_CHARS = 2048
+MAX_FLOW_INTENT_CHARS = 200
 ALLOWED_KEYS = {
     "title",
     "description",
@@ -41,6 +42,9 @@ ALLOWED_KEYS = {
     # flow's interactive steps (defaults to ``read`` when absent).
     "web_target",
     "risk_class",
+    # SPEC-053 R-1: optional author-written intent for the flow's gated
+    # mutating step, shown as the confirmation card's lead decision line.
+    "flow_intent",
 }
 VALID_RISK_CLASSES = ("read", "write")
 SKIPPED_BASENAMES = {"readme.md", "notice", "notice.md"}
@@ -189,6 +193,26 @@ def _validate_frontmatter(
                 source_id, rel_path, "risk_class requires a web_target declaration"
             )
 
+    # SPEC-053 R-1: optional author-written intent for the flow's gated
+    # mutating step (card-level, display-only). Requires ``web_target`` like
+    # the other flow-declaration keys, but not ``risk_class: write``.
+    flow_intent = frontmatter.get("flow_intent")
+    if flow_intent is not None:
+        if (
+            not isinstance(flow_intent, str)
+            or not flow_intent.strip()
+            or len(flow_intent) > MAX_FLOW_INTENT_CHARS
+        ):
+            return Rejection(
+                source_id,
+                rel_path,
+                "flow_intent must be a non-empty string ≤ 200 chars",
+            )
+        if web_target is None:
+            return Rejection(
+                source_id, rel_path, "flow_intent requires a web_target declaration"
+            )
+
     if len(body.encode("utf-8")) > MAX_BODY_BYTES:
         return Rejection(source_id, rel_path, "body exceeds 64 KiB")
 
@@ -283,6 +307,7 @@ def ingest_directory(
                 source_url=frontmatter.get("source_url"),
                 web_target=frontmatter.get("web_target"),
                 risk_class=frontmatter.get("risk_class"),
+                flow_intent=frontmatter.get("flow_intent"),
                 updated_at=updated_at,
                 body=body.lstrip("\n"),
             )

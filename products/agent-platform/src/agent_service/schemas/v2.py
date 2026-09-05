@@ -109,7 +109,7 @@ class AgentChatConfirmRequest(BaseModel):
 
 
 class AgentStreamEvent(BaseModel):
-    """SSE frame payload conforming to agent-stream-event.schema.json (v9).
+    """SSE frame payload conforming to agent-stream-event.schema.json (v10).
 
     v3 added tool_call/tool_result frames for evidence panel rendering
     (SPEC-011 R-1). v4 adds confirmation_request/confirmation_result frames
@@ -123,7 +123,12 @@ class AgentStreamEvent(BaseModel):
     bundle (SPEC-030 R-3). v9 adds the optional ``flow_summary`` on
     confirmation_request frames carrying the bound browser-flow headline
     (SPEC-051 R-6) so the live operator card renders the same workflow
-    framing the durable record gives the approver inbox.
+    framing the durable record gives the approver inbox. v10 adds the
+    optional ``flow_intent`` inside ``flow_summary`` (SPEC-053 R-2): the
+    skill-authored sentence describing what the flow's gated mutating step
+    achieves, rendered as the card's lead decision line. Additive and
+    display-only — ``flow_summary`` stays ``dict[str, Any]`` and the frame
+    shape is unchanged for skills that omit it.
     """
 
     type: Literal[
@@ -143,8 +148,9 @@ class AgentStreamEvent(BaseModel):
     confirm_id: str | None = None
     pending_calls: list[dict[str, Any]] | None = None
     # SPEC-051 R-6: card-level browser-flow headline (skill intent, origin,
-    # risk_class) on confirmation_request frames. Mirrors the durable
-    # record's flow_summary so the live operator card renders the same
+    # risk_class) on confirmation_request frames; SPEC-053 R-2 adds the
+    # author-written ``flow_intent`` decision line inside it. Mirrors the
+    # durable record's flow_summary so the live operator card renders the same
     # workflow framing as the approver inbox; absent for non-browser cards.
     flow_summary: dict[str, Any] | None = None
     tool_name: str | None = None

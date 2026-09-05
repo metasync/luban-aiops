@@ -58,13 +58,14 @@
     },
     "flow_summary": {
       "type": ["object", "null"],
-      "description": "SPEC-051 R-6: card-level browser-flow headline on confirmation_request frames (skill intent, origin, risk_class) so the live operator card renders the same workflow framing as the durable record served to the approver inbox. Absent for non-browser cards.",
+      "description": "SPEC-051 R-6: card-level browser-flow headline on confirmation_request frames (skill intent, origin, risk_class) so the live operator card renders the same workflow framing as the durable record served to the approver inbox. SPEC-053 R-2 adds flow_intent: the skill-authored sentence describing what the flow's gated mutating step achieves, rendered as the card's lead decision line (display-only, never a security input). Absent for non-browser cards.",
       "additionalProperties": false,
       "properties": {
         "skill_id": { "type": "string" },
         "origin": { "type": "string" },
         "title": { "type": "string" },
         "description": { "type": "string" },
+        "flow_intent": { "type": "string" },
         "risk_class": { "type": "string" }
       }
     },

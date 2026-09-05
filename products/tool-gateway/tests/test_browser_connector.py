@@ -342,19 +342,25 @@ def _stub_skill(connector: BrowserConnector, record: dict | None) -> None:
 
 
 def _web_skill(
-    risk_class: str | None = "write", title: str = "", description: str = ""
+    risk_class: str | None = "write",
+    title: str = "",
+    description: str = "",
+    flow_intent: str = "",
 ) -> dict:
     skill = {
         "skill_id": "team-a/web/inventoryhealth",
         "web_target": f"{ALLOWED_ORIGIN}/login",
         "risk_class": risk_class,
     }
-    # SPEC-051 R-6: optional human-readable frontmatter; only present when the
-    # caller supplies it so the default shape stays byte-for-byte unchanged.
+    # SPEC-051 R-6 / SPEC-053 R-2: optional human-readable frontmatter; only
+    # present when the caller supplies it so the default shape stays
+    # byte-for-byte unchanged.
     if title:
         skill["title"] = title
     if description:
         skill["description"] = description
+    if flow_intent:
+        skill["flow_intent"] = flow_intent
     return skill
 
 
@@ -697,10 +703,10 @@ class SecretQueryRedactionTests(unittest.TestCase):
 
 class FlowStateSerializationTests(unittest.TestCase):
     def test_to_dict_surfaces_headline_and_omits_denied(self) -> None:
-        """``to_dict()`` carries the human-readable title/description to the
-        kernel card and deliberately omits the gateway-internal ``denied``
-        kill-switch (the HITL path enforces denial upstream, so it never rides
-        the flow dict to the kernel)."""
+        """``to_dict()`` carries the human-readable title/description and the
+        SPEC-053 ``flow_intent`` to the kernel card and deliberately omits the
+        gateway-internal ``denied`` kill-switch (the HITL path enforces denial
+        upstream, so it never rides the flow dict to the kernel)."""
         flow = FlowState(
             skill_id="team-a/web/inventoryhealth",
             origin="https://inventory.internal:8443",
@@ -708,6 +714,7 @@ class FlowStateSerializationTests(unittest.TestCase):
             max_steps=20,
             title="Reset User Password",
             description="Reset a user's password in the admin portal",
+            flow_intent="Submit the password reset for the user.",
             steps_used=3,
             approved=False,
         )
@@ -719,6 +726,7 @@ class FlowStateSerializationTests(unittest.TestCase):
                 "risk_class": "write",
                 "title": "Reset User Password",
                 "description": "Reset a user's password in the admin portal",
+                "flow_intent": "Submit the password reset for the user.",
                 "steps_used": 3,
                 "max_steps": 20,
                 "approved": False,
@@ -739,6 +747,7 @@ class FlowStateSerializationTests(unittest.TestCase):
         payload = flow.to_dict()
         self.assertEqual(payload["title"], "")
         self.assertEqual(payload["description"], "")
+        self.assertEqual(payload["flow_intent"], "")
         self.assertFalse(payload["approved"])
 
 
@@ -834,6 +843,44 @@ class FlowBindingTests(unittest.TestCase):
         self.assertEqual(result.status, "success")
         self.assertEqual(result.data["flow"]["title"], "")
         self.assertEqual(result.data["flow"]["description"], "")
+
+    def test_navigate_flow_carries_flow_intent(self) -> None:
+        """SPEC-053 R-2: the bound flow dict surfaces the skill's authored
+        ``flow_intent`` so the kernel card leads with the plain decision line
+        (e.g. "Submit the password reset for the user.") above the technical
+        DOM-level action description."""
+        _stub_skill(
+            self.connector,
+            _web_skill(
+                "write",
+                title="Reset User Password",
+                flow_intent="Submit the password reset for the user.",
+            ),
+        )
+        result = self._navigate(
+            {"url": f"{ALLOWED_ORIGIN}/login", "skill_id": "team-a/web/inventoryhealth"}
+        )
+        self.assertEqual(result.status, "success")
+        self.assertEqual(
+            result.data["flow"]["flow_intent"],
+            "Submit the password reset for the user.",
+        )
+        # The same intent rides the session's FlowState for later interactions.
+        self.assertEqual(
+            self.connector.pool.get("dev.operator").flow.flow_intent,
+            "Submit the password reset for the user.",
+        )
+
+    def test_navigate_flow_intent_defaults_empty_without_declaration(self) -> None:
+        """A skill with no ``flow_intent`` frontmatter yields an empty string —
+        the kernel card then renders exactly as it did pre-SPEC-053 (no intent
+        lead line), keeping the change strictly additive."""
+        _stub_skill(self.connector, _web_skill("write"))
+        result = self._navigate(
+            {"url": f"{ALLOWED_ORIGIN}/login", "skill_id": "team-a/web/inventoryhealth"}
+        )
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.data["flow"]["flow_intent"], "")
 
     def test_risk_class_defaults_read_when_absent(self) -> None:
         skill = _web_skill(None)

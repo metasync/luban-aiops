@@ -34,6 +34,7 @@ def _skill(
     title="T",
     web_target=None,
     risk_class=None,
+    flow_intent=None,
 ) -> Skill:
     return Skill(
         skill_id=skill_id,
@@ -45,6 +46,7 @@ def _skill(
         tags=tags,
         web_target=web_target,
         risk_class=risk_class,
+        flow_intent=flow_intent,
         updated_at=NOW,
         body=body,
     )
@@ -114,6 +116,33 @@ class InMemoryStoreTests(unittest.TestCase):
 
     def test_get_unknown_returns_none(self) -> None:
         self.assertIsNone(_run(self.store.get("a/nope")))
+
+    def test_get_round_trips_flow_intent(self) -> None:
+        # SPEC-053 R-1: the in-memory backend stores whole Skill objects, so
+        # flow_intent round-trips without a column list — the parity check
+        # against the Postgres backend's explicit persistence.
+        _run(
+            self.store.replace_source(
+                "a",
+                [
+                    _skill(
+                        "a/check",
+                        web_target="http://target:8080/",
+                        risk_class="write",
+                        flow_intent="Submit the password reset for the user.",
+                    )
+                ],
+            )
+        )
+        skill = _run(self.store.get("a/check"))
+        self.assertIsNotNone(skill)
+        self.assertEqual(
+            skill.flow_intent, "Submit the password reset for the user."
+        )
+        self.assertEqual(
+            skill.summary()["flow_intent"],
+            "Submit the password reset for the user.",
+        )
 
     def test_ready_and_close_are_noops(self) -> None:
         self.assertTrue(_run(self.store.ready()))
@@ -211,12 +240,40 @@ class PostgresStoreAdapterTests(unittest.TestCase):
         self.assertEqual(calls[1]["params"]["web_target"], "http://target:8080/")
         self.assertEqual(calls[1]["params"]["risk_class"], "write")
 
+    def test_replace_source_persists_flow_intent(self) -> None:
+        # SPEC-053 R-1: flow_intent must survive the Postgres round-trip on
+        # both the INSERT params and the column list, or the deployed backend
+        # silently drops the card's decision line (the SPEC-050 dual-backend
+        # field-drop lesson — the in-memory backend carries it for free).
+        calls: list[dict] = []
+        store = PostgresSkillStore(
+            "postgresql://fake", connect=self._fake_connect(calls)
+        )
+        _run(
+            store.replace_source(
+                "a",
+                [
+                    _skill(
+                        "a/check",
+                        web_target="http://target:8080/",
+                        risk_class="write",
+                        flow_intent="Submit the password reset for the user.",
+                    )
+                ],
+            )
+        )
+        self.assertIn("flow_intent", calls[1]["sql"])
+        self.assertEqual(
+            calls[1]["params"]["flow_intent"],
+            "Submit the password reset for the user.",
+        )
+
     def test_get_maps_web_flow_columns(self) -> None:
         calls: list[dict] = []
         row = (
             "a/check", "a", "check.md", "local", "T", "summary",
             None, None, None, NOW, "body",
-            "http://target:8080/", "write",
+            "http://target:8080/", "write", "Submit the reset.",
         )
         store = PostgresSkillStore(
             "postgresql://fake", connect=self._fake_connect(calls, rows=[row])
@@ -225,12 +282,13 @@ class PostgresStoreAdapterTests(unittest.TestCase):
         self.assertIsNotNone(skill)
         self.assertEqual(skill.web_target, "http://target:8080/")
         self.assertEqual(skill.risk_class, "write")
+        self.assertEqual(skill.flow_intent, "Submit the reset.")
 
     def test_search_uses_full_text_prefilter(self) -> None:
         calls: list[dict] = []
         row = (
             "a/hit", "a", "hit.md", "local", "Pod", "summary",
-            ["pod"], None, None, NOW, "pod body", None, None,
+            ["pod"], None, None, NOW, "pod body", None, None, None,
         )
         store = PostgresSkillStore(
             "postgresql://fake", connect=self._fake_connect(calls, rows=[row])

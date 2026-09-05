@@ -34,12 +34,16 @@ mapping); the rest is the body.
 | `source_url` | no | upstream attribution link for adapted open-source content |
 | `web_target` | no | web-check flow entry URL: absolute `http(s)` URL, ≤ 2048 chars; declares the skill a browser-driven check flow (SPEC-049) |
 | `risk_class` | no | `read` or `write` — declared effect of the flow's interactive steps; requires `web_target`; treated as `read` when `web_target` is present without it |
+| `flow_intent` | no | author-written plain sentence, ≤ 200 chars, describing what the flow's gated mutating step achieves; requires `web_target`; shown as the confirmation card's lead decision line and display-only — never a security input (SPEC-053) |
 
 Unknown keys are rejected: frontmatter must contain only the keys above.
 The `web_target` / `risk_class` pair is additive (SPEC-049 R-3): documents
 without them ingest unchanged, and the procedural steps stay in the markdown
-body — there is no separate step format. Credentials never belong in skills;
-the browser tool surface resolves them from platform-managed credential sets.
+body — there is no separate step format. `flow_intent` is likewise additive
+(SPEC-053 R-1): it is display-only context for the confirmation card and never
+a security input — the deviation guard and signed execution do not read it.
+Credentials never belong in skills (including in `flow_intent`); the browser
+tool surface resolves them from platform-managed credential sets.
 
 ## Size caps
 

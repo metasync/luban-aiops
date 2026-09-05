@@ -412,6 +412,9 @@ class BrowserConnector:
             # password"), not a bare tool action like web.click.
             title=str(skill.get("title") or ""),
             description=str(skill.get("description") or ""),
+            # SPEC-053 R-2: carry the author-written gated-step intent so the
+            # kernel renders it as the card's lead decision line (display-only).
+            flow_intent=str(skill.get("flow_intent") or ""),
             approved=(risk_class == "read"),
         )
         entry.reset_page_state()

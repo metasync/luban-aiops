@@ -9,9 +9,13 @@ description: >
   single HITL gate on the final "Confirm reset" click — the
   destructive mutation the operator actually approves.
 tags: [admin, portal, password, reset, user, account, change-password, admin-portal, user-management]
-version: "1.2"
+version: "1.3"
 web_target: http://browser-check-target:8080/
 risk_class: write
+# flow_intent (SPEC-053 R-4): the operator-facing intent of the single gated
+# mutation (the final "Confirm reset" click), rendered as the confirmation
+# card's lead decision line above the demoted DOM/technical detail.
+flow_intent: "Submit the password reset for the target user, permanently changing their admin-portal credentials."
 ---
 
 ## Purpose
@@ -44,6 +48,10 @@ browser web-check skill. It demonstrates:
 - Reaching the reset form through read-tier navigation
   (`web.navigate` to a URL that pre-fills the new password) so the
   "Confirm reset" click stays the flow's sole write-tier interaction.
+- Declaring `flow_intent` in the frontmatter so the confirmation card
+  leads with a plain, authored sentence describing what the gated
+  "Confirm reset" mutation achieves (SPEC-053) — the operator-facing
+  point of the approval — above the demoted DOM/technical detail.
 
 ## Preconditions
 

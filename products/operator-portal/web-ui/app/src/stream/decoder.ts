@@ -49,6 +49,7 @@ function toFlowSummary(value: unknown): FlowSummary | undefined {
     origin: asString(record.origin),
     title: asString(record.title),
     description: asString(record.description),
+    flowIntent: asString(record.flow_intent),
     riskClass: asString(record.risk_class),
   };
 }
