@@ -2,12 +2,13 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-09-05
 - approved: 2026-09-05
+- delivered: 2026-09-05 (v0.34.0)
 - release slice: R5 — Hardening and External Consumption (fifteenth R5
-  slice)
+  slice, v0.34.0)
 - related ADRs: ADR-0008 (spec delivery traceability gate); lineage:
   realizes the follow-up SPEC-051 R-6 explicitly deferred ("structured
   per-step plan rendering … needs a skill-format change touching the skills
@@ -293,3 +294,12 @@ Acceptance criteria:
   skills-hub / tool-gateway / agent-platform / operator-portal + the three
   additive contract schemas and the password-reset sample, bundled with
   SPEC-052 into the next (deferred) release.
+- 2026-09-05: delivered (v0.34.0). Implemented across skills-hub
+  (`flow_intent` schema/model/ingestion/dual store), tool-gateway
+  (`FlowState`/`bind_flow`), agent-platform (`FlowContext.summary()`,
+  `_FLOW_SUMMARY_FIELDS`, stream v9 → v10, both `flow_summary` schemas), and
+  operator-portal (decoder/transcript `flowIntent`, `ConfirmationCardView`
+  decision line), plus the password-reset sample declaration. Status
+  `approved → delivered`; skills-hub 57, tool-gateway browser connector 96,
+  agent-platform 798, portal 283 all green, `make verify` green at VERSION
+  0.34.0.

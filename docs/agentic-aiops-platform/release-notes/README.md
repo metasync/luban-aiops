@@ -7,6 +7,23 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-05-skill-transparency-and-approval-card-legibility.md`
+  - release train (v0.34.0) closing the 2026-09-05 post-live-test feedback
+    on the browser-flow approval experience: delivers SPEC-052 (a read-only
+    rendered/raw skill content viewer in the portal Skills table via a new
+    platform-gateway single-skill detail proxy reusing the `skills:read`
+    action and skills-hub's existing `get_skill`; no shared-contract change,
+    skills-hub unchanged) and SPEC-053 (one additive optional `flow_intent`
+    frontmatter key — ≤ 200 chars, requires `web_target` — authoring the
+    plain-language line the single HITL card leads with, carried card-level
+    on the existing SPEC-051 R-6 `flow_summary` path from the gateway flow
+    binding through the kernel confirmation frame + durable record to the
+    portal card; display-only, never a security input; additive contract
+    change, stream v9 → v10), plus two portal quick wins (the per-call block
+    renders the parsed DOM label as prose with the raw args behind a
+    "Technical details" expander, and the post-approval indicator becomes a
+    labelled "Agent is working…" spinner row above the evidence). No new
+    policy actions, no new audit event types
 - `2026-09-05-post-live-check-confirmation-card-flow-headline.md`
   - next-day patch (v0.33.1) from a live test of v0.33.0: the operator's
     live HITL confirmation card rendered without its browser-flow

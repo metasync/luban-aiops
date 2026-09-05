@@ -2,12 +2,13 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-09-05
 - approved: 2026-09-05
+- delivered: 2026-09-05 (v0.34.0)
 - release slice: R5 — Hardening and External Consumption (fourteenth R5
-  slice)
+  slice, v0.34.0)
 - related ADRs: ADR-0008 (spec delivery traceability gate); lineage:
   extends SPEC-014 (skills and grounded guidance — the skill envelope and
   its `body` field), SPEC-019 R-4 (portal skills inventory), and reuses the
@@ -182,3 +183,9 @@ Acceptance criteria:
 - 2026-09-05: approved as drafted (no scope changes) by the operator; plan.md
   and tasks.md follow, then implementation bundled into the next release with
   the two v0.33.x UX commits already on `main`.
+- 2026-09-05: delivered (v0.34.0). Implementation shipped in `8edc4bf`
+  (platform-gateway single-skill detail proxy + portal `SkillContentViewer`
+  rendered/raw modal); status `approved → delivered` at the v0.34.0 release,
+  bundled with SPEC-053 and the two v0.33.x UX quick-win commits. Gateway
+  detail proxy 37 passed, portal suite green, `npm run build` clean,
+  `make verify` green at VERSION 0.34.0.

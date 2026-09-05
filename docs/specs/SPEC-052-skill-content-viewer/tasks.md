@@ -25,13 +25,13 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 - [x] all acceptance criteria in `spec.md` verified (R-1…R-3)
 - [x] `make verify` green (gateway pytest incl. route-inventory + policy-matrix guards; overlays; policy; version lockstep)
 - [x] portal `npm test` and `npm run build` green
-- [ ] living state docs updated: operator guide Skills/transparency section, affected RepoWiki pages (portal workspace views; gateway routing)
-- [ ] `CHANGELOG.md` entry added referencing SPEC-052
-- [ ] spec index in `docs/specs/README.md` set to `delivered`
-- [ ] spec status set to `delivered`
+- [x] living state docs updated: operator guide Skills/transparency section, affected RepoWiki pages (portal workspace views; gateway routing)
+- [x] `CHANGELOG.md` entry added referencing SPEC-052
+- [x] spec index in `docs/specs/README.md` set to `delivered`
+- [x] spec status set to `delivered`
 
-> The four open Delivery-Gate items are release-time bookkeeping (deferred with
-> the version bump until SPEC-053 lands, per the operator's "commit now, defer
-> release" decision). Implementation and verification are complete: gateway
-> detail proxy 37 passed, portal suite 279 passed, `npm run build` clean,
-> `make verify` green at VERSION 0.33.1.
+> Delivered 2026-09-05 (v0.34.0), bundled with SPEC-053 and the two v0.33.x
+> UX quick-win commits already on `main`. The four Delivery-Gate items closed
+> at release time with the version bump: gateway detail proxy 37 passed,
+> portal suite green, `npm run build` clean, `make verify` green at VERSION
+> 0.34.0.

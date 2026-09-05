@@ -63,6 +63,14 @@ Rules that matter for day-2 operations:
   `web.navigate(skill_id=...)`, the gateway binds the flow and enforces
   its risk class (write-class flows get exactly one HITL gate before any
   interaction).
+- **Declared step intent (SPEC-053):** the optional `flow_intent` key
+  (≤ 200 chars, requires `web_target`) authors in plain language what the
+  flow's single gated mutating step achieves. The confirmation card a
+  write-class flow parks leads with this line above the parsed
+  DOM/technical detail, so the approver reads the decision in the skill
+  author's words. It is display-only — never a security input (the
+  deviation guard and signed execution are unchanged) — and skills that
+  omit it render exactly as before.
 - Body ≤ 64 KiB. Split long guides.
 - Moving or renaming a file changes its `skill_id` — intentionally, so stale
   citations become visible. Duplicate slugs within one source are rejected;

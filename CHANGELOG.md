@@ -11,6 +11,76 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.34.0 — 2026-09-05
+
+### Added
+
+- **Skill content viewer (SPEC-052)** — the portal Skills view (SPEC-019
+  R-4) listed ingested skills but showed only their envelope metadata
+  (id, title, source, risk class), never the authored `body`, so an
+  operator could not read a skill to validate where its single
+  browser-flow HITL gate lands (the transparency goal motivating
+  SPEC-049/051). A new read-only rendered/raw viewer opens from each
+  Skills-table row, reusing the SPEC-045 R-5 preview pattern (rendered
+  Markdown ⇄ raw source toggle, mode badge). Because the skills list
+  payload omits `body` by contract, the viewer fetches it through a new
+  platform-gateway single-skill detail proxy
+  (`GET /api/v1/skills/{skill_id:path}`) that reuses the existing
+  `skills:read` action and skills-hub's existing `get_skill` endpoint
+  (which already returns `body` and emits `skill_retrieved`). No new
+  policy actions, no new audit event types, no shared-contract change;
+  skills-hub is unchanged.
+- **Skill-declared step intent on the browser confirmation card
+  (SPEC-053)** — realizes the follow-up SPEC-051 R-6 explicitly deferred
+  ("structured per-step plan rendering … needs a skill-format change
+  touching the skills contract and ingestion path"). One additive optional
+  frontmatter key, `flow_intent` (≤ 200 chars, requires `web_target`),
+  authors in plain language what the flow's single gated mutating step
+  achieves. Because SPEC-051 R-1 collapses a mutating browser flow to
+  exactly one HITL gate, a single card-level intent maps 1:1 to the card
+  (no brittle per-click matching). It rides the existing SPEC-051 R-6
+  `flow_summary` path verbatim and under the same name — skill record →
+  gateway `bind_flow`/`FlowState` → `web.navigate` `data["flow"]` →
+  kernel `FlowContext.summary()` → `confirmation_request` frame + durable
+  `ConfirmationRecordModel` → portal card — where `ConfirmationCardView`
+  renders it as a plain-text decision line above the demoted
+  DOM/technical detail. `flow_intent` is display-only and never a
+  security input: the deviation guard and SPEC-037 signed execution are
+  unchanged, and skills that omit it render exactly as today. Additive
+  contract change (`skill.schema.json` plus the two `flow_summary`
+  schemas; stream contract v9 → v10) touching the skills-hub
+  ingestion/store path; no new policy actions, no new audit event types.
+  The password-reset sample skill declares a `flow_intent` so the demo
+  card leads with the plain decision line.
+
+### Changed
+
+- **Humanized browser approval card (post-live-test quick win)** — the
+  per-call block on the browser-flow confirmation card keeps the tool name
+  and risk tier but now renders the parsed DOM element label as prose
+  (`.confirm-call-hint`) instead of a raw code block, and folds the raw
+  argument JSON behind a native "Technical details" expander mirroring the
+  evidence card's "Parameters" expander. Nothing is dropped — the full
+  parameters stay one click away and still travel to the audit trail
+  unchanged. Portal-only, no stream-contract change.
+- **Clarified post-approval progress (post-live-test quick win)** — the
+  post-approval activity indicator moves from a bare animated-dots bubble
+  below the evidence to a labelled spinner row ("Agent is working…")
+  rendered under the reply and above the tool-evidence panel, so the
+  operator reads "work is continuing" ahead of the still-growing
+  evidence. Portal-only, no stream-contract change.
+
+### Fixed
+
+- **DocumentsView parallel-suite flake** — the test `flush()` helper
+  awaited a bare `setTimeout(0)` (a single macrotask tick not wrapped in
+  `act()`); under full-parallel CPU contention React 19 deferred the
+  resolved mock promise's re-render to a later macrotask, so post-flush
+  assertions intermittently read the pre-update DOM. Awaiting the timer
+  inside `act()` drains the pending promise, the scheduler hop, and the
+  commit, so every call site reads the settled tree regardless of worker
+  load. Test-only; no runtime change.
+
 ## 0.33.1 — 2026-09-05
 
 ### Fixed

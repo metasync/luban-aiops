@@ -387,8 +387,11 @@ confirm hash) lives in the
   tool-gateway, as the agent sees them (name, risk level, description).
   Mutating tools appear only when the deployment enables them.
 - **Skills** — the skills inventory with source and tag filters; what the
-  agent can cite as grounded guidance. Content operations (adding,
-  revising, removing skills) are in the
+  agent can cite as grounded guidance. Each row has a **View** action that
+  opens a read-only rendered/raw viewer of the skill's authored body
+  (SPEC-052), so you can read exactly what the agent will cite — and, for a
+  web-check skill, confirm where its single HITL gate lands. Content
+  operations (adding, revising, removing skills) are in the
   [Skills and Guidance Guide](skills-guide.md).
 
 ## Settings (Workspace)
