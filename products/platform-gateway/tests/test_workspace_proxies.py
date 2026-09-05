@@ -50,6 +50,19 @@ SKILLS_PAYLOAD = {
     "limit": 100,
 }
 
+# SPEC-052 R-1: the single-skill detail response carries the full record
+# including the markdown body, which the list payload omits by contract.
+SKILL_DETAIL_PAYLOAD = {
+    "skill_id": "sre-alerting/alerts/kubepodnotready",
+    "source_id": "sre-alerting",
+    "title": "KubePodNotReady triage",
+    "description": "Diagnose a pod stuck in NotReady.",
+    "tags": ["kubernetes", "pod"],
+    "version": "1.2.0",
+    "web_target": "https://admin.example.com",
+    "body": "# KubePodNotReady\n\n1. Check pod events.\n2. Inspect logs.",
+}
+
 
 def _identity(role: str) -> IdentityContext:
     return IdentityContext(
@@ -330,6 +343,93 @@ class SkillsProxyTests(WorkspaceProxyBase):
             response = self.client.get("/api/v1/skills")
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()["detail"], "bad credential")
+
+
+class SkillDetailProxyTests(WorkspaceProxyBase):
+    """Single-skill detail pass-through (SPEC-052 R-1).
+
+    The list omits ``body`` by contract, so the portal reads a skill's
+    content through this detail hop. It rides the same ``skills:read`` gate
+    and gateway-held Basic credential as the list proxy — the user's token is
+    never forwarded, and skills-hub is unchanged.
+    """
+
+    DETAIL_PATH = "/api/v1/skills/sre-alerting/alerts/kubepodnotready"
+    UPSTREAM_URL = (
+        "http://skills-hub:8000/api/v1/skills/sre-alerting/alerts/kubepodnotready"
+    )
+
+    def test_operator_allowed_and_full_record_proxied_with_credential(self) -> None:
+        fake = _FakeAsyncClient(response=_FakeResponse(200, SKILL_DETAIL_PAYLOAD))
+        with (
+            self._patch_identity("operator", "skills"),
+            self._patch_httpx(fake, "skills_hub_client"),
+        ):
+            response = self.client.get(self.DETAIL_PATH)
+        self.assertEqual(response.status_code, 200)
+        # The body — omitted from the list payload — travels in the detail.
+        self.assertIn("body", response.json())
+        call = fake.calls[0]
+        # The namespaced id keeps its slashes for skills-hub's {skill_id:path}.
+        self.assertEqual(call["url"], self.UPSTREAM_URL)
+        # The proxy authenticates with its own credential, never the user's.
+        self.assertEqual(call["auth"], ("platform-gateway", "pg-skills-secret"))
+        self.assertIsNone(call["params"])
+
+    def test_ungranted_role_denied_before_upstream(self) -> None:
+        fake = _FakeAsyncClient(response=_FakeResponse(200, SKILL_DETAIL_PAYLOAD))
+        with (
+            self._patch_identity("auditor", "skills"),
+            self._patch_httpx(fake, "skills_hub_client"),
+        ):
+            response = self.client.get(self.DETAIL_PATH)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"]["action"], "skills:read")
+        self.assertEqual(fake.calls, [])
+
+    def test_unknown_id_404_passed_through(self) -> None:
+        fake = _FakeAsyncClient(
+            response=_FakeResponse(
+                404,
+                {"error": {"code": "SKILL_NOT_FOUND", "message": "unknown skill id"}},
+            )
+        )
+        with (
+            self._patch_identity("operator", "skills"),
+            self._patch_httpx(fake, "skills_hub_client"),
+        ):
+            response = self.client.get("/api/v1/skills/sre-alerting/nope")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "unknown skill id")
+
+    def test_unconfigured_upstream_returns_503(self) -> None:
+        self._use_settings(_settings(skills_hub_url=""))
+        with self._patch_identity("operator", "skills"):
+            response = self.client.get(self.DETAIL_PATH)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "skills hub not configured")
+
+    def test_transport_failure_returns_502(self) -> None:
+        fake = _FakeAsyncClient(raise_exc=httpx.ConnectError("boom"))
+        with (
+            self._patch_identity("operator", "skills"),
+            self._patch_httpx(fake, "skills_hub_client"),
+        ):
+            response = self.client.get(self.DETAIL_PATH)
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], "skills hub unavailable")
+
+    def test_upstream_5xx_mapped_to_502(self) -> None:
+        fake = _FakeAsyncClient(
+            response=_FakeResponse(500, {"detail": "internal error"})
+        )
+        with (
+            self._patch_identity("operator", "skills"),
+            self._patch_httpx(fake, "skills_hub_client"),
+        ):
+            response = self.client.get(self.DETAIL_PATH)
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], "skills hub request failed")
 
 
 MODELS_PAYLOAD = {

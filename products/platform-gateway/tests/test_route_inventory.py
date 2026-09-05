@@ -53,6 +53,9 @@ EXPECTED_ROUTES = {
     ("GET", "/api/v1/policy/matrix"),
     ("GET", "/api/v1/tools"),
     ("GET", "/api/v1/skills"),
+    # Skill content viewer (SPEC-052 R-1): single-skill detail pass-through so
+    # the portal can read a skill's body, which the list omits by contract.
+    ("GET", "/api/v1/skills/{skill_id:path}"),
     # Model catalog discovery (SPEC-024 R-2): credential-gated catalog
     # pass-through, discovery-safe payload.
     ("GET", "/api/v1/models"),

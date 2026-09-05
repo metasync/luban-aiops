@@ -18,7 +18,7 @@ from platform_gateway.services.gateway_service import (
     resolve_request_identity,
 )
 from platform_gateway.services.policy_engine import ACTION_SKILLS_READ
-from platform_gateway.services.skills_hub_client import list_skills
+from platform_gateway.services.skills_hub_client import get_skill, list_skills
 
 router = APIRouter()
 LOGGER = logging.getLogger(__name__)
@@ -48,5 +48,31 @@ async def list_skills_route(
         request_id=request_id,
         user_id=identity.username,  # type: ignore[union-attr]
         total=response.get("total"),
+    )
+    return response
+
+
+@router.get("/api/v1/skills/{skill_id:path}")
+async def get_skill_route(
+    skill_id: str,
+    request: Request,
+    x_request_id: str | None = Header(default=None),
+    settings: PlatformGatewaySettings = Depends(get_settings),
+) -> dict:
+    # SPEC-052 R-1: single-skill detail pass-through so the portal can read a
+    # skill's body (the list omits it by contract). Declared after the exact
+    # ``/api/v1/skills`` list route so the greedy ``{skill_id:path}`` match never
+    # shadows it. Same ``skills:read`` gate and gateway-held Basic credential as
+    # the list — no new policy action, and skills-hub still emits skill_retrieved.
+    request_id = resolve_request_id(x_request_id)
+    identity = await resolve_request_identity(settings, request, request_id)
+    enforce_policy(settings, identity, ACTION_SKILLS_READ, request_id)
+    response = await get_skill(settings, request_id, skill_id)
+    log_event(
+        LOGGER,
+        "skill_detail_proxied",
+        request_id=request_id,
+        user_id=identity.username,  # type: ignore[union-attr]
+        skill_id=skill_id,
     )
     return response

@@ -76,3 +76,34 @@ async def list_skills(
     if response.status_code >= 300:
         _raise_upstream(response)
     return response.json()
+
+
+async def get_skill(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    skill_id: str,
+) -> dict:
+    """Fetch one full skill record (SPEC-052 R-1).
+
+    The list payload omits ``body`` by contract, so the portal reads a
+    skill's content through this detail hop. ``skill_id`` is the namespaced
+    ``<source_id>/<slug>`` form; its charset (``[a-z0-9-/]``) is already
+    URL-safe, so the segment separators are preserved literally for
+    skills-hub's ``{skill_id:path}`` matcher. Same credential and error
+    posture as :func:`list_skills` — the user's token is never forwarded.
+    """
+    url = f"{_base_url(settings)}{LIST_PATH}/{skill_id}"
+    try:
+        async with httpx.AsyncClient(timeout=PROXY_TIMEOUT_SECONDS) as client:
+            response = await client.get(
+                url,
+                auth=_credential(settings),
+                headers={"x-request-id": request_id},
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="skills hub unavailable"
+        ) from exc
+    if response.status_code >= 300:
+        _raise_upstream(response)
+    return response.json()

@@ -12,6 +12,10 @@ import {
 } from "antd";
 import { requestJson } from "../../api/client";
 import { formatTimestamp } from "../format";
+import {
+  SkillContentViewer,
+  type SkillDetail,
+} from "../../chat/SkillContentViewer";
 
 interface SkillRecord {
   skill_id: string;
@@ -33,6 +37,11 @@ export default function SkillsView() {
   const [payload, setPayload] = useState<SkillsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // SPEC-052 R-2: the skill whose full record is open in the viewer, and the
+  // row currently fetching its detail. The body is fetched lazily, only when
+  // View is invoked — the list payload omits it by contract.
+  const [viewing, setViewing] = useState<SkillDetail | null>(null);
+  const [viewLoadingId, setViewLoadingId] = useState<string | null>(null);
 
   const load = useCallback(async (sourceFilter: string, tagFilter: string) => {
     setLoading(true);
@@ -49,6 +58,23 @@ export default function SkillsView() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  // SPEC-052 R-2: fetch one skill's full record (the list omits body by
+  // contract) only when View is invoked. The namespaced id keeps its slashes
+  // for the gateway's {skill_id:path} proxy; each segment is percent-encoded.
+  const openSkill = useCallback(async (skillId: string) => {
+    setViewLoadingId(skillId);
+    setError(null);
+    try {
+      const encoded = skillId.split("/").map(encodeURIComponent).join("/");
+      const detail = await requestJson<SkillDetail>(`/api/v1/skills/${encoded}`);
+      setViewing(detail);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setViewLoadingId(null);
     }
   }, []);
 
@@ -74,6 +100,21 @@ export default function SkillsView() {
       title: "updated",
       dataIndex: "updated_at",
       render: (value: string) => formatTimestamp(value),
+    },
+    {
+      // SPEC-052 R-2: open the read-only content viewer for this skill.
+      title: "",
+      key: "actions",
+      render: (_value, skill) => (
+        <Button
+          size="small"
+          loading={viewLoadingId === skill.skill_id}
+          aria-label={`View ${skill.title || skill.skill_id}`}
+          onClick={() => void openSkill(skill.skill_id)}
+        >
+          View
+        </Button>
+      ),
     },
   ];
 
@@ -126,6 +167,8 @@ export default function SkillsView() {
           </>
         ) : null}
       </Spin>
+      {/* SPEC-052 R-3: read-only rendered/raw viewer for the opened skill. */}
+      <SkillContentViewer skill={viewing} onClose={() => setViewing(null)} />
     </div>
   );
 }
