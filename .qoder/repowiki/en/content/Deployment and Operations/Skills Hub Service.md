@@ -21,20 +21,16 @@
 - [skills-guide.md](file://docs/guides/skills-guide.md)
 - [SPEC-049 spec.md](file://docs/specs/SPEC-049-browser-web-check-tools/spec.md)
 - [SPEC-053 spec.md](file://docs/specs/SPEC-053-skill-declared-step-intent/spec.md)
+- [test_ingestion.py](file://products/skills-hub/tests/test_ingestion.py)
 - [test_audit_emitter.py](file://products/skills-hub/tests/test_audit_emitter.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive audit emitter service for durable audit trail integration
-- Implemented new configuration options (SKILLS_AUDIT_SERVICE_URL, SKILLS_AUDIT_CLIENT_ID, SKILLS_AUDIT_CLIENT_SECRET)
-- Integrated audit event emission at search and retrieval endpoints with fire-and-forget delivery
-- Enhanced sync monitoring with improved error handling and credential scrubbing
-- Added Prometheus metrics for audit emission tracking
-- Updated API routes to emit usage audit events for skill searches and retrievals
-- **New**: Added support for optional web_target and risk_class frontmatter fields for declaring web-check flows with interactive step risk levels per SPEC-049
-- **Updated**: Enhanced skill schema with optional flow_intent field for browser flow intent declarations per SPEC-053
-- **Updated**: Postgres migration support for browser flow intent declarations with idempotent ALTER statements
+- Enhanced flow_intent field validation in ingestion.py enforcing strict constraints (non-empty string ≤ 200 chars, requires web_target)
+- Updated schema definitions in skill.schema.json to include flow_intent field with proper validation rules
+- Added comprehensive test coverage for flow_intent edge cases including validation failures and valid scenarios
+- Updated documentation to reflect the enhanced validation logic and testing coverage
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -57,9 +53,9 @@ Key responsibilities:
 - Frontmatter validation and metadata normalization against a shared schema
 - Deterministic ranking and provenance-aware search results
 - Query authentication via static Basic credentials or projected workload tokens
-- **Enhanced**: Durable audit trail integration with fire-and-forget audit event emission for all user-facing operations and sync cycles
-- **New**: Web-check flow declaration support with optional web_target and risk_class frontmatter fields for browser-driven interactive steps
-- **Updated**: Browser flow intent declarations with optional flow_intent field for author-written descriptions of gated mutating steps
+- Durable audit trail integration with fire-and-forget audit event emission for all user-facing operations and sync cycles
+- Web-check flow declaration support with optional web_target and risk_class frontmatter fields for browser-driven interactive steps
+- **Enhanced**: Browser flow intent declarations with comprehensive validation ensuring flow_intent is a non-empty string ≤ 200 chars and requires web_target presence
 - Operational status reporting and metrics
 
 **Section sources**
@@ -117,11 +113,11 @@ K --> M["shared/shared-contracts/schemas/skill.schema.json"]
 - Scoring: deterministic keyword scoring with title/tag/body weights and capped body occurrences; stable tie-breaking by skill_id.
 - Sync: per-source async loop materializing git or local sources with subpath support, ingesting, atomically replacing store slices, tracking status and metrics, emitting audit events.
 - Query auth: supports HTTP Basic against a static registry and projected workload tokens validated against cluster OIDC issuer JWKS.
-- **Enhanced**: Audit emitter: fire-and-forget delivery of usage events to the audit service with non-blocking thread-based emission and comprehensive error handling.
-- **New**: Web-check flow support: optional web_target and risk_class frontmatter fields for declaring browser-driven check flows with interactive step risk levels.
-- **Updated**: Flow intent support: optional flow_intent field for author-written descriptions of gated mutating steps, displayed on browser confirmation cards.
+- Audit emitter: fire-and-forget delivery of usage events to the audit service with non-blocking thread-based emission and comprehensive error handling.
+- Web-check flow support: optional web_target and risk_class frontmatter fields for declaring browser-driven check flows with interactive step risk levels.
+- **Enhanced**: Flow intent support: optional flow_intent field with comprehensive validation ensuring it's a non-empty string ≤ 200 chars and requires web_target presence.
 
-**Updated** Enhanced with comprehensive audit emitter service providing durable audit trail integration, new configuration options for audit service connectivity, improved sync monitoring with credential scrubbing, new web-check flow declaration support per SPEC-049, and browser flow intent declarations per SPEC-053.
+**Updated** Enhanced with comprehensive flow_intent field validation enforcing strict constraints (non-empty string ≤ 200 chars, requires web_target), updated schema definitions, and comprehensive test coverage for edge cases.
 
 **Section sources**
 - [runtime.py:19-30](file://products/skills-hub/src/skills_hub/core/runtime.py#L19-L30)
@@ -178,7 +174,7 @@ Hub->>Audit : Emit skills_synced event (success/error)
 - List supports offset/limit/source/tag filters with bounded limits.
 - Search requires a non-empty query and returns scored hits with excerpts and provenance.
 - Get returns the full skill envelope when present.
-- **Enhanced**: Search and retrieval endpoints emit usage audit events correlating with caller's x-request-id for durable audit trail.
+- Search and retrieval endpoints emit usage audit events correlating with caller's x-request-id for durable audit trail.
 
 ```mermaid
 flowchart TD
@@ -202,7 +198,7 @@ Get -- Not found --> Err404["Return 404 SKILL_NOT_FOUND<br/>emit_audit_event('sk
 - [skills.py:1-172](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L1-L172)
 
 ### Web-Check Flow Declaration Support
-- **New Feature**: Optional web_target and risk_class frontmatter fields for declaring browser-driven web-check flows per SPEC-049.
+- Optional web_target and risk_class frontmatter fields for declaring browser-driven web-check flows per SPEC-049.
 - web_target: Absolute http(s) URL declaring this skill as a browser-driven check flow entry point (≤2048 chars).
 - risk_class: Declares the effect of the flow's interactive steps - either "read" (default when web_target present without risk_class) or "write" (requires HITL approval).
 - Validation ensures web_target is a valid absolute URL with proper scheme and host.
@@ -237,11 +233,11 @@ RCOK -- Yes --> ValidFlow["Valid: Web-check flow"]
 - [skill.schema.json:63-73](file://shared/shared-contracts/schemas/skill.schema.json#L63-L73)
 
 ### Flow Intent Declaration Support
-- **New Feature**: Optional flow_intent frontmatter field for author-written descriptions of gated mutating steps per SPEC-053.
-- flow_intent: Plain sentence describing what the flow's gated mutating step achieves (≤200 chars).
+- **Enhanced**: Optional flow_intent frontmatter field for author-written descriptions of gated mutating steps per SPEC-053.
+- **Enhanced Validation**: flow_intent must be a non-empty string with maximum 200 characters and requires web_target to be present.
 - Display-only field shown as the lead decision line on browser confirmation cards.
 - Requires web_target to be present but does not require risk_class: write.
-- Validation ensures flow_intent is a non-empty string with proper length constraints.
+- Comprehensive validation ensures flow_intent is properly formatted and constrained.
 - Skills without flow_intent ingest unchanged - maintains backward compatibility.
 
 ```mermaid
@@ -304,8 +300,8 @@ LogOnly --> Done
 - Parses YAML frontmatter, enforces allowed keys and length constraints, validates body size.
 - Derives deterministic slugs from file paths; rejects duplicate slugs within a source.
 - Produces an IngestResult with accepted records and bounded rejection details.
-- **New**: Validates web-check flow declarations including web_target URL format and risk_class values.
-- **Updated**: Validates flow_intent declarations requiring web_target presence and proper formatting.
+- Validates web-check flow declarations including web_target URL format and risk_class values.
+- **Enhanced**: Validates flow_intent declarations requiring web_target presence and proper formatting with strict constraints (non-empty string ≤ 200 chars).
 
 ```mermaid
 flowchart TD
@@ -342,7 +338,7 @@ NextFile --> End
 - Strategy interface defines initialize, replace_source, prune_sources, get, list, search, count, ready, close.
 - InMemory backend maintains per-source snapshots with atomic swap semantics.
 - Postgres backend creates table/index on initialize, performs atomic per-source delete+insert, and uses GIN full-text search with candidate pre-filtering followed by shared scorer re-ranking.
-- **Updated**: Postgres schema includes flow_intent column with idempotent ALTER statement for migration support.
+- Postgres schema includes flow_intent column with idempotent ALTER statement for migration support.
 
 ```mermaid
 classDiagram
@@ -401,13 +397,13 @@ Cap --> Out(["Hits"])
 ### Synchronization Engine
 - Per-source async tasks run independent loops with jittered intervals.
 - Materialization: local directories or Git clone/fetch/reset with optional token injection into HTTPS URLs.
-- **Enhanced**: Git sources now support subpath specification for monorepo scenarios with security validation.
+- Git sources now support subpath specification for monorepo scenarios with security validation.
 - Ingest runs synchronously in a thread to avoid blocking the event loop.
 - On success, atomically replaces the source slice in the store; on failure, retains previous snapshot and records error/metrics.
 - Status report exposes last_sync_at, ref, accepted counts, and bounded rejections.
-- **Enhanced**: Emits audit events for each sync cycle (success/error) with detailed outcome information.
+- Emits audit events for each sync cycle (success/error) with detailed outcome information.
 
-**Updated** The sync engine now includes comprehensive Git repository support with subpath specification, security validation, improved error handling with credential scrubbing, and audit event emission for durable tracking.
+**Updated** The sync engine includes comprehensive Git repository support with subpath specification, security validation, improved error handling with credential scrubbing, and audit event emission for durable tracking.
 
 ```mermaid
 sequenceDiagram
@@ -467,13 +463,13 @@ Static -- Invalid --> Deny
 ### Configuration and Runtime
 - Settings parsed from environment variables with fail-fast validation for malformed inputs.
 - SourceSpec supports local and git types with required fields enforced.
-- **Enhanced**: Git sources now support optional `path` field for subdirectory specification within monorepos.
+- Git sources now support optional `path` field for subdirectory specification within monorepos.
 - Security validation prevents path traversal attacks and ensures relative paths only.
 - Query clients and workload clients parsed from comma-separated mappings.
 - Run settings resolve host/port with safe defaults.
-- **Enhanced**: New audit configuration options: `SKILLS_AUDIT_SERVICE_URL`, `SKILLS_AUDIT_CLIENT_ID`, `SKILLS_AUDIT_CLIENT_SECRET` for audit service integration.
+- New audit configuration options: `SKILLS_AUDIT_SERVICE_URL`, `SKILLS_AUDIT_CLIENT_ID`, `SKILLS_AUDIT_CLIENT_SECRET` for audit service integration.
 
-**Updated** Configuration now supports Git source subpath specification with comprehensive security validation, plus new audit service configuration options for durable audit trail integration.
+**Updated** Configuration supports Git source subpath specification with comprehensive security validation, plus new audit service configuration options for durable audit trail integration.
 
 **Section sources**
 - [config.py:1-209](file://products/skills-hub/src/skills_hub/core/config.py#L1-L209)
@@ -481,10 +477,10 @@ Static -- Invalid --> Deny
 
 ### Metrics and Observability
 - Prometheus metrics surface with RED (Rate, Errors, Duration) instrumentation.
-- **Enhanced**: New `audit_emits_total` counter tracking audit emission success/failure.
+- New `audit_emits_total` counter tracking audit emission success/failure.
 - Existing metrics: `skills_syncs_total`, `skills_searches_total`, `skills_ingest_rejected_total`, `skills_store_skills`.
 - OpenTelemetry tracing integration for sync operations and Git checkout processes.
-- **Enhanced**: Credential scrubbing in error messages and trace spans to prevent secret leakage.
+- Credential scrubbing in error messages and trace spans to prevent secret leakage.
 
 **Section sources**
 - [metrics.py:1-113](file://products/skills-hub/src/skills_hub/core/metrics.py#L1-L113)
@@ -494,7 +490,7 @@ Static -- Invalid --> Deny
 - The sync engine depends on ingestion, the skill store, and emits audit events.
 - Both backends depend on the shared scoring module to ensure identical ranking behavior.
 - The application lifecycle wires configuration, store initialization, pruning, and sync management.
-- **Enhanced**: Audit emitter integrates with Prometheus metrics and has no dependencies on other services beyond HTTP client.
+- Audit emitter integrates with Prometheus metrics and has no dependencies on other services beyond HTTP client.
 
 ```mermaid
 graph LR
@@ -540,9 +536,9 @@ AE --> METRICS["core/metrics.py"]
   - Git operations run in threads to avoid blocking the event loop.
 - Storage:
   - In-memory store offers fast reads/writes for dev/test; Postgres provides durability and scalable indexing.
-- **Enhanced**: Git operations now include timeout protection and efficient shallow cloning for better performance.
-- **Enhanced**: Audit emission uses fire-and-forget pattern with daemon threads and short timeouts (2 seconds) to prevent any impact on query latency.
-- **Enhanced**: Credential scrubbing in error messages and traces prevents accidental secret exposure while maintaining observability.
+- Git operations include timeout protection and efficient shallow cloning for better performance.
+- Audit emission uses fire-and-forget pattern with daemon threads and short timeouts (2 seconds) to prevent any impact on query latency.
+- Credential scrubbing in error messages and traces prevents accidental secret exposure while maintaining observability.
 
 ## Troubleshooting Guide
 Common operational issues and resolutions:
@@ -552,11 +548,12 @@ Common operational issues and resolutions:
   - Inspect /api/v1/skills/status for rejection reasons; fix frontmatter or size violations; use the pre-flight validator CLI.
 - Source reports last_error:
   - Check unreachable Git URL, invalid token, or unreadable path; previous snapshot remains served until recovery.
-- **New**: Web-check flow validation errors:
+- Web-check flow validation errors:
   - Verify web_target is a valid absolute http(s) URL; ensure risk_class is either "read" or "write"; note that risk_class requires web_target to be present.
-- **New**: Flow intent validation errors:
+- **Enhanced**: Flow intent validation errors:
   - Verify flow_intent is a non-empty string ≤ 200 chars; ensure it requires web_target to be present; note that flow_intent does not require risk_class: write.
-- **New**: Git subpath errors:
+  - Common validation failures include empty strings, strings exceeding 200 characters, and flow_intent without web_target.
+- Git subpath errors:
   - Verify configured subpath exists in the Git repository; check for path traversal attempts being rejected.
 - Search returns no matches:
   - Confirm skill exists via catalog endpoint; check status and ensure source synced successfully.
@@ -564,9 +561,9 @@ Common operational issues and resolutions:
   - Align ConfigMap entries with actual files under skills directories.
 - Agent claims no skills exist:
   - Verify tool-gateway connector configuration and query secret alignment.
-- **New**: Audit events not appearing:
+- Audit events not appearing:
   - Verify `SKILLS_AUDIT_SERVICE_URL` is configured; check audit service availability; monitor `audit_emits_total{result="error"}` metric.
-- **New**: Audit emission failures:
+- Audit emission failures:
   - Check audit service credentials (`SKILLS_AUDIT_CLIENT_ID`, `SKILLS_AUDIT_CLIENT_SECRET`); verify network connectivity; review audit service logs.
 
 Operational endpoints and metrics:
@@ -581,14 +578,14 @@ Operational endpoints and metrics:
 ## Conclusion
 The Skills Hub Service provides a robust, deterministic, and secure foundation for serving grounded guidance to agents. Its design emphasizes fail-fast configuration, resilient per-source sync, deterministic ranking, and clear operational surfaces. Integration through the tool-gateway ensures consistent policy enforcement, auditability, and evidence presentation.
 
-**Updated** The recent enhancements add comprehensive Git repository support with subpath specification for monorepo scenarios, robust security validation, improved error handling with credential scrubbing, a complete audit trail integration through the fire-and-forget audit emitter service, new web-check flow declaration support per SPEC-049, and browser flow intent declarations per SPEC-053. These improvements make it suitable for enterprise-scale federated skill management with durable usage tracking, enhanced observability, and browser-driven interactive workflow capabilities.
+**Updated** The recent enhancements add comprehensive Git repository support with subpath specification for monorepo scenarios, robust security validation, improved error handling with credential scrubbing, a complete audit trail integration through the fire-and-forget audit emitter service, web-check flow declaration support per SPEC-049, and enhanced browser flow intent declarations per SPEC-053 with comprehensive validation. These improvements make it suitable for enterprise-scale federated skill management with durable usage tracking, enhanced observability, and browser-driven interactive workflow capabilities.
 
 ## Appendices
 
 ### Data Model: Skill Envelope
 - Fields include identifiers, provenance, human-readable metadata, optional version/attribution, timestamps, and body.
 - Constraints and formats are defined by the shared schema.
-- **New**: Optional web_target, risk_class, and flow_intent fields for web-check flow declarations and browser flow intent.
+- Optional web_target, risk_class, and flow_intent fields for web-check flow declarations and browser flow intent.
 
 ```mermaid
 erDiagram
@@ -680,11 +677,12 @@ Navigate to the password reset interface and perform the reset operation...
 ```
 
 ### Flow Intent Validation Rules
-- flow_intent must be a non-empty string with maximum 200 characters
-- flow_intent requires web_target to be present
+- **Enhanced**: flow_intent must be a non-empty string with maximum 200 characters
+- **Enhanced**: flow_intent requires web_target to be present
 - flow_intent does not require risk_class: write (display-only field)
 - flow_intent is validated during ingestion and stored verbatim
 - flow_intent appears in full-record responses but not in list/search summaries
+- **New**: Comprehensive test coverage for edge cases including empty strings, oversized content, and missing web_target dependencies
 
 ### Audit Event Schema
 - Events follow the shared audit-event schema with correlation via x-request-id.
@@ -770,7 +768,7 @@ SKILLS_AUDIT_CLIENT_SECRET=your-audit-secret
 **Section sources**
 - [config.py:50-116](file://products/skills-hub/src/skills_hub/core/config.py#L50-L116)
 - [sync.py:87-112](file://products/skills-hub/src/skills_hub/services/sync.py#L87-L112)
-- [test_audit_emitter.py:120-151](file://products/skills-hub/tests/test_audit_emitter.py#L120-L151)
+- [test_ingestion.py:295-443](file://products/skills-hub/tests/test_ingestion.py#L295-L443)
 - [config.py:175-203](file://products/skills-hub/src/skills_hub/core/config.py#L175-L203)
 - [skill_store.py:173-182](file://products/skills-hub/src/skills_hub/services/skill_store.py#L173-L182)
 - [skill_store.py:195-218](file://products/skills-hub/src/skills_hub/services/skill_store.py#L195-L218)
