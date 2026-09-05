@@ -11,6 +11,39 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.33.1 — 2026-09-05
+
+### Fixed
+
+- **Live HITL confirmation card omitted the browser-flow headline
+  (SPEC-051 R-6)** — a live password-reset test on v0.33.0 showed the
+  operator's confirmation card render without its flow *description*
+  initially, while the approver inbox card showed it, and the operator's
+  own card only gained the description after the decision. Both views
+  share the portal's `ConfirmationCardView` and read
+  `flowSummary.description`, so the divergence was in the data each
+  received, not the rendering. The approver inbox and the
+  post-decision/reload card read the **durable** `ConfirmationRecordModel`
+  (whose `flow_summary` JSONB column carries the headline), whereas the
+  operator's **live** card reads the `confirmation_request` SSE frame —
+  which is serialized through `AgentStreamEvent` in
+  `_normalize_stream_event`, and that model had no `flow_summary` field.
+  The kernel's headline (`frame["flow_summary"]`, from
+  `FlowContext.summary()`) was therefore dropped at the serialization
+  boundary and never reached the live card. `AgentStreamEvent` gains the
+  optional `flow_summary` (stream contract v8 → v9),
+  `_normalize_stream_event` passes it through a defensive
+  `_coerce_flow_summary` (keeps only the contract's five string fields; a
+  non-dict summary degrades to absent so a malformed headline can never
+  fail `additionalProperties:false`), and `agent-session.schema.json`
+  declares the same field on the durable confirmation-card items (a latent
+  gap — the model already served it). Pinned by three contract tests: the
+  live frame preserves `description` and every field, malformed/unknown
+  fields are dropped while the frame stays valid, and a durable card
+  carrying a headline conforms to the session contract. The portal was
+  already correct and is unchanged; no API route, policy action, or audit
+  event type changed.
+
 ## 0.33.0 — 2026-09-04
 
 ### Fixed

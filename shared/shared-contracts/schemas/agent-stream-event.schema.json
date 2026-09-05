@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/agent-stream-event.schema.json",
-  "title": "Agent Stream Event (v8)",
-  "description": "SSE frame payload for GET /api/v2/chat/stream. v3 added tool_call and tool_result event types for evidence panel rendering (SPEC-011 R-1). v4 adds confirmation_request and confirmation_result event types for HITL confirmation bridging (SPEC-020 R-1). v5 adds an optional data field on tool_result frames carrying the full tool payload within the stream size cap. v6 adds an optional risk_level on each pending_calls entry so confirmation cards can surface mutating (write/admin) tool calls (SPEC-021 R-3). v7 adds an optional model field on message_end frames carrying the model id that resolved for the turn (SPEC-024 R-3/R-4). v8 adds an optional action on each pending_calls entry carrying the policy action derived from the risk tier so the tiered require_approval confirmation bridge and portal approval badges can render (SPEC-030 R-3).",
+  "title": "Agent Stream Event (v9)",
+  "description": "SSE frame payload for GET /api/v2/chat/stream. v3 added tool_call and tool_result event types for evidence panel rendering (SPEC-011 R-1). v4 adds confirmation_request and confirmation_result event types for HITL confirmation bridging (SPEC-020 R-1). v5 adds an optional data field on tool_result frames carrying the full tool payload within the stream size cap. v6 adds an optional risk_level on each pending_calls entry so confirmation cards can surface mutating (write/admin) tool calls (SPEC-021 R-3). v7 adds an optional model field on message_end frames carrying the model id that resolved for the turn (SPEC-024 R-3/R-4). v8 adds an optional action on each pending_calls entry carrying the policy action derived from the risk tier so the tiered require_approval confirmation bridge and portal approval badges can render (SPEC-030 R-3). v9 adds an optional flow_summary on confirmation_request frames carrying the bound browser-flow headline so the live operator card renders the same workflow framing the durable record gives the approver inbox (SPEC-051 R-6).",
   "type": "object",
   "additionalProperties": false,
   "required": ["type", "session_id", "request_id"],
@@ -54,6 +54,18 @@
             "description": "Policy action the parked call maps to, derived from the risk tier at park time (SPEC-030 R-3): read -> tools:invoke, write/admin -> tools:mutate. Absent for tools without a gateway risk tier; the confirm bridge treats absent as the implicit no-rule path."
           }
         }
+      }
+    },
+    "flow_summary": {
+      "type": ["object", "null"],
+      "description": "SPEC-051 R-6: card-level browser-flow headline on confirmation_request frames (skill intent, origin, risk_class) so the live operator card renders the same workflow framing as the durable record served to the approver inbox. Absent for non-browser cards.",
+      "additionalProperties": false,
+      "properties": {
+        "skill_id": { "type": "string" },
+        "origin": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "risk_class": { "type": "string" }
       }
     },
     "tool_name": {

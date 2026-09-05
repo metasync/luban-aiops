@@ -7,6 +7,20 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-05-post-live-check-confirmation-card-flow-headline.md`
+  - next-day patch (v0.33.1) from a live test of v0.33.0: the operator's
+    live HITL confirmation card rendered without its browser-flow
+    description while the approver inbox card showed it, because the
+    `confirmation_request` SSE frame is serialized through
+    `AgentStreamEvent`, which had no `flow_summary` field — the kernel's
+    headline was dropped at that boundary, while the durable record the
+    inbox and the post-decision card read still carried it.
+    `AgentStreamEvent` gains the optional field (stream schema v8 → v9),
+    `_normalize_stream_event` passes it through a defensive coercion that
+    keeps only the contract's five string fields, and
+    `agent-session.schema.json` declares it on the durable card items (a
+    latent gap); pinned by three contract tests — backend plus two shared
+    contracts touched, the portal was already correct and is unchanged
 - `2026-09-04-browser-flow-hitl-gate-enforcement.md`
   - delivers SPEC-051 (v0.33.0, thirteenth R5 slice): completes SPEC-049
     R-4 platform-side — one HITL gate per mutating browser flow. The

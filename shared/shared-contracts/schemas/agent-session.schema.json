@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/agent-session.schema.json",
   "title": "Agent Session (v2)",
-  "description": "Session record returned by POST /api/v2/sessions and GET /api/v2/sessions/{id}. SPEC-022 R-1 adds workspace fields: server-minted title, last_active_at, parked-confirmation flag, and a best-effort transcript reconstructed from the kernel state snapshot. SPEC-025 R-2 adds the additive evidence_turns field carrying persisted tool evidence grouped by assistant turn. SPEC-024 R-3 adds the additive model field carrying the session's pinned model id. SPEC-031 R-2 adds the additive confirmations field carrying durable confirmation lifecycle cards. SPEC-037 R-4 adds the additive executions array under each confirmation card carrying signed execution request/receipt rows.",
+  "description": "Session record returned by POST /api/v2/sessions and GET /api/v2/sessions/{id}. SPEC-022 R-1 adds workspace fields: server-minted title, last_active_at, parked-confirmation flag, and a best-effort transcript reconstructed from the kernel state snapshot. SPEC-025 R-2 adds the additive evidence_turns field carrying persisted tool evidence grouped by assistant turn. SPEC-024 R-3 adds the additive model field carrying the session's pinned model id. SPEC-031 R-2 adds the additive confirmations field carrying durable confirmation lifecycle cards. SPEC-037 R-4 adds the additive executions array under each confirmation card carrying signed execution request/receipt rows. SPEC-051 R-6 adds the additive flow_summary on each confirmation card carrying the bound browser-flow headline so durable cards render the same workflow framing as the live operator card.",
   "type": "object",
   "additionalProperties": false,
   "required": ["session_id", "user_id", "created_at", "status"],
@@ -123,6 +123,18 @@
           "turn_index": {
             "type": ["integer", "null"],
             "description": "SPEC-033 R-2: ordinal of the user turn that parked the record (same convention as evidence_turns.turn_index), so transcript seeding anchors the card under its parking exchange; null for records parked before the column existed."
+          },
+          "flow_summary": {
+            "type": ["object", "null"],
+            "description": "SPEC-051 R-6: card-level browser-flow headline captured at park time (skill intent, origin, risk_class) so the durable confirmation card renders the same workflow framing on the approver inbox and the owner transcript as the live operator card; null for non-browser cards and for records parked before the column existed.",
+            "additionalProperties": false,
+            "properties": {
+              "skill_id": { "type": "string" },
+              "origin": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string" },
+              "risk_class": { "type": "string" }
+            }
           },
           "status": {
             "type": "string",

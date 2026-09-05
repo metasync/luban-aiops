@@ -109,7 +109,7 @@ class AgentChatConfirmRequest(BaseModel):
 
 
 class AgentStreamEvent(BaseModel):
-    """SSE frame payload conforming to agent-stream-event.schema.json (v8).
+    """SSE frame payload conforming to agent-stream-event.schema.json (v9).
 
     v3 added tool_call/tool_result frames for evidence panel rendering
     (SPEC-011 R-1). v4 adds confirmation_request/confirmation_result frames
@@ -120,7 +120,10 @@ class AgentStreamEvent(BaseModel):
     entries so the portal can flag mutating batches (SPEC-021 R-3).
     v8 adds the optional ``action`` on ``pending_calls`` entries so the
     confirm bridge can evaluate the parked batch against the policy
-    bundle (SPEC-030 R-3).
+    bundle (SPEC-030 R-3). v9 adds the optional ``flow_summary`` on
+    confirmation_request frames carrying the bound browser-flow headline
+    (SPEC-051 R-6) so the live operator card renders the same workflow
+    framing the durable record gives the approver inbox.
     """
 
     type: Literal[
@@ -139,6 +142,11 @@ class AgentStreamEvent(BaseModel):
     message: str | None = None
     confirm_id: str | None = None
     pending_calls: list[dict[str, Any]] | None = None
+    # SPEC-051 R-6: card-level browser-flow headline (skill intent, origin,
+    # risk_class) on confirmation_request frames. Mirrors the durable
+    # record's flow_summary so the live operator card renders the same
+    # workflow framing as the approver inbox; absent for non-browser cards.
+    flow_summary: dict[str, Any] | None = None
     tool_name: str | None = None
     call_id: str | None = None
     parameters: dict[str, Any] | None = None

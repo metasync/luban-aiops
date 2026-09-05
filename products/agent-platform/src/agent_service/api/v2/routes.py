@@ -494,6 +494,11 @@ _PENDING_CALL_RISK_LEVELS = frozenset({"read", "write", "admin"})
 # from its risk tier; the confirm bridge evaluates this action.
 _PENDING_CALL_ACTIONS = frozenset({"tools:invoke", "tools:mutate"})
 
+# v9 (SPEC-051 R-6): the card-level browser-flow headline fields the
+# stream schema allows on a confirmation_request frame. Mirrors the
+# kernel's FlowContext.summary() and the durable record's flow_summary.
+_FLOW_SUMMARY_FIELDS = ("skill_id", "origin", "title", "description", "risk_class")
+
 
 def _normalize_stream_event(
     raw: dict[str, object], session_id: str, request_id: str
@@ -519,6 +524,10 @@ def _normalize_stream_event(
             else None
         ),
         pending_calls=_coerce_pending_calls(raw.get("pending_calls")),
+        # SPEC-051 R-6: the browser-flow headline rides confirmation_request
+        # frames so the live operator card matches the durable record the
+        # approver inbox renders; coerced to the contract fields or None.
+        flow_summary=_coerce_flow_summary(raw.get("flow_summary")),
         tool_name=raw.get("tool_name") if isinstance(raw.get("tool_name"), str) else None,
         call_id=raw.get("call_id") if isinstance(raw.get("call_id"), str) else None,
         parameters=(
@@ -586,6 +595,22 @@ def _coerce_pending_calls(value: object) -> list[dict[str, object]] | None:
             entry["display_hint"] = display_hint
         calls.append(entry)
     return calls or None
+
+
+def _coerce_flow_summary(value: object) -> dict[str, object] | None:
+    """Keep the confirmation_request flow headline schema-conformant
+    (SPEC-051 R-6). Returns None when no browser flow is bound so the
+    card falls back to plain tool-action rendering; only the contract's
+    string fields survive, so a malformed summary can never make the
+    frame fail additionalProperties:false validation."""
+    if not isinstance(value, dict):
+        return None
+    summary: dict[str, object] = {}
+    for field in _FLOW_SUMMARY_FIELDS:
+        item = value.get(field)
+        if isinstance(item, str):
+            summary[field] = item
+    return summary or None
 
 
 # --- Sessions ---
