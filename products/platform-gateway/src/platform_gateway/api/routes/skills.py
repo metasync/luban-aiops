@@ -64,6 +64,9 @@ async def get_skill_route(
     # ``/api/v1/skills`` list route so the greedy ``{skill_id:path}`` match never
     # shadows it. Same ``skills:read`` gate and gateway-held Basic credential as
     # the list — no new policy action, and skills-hub still emits skill_retrieved.
+    # ``get_skill`` holds ``skill_id`` to skills-hub's producer charset before it
+    # reaches the upstream URL, so a traversal-shaped id is rejected (generic 404)
+    # at the edge rather than forwarded.
     request_id = resolve_request_id(x_request_id)
     identity = await resolve_request_identity(settings, request, request_id)
     enforce_policy(settings, identity, ACTION_SKILLS_READ, request_id)

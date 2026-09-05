@@ -402,6 +402,33 @@ class SkillDetailProxyTests(WorkspaceProxyBase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["detail"], "unknown skill id")
 
+    def test_traversal_shaped_id_rejected_before_upstream(self) -> None:
+        # SPEC-052 hardening: a traversal-shaped id never reaches skills-hub's
+        # URL. Percent-encoded so the ASGI client can't normalize the dot-segment
+        # away before routing; the guard rejects the encoded and decoded forms.
+        fake = _FakeAsyncClient(response=_FakeResponse(200, SKILL_DETAIL_PAYLOAD))
+        with (
+            self._patch_identity("operator", "skills"),
+            self._patch_httpx(fake, "skills_hub_client"),
+        ):
+            response = self.client.get("/api/v1/skills/sre-alerting/..%2fsecret")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "unknown skill id")
+        self.assertEqual(fake.calls, [])
+
+    def test_malformed_id_rejected_before_upstream(self) -> None:
+        # A single-segment id (no ``<source_id>/<slug>`` namespace) violates the
+        # producer contract and is rejected before any upstream hop.
+        fake = _FakeAsyncClient(response=_FakeResponse(200, SKILL_DETAIL_PAYLOAD))
+        with (
+            self._patch_identity("operator", "skills"),
+            self._patch_httpx(fake, "skills_hub_client"),
+        ):
+            response = self.client.get("/api/v1/skills/just-a-slug")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "unknown skill id")
+        self.assertEqual(fake.calls, [])
+
     def test_unconfigured_upstream_returns_503(self) -> None:
         self._use_settings(_settings(skills_hub_url=""))
         with self._patch_identity("operator", "skills"):

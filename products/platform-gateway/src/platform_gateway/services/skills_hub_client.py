@@ -13,6 +13,7 @@ passed through with the upstream message.
 from __future__ import annotations
 
 import logging
+import re
 
 import httpx
 from fastapi import HTTPException
@@ -23,6 +24,18 @@ LOGGER = logging.getLogger(__name__)
 
 PROXY_TIMEOUT_SECONDS = 10.0
 LIST_PATH = "/api/v1/skills"
+
+# SPEC-052 R-1 hardening: the detail hop folds ``skill_id`` into an upstream URL
+# path segment, so it is held to skills-hub's own producer contract — one or more
+# ``[a-z0-9]`` runs joined by single ``-`` within a segment, and at least two
+# ``/``-separated segments (``<source_id>/<slug>``). Anything else (``..``
+# traversal, absolute paths, ``%``-encoded octets, spaces, uppercase, empty or
+# duplicate slashes) is rejected before it can reach the URL. skills-hub itself
+# only ever does a keyed store lookup, so this is defense-in-depth at the edge,
+# not the sole barrier.
+_SKILL_ID_RE = re.compile(
+    r"^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)+$"
+)
 
 
 def _base_url(settings: PlatformGatewaySettings) -> str:
@@ -87,11 +100,18 @@ async def get_skill(
 
     The list payload omits ``body`` by contract, so the portal reads a
     skill's content through this detail hop. ``skill_id`` is the namespaced
-    ``<source_id>/<slug>`` form; its charset (``[a-z0-9-/]``) is already
-    URL-safe, so the segment separators are preserved literally for
-    skills-hub's ``{skill_id:path}`` matcher. Same credential and error
-    posture as :func:`list_skills` — the user's token is never forwarded.
+    ``<source_id>/<slug>`` form; it is checked against ``_SKILL_ID_RE`` before
+    being folded into the upstream URL, so a traversal-shaped or otherwise
+    malformed identifier is rejected here rather than forwarded. Valid ids keep
+    their segment separators literally for skills-hub's ``{skill_id:path}``
+    matcher. Same credential and error posture as :func:`list_skills` — the
+    user's token is never forwarded.
     """
+    if not _SKILL_ID_RE.match(skill_id):
+        # Reject at the sink, before any URL is built. The generic 404 mirrors
+        # skills-hub's SKILL_NOT_FOUND, so a structural reject is
+        # indistinguishable from an absent skill (no enumeration oracle).
+        raise HTTPException(status_code=404, detail="unknown skill id")
     url = f"{_base_url(settings)}{LIST_PATH}/{skill_id}"
     try:
         async with httpx.AsyncClient(timeout=PROXY_TIMEOUT_SECONDS) as client:
