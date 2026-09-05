@@ -448,8 +448,16 @@ afterEach(() => {
 });
 
 async function flush() {
-  // Let the initial list fetch settle before asserting.
-  await new Promise((resolve) => window.setTimeout(resolve, 0));
+  // Let the initial list fetch settle AND React commit the resulting update
+  // before asserting. A bare setTimeout(0) is fragile under CPU contention
+  // (the full parallel suite): the mock's resolved promise fires a setState
+  // whose re-render React 19 schedules on a later macrotask, so a single
+  // tick can assert against the pre-update DOM. Awaiting the timer *inside*
+  // act() drains the pending promise, the scheduler's macrotask hop, and the
+  // commit, so every call site reads the settled tree regardless of load.
+  await act(async () => {
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+  });
 }
 
 describe("DocumentsView list (SPEC-039 R-6)", () => {
