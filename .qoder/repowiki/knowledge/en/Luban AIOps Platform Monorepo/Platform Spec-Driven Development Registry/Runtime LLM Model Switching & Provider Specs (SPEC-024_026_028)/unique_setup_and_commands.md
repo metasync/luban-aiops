@@ -1,1 +1,0 @@
-Spec delivery is gated by `make verify` rendering the gitops overlays cleanly after consolidating `runtime-profiles/` to a single `default/` profile; new providers are validated by unit tests and a green `make verify` before being marked delivered.

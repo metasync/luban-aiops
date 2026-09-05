@@ -13,7 +13,10 @@
 - [SPEC-008-service-to-service-identity/spec.md](file://docs/specs/SPEC-008-service-to-service-identity/spec.md)
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
+- [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
+- [0007-browser-flow-single-hitl-gate.md](file://docs/adr/0007-browser-flow-single-hitl-gate.md)
 - [2026-08-27-document-read-audit-integrity.md](file://docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md)
+- [2026-09-04-browser-flow-hitl-gate-enforcement.md](file://docs/agentic-aiops-platform/release-notes/2026-09-04-browser-flow-hitl-gate-enforcement.md)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [documents.py](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py)
 - [test_documents.py](file://products/agent-platform/tests/test_documents.py)
@@ -46,16 +49,22 @@
 - [audit_emitter.py](file://products/identity-broker/src/identity_service/services/audit_emitter.py)
 - [config.py](file://products/audit-service/src/audit_service/core/config.py)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [test_flow_approvals.py](file://products/agent-platform/tests/test_flow_approvals.py)
+- [test_execution_signing.py](file://products/agent-platform/tests/test_execution_signing.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced documentation for document read audit integrity with envelope-only listings
-- Updated security architecture section to include centralized single-document fetch endpoints
-- Added detailed explanation of cross-owner access auditing mechanisms
-- Updated threat modeling to address document content exposure prevention
-- Enhanced compliance requirements with document audit trail specifications
-- Updated troubleshooting guide with document read audit verification procedures
+- Enhanced security model documentation with flow-based approval enforcement for browser flows
+- Added coverage of session-scoped flow authorities with TTL-based expiration
+- Documented single-HITL-gate-per-flow invariant implementation
+- Added flow-specific execution signing and audit trail enhancements
+- Updated threat modeling to address cross-flow privilege escalation prevention
+- Enhanced compliance requirements with flow authority audit trails
+- Updated troubleshooting guide with flow approval enforcement diagnostics
 
 ## Table of Contents
 1. Introduction
@@ -70,17 +79,17 @@
 10. Appendices
 
 ## Introduction
-This Security Guide documents the Luban AIOps Platform's enhanced security architecture, threat mitigation strategies, and compliance requirements. The platform now implements a sophisticated security model featuring audience-bound JWTs, delegated token flows, service-to-service identity patterns, deterministic tool output redaction, workload identity service tokens, explicit tool permission allow-listing, and a durable audit trail with secure service-to-service authentication. It covers identity and authorization design (OIDC integration, JWT token security, and role-based access control), the authorization matrix across services and resources, secure configuration and secrets management, network security, vulnerability assessment procedures, scanning and penetration testing guidelines, compliance and audit logging, incident response procedures, and secure development practices with security review processes.
+This Security Guide documents the Luban AIOps Platform's enhanced security architecture, threat mitigation strategies, and compliance requirements. The platform now implements a sophisticated security model featuring audience-bound JWTs, delegated token flows, service-to-service identity patterns, deterministic tool output redaction, workload identity service tokens, explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, and a durable audit trail with secure service-to-service authentication. It covers identity and authorization design (OIDC integration, JWT token security, and role-based access control), the authorization matrix across services and resources, secure configuration and secrets management, network security, vulnerability assessment procedures, scanning and penetration testing guidelines, compliance and audit logging, incident response procedures, and secure development practices with security review processes.
 
-The platform has been significantly hardened with multiple security enhancements including explicit tool permission allow-listing to prevent unauthorized tool execution, deterministic redaction of tool outputs to prevent credential leakage to external model providers, workload identity service tokens that replace static client secrets with short-lived, Kubernetes-projected tokens validated against cluster OIDC issuers, and a comprehensive audit trail system that provides immutable records of all platform activities with strong authentication and authorization controls. **Updated**: The platform now implements enhanced audit integrity for document read operations, ensuring cross-owner access to sensitive content is properly recorded through centralized single-document fetch endpoints rather than list endpoints, preventing unauthorized content exposure while maintaining comprehensive audit trails.
+The platform has been significantly hardened with multiple security enhancements including explicit tool permission allow-listing to prevent unauthorized tool execution, deterministic redaction of tool outputs to prevent credential leakage to external model providers, workload identity service tokens that replace static client secrets with short-lived, Kubernetes-projected tokens validated against cluster OIDC issuers, flow-based approval enforcement ensuring exactly one HITL gate per mutating browser flow, session-scoped flow authorities with time-bounded expiration, and a comprehensive audit trail system that provides immutable records of all platform activities with strong authentication and authorization controls. **Updated**: The platform now implements enhanced flow-based security enforcement where browser flows are secured with exactly one operator decision per mutating flow, with each subsequent write-tier interaction auto-signed under the approved flow's authority while maintaining strict identity scoping and gateway deviation guards.
 
 ## Project Structure
 The platform is organized into multiple products and shared components with enhanced security boundaries:
 - Identity Broker: Centralized identity and token issuance/validation service supporting OIDC flows, audience-bound JWT lifecycle management, delegated token operations, and workload identity token validation.
-- Tool Gateway: API gateway enforcing authentication, authorization, policy decisions, secure tool execution orchestration, deterministic output redaction, and explicit tool permission allow-listing with service-to-service identity validation.
+- Tool Gateway: API gateway enforcing authentication, authorization, policy decisions, secure tool execution orchestration, deterministic output redaction, explicit tool permission allow-listing, and flow deviation guard enforcement with service-to-service identity validation.
 - Audit Service: Durable audit trail storage with secure service-to-service authentication, role-based query access, and retention policies for compliance requirements.
-- Agent Platform: Runtime for agent services with session management, provider integrations, strict audience-scoped permissions, vetted tool auto-approval mechanisms, and enhanced document repository with envelope-only listings.
-- Operator Portal: Web UI for operators to manage platform resources with enhanced security controls and audited document access.
+- Agent Platform: Runtime for agent services with session management, provider integrations, strict audience-scoped permissions, vetted tool auto-approval mechanisms, flow-based approval enforcement with session-scoped authorities, and enhanced document repository with envelope-only listings.
+- Operator Portal: Web UI for operators to manage platform resources with enhanced security controls, flow-semantic confirmation cards, and audited document access.
 - Shared Contracts and Schemas: Common data models and policy specifications used across services with enhanced security schemas.
 - GitOps and Kubernetes overlays: Declarative deployment configurations including RBAC, policies, and runtime environment variables with least-privilege defaults.
 
@@ -108,10 +117,10 @@ end
 
 ## Core Components
 - Identity Broker provides OIDC endpoints, issues and validates audience-bound tokens, supports delegated token flows, exposes identity context APIs with service-to-service authentication, and validates workload identity tokens from Kubernetes projected service accounts.
-- Tool Gateway performs request authentication, token verification with audience validation, policy evaluation, secure tool execution orchestration, deterministic output redaction, and routes requests to downstream services with proper identity propagation.
+- Tool Gateway performs request authentication, token verification with audience validation, policy evaluation, secure tool execution orchestration, deterministic output redaction, flow deviation guard enforcement, and routes requests to downstream services with proper identity propagation.
 - Audit Service provides durable audit trail storage with secure service-to-service authentication using both static credentials and workload identity, role-based query access control, and retention policies for compliance.
 - Policy Engine evaluates policies against requests and enforces RBAC and fine-grained permissions with service-to-service identity awareness.
-- Agent Platform manages sessions and runtime dependencies for agent workloads with strict audience-scoped permissions, least-privilege execution contexts, explicit tool permission allow-listing, and enhanced document repository with envelope-only listings and centralized fetch auditing.
+- Agent Platform manages sessions and runtime dependencies for agent workloads with strict audience-scoped permissions, least-privilege execution contexts, explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, and enhanced document repository with envelope-only listings and centralized fetch auditing.
 - Kubernetes RBAC and policy manifests define least-privilege access and runtime constraints with enhanced service identity management.
 
 Key responsibilities:
@@ -119,10 +128,12 @@ Key responsibilities:
 - Authorization via policy engine using RBAC, scopes, and resource-scoped permissions with service identity awareness.
 - Secure configuration through environment-driven settings and secrets injection with least-privilege defaults.
 - Explicit tool permission allow-listing preventing unauthorized tool execution while maintaining operational efficiency.
+- Flow-based approval enforcement ensuring exactly one HITL gate per mutating browser flow with session-scoped authorities.
 - Deterministic tool output redaction preventing credential leakage to external model providers.
 - Workload identity service tokens replacing static client secrets with short-lived, auditable credentials.
 - Comprehensive audit trail with secure ingestion, storage, and query capabilities with role-based access control.
 - **Enhanced document read audit integrity** ensuring cross-owner access to sensitive content is properly recorded through centralized single-document fetch endpoints.
+- **Flow authority audit trails** providing complete visibility into browser flow approvals and auto-signed executions.
 - Observability and audit logging for security events with enhanced service-to-service communication tracking.
 
 **Section sources**
@@ -134,9 +145,10 @@ Key responsibilities:
 - [SPEC-008-service-to-service-identity/spec.md](file://docs/specs/SPEC-008-service-to-service-identity/spec.md)
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
+- [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
 
 ## Architecture Overview
-The enhanced security architecture centers on a trust boundary at the Tool Gateway, which authenticates clients, verifies audience-bound tokens, enforces policies with service identity awareness, delegates tokens securely to internal services, applies deterministic redaction to prevent credential leakage, and enforces explicit tool permission allow-listing. The Identity Broker acts as the single source of truth for user and service identities, issuing OIDC-compliant tokens with audience scoping, validating workload identity tokens from Kubernetes, and providing introspection endpoints. The Audit Service provides durable, tamper-evident audit trails with secure service-to-service authentication and role-based query access. Policies are declarative and evaluated per-request, enabling dynamic authorization based on roles, scopes, resource attributes, and service identity relationships. **Updated**: The document repository architecture now ensures that sensitive document content is only accessible through centralized single-document fetch endpoints, with envelope-only listings preventing unauthorized content exposure while maintaining comprehensive audit trails for cross-owner access.
+The enhanced security architecture centers on a trust boundary at the Tool Gateway, which authenticates clients, verifies audience-bound tokens, enforces policies with service identity awareness, delegates tokens securely to internal services, applies deterministic redaction to prevent credential leakage, enforces explicit tool permission allow-listing, and maintains flow deviation guards. The Identity Broker acts as the single source of truth for user and service identities, issuing OIDC-compliant tokens with audience scoping, validating workload identity tokens from Kubernetes, and providing introspection endpoints. The Audit Service provides durable, tamper-evident audit trails with secure service-to-service authentication and role-based query access. Policies are declarative and evaluated per-request, enabling dynamic authorization based on roles, scopes, resource attributes, and service identity relationships. **Updated**: The flow-based approval system ensures exactly one HITL gate per mutating browser flow, with session-scoped authorities scoped to flow identity (skill_id + origin) and time-bounded by configurable TTL, eliminating cross-flow privilege escalation while maintaining individual execution signing and audit trails for each unlocked write.
 
 ```mermaid
 sequenceDiagram
@@ -145,6 +157,7 @@ participant Gateway as "Tool Gateway"
 participant Broker as "Identity Broker"
 participant Policy as "Policy Engine"
 participant Agent as "Agent Platform"
+participant FlowStore as "Flow Approval Store"
 participant Delegation as "Delegation Service"
 participant Redaction as "Redaction Engine"
 participant AllowList as "Tool Permission Allow-List"
@@ -158,6 +171,8 @@ Policy-->>Gateway : "Decision (Allow/Deny)"
 Gateway->>Delegation : "Request Delegated Token (Workload Identity)"
 Delegation-->>Gateway : "Service-Specific Token"
 Gateway->>Agent : "Forward Request with Context"
+Agent->>FlowStore : "Check Session-Scoped Flow Authority"
+FlowStore-->>Agent : "Authority Decision (TTL + Identity Match)"
 Agent->>AllowList : "Check Tool Permission (Vetted Allow-List)"
 AllowList-->>Agent : "Permission Decision"
 Agent->>DocStore : "List Documents (Envelope Only)"
@@ -168,7 +183,7 @@ Agent-->>Gateway : "Response with Potential Credentials"
 Gateway->>Redaction : "Apply Deterministic Redaction"
 Redaction-->>Gateway : "Sanitized Response"
 Gateway-->>Client : "Final Response"
-Note over Agent,DocStore : Cross-owner reads trigger document_read audit events
+Note over Agent,FlowStore : Flow authority scoped to skill_id + origin prevents cross-flow escalation
 ```
 
 **Diagram sources**
@@ -179,6 +194,7 @@ Note over Agent,DocStore : Cross-owner reads trigger document_read audit events
 - [delegation_client.py](file://products/tool-gateway/src/api_gateway/services/delegation_client.py)
 - [redaction.py](file://products/tool-gateway/src/api_gateway/tools/redaction.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
 - [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [exchange_service.py](file://products/identity-broker/src/identity_service/services/exchange_service.py)
@@ -192,6 +208,7 @@ Note over Agent,DocStore : Cross-owner reads trigger document_read audit events
 - [SPEC-008-service-to-service-identity/spec.md](file://docs/specs/SPEC-008-service-to-service-identity/spec.md)
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
+- [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
 
 ## Detailed Component Analysis
 
@@ -263,6 +280,7 @@ Key aspects:
 - Audit logging of authz decisions, service-to-service communications, and sensitive operations.
 - Delegated token flow implementation for secure inter-service communications with workload identity preference.
 - Deterministic tool output redaction preventing credential leakage to model providers.
+- Flow deviation guard enforcement ensuring origin allowlist, risk class, and step budget bounds.
 - Fail-closed overflow protection when too much content appears to contain credentials.
 
 ```mermaid
@@ -379,6 +397,46 @@ ReturnEnvelopes --> End
 - [test_documents.py:250-266](file://products/agent-platform/tests/test_documents.py#L250-L266)
 - [2026-08-27-document-read-audit-integrity.md](file://docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md)
 
+### Flow-Based Approval Enforcement: Single HITL Gate Per Browser Flow
+**New** The platform now implements flow-based approval enforcement ensuring exactly one HITL gate per mutating browser flow, addressing critical security gaps where previously every write-tier browser interaction required separate operator approval. This enhancement eliminates cross-flow privilege escalation while maintaining individual execution signing and comprehensive audit trails.
+
+Key aspects:
+- **Session-Scoped Flow Authorities**: Each approval creates a session-scoped authority keyed on both chat session ID and approved flow identity (skill_id + origin), preventing cross-flow privilege escalation.
+- **Time-Bounded Expiration**: Flow authorities are bounded by configurable TTL (`AGENT_BROWSER_FLOW_APPROVAL_TTL`, default 900 seconds) with fail-safe behavior when expired or disabled (ttl=0).
+- **Identity Guard Enforcement**: The kernel maintains a session-scoped `FlowContext` reflecting the gateway-owned flow binding; any rebind to a different flow triggers re-parking of the next write.
+- **Auto-Signed Executions**: Subsequent write-tier browser interactions in the same flow are auto-signed under the approving card's authority with fresh execution IDs and argument digests.
+- **Gateway Deviation Guards**: Every unlocked write remains bounded by origin allowlist, declared risk class, and step budget enforcement at the tool gateway.
+- **Flow-Semantic Confirmation Cards**: Operators approve workflow-level actions ("Reset User Password in Admin Portal") rather than bare tool actions, improving operator understanding and security posture.
+
+```mermaid
+flowchart TD
+FirstWrite["First Write-Tier Browser Interaction"] --> ParkCard["Park Confirmation Card"]
+ParkCard --> Approve{"Operator Approves?"}
+Approve --> |No| Deny["Deny Execution"]
+Approve --> |Yes| RecordAuthority["Record Session-Scoped Flow Authority"]
+RecordAuthority --> NextWrite["Subsequent Write in Same Flow"]
+NextWrite --> CheckAuthority{"Valid Flow Authority?"}
+CheckAuthority --> |No| RePark["Re-Park New Card"]
+CheckAuthority --> |Yes| AutoSign["Auto-Sign Under Flow Authority"]
+AutoSign --> Execute["Execute with Gateway Guards"]
+RePark --> ParkCard
+Deny --> End(["Execution Blocked"])
+Execute --> End
+```
+
+**Diagram sources**
+- [flow_approvals.py:138-231](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L138-L231)
+- [runtime_kernel.py:1256-1341](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1256-L1341)
+- [execution_signing.py:101-134](file://products/agent-platform/src/agent_service/services/execution_signing.py#L101-L134)
+
+**Section sources**
+- [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
+- [0007-browser-flow-single-hitl-gate.md](file://docs/adr/0007-browser-flow-single-hitl-gate.md)
+- [flow_approvals.py:1-245](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L245)
+- [runtime_kernel.py:1256-1341](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1256-L1341)
+- [execution_signing.py:101-134](file://products/agent-platform/src/agent_service/services/execution_signing.py#L101-L134)
+- [2026-09-04-browser-flow-hitl-gate-enforcement.md](file://docs/agentic-aiops-platform/release-notes/2026-09-04-browser-flow-hitl-gate-enforcement.md)
+
 ### Explicit Tool Permission Allow-List System
 **Updated** The tool permission auto-approval system has been significantly hardened to address CWE-862 (Incorrect Authorization) vulnerability. Instead of automatically approving any read-only tool, the system now uses an explicit vetted allow-list controlled by the `AGENT_GATEWAY_TOOL_AUTO_ALLOW` environment variable. This ensures that only pre-approved, security-reviewed tools can bypass the interactive permission confirmation process.
 
@@ -492,7 +550,7 @@ Note over Gateway,Broker : Fallback to Static Secret if Workload Token Unavailab
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 
 ### Agent Platform: Enhanced Session and Runtime Security with Least-Privilege
-**Updated** The Agent Platform manages sessions and runtime dependencies for agent workloads with enhanced security controls including explicit tool permission allow-listing and enhanced document repository with envelope-only listings. It integrates with the identity system to ensure authenticated sessions with audience-scoped permissions and enforces runtime policies with least-privilege execution contexts.
+**Updated** The Agent Platform manages sessions and runtime dependencies for agent workloads with enhanced security controls including explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, and enhanced document repository with envelope-only listings. It integrates with the identity system to ensure authenticated sessions with audience-scoped permissions and enforces runtime policies with least-privilege execution contexts.
 
 Key aspects:
 - Session creation and persistence with secure identifiers and audience validation.
@@ -500,12 +558,14 @@ Key aspects:
 - Telemetry and observability for security-relevant events with service identity tracking.
 - Runtime policy enforcement with audience-scoped permissions and service identity validation.
 - Explicit tool permission allow-listing preventing unauthorized tool execution.
+- **Flow-based approval enforcement** ensuring exactly one HITL gate per mutating browser flow with session-scoped authorities.
 - **Enhanced document repository** with envelope-only listings and centralized fetch auditing.
 - Integration with AgentScope permission system for headless stream compatibility.
 
 **Section sources**
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
+- [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
 
 ### Kubernetes RBAC and Policy Manifests: Enhanced Least-Privilege Access
 RBAC and policy manifests enforce least-privilege access at the cluster level with enhanced service identity management. They define roles, bindings, and policy files consumed by the gateway and other services with audience-scoped permissions.
@@ -531,6 +591,7 @@ Security-critical dependencies include:
 - Pattern matching libraries for deterministic credential detection and redaction.
 - AgentScope permission system for tool permission management with explicit allow-listing.
 - Audit service client for secure audit event emission with authentication.
+- **Flow approval store** for session-scoped browser flow authorities with TTL-based expiration.
 - **Document store with envelope-only listing capability** for secure document content access.
 
 ```mermaid
@@ -550,8 +611,10 @@ RBAC["Kubernetes RBAC"] --> Gateway
 DelegationClient --> IdentityBroker
 RedactionEngine --> PatternMatching["Pattern Matching Library"]
 AgentPlatform --> AllowList["Tool Permission Allow-List"]
+AgentPlatform --> FlowStore["Flow Approval Store"]
 AgentPlatform --> DocStore["Document Store (Envelope-Only)"]
 AllowList --> AgentScope["AgentScope Permission System"]
+FlowStore --> FlowContext["Flow Context Store"]
 DocStore --> AuditEmitter
 AuditEmitter --> AuditService["Audit Service"]
 AuditService --> AuditStore["Audit Store"]
@@ -566,6 +629,7 @@ AuditService --> AuditStore["Audit Store"]
 - [exchange_service.py](file://products/identity-broker/src/identity_service/services/exchange_service.py)
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [audit_emitter.py](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py)
 - [ingest_auth.py](file://products/audit-service/src/audit_service/services/ingest_auth.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -576,6 +640,7 @@ AuditService --> AuditStore["Audit Store"]
 - [SPEC-008-service-to-service-identity/spec.md](file://docs/specs/SPEC-008-service-to-service-identity/spec.md)
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
+- [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
 
 ## Performance Considerations
 - Token caching: Cache validated audience-bound tokens and claims to reduce broker calls while maintaining security.
@@ -588,6 +653,7 @@ AuditService --> AuditStore["Audit Store"]
 - Workload token caching: Cache workload token validation results to reduce cluster OIDC issuer calls.
 - Tool permission checking: Minimal overhead for allow-list lookups using frozenset for O(1) membership testing.
 - Audit emission: Fire-and-forget audit delivery with non-blocking threads and timeout protection to prevent request path degradation.
+- **Flow authority checking**: Minimal overhead for session-scoped flow authority lookups using in-memory dictionaries.
 - **Document listing performance**: Envelope-only listings reduce payload size and improve response times while maintaining security.
 - **Cross-owner read auditing**: Audit event emission is optimized to minimize impact on document fetch performance.
 
@@ -606,6 +672,9 @@ Common issues and resolutions:
 - **Audit query access denied**: Confirm user has auditor or platform-admin role and audit:read policy action is granted.
 - **Document content exposure**: Verify that document listings return envelope-only data and full content is only accessible through single-document fetch endpoints.
 - **Missing cross-owner read audits**: Check that document fetch endpoints properly emit `document_read` audit events for cross-owner access.
+- **Flow approval issues**: Verify browser flow approval TTL configuration and check that flow authorities are properly scoped to session and flow identity.
+- **Cross-flow privilege escalation**: Ensure flow context rebinding is detected and writes re-park when flow identity changes.
+- **Flow authority expiration**: Check AGENT_BROWSER_FLOW_APPROVAL_TTL setting and verify approval timestamps for TTL-based expiration.
 
 Recommended diagnostics:
 - Enable verbose logging for auth and policy decisions with service identity context.
@@ -618,6 +687,8 @@ Recommended diagnostics:
 - **Monitor audit service health and ingestion metrics** to ensure audit trail completeness.
 - **Verify document listing responses** to ensure they contain only envelope data without sensitive content.
 - **Audit document fetch events** to confirm cross-owner access is properly recorded.
+- **Monitor flow approval stores** to verify session-scoped authorities are properly created and expired.
+- **Check flow context rebinding** to ensure cross-flow privilege escalation is prevented.
 
 **Section sources**
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
@@ -625,15 +696,16 @@ Recommended diagnostics:
 - [policy-default.yaml](file://products/tool-gateway/src/api_gateway/policies/policy-default.yaml)
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
+- [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
 
 ## Conclusion
-The Luban AIOps Platform implements an enhanced robust security architecture centered on OIDC-based authentication, audience-bound JWT token security, policy-driven authorization with service identity awareness, explicit tool permission allow-listing, deterministic tool output redaction, workload identity service tokens, and a comprehensive audit trail system with secure service-to-service authentication. By enforcing least-privilege access through RBAC, audience-scoped permissions, declarative policies, and explicit tool permission controls, integrating comprehensive observability and audit logging for service-to-service communications, implementing fail-closed credential protection, and providing durable audit trails with role-based access control, the platform provides strong protection against common threats. The addition of delegated token flows, service-to-service identity patterns, explicit tool permission allow-listing, deterministic redaction, workload identity tokens, secure audit trail capabilities, and **enhanced document read audit integrity with envelope-only listings** further strengthens the security posture while maintaining operational efficiency. Continuous security scanning, penetration testing, and adherence to compliance standards further enhance the platform's security framework.
+The Luban AIOps Platform implements an enhanced robust security architecture centered on OIDC-based authentication, audience-bound JWT token security, policy-driven authorization with service identity awareness, explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, deterministic tool output redaction, workload identity service tokens, and a comprehensive audit trail system with secure service-to-service authentication. By enforcing least-privilege access through RBAC, audience-scoped permissions, declarative policies, and explicit tool permission controls, integrating comprehensive observability and audit logging for service-to-service communications, implementing fail-closed credential protection, and providing durable audit trails with role-based access control, the platform provides strong protection against common threats. The addition of delegated token flows, service-to-service identity patterns, explicit tool permission allow-listing, deterministic redaction, workload identity tokens, secure audit trail capabilities, flow-based approval enforcement with single HITL gates per browser flow, and **enhanced document read audit integrity with envelope-only listings** further strengthens the security posture while maintaining operational efficiency. Continuous security scanning, penetration testing, and adherence to compliance standards further enhance the platform's security framework.
 
 ## Appendices
 
 ### Compliance Requirements
 - Align with industry standards for identity management and access control with audience-scoped permissions.
-- Ensure audit logs capture authentication, authorization, service-to-service communications, administrative actions, and redaction events.
+- Ensure audit logs capture authentication, authorization, service-to-service communications, administrative actions, redaction events, and flow approval decisions.
 - Maintain encryption for data in transit and at rest where applicable with proper key management.
 - Regularly review and update policies to reflect organizational changes and least-privilege principles.
 - Implement comprehensive service identity management with audience validation and delegation controls.
@@ -643,12 +715,15 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Ensure audit trail retention meets regulatory requirements** with configurable retention policies.
 - **Implement audit query access controls** to restrict sensitive audit data to authorized personnel only.
 - **Verify document read audit integrity** to ensure cross-owner access to sensitive content is properly recorded and documented.
+- **Monitor flow approval authorities** to ensure session-scoped authorities expire appropriately and prevent privilege escalation.
+- **Validate flow identity scoping** to prevent cross-flow privilege escalation through flow context rebinding.
 
 **Section sources**
 - [SECURITY.md](file://SECURITY.md)
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
+- [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
 
 ### Vulnerability Assessment and Penetration Testing
 - Conduct regular automated scans for dependencies and container images with security-focused analysis.
@@ -662,6 +737,9 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Validate audit trail integrity** by attempting to modify or delete stored audit records.
 - **Test document read audit integrity** by verifying that cross-owner access to sensitive content is properly recorded through centralized fetch endpoints.
 - **Verify envelope-only listings** to ensure document content cannot be accessed through list endpoints.
+- **Test flow-based approval enforcement** by attempting to escalate privileges across different browser flows.
+- **Validate flow authority expiration** by testing TTL-based expiration and disabled flow-unlock scenarios.
+- **Test cross-flow privilege escalation** by attempting to reuse flow authorities after flow context rebinding.
 - Document findings and remediation steps; track vulnerabilities to closure with security impact assessment.
 - Integrate security checks into CI/CD pipelines for continuous assurance with audience-bound token validation and redaction testing.
 
@@ -670,6 +748,7 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - [README.md](file://README.md)
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
+- [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
 
 ### Secure Development Practices
 - Enforce least privilege in code and configuration with audience-scoped permissions and service identity awareness.
@@ -685,6 +764,9 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Validate audit trail immutability** to ensure stored audit records cannot be tampered with.
 - **Ensure document repository security** by implementing envelope-only listings and centralized fetch auditing.
 - **Test cross-owner read auditing** to verify that sensitive document access is properly recorded.
+- **Implement flow-based approval security testing** to validate single HITL gate enforcement and flow authority scoping.
+- **Test flow context rebinding** to ensure cross-flow privilege escalation is prevented.
+- **Validate flow authority TTL expiration** to ensure time-bounded authorities expire correctly.
 
 **Section sources**
 - [SPEC-003-identity-trust-hardening/spec.md](file://docs/specs/SPEC-003-identity-trust-hardening/spec.md)
@@ -692,9 +774,10 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - [SPEC-008-service-to-service-identity/spec.md](file://docs/specs/SPEC-008-service-to-service-identity/spec.md)
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
+- [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
 
 ### Threat Modeling Updates
-**Updated** The security hardening features address several critical attack vectors, with particular emphasis on tool permission vulnerabilities, audit trail integrity, and document content exposure prevention:
+**Updated** The security hardening features address several critical attack vectors, with particular emphasis on tool permission vulnerabilities, flow-based approval enforcement, audit trail integrity, and document content exposure prevention:
 
 **Credential Leakage Prevention:**
 - Deterministic redaction prevents service-account JWTs, bearer tokens, and basic credentials from reaching external model providers.
@@ -712,6 +795,13 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Fail-safe defaults** ensure that unknown tools require explicit confirmation rather than automatic approval.
 - **Integration with existing policy framework** ensures tool permissions complement broader authorization controls.
 
+**Flow-Based Approval Security:**
+- **Single HITL gate per browser flow eliminates repeated approval fatigue** while maintaining security through session-scoped authorities.
+- **Flow identity scoping (skill_id + origin) prevents cross-flow privilege escalation** through flow context rebinding.
+- **Time-bounded authorities with configurable TTL** ensure approvals don't persist indefinitely.
+- **Auto-signed executions maintain individual execution signing** preserving audit trail integrity for each unlocked write.
+- **Gateway deviation guards remain enforcement boundary** ensuring origin allowlist, risk class, and step budget bounds apply to all unlocked writes.
+
 **Document Content Exposure Prevention:**
 - **Envelope-only listings prevent unauthorized content access** through document listing endpoints.
 - **Centralized single-document fetch ensures audited access** to sensitive document content.
@@ -723,12 +813,14 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Role-based query access** ensures only authorized users can view audit trails through platform gateway policy enforcement.
 - **Immutable storage design** prevents modification or deletion of audit records once stored.
 - **Service attribution** ensures all audit events are traceable to their originating service.
+- **Flow approval audit trails** provide complete visibility into browser flow approvals and auto-signed executions.
 
 **Attack Surface Reduction:**
 - Single choke point for redaction eliminates bypass opportunities.
 - Audience validation prevents token misuse across services.
 - Workload subject registration ensures only authorized service accounts can obtain delegated tokens.
 - **Explicit tool permission controls prevent unauthorized tool execution** even for read-only operations.
+- **Flow-based approval enforcement prevents privilege escalation** across different browser flows.
 - **Audit service authentication prevents unauthorized audit event ingestion** from untrusted services.
 - **Document repository security prevents content exposure** through unauthorized listing endpoints.
 
@@ -736,8 +828,11 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-009-pre-production-hardening/plan.md](file://docs/specs/SPEC-009-pre-production-hardening/plan.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
+- [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
 - [SECURITY.md](file://SECURITY.md)
+- [0007-browser-flow-single-hitl-gate.md](file://docs/adr/0007-browser-flow-single-hitl-gate.md)
 - [gateway_tools.py:35-96](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L35-L96)
+- [flow_approvals.py:1-245](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L245)
 - [routes.py:858-915](file://products/agent-platform/src/agent_service/api/v2/routes.py#L858-L915)
 
 ### Security Configuration Reference
@@ -745,6 +840,10 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 
 **Tool Permission Controls:**
 - `AGENT_GATEWAY_TOOL_AUTO_ALLOW`: Comma-separated list of vetted tools that bypass interactive permission confirmation. Default includes safe read-only tools. Empty string approves nothing.
+
+**Flow-Based Approval Controls:**
+- `AGENT_BROWSER_FLOW_APPROVAL_TTL`: Time-to-live for flow-based approval authorities in seconds (default 900). Setting to 0 disables flow-unlock entirely, restoring per-action gating.
+- Flow authorities are automatically scoped to session ID and approved flow identity (skill_id + origin) to prevent cross-flow privilege escalation.
 
 **Identity and Authentication:**
 - Standard OIDC configuration variables for issuer URLs, signing keys, and token lifetimes.
@@ -783,3 +882,4 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - [config.py](file://products/audit-service/src/audit_service/core/config.py)
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env)
 - [routes.py:858-915](file://products/agent-platform/src/agent_service/api/v2/routes.py#L858-L915)
+- [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md:117-125](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md#L117-L125)

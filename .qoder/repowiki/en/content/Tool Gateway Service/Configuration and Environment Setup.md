@@ -15,6 +15,7 @@
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [app.py](file://products/tool-gateway/src/tool_gateway/app.py)
@@ -46,6 +47,7 @@
 - [spec.md](file://docs/specs/SPEC-043-incident-report-document-type/spec.md)
 - [spec.md](file://docs/specs/SPEC-049-browser-web-check-tools/spec.md)
 - [spec.md](file://docs/specs/SPEC-050-browser-tools-expansion-and-samples/spec.md)
+- [spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
 - [approval-and-hitl.md](file://docs/guides/approval-and-hitl.md)
 - [tool-configuration.md](file://docs/guides/tool-configuration.md)
 - [reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
@@ -59,12 +61,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new GATEWAY_BROWSER_UPLOAD_DIR configuration option for file upload path allowlisting
-- Enhanced browser connector section with expanded tool surface including web.upload_file, web.select, web.press_key, and web.evaluate tools
-- Updated security configuration documentation for write-tier operations requiring HITL approval
-- Added detailed guidance for enhanced session management supporting additional browser tools
-- Updated troubleshooting guide with new file upload and write-tier operation issues
-- Enhanced security considerations for file upload path validation and traversal prevention
+- Added comprehensive documentation for the new AGENT_BROWSER_FLOW_APPROVAL_TTL configuration knob (default 900 seconds) that bounds flow authority duration for browser HITL gates
+- Enhanced browser connector configuration documentation with flow-related settings including TTL-based approval expiration and flow identity scoping
+- Updated security model documentation to include flow-based approval enforcement with session-scoped authority and TTL expiration
+- Added detailed guidance for flow context management and approval store operations
+- Updated troubleshooting guide with flow approval TTL expiration scenarios and configuration validation errors
+- Enhanced security considerations for flow authority scoping and TTL-based expiration mechanisms
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -81,7 +83,7 @@
 ## Introduction
 This document explains how the Platform Gateway Service manages configuration and environment setup across layers: environment variables, configuration files, and runtime overrides. It details available options, defaults, validation rules, and deployment-specific settings for development, staging, and production. It also provides examples for Docker and Kubernetes (ConfigMaps/Secrets), and outlines security best practices for secrets management and consistent configuration across environments.
 
-**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations, risk-tier admission gates for mutating tools via GATEWAY_MUTATING_TOOLS_ENABLED, configurable HITL confirmation timeouts through AGENT_HITL_CONFIRM_TIMEOUT, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, the new mutating-dev kustomize profile that provides a committed, environment-scoped development posture for enabling mutating tools safely with bounded RBAC permissions while preserving configuration across LLM provider switches, the live model discovery feature controlled by AGENT_MODEL_DISCOVERY_ENABLED, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS, and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS that enables automatic model catalog updates from provider endpoints with fail-soft fallback mechanisms, the new execution signing system with AGENT_EXECUTION_SIGNING_KEY that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions via AGENT_AUDIT_SERVICE_URL, and durable execution record persistence using AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL settings, plus comprehensive incident service connectivity configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables that enable incident report document assembly and triage capabilities with Basic authentication flows, comprehensive browser tool configuration through seven new GATEWAY_BROWSER_* environment variables that enable web-check capabilities with Chromium headless sidecar, enhanced NetworkPolicy enforcement for browser sidecar connectivity, improved credential set enumeration prevention with generic error messages, and enhanced logging for screenshot unmask failures that logs exception classes only without sensitive data exposure. **New**: Added support for GATEWAY_BROWSER_UPLOAD_DIR configuration for secure file upload path allowlisting, expanded browser tool surface with nine additional tools (web.select, web.press_key, web.upload_file, web.evaluate as write tier; web.extract, web.wait_for, web.hover, web.scroll, web.switch_frame as read tier), enhanced session management for the expanded tool surface, and updated security configuration for write-tier operations requiring HITL approval.
+**Updated** Enhanced documentation now includes comprehensive workspace resource integration capabilities through new platform-gateway configuration settings that enable read-only proxies for tools catalog and skills inventory, durable OpenTelemetry secret provisioning that maintains authentication headers across all deployment operations, risk-tier admission gates for mutating tools via GATEWAY_MUTATING_TOOLS_ENABLED, configurable HITL confirmation timeouts through AGENT_HITL_CONFIRM_TIMEOUT, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, the new mutating-dev kustomize profile that provides a committed, environment-scoped development posture for enabling mutating tools safely with bounded RBAC permissions while preserving configuration across LLM provider switches, the live model discovery feature controlled by AGENT_MODEL_DISCOVERY_ENABLED, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS, and AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS that enables automatic model catalog updates from provider endpoints with fail-soft fallback mechanisms, the new execution signing system with AGENT_EXECUTION_SIGNING_KEY that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions via AGENT_AUDIT_SERVICE_URL, and durable execution record persistence using AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL settings, plus comprehensive incident service connectivity configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables that enable incident report document assembly and triage capabilities with Basic authentication flows, comprehensive browser tool configuration through seven new GATEWAY_BROWSER_* environment variables that enable web-check capabilities with Chromium headless sidecar, enhanced NetworkPolicy enforcement for browser sidecar connectivity, improved credential set enumeration prevention with generic error messages, and enhanced logging for screenshot unmask failures that logs exception classes only without sensitive data exposure. **New**: Added support for AGENT_BROWSER_FLOW_APPROVAL_TTL configuration (default 900 seconds) that bounds flow authority duration for browser HITL gates, providing time-bounded, flow-scoped session authority that expires after the configured TTL or when disabled (0), enhanced browser connector configuration documentation with flow-related settings including TTL-based approval expiration and flow identity scoping, updated security model documentation to include flow-based approval enforcement with session-scoped authority and TTL expiration mechanisms, and comprehensive flow context management supporting flow identity verification and approval store operations.
 
 ## Project Structure
 The Platform Gateway Service is implemented under products/platform-gateway with its core configuration logic in the core module. Deployment manifests and environment templates are maintained under shared/platform-ops/gitops/dev-k8s/base/platform-gateway. The service includes workspace resource integration features that proxy requests to tool-gateway and skills-hub services for read-only inventory access, plus enhanced OpenTelemetry configuration with durable secret management. The new mutating-dev profile provides a dedicated development posture for enabling mutating tools with appropriate RBAC controls. The agent platform component now includes live model discovery capabilities that automatically refresh model catalogs from provider endpoints, along with execution signing and audit trail capabilities for tamper-evident execution records. The tool-gateway component now includes browser connector capabilities with Chromium headless sidecar integration for web-check operations, enhanced with NetworkPolicy enforcement and improved security measures.
@@ -119,143 +121,120 @@ Y["Incident Report Assembly"]
 Z["AGENT_INCIDENT_*"]
 AA["Incident Service Proxy"]
 BB["PLATFORM_GATEWAY_INCIDENT_*"]
+CC["Flow Approval Store"]
+DD["AGENT_BROWSER_FLOW_APPROVAL_TTL"]
+EE["Flow Context Management"]
+FF["Session-Scoped Authority"]
+GG["TTL-Based Expiration"]
 end
 subgraph "Tool Gateway Risk Control"
-CC["tool-gateway config.py"]
-DD["registry.py"]
-EE["GATEWAY_MUTATING_TOOLS_ENABLED"]
-FF["Risk-Tier Admission Gate"]
-GG["Policy Enforcement"]
-HH["Browser Connector"]
-II["GATEWAY_BROWSER_*"]
-JJ["Chromium Sidecar"]
-KK["CDP Endpoint"]
-LL["Session Pool"]
-MM["Credential Sets"]
-NN["NetworkPolicy Enforcement"]
-OO["Enumeration Prevention"]
-PP["Screenshot Security"]
-QQ["File Upload Security"]
-RR["GATEWAY_BROWSER_UPLOAD_DIR"]
+HH["tool-gateway config.py"]
+II["registry.py"]
+JJ["GATEWAY_MUTATING_TOOLS_ENABLED"]
+KK["Risk-Tier Admission Gate"]
+LL["Policy Enforcement"]
+MM["Browser Connector"]
+NN["GATEWAY_BROWSER_*"]
+OO["Chromium Sidecar"]
+PP["CDP Endpoint"]
+QQ["Session Pool"]
+RR["Credential Sets"]
+SS["NetworkPolicy Enforcement"]
+TT["Enumeration Prevention"]
+UU["Screenshot Security"]
+VV["File Upload Security"]
+WW["GATEWAY_BROWSER_UPLOAD_DIR"]
 end
 subgraph "Workspace Resource Integration"
-SS["tool_gateway_url"]
-TT["skills_hub_url"]
-UU["skills_client_id"]
-VV["skills_client_secret"]
-WW["Delegated Token Flow"]
-XX["Basic Auth Flow"]
-YY["Incident Service"]
-ZZ["PLATFORM_GATEWAY_INCIDENT_*"]
+XX["tool_gateway_url"]
+YY["skills_hub_url"]
+ZZ["skills_client_id"]
+AAA["skills_client_secret"]
+BBB["Delegated Token Flow"]
+CCC["Basic Auth Flow"]
+DDD["Incident Service"]
+EEE["PLATFORM_GATEWAY_INCIDENT_*"]
 end
 subgraph "Enhanced OTel Secret Management"
-AAA["sync-otel-secrets.sh"]
-BBB["OTEL_EXPORTER_OTLP_HEADERS"]
-CCC["Cluster Secret Merge"]
-DDD["Local File Preservation"]
-EEE["Sibling Script Hooks"]
+FFF["sync-otel-secrets.sh"]
+GGG["OTEL_EXPORTER_OTLP_HEADERS"]
+HHH["Cluster Secret Merge"]
+III["Local File Preservation"]
+JJJ["Sibling Script Hooks"]
 end
 subgraph "Mutating Dev Profile"
-FFF["dev-k8s/kustomization.yaml"]
-GGG["runtime-profiles/mutating-dev/"]
-HHH["mutating.env"]
-III["tool-gateway-pod-delete.yaml"]
-JJJ["RBAC Role/RoleBinding"]
-KKK["ConfigMap Merge"]
+KKK["dev-k8s/kustomization.yaml"]
+LLL["runtime-profiles/mutating-dev/"]
+MMM["mutating.env"]
+NNN["tool-gateway-pod-delete.yaml"]
+OOO["RBAC Role/RoleBinding"]
+PPP["ConfigMap Merge"]
 end
 subgraph "Browser Development Profile"
-LLL["runtime-profiles/browser-dev/"]
-MMM["browser.env"]
-NNN["tool-gateway-browser-sidecar.yaml"]
-OOO["chromedp/headless-shell"]
-PPP["CDP ws://localhost:9222"]
-QQQ["Credential Sets Secret"]
-RRR["Allow Origins"]
-SSS["NetworkPolicy"]
+QQQ["runtime-profiles/browser-dev/"]
+RRR["browser.env"]
+SSS["tool-gateway-browser-sidecar.yaml"]
+TTT["chromedp/headless-shell"]
+UUU["CDP ws://localhost:9222"]
+VVV["Credential Sets Secret"]
+WWW["Allow Origins"]
+XXX["NetworkPolicy"]
+YYY["Flow Approval TTL"]
+ZZZ["AGENT_BROWSER_FLOW_APPROVAL_TTL"]
 end
 subgraph "Execution Signing & Audit"
-TTT["sync-execution-signing-secret.sh"]
-UUU["execution-signing-secret"]
-VVV["HMAC-SHA256 Signing"]
-WWW["Durable Audit Trail"]
-XXX["Fire-and-Forget Emission"]
-YYY["Postgres Persistence"]
-ZZZ["Retention Scanning"]
+AAA["sync-execution-signing-secret.sh"]
+BBB["execution-signing-secret"]
+CCC["HMAC-SHA256 Signing"]
+DDD["Durable Audit Trail"]
+EEE["Fire-and-Forget Emission"]
+FFF["Postgres Persistence"]
+GGG["Retention Scanning"]
 end
 subgraph "OIDC Configuration"
-AAAA["Identity Broker"]
-BBBB["OIDC_REDIRECT_URI"]
-CCCC["OIDC_EXTRA_REDIRECT_URIS"]
-DDDD["Keycloak Client"]
-EEEE["Canonical Callback"]
-FFFF["Reachability Only"]
+HHH["Identity Broker"]
+III["OIDC_REDIRECT_URI"]
+JJJ["OIDC_EXTRA_REDIRECT_URIS"]
+KKK["Keycloak Client"]
+LLL["Canonical Callback"]
+MMM["Reachability Only"]
 end
-A --> AAA
-B --> FFF
-C --> AAA
+A --> FFF
+B --> KKK
+C --> FFF
 D --> F
 E --> G
-F --> SS
-G --> TT
-H --> YY
-AAA --> FFF
-GGG --> HHH
-HHH --> III
-III --> JJJ
-JJJ --> KKK
-KKK --> TTT
-TTT --> UUU
-UUU --> VVV
-VVV --> WWW
-WWW --> XXX
-XXX --> YYY
-YYY --> ZZZ
-II --> HH
-HH --> JJ
-JJ --> KK
-KK --> LL
-LL --> MM
-MM --> GG
-NN --> QQ
-OO --> PP
-QQ --> RR
-RR --> SS
-SS --> TT
-UU --> VV
-WW --> ZZ
+H --> DDD
+FFF --> PPP
+KKK --> LLL
+LLL --> MMM
+MMM --> NNN
+NNN --> OOO
+OOO --> PPP
+PPP --> AAA
 AAA --> BBB
 BBB --> CCC
 CCC --> DDD
 DDD --> EEE
+EEE --> FFF
 FFF --> GGG
-GGG --> HHH
-HHH --> III
-III --> JJJ
-JJJ --> KKK
-KKK --> TTT
-TTT --> UUU
-UUU --> VVV
-VVV --> WWW
-WWW --> XXX
-XXX --> YYY
-YYY --> ZZZ
-II --> HH
-HH --> JJ
-JJ --> KK
-KK --> LL
-LL --> MM
-MM --> GG
-NN --> QQ
+II --> MM
+MM --> OO
 OO --> PP
+PP --> QQ
 QQ --> RR
-RR --> SS
-SS --> TT
-UU --> VV
-WW --> ZZ
-AAA --> BBB
-BBB --> CCC
-CCC --> DDD
-DDD --> EEE
+RR --> LL
+SS --> VV
+TT --> UU
+UU --> WW
+WW --> XX
+XX --> YY
+ZZ --> AA
+BB --> CC
+CC --> DD
+DD --> EE
+EE --> FF
+FF --> GG
 ```
 
 **Diagram sources**
@@ -272,6 +251,7 @@ DDD --> EEE
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
@@ -312,6 +292,7 @@ DDD --> EEE
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
@@ -357,6 +338,7 @@ DDD --> EEE
 - **New**: File upload path allowlisting through GATEWAY_BROWSER_UPLOAD_DIR for secure file upload operations.
 - **New**: Expanded browser tool surface with nine additional tools (web.select, web.press_key, web.upload_file, web.evaluate as write tier; web.extract, web.wait_for, web.hover, web.scroll, web.switch_frame as read tier).
 - **New**: Enhanced session management supporting the expanded tool surface with improved flow binding and deviation guards.
+- **New**: Flow-based approval enforcement with AGENT_BROWSER_FLOW_APPROVAL_TTL configuration (default 900 seconds) that bounds flow authority duration, providing time-bounded, flow-scoped session authority that expires after the configured TTL or when disabled (0).
 
 Key responsibilities:
 - Provide a single source of truth for configuration via typed models.
@@ -380,9 +362,10 @@ Key responsibilities:
 - **New**: Prevent credential set enumeration attacks by returning generic error messages instead of revealing available set names.
 - **New**: Log screenshot unmask failures with exception class information only, never exposing sensitive data or stack traces.
 - **New**: Implement secure file upload path validation preventing directory traversal attacks through GATEWAY_BROWSER_UPLOAD_DIR configuration.
-- **New**: Support expanded browser tool surface with appropriate tier classification and HITL approval requirements for write-tier operations.
+- **New**: Support expanded browser tool surface with appropriate tier classification and HITL approval requirements.
+- **New**: Implement flow-based approval enforcement with AGENT_BROWSER_FLOW_APPROVAL_TTL configuration that provides time-bounded, flow-scoped session authority for browser HITL gates, with TTL-based expiration and flow identity verification.
 
-**Updated** Enhanced core components to include comprehensive workspace resource integration capabilities with read-only proxies for tools catalog and skills inventory, supporting both delegated token flow for tools and Basic authentication for skills, risk-tier admission gates for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus durable OpenTelemetry secret provisioning that persists authentication headers across deployment operations, the new mutating-dev kustomize profile that provides a safe, committed development posture for enabling mutating tools with appropriate RBAC controls, the live model discovery service that automatically refreshes model catalogs from provider endpoints with robust fallback mechanisms, the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions, and durable execution record persistence with retention scanning, comprehensive browser connector capabilities with Chromium headless sidecar integration for web-check operations, comprehensive incident service connectivity configuration that enables incident report document assembly and triage capabilities through Basic authentication flows, enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs, NetworkPolicy enforcement for secure browser sidecar connectivity, enhanced credential set enumeration prevention with generic error messages, and improved screenshot unmask failure logging that logs exception classes only without exposing sensitive data. **New**: Added support for GATEWAY_BROWSER_UPLOAD_DIR configuration for secure file upload path allowlisting, expanded browser tool surface with nine additional tools requiring appropriate tier classification and HITL approval, enhanced session management for the expanded tool surface, and comprehensive security measures for write-tier operations.
+**Updated** Enhanced core components to include comprehensive workspace resource integration capabilities with read-only proxies for tools catalog and skills inventory, supporting both delegated token flow for tools and Basic authentication for skills, risk-tier admission gates for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus durable OpenTelemetry secret provisioning that persists authentication headers across deployment operations, the new mutating-dev kustomize profile that provides a safe, committed development posture for enabling mutating tools with appropriate RBAC controls, the live model discovery service that automatically refreshes model catalogs from provider endpoints with robust fallback mechanisms, the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions, and durable execution record persistence with retention scanning, comprehensive browser connector capabilities with Chromium headless sidecar integration for web-check operations, comprehensive incident service connectivity configuration that enables incident report document assembly and triage capabilities through Basic authentication flows, enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs, NetworkPolicy enforcement for secure browser sidecar connectivity, enhanced credential set enumeration prevention with generic error messages, and improved screenshot unmask failure logging that logs exception classes only without exposing sensitive data. **New**: Added support for AGENT_BROWSER_FLOW_APPROVAL_TTL configuration (default 900 seconds) that bounds flow authority duration for browser HITL gates, providing time-bounded, flow-scoped session authority with TTL-based expiration and flow identity verification, enhanced browser connector configuration documentation with flow-related settings including TTL-based approval expiration and flow identity scoping, updated security model documentation to include flow-based approval enforcement with session-scoped authority and TTL expiration mechanisms, and comprehensive flow context management supporting flow identity verification and approval store operations.
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -398,6 +381,7 @@ Key responsibilities:
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
@@ -420,7 +404,7 @@ Key responsibilities:
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
 
 ## Architecture Overview
-The configuration system follows a layered approach with enhanced workspace resource integration, risk-tier admission gates, durable secret management, live model discovery, execution signing, incident service connectivity, browser connector capabilities, NetworkPolicy enforcement, enhanced credential security, clarified OIDC redirect URI behavior, and secure file upload path validation:
+The configuration system follows a layered approach with enhanced workspace resource integration, risk-tier admission gates, durable secret management, live model discovery, execution signing, incident service connectivity, browser connector capabilities, NetworkPolicy enforcement, enhanced credential security, clarified OIDC redirect URI behavior, secure file upload path validation, and flow-based approval enforcement:
 - Defaults: defined in code or default YAML policies.
 - Config files: loaded from container filesystem or mounted volumes.
 - Environment variables: injected at runtime via platform orchestration (e.g., Kubernetes).
@@ -444,6 +428,7 @@ The configuration system follows a layered approach with enhanced workspace reso
 - **New**: Enhanced OIDC configuration: canonical callback URIs vs reachability-only extra URIs with clear behavioral distinctions.
 - **New**: Secure file upload path validation: prevents directory traversal attacks through GATEWAY_BROWSER_UPLOAD_DIR configuration.
 - **New**: Expanded browser tool surface: nine additional tools with appropriate tier classification and HITL approval requirements.
+- **New**: Flow-based approval enforcement: time-bounded, flow-scoped session authority with TTL-based expiration through AGENT_BROWSER_FLOW_APPROVAL_TTL configuration.
 
 ```mermaid
 sequenceDiagram
@@ -467,6 +452,7 @@ participant Audit as "Audit Service"
 participant ExecStore as "Execution Record Store"
 participant NetPol as "NetworkPolicy"
 participant FileUpload as "File Upload Handler"
+participant FlowApprovals as "Flow Approval Store"
 Note over Portal,Agent : Agent Auto-Allow List & HITL Timeout
 Note over Agent,ModelDisc : Live Model Discovery
 Note over Agent,ExecSign : Execution Signing
@@ -478,6 +464,7 @@ Note over Browser,Sidecar : CDP Connection
 Note over Identity,Keycloak : OIDC Redirect URI Behavior
 Note over Browser,NetPol : NetworkPolicy Enforcement
 Note over Browser,FileUpload : File Upload Path Validation
+Note over Agent,FlowApprovals : Flow-Based Approval Enforcement
 Portal->>Agent : Tool Call Request
 Agent->>Agent : Check Auto-Allow List
 Agent->>Agent : Apply HITL Timeout
@@ -497,6 +484,9 @@ Sidecar-->>Browser : Ready/Not Ready
 Browser->>FileUpload : Validate Upload Path
 FileUpload->>FileUpload : Check GATEWAY_BROWSER_UPLOAD_DIR
 FileUpload-->>Browser : Path Valid/Invalid
+Browser->>FlowApprovals : Check Flow Approval
+FlowApprovals->>FlowApprovals : Check TTL Expiration
+FlowApprovals-->>Browser : Approval Valid/Expired
 Browser-->>ToolGW : Tool Result
 ToolGW-->>Gateway : Response
 Agent->>ExecSign : Sign Execution Request (if mutating)
@@ -547,6 +537,7 @@ Identity-->>Portal : Platform JWT
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
@@ -565,6 +556,7 @@ Identity-->>Portal : Platform JWT
 - [spec.md](file://docs/specs/SPEC-043-incident-report-document-type/spec.md)
 - [spec.md](file://docs/specs/SPEC-049-browser-web-check-tools/spec.md)
 - [spec.md](file://docs/specs/SPEC-050-browser-tools-expansion-and-samples/spec.md)
+- [spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
 
 ## Detailed Component Analysis
 
@@ -575,7 +567,7 @@ Identity-->>Portal : Platform JWT
 - Error handling: Aggregates validation errors and surfaces actionable messages.
 - Service discovery: Uses DNS-based resolution for inter-service communication.
 
-**Updated** Enhanced to support workspace resource integration with new configuration fields for tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret, enabling read-only proxies for tools catalog and skills inventory, plus risk-tier admission gate configuration for mutating tools, integration with the mutating-dev profile, live model discovery configuration through AGENT_MODEL_DISCOVERY_* environment variables, execution signing configuration through AGENT_EXECUTION_SIGNING_KEY and audit service configuration through AGENT_AUDIT_SERVICE_URL, comprehensive browser connector configuration through seven GATEWAY_BROWSER_* environment variables for Chromium headless sidecar integration, incident service connectivity configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables for incident report document assembly and triage capabilities, NetworkPolicy enforcement configuration for secure browser sidecar connectivity, enhanced credential set enumeration prevention with generic error messages, and enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs. **New**: Added GATEWAY_BROWSER_UPLOAD_DIR configuration for secure file upload path allowlisting and expanded browser tool surface configuration supporting nine additional tools with appropriate tier classification.
+**Updated** Enhanced to support workspace resource integration with new configuration fields for tool_gateway_url, skills_hub_url, skills_client_id, and skills_client_secret, enabling read-only proxies for tools catalog and skills inventory, plus risk-tier admission gate configuration for mutating tools, integration with the mutating-dev profile, live model discovery configuration through AGENT_MODEL_DISCOVERY_* environment variables, execution signing configuration through AGENT_EXECUTION_SIGNING_KEY and audit service configuration through AGENT_AUDIT_SERVICE_URL, comprehensive browser connector configuration through seven GATEWAY_BROWSER_* environment variables for Chromium headless sidecar integration, incident service connectivity configuration through AGENT_INCIDENT_* and PLATFORM_GATEWAY_INCIDENT_* environment variables for incident report document assembly and triage capabilities, NetworkPolicy enforcement configuration for secure browser sidecar connectivity, enhanced credential set enumeration prevention with generic error messages, and enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs. **New**: Added AGENT_BROWSER_FLOW_APPROVAL_TTL configuration (default 900 seconds) that bounds flow authority duration for browser HITL gates, providing time-bounded, flow-scoped session authority with TTL-based expiration and flow identity verification, enhanced browser connector configuration documentation with flow-related settings including TTL-based approval expiration and flow identity scoping, updated security model documentation to include flow-based approval enforcement with session-scoped authority and TTL expiration mechanisms, and comprehensive flow context management supporting flow identity verification and approval store operations.
 
 ```mermaid
 flowchart TD
@@ -609,7 +601,7 @@ Expose --> End
 - **GATEWAY_BROWSER_SCREENSHOT_MAX_BYTES**: Maximum screenshot size in bytes (default: 65536)
 - **GATEWAY_BROWSER_UPLOAD_DIR**: Directory for secure file uploads with path validation (default: /tmp/browser-uploads)
 
-Security features include origin allowlisting, flow binding with skill declarations, credential masking in screenshots, bounded session lifecycle management, NetworkPolicy enforcement for secure communication, enhanced credential set enumeration prevention, improved screenshot unmask failure logging, and secure file upload path validation preventing directory traversal attacks. The connector implements a deviation guard that prevents interactions outside approved flows and enforces read/write tier separation. **New**: Enhanced session management supporting the expanded tool surface with nine additional tools (web.select, web.press_key, web.upload_file, web.evaluate as write tier; web.extract, web.wait_for, web.hover, web.scroll, web.switch_frame as read tier) with appropriate tier classification and HITL approval requirements.
+Security features include origin allowlisting, flow binding with skill declarations, credential masking in screenshots, bounded session lifecycle management, NetworkPolicy enforcement for secure communication, enhanced credential set enumeration prevention, improved screenshot unmask failure logging, and secure file upload path validation preventing directory traversal attacks. The connector implements a deviation guard that prevents interactions outside approved flows and enforces read/write tier separation. **New**: Enhanced session management supporting the expanded tool surface with nine additional tools (web.select, web.press_key, web.upload_file, web.evaluate as write tier; web.extract, web.wait_for, web.hover, web.scroll, web.switch_frame as read tier) with appropriate tier classification and HITL approval requirements, plus flow-based approval enforcement with AGENT_BROWSER_FLOW_APPROVAL_TTL configuration that provides time-bounded, flow-scoped session authority with TTL-based expiration and flow identity verification.
 
 ```mermaid
 flowchart TD
@@ -624,7 +616,8 @@ Sessions --> AllowOrigins["Configure Origin Allowlist"]
 AllowOrigins --> CredentialSets["Load Credential Sets"]
 CredentialSets --> Tools["Register 15 Web Tools"]
 Tools --> UploadDir["Configure Upload Directory"]
-UploadDir --> Ready["Browser Connector Ready"]
+UploadDir --> FlowApproval["Configure Flow Approval TTL"]
+FlowApproval --> Ready["Browser Connector Ready"]
 ```
 
 **Diagram sources**
@@ -639,6 +632,42 @@ UploadDir --> Ready["Browser Connector Ready"]
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 - [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
 - [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
+
+### Flow-Based Approval Enforcement
+- Purpose: Provide time-bounded, flow-scoped session authority for browser HITL gates through AGENT_BROWSER_FLOW_APPROVAL_TTL configuration.
+- **AGENT_BROWSER_FLOW_APPROVAL_TTL**: Seconds an operator's approval of a `write`-class browser flow unlocks subsequent `web.*` writes in that same flow (default: 900 seconds)
+- **Flow Identity Scoping**: Authority is scoped to the chat session AND the approved flow's identity (`skill_id` + `origin`)
+- **TTL-Based Expiration**: Expired approvals no longer unlock - the next write parks again
+- **Disable Mode**: Setting TTL to 0 disables flow-unlock entirely, restoring pre-fix posture where every browser write parks its own card
+- **Validation**: Must be >= 0 seconds, with negative values rejected during startup
+
+Security features include flow identity verification, TTL-based expiration monitoring, session-scoped authority management, and safe failure modes where expired approvals cause re-parking rather than unauthorized execution. The implementation uses process-wide stores for flow contexts and approvals, with atomic operations for authority recording and lookup.
+
+```mermaid
+flowchart TD
+Approval["Operator Approves Flow"] --> RecordApproval["Record Flow Approval"]
+RecordApproval --> SetTTL["Set TTL Expiration"]
+SetTTL --> CheckApproval{"Check Flow Approval"}
+CheckApproval --> Valid{"Approval Valid?"}
+Valid --> |no| ParkWrite["Park Write for Approval"]
+Valid --> |yes| UnlockFlow["Unlock Flow Writes"]
+UnlockFlow --> ExecuteWrite["Execute Write Operation"]
+ExecuteWrite --> CheckTTL{"TTL Expired?"}
+CheckTTL --> |yes| RevokeApproval["Revoke Flow Authority"]
+CheckTTL --> |no| ContinueFlow["Continue Flow Execution"]
+RevokeApproval --> ParkWrite
+ContinueFlow --> Complete["Operation Complete"]
+ParkWrite --> AwaitApproval["Await Operator Approval"]
+AwaitApproval --> Complete
+```
+
+**Diagram sources**
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+
+**Section sources**
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 
 ### Enhanced Credential Set Enumeration Prevention
 - Purpose: Prevent information disclosure attacks by avoiding enumeration of available credential set names.
@@ -1272,8 +1301,9 @@ SkillsHubClient --> PlatformGatewaySettings
 - **New**: Enhanced OIDC configuration with clear separation between canonical callback URIs and reachability-only extra URIs.
 - **New**: NetworkPolicy enforcement configuration for browser sidecar connectivity.
 - **New**: File upload path allowlisting configuration through GATEWAY_BROWSER_UPLOAD_DIR for secure file upload operations.
+- **New**: Flow-based approval enforcement configuration through AGENT_BROWSER_FLOW_APPROVAL_TTL for time-bounded, flow-scoped session authority.
 
-**Updated** Enhanced deployment configuration with workspace resource integration, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list settings, plus durable OpenTelemetry secret provisioning that maintains authentication headers across deployment operations, the new mutating-dev profile that provides a committed development posture for enabling mutating tools safely, live model discovery configuration for automatic catalog updates, execution signing secret provisioning for tamper-evident execution records, audit service configuration for durable audit trails, comprehensive browser connector configuration for web-check operations with Chromium headless sidecar, incident service configuration for incident report document assembly and triage capabilities, enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs, NetworkPolicy enforcement for secure browser sidecar connectivity, and file upload path allowlisting configuration for secure file upload operations.
+**Updated** Enhanced deployment configuration with workspace resource integration, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration for mutating tools, configurable HITL confirmation timeouts, enhanced agent auto-allow list settings, plus durable OpenTelemetry secret provisioning that maintains authentication headers across deployment operations, the new mutating-dev profile that provides a committed development posture for enabling mutating tools safely, live model discovery configuration for automatic catalog updates, execution signing secret provisioning for tamper-evident execution records, audit service configuration for durable audit trails, comprehensive browser connector configuration for web-check operations with Chromium headless sidecar, incident service configuration for incident report document assembly and triage capabilities, enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs, NetworkPolicy enforcement for secure browser sidecar connectivity, file upload path allowlisting configuration for secure file upload operations, and flow-based approval enforcement configuration for time-bounded, flow-scoped session authority.
 
 ```mermaid
 graph TB
@@ -1315,10 +1345,13 @@ Agent --> ModelDisc["Model Discovery Service"]
 Agent --> ExecSign["Execution Signing Service"]
 Agent --> Audit["Audit Service"]
 Agent --> IncidentAssembly["Incident Report Assembly"]
+Agent --> FlowApproval["Flow Approval Store"]
 ModelDisc --> ProviderEndpoints["Provider /models Endpoints"]
 ExecSign --> ExecStore["Execution Record Store"]
 Audit --> AuditBackend["Audit Service Backend"]
 IncidentAssembly --> IncidentSvc
+FlowApproval --> TTL["TTL-Based Expiration"]
+TTL --> FlowAuthority["Flow Authority Management"]
 MutDev["Mutating Dev Profile"] --> ConfigMerge["ConfigMap Merge"]
 ConfigMerge --> ToolGWEnv
 ExecSigning --> ExecSign
@@ -1327,7 +1360,7 @@ BrowserSecrets --> BrowserConn
 OIDCConfig["OIDC Configuration"] --> CanonicalURI["OIDC_REDIRECT_URI"]
 OIDCConfig --> ExtraURIs["OIDC_EXTRA_REDIRECT_URIS"]
 CanonicalURI --> IdentityBroker["Identity Broker"]
-ExtraURIs --> Keycloak["Keycloak Registration"]
+ExtraURIs --> Keycloak["Keycloak"]
 IdentityBroker --> CanonicalCallback["Canonical Callback"]
 Keycloak --> ReachabilityOnly["Reachability Only"]
 ```
@@ -1359,7 +1392,7 @@ Keycloak --> ReachabilityOnly["Reachability Only"]
 ## Dependency Analysis
 Configuration components depend on environment variables and files, while the runtime settings handle DNS-based service discovery. The Docker image encapsulates runtime dependencies, and Kubernetes manifests inject configuration at deployment time. Workspace resource integration adds dependencies on tool-gateway and skills-hub services with appropriate authentication mechanisms.
 
-**Updated** Added dependencies for workspace resource integration including tool-gateway delegation flow and skills-hub Basic authentication, risk-tier admission gate enforcement, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus enhanced OpenTelemetry secret provisioning dependencies that ensure authentication headers persist across deployment operations, the new mutating-dev profile dependencies that provide committed development posture for enabling mutating tools safely, live model discovery dependencies that connect to provider endpoints with robust fallback mechanisms, execution signing dependencies that require execution-signing-secret provisioning, audit service dependencies for durable audit trail emission, execution record store dependencies for Postgres-backed persistence with retention scanning, comprehensive browser connector dependencies that require Chromium headless sidecar integration with CDP connectivity, incident service dependencies that require incident-query-client configuration and credential provisioning through sync-incident-secrets.sh, OIDC configuration dependencies that distinguish between canonical callback URIs and reachability-only extra URIs, NetworkPolicy enforcement dependencies for secure browser sidecar connectivity, and file upload path validation dependencies that require GATEWAY_BROWSER_UPLOAD_DIR configuration for secure file upload operations.
+**Updated** Added dependencies for workspace resource integration including tool-gateway delegation flow and skills-hub Basic authentication, risk-tier admission gate enforcement, configurable HITL confirmation timeouts, enhanced agent auto-allow list functionality with read-only enforcement, plus enhanced OpenTelemetry secret provisioning dependencies that ensure authentication headers persist across deployment operations, the new mutating-dev profile dependencies that provide committed development posture for enabling mutating tools safely, live model discovery dependencies that connect to provider endpoints with robust fallback mechanisms, execution signing dependencies that require execution-signing-secret provisioning, audit service dependencies for durable audit trail emission, execution record store dependencies for Postgres-backed persistence with retention scanning, comprehensive browser connector dependencies that require Chromium headless sidecar integration with CDP connectivity, incident service dependencies that require incident-query-client configuration and credential provisioning through sync-incident-secrets.sh, OIDC configuration dependencies that distinguish between canonical callback URIs and reachability-only extra URIs, NetworkPolicy enforcement dependencies for secure browser sidecar connectivity, and file upload path validation dependencies that require GATEWAY_BROWSER_UPLOAD_DIR configuration for secure file upload operations. **New**: Added flow-based approval enforcement dependencies that require AGENT_BROWSER_FLOW_APPROVAL_TTL configuration for time-bounded, flow-scoped session authority with TTL-based expiration and flow identity verification.
 
 ```mermaid
 graph TB
@@ -1392,12 +1425,15 @@ Agent --> ModelDisc["Model Discovery"]
 Agent --> ExecSign["Execution Signing"]
 Agent --> Audit["Audit Emitter"]
 Agent --> IncidentAssembly["Incident Report Assembly"]
+Agent --> FlowApproval["Flow Approval Store"]
 ModelDisc --> Providers["Provider Endpoints"]
 ExecSign --> ExecStore["Execution Record Store"]
 ExecSign --> Audit
 Audit --> AuditBackend["Audit Service Backend"]
 IncidentAssembly --> IncidentBackend["Incident Service Backend"]
 ExecStore --> Postgres["Postgres Database"]
+FlowApproval --> TTL["TTL-Based Expiration"]
+TTL --> FlowAuthority["Flow Authority Management"]
 ToolGW["tool-gateway config.py"] --> RiskGate["Risk-Tier Gate"]
 ToolGW --> BrowserConn["Browser Connector"]
 BrowserConn --> Sidecar["Chromium Sidecar"]
@@ -1438,6 +1474,7 @@ Keycloak --> CanonicalCallback["Canonical Callback"]
 - [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
@@ -1469,6 +1506,7 @@ Keycloak --> CanonicalCallback["Canonical Callback"]
 - [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
@@ -1524,6 +1562,7 @@ Keycloak --> CanonicalCallback["Canonical Callback"]
 - **New**: Screenshot unmask failure logging uses lightweight exception class extraction.
 - **New**: File upload path validation uses efficient realpath operations to prevent directory traversal attacks.
 - **New**: Expanded browser tool surface maintains performance through efficient session management and flow binding.
+- **New**: Flow-based approval enforcement uses efficient TTL checking and flow identity verification with minimal overhead.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -1601,8 +1640,13 @@ Common issues and resolutions:
 - **New**: Write-tier browser tools not available: Check GATEWAY_MUTATING_TOOLS_ENABLED setting; verify tools:mutate policy grants and HITL confirmation timeout.
 - **New**: Browser tool tier classification issues: Verify tool definitions have correct risk_level assignments; check registry registration for expanded tool surface.
 - **New**: Enhanced session management issues: Check browser session pool configuration; verify flow binding and deviation guard enforcement.
+- **New**: Flow approval TTL expiration: Check AGENT_BROWSER_FLOW_APPROVAL_TTL configuration; verify TTL value is appropriate for your workflow duration.
+- **New**: Flow approval not unlocking writes: Verify AGENT_BROWSER_FLOW_APPROVAL_TTL is set to positive value; check flow identity matching (skill_id + origin).
+- **New**: Flow approval disabled: If AGENT_BROWSER_FLOW_APPROVAL_TTL=0, every browser write parks its own card; adjust TTL to enable flow-unlock.
+- **New**: Flow identity mismatch: Check that flow context matches approved flow identity; rebind may be required if skill_id or origin changed.
+- **New**: Flow approval validation errors: Ensure AGENT_BROWSER_FLOW_APPROVAL_TTL >= 0; negative values are rejected during startup.
 
-**Updated** Added comprehensive troubleshooting guidance for workspace resource integration including proxy configuration, authentication issues, and downstream service connectivity problems, risk-tier admission gate configuration issues, HITL confirmation timeout problems, enhanced agent auto-allow list misconfiguration detection, plus detailed guidance for OpenTelemetry secret provisioning and authentication issues, new troubleshooting steps for the mutating-dev profile integration including profile activation, RBAC verification, and triple-gate enforcement issues, comprehensive guidance for live model discovery configuration, provider connectivity, and fallback behavior troubleshooting, new troubleshooting steps for execution signing including secret provisioning, signing failures, argument digest mismatches, audit service connectivity, and execution record persistence issues, comprehensive troubleshooting guidance for incident service connectivity including URL configuration, credential provisioning, authentication failures, and service availability issues, comprehensive browser connector troubleshooting including sidecar connectivity, session management, origin allowlisting, flow binding, credential set configuration, and screenshot sizing, enhanced OIDC troubleshooting guidance that clarifies the distinction between canonical callback URIs and reachability-only extra URIs, helping users understand why login from extra origins redirects back to canonical hostname, NetworkPolicy troubleshooting for browser sidecar connectivity issues, credential set enumeration prevention troubleshooting, screenshot unmask failure logging diagnostics, and comprehensive file upload troubleshooting including path validation, directory traversal prevention, and upload directory configuration.
+**Updated** Added comprehensive troubleshooting guidance for workspace resource integration including proxy configuration, authentication issues, and downstream service connectivity problems, risk-tier admission gate configuration issues, HITL confirmation timeout problems, enhanced agent auto-allow list misconfiguration detection, plus detailed guidance for OpenTelemetry secret provisioning and authentication issues, new troubleshooting steps for the mutating-dev profile integration including profile activation, RBAC verification, and triple-gate enforcement issues, comprehensive guidance for live model discovery configuration, provider connectivity, and fallback behavior troubleshooting, new troubleshooting steps for execution signing including secret provisioning, signing failures, argument digest mismatches, audit service connectivity, and execution record persistence issues, comprehensive troubleshooting guidance for incident service connectivity including URL configuration, credential provisioning, authentication failures, and service availability issues, comprehensive browser connector troubleshooting including sidecar connectivity, session management, origin allowlisting, flow binding, credential set configuration, and screenshot sizing, enhanced OIDC troubleshooting guidance that clarifies the distinction between canonical callback URIs and reachability-only extra URIs, helping users understand why login from extra origins redirects back to canonical hostname, NetworkPolicy troubleshooting for browser sidecar connectivity issues, credential set enumeration prevention troubleshooting, screenshot unmask failure logging diagnostics, and comprehensive file upload troubleshooting including path validation, directory traversal prevention, and upload directory configuration. **New**: Added comprehensive troubleshooting guidance for flow-based approval enforcement including AGENT_BROWSER_FLOW_APPROVAL_TTL configuration, TTL expiration scenarios, flow identity verification issues, and approval store operations, helping users diagnose and resolve flow-unlock related problems.
 
 **Section sources**
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
@@ -1618,6 +1662,7 @@ Common issues and resolutions:
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [model_discovery.py](file://products/agent-platform/src/agent_service/services/model_discovery.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
@@ -1637,16 +1682,16 @@ Common issues and resolutions:
 ## Conclusion
 The Platform Gateway Service employs a robust, layered configuration system that integrates environment variables, configuration files, and runtime overrides with strict validation. By following the outlined best practices for Docker and Kubernetes deployments, teams can maintain secure, consistent configurations across environments while ensuring reliability and performance. The architectural shift to DNS-based service discovery eliminates service-link conflicts and provides more reliable inter-service communication patterns. The addition of workspace resource integration enables operators to gain self-service visibility into their workspace resources through read-only proxies for tools catalog and skills inventory, enhancing operational transparency and reducing dependency on agent-mediated resource discovery.
 
-**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive workspace resource integration capabilities that provide operators with direct visibility into their workspace resources, risk-tier admission gates that provide fine-grained control over mutating tool access, configurable HITL confirmation timeouts that balance operational efficiency with safety requirements, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, plus durable OpenTelemetry secret provisioning that ensures authentication headers persist across all deployment operations, maintaining consistent telemetry collection regardless of deployment sequence or environment regeneration, the new mutating-dev kustomize profile that provides a committed, safe development posture for enabling mutating tools with appropriate RBAC controls and triple-gate security enforcement, the live model discovery service that automatically keeps model catalogs current through periodic provider endpoint polling with robust fail-soft fallback mechanisms, the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions for durable audit trails, and execution record persistence with retention scanning for compliance requirements, comprehensive browser connector capabilities with Chromium headless sidecar integration for web-check operations including session management, origin allowlisting, flow binding, and credential set support, comprehensive incident service connectivity configuration that enables incident report document assembly and triage capabilities through Basic authentication flows, enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs, NetworkPolicy enforcement for secure browser sidecar connectivity, enhanced credential set enumeration prevention with generic error messages, and improved screenshot unmask failure logging that prioritizes security by logging exception classes only without exposing sensitive data. **New**: Added comprehensive support for GATEWAY_BROWSER_UPLOAD_DIR configuration enabling secure file upload path allowlisting, expanded browser tool surface with nine additional tools (web.select, web.press_key, web.upload_file, web.evaluate as write tier; web.extract, web.wait_for, web.hover, web.scroll, web.switch_frame as read tier) with appropriate tier classification and HITL approval requirements, enhanced session management supporting the expanded tool surface with improved flow binding and deviation guards, and comprehensive security measures for write-tier operations requiring proper authorization and approval workflows.
+**Updated** Enhanced conclusion reflecting the architectural improvements in service discovery, environment variable handling, comprehensive workspace resource integration capabilities that provide operators with direct visibility into their workspace resources, risk-tier admission gates that provide fine-grained control over mutating tool access, configurable HITL confirmation timeouts that balance operational efficiency with safety requirements, enhanced agent auto-allow list functionality with read-only enforcement and misconfiguration logging, plus durable OpenTelemetry secret provisioning that ensures authentication headers persist across all deployment operations, maintaining consistent telemetry collection regardless of deployment sequence or environment regeneration, the new mutating-dev kustomize profile that provides a committed, safe development posture for enabling mutating tools with appropriate RBAC controls and triple-gate security enforcement, the live model discovery service that automatically keeps model catalogs current through periodic provider endpoint polling with robust fail-soft fallback mechanisms, the execution signing system that provides tamper-evident execution records through HMAC-SHA256 signing, integrated audit service emissions for durable audit trails, and execution record persistence with retention scanning for compliance requirements, comprehensive browser connector capabilities with Chromium headless sidecar integration for web-check operations including session management, origin allowlisting, flow binding, and credential set support, comprehensive incident service connectivity configuration that enables incident report document assembly and triage capabilities through Basic authentication flows, enhanced OIDC configuration that clearly distinguishes between canonical callback URIs and reachability-only extra URIs, NetworkPolicy enforcement for secure browser sidecar connectivity, enhanced credential set enumeration prevention with generic error messages, and improved screenshot unmask failure logging that prioritizes security by logging exception classes only without exposing sensitive data. **New**: Added comprehensive support for AGENT_BROWSER_FLOW_APPROVAL_TTL configuration (default 900 seconds) that bounds flow authority duration for browser HITL gates, providing time-bounded, flow-scoped session authority with TTL-based expiration and flow identity verification, enhanced browser connector configuration documentation with flow-related settings including TTL-based approval expiration and flow identity scoping, updated security model documentation to include flow-based approval enforcement with session-scoped authority and TTL expiration mechanisms, and comprehensive flow context management supporting flow identity verification and approval store operations.
 
 ## Appendices
 
 ### Environment-Specific Settings
-- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable workspace resource proxies with local tool-gateway and skills-hub instances, configure OTel with dev OpenObserve credentials, set GATEWAY_MUTATING_TOOLS_ENABLED=false for safety, configure AGENT_HITL_CONFIRM_TIMEOUT=600 for reasonable confirmation windows, enable enhanced agent auto-allow list with vetted read-only tools, **new**: Include the mutating-dev profile permanently for safe development access to mutating tools with bounded RBAC permissions, **new**: Enable live model discovery with shorter refresh intervals (e.g., 300 seconds) for rapid testing of new provider models, **new**: Provision execution signing secret for testing tamper-evident execution records, **new**: Configure audit service URL for durable audit trail testing, **new**: Configure incident service connectivity with AGENT_INCIDENT_SERVICE_URL and AGENT_INCIDENT_CLIENT_SECRET for incident report document assembly testing, **new**: Enable browser connector with browser-dev profile for web-check testing with Chromium headless sidecar, **new**: Configure NetworkPolicy for browser sidecar connectivity, **new**: Test credential set enumeration prevention with generic error messages, **new**: Monitor screenshot unmask failure logging for security compliance, **new**: Configure OIDC with both canonical callback URI and extra URIs for reachability testing across different browser origins, **new**: Configure GATEWAY_BROWSER_UPLOAD_DIR for secure file upload testing with appropriate path validation.
-- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure workspace resource proxies with staging backend services, provision OTel secrets with staging OpenObserve credentials, carefully evaluate GATEWAY_MUTATING_TOOLS_ENABLED for testing scenarios, tune AGENT_HITL_CONFIRM_TIMEOUT for staging workflows, monitor auto-allow list effectiveness, **new**: Consider including mutating-dev profile selectively for staging testing scenarios with appropriate RBAC scoping, **new**: Configure model discovery with moderate refresh intervals (e.g., 900 seconds) to balance freshness with stability, **new**: Enable execution signing with staging audit service for end-to-end testing of tamper-evident execution records, **new**: Configure incident service connectivity with staging credentials for incident report document assembly testing, **new**: Enable browser connector with restricted origin allowlists for staging web-check testing, **new**: Apply NetworkPolicy enforcement for staging browser sidecar connectivity, **new**: Test credential enumeration prevention and screenshot security logging, **new**: Configure OIDC with canonical callback URI and extra URIs for staging browser origin testing, **new**: Configure GATEWAY_BROWSER_UPLOAD_DIR with staging-appropriate upload directories and security policies.
-- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure workspace resource proxies with production backend services and proper authentication, ensure OTel secrets are provisioned with production OpenObserve credentials, keep GATEWAY_MUTATING_TOOLS_ENABLED=false unless absolutely necessary, set AGENT_HITL_CONFIRM_TIMEOUT appropriately for production SLAs, audit auto-allow list regularly for security compliance, **new**: Never include mutating-dev profile in production deployments; use separate controlled overlays if mutating tools are absolutely required, **new**: Configure model discovery with conservative refresh intervals (e.g., 1800 seconds) and longer timeouts to minimize provider load and ensure stability, **new**: Always provision execution signing secret for production tamper-evident execution records, **new**: Configure audit service integration for comprehensive audit trail compliance, **new**: Configure incident service connectivity with production credentials for incident report document assembly and triage operations, **new**: Enable browser connector only for specific production use cases with strict origin allowlists and session limits, **new**: Apply strict NetworkPolicy enforcement for browser sidecar connectivity, **new**: Monitor credential enumeration prevention and screenshot security logging for compliance, **new**: Configure OIDC with canonical callback URI as the sole authentication endpoint and extra URIs only for reachability testing, **new**: Configure GATEWAY_BROWSER_UPLOAD_DIR with production-grade security policies, path validation, and access controls.
+- Development: Enable verbose logging, relaxed validation, local secrets, optional redaction disablement, memory-based storage, local git sources without authentication, enable workspace resource proxies with local tool-gateway and skills-hub instances, configure OTel with dev OpenObserve credentials, set GATEWAY_MUTATING_TOOLS_ENABLED=false for safety, configure AGENT_HITL_CONFIRM_TIMEOUT=600 for reasonable confirmation windows, enable enhanced agent auto-allow list with vetted read-only tools, **new**: Include the mutating-dev profile permanently for safe development access to mutating tools with bounded RBAC permissions, **new**: Enable live model discovery with shorter refresh intervals (e.g., 300 seconds) for rapid testing of new provider models, **new**: Provision execution signing secret for testing tamper-evident execution records, **new**: Configure audit service URL for durable audit trail testing, **new**: Configure incident service connectivity with AGENT_INCIDENT_SERVICE_URL and AGENT_INCIDENT_CLIENT_SECRET for incident report document assembly testing, **new**: Enable browser connector with browser-dev profile for web-check testing with Chromium headless sidecar, **new**: Configure NetworkPolicy for browser sidecar connectivity, **new**: Test credential set enumeration prevention with generic error messages, **new**: Monitor screenshot unmask failure logging for security compliance, **new**: Configure OIDC with both canonical callback URI and extra URIs for reachability testing across different browser origins, **new**: Configure GATEWAY_BROWSER_UPLOAD_DIR for secure file upload testing with appropriate path validation, **new**: Configure AGENT_BROWSER_FLOW_APPROVAL_TTL=900 for flow-based approval testing with reasonable TTL duration.
+- Staging: Mirror production settings with test data and limited scope, enable full redaction, PostgreSQL-backed storage, private repository access with test tokens, configure workspace resource proxies with staging backend services, provision OTel secrets with staging OpenObserve credentials, carefully evaluate GATEWAY_MUTATING_TOOLS_ENABLED for testing scenarios, tune AGENT_HITL_CONFIRM_TIMEOUT for staging workflows, monitor auto-allow list effectiveness, **new**: Consider including mutating-dev profile selectively for staging testing scenarios with appropriate RBAC scoping, **new**: Configure model discovery with moderate refresh intervals (e.g., 900 seconds) to balance freshness with stability, **new**: Enable execution signing with staging audit service for end-to-end testing of tamper-evident execution records, **new**: Configure incident service connectivity with staging credentials for incident report document assembly testing, **new**: Enable browser connector with restricted origin allowlists for staging web-check testing, **new**: Apply NetworkPolicy enforcement for staging browser sidecar connectivity, **new**: Test credential enumeration prevention and screenshot security logging, **new**: Configure OIDC with canonical callback URI and extra URIs for staging browser origin testing, **new**: Configure GATEWAY_BROWSER_UPLOAD_DIR with staging-appropriate upload directories and security policies, **new**: Configure AGENT_BROWSER_FLOW_APPROVAL_TTL=900 for staging flow-based approval testing with production-like TTL duration.
+- Production: Strict validation, minimal logging, centralized secret management, mandatory workload identity, optimized sync intervals, secure private repository authentication, configure workspace resource proxies with production backend services and proper authentication, ensure OTel secrets are provisioned with production OpenObserve credentials, keep GATEWAY_MUTATING_TOOLS_ENABLED=false unless absolutely necessary, set AGENT_HITL_CONFIRM_TIMEOUT appropriately for production SLAs, audit auto-allow list regularly for security compliance, **new**: Never include mutating-dev profile in production deployments; use separate controlled overlays if mutating tools are absolutely required, **new**: Configure model discovery with conservative refresh intervals (e.g., 1800 seconds) and longer timeouts to minimize provider load and ensure stability, **new**: Always provision execution signing secret for production tamper-evident execution records, **new**: Configure audit service integration for comprehensive audit trail compliance, **new**: Configure incident service connectivity with production credentials for incident report document assembly and triage operations, **new**: Enable browser connector only for specific production use cases with strict origin allowlists and session limits, **new**: Apply strict NetworkPolicy enforcement for browser sidecar connectivity, **new**: Monitor credential enumeration prevention and screenshot security logging for compliance, **new**: Configure OIDC with canonical callback URI as the sole authentication endpoint and extra URIs only for reachability testing, **new**: Configure GATEWAY_BROWSER_UPLOAD_DIR with production-grade security policies, path validation, and access controls, **new**: Configure AGENT_BROWSER_FLOW_APPROVAL_TTL with production-appropriate TTL duration based on workflow requirements and security policies.
 
-**Updated** Added guidance for workspace resource proxy configuration across environments, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration recommendations, HITL confirmation timeout tuning guidelines, enhanced agent auto-allow list configuration, plus comprehensive OTel secret provisioning requirements for each environment, new guidance for the mutating-dev profile usage patterns across different deployment environments, detailed recommendations for live model discovery configuration including refresh intervals, timeout settings, and monitoring strategies across different deployment environments, comprehensive guidance for execution signing and audit service configuration across development, staging, and production environments, comprehensive guidance for incident service connectivity configuration including URL setup, credential provisioning, and authentication configuration across different deployment environments, comprehensive browser connector configuration guidance including sidecar deployment, origin allowlisting, session management, and credential set configuration across different deployment environments, NetworkPolicy enforcement configuration for secure browser sidecar connectivity across environments, credential enumeration prevention testing and monitoring, screenshot security logging validation, and enhanced OIDC configuration guidance that clarifies the role of canonical callback URIs versus reachability-only extra URIs across different deployment environments. **New**: Added comprehensive guidance for GATEWAY_BROWSER_UPLOAD_DIR configuration across environments including upload directory setup, path validation policies, security controls, and monitoring requirements for secure file upload operations.
+**Updated** Added guidance for workspace resource proxy configuration across environments, including tool gateway URL, skills hub URL, and skills client credentials for read-only workspace resource access, risk-tier admission gate configuration recommendations, HITL confirmation timeout tuning guidelines, enhanced agent auto-allow list configuration, plus comprehensive OTel secret provisioning requirements for each environment, new guidance for the mutating-dev profile usage patterns across different deployment environments, detailed recommendations for live model discovery configuration including refresh intervals, timeout settings, and monitoring strategies across different deployment environments, comprehensive guidance for execution signing and audit service configuration across development, staging, and production environments, comprehensive guidance for incident service connectivity configuration including URL setup, credential provisioning, and authentication configuration across different deployment environments, comprehensive browser connector configuration guidance including sidecar deployment, origin allowlisting, session management, and credential set configuration across different deployment environments, NetworkPolicy enforcement configuration for secure browser sidecar connectivity across environments, credential enumeration prevention testing and monitoring, screenshot security logging validation, and enhanced OIDC configuration guidance that clarifies the role of canonical callback URIs versus reachability-only extra URIs across different deployment environments. **New**: Added comprehensive guidance for AGENT_BROWSER_FLOW_APPROVAL_TTL configuration across environments including TTL duration selection, flow-based approval testing, and security policy alignment for production deployments.
 
 ### Security and Secrets Management
 - Store secrets in Kubernetes Secrets or external vaults; never hardcode.
@@ -1712,11 +1757,16 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - **New**: Implement comprehensive logging for file upload path validation failures and security violations.
 - **New**: Validate expanded browser tool surface security controls including write-tier HITL approval requirements.
 - **New**: Monitor enhanced session management for security implications and resource exhaustion prevention.
+- **New**: Secure AGENT_BROWSER_FLOW_APPROVAL_TTL configuration with appropriate TTL duration based on security requirements; shorter TTL reduces attack window but increases operator friction.
+- **New**: Monitor flow approval usage patterns and TTL expiration events for security monitoring.
+- **New**: Audit flow identity verification to ensure approvals are scoped to correct skill_id and origin combinations.
+- **New**: Implement alerts for flow approval TTL expiration and flow identity mismatches.
+- **New**: Regularly review flow approval policies and TTL settings to ensure they align with security requirements.
 
-**Updated** Enhanced security guidance with workspace resource integration security considerations, including credential management, authentication monitoring, and access pattern auditing, risk-tier admission gate security controls, HITL confirmation timeout security implications, enhanced agent auto-allow list security enforcement, plus comprehensive OpenTelemetry secret management security practices, new security considerations for the mutating-dev profile including profile integrity, RBAC scoping, and triple-gate enforcement monitoring, comprehensive security guidance for live model discovery including provider credential management, endpoint access monitoring, and fallback behavior auditing, comprehensive security guidance for execution signing including secret protection, key rotation, tamper-evident record verification, audit service credential management, and execution record retention compliance, comprehensive security guidance for incident service connectivity including credential management, authentication monitoring, access pattern auditing, and service availability monitoring, comprehensive security guidance for browser connector including origin allowlist security, credential set protection, session management, and screenshot sanitization, enhanced OIDC security guidance that emphasizes the security implications of distinguishing between canonical callback URIs and reachability-only extra URIs, NetworkPolicy security enforcement for browser sidecar connectivity, credential enumeration prevention security measures, screenshot security logging best practices, and comprehensive security guidance for file upload path validation including directory traversal prevention, upload directory security, and expanded browser tool surface security controls.
+**Updated** Enhanced security guidance with workspace resource integration security considerations, including credential management, authentication monitoring, and access pattern auditing, risk-tier admission gate security controls, HITL confirmation timeout security implications, enhanced agent auto-allow list security enforcement, plus comprehensive OpenTelemetry secret management security practices, new security considerations for the mutating-dev profile including profile integrity, RBAC scoping, and triple-gate enforcement monitoring, comprehensive security guidance for live model discovery including provider credential management, endpoint access monitoring, and fallback behavior auditing, comprehensive security guidance for execution signing including secret protection, key rotation, tamper-evident record verification, audit service credential management, and execution record retention compliance, comprehensive security guidance for incident service connectivity including credential management, authentication monitoring, access pattern auditing, and service availability monitoring, comprehensive security guidance for browser connector including origin allowlist security, credential set protection, session management, and screenshot sanitization, enhanced OIDC security guidance that emphasizes the security implications of distinguishing between canonical callback URIs and reachability-only extra URIs, NetworkPolicy security enforcement for browser sidecar connectivity, credential enumeration prevention security measures, screenshot security logging best practices, and comprehensive security guidance for file upload path validation including directory traversal prevention, upload directory security, and expanded browser tool surface security controls. **New**: Added comprehensive security guidance for flow-based approval enforcement including AGENT_BROWSER_FLOW_APPROVAL_TTL configuration security, TTL duration selection based on threat models, flow identity verification security, and approval store security measures.
 
 ### Complete Environment Variables Reference
-**Updated** Comprehensive reference including workspace resource integration variables for tools catalog and skills inventory access, risk-tier admission gate configuration, HITL confirmation timeout settings, enhanced agent auto-allow list configuration, plus enhanced OpenTelemetry configuration variables, new variables related to the mutating-dev profile integration, comprehensive live model discovery configuration variables, execution signing and audit service configuration variables, comprehensive incident service connectivity configuration variables for both agent-platform and platform-gateway incident service clients, comprehensive browser connector configuration variables for Chromium headless sidecar integration, NetworkPolicy enforcement configuration variables, enhanced credential set enumeration prevention settings, improved screenshot security logging configuration, and enhanced OIDC configuration variables that clearly distinguish between canonical callback URIs and reachability-only extra URIs. **New**: Added GATEWAY_BROWSER_UPLOAD_DIR configuration variable for secure file upload path allowlisting and expanded browser tool surface configuration supporting nine additional tools with appropriate tier classification.
+**Updated** Comprehensive reference including workspace resource integration variables for tools catalog and skills inventory access, risk-tier admission gate configuration, HITL confirmation timeout settings, enhanced agent auto-allow list configuration, plus enhanced OpenTelemetry configuration variables, new variables related to the mutating-dev profile integration, comprehensive live model discovery configuration variables, execution signing and audit service configuration variables, comprehensive incident service connectivity configuration variables for both agent-platform and platform-gateway incident service clients, comprehensive browser connector configuration variables for Chromium headless sidecar integration, NetworkPolicy enforcement configuration variables, enhanced credential set enumeration prevention settings, improved screenshot security logging configuration, and enhanced OIDC configuration variables that clearly distinguish between canonical callback URIs and reachability-only extra URIs. **New**: Added AGENT_BROWSER_FLOW_APPROVAL_TTL configuration variable (default 900 seconds) that bounds flow authority duration for browser HITL gates, providing time-bounded, flow-scoped session authority with TTL-based expiration and flow identity verification.
 
 #### Core Configuration
 - `AGENT_SERVICE_URL`: Agent service endpoint URL (DNS-based)
@@ -1760,6 +1810,7 @@ The Platform Gateway Service employs a robust, layered configuration system that
 #### Agent Platform Configuration
 - `AGENT_GATEWAY_TOOL_AUTO_ALLOW`: Comma-separated list of auto-allowed tools (default: built-in vetted read-only tools)
 - `AGENT_HITL_CONFIRM_TIMEOUT`: HITL confirmation timeout in seconds (default: 600, 0 to disable)
+- `AGENT_BROWSER_FLOW_APPROVAL_TTL`: Seconds an operator's approval of a `write`-class browser flow unlocks subsequent `web.*` writes in that same flow (default: 900, 0 to disable flow-unlock)
 
 #### Live Model Discovery Configuration
 - `AGENT_MODEL_DISCOVERY_ENABLED`: Enable/disable live model discovery (default: true)
@@ -1821,6 +1872,7 @@ The Platform Gateway Service employs a robust, layered configuration system that
 - [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
 - [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
@@ -2714,3 +2766,63 @@ The browser connector now supports fifteen tools total, categorized by risk leve
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [spec.md](file://docs/specs/SPEC-050-browser-tools-expansion-and-samples/spec.md)
+
+### Flow-Based Approval Enforcement Guide
+**New Section** Comprehensive guide for understanding and managing flow-based approval enforcement with AGENT_BROWSER_FLOW_APPROVAL_TTL configuration.
+
+#### Prerequisites
+- Browser connector enabled with GATEWAY_BROWSER_ENABLED=true
+- Understanding of browser flow concepts and skill bindings
+- Knowledge of AGENT_BROWSER_FLOW_APPROVAL_TTL configuration options
+- Proper RBAC permissions for flow approval operations
+
+#### Configuration Options
+- `AGENT_BROWSER_FLOW_APPROVAL_TTL=900`: Seconds an operator's approval unlocks subsequent web.* writes in that same flow (default: 900 seconds)
+- `AGENT_BROWSER_FLOW_APPROVAL_TTL=0`: Disables flow-unlock entirely, restoring per-action gating where every browser write parks its own card
+- `AGENT_BROWSER_FLOW_APPROVAL_TTL>=1`: Enables flow-unlock with TTL-based expiration
+
+#### Flow Authority Mechanics
+- **Session-Scoped Authority**: Approval is scoped to the chat session AND the approved flow's identity (`skill_id` + `origin`)
+- **TTL-Based Expiration**: Authority expires after configured TTL seconds from approval time
+- **Flow Identity Verification**: Subsequent writes must match the approved flow's identity to be unlocked
+- **Safe Failure Mode**: Expired approvals cause re-parking rather than unauthorized execution
+
+#### Security Features
+- **Flow Identity Scoping**: Authority is keyed on session id + approved flow identity, preventing cross-flow privilege escalation
+- **TTL-Based Timeouts**: Automatic expiration prevents indefinite flow authority
+- **Deviation Guard Enforcement**: Gateway origin allowlist, risk_class, and step budget still bound every unlocked write
+- **Auto-Signing Under Authority**: Each unlocked write is signed under the approving card's authority with fresh execution_id and args_digest
+
+#### Example Configuration
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-runtime-config
+data:
+  AGENT_BROWSER_FLOW_APPROVAL_TTL: "900"
+```
+
+#### Workflow Examples
+- **Single Approval Flow**: Operator approves one write-tier interaction, subsequent writes in same flow execute without further cards until TTL expires
+- **Flow Rebinding**: If session binds to different flow (new skill_id/origin), next write re-parks for fresh approval
+- **TTL Expiration**: After TTL expires, next write parks again requiring fresh operator approval
+- **Per-Action Mode**: With TTL=0, every write-tier interaction parks its own card (pre-SPEC-051 behavior)
+
+#### Monitoring and Diagnostics
+- Monitor flow approval TTL expiration events
+- Track flow identity mismatches and re-parking events
+- Verify flow context updates from web.navigate results
+- Audit flow authority usage patterns for security monitoring
+- Alert on unusual flow approval patterns or TTL expiration spikes
+
+#### Security Considerations
+- **TTL Duration Selection**: Balance operational efficiency with security requirements; shorter TTL reduces attack window but increases operator friction
+- **Flow Identity Validation**: Ensure approved flow identity matches current flow context to prevent privilege escalation
+- **Approval Scope Limitation**: Authority carries no independent privilege beyond unlocking that flow's browser writes for that session
+- **Gateway Guard Enforcement**: Every unlocked write remains bounded by tool-gateway deviation guard (origin allowlist, risk_class, step budget)
+
+**Section sources**
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)

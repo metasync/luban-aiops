@@ -1,1 +1,0 @@
-Specs document delivery of React + Ant Design X + TypeScript + Vite for the portal web UI, SSE-based chat streaming over `fetch` + `ReadableStream`, and Postgres-backed confirmation records with schema evolution via additive fields in `agent-session.schema.json`.

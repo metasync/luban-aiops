@@ -1,5 +1,0 @@
-- Each spec directory follows a fixed plan/spec/tasks triad with YAML front-matter metadata (status, owner, created, release slice, related specs) and a Changelog section recording draft → approved → delivered milestones.
-- Requirements are numbered R-N with explicit acceptance criteria written as testable statements rather than prose, and Non-Goals sections enumerate out-of-scope items.
-- New backend capabilities introduce additive changes only — new schema fields, new read-only actions, and new routes — while preserving backward compatibility for pre-delivery data and clients.
-- Frontend-backend boundaries are enforced via shared JSON schemas under `shared/shared-contracts/schemas/` (e.g., `policy-matrix.schema.json`, `agent-session.schema.json`) that both gateway and portal consume.
-- Role-scoped visibility is enforced server-side (deny-by-default policy evaluation) while client-side hiding is treated as convenience only; views remain hidden-not-destroyed across role changes.

@@ -1,1 +1,0 @@
-Markdown-based specification artifacts driven by reusable templates under docs/specs/templates/, with a numbering convention (SPEC-001 through SPEC-050) used to order and reference features across the platform.

@@ -1,1 +1,0 @@
-Specification documents defining the platform's dual-surface observability baseline (Prometheus /metrics plus opt-in OpenTelemetry) and the audit-service reporting/CSV export surface for governance consumption.

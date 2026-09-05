@@ -1,1 +1,0 @@
-Python-based platform using Redis (redis>=6.2,<7.0) for session persistence, the official `elasticsearch` Python client for read-only log/metric queries, and AgentScope 2.0.6 kernel events (`RequireUserConfirmEvent`, `UserConfirmResultEvent`, `UserInterruptEvent`) for human-in-the-loop control flow.

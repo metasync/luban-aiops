@@ -1,1 +1,0 @@
-Plain Markdown documents consumed by human reviewers and maintained alongside code; no build tooling beyond the root `Makefile`'s `verify` target which validates the rest of the project.

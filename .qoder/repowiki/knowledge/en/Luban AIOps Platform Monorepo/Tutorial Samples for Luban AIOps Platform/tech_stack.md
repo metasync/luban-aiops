@@ -1,1 +1,0 @@
-Shell-based deployment script using `kubectl` to manage a `skills-samples` ConfigMap consumed by the platform's `skills-hub` service; sample skills are plain Markdown frontmatter documents consumed by the skills hub; demo scripts use `curl` against the identity broker and platform gateway APIs with bearer tokens obtained via the local dev port-forward.

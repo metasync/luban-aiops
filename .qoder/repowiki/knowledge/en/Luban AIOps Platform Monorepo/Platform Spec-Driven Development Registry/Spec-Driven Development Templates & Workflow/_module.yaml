@@ -1,9 +1,0 @@
-schema_version: 1
-module_path: specs/templates_and_meta
-title: Spec-Driven Development Templates & Workflow
-scope:
-    - docs/specs/templates/
-    - docs/specs/README.md
-source_files: []
-depends_on: []
-related_to: []

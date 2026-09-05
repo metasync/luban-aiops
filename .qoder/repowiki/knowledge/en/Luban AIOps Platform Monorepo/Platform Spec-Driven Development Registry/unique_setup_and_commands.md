@@ -1,1 +1,0 @@
-New features are created by copying the plan.md/spec.md/tasks.md files from docs/specs/templates/ into a new SPEC-NNN-<name>/ directory and assigning the next available number; existing specs are referenced by their SPEC-NNN identifier throughout the codebase.

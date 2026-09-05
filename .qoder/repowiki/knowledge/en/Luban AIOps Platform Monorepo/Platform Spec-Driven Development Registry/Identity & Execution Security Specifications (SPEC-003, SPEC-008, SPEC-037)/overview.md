@@ -1,1 +1,0 @@
-Specification documents defining the platform's identity trust hardening, broker-mediated service-to-service token delegation, and signed execution requests with tamper-evident receipts.

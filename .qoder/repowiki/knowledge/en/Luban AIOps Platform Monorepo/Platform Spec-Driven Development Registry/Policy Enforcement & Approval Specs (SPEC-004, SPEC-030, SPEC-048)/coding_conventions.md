@@ -1,5 +1,0 @@
-- Each spec directory contains a fixed triad of `plan.md`, `spec.md`, and `tasks.md` separating planning, detailed requirements, and task breakdowns.
-- Specs use a status header block (status, owner, created, release slice, related risks/ADRs) followed by Summary, Requirements (numbered R-N with acceptance criteria), Non-Goals, Impact, Open Questions, and Changelog sections.
-- Requirements are written as declarative statements with concrete acceptance criteria that reference specific files, schemas, routes, or make targets rather than vague behavior.
-- Policy changes are modeled as additive revisions to shared JSON Schema contracts (v1 → v2) so consumers can validate unchanged v1 bundles while new fields opt in.
-- Evaluation semantics are documented as precedence rules (deny > require_approval > allow, highest priority wins within an outcome class, disabled rules skipped) and enforced identically across both gateway engines.

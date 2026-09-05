@@ -1,1 +1,0 @@
-Monorepo that composes eight Python services, a web portal, shared contracts and GitOps overlays into a spec-driven agentic AI operations platform with coordinated build, policy sync, and e2e verification.

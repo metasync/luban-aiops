@@ -12,6 +12,9 @@
 - [AuthContext.tsx](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx)
 - [client.ts](file://products/operator-portal/web-ui/app/src/api/client.ts)
 - [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [useChatStream.ts](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts)
+- [models.ts](file://products/operator-portal/web-ui/app/src/stream/models.ts)
+- [global.css](file://products/operator-portal/web-ui/app/src/theme/global.css)
 - [SettingsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx)
 - [AuditView.tsx](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx)
 - [AuditSummaryPanel.tsx](file://products/operator-portal/web-ui/app/src/views/audit/AuditSummaryPanel.tsx)
@@ -22,11 +25,11 @@
 
 ## Update Summary
 **Changes Made**
-- Updated audit trail section to reflect v0.29.3 audit events initial-load recovery enhancement with improved session lifecycle handling
-- Added comprehensive documentation for stale session transition recovery and automatic retry mechanisms
-- Enhanced testing coverage section with regression tests for automatic recovery scenarios during authentication state changes
-- Updated troubleshooting guide with v0.29.3 specific recovery improvements and stale session handling
-- Updated conclusion to include latest session lifecycle hardening and automatic recovery capabilities
+- Updated Chat Workspace section to document enhanced confirmation card display with flow headline rendering and metadata visualization
+- Added comprehensive documentation for browser flow context including skill title, description, target origin, and risk class display
+- Enhanced visual styling documentation with background highlighting and tags for origin/risk classification
+- Updated confirmation card architecture section with new FlowSummary interface and metadata handling
+- Added CSS styling references for the enhanced confirmation card presentation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -45,6 +48,7 @@ The Operator Portal is the operator-facing web application for platform administ
 
 Key capabilities include:
 - Chat and streaming responses with tool evidence and inline human-in-the-loop confirmations
+- **Enhanced confirmation cards with browser flow context showing skill titles, descriptions, target origins, and risk classifications with visual styling**
 - Incident management with triage reports and live runs
 - Approval queue with pending decision badges and actions
 - **Enhanced read-only audit trail with sophisticated tabbed interface (Events and Summary tabs), shared filter toolbar, CSV export with truncation warnings, comprehensive summary analytics with drill-down capabilities, critical hook ordering stability for sign-out/token refresh scenarios, and automatic recovery from stale session transitions**
@@ -83,7 +87,7 @@ Nginx --> Dist
 - Application shell and routing: React app root, theme provider, auth provider, and view router with sidebar sections and responsive drawer.
 - Authentication: OIDC login flow, token refresh scheduling, and session persistence; roles drive UI visibility and feature gating.
 - API client: Centralized fetch wrapper adding bearer tokens and request IDs, with configurable gateway URL override.
-- Chat workspace: Session list, message composer, model selector, voice input, streaming SSE transport, tool evidence rendering, and HITL confirmation cards.
+- Chat workspace: Session list, message composer, model selector, voice input, streaming SSE transport, tool evidence rendering, and **enhanced HITL confirmation cards with browser flow context and metadata visualization**.
 - Control views: Approvals inbox, **enhanced audit trail with sophisticated tabbed interface, critical hook ordering stability, and automatic recovery from stale session transitions**, permissions matrix, settings & debug, incidents triage.
 - Workspace views: Tools catalog and skills inventory with filters.
 - Theme and accessibility: Dark theme tokens mirrored into CSS custom properties; ARIA labels and keyboard-friendly controls.
@@ -212,7 +216,7 @@ Ok --> |Yes| Json["Parse JSON and return"]
 - Model selector integrates with /api/v1/models; selection persists per session.
 - Voice input uses Web Speech API with language preference persisted locally.
 - Tool evidence rendered as collapsible cards with status badges and optional full output expander.
-- Inline HITL confirmation cards post decisions to /api/v1/chat/confirm; server-side enforcement applies.
+- **Enhanced inline HITL confirmation cards with browser flow context showing skill titles, descriptions, target origins, and risk classifications with visual styling including background highlighting and tags**.
 
 ```mermaid
 sequenceDiagram
@@ -236,6 +240,55 @@ GW-->>CV : Resume stream with decision
 **Section sources**
 - [ChatView.tsx:1-200](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L200)
 - [README.md:43-126](file://products/operator-portal/README.md#L43-L126)
+
+### Enhanced Confirmation Cards with Browser Flow Context
+**Updated** The confirmation card system has been significantly enhanced to provide rich browser flow context when operators encounter human-in-the-loop approval requests. This enhancement addresses SPEC-051 R-6 requirements for improved operator understanding of automated workflow intent.
+
+#### Flow Summary Interface and Metadata
+- **FlowSummary Interface**: New typed interface providing structured metadata about browser automation flows including skill identification, target origin, human-readable titles, descriptions, and risk classification
+- **Metadata Sources**: Flow context is populated from skill frontmatter and runtime analysis, providing operators with meaningful workflow descriptions rather than raw tool invocations
+- **Conditional Rendering**: Flow headline displays only when relevant metadata is available, gracefully degrading to tool-level details when flow context is absent
+
+#### Visual Enhancement Features
+- **Background Highlighting**: Flow headline section uses subtle background highlighting (`rgba(127,127,127,0.08)`) with left border accent to visually distinguish workflow context from individual tool calls
+- **Origin Tags**: Target origin displayed as geekblue-tagged identifiers, helping operators understand which systems or domains are being accessed
+- **Risk Classification Tags**: Risk class shown with appropriate color coding - default for read operations, warning for write/mutating operations
+- **Typography Hierarchy**: Skill titles use bold formatting while descriptions appear with reduced opacity for visual hierarchy
+
+#### Integration with Existing Card Architecture
+- **Seamless Integration**: Flow headline renders above the existing tool call list, maintaining backward compatibility with non-browser confirmation scenarios
+- **Metadata Propagation**: FlowSummary data flows through the entire confirmation pipeline from stream frames to final card rendering
+- **Type Safety**: Full TypeScript support ensures compile-time validation of flow metadata structure and prevents runtime errors
+
+```mermaid
+flowchart TD
+ConfirmationRequest["Confirmation Request Frame"] --> FlowContext["Extract FlowSummary Metadata"]
+FlowContext --> TitleCheck{"Has Title/Description?"}
+TitleCheck --> |Yes| RenderHeadline["Render Flow Headline Section"]
+TitleCheck --> |No| SkipHeadline["Skip to Tool Details"]
+RenderHeadline --> BackgroundStyle["Apply Background Highlighting"]
+BackgroundStyle --> OriginTags["Display Origin Tags"]
+OriginTags --> RiskTags["Display Risk Classification Tags"]
+RiskTags --> ToolDetails["Render Individual Tool Calls"]
+SkipHeadline --> ToolDetails
+ToolDetails --> DecisionButtons["Decision Buttons"]
+```
+
+**Diagram sources**
+- [ChatView.tsx:388-435](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L388-L435)
+- [models.ts:70-79](file://products/operator-portal/web-ui/app/src/stream/models.ts#L70-L79)
+
+#### Styling and Presentation
+- **CSS Classes**: Uses `.confirm-flow` class for consistent styling across different confirmation scenarios
+- **Responsive Design**: Flow headline section adapts to different screen sizes while maintaining readability
+- **Accessibility**: Proper semantic HTML structure with appropriate heading levels and descriptive text
+- **Visual Consistency**: Follows established design patterns used throughout the confirmation card system
+
+**Section sources**
+- [ChatView.tsx:388-435](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L388-L435)
+- [models.ts:70-79](file://products/operator-portal/web-ui/app/src/stream/models.ts#L70-L79)
+- [useChatStream.ts:44-47](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L44-L47)
+- [global.css:552-604](file://products/operator-portal/web-ui/app/src/theme/global.css#L552-L604)
 
 ### Enhanced Audit Trail with Automatic Recovery Capabilities
 **Updated** The audit trail view has been completely redesigned with an advanced tabbed interface that provides both detailed event inspection and comprehensive summary analytics with interactive drill-down capabilities. The v0.29.3 release includes critical improvements for session lifecycle handling that prevent empty state rendering during stale session transitions, ensuring robust automatic recovery without manual intervention.
@@ -402,6 +455,7 @@ Nginx --> Gateway["Platform Gateway"]
 - **v0.29.1 Layout Optimization**: Fixed-width columns eliminate dynamic width recalculation overhead and prevent layout shifts during table rendering.
 - **v0.29.2 Hook Stability**: Critical hook ordering fixes eliminate render instability during authentication state changes, improving perceived performance and reliability.
 - **v0.29.3 Recovery Efficiency**: Automatic recovery from stale session transitions eliminates need for manual refresh operations, improving user experience and reducing support burden.
+- **Enhanced Confirmation Card Performance**: Flow headline rendering uses conditional checks to avoid unnecessary DOM manipulation when flow metadata is absent, maintaining optimal performance for non-browser confirmation scenarios.
 
 [No sources needed since this section provides general guidance]
 
@@ -418,6 +472,7 @@ Nginx --> Gateway["Platform Gateway"]
 - **v0.29.2 Hook Ordering Issues**: If audit view exhibits unstable rendering during sign-out or token refresh, verify that all hooks execute before the role gate early return; check that authentication state changes don't cause unexpected unmounting.
 - **v0.29.3 Stale Session Issues**: If audit view shows empty state after authentication changes, verify that the session object is properly updated; the automatic recovery mechanism should clear latched failures and retry automatically. Check that the initial-load effect is keyed on the session object and triggers on session changes.
 - **Type Safety Issues**: Ensure DrilldownPatch type usage is correct when implementing custom drill-down functionality; verify filter merging maintains type safety.
+- **Confirmation Card Flow Context Issues**: If browser flow headlines aren't displaying, verify that skill frontmatter contains valid title/description fields; check that flow metadata is properly propagated through the confirmation pipeline; ensure CSS classes are applied correctly for visual styling.
 
 **Section sources**
 - [AuthContext.tsx:40-85](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L40-L85)
@@ -428,7 +483,7 @@ Nginx --> Gateway["Platform Gateway"]
 - [AuditView.test.tsx:97-131](file://products/operator-portal/web-ui/app/src/views/__tests__/AuditView.test.tsx#L97-L131)
 
 ## Conclusion
-The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface, advanced analytics, and automatic recovery from stale session transitions**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants. The v0.29.3 session lifecycle enhancement adds automatic recovery capabilities that prevent empty state rendering during stale session transitions, eliminating the need for manual refresh operations and providing a more resilient user experience.
+The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface, advanced analytics, and automatic recovery from stale session transitions**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants. The v0.29.3 session lifecycle enhancement adds automatic recovery capabilities that prevent empty state rendering during stale session transitions, eliminating the need for manual refresh operations and providing a more resilient user experience. **The enhanced confirmation card system with browser flow context provides operators with meaningful workflow descriptions, visual styling with background highlighting and tags, and improved situational awareness when approving automated browser actions.**
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -462,6 +517,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - Theme: Dark theme tokens defined in tokens.ts and applied via antd ConfigProvider; CSS custom properties mirror tokens for consistent styling.
 - Accessibility: ARIA labels on navigation and user actions; keyboard-friendly menus and controls; responsive layout adapts to narrow screens with a drawer.
 - **Enhanced Audit Interface**: Sophisticated tabbed interface provides intuitive navigation between detailed events and comprehensive summary analytics; shared filter toolbar ensures consistent user experience across tabs; collapsible sections improve information density while maintaining accessibility; v0.29.1 improvements provide more stable table layouts with fixed-width columns; v0.29.2 hook ordering ensures stable rendering during authentication state changes; v0.29.3 automatic recovery prevents empty states during session transitions.
+- **Enhanced Confirmation Cards**: Browser flow context provides meaningful workflow descriptions with visual styling including background highlighting, origin tags, and risk classification indicators; accessible semantic HTML structure with appropriate heading levels and descriptive text; responsive design adapts to different screen sizes while maintaining readability.
 
 **Section sources**
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
@@ -475,6 +531,31 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 **Section sources**
 - [README.md:43-65](file://products/operator-portal/README.md#L43-L65)
 - [index.html:1-14](file://products/operator-portal/web-ui/app/index.html#L1-L14)
+
+### Enhanced Confirmation Card System
+**Updated** The confirmation card system has been significantly enhanced with browser flow context to provide operators with meaningful workflow descriptions and improved situational awareness when approving automated browser actions.
+
+#### Flow Context Architecture
+- **FlowSummary Interface**: Structured metadata including skill identification, target origin, human-readable titles, descriptions, and risk classification
+- **Conditional Rendering**: Flow headline displays only when relevant metadata is available, gracefully degrading to tool-level details
+- **Type Safety**: Full TypeScript support ensures compile-time validation of flow metadata structure
+
+#### Visual Enhancements
+- **Background Highlighting**: Subtle background highlighting with left border accent to distinguish workflow context
+- **Origin Tags**: Geekblue-tagged target origin identifiers for system/domain context
+- **Risk Classification Tags**: Color-coded risk indicators (default for read, warning for write operations)
+- **Typography Hierarchy**: Bold titles with reduced opacity descriptions for visual hierarchy
+
+#### Integration Features
+- **Seamless Integration**: Renders above existing tool call list while maintaining backward compatibility
+- **Metadata Propagation**: FlowSummary data flows through entire confirmation pipeline from stream frames to final rendering
+- **Performance Optimization**: Conditional checks prevent unnecessary DOM manipulation when flow metadata is absent
+
+**Section sources**
+- [ChatView.tsx:388-435](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L388-L435)
+- [models.ts:70-79](file://products/operator-portal/web-ui/app/src/stream/models.ts#L70-L79)
+- [useChatStream.ts:44-47](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L44-L47)
+- [global.css:552-604](file://products/operator-portal/web-ui/app/src/theme/global.css#L552-L604)
 
 ### Enhanced Audit Trail Features
 **Completely Redesigned** The audit trail has been completely redesigned with advanced interactive features, further hardened in v0.29.1 for improved table stability and readability, v0.29.2 for critical hook ordering stability during authentication state changes, and v0.29.3 for automatic recovery from stale session transitions.

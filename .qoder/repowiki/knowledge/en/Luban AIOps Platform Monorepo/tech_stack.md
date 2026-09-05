@@ -1,1 +1,0 @@
-Python + uv for every service; Docker images built with a shared `base-uv` image under `shared/base-images/`; Kustomize overlays under `shared/platform-ops/gitops/`; JSON Schema + YAML policy bundles in `shared/shared-contracts/` validated by shared scripts; all services follow the same `core/`, `api/`, `services/`, `schemas/` package layout.

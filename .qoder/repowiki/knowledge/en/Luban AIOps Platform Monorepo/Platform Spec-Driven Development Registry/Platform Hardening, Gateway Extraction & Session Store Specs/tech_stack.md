@@ -1,1 +1,0 @@
-FastAPI-based services (`agent-platform`, `tool-gateway`, `identity-broker`) with pydantic request/response models bound to JSON Schema in `shared/shared-contracts`; Kubernetes deployment via Kustomize overlays rendered by GitHub Actions; Postgres backend uses synchronous `psycopg[binary]` driver consistent with audit-service/incident-service patterns.

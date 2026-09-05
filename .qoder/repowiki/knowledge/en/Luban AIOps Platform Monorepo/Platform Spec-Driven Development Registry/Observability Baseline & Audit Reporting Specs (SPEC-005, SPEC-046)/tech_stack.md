@@ -1,1 +1,0 @@
-Prometheus exposition format via `prometheus-client` (RED metrics, bounded cardinality path labels); OpenTelemetry SDK with `opentelemetry-instrumentation-fastapi` and OTLP exporter targeting Elastic APM; FastAPI services; PostgreSQL-backed audit store with envelope-only GROUP BY aggregation; RFC-4180 CSV streaming via server-side pagination.

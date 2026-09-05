@@ -1,1 +1,0 @@
-New specs are created by copying `docs/specs/templates/{spec,plan,tasks}.md` into a new `docs/specs/SPEC-NNN-<slug>/` directory, assigning the next sequential number, and updating the spec index table in `docs/specs/README.md`. Delivery requires running `make verify` and setting the spec status to `delivered` only after all acceptance criteria in `spec.md` are verified.

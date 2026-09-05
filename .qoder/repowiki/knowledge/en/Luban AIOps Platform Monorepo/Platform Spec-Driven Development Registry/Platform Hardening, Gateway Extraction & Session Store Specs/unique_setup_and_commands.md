@@ -1,1 +1,0 @@
-Each spec's acceptance criteria are validated by running `uv run pytest` across all three products and `kustomize build` over development overlays as part of GitHub Actions workflows; SPEC-016 additionally requires an initdb ConfigMap (`create-sessions-db.sql`) and idempotent `CREATE TABLE IF NOT EXISTS` startup DDL.

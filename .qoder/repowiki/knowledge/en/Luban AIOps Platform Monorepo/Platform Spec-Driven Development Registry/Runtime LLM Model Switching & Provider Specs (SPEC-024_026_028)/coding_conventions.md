@@ -1,5 +1,0 @@
-- Each spec directory uses a fixed three-file layout: `plan.md`, `spec.md`, `tasks.md`, with status, owner, created date, release slice, related ADRs, and a changelog at the bottom of `spec.md`.
-- Requirements are numbered R-N with explicit acceptance criteria, followed by Non-Goals, Impact (products/contracts/docs touched), and Open Questions that are explicitly resolved into requirements.
-- Provider configuration follows an additive env-knob pattern: each provider gets a `<PROVIDER>_API_KEY` credential gate, optional `<PROVIDER>_BASE_URL`, `<PROVIDER>_MODEL_NAME` default, and `<PROVIDER>_MODELS` series override.
-- Catalog entries are fail-closed: missing credentials exclude a provider from the catalog, unknown model selections return 4xx, and no silent fallback to defaults occurs.
-- Model selection is audited by enriching existing `chat_started`/`chat_completed` events rather than introducing new event types, keeping the closed event-type enum stable.

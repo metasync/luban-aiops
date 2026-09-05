@@ -1,0 +1,1 @@
+Python services built with `uv` (environment + package manager pinned by `.python-version`), FastAPI-based apps packaged into Docker images using a shared `base-uv` image from `shared/base-images/base-uv`; deployment via Kustomize overlays under `shared/platform-ops/gitops`; policy engine backed by YAML bundles validated against JSON schemas in `shared/shared-contracts/scripts`.

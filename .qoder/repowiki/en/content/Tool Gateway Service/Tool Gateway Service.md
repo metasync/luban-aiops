@@ -45,16 +45,18 @@
 - [2026-08-10-r1-hardening-grounded-responses-and-evidence-ux.md](file://docs/agentic-aiops-platform/release-notes/2026-08-10-r1-hardening-grounded-responses-and-evidence-ux.md)
 - [2026-09-02-spec-049-browser-web-check-tools.md](file://docs/agentic-aiops-platform/release-notes/2026-09-02-spec-049-browser-web-check-tools.md)
 - [2026-09-04-spec-050-browser-tools-expansion-and-samples.md](file://docs/agentic-aiops-platform/release-notes/2026-09-04-spec-050-browser-tools-expansion-and-samples.md)
+- [SPEC-051 spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
+- [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [transcript.ts](file://products/operator-portal/web-ui/app/src/chat/transcript.ts)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Expanded browser tool surface from 6 to 15 tools with nine new capabilities per SPEC-050
-- Added comprehensive security controls including origin re-checks, mutation guards, path allowlisting, and cross-origin frame denial
-- Updated browser connector documentation to reflect new web.select, web.press_key, web.upload_file, web.evaluate, web.extract, web.wait_for, web.hover, web.scroll, and web.switch_frame tools
-- Enhanced security model with write-tier HITL confirmation for dangerous operations and read-tier origin validation for observation tools
-- Added file upload path allowlisting and JavaScript evaluation result bounding
-- Updated browser session management to support iframe traversal and frame context tracking
+- Enhanced FlowState with title/description fields for flow-semantic confirmation cards per SPEC-051 R-6
+- Improved browser connector integration with flow binding and deviation guards for enhanced security
+- Updated tool surface documentation to reflect the new flow-based approval system
+- Added comprehensive flow semantic rendering in operator portal confirmation cards
+- Enhanced browser session management with flow context tracking and origin deviation detection
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -84,6 +86,7 @@ Key responsibilities (current):
 - **Enhanced Kubernetes integration via cluster-wide read-only ClusterRole enabling cross-namespace diagnostic capabilities**
 - **New bounded mutating tool support** with k8s.delete_pod for controlled pod restart operations
 - **Expanded browser connector tools** providing comprehensive web application interaction capabilities through Playwright-based headless browser automation with 15 total tools
+- **Flow-based approval system** with semantic confirmation cards showing workflow intent rather than bare tool actions
 - Elastic connector integration for observability data access including log search, service health metrics, and alert management
 - Incidents connector integration for querying incident data through the new incident service
 - Skills connector integration for accessing team-owned operational skills and runbooks with full audit trail correlation
@@ -149,7 +152,7 @@ D --> T
 D --> U
 ```
 
-**Updated** Architecture diagram reflects the current structure with all five connectors including the expanded browser connector with 15 tools and enhanced security controls
+**Updated** Architecture diagram reflects the current structure with all five connectors including the expanded browser connector with 15 tools and enhanced security controls, plus flow-based approval system
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -191,13 +194,14 @@ D --> U
 - **Enhanced Request Correlation**: Propagates x-request-id headers through the entire tool execution pipeline to enable end-to-end audit trail tracking from initial tool invocation through downstream service calls.
 - **Enhanced Kubernetes Connector**: Provides safe abstractions for interacting with Kubernetes clusters across all namespaces using cluster-wide read-only ClusterRole permissions, enabling comprehensive diagnostic capabilities while maintaining strict read-only access controls, plus bounded mutating operations through k8s.delete_pod.
 - **Expanded Browser Connector**: Provides comprehensive web application interaction capabilities through Playwright-based headless browser automation with stateful session management, origin allowlist enforcement, flow binding, credential set management, and 15 total tools including nine new capabilities.
+- **Flow-Based Approval System**: Implements semantic confirmation cards that show workflow intent (skill title/description + origin) rather than bare tool actions, providing operators with meaningful context for approval decisions.
 - Elastic Connector: Provides read-only access to Elasticsearch for observability data including log search, service health metrics, and active alerts.
 - Incidents Connector: Provides read-only access to the incident-service query API for listing and retrieving incident data with proper authentication and parameter validation.
 - Skills Connector: Provides read-only access to the skills-hub retrieval API for searching and retrieving team-owned operational skills and runbooks with full audit trail correlation.
 - Schemas and Contracts: Enforce consistent request/response shapes for tool invocations and results.
 - Core Utilities: Configuration, runtime settings, observability, metrics, telemetry, request context propagation, and dependency injection.
 
-**Updated** Component descriptions reflect the current implementation with enhanced request correlation capabilities, all five connectors integrated, and the expanded browser connector with 15 tools including nine new capabilities per SPEC-050
+**Updated** Component descriptions reflect the current implementation with enhanced request correlation capabilities, all five connectors integrated, the expanded browser connector with 15 tools including nine new capabilities per SPEC-050, and the new flow-based approval system per SPEC-051
 
 **Section sources**
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
@@ -221,12 +225,12 @@ D --> U
 - [dependencies.py](file://products/tool-gateway/src/tool_gateway/core/dependencies.py)
 
 ## Architecture Overview
-The Tool Gateway follows a streamlined architecture focused on multi-source tool execution with enhanced security features including automatic output redaction, risk-tier admission control, and comprehensive request correlation. As an internal service, it receives requests from other platform services through well-defined APIs.
+The Tool Gateway follows a streamlined architecture focused on multi-source tool execution with enhanced security features including automatic output redaction, risk-tier admission control, comprehensive request correlation, and flow-based approval semantics. As an internal service, it receives requests from other platform services through well-defined APIs.
 
 **Current Architecture:**
 - API Layer: FastAPI routers expose endpoints for tool discovery and invocation only.
 - Service Layer: Gateway orchestrates tool invocation flows; policy engine enforces rules for tool actions with enhanced permissions including mutating actions; token verifier authenticates with audience validation for `tool-gateway`.
-- Tool Layer: Registry discovers and executes tools from multiple connectors with risk-tier admission control; **enhanced request correlation propagates x-request-id headers through the entire pipeline**; **enhanced Kubernetes connector provides cluster-wide read-only access plus bounded mutating operations**; **expanded browser connector provides 15 web application interaction tools with comprehensive security controls**; Elastic connector provides observability data access; incidents connector provides incident data access; skills connector provides skills and runbook access; output redaction ensures sensitive data never leaves the service.
+- Tool Layer: Registry discovers and executes tools from multiple connectors with risk-tier admission control; **enhanced request correlation propagates x-request-id headers through the entire pipeline**; **enhanced Kubernetes connector provides cluster-wide read-only access plus bounded mutating operations**; **expanded browser connector provides 15 web application interaction tools with comprehensive security controls and flow-based approval**; Elastic connector provides observability data access; incidents connector provides incident data access; skills connector provides skills and runbook access; output redaction ensures sensitive data never leaves the service.
 - Core Layer: Configuration, runtime, observability, metrics, telemetry, and request context support cross-cutting concerns.
 
 ```mermaid
@@ -244,6 +248,7 @@ participant Elastic as "Elastic Connector"
 participant Incidents as "Incidents Connector"
 participant Skills as "Skills Connector"
 participant Redaction as "Output Redaction"
+participant Portal as "Operator Portal"
 Client->>Router : "POST /api/v2/tools/invoke"
 Router->>ToolsRoute : "Handle tool invocation"
 ToolsRoute->>Gateway : "Invoke tool flow"
@@ -258,6 +263,8 @@ alt "Browser Tool (15 tools)"
 Gateway->>Registry : "Execute browser tool with validated inputs"
 Registry->>Browser : "Call web.* operations with security controls"
 Browser-->>Registry : "Web result with evidence"
+Browser->>Portal : "Flow semantic confirmation card"
+Portal-->>Browser : "Approval decision"
 else "Kubernetes Tool"
 Gateway->>Registry : "Execute k8s tool with validated inputs"
 Registry->>K8s : "Call k8s operations (cluster-wide read-only or bounded mutate)"
@@ -286,7 +293,7 @@ ToolsRoute-->>Client : "403 Forbidden"
 end
 ```
 
-**Updated** Sequence diagram reflects the current architecture with enhanced request correlation, all five connectors integrated, and the expanded browser connector with 15 tools including nine new capabilities
+**Updated** Sequence diagram reflects the current architecture with enhanced request correlation, all five connectors integrated, the expanded browser connector with 15 tools including nine new capabilities, and the new flow-based approval system with semantic confirmation cards
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -430,7 +437,7 @@ BrowserConnector --> BrowserSessionPool : "uses"
 BrowserConnector --> CredentialSetStore : "uses"
 ```
 
-**Updated** Streamlined architecture with enhanced request correlation, risk-tier admission control, all five connectors integrated, and the expanded browser connector with 15 tools including nine new capabilities per SPEC-050
+**Updated** Streamlined architecture with enhanced request correlation, risk-tier admission control, all five connectors integrated, the expanded browser connector with 15 tools including nine new capabilities per SPEC-050, and flow-based approval system per SPEC-051
 
 **Diagram sources**
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
@@ -725,6 +732,59 @@ NewTools --> SwitchFrame["web.switch_frame - Cross-Origin Denial"]
 - [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
 - [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 
+### Enhanced Flow-Based Approval System with Semantic Confirmation Cards
+Implements flow-based approval semantics that provide operators with meaningful context for approval decisions through semantic confirmation cards:
+
+**Core Features**:
+- **FlowState Enhancement**: Added `title` and `description` fields to FlowState class for human-readable workflow context
+- **Semantic Card Rendering**: Operator portal displays workflow intent ("Reset User Password in Admin Portal") instead of bare tool actions ("web.click")
+- **Flow Context Persistence**: Maintains flow context across owner→approver identity switches during HITL workflows
+- **Origin Deviation Detection**: Prevents interactions on pages that drift from approved flow origins
+- **Skill Metadata Integration**: Carries skill frontmatter (title, description) through the approval pipeline
+
+**Implementation Details**:
+- FlowState.to_dict() includes title/description fields for portal consumption
+- bind_flow() populates FlowState with skill metadata from fetched skill records
+- Web navigate returns flow context in data["flow"] for kernel processing
+- Operator portal renders flow headline above tool detail in confirmation cards
+- Durable confirmation records persist flow_summary for replay and audit trails
+
+**Security Benefits**:
+- Operators approve meaningful workflow actions rather than opaque tool calls
+- Flow binding ensures approvals are scoped to specific skill declarations
+- Deviation guard prevents off-origin interactions from executing under previous approvals
+- Origin re-checks ensure captured content matches approved flow boundaries
+
+```mermaid
+flowchart TD
+SkillFetch["Fetch Skill Metadata"] --> BindFlow["Bind Flow with Title/Description"]
+BindFlow --> Navigate["Navigate to Target URL"]
+Navigate --> FlowContext["Create FlowContext with Metadata"]
+FlowContext --> ConfirmationCard["Generate Semantic Confirmation Card"]
+ConfirmationCard --> OperatorReview["Operator Reviews Workflow Intent"]
+OperatorReview --> Approval{"Approved?"}
+Approval --> |Yes| ExecuteAction["Execute Under Flow Scope"]
+Approval --> |No| DenyAction["Deny Interaction"]
+ExecuteAction --> DeviationGuard["Check Origin Deviation"]
+DeviationGuard --> Safe{"Safe Origin?"}
+Safe --> |Yes| Complete["Complete Action"]
+Safe --> |No| Halt["Halt & Clear Flow"]
+```
+
+**New** Flow-based approval system provides semantic confirmation cards with workflow intent context per SPEC-051 R-6
+
+**Diagram sources**
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [transcript.ts](file://products/operator-portal/web-ui/app/src/chat/transcript.ts)
+
+**Section sources**
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [transcript.ts](file://products/operator-portal/web-ui/app/src/chat/transcript.ts)
+
 ### Elastic Connector for Observability Data
 Provides read-only access to Elasticsearch for observability data with three main tools:
 - **Search Logs**: Search logs using Kibana Query Language or simple text with configurable time ranges and result limits
@@ -890,7 +950,7 @@ Services --> Schemas["Schemas & Contracts"]
 Services --> Core["Core Config/Runtime/Observability"]
 ```
 
-**Updated** Simplified dependency graph reflecting all five connectors with enhanced Kubernetes permissions, expanded browser connector with 15 tools and comprehensive security controls, risk-tier admission control, and request correlation capabilities
+**Updated** Simplified dependency graph reflecting all five connectors with enhanced Kubernetes permissions, expanded browser connector with 15 tools and comprehensive security controls, risk-tier admission control, request correlation capabilities, and flow-based approval system
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -953,6 +1013,8 @@ Services --> Core["Core Config/Runtime/Observability"]
 - **JavaScript evaluation result bounding to prevent memory exhaustion**
 - **File upload path validation to prevent filesystem traversal attacks**
 - **Cross-origin frame denial to prevent security bypass attempts**
+- **Flow context caching to reduce skill fetch overhead during approval workflows**
+- **Semantic card rendering optimization to minimize UI reflows during approval processes**
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -987,11 +1049,14 @@ Common issues and resolutions:
 - **File upload problems**: Check GATEWAY_BROWSER_UPLOAD_DIR configuration and file path allowlisting
 - **JavaScript evaluation blocked**: Review mutation guard patterns and ensure expressions don't contain known mutating APIs
 - **Iframe traversal denied**: Verify frame origin matches flow bound origin for cross-origin frame denial
+- **Flow-based approval issues**: Check FlowState title/description fields and skill metadata availability
+- **Semantic card rendering problems**: Verify flow_summary mapping in operator portal and durable record persistence
+- **Origin deviation detection**: Ensure flow origin matches current page origin for deviation guard checks
 - Performance degradation: Monitor metrics and adjust rate limits
 - Output redaction issues: Check redaction configuration and overflow thresholds
 - Dependency injection problems: Verify service initialization and configuration
 
-**Updated** Added troubleshooting guidance for browser connector, risk-tier admission control, mutating tools, request correlation, SPEC-050 tools, file uploads, JavaScript evaluation, and iframe traversal
+**Updated** Added troubleshooting guidance for browser connector, risk-tier admission control, mutating tools, request correlation, SPEC-050 tools, file uploads, JavaScript evaluation, iframe traversal, and flow-based approval system
 
 **Section sources**
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
@@ -1012,9 +1077,9 @@ Common issues and resolutions:
 ## Conclusion
 The Tool Gateway Service provides a focused, secure, and extensible platform for internal tool execution with policy enforcement, secure tool invocation, comprehensive output redaction, and enhanced request correlation. Its streamlined architecture enables easy extension with new tools while maintaining strong security and observability standards. The service now operates exclusively as an internal component, receiving requests from other platform services through well-defined APIs with delegated token authentication.
 
-The platform-gateway extraction has successfully separated portal-facing responsibilities into the new `platform-gateway` service, allowing tool-gateway to focus solely on its core mandate of connector standardization and tool execution. Recent enhancements include the addition of Elastic connector for observability data access, incidents connector for querying incident data through the new incident service, **skills connector for accessing team-owned operational skills and runbooks with full audit trail correlation**, **expanded browser connector with 15 tools providing comprehensive web application interaction capabilities per SPEC-050**, **enhanced RBAC permissions with cluster-wide read-only access enabling comprehensive diagnostic capabilities across all namespaces**, **risk-tier admission control with GATEWAY_MUTATING_TOOLS_ENABLED for secure mutating tool registration**, **bounded mutating tool support with k8s.delete_pod for controlled pod restart operations**, and **enhanced request correlation through x-request-id header forwarding enabling end-to-end audit trail tracking**.
+The platform-gateway extraction has successfully separated portal-facing responsibilities into the new `platform-gateway` service, allowing tool-gateway to focus solely on its core mandate of connector standardization and tool execution. Recent enhancements include the addition of Elastic connector for observability data access, incidents connector for querying incident data through the new incident service, **skills connector for accessing team-owned operational skills and runbooks with full audit trail correlation**, **expanded browser connector with 15 tools providing comprehensive web application interaction capabilities per SPEC-050**, **enhanced RBAC permissions with cluster-wide read-only access enabling comprehensive diagnostic capabilities across all namespaces**, **risk-tier admission control with GATEWAY_MUTATING_TOOLS_ENABLED for secure mutating tool registration**, **bounded mutating tool support with k8s.delete_pod for controlled pod restart operations**, **enhanced request correlation through x-request-id header forwarding enabling end-to-end audit trail tracking**, and **flow-based approval system with semantic confirmation cards providing meaningful workflow context for operators**.
 
-This architectural change improves ownership alignment, security boundaries, and maintainability while preserving all external contracts and functionality. The transition from namespaced Role to cluster-wide ClusterRole significantly enhances operational capabilities while maintaining strict read-only access controls. The introduction of risk-tier admission control ensures that mutating operations require explicit authorization through both environment configuration and policy enforcement. The enhanced request correlation capabilities ensure that every tool invocation can be traced end-to-end through downstream services, providing comprehensive audit trail visibility. The expanded browser connector extends the platform's capabilities to interact with web applications through a bounded, secure interface with comprehensive security controls including origin allowlisting, flow binding, credential masking, cross-origin frame denial, JavaScript evaluation mutation guards, and file upload path allowlisting.
+This architectural change improves ownership alignment, security boundaries, and maintainability while preserving all external contracts and functionality. The transition from namespaced Role to cluster-wide ClusterRole significantly enhances operational capabilities while maintaining strict read-only access controls. The introduction of risk-tier admission control ensures that mutating operations require explicit authorization through both environment configuration and policy enforcement. The enhanced request correlation capabilities ensure that every tool invocation can be traced end-to-end through downstream services, providing comprehensive audit trail visibility. The expanded browser connector extends the platform's capabilities to interact with web applications through a bounded, secure interface with comprehensive security controls including origin allowlisting, flow binding, credential masking, cross-origin frame denial, JavaScript evaluation mutation guards, and file upload path allowlisting. The new flow-based approval system transforms operator experience by displaying workflow intent ("Reset User Password in Admin Portal") rather than bare tool actions, making approval decisions more meaningful and reducing cognitive load during critical operations.
 
 ## Appendices
 
@@ -1163,6 +1228,42 @@ The browser connector provides comprehensive web application interaction capabil
 - [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [test_browser_connector.py](file://products/tool-gateway/tests/test_browser_connector.py)
 
+### Enhanced Flow-Based Approval System Implementation
+The flow-based approval system implements semantic confirmation cards that provide operators with meaningful workflow context for approval decisions:
+
+**Core Implementation**:
+- **FlowState Enhancement**: Added `title` and `description` fields to FlowState class for human-readable workflow context
+- **Semantic Card Rendering**: Operator portal displays workflow intent ("Reset User Password in Admin Portal") instead of bare tool actions
+- **Flow Context Persistence**: Maintains flow context across owner→approver identity switches during HITL workflows
+- **Origin Deviation Detection**: Prevents interactions on pages that drift from approved flow origins
+- **Skill Metadata Integration**: Carries skill frontmatter (title, description) through the approval pipeline
+
+**Technical Details**:
+- FlowState.to_dict() includes title/description fields for portal consumption
+- bind_flow() populates FlowState with skill metadata from fetched skill records
+- Web navigate returns flow context in data["flow"] for kernel processing
+- Operator portal renders flow headline above tool detail in confirmation cards
+- Durable confirmation records persist flow_summary for replay and audit trails
+
+**Security Benefits**:
+- Operators approve meaningful workflow actions rather than opaque tool calls
+- Flow binding ensures approvals are scoped to specific skill declarations
+- Deviation guard prevents off-origin interactions from executing under previous approvals
+- Origin re-checks ensure captured content matches approved flow boundaries
+
+**Testing Coverage**:
+- FlowState title/description field validation
+- bind_flow metadata population testing
+- Portal semantic card rendering verification
+- Flow context persistence across identity switches
+- Origin deviation detection effectiveness
+
+**Section sources**
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [transcript.ts](file://products/operator-portal/web-ui/app/src/chat/transcript.ts)
+
 ### Policy Definition Examples
 YAML-based policy definitions control access to tools and operations with enhanced permissions:
 - Rule-based access control with conditions
@@ -1211,8 +1312,9 @@ When developing custom tools:
 - **Understand that write/admin tools require GATEWAY_MUTATING_TOOLS_ENABLED and tools:mutate policy permission**
 - **For skills tools, request_id will be automatically forwarded to downstream services for audit correlation**
 - **For browser tools, understand flow binding requirements, origin allowlist constraints, and comprehensive security controls**
+- **For browser tools with flow binding, understand flow-based approval semantics and semantic confirmation cards**
 
-**Updated** Added guidance for risk-level classification, mutating tool requirements, request correlation capabilities, and expanded browser connector integration with 15 tools and comprehensive security controls
+**Updated** Added guidance for risk-level classification, mutating tool requirements, request correlation capabilities, expanded browser connector integration with 15 tools and comprehensive security controls, and flow-based approval system integration
 
 **Section sources**
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
@@ -1230,6 +1332,7 @@ When developing custom tools:
 - **Risk-tier admission control preventing unauthorized access to mutating tools**
 - **Enhanced request correlation with x-request-id header forwarding for audit trail continuity**
 - **Expanded browser connector security controls including origin allowlist, flow binding, credential masking, cross-origin frame denial, JavaScript evaluation mutation guards, and file upload path allowlisting**
+- **Flow-based approval system security controls including origin deviation detection and flow context validation**
 - Input validation and sanitization
 - Policy-based access control with enhanced tool permissions including tools:mutate
 - Secure configuration management
@@ -1246,8 +1349,9 @@ When developing custom tools:
 - **Credential set validation and secure file loading**
 - **JavaScript expression mutation guard blocking known state-changing DOM APIs**
 - **File upload path traversal prevention with directory allowlisting**
+- **Flow context validation ensuring approvals are scoped to specific skill declarations**
 
-**Updated** Enhanced security model with risk-tier admission control, improved cluster-wide RBAC permissions, enhanced request correlation capabilities, and comprehensive browser connector security controls including SPEC-050 additions
+**Updated** Enhanced security model with risk-tier admission control, improved cluster-wide RBAC permissions, enhanced request correlation capabilities, comprehensive browser connector security controls including SPEC-050 additions, and flow-based approval system security controls
 
 **Section sources**
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
@@ -1281,9 +1385,10 @@ When developing custom tools:
 - **Monitor credential set access patterns and file reload events**
 - **Monitor JavaScript evaluation mutation guard effectiveness**
 - **Track file upload path allowlisting violations and traversal attempts**
-- **Monitor cross-origin frame denial effectiveness and iframe traversal attempts**
+- **Monitor flow-based approval system effectiveness and semantic card rendering**
+- **Track flow context persistence and origin deviation detection accuracy**
 
-**Updated** Enhanced monitoring strategies with risk-tier admission control, cluster-wide access monitoring, request correlation monitoring, and comprehensive browser connector metrics including SPEC-050 security controls
+**Updated** Enhanced monitoring strategies with risk-tier admission control, cluster-wide access monitoring, request correlation monitoring, comprehensive browser connector metrics including SPEC-050 security controls, and flow-based approval system monitoring
 
 **Section sources**
 - [metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
@@ -1527,3 +1632,40 @@ The SPEC-050 implementation expands the browser tool surface from 6 to 15 tools 
 - [test_browser_connector.py](file://products/tool-gateway/tests/test_browser_connector.py)
 - [2026-09-04-spec-050-browser-tools-expansion-and-samples.md](file://docs/agentic-aiops-platform/release-notes/2026-09-04-spec-050-browser-tools-expansion-and-samples.md)
 - [spec.md](file://docs/specs/SPEC-050-browser-tools-expansion-and-samples/spec.md)
+
+### SPEC-051 Flow-Based Approval System Implementation
+The SPEC-051 implementation provides flow-based approval semantics with semantic confirmation cards:
+
+**Implementation Details**:
+- **FlowState Enhancement**: Added `title` and `description` fields for human-readable workflow context
+- **Semantic Card Rendering**: Operator portal displays workflow intent ("Reset User Password in Admin Portal") instead of bare tool actions
+- **Flow Context Persistence**: Maintains flow context across owner→approver identity switches during HITL workflows
+- **Origin Deviation Detection**: Prevents interactions on pages that drift from approved flow origins
+- **Skill Metadata Integration**: Carries skill frontmatter (title, description) through the approval pipeline
+
+**Technical Implementation**:
+- FlowState.to_dict() includes title/description fields for portal consumption
+- bind_flow() populates FlowState with skill metadata from fetched skill records
+- Web navigate returns flow context in data["flow"] for kernel processing
+- Operator portal renders flow headline above tool detail in confirmation cards
+- Durable confirmation records persist flow_summary for replay and audit trails
+
+**Security Benefits**:
+- Operators approve meaningful workflow actions rather than opaque tool calls
+- Flow binding ensures approvals are scoped to specific skill declarations
+- Deviation guard prevents off-origin interactions from executing under previous approvals
+- Origin re-checks ensure captured content matches approved flow boundaries
+
+**Testing Coverage**:
+- FlowState title/description field validation
+- bind_flow metadata population testing
+- Portal semantic card rendering verification
+- Flow context persistence across identity switches
+- Origin deviation detection effectiveness
+
+**Section sources**
+- [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [transcript.ts](file://products/operator-portal/web-ui/app/src/chat/transcript.ts)
+- [SPEC-051 spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)

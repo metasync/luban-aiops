@@ -1,5 +1,0 @@
-- Every spec follows a fixed three-file structure — `plan.md` for sequencing, `spec.md` for requirements and acceptance criteria, `tasks.md` for implementation tasks — so readers can navigate any spec uniformly.
-- Requirements are numbered R-1, R-2, … and each carries explicit acceptance criteria phrased as testable signals rather than prose goals.
-- Specs enumerate a dedicated `Impact` section listing every touched product, contract schema, and deployment artifact before implementation begins.
-- A `Changelog` section inside each spec records date-stamped status transitions (draft → approved → delivered) and open-question resolutions, keeping living state alongside the static requirements.
-- Security-sensitive configuration is modeled as environment variables or K8s Secrets (e.g. `IDENTITY_JWT_PRIVATE_KEY_PATH`, `GATEWAY_SERVICE_CLIENT_SECRET`, `AGENT_EXECUTION_SIGNING_KEY`) rather than inline defaults, with dev-only fallbacks called out explicitly.

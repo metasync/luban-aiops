@@ -1,1 +1,0 @@
-Specification documents defining the platform's deny-by-default policy enforcement, tiered require-approval semantics, and policy testing/rollout controls for the gateway policy engines.

@@ -40,6 +40,7 @@
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [incident_report.py](file://products/agent-platform/src/agent_service/services/incident_report.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
 - [models.py](file://products/platform-gateway/src/platform_gateway/api/routes/models.py)
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
@@ -68,6 +69,7 @@
 - [test_document_prose.py](file://products/agent-platform/tests/test_document_prose.py)
 - [test_documents.py](file://products/agent-platform/tests/test_documents.py)
 - [test_documents_repository.py](file://products/platform-gateway/tests/test_documents_repository.py)
+- [test_flow_approvals.py](file://products/agent-platform/tests/test_flow_approvals.py)
 - [spec.md](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md)
 - [decision-sync-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-26-decision-sync-arrival-polish.md)
 - [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
@@ -88,12 +90,12 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced runtime kernel HITL confirmation handling to support expanded browser tool surface with improved pending decision polling and transcript handling for write-tier operations
-- Updated confirmation request payload serialization to include display hints for browser interaction tools (web.click, web.type, web.select, web.press_key, web.upload_file)
-- Improved session transcript reconstruction with blank-line block joining for proper markdown rendering of resumed content after decisions
-- Enhanced decision sync robustness with time-based settle windows and progressive arrival presentation for better user experience
-- Updated browser tool risk classification to properly reflect write-tier operations in evidence and confirmation flows
-- Added comprehensive test coverage for browser tool expansion scenarios and confirmation card anchoring improvements
+- Added comprehensive flow authority management with 240+ lines of enhanced runtime kernel integration including build_flow_request function, flow approval system integration, and TTL-based flow authorities
+- Integrated new flow_approvals.py service (244 lines) implementing session-scoped flow context and approval tracking with FlowContextStore and FlowApprovalStore
+- Enhanced execution signing capabilities with flow request building for isolated tool execution workflows
+- Added browser write tools classification and BROWSER_WRITE_TOOLS constant for proper risk assessment
+- Updated middleware stack to include flow signing capability through GatewayPermissionMiddleware
+- Implemented process-wide singletons for flow contexts and approvals with TTL-based expiration handling
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -111,26 +113,27 @@
 13. [Session Store Enhancements](#session-store-enhancements)
 14. [Enhanced Transcript Reconstruction](#enhanced-transcript-reconstruction)
 15. [HITL Confirmation Registry Integration](#hitl-confirmation-registry-integration)
-16. [Enhanced Streaming Architecture](#enhanced-streaming-architecture)
-17. [Voice Readiness Support](#voice-readiness-support)
-18. [Per-Request Trace Queues](#per-request-trace-queues)
-19. [Delegated Token Management](#delegated-token-management)
-20. [Evidence Store Service](#evidence-store-service)
-21. [Model Catalog Service](#model-catalog-service)
-22. [Live Model Discovery Service](#live-model-discovery-service)
-23. [Multi-Model Runtime Capability](#multi-model-runtime-capability)
-24. [Decision Sync Robustness](#decision-sync-robustness)
-25. [Browser Tool Surface Expansion](#browser-tool-surface-expansion)
-26. [Dependency Analysis](#dependency-analysis)
-27. [Performance Considerations](#performance-considerations)
-28. [Troubleshooting Guide](#troubleshooting-guide)
-29. [Conclusion](#conclusion)
-30. [Appendices](#appendices)
+16. [Flow Authority Management](#flow-authority-management)
+17. [Enhanced Streaming Architecture](#enhanced-streaming-architecture)
+18. [Voice Readiness Support](#voice-readiness-support)
+19. [Per-Request Trace Queues](#per-request-trace-queues)
+20. [Delegated Token Management](#delegated-token-management)
+21. [Evidence Store Service](#evidence-store-service)
+22. [Model Catalog Service](#model-catalog-service)
+23. [Live Model Discovery Service](#live-model-discovery-service)
+24. [Multi-Model Runtime Capability](#multi-model-runtime-capability)
+25. [Decision Sync Robustness](#decision-sync-robustness)
+26. [Browser Tool Surface Expansion](#browser-tool-surface-expansion)
+27. [Dependency Analysis](#dependency-analysis)
+28. [Performance Considerations](#performance-considerations)
+29. [Troubleshooting Guide](#troubleshooting-guide)
+30. [Conclusion](#conclusion)
+31. [Appendices](#appendices)
 
 ## Introduction
 The Agent Platform Service is the core orchestration engine of the Luban AIOps Platform. It provides a runtime kernel for agent execution, a provider registry for multi-model backends (OpenAI, DashScope, DeepSeek, and Luban), and robust session management with durable storage. The service exposes REST APIs for agent interactions, streaming responses, and configuration management, enabling scalable and observable AI operations across diverse model providers.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs, role-based access controls, and deterministic counts-only summaries computed at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.** **Critical Security Fix v0.21.1**: Implemented envelope-only document listings for GET /documents endpoint, ensuring cross-owner reads are properly audited by stripping sensitive fields from list responses while maintaining full content access through single-document fetch endpoints. **SPEC-041 Enhancement**: Added deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Added AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic. **SPEC-043 Enhancement**: Added incident report document type support with dedicated incident service integration, dual-action authorization gates, and structured error handling for incident-specific workflows. **SPEC-050 Enhancement**: Enhanced browser tool surface with expanded write-tier operations, improved pending decision polling, and better transcript handling for browser interaction tools including web.click, web.type, web.select, web.press_key, and web.upload_file with human-readable element descriptions.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs, role-based access controls, and deterministic counts-only summaries computed at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.** **Critical Security Fix v0.21.1**: Implemented envelope-only document listings for GET /documents endpoint, ensuring cross-owner reads are properly audited by stripping sensitive fields from list responses while maintaining full content access through single-document fetch endpoints. **SPEC-041 Enhancement**: Added deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Added AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic. **SPEC-043 Enhancement**: Added incident report document type support with dedicated incident service integration, dual-action authorization gates, and structured error handling for incident-specific workflows. **SPEC-050 Enhancement**: Enhanced browser tool surface with expanded write-tier operations, improved pending decision polling, and better transcript handling for browser interaction tools including web.click, web.type, web.select, web.press_key, and web.upload_file with human-readable element descriptions. **NEW FLOW AUTHORITY MANAGEMENT**: Added comprehensive flow authority management with 240+ lines of enhanced runtime kernel integration including build_flow_request function, flow approval system integration, and TTL-based flow authorities for secure isolated tool execution workflows.
 
 ## Project Structure
 The Agent Platform Service is implemented as a Python FastAPI application organized by feature layers:
@@ -146,6 +149,7 @@ The Agent Platform Service is implemented as a Python FastAPI application organi
 - **Incident report service with incident service client, digest assembly, and dual-action authorization**
 - **Shift summary digest assembly from multiple durable stores with handover skeleton computation**
 - **Optional prose generation with fail-soft behavior, prompt safety, and AI-generated blurb extraction**
+- **Flow authority management with session-scoped flow context and approval tracking**
 - Execution worker client for isolated tool execution with fail-closed behavior
 - Execution record persistence for signed execution lifecycle tracking
 - Tools and integrations
@@ -189,6 +193,11 @@ shift_sum["services/shift_summary.py"]
 doc_prose["services/document_prose.py"]
 inc_client["services/incident_client.py"]
 inc_report["services/incident_report.py"]
+end
+subgraph "Flow Authorities"
+flow_approvals["services/flow_approvals.py"]
+flow_contexts["FlowContextStore"]
+flow_approvals_store["FlowApprovalStore"]
 end
 subgraph "Execution"
 exec_worker["services/execution_worker_client.py"]
@@ -248,6 +257,9 @@ kernel --> ev_store
 kernel --> model_cat
 kernel --> exec_worker
 kernel --> exec_records
+kernel --> flow_approvals
+kernel --> flow_contexts
+kernel --> flow_approvals_store
 gw_tools --> exec_worker
 exec_worker --> exec_runtime
 model_disc --> model_cat
@@ -261,6 +273,9 @@ shift_sum --> metrics
 doc_prose --> metrics
 inc_client --> metrics
 inc_report --> metrics
+flow_approvals --> metrics
+flow_contexts --> metrics
+flow_approvals_store --> metrics
 app --> metrics
 app --> obs
 app --> tel
@@ -301,6 +316,7 @@ settings --> env
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
 - [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [incident_report.py](file://products/agent-platform/src/agent_service/services/incident_report.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
@@ -320,6 +336,7 @@ settings --> env
 - **Incident Report Service**: Provides specialized document type for incident analysis with incident service integration, dual-action authorization gates, and structured error handling for incident-specific workflows.
 - **Shift Summary Assembly**: Builds deterministic digests from multiple durable stores with role-based coverage, provenance tracking, and handover skeleton generation for summary computation.
 - **Optional Prose Generation**: Generates AI-powered narratives from digests with fail-soft behavior, prompt safety guarantees, and AI-generated blurb extraction using SUMMARY marker format.
+- **Flow Authority Management**: Implements session-scoped flow context and approval tracking with TTL-based authorities for secure isolated tool execution workflows.
 - **Execution Worker Client**: Provides isolated execution of approved mutating tools through the execution-runtime service with fail-closed behavior, signature verification, and receipt tracking.
 - **Execution Record Store**: Persists signed execution request/receipt lifecycle with durable storage and first-write-wins semantics for late arrivals.
 - Enhanced Confirmation Records: Provides persistent storage for HITL confirmation lifecycle with turn_index field support, idempotent resolution, startup sweep scoping, and cross-replica consistency guarantees.
@@ -336,6 +353,7 @@ Key responsibilities:
 - Evidence Capture: Persist tool_call and tool_result frames with size caps and automatic eviction.
 - **Document Creation**: Generate typed operation documents with deterministic digests, optional prose summaries with AI-generated blurbs, deterministic counts-only summaries derived from handover skeletons, and role-based access controls.
 - **Incident Report Creation**: Generate incident report documents with incident service integration, dual-action authorization, and structured error handling.
+- **Flow Authority Management**: Manage session-scoped flow contexts and approvals with TTL-based expiration for secure isolated tool execution.
 - **Role-Based Access**: Enforce owner-only draft visibility and team-wide published document access with envelope-only listings for security.
 - **Isolated Execution**: Route approved mutating tool calls to execution-runtime service with signature verification and receipt tracking.
 - **Enhanced Confirmation Record Management**: Persist parked confirmations with turn_index anchoring, idempotent resolution, startup sweep scoping, and cross-replica consistency.
@@ -355,7 +373,7 @@ Key responsibilities:
 - HITL Integration: Support human-in-the-loop workflows with parked confirmation management and durable state.
 - Observability: Emit structured logs, metrics, and traces for each operation with per-request audit trails.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs using SUMMARY marker format, role-based access controls with draft/published states, envelope-only listings for security, and deterministic counts-only summaries computed from handover skeletons at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.** **SPEC-043 Enhancement**: Added incident report document type support with dedicated incident service client, dual-action authorization gates requiring both documents:create and incident:read permissions, structured error handling for incident service dependencies, and comprehensive test coverage for incident-specific workflows. **SPEC-050 Enhancement**: Enhanced browser tool surface with expanded write-tier operations including web.click, web.type, web.select, web.press_key, and web.upload_file, with improved pending decision polling and transcript handling for browser interaction tools featuring human-readable element descriptions and proper risk classification.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs using SUMMARY marker format, role-based access controls with draft/published states, envelope-only listings for security, and deterministic counts-only summaries computed from handover skeletons at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.** **Critical Security Fix v0.21.1**: Implemented envelope-only document listings for GET /documents endpoint to ensure cross-owner reads are properly audited by stripping sensitive fields from list responses while maintaining full content access through single-document fetch endpoints. **SPEC-041 Enhancement**: Added deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Added AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic. **SPEC-043 Enhancement**: Added incident report document type support with dedicated incident service client, dual-action authorization gates requiring both documents:create and incident:read permissions, structured error handling for incident service dependencies, and comprehensive test coverage for incident-specific workflows. **SPEC-050 Enhancement**: Enhanced browser tool surface with expanded write-tier operations including web.click, web.type, web.select, web.press_key, and web.upload_file, with improved pending decision polling and transcript handling for browser interaction tools featuring human-readable element descriptions and proper risk classification. **NEW FLOW AUTHORITY MANAGEMENT**: Added comprehensive flow authority management with 240+ lines of enhanced runtime kernel integration including build_flow_request function, flow approval system integration, and TTL-based flow authorities for secure isolated tool execution workflows with session-scoped flow context and approval tracking.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -367,6 +385,7 @@ Key responsibilities:
 - [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
@@ -390,6 +409,7 @@ The service follows a layered architecture with enhanced security and anti-hallu
 - **Incident report service provides specialized document type with incident service integration, dual-action authorization gates, and structured error handling for incident-specific workflows**.
 - **Shift summary assembly builds deterministic digests from multiple durable stores with provenance tracking, role-based coverage, and handover skeleton generation for summary computation**.
 - **Optional prose generation creates AI-powered narratives from digests with fail-soft behavior, prompt safety guarantees, and AI-generated blurb extraction using SUMMARY marker format**.
+- **Flow authority management implements session-scoped flow context and approval tracking with TTL-based authorities for secure isolated tool execution workflows**.
 - **Execution worker client provides isolated execution of approved mutating tools through the execution-runtime service with fail-closed behavior and signature verification**.
 - **Execution record store persists signed execution request/receipt lifecycle with durable storage and first-write-wins semantics**.
 - Enhanced confirmation record store provides durable HITL confirmation lifecycle management with turn_index field support, idempotent resolution, and cross-replica consistency.
@@ -411,6 +431,7 @@ participant ShiftSum as "ShiftSummary"
 participant IncClient as "IncidentClient"
 participant IncReport as "IncidentReport"
 participant DocProse as "DocumentProse"
+participant FlowAuth as "FlowAuthorityManager"
 participant ExecWorker as "ExecutionWorkerClient"
 participant ExecRuntime as "ExecutionRuntime"
 participant ConfirmStore as "ConfirmationRecordStore"
@@ -450,9 +471,11 @@ else Authorization denied
 API-->>Gateway : 403 Forbidden
 Gateway-->>Client : 403 Forbidden
 end
-Note over ExecWorker : Isolated Execution Flow
+Note over ExecWorker : Isolated Execution Flow with Flow Authority
 Client->>API : Chat with approved mutating tool
 API->>Kernel : execute(message, sessionId, bearerToken)
+Kernel->>FlowAuth : Check flow authority for session
+FlowAuth-->>Kernel : Flow approval status
 Kernel->>ExecWorker : handoff(envelope, arguments, delegated_token)
 ExecWorker->>ExecRuntime : POST /api/v1/executions/handoff
 ExecRuntime->>ExecRuntime : verify signature & digest
@@ -464,7 +487,7 @@ ExecRecords-->>Kernel : execution recorded
 end
 ```
 
-**Updated** The sequence diagram now shows the complete multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated validation, and the full model resolution hierarchy (request > pinned > default). **It also includes the incident report document creation flow with dual-action authorization gates requiring both documents:create and incident:read permissions, incident service client integration with structured error handling, and comprehensive degradation strategies for dependency failures.** **It also includes the document repository workflow with shift summary digest assembly, deterministic counts-only summary computation from handover skeletons, optional prose generation with AI-generated blurb extraction using SUMMARY marker format, persistent document storage with role-based access controls, envelope-only listings for security, and PostgreSQL migration support for the summary and blurb columns.** **It also includes the execution worker integration for isolated tool execution with signature verification and receipt tracking, enhanced confirmation record storage layer with turn_index field support for precise confirmation card anchoring, idempotent resolution, startup sweep scoping to prevent sibling replica interference, and cross-replica consistency guarantees.** **SPEC-050 Enhancement**: Added browser tool surface expansion with improved pending decision polling and transcript handling for write-tier operations, supporting human-readable element descriptions for browser interaction tools.
+**Updated** The sequence diagram now shows the complete multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated validation, and the full model resolution hierarchy (request > pinned > default). **It also includes the incident report document creation flow with dual-action authorization gates requiring both documents:create and incident:read permissions, incident service client integration with structured error handling, and comprehensive degradation strategies for dependency failures.** **It also includes the document repository workflow with shift summary digest assembly, deterministic counts-only summary computation from handover skeletons, optional prose generation with AI-generated blurb extraction using SUMMARY marker format, persistent document storage with role-based access controls, envelope-only listings for security, and PostgreSQL migration support for the summary and blurb columns.** **It also includes the flow authority management with session-scoped flow context and approval tracking, TTL-based authorities for secure isolated tool execution, and comprehensive flow approval system integration.** **It also includes the execution worker integration for isolated tool execution with signature verification and receipt tracking, enhanced confirmation record storage layer with turn_index field support for precise confirmation card anchoring, idempotent resolution, startup sweep scoping to prevent sibling replica interference, and cross-replica consistency guarantees.** **SPEC-050 Enhancement**: Added browser tool surface expansion with improved pending decision polling and transcript handling for write-tier operations, supporting human-readable element descriptions for browser interaction tools.
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -477,6 +500,7 @@ end
 - [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
@@ -504,8 +528,9 @@ The runtime kernel is the central orchestrator for agent execution with enhanced
 - Anti-hallucination guard system with NO_TOOLS_NOTICE injection
 - Auto-approval mechanism for vetted read-only tools to prevent headless stream stalls
 - Voice readiness support through input_modality parameter passthrough
-- **Isolated execution routing for approved mutating tools through execution-runtime service**
+- **Isolated execution routing for approved mutating tools through execution-runtime service with flow authority management**
 - **Enhanced durable confirmation management with turn_index field support, idempotent resolution, and cross-replica consistency**
+- **Flow authority management with session-scoped flow context and approval tracking using TTL-based authorities**
 
 ```mermaid
 classDiagram
@@ -533,6 +558,7 @@ class AgentKernel {
 +_build_model(model_id)
 +_build_confirmation_frame(event, session_id, user_name, toolkit, turn_index)
 +_prepare_executions(pending, user_name, confirmed, request_id, session_id)
++_sign_flow_execution(flow_request)
 }
 class SessionService {
 +load(sessionId)
@@ -579,6 +605,14 @@ class DocumentProse {
 +generate_prose(kernel, document_type, digest)
 +build_prose_prompt(document_type, digest)
 +parse_blurb(text)
+}
+class FlowAuthorityManager {
+<<interface>>
++check_flow_authorization(session_id)
++record_approval(session_id, confirm_id, owner_user_id, decider_user_id, skill_id, origin, ttl)
++has_approval(session_id)
++clear(session_id)
++clear_all()
 }
 class ExecutionWorkerClient {
 <<interface>>
@@ -647,6 +681,7 @@ AgentKernel --> IncidentClient : "fetches incident bundles"
 AgentKernel --> IncidentReport : "assembles incident digests"
 AgentKernel --> ShiftSummary : "generates digests"
 AgentKernel --> DocumentProse : "generates prose"
+AgentKernel --> FlowAuthorityManager : "manages flow authorities"
 AgentKernel --> ExecutionWorkerClient : "routes approved mutations"
 AgentKernel --> ExecutionRecordStore : "persists execution records"
 AgentKernel --> ConfirmationRecordStore : "persists confirmations"
@@ -654,13 +689,15 @@ AgentKernel --> EvidenceStore : "persists evidence"
 AgentKernel --> ModelCatalog : "resolves models"
 AgentKernel --> ProviderRegistry : "uses"
 AgentKernel --> GatewayTools : "manages"
+FlowAuthorityManager --> FlowContextStore : "manages contexts"
+FlowAuthorityManager --> FlowApprovalStore : "manages approvals"
 ModelDiscovery --> ModelCatalog : "updates"
 ProviderRegistry --> ModelProvider : "manages"
 GatewayTools --> ModelProvider : "secure invocation"
 GatewayTools --> ExecutionWorkerClient : "isolated execution"
 ```
 
-**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, enhanced session management methods for multi-session workspace operations and model pinning, evidence capture and persistence for tool execution frames, model normalization for legacy provider name aliases, voice readiness support through input_modality parameter passthrough, **isolated execution routing for approved mutating tools through the execution-runtime service with signature verification and receipt tracking, enhanced durable confirmation management with turn_index field support, idempotent resolution, and cross-replica consistency guarantees, and incident report document type support with dedicated incident service client integration and dual-action authorization enforcement.** **SPEC-050 Enhancement**: Enhanced browser tool surface with improved pending decision polling and transcript handling for write-tier operations, supporting human-readable element descriptions for browser interaction tools like web.click, web.type, web.select, web.press_key, and web.upload_file.
+**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, enhanced session management methods for multi-session workspace operations and model pinning, evidence capture and persistence for tool execution frames, model normalization for legacy provider name aliases, voice readiness support through input_modality parameter passthrough, **isolated execution routing for approved mutating tools through the execution-runtime service with signature verification, receipt tracking, and comprehensive flow authority management, enhanced durable confirmation management with turn_index field support, idempotent resolution, and cross-replica consistency guarantees, and incident report document type support with dedicated incident service client integration and dual-action authorization enforcement.** **NEW FLOW AUTHORITY MANAGEMENT**: Added comprehensive flow authority management with 240+ lines of enhanced runtime kernel integration including build_flow_request function, flow approval system integration, and TTL-based flow authorities for secure isolated tool execution workflows with session-scoped flow context and approval tracking. **SPEC-050 Enhancement**: Enhanced browser tool surface with improved pending decision polling and transcript handling for write-tier operations, supporting human-readable element descriptions for browser interaction tools like web.click, web.type, web.select, web.press_key, and web.upload_file.
 
 **Diagram sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -670,6 +707,7 @@ GatewayTools --> ExecutionWorkerClient : "isolated execution"
 - [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
@@ -682,6 +720,136 @@ GatewayTools --> ExecutionWorkerClient : "isolated execution"
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+
+### Flow Authority Management
+
+#### Overview
+The flow authority management system provides comprehensive session-scoped flow context and approval tracking with TTL-based authorities for secure isolated tool execution workflows. This enhancement addresses the need for granular control over tool execution flows within specific sessions, ensuring that only authorized operations can proceed within their designated time windows.
+
+#### Key Features
+- **Session-Scoped Flow Context**: Each session maintains its own flow context with isolated approval tracking
+- **TTL-Based Authorities**: Flow approvals expire after configured time periods to prevent indefinite access
+- **Process-Wide Singletons**: Flow contexts and approvals are managed through process-wide singletons for efficient sharing
+- **BROWSER_WRITE_TOOLS Classification**: Proper classification of browser interaction tools as write-tier operations requiring confirmation
+- **Build Flow Request Function**: Comprehensive flow request building for isolated tool execution workflows
+- **Approval Tracking**: Complete tracking of flow approvals with owner and decider user identification
+- **Expiration Handling**: Automatic expiration of flow authorities with safe failure modes
+
+#### Flow Approval Architecture
+```mermaid
+flowchart TD
+A["Tool Execution Request"] --> B{"Check Flow Authority"}
+B --> C{"Session Has Active Approval?"}
+C --> |Yes| D["Execute Tool Call"]
+C --> |No| E{"Requires Confirmation?"}
+E --> |Yes| F["Park for Human Approval"]
+E --> |No| G["Execute Directly"]
+F --> H["Await User Decision"]
+H --> I{"Decision Received?"}
+I --> |Approve| J["Record Flow Approval"]
+I --> |Deny| K["Reject Execution"]
+J --> L["Set TTL-Based Authority"]
+L --> M["Execute Tool Call"]
+D --> N["Complete Execution"]
+G --> N
+K --> O["Return Rejection"]
+M --> N
+```
+
+**Diagram sources**
+- [flow_approvals.py:176-244](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L176-L244)
+- [runtime_kernel.py:40-44](file://products/agent-platform/src/agent_service/runtime_kernel.py#L40-L44)
+
+#### Flow Context Store Implementation
+The FlowContextStore manages session-scoped flow contexts with comprehensive approval tracking:
+
+```mermaid
+sequenceDiagram
+participant Client as "Client"
+participant Kernel as "RuntimeKernel"
+participant FlowStore as "FlowContextStore"
+participant ApprovalStore as "FlowApprovalStore"
+Note over Client,ApprovalStore : Flow Authority Management
+Client->>Kernel : Execute tool with session_id
+Kernel->>FlowStore : get(session_id)
+FlowStore-->>Kernel : FlowContext or None
+alt No active approval
+Kernel->>ApprovalStore : has_approval(session_id)
+ApprovalStore-->>Kernel : False
+Kernel->>Kernel : Park for human approval
+Kernel->>ApprovalStore : record_approval(...)
+ApprovalStore-->>Kernel : FlowApproval with TTL
+Kernel->>Kernel : Set TTL-based authority
+else Active approval exists
+Kernel->>Kernel : Proceed with execution
+end
+Kernel-->>Client : Tool execution result
+```
+
+**Diagram sources**
+- [flow_approvals.py:241-244](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L241-L244)
+- [flow_approvals.py:188-208](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L188-L208)
+
+#### TTL-Based Expiration Handling
+Flow authorities use TTL-based expiration to ensure temporary access:
+
+```mermaid
+flowchart TD
+A["Flow Approval Recorded"] --> B["Set approved_at timestamp"]
+B --> C["Configure TTL period"]
+C --> D{"Check if expired?"}
+D --> |No| E["Allow execution"]
+D --> |Yes| F["Reject execution"]
+E --> G["Execute tool call"]
+F --> H["Return unauthorized"]
+G --> I["Complete execution"]
+H --> J["Log rejection"]
+```
+
+**Diagram sources**
+- [flow_approvals.py:188-208](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L188-L208)
+- [test_flow_approvals.py:168-184](file://products/agent-platform/tests/test_flow_approvals.py#L168-L184)
+
+#### Browser Write Tools Classification
+The system includes proper classification for browser interaction tools as write-tier operations:
+
+```mermaid
+flowchart TD
+A["Browser Tool Invocation"] --> B{"Tool Type?"}
+B --> |web.click| C["Write-Tier Operation"]
+B --> |web.type| D["Write-Tier Operation"]
+B --> |web.select| E["Write-Tier Operation"]
+B --> |web.press_key| F["Write-Tier Operation"]
+B --> |web.upload_file| G["Write-Tier Operation"]
+C --> H["Require Flow Authority"]
+D --> H
+E --> H
+F --> H
+G --> H
+H --> I["Check Flow Approval"]
+I --> J{"Has Active Approval?"}
+J --> |Yes| K["Execute Tool"]
+J --> |No| L["Park for Approval"]
+```
+
+**Diagram sources**
+- [flow_approvals.py:40-44](file://products/agent-platform/src/agent_service/runtime_kernel.py#L40-L44)
+- [flow_approvals.py:176-244](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L176-L244)
+
+#### Test Coverage
+The implementation includes comprehensive test coverage for flow authority scenarios:
+
+- **TTL Expiration Testing**: Validates proper expiration behavior for various TTL values
+- **Zero TTL Handling**: Tests that TTL <= 0 disables flow unlock for security
+- **Negative TTL Support**: Handles negative TTL values as expired authorities
+- **Stale Approval Detection**: Verifies detection of expired approvals based on timestamps
+- **Store Operations**: Tests recording, retrieval, and clearing of flow approvals
+- **Session Isolation**: Ensures proper isolation between different session contexts
+
+**Section sources**
+- [flow_approvals.py:1-244](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L244)
+- [runtime_kernel.py:40-44](file://products/agent-platform/src/agent_service/runtime_kernel.py#L40-L44)
+- [test_flow_approvals.py:168-201](file://products/agent-platform/tests/test_flow_approvals.py#L168-L201)
 
 ### Browser Tool Surface Expansion
 
@@ -1148,8 +1316,8 @@ D --> G["Show winner's outcome to loser"]
 ```
 
 **Diagram sources**
-- [confirmation_records.py:262-274](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L262-L274)
-- [routes.py:276-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L276-L294)
+- [confirmation_records.py:262-274](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L262-274)
+- [routes.py:276-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L276-294)
 
 #### Startup Sweep Scoping
 The startup sweep is carefully scoped to only close pending confirmations that have exceeded the HITL confirmation TTL, ensuring that sibling replicas' live parks are never expired:
@@ -1191,7 +1359,7 @@ end note
 ```
 
 **Diagram sources**
-- [routes.py:276-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L276-L294)
+- [routes.py:276-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L276-294)
 - [test_confirmation_records.py:413-497](file://products/agent-platform/tests/test_confirmation_records.py#L413-L497)
 
 #### Backend Implementations
@@ -1566,7 +1734,7 @@ Typical endpoints:
 
 Request/response validation uses Pydantic models defined in schemas with enhanced v3 streaming event types.
 
-**Updated** Chat endpoints now accept delegated tokens for secure tool execution and support v3 streaming protocol with tool_call/tool_result frames for comprehensive audit trails. Both POST /chat and GET /chat/stream endpoints accept input_modality parameters for voice-readiness parity. Session endpoints provide multi-session workspace operations with proper authorization, audit trails, and evidence turn retrieval. Model endpoints provide credential-safe enumeration of available models with public schema compliance. **Document endpoints provide complete CRUD operations with role-based access controls, draft/published states, audit trail integration, envelope-only listings for security, deterministic counts-only summaries derived from handover skeletons, and AI-generated one-line blurbs extracted from prose responses. Confirmation endpoints provide structured 409 responses for racing approvers with winner attribution and durable outcome persistence, plus turn_index field support for precise confirmation card anchoring. Incident report document creation enforces dual-action authorization gates requiring both documents:create and incident:read permissions. Browser tool enhancements include improved pending decision polling and transcript handling for write-tier operations with human-readable element descriptions.**
+**Updated** Chat endpoints now accept delegated tokens for secure tool execution and support v3 streaming protocol with tool_call/tool_result frames for comprehensive audit trails. Both POST /chat and GET /chat/stream endpoints accept input_modality parameters for voice-readiness parity. Session endpoints provide multi-session workspace operations with proper authorization, audit trails, and evidence turn retrieval. Model endpoints provide credential-safe enumeration of available models with public schema compliance. **Document endpoints provide complete CRUD operations with role-based access controls, draft/published states, audit trail integration, envelope-only listings for security, deterministic counts-only summaries derived from handover skeletons, and AI-generated one-line blurbs extracted from prose responses. Confirmation endpoints provide structured 409 responses for racing approvers with winner attribution and durable outcome persistence, plus turn_index field support for precise confirmation card anchoring. Incident report document creation enforces dual-action authorization gates requiring both documents:create and incident:read permissions. Browser tool enhancements include improved pending decision polling and transcript handling for write-tier operations with human-readable element descriptions. Flow authority management integrates with execution workflows for secure isolated tool execution with session-scoped approvals and TTL-based authorities.**
 
 **Section sources**
 - [routes.py:106-235](file://products/agent-platform/src/agent_service/api/v2/routes.py#L106-L235)
@@ -1590,6 +1758,7 @@ participant EvStore as "EvidenceStore"
 participant ConfirmStore as "ConfirmationRecordStore"
 participant ExecWorker as "ExecutionWorkerClient"
 participant ExecRuntime as "ExecutionRuntime"
+participant FlowAuth as "FlowAuthorityManager"
 Kernel->>GatewayTools : build_gateway_toolkit(definitions, bearerToken, traceQueue)
 GatewayTools->>External : discover_tools(bearerToken)
 External-->>GatewayTools : availableTools
@@ -1610,6 +1779,9 @@ Kernel->>EvStore : persist evidence frames
 EvStore-->>Kernel : evidence stored
 GatewayTools-->>Kernel : toolResult
 else Approved mutating tool
+GatewayTools->>FlowAuth : Check flow authority
+FlowAuth-->>GatewayTools : Flow approval status
+alt Has flow authority
 GatewayTools->>ExecWorker : handoff(envelope, arguments, delegated_token)
 ExecWorker->>ExecRuntime : POST /api/v1/executions/handoff
 ExecRuntime-->>ExecWorker : result + receipt
@@ -1619,10 +1791,13 @@ Trace-->>Kernel : audit trail data
 Kernel->>EvStore : persist evidence frames
 EvStore-->>Kernel : evidence stored
 GatewayTools-->>Kernel : toolResult
+else No flow authority
+GatewayTools-->>Kernel : Reject execution
+end
 end
 ```
 
-**Updated** The tools integration now includes AgentScope 2.x toolkit registration pattern, per-request trace queues for audit trails, v3 streaming support with tool_call/tool_result frames, auto-approval mechanism for vetted read-only tools, HITL confirmation registry integration with durable storage for interactive workflows, evidence store integration for persistent tool execution records, **isolated execution routing for approved mutating tools through the execution-runtime service with signature verification and receipt tracking, and enhanced confirmation record persistence with turn_index field support, idempotent resolution, and cross-replica consistency**. Voice readiness is maintained throughout the tool execution pipeline. **SPEC-050 Enhancement**: Enhanced browser tool surface with improved pending decision polling and transcript handling for write-tier operations, supporting human-readable element descriptions for browser interaction tools.
+**Updated** The tools integration now includes AgentScope 2.x toolkit registration pattern, per-request trace queues for audit trails, v3 streaming support with tool_call/tool_result frames, auto-approval mechanism for vetted read-only tools, HITL confirmation registry integration with durable storage for interactive workflows, evidence store integration for persistent tool execution records, **isolated execution routing for approved mutating tools through the execution-runtime service with signature verification, receipt tracking, and comprehensive flow authority management, enhanced confirmation record persistence with turn_index field support, idempotent resolution, and cross-replica consistency**. Voice readiness is maintained throughout the tool execution pipeline. **SPEC-050 Enhancement**: Enhanced browser tool surface with improved pending decision polling and transcript handling for write-tier operations, supporting human-readable element descriptions for browser interaction tools. **NEW FLOW AUTHORITY MANAGEMENT**: Added comprehensive flow authority management with session-scoped flow context and approval tracking for secure isolated tool execution workflows.
 
 **Diagram sources**
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
@@ -1632,6 +1807,7 @@ end
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 
 **Section sources**
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
@@ -2405,7 +2581,7 @@ ModelCatalog --> RuntimeSettings : "uses for defaults"
 **Diagram sources**
 - [model_catalog.py:42-61](file://products/agent-platform/src/agent_service/services/model_catalog.py#L42-L61)
 - [model_catalog.py:149-185](file://products/agent-platform/src/agent_service/services/model_catalog.py#L149-L185)
-- [model_catalog.py:223-280](file://products/agent-platform/src/agent_service/services/model_catalog.py#L223-L280)
+- [model_catalog.py:223-280](file://products/agent-platform/src/agent_service/services/model_catalog.py#L223-280)
 
 ### Key Features
 - **Credential-Gated Discovery**: Only providers with resolvable API keys contribute to the catalog
@@ -2712,6 +2888,7 @@ The service has clear separation of concerns with minimal coupling between layer
 - **Incident report service provides specialized document type with incident service integration, dual-action authorization gates, and structured error handling**
 - **Shift summary assembly builds deterministic digests from multiple durable stores with provenance tracking and handover skeleton computation**
 - **Optional prose generation creates AI-powered narratives from digests with fail-soft behavior and AI-generated blurb extraction**
+- **Flow authority management implements session-scoped flow context and approval tracking with TTL-based authorities for secure isolated tool execution**
 - **Execution worker client provides isolated execution through execution-runtime service with fail-closed behavior**
 - **Execution record store provides durable persistence for signed execution lifecycle tracking**
 - **Enhanced confirmation record store provides durable HITL confirmation lifecycle management with turn_index field support and idempotent resolution**
@@ -2731,6 +2908,7 @@ Kernel --> ModelCat["ModelCatalog"]
 Kernel --> Registry["ProviderRegistry"]
 Kernel --> Tools["GatewayTools"]
 Kernel --> Closure["ToolkitClosure"]
+Kernel --> FlowAuth["FlowAuthorityManager"]
 Registry --> Base["BaseProvider"]
 Base --> OpenAI["OpenAIProvider"]
 Base --> DashScope["DashScopeProvider"]
@@ -2765,9 +2943,13 @@ ShiftSum --> Metrics
 DocProse --> Metrics
 IncClient --> Metrics
 IncReport --> Metrics
+FlowAuth --> FlowContexts["FlowContextStore"]
+FlowAuth --> FlowApprovals["FlowApprovalStore"]
+FlowContexts --> Metrics
+FlowApprovals --> Metrics
 ```
 
-**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, **document repository integration with persistent typed documents, role-based access controls, envelope-only listings, deterministic summary generation, and AI-generated blurb extraction using SUMMARY marker format, incident report service integration with incident service client, dual-action authorization gates, and structured error handling, shift summary assembly for deterministic digest generation with handover skeleton computation, optional prose generation with fail-soft behavior and AI-generated blurb extraction, execution worker integration for isolated tool execution with fail-closed behavior and signature verification, execution record persistence for signed execution lifecycle tracking, enhanced confirmation record store with turn_index field support, idempotent resolution, and cross-replica consistency, model catalog service with credential-gated discovery and legacy alias resolution, live model discovery service with background task management, voice-readiness support through input_modality parameter passthrough, and the new Luban provider for self-hosted OpenAI-compatible endpoints.** **SPEC-050 Enhancement**: Added browser tool surface expansion with improved pending decision polling and transcript handling for write-tier operations, supporting human-readable element descriptions for browser interaction tools.
+**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, **document repository integration with persistent typed documents, role-based access controls, envelope-only listings, deterministic summary generation, and AI-generated blurb extraction using SUMMARY marker format, incident report service integration with incident service client, dual-action authorization gates, and structured error handling, shift summary assembly for deterministic digest generation with handover skeleton computation, optional prose generation with fail-soft behavior and AI-generated blurb extraction, flow authority management with session-scoped flow context and approval tracking for secure isolated tool execution, execution worker integration for isolated tool execution with fail-closed behavior and signature verification, execution record persistence for signed execution lifecycle tracking, enhanced confirmation record store with turn_index field support, idempotent resolution, and cross-replica consistency, model catalog service with credential-gated discovery and legacy alias resolution, live model discovery service with background task management, voice-readiness support through input_modality parameter passthrough, and the new Luban provider for self-hosted OpenAI-compatible endpoints.** **SPEC-050 Enhancement**: Added browser tool surface expansion with improved pending decision polling and transcript handling for write-tier operations, supporting human-readable element descriptions for browser interaction tools.
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -2778,6 +2960,7 @@ IncReport --> Metrics
 - [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
@@ -2816,7 +2999,7 @@ IncReport --> Metrics
 - Auto-approval mechanism eliminates permission prompt overhead for vetted read-only tools
 - **Enhanced Workspace Optimization**: Server-side sorting in Postgres backend for efficient session listing
 - **TTL-Aware Operations**: All workspace operations respect session TTL to prevent resource leaks
-- **Fail-Open Design**: Workspace bookkeeping failures don't impact core chat performance
+- **Fail-Open Design**: Workspace bookkeeping failures don't block core chat performance
 - **Enhanced Transcript Extraction**: Best-effort design ensures degraded performance without errors
 - **Voice Readiness**: Input modality parameter adds minimal overhead as metadata-only processing
 - **Evidence Store Optimization**: Size-capped storage with automatic eviction prevents memory bloat
@@ -2875,8 +3058,14 @@ IncReport --> Metrics
 - **Element Reference Mapping**: Efficient lookup of snapshot element references for display hint generation
 - **Confirmation Request Payload**: Optimized serialization of browser tool confirmation requests with display hints
 - **Test Coverage**: Comprehensive testing for browser tool scenarios ensures performance and reliability
+- **Flow Authority Optimization**: Session-scoped flow context management with efficient TTL-based expiration handling
+- **Process-Wide Singletons**: Flow contexts and approvals managed through process-wide singletons for efficient sharing
+- **Browser Write Tools Classification**: Efficient classification of browser interaction tools as write-tier operations
+- **Build Flow Request Function**: Optimized flow request building for isolated tool execution workflows
+- **Approval Tracking**: Efficient approval tracking with owner and decider user identification
+- **Expiration Handling**: Automatic expiration of flow authorities with safe failure modes and minimal overhead
 
-**Updated** Performance considerations now include enhanced multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, model catalog optimization with startup-derived catalog and efficient legacy alias resolution, live model discovery optimization with background task management, multi-tier caching strategies, atomic catalog updates with lock protection, multi-model runtime optimization with priority-based resolution and session-based caching, enhanced confirmation record optimization with turn_index field support, SQL-level idempotency, startup sweep scoping, cross-replica consistency guarantees, Luban provider optimization for self-hosted OpenAI-compatible endpoints with strict security requirements, decision sync robustness with time-based settle windows, progressive arrival presentation for improved user experience, blank-line block joining for efficient markdown rendering, **document repository optimization with bounded storage, role-based access control efficiency, audit trail integration, dual backend fallback, retention policy enforcement, provenance tracking efficiency, envelope-only listings for security, deterministic summary computation with lightweight handover skeleton processing, and AI-generated blurb extraction with bounded character limits and efficient parsing logic, incident report optimization with structured error handling, dual-action authorization efficiency, incident service client performance tuning, and digest assembly optimization with mechanical fact copying, shift summary assembly optimization with deterministic digest generation and graceful degradation, optional prose generation optimization with hard timeout protection, fail-soft behavior, and AI-generated blurb extraction, execution worker optimization with fail-closed behavior preventing unnecessary network calls, signature verification efficiency with constant-time comparison, receipt tracking with first-write-wins semantics, single-flight idempotency preventing redundant executions, timeout handling with bounded budgets, and structured error responses for targeted troubleshooting, browser tool surface optimization with enhanced pending decision polling, improved timeout handling, better user feedback, efficient display hint generation, proper risk classification for write-tier operations, optimized transcript handling for browser tools, and efficient element reference mapping for human-readable descriptions.**
+**Updated** Performance considerations now include enhanced multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, model catalog optimization with startup-derived catalog and efficient legacy alias resolution, live model discovery optimization with background task management, multi-tier caching strategies, atomic catalog updates with lock protection, multi-model runtime optimization with priority-based resolution and session-based caching, enhanced confirmation record optimization with turn_index field support, SQL-level idempotency, startup sweep scoping, cross-replica consistency guarantees, Luban provider optimization for self-hosted OpenAI-compatible endpoints with strict security requirements, decision sync robustness with time-based settle windows, progressive arrival presentation for improved user experience, blank-line block joining for efficient markdown rendering, **document repository optimization with bounded storage, role-based access control efficiency, audit trail integration, dual backend fallback, retention policy enforcement, provenance tracking efficiency, envelope-only listings for security, deterministic summary computation with lightweight handover skeleton processing, and AI-generated blurb extraction with bounded character limits and efficient parsing logic, incident report optimization with structured error handling, dual-action authorization efficiency, incident service client performance tuning, and digest assembly optimization with mechanical fact copying, shift summary assembly optimization with deterministic digest generation and graceful degradation, optional prose generation optimization with hard timeout protection, fail-soft behavior, and AI-generated blurb extraction, flow authority management optimization with session-scoped flow context, efficient TTL-based expiration handling, process-wide singleton management, browser write tools classification, optimized flow request building, efficient approval tracking, and safe expiration handling, execution worker optimization with fail-closed behavior preventing unnecessary network calls, signature verification efficiency with constant-time comparison, receipt tracking with first-write-wins semantics, single-flight idempotency preventing redundant executions, timeout handling with bounded budgets, and structured error responses for targeted troubleshooting, browser tool surface optimization with enhanced pending decision polling, improved timeout handling, better user feedback, efficient display hint generation, proper risk classification for write-tier operations, optimized transcript handling for browser tools, and efficient element reference mapping for human-readable descriptions.**
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -2974,6 +3163,15 @@ Common issues and resolutions:
 - **Element Reference Mapping**: Check snapshot element reference lookup and display hint generation
 - **Confirmation Request Payload**: Verify browser tool confirmation requests include proper display hints
 - **Test Coverage**: Validate browser tool scenarios including simple expressions, mutation blocking, and risk classification
+- **Flow Authority Issues**: Verify flow context store connectivity, approval tracking, and TTL-based expiration handling
+- **Flow Context Problems**: Check session-scoped flow context management and process-wide singleton operations
+- **Approval Tracking Issues**: Verify flow approval recording, owner/decider user identification, and TTL configuration
+- **Expiration Handling**: Test flow authority expiration behavior and safe failure modes
+- **Browser Write Tools**: Validate browser tool classification as write-tier operations and proper confirmation flow
+- **Build Flow Request**: Check flow request building for isolated tool execution workflows and proper parameter handling
+- **Process Singleton Issues**: Verify flow contexts and approvals singleton management and thread safety
+- **TTL Configuration**: Check TTL-based authority expiration and proper timeout handling
+- **Session Isolation**: Validate proper isolation between different session contexts for flow authorities
 
 Debugging utilities:
 - Health check endpoints for service status
@@ -3041,8 +3239,15 @@ Debugging utilities:
 - **Element Reference Mapping Debugging**: Check snapshot element reference lookup, display hint generation, and human-readable descriptions
 - **Confirmation Request Payload Debugging**: Verify browser tool confirmation requests include proper display hints and element descriptions
 - **Test Coverage Debugging**: Validate browser tool scenarios including simple expressions, mutation blocking, and risk classification
+- **Flow Authority Debugging**: Verify flow context store connectivity, approval tracking functionality, and TTL-based expiration handling
+- **Flow Context Debugging**: Check session-scoped flow context management, process-wide singleton operations, and thread safety
+- **Approval Tracking Debugging**: Validate flow approval recording, owner/decider user identification, and TTL configuration
+- **Expiration Handling Debugging**: Test flow authority expiration behavior, safe failure modes, and proper timeout handling
+- **Browser Write Tools Debugging**: Validate browser tool classification as write-tier operations and proper confirmation flow
+- **Build Flow Request Debugging**: Check flow request building for isolated tool execution workflows and proper parameter handling
+- **Process Singleton Debugging**: Verify flow contexts and approvals singleton management, thread safety, and memory efficiency
 
-**Updated** Troubleshooting guide now includes enhanced multi-session workspace troubleshooting, enhanced transcript extraction debugging strategies with blank-line block joining, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification, plus live model discovery troubleshooting with background task monitoring, provider filtering validation, cache tier diagnostics, and discovery performance optimization, and multi-model runtime troubleshooting with model resolution debugging and session pinning diagnostics, enhanced confirmation record troubleshooting with turn_index field support, SQL-level idempotency validation, startup sweep scoping verification, and cross-replica consistency testing, Luban provider troubleshooting with self-hosted endpoint configuration and bearer token authentication, decision sync robustness troubleshooting with time-based settle window validation, progressive arrival presentation debugging, and markdown rendering verification for resumed content, **document repository troubleshooting with backend connectivity validation, ownership verification, draft/published state management, role-based access control testing, envelope-only listing verification, summary computation debugging, PostgreSQL migration validation, legacy record degradation testing, AI-generated blurb extraction debugging, incident report troubleshooting with incident service client validation, dual-action authorization testing, structured error handling verification, and digest assembly verification, shift summary troubleshooting with deterministic digest generation and graceful degradation, optional prose generation troubleshooting with model availability checking, timeout configuration validation, prompt contract adherence verification, fail-soft behavior testing, and AI-generated blurb extraction debugging, execution worker troubleshooting with worker URL configuration validation, handoff token setup verification, signature verification debugging, receipt tracking diagnostics, timeout handling validation, and structured rejection reason analysis, browser tool troubleshooting with browser tool configuration validation, element reference handling verification, display hint generation testing, pending decision polling debugging, transcript handling validation, risk classification verification, and comprehensive test coverage for browser tool scenarios.**
+**Updated** Troubleshooting guide now includes enhanced multi-session workspace troubleshooting, enhanced transcript extraction debugging strategies with blank-line block joining, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification, plus live model discovery troubleshooting with background task monitoring, provider filtering validation, cache tier diagnostics, and discovery performance optimization, and multi-model runtime troubleshooting with model resolution debugging and session pinning diagnostics, enhanced confirmation record troubleshooting with turn_index field support, SQL-level idempotency validation, startup sweep scoping verification, and cross-replica consistency testing, Luban provider troubleshooting with self-hosted endpoint configuration and bearer token authentication, decision sync robustness troubleshooting with time-based settle window validation, progressive arrival presentation debugging, and markdown rendering verification for resumed content, **document repository troubleshooting with backend connectivity validation, ownership verification, draft/published state management, role-based access control testing, envelope-only listing verification, summary computation debugging, PostgreSQL migration validation, legacy record degradation testing, AI-generated blurb extraction debugging, incident report troubleshooting with incident service client validation, dual-action authorization testing, structured error handling verification, and digest assembly verification, shift summary troubleshooting with deterministic digest generation and graceful degradation, optional prose generation troubleshooting with model availability checking, timeout configuration validation, prompt contract adherence verification, fail-soft behavior testing, and AI-generated blurb extraction debugging, flow authority management troubleshooting with flow context store validation, approval tracking verification, TTL-based expiration testing, session-scoped context management, process-wide singleton operations, browser write tools classification, flow request building validation, and safe expiration handling, execution worker troubleshooting with worker URL configuration validation, handoff token setup verification, signature verification debugging, receipt tracking diagnostics, timeout handling validation, and structured rejection reason analysis, browser tool troubleshooting with browser tool configuration validation, element reference handling verification, display hint generation testing, pending decision polling debugging, transcript handling validation, risk classification verification, and comprehensive test coverage for browser tool scenarios.**
 
 **Section sources**
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -3053,7 +3258,7 @@ Debugging utilities:
 ## Conclusion
 The Agent Platform Service provides a robust foundation for AI agent orchestration with multi-provider support, durable session management, and comprehensive observability. Its modular architecture enables easy customization and scaling while maintaining high performance and reliability.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs using SUMMARY marker format, role-based access controls with draft/published states, envelope-only listings for security, and deterministic counts-only summaries computed from handover skeletons at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict security requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses. The service also features enhanced decision sync robustness with time-based settle windows, improved session transcript reconstruction with blank-line block joining for proper markdown rendering, and progressive arrival presentation for resumed content.** **SPEC-043 Enhancement**: Added incident report document type support with dedicated incident service integration, dual-action authorization gates requiring both documents:create and incident:read permissions, structured error handling for incident service dependencies, and comprehensive test coverage for incident-specific workflows. **SPEC-050 Enhancement**: Enhanced browser tool surface with expanded write-tier operations including web.click, web.type, web.select, web.press_key, and web.upload_file, with improved pending decision polling and transcript handling for browser interaction tools featuring human-readable element descriptions and proper risk classification. These enhancements strengthen the platform's flexibility, enable dynamic model management, provide detailed operational visibility, ensure cross-replica consistency for HITL workflows, improve user experience with reliable content delivery, and maintain the performance characteristics that make it suitable for production AI operations. **Critical Security Fix v0.21.1**: Implemented envelope-only document listings for GET /documents endpoint to prevent unauthorized content access while maintaining full content access through audited single-document fetch endpoints, ensuring cross-owner reads are properly audited. **SPEC-041 Enhancement**: Added deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Added AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs using SUMMARY marker format, role-based access controls with draft/published states, envelope-only listings for security, and deterministic counts-only summaries computed from handover skeletons at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict security requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses. The service also features enhanced decision sync robustness with time-based settle windows, improved session transcript reconstruction with blank-line block joining for proper markdown rendering, and progressive arrival presentation for resumed content.** **Critical Security Fix v0.21.1**: Implemented envelope-only document listings for GET /documents endpoint to prevent unauthorized content access while maintaining full content access through audited single-document fetch endpoints, ensuring cross-owner reads are properly audited. **SPEC-041 Enhancement**: Added deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Added AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic. **SPEC-043 Enhancement**: Added incident report document type support with dedicated incident service integration, dual-action authorization gates requiring both documents:create and incident:read permissions, structured error handling for incident service dependencies, and comprehensive test coverage for incident-specific workflows. **SPEC-050 Enhancement**: Enhanced browser tool surface with expanded write-tier operations including web.click, web.type, web.select, web.press_key, and web.upload_file, with improved pending decision polling and transcript handling for browser interaction tools featuring human-readable element descriptions and proper risk classification. **NEW FLOW AUTHORITY MANAGEMENT**: Added comprehensive flow authority management with 240+ lines of enhanced runtime kernel integration including build_flow_request function, flow approval system integration, and TTL-based flow authorities for secure isolated tool execution workflows with session-scoped flow context and approval tracking. These enhancements strengthen the platform's flexibility, enable dynamic model management, provide detailed operational visibility, ensure cross-replica consistency for HITL workflows, improve user experience with reliable content delivery, and maintain the performance characteristics that make it suitable for production AI operations.
 
 ## Appendices
 
@@ -3243,7 +3448,21 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - **Performance Optimization**: Monitor browser tool performance and optimize pending decision polling intervals
 - **Error Handling**: Test browser tool error scenarios and proper error messaging to users
 
-**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, live model discovery configuration with background task management, provider filtering mechanisms, cache tier optimization, atomic catalog updates with lock protection, multi-model runtime configuration with per-turn selection and session-based pinning, enhanced confirmation record store configuration with turn_index field support, idempotent resolution, startup sweep scoping, cross-replica consistency validation, Luban provider configuration for self-hosted OpenAI-compatible endpoints with complete operator workflow management, **document repository configuration with backend setup, retention policies, capacity limits, authorization configuration, foreign coverage handling, audit trail verification, provenance tracking, role-based access control, envelope-only listing verification, summary computation validation, PostgreSQL migration testing, legacy record degradation testing, AI-generated blurb extraction validation, and prose generation configuration with SUMMARY marker format, incident report configuration with incident service client setup, dual-action authorization testing, structured error handling verification, and digest assembly verification, shift summary configuration with session coverage limits, label length constraints, foreign access validation, graceful degradation testing, provenance integrity verification, coverage tier testing, error scenario validation, handover skeleton generation, and deterministic summary computation, optional prose generation configuration with timeout settings, model availability verification, fail-soft behavior testing, prompt safety validation, streaming support testing, empty response handling, integration testing, and AI-generated blurb extraction with robust parsing logic, execution worker configuration with fail-closed behavior, signature verification, receipt tracking, and isolated tool execution, browser tool surface configuration with browser tool setup, pending decision polling optimization, transcript handling validation, risk classification verification, element reference mapping, confirmation request payload validation, comprehensive test coverage, user experience testing, performance optimization, and error handling, decision sync robustness configuration with time-based settle windows, progressive arrival presentation, and blank-line block joining for proper markdown rendering.**
+#### Flow Authority Management Configuration
+- **Backend Selection**: Configure AGENT_STATE_STORE_BACKEND for memory or postgres
+- **Database Setup**: Set AGENT_STATE_DB_URL for Postgres flow approval persistence
+- **TTL Configuration**: Set appropriate TTL values for flow authority expiration (default: 900 seconds)
+- **Session Isolation**: Verify proper isolation between different session contexts for flow authorities
+- **Approval Tracking**: Validate flow approval recording with owner and decider user identification
+- **Expiration Handling**: Test TTL-based expiration behavior and safe failure modes
+- **Browser Write Tools**: Configure proper classification of browser interaction tools as write-tier operations
+- **Build Flow Request**: Validate flow request building for isolated tool execution workflows
+- **Process Singletons**: Verify flow contexts and approvals singleton management and thread safety
+- **Monitoring**: Track flow authority lifecycle metrics and expiration events
+- **Security**: Ensure proper session-scoped flow context management and approval validation
+- **Integration**: Test flow authority integration with execution worker and tool execution workflows
+
+**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, live model discovery configuration with background task management, provider filtering mechanisms, cache tier optimization, atomic catalog updates with lock protection, multi-model runtime configuration with per-turn selection and session-based pinning, enhanced confirmation record store configuration with turn_index field support, idempotent resolution, startup sweep scoping, cross-replica consistency validation, Luban provider configuration for self-hosted OpenAI-compatible endpoints with complete operator workflow management, **document repository configuration with backend setup, retention policies, capacity limits, authorization configuration, foreign coverage handling, audit trail verification, provenance tracking, role-based access control, envelope-only listing verification, summary computation validation, PostgreSQL migration testing, legacy record degradation testing, AI-generated blurb extraction validation, and prose generation configuration with SUMMARY marker format, incident report configuration with incident service client setup, dual-action authorization testing, structured error handling verification, and digest assembly verification, shift summary configuration with session coverage limits, label length constraints, foreign access validation, graceful degradation testing, provenance integrity verification, coverage tier testing, error scenario validation, handover skeleton generation, and deterministic summary computation, optional prose generation configuration with timeout settings, model availability verification, fail-soft behavior testing, prompt safety validation, streaming support testing, empty response handling, integration testing, and AI-generated blurb extraction with robust parsing logic, flow authority management configuration with session-scoped flow context, approval tracking setup, TTL-based expiration handling, browser write tools classification, flow request building validation, process-wide singleton management, and safe expiration handling, execution worker configuration with fail-closed behavior, signature verification, receipt tracking, and isolated tool execution, browser tool surface configuration with browser tool setup, pending decision polling optimization, transcript handling validation, risk classification verification, element reference mapping, confirmation request payload validation, comprehensive test coverage, user experience testing, performance optimization, and error handling, decision sync robustness configuration with time-based settle windows, progressive arrival presentation, and blank-line block joining for proper markdown rendering.**
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -3267,6 +3486,7 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
 - [test_chat_stream_modality.py](file://products/agent-platform/tests/test_chat_stream_modality.py)
@@ -3284,6 +3504,7 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [test_document_prose.py](file://products/agent-platform/tests/test_document_prose.py)
 - [test_documents.py](file://products/agent-platform/tests/test_documents.py)
 - [test_documents_repository.py](file://products/platform-gateway/tests/test_documents_repository.py)
+- [test_flow_approvals.py](file://products/agent-platform/tests/test_flow_approvals.py)
 - [spec.md](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md)
 - [decision-sync-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-26-decision-sync-arrival-polish.md)
 - [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)

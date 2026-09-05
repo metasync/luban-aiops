@@ -1,1 +1,0 @@
-RSA-2048+ JWTs issued by `identity-broker` with JWKS (RFC 7517) published at `/.well-known/jwks.json`; local verification in `tool-gateway` using `PyJWT[crypto]` with `PyJWKClient`; HMAC-SHA256 signing for execution envelopes; Postgres-backed record store for execution requests/receipts mirroring the confirmation-record posture from SPEC-031.

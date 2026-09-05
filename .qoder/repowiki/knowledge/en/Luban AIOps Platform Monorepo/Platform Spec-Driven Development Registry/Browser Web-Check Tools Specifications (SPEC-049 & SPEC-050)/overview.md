@@ -1,1 +1,0 @@
-Specification documents defining the browser-based web-check tools for tool-gateway, including the initial six-tool surface and a nine-tool expansion with a password-reset tutorial sample.

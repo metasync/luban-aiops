@@ -1,5 +1,0 @@
-- Every spec directory ships a consistent plan/spec/tasks triple, with the spec file carrying status metadata (owner, created, approved, delivered, release slice, related ADRs) at the top.
-- Requirements are numbered R-1, R-2, … and each carries explicit acceptance criteria written as testable statements rather than narrative prose.
-- New API surface is gated behind deny-by-default policy actions (e.g., `incident:read/create/triage`, `session:list/delete`) defined in `shared/shared-contracts/policies/policy-default.yaml` before being exposed.
-- Cross-service data contracts are versioned as JSON schemas under `shared/shared-contracts/schemas/` and bound to Pydantic models via contract tests.
-- Delivery artifacts consistently include updated product READMEs, `docs/guides/` living-state docs, CHANGELOG entries, and a smoke/demo script exercising end-to-end flows.

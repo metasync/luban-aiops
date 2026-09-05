@@ -1,6 +1,0 @@
-- Each spec directory follows the fixed three-file layout: `spec.md` for requirements, `plan.md` for technical design, and `tasks.md` for execution tracking.
-- Requirements are assigned stable IDs (`R-1`, `R-2`, ...) once a spec reaches `approved` status and are referenced verbatim from tasks and changelog entries.
-- Specs carry a YAML-like status header listing `status`, `owner`, `created`, `release slice`, and `related ADRs`; allowed statuses are strictly `draft`, `approved`, `in-progress`, `delivered`, or `superseded`.
-- Tasks in `tasks.md` are scoped to specific product paths via parenthesized paths like `(products/...)` and grouped under their originating requirement section.
-- The spec index in `docs/specs/README.md` is kept current as the single source of truth for all active and historical specs, with one row per ID.
-- Delivery gates require updating living state docs listed in the spec's `Impact` section, adding a `CHANGELOG.md` entry referencing the spec ID, and advancing the spec status to `delivered`.

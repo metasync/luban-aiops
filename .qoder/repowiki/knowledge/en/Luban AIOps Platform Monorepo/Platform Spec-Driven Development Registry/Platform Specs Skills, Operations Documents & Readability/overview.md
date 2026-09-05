@@ -1,1 +1,0 @@
-Specification documents defining the platform's skills ingestion system, operations document repository with shift summaries, and operator-facing readability improvements for the Documents view.

@@ -1,1 +1,0 @@
-Markdown-based SDD specs referencing FastAPI services, Postgres-backed stores, Alertmanager v4 webhooks, Kustomize overlays, and a connector protocol pattern reused from audit-service/skills-hub.

@@ -1,1 +1,0 @@
-Each spec directory ships a `plan.md` / `spec.md` / `tasks.md` triad consumed by the workspace's spec-driven workflow; delivery gates are expressed as acceptance criteria checked against CI (`ci.yml`) and product test suites (e.g. 87 green tests for SPEC-002, fake-psycopg backends for SPEC-017).
