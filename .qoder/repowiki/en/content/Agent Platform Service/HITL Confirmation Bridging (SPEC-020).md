@@ -10,12 +10,15 @@
 - [multimodel-runtime-and-live-discovery.md](file://docs/agentic-aiops-platform/release-notes/2026-08-24-multimodel-runtime-and-live-discovery.md)
 - [approval-inbox-persistent-confirmation.md](file://docs/agentic-aiops-platform/release-notes/2026-08-25-approval-inbox-persistent-confirmation.md)
 - [confirmation-race-and-restart-sweep-patch.md](file://docs/agentic-aiops-platform/release-notes/2026-08-25-confirmation-race-and-restart-sweep-patch.md)
+- [post-live-check-confirmation-card-flow-headline.md](file://docs/agentic-aiops-platform/release-notes/2026-09-05-post-live-check-confirmation-card-flow-headline.md)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
+- [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
 - [chat-confirm.schema.json](file://shared/shared-contracts/schemas/chat-confirm.schema.json)
 - [agent-stream-event.schema.json](file://shared/shared-contracts/schemas/agent-stream-event.schema.json)
+- [agent-session.schema.json](file://shared/shared-contracts/schemas/agent-session.schema.json)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
@@ -23,6 +26,7 @@
 - [approvals.py](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py)
 - [app.js](file://products/operator-portal/web-ui/app.js)
 - [styles.css](file://products/operator-portal/web-ui/styles.css)
+- [decoder.ts](file://products/operator-portal/web-ui/app/src/stream/decoder.ts)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 </cite>
@@ -35,6 +39,7 @@
 - Updated confirm route to persist decision outcomes before streaming resumes, ensuring racing approvers receive structured resolution information
 - Enhanced Postgres backend initialization with proper TTL-based stale record closure during startup
 - Added support for structured 409 conflict responses with detailed resolution information including decider identity and timestamps
+- **v0.33.1 Enhancement**: Flow summary propagation now preserves browser-flow headline metadata (skill_id, origin, title, description, risk_class) throughout the entire pipeline from stream frames to final card rendering, ensuring consistent workflow framing across live operator cards and durable confirmation records
 - **v0.23.1 Enhancement**: Fixed TOOL_NOT_FOUND errors for approved mutating tool invocations by implementing canonical tool name resolution mapping between sanitized model-visible names and canonical dotted names required by gateway registry
 
 ## Table of Contents
@@ -65,6 +70,7 @@ Key outcomes:
 - **Race resilience**: Concurrent approver attempts resolve to structured outcomes rather than errors.
 - **Cross-session discovery**: Designated approvers can discover and act on parked confirmations across sessions via approvals inbox.
 - **Owner transcript persistence**: Confirmed decisions persist in owner transcripts after re-login or pod restarts.
+- **Flow summary propagation**: Browser-flow headline metadata (skill_id, origin, title, description, risk_class) preserved throughout pipeline from stream frames to final card rendering for consistent workflow framing.
 - **Canonical tool name resolution**: Approved mutating tool invocations correctly resolve to gateway registry using canonical dotted names instead of sanitized model-visible names.
 
 **Section sources**
@@ -73,16 +79,17 @@ Key outcomes:
 - [mutating-tool-name-regression.md:7-58](file://docs/agentic-aiops-platform/release-notes/2026-08-28-mutating-tool-name-regression.md#L7-L58)
 - [multimodel-runtime-and-live-discovery.md:126-136](file://docs/agentic-aiops-platform/release-notes/2026-08-24-multimodel-runtime-and-live-discovery.md#L126-L136)
 - [approval-inbox-persistent-confirmation.md:6-51](file://docs/agentic-aiops-platform/release-notes/2026-08-25-approval-inbox-persistent-confirmation.md#L6-L51)
+- [post-live-check-confirmation-card-flow-headline.md:1-56](file://docs/agentic-aiops-platform/release-notes/2026-09-05-post-live-check-confirmation-card-flow-headline.md#L1-L56)
 - [spec.md:17-31](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md#L17-L31)
 - [spec.md:43-67](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/spec.md#L43-L67)
 
 ## Project Structure
-The feature spans three products plus shared contracts, enhanced with SPEC-021 capabilities, SPEC-030 tier enforcement, SPEC-031 persistent storage, and v0.23.1 canonical name resolution:
+The feature spans three products plus shared contracts, enhanced with SPEC-021 capabilities, SPEC-030 tier enforcement, SPEC-031 persistent storage, v0.23.1 canonical name resolution, and v0.33.1 flow summary propagation:
 - Agent platform: runtime park/resume, in-memory registry with risk tracking, v2 routes, schemas, settings, and durable confirmation records store.
 - Platform gateway: confirm proxy route, tiered policy enforcement, audit emission, approval validation, and approvals inbox relay.
 - Tool gateway: risk-tier admission gate, mutating tool registration, tools:mutate enforcement.
 - Operator portal: confirmation card rendering with tier badges and confirm handler, approvals view, and persistent transcript cards.
-- Shared contracts: stream event schema growth with risk_level, confirm request schema, policy rule with approval tiers.
+- Shared contracts: stream event schema growth with risk_level, confirm request schema, policy rule with approval tiers, and session schema with flow_summary support.
 
 ```mermaid
 graph TB
@@ -91,6 +98,7 @@ RK["runtime_kernel.py"]
 HC["hitl_confirmations.py"]
 CR["confirmation_records.py"]
 R2["api/v2/routes.py"]
+S2["schemas/v2.py"]
 end
 subgraph "Platform Gateway"
 GC["api/routes/chat.py"]
@@ -106,6 +114,7 @@ subgraph "Operator Portal"
 PJ["web-ui/app.js"]
 PS["web-ui/styles.css"]
 AV["ApprovalsView.tsx"]
+DT["stream/decoder.ts"]
 end
 PG["PostgreSQL"]
 SC["shared/shared-contracts/schemas/*"]
@@ -122,6 +131,7 @@ GC -.-> POL
 R2 -.-> SC
 GS -.-> SC
 PJ -.-> SC
+DT -.-> SC
 TG -.-> TC
 AV -.-> AI
 ```
@@ -131,14 +141,17 @@ AV -.-> AI
 - [hitl_confirmations.py:85-208](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L85-L208)
 - [confirmation_records.py:214-565](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L214-L565)
 - [routes.py:156-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L156-L227)
+- [v2.py:120-150](file://products/agent-platform/src/agent_service/schemas/v2.py#L120-L150)
 - [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
 - [gateway_service.py:336-446](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L336-L446)
 - [policy_engine.py:335-389](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L335-389)
 - [approvals.py:19-51](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L19-L51)
 - [k8s_connector.py:439-518](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py#L439-L518)
 - [config.py:75-81](file://products/tool-gateway/src/tool_gateway/core/config.py#L75-L81)
+- [decoder.ts:39-125](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L39-L125)
 - [agent-stream-event.schema.json:1-96](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L1-L96)
 - [chat-confirm.schema.json:1-27](file://shared/shared-contracts/schemas/chat-confirm.schema.json#L1-L27)
+- [agent-session.schema.json:127-138](file://shared/shared-contracts/schemas/agent-session.schema.json#L127-L138)
 - [policy-default.yaml:42-54](file://shared/shared-contracts/policies/policy-default.yaml#L42-L54)
 
 **Section sources**
@@ -147,34 +160,39 @@ AV -.-> AI
 
 ## Core Components
 - **Enhanced Confirmation Registry**: In-memory per-process store keyed by session_id with risk tracking and canonical name mapping; supports register, claim, resolve, expiry, and parked checks with risk tier awareness. Single pending confirmation per session with optional risk metadata and gateway name mapping.
-- **Durable Confirmation Records Store**: Postgres-backed persistence layer that survives pod restarts and maintains consistency across replicas. Implements bounded storage (50 records per session, 30-day inbox history) with automatic cleanup and stale record handling.
-- **Runtime kernel bridge**: Translates RequireUserConfirmEvent into confirmation_request frame with risk_level payload, registers pending calls with risk mapping and canonical name resolution, ends stream without message_end, and resumes via UserConfirmResultEvent on decision. Now persists confirmation lifecycle to durable store before streaming.
-- **Confirm route (agent platform)**: POST /api/v2/chat/confirm validates ownership, claims entry, handles expired/unknown states, streams resumed reply with confirmation_result first. **Updated**: Now uses degraded model resolution to prevent UnknownModelError exceptions and removed session ownership assertion for tier_2 approvers. **Enhanced**: Persists decision outcomes immediately at claim time for race resilience.
+- **Durable Confirmation Records Store**: Postgres-backed persistence layer that survives pod restarts and maintains consistency across replicas. Implements bounded storage (50 records per session, 30-day inbox history) with automatic cleanup and stale record handling. Now includes flow_summary JSONB column for browser-flow headline preservation.
+- **Runtime kernel bridge**: Translates RequireUserConfirmEvent into confirmation_request frame with risk_level payload, registers pending calls with risk mapping and canonical name resolution, ends stream without message_end, and resumes via UserConfirmResultEvent on decision. Now persists confirmation lifecycle to durable store before streaming and includes flow_summary in parked records.
+- **Confirm route (agent platform)**: POST /api/v2/chat/confirm validates ownership, claims entry, handles expired/unknown states, streams resumed reply with confirmation_result first. **Updated**: Now uses degraded model resolution to prevent UnknownModelError exceptions and removed session ownership assertion for tier_2 approvers. **Enhanced**: Persists decision outcomes immediately at claim time for race resilience. **New**: Includes flow_summary coercion for schema compliance.
 - **Pending confirmation endpoint**: GET /api/v2/chat/pending-confirmation provides authoritative parked batch metadata including owner_user_id, derived policy action, and pending_calls with risk levels for gateway tier enforcement.
 - **Confirm proxy (platform gateway)**: POST /api/v1/chat/confirm enforces chat:confirm action, obtains delegated token, proxies to agent platform, emits confirmation_decided audit when kernel applies decision. **Enhanced**: Enforces tier-based approval requirements against decided_by_roles using pending confirmation data. **Updated**: Passes through structured 409 responses with detailed resolution information.
 - **Approvals inbox API**: GET /api/v1/approvals/inbox provides cross-session discovery for designated approvers with metadata-only items preserving owner scoping.
-- **Session detail confirmation cards**: GET /api/v2/sessions/{id} includes additive `confirmations` field with ordered records from durable store, enabling persistent card rendering in owner transcripts.
+- **Session detail confirmation cards**: GET /api/v2/sessions/{id} includes additive `confirmations` field with ordered records from durable store, enabling persistent card rendering in owner transcripts. **Enhanced**: Now includes flow_summary for browser-flow headline rendering.
+- **Stream event normalization**: `_normalize_stream_event` passes flow_summary through defensive `_coerce_flow_summary` that keeps only contract's five string fields (skill_id, origin, title, description, risk_class) and degrades non-dict summaries to absent.
+- **Portal decoder enhancement**: `toFlowSummary` function parses card-level browser-flow headline from stream frames, returning undefined for non-browser cards so they fall back to plain tool-action rendering.
 - **Tiered Policy Engine**: Evaluates actions with deny > require_approval > allow precedence, returns ApprovalSpec with tier information for require_approval decisions.
 - **Risk-tier admission (tool gateway)**: Enforces tools:mutate policy action for write/admin tools, gates k8s.delete_pod behind GATEWAY_MUTATING_TOOLS_ENABLED flag.
-- **Portal card**: Renders confirmation_request as inline card with tier badges ("operator confirmation" vs "approver required"), tool names, parameters, and permission message; posts to gateway confirm and continues SSE stream after decision. **Enhanced**: Supports persistent card rendering from durable records and Approvals view for designated approvers.
+- **Portal card**: Renders confirmation_request as inline card with tier badges ("operator confirmation" vs "approver required"), tool names, parameters, and permission message; posts to gateway confirm and continues SSE stream after decision. **Enhanced**: Supports persistent card rendering from durable records and Approvals view for designated approvers. **New**: Displays browser-flow headline when flow_summary is present.
 
 **Section sources**
 - [hitl_confirmations.py:34-208](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L34-L208)
 - [confirmation_records.py:114-565](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L114-L565)
 - [runtime_kernel.py:657-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L657-L794)
 - [routes.py:65-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L227)
-- [routes.py:578-601](file://products/agent-platform/src/agent_service/api/v2/routes.py#L578-L601)
+- [routes.py:497-614](file://products/agent-platform/src/agent_service/api/v2/routes.py#L497-L614)
+- [v2.py:120-150](file://products/agent-platform/src/agent_service/schemas/v2.py#L120-L150)
+- [v2.py:210-242](file://products/agent-platform/src/agent_service/schemas/v2.py#L210-L242)
 - [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
 - [gateway_service.py:336-446](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L336-L446)
 - [policy_engine.py:97-148](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L97-L148)
 - [approvals.py:19-51](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L19-L51)
 - [k8s_connector.py:439-518](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py#L439-L518)
 - [config.py:75-81](file://products/tool-gateway/src/tool_gateway/core/config.py#L75-L81)
+- [decoder.ts:39-125](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L39-L125)
 - [app.js:1697-1758](file://products/operator-portal/web-ui/app.js#L1697-L1758)
 - [styles.css:682-683](file://products/operator-portal/web-ui/styles.css#L682-L683)
 
 ## Architecture Overview
-End-to-end flow from kernel ASK to portal decision and resumed execution, enhanced with tiered approval enforcement, resilient model resolution, persistent state management, and canonical tool name resolution:
+End-to-end flow from kernel ASK to portal decision and resumed execution, enhanced with tiered approval enforcement, resilient model resolution, persistent state management, canonical tool name resolution, and flow summary propagation:
 
 ```mermaid
 sequenceDiagram
@@ -187,11 +205,11 @@ participant Reg as "ConfirmationRegistry"
 participant Store as "ConfirmationRecordStore"
 participant DB as "PostgreSQL"
 Note over RK : Stream turn begins
-RK-->>AP : RequireUserConfirmEvent + risk_levels + gateway_names
+RK-->>AP : RequireUserConfirmEvent + risk_levels + flow_summary
 AP->>Reg : register(session, user, reply, tool_calls, timeout, risk_levels, gateway_names)
-AP->>Store : save_parked(confirm_id, session_id, owner, pending_calls, action)
-Store->>DB : INSERT confirmation_records
-AP-->>Portal : data : {type : "confirmation_request", confirm_id, pending_calls[risk_level, canonical_tool_name], message}
+AP->>Store : save_parked(confirm_id, session_id, owner, pending_calls, action, flow_summary)
+Store->>DB : INSERT confirmation_records (with flow_summary JSONB)
+AP-->>Portal : data : {type : "confirmation_request", confirm_id, pending_calls[risk_level, canonical_tool_name], flow_summary, message}
 Portal->>GW : POST /api/v1/chat/confirm {session_id, confirm_id, decision}
 GW->>GW : enforce_policy("chat : confirm")
 alt Decision involves write/admin tool
@@ -202,6 +220,7 @@ GW-->>Portal : 403 Forbidden (self_approval)
 else tier_1 or approved tier_2
 GW->>TG : enforce_policy("tools : mutate")
 TG-->>GW : allow/deny based on role
+end
 end
 GW->>AP : POST /api/v2/chat/confirm (delegated token)
 AP->>Reg : claim(session, confirm_id, timeout)
@@ -230,14 +249,16 @@ end
 
 **Diagram sources**
 - [runtime_kernel.py:657-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L657-L794)
-- [runtime_kernel.py:1000-1060](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1000-L1060)
+- [runtime_kernel.py:1090-1125](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1090-L1125)
 - [confirmation_records.py:407-455](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L407-L455)
 - [routes.py:156-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L156-L227)
+- [routes.py:497-614](file://products/agent-platform/src/agent_service/api/v2/routes.py#L497-L614)
 - [routes.py:277-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L277-L294)
 - [gateway_service.py:336-446](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L336-L446)
 - [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
 - [policy_engine.py:335-389](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L335-389)
 - [hitl_confirmations.py:101-199](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L101-L199)
+- [decoder.ts:39-125](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L39-L125)
 
 ## Detailed Component Analysis
 
@@ -275,6 +296,7 @@ class PendingConfirmation {
 +pending_calls_payload() list
 +highest_action() string?
 +tool_names() list
++flow_summary() dict?
 }
 class ConfirmationRegistry {
 +register(session_id, user_id, reply_id, tool_calls, timeout, risk_levels, gateway_names) PendingConfirmation
@@ -301,16 +323,18 @@ Responsibilities:
 - Handle stale pending records on startup by marking them as expired since parked kernel replies cannot survive process restarts.
 - Provide best-effort persistence that degrades gracefully when Postgres is unavailable.
 - Support cross-session queries for approvals inbox with metadata-only exposure.
+- **New**: Include flow_summary JSONB column for browser-flow headline preservation across all surfaces.
 
 Storage design:
 - Uses same Postgres posture as SPEC-016 session store with shared database connection management.
 - Implements opportunistic sweep patterns similar to other stores for efficient cleanup.
 - Maintains separation between hot-path in-memory registry and durable record store.
 - **Enhanced**: Startup sweep now uses configurable TTL scoping via AGENT_HITL_CONFIRM_TIMEOUT for precise stale record identification.
+- **New**: flow_summary column migration handled automatically at startup for backward compatibility.
 
 ```mermaid
 flowchart TD
-Park["save_parked(record)"] --> Insert["INSERT confirmation_records"]
+Park["save_parked(record with flow_summary)"] --> Insert["INSERT confirmation_records (flow_summary JSONB)"]
 Insert --> Evict{"Over cap?"}
 Evict -- Yes --> Sweep["DELETE oldest records"]
 Evict -- No --> Continue["Continue"]
@@ -325,16 +349,18 @@ CloseStale --> Complete
 
 **Diagram sources**
 - [confirmation_records.py:407-455](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L407-L455)
-- [confirmation_records.py:233-317](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L233-317)
+- [confirmation_records.py:233-317](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L233-L317)
+- [confirmation_records.py:279-285](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L279-L285)
 - [confirmation_records.py:415-431](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L415-L431)
 
 **Section sources**
 - [confirmation_records.py:114-565](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L114-L565)
 
-### Runtime Kernel Bridge (Park and Resume with Risk Mapping and Canonical Name Resolution)
+### Runtime Kernel Bridge (Park and Resume with Risk Mapping, Canonical Name Resolution, and Flow Summary Propagation)
 Behavior:
 - On RequireUserConfirmEvent, builds confirmation_request frame with risk_level payload, registers pending calls with risk mapping and canonical name resolution, yields frame, and ends stream without message_end.
 - **Enhanced**: Persists confirmation lifecycle to durable store before streaming confirmation_request frame to client.
+- **New**: Includes flow_summary in parked records and confirmation_request frames for browser-flow headline preservation.
 - resume_confirmation sets delegated token, emits confirmation_result first, then streams resumed reply through normalization/evidence pipeline.
 - **Enhanced**: Records resolution outcome to durable store after confirmation_result flows through.
 - Handles chained parks: resumed turns can trigger another ASK, emitting a fresh confirmation_request.
@@ -346,10 +372,10 @@ flowchart TD
 Start(["Stream Event"]) --> CheckASK{"RequireUserConfirmEvent?"}
 CheckASK -- No --> Normalize["Normalize event"]
 Normalize --> Yield["Yield normalized event"]
-CheckASK -- Yes --> BuildFrame["Build confirmation_request frame with risk_level"]
+CheckASK -- Yes --> BuildFrame["Build confirmation_request frame with risk_level + flow_summary"]
 BuildFrame --> MapNames["_toolkit_gateway_name_map(toolkit)"]
-MapNames --> Register["Register pending confirmation with risk_levels, gateway_names"]
-Register --> Persist["save_parked(confirm_id, session_id, owner, pending_calls, action)"]
+MapNames --> Register["Register pending confirmation with risk_levels, gateway_names, flow_summary"]
+Register --> Persist["save_parked(confirm_id, session_id, owner, pending_calls, action, flow_summary)"]
 Persist --> EndStream["End stream (no message_end)"]
 EndStream --> WaitDecision["Await confirm decision"]
 WaitDecision --> Resume["resume_confirmation(UserConfirmResultEvent)"]
@@ -364,13 +390,47 @@ ChainedASK -- No --> Complete["Complete turn"]
 **Diagram sources**
 - [runtime_kernel.py:555-644](file://products/agent-platform/src/agent_service/runtime_kernel.py#L555-L644)
 - [runtime_kernel.py:657-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L657-L794)
-- [runtime_kernel.py:1000-1060](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1000-L1060)
+- [runtime_kernel.py:1090-1125](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1090-L1125)
 - [runtime_kernel.py:1328-1344](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1328-L1344)
 
 **Section sources**
 - [runtime_kernel.py:657-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L657-L794)
-- [runtime_kernel.py:1000-1060](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1000-L1060)
+- [runtime_kernel.py:1090-1125](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1090-L1125)
 - [runtime_kernel.py:1328-1344](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1328-L1344)
+
+### Stream Event Normalization (Flow Summary Coercion)
+Responsibilities:
+- Translate kernel stream chunks into contract-conformant events with defensive field validation.
+- **New**: Include flow_summary field in AgentStreamEvent schema (v9) for confirmation_request frames carrying bound browser-flow headlines.
+- **New**: Implement `_coerce_flow_summary` function that keeps only contract's five string fields (skill_id, origin, title, description, risk_class) and degrades non-dict summaries to absent.
+- Ensure malformed flow summaries never fail frame's additionalProperties:false validation.
+- Maintain backward compatibility for non-browser cards where flow_summary is absent.
+
+Schema evolution:
+- Stream contract bumped from v8 to v9 to declare optional flow_summary field.
+- Defensive coercion ensures only valid string fields survive transformation.
+- Non-dict flow summaries degrade to None, allowing fallback to plain tool-action rendering.
+
+```mermaid
+flowchart TD
+RawFrame["Kernel Frame"] --> Normalize["_normalize_stream_event()"]
+Normalize --> ExtractFields["Extract core fields"]
+ExtractFields --> CoerceFlow["Coerce flow_summary"]
+CoerceFlow --> Validate{"Is flow_summary dict?"}
+Validate -- No --> SetNone["Set flow_summary = None"]
+Validate -- Yes --> FilterFields["Filter to 5 contract fields"]
+FilterFields --> SchemaConform["Create AgentStreamEvent v9"]
+SetNone --> SchemaConform
+SchemaConform --> Wire["Wire to Portal"]
+```
+
+**Diagram sources**
+- [routes.py:497-614](file://products/agent-platform/src/agent_service/api/v2/routes.py#L497-L614)
+- [v2.py:120-150](file://products/agent-platform/src/agent_service/schemas/v2.py#L120-L150)
+
+**Section sources**
+- [routes.py:497-614](file://products/agent-platform/src/agent_service/api/v2/routes.py#L497-L614)
+- [v2.py:120-150](file://products/agent-platform/src/agent_service/schemas/v2.py#L120-L150)
 
 ### Tiered Policy Engine (SPEC-030 Implementation)
 Responsibilities:
@@ -530,13 +590,22 @@ Responsibilities:
 - Post decision to gateway confirm endpoint and continue SSE stream into same message area.
 - Lock card status on confirmation_result or error; handle 410 as expired.
 - Display tier badges: "operator confirmation" for tier_1, "approver required" for tier_2 with decider roles.
-- **Enhanced**: Support persistent card rendering from durable records for owner transcripts and approvals inbox.
+- **Enhanced**: Support persistent card rendering from durable records and Approvals view for designated approvers.
+- **New**: Display browser-flow headline when flow_summary is present, showing skill intent, origin, title, description, and risk class.
 - **New**: Approvals view for designated approvers with pending/history listing, badge count, and decision panel.
+
+Flow summary rendering:
+- `toFlowSummary` function parses card-level browser-flow headline from stream frames.
+- Returns undefined for non-browser cards, allowing fallback to plain tool-action rendering.
+- Converts snake_case fields to camelCase for portal consumption (skill_id → skillId, etc.).
+- Preserves all five flow context fields: skill_id, origin, title, description, risk_class.
 
 ```mermaid
 flowchart TD
 S(["SSE Loop"]) --> Type{"type == confirmation_request?"}
-Type -- Yes --> CheckTier{"require_approval with tier?"}
+Type -- Yes --> CheckFlow{"Has flow_summary?"}
+CheckFlow -- Yes --> RenderFlowCard["Render browser-flow card<br/>with headline (title, description, risk_class)"]
+CheckFlow -- No --> CheckTier{"require_approval with tier?"}
 CheckTier -- Yes --> CheckTierType{"tier_1 vs tier_2?"}
 CheckTierType -- tier_1 --> RenderTier1Card["Render approval card with 'operator confirmation' badge<br/>Approve/Deny buttons"]
 CheckTierType -- tier_2 --> RenderTier2Card["Render approval card with 'approver required' badge<br/>Show decider roles"]
@@ -552,10 +621,12 @@ Normal --> Done
 ```
 
 **Diagram sources**
+- [decoder.ts:39-125](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L39-L125)
 - [app.js:1697-1758](file://products/operator-portal/web-ui/app.js#L1697-L1758)
 - [styles.css:682-683](file://products/operator-portal/web-ui/styles.css#L682-L683)
 
 **Section sources**
+- [decoder.ts:39-125](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L39-L125)
 - [app.js:1697-1758](file://products/operator-portal/web-ui/app.js#L1697-L1758)
 - [styles.css:682-683](file://products/operator-portal/web-ui/styles.css#L682-L683)
 
@@ -565,7 +636,8 @@ Normal --> Done
   - Confirm request schema binds session_id, confirm_id, decision.
   - Policy bundle adds tools:mutate action granted to platform-admin and operator roles; observer excluded.
   - **Enhanced**: Policy engine adds require_approval outcome with ApprovalSpec containing tier, decided_by_roles, and allow_self_approval.
-  - **New**: Session schema includes additive `confirmations` field for persistent card rendering.
+  - **New**: Session schema includes additive `confirmations` field for persistent card rendering with flow_summary support.
+  - **New**: Stream event schema v9 adds optional flow_summary on confirmation_request frames for browser-flow headline preservation.
 - Services:
   - Agent platform depends on runtime kernel and registry for park/resume semantics with risk tracking and canonical name resolution.
   - **Enhanced**: Agent platform now depends on durable confirmation records store for persistence with best-effort degradation.
@@ -573,12 +645,13 @@ Normal --> Done
   - **New**: Platform gateway includes approvals inbox route with `approvals:list` policy enforcement.
   - Tool gateway depends on policy engine for tools:mutate enforcement and configuration management.
   - Portal depends on SSE parser and styles for card rendering with tier badges.
-  - **New**: Portal includes ApprovalsView component for designated approvers.
+  - **New**: Portal includes ApprovalsView component for designated approvers and flow summary decoding.
 
 ```mermaid
 graph LR
-SCHEMA["agent-stream-event.schema.json"] --> ROUTES["api/v2/routes.py"]
+SCHEMA["agent-stream-event.schema.json (v9)"] --> ROUTES["api/v2/routes.py"]
 CONFIRM_SCHEMA["chat-confirm.schema.json"] --> ROUTES
+SESSION_SCHEMA["agent-session.schema.json"] --> ROUTES
 POLICY["policy-default.yaml"] --> GWSVC["services/gateway_service.py"]
 POLICY --> TGSVC["tool-gateway services"]
 POLICY --> PE["services/policy_engine.py"]
@@ -592,11 +665,14 @@ CHATROUTE --> GWSVC
 CHATROUTE --> SCHEMA
 TGSVC --> CONFIG["core/config.py"]
 PE --> DECISION["PolicyDecision with ApprovalSpec"]
+DECODER["stream/decoder.ts"] --> PORTAL["Portal UI"]
+PORTAL -.-> SESSION_SCHEMA
 ```
 
 **Diagram sources**
 - [agent-stream-event.schema.json:1-96](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L1-L96)
 - [chat-confirm.schema.json:1-27](file://shared/shared-contracts/schemas/chat-confirm.schema.json#L1-L27)
+- [agent-session.schema.json:127-138](file://shared/shared-contracts/schemas/agent-session.schema.json#L127-L138)
 - [policy-default.yaml:42-54](file://shared/shared-contracts/policies/policy-default.yaml#L42-L54)
 - [policy-default.yaml:113-135](file://shared/shared-contracts/policies/policy-default.yaml#L113-L135)
 - [routes.py:230-320](file://products/agent-platform/src/agent_service/api/v2/routes.py#L230-L320)
@@ -608,10 +684,12 @@ PE --> DECISION["PolicyDecision with ApprovalSpec"]
 - [confirmation_records.py:214-565](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L214-L565)
 - [config.py:75-81](file://products/tool-gateway/src/tool_gateway/core/config.py#L75-L81)
 - [policy_engine.py:97-148](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L97-L148)
+- [decoder.ts:39-125](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L39-L125)
 
 **Section sources**
 - [agent-stream-event.schema.json:1-96](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L1-L96)
 - [chat-confirm.schema.json:1-27](file://shared/shared-contracts/schemas/chat-confirm.schema.json#L1-L27)
+- [agent-session.schema.json:127-138](file://shared/shared-contracts/schemas/agent-session.schema.json#L127-L138)
 - [policy-default.yaml:42-54](file://shared/shared-contracts/policies/policy-default.yaml#L42-L54)
 - [policy-default.yaml:113-135](file://shared/shared-contracts/policies/policy-default.yaml#L113-L135)
 
@@ -631,6 +709,7 @@ PE --> DECISION["PolicyDecision with ApprovalSpec"]
 - **Metadata-only inbox**: Cross-session discovery exposes only metadata fields, preserving owner privacy and reducing data transfer costs.
 - **Claim-time persistence**: Immediate outcome persistence at claim time eliminates race conditions while maintaining high performance through best-effort degradation.
 - **v0.23.1 Enhancement**: Canonical name mapping is captured once at park time from toolkit, avoiding repeated lookups during confirmation processing.
+- **v0.33.1 Enhancement**: Flow summary coercion is lightweight, filtering only five string fields and degrading non-dict values efficiently.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -650,11 +729,13 @@ Common issues and resolutions:
 - **Concurrent approver conflicts**: Multiple approvers attempting the same confirmation will receive structured "already_resolved" responses instead of errors.
 - **Expired cards appearing**: Stale pending records are marked as expired on startup since parked kernel replies cannot survive process restarts.
 - **Approvals inbox not accessible**: Verify user has `approvals:list` permission; only `approver` and `platform-admin` roles can access the inbox.
-- **Owner transcript missing cards**: Check if session detail includes `confirmations` field; cards should appear even after re-login or pod restart.
+- **Owner transcript missing cards**: Check if session detail includes `confirmations` field; cards should appear even after re-login or pod restarts.
 - **Race condition confusion**: Structured 409 responses include winner's outcome; losing approvers can see who decided and when.
 - **Startup sweep issues**: Verify AGENT_HITL_CONFIRM_TIMEOUT is properly configured; startup sweep uses this value to identify stale pending records for closure.
 - **Postgres initialization failures**: Check AGENT_STATE_STORE_BACKEND and AGENT_STATE_DB_URL configuration; service falls back to in-memory store when Postgres is unavailable.
 - **v0.23.1 Fix**: TOOL_NOT_FOUND errors for approved mutating tool invocations are now resolved by using canonical dotted names (e.g., `k8s.delete_pod`) instead of sanitized model-visible names (e.g., `k8s_delete_pod`) in the signed execution envelope.
+- **v0.33.1 Issue**: Live operator confirmation card missing browser-flow description while approver inbox shows it; check that flow_summary is properly propagated through stream normalization and that AgentStreamEvent schema includes flow_summary field.
+- **Flow summary not rendering**: Verify that flow_summary coercion is working correctly and that only the five contract fields (skill_id, origin, title, description, risk_class) are being passed through.
 
 Operational checks:
 - Verify AGENT_HITL_CONFIRM_TIMEOUT > 0 to enable bridging; set to 0 to restore legacy silent-park behavior.
@@ -674,11 +755,13 @@ Operational checks:
 - **Verify startup sweep configuration**: Ensure AGENT_HITL_CONFIRM_TIMEOUT is properly set for accurate stale record identification during startup.
 - **Monitor structured 409 responses**: Check that concurrent approver attempts receive detailed resolution information including decider identity and timestamps.
 - **v0.23.1 Verification**: Verify that approved mutating tool invocations execute successfully by checking that the signed execution envelope contains canonical dotted tool names (e.g., `k8s.delete_pod`) rather than sanitized names (e.g., `k8s_delete_pod`).
+- **v0.33.1 Verification**: Verify that flow_summary is properly included in confirmation_request frames and that the portal decoder correctly parses browser-flow headlines for consistent workflow framing.
 
 **Section sources**
 - [routes.py:65-94](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L94)
 - [routes.py:156-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L156-L227)
 - [routes.py:277-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L277-L294)
+- [routes.py:497-614](file://products/agent-platform/src/agent_service/api/v2/routes.py#L497-L614)
 - [routes.py:578-601](file://products/agent-platform/src/agent_service/api/v2/routes.py#L578-L601)
 - [gateway_service.py:336-396](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L336-L396)
 - [approvals.py:19-51](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L19-L51)
@@ -691,6 +774,7 @@ Operational checks:
 - [confirmation_records.py:415-431](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L415-L431)
 - [routes.py:370-410](file://products/agent-platform/src/agent_service/api/v2/routes.py#L370-L410)
 - [mutating-tool-name-regression.md:18-58](file://docs/agentic-aiops-platform/release-notes/2026-08-28-mutating-tool-name-regression.md#L18-L58)
+- [post-live-check-confirmation-card-flow-headline.md:12-56](file://docs/agentic-aiops-platform/release-notes/2026-09-05-post-live-check-confirmation-card-flow-headline.md#L12-L56)
 
 ## Conclusion
 SPEC-020 delivers a robust, auditable HITL bridge that transforms kernel ASK parking into a portal-driven approval workflow, enhanced with SPEC-021's bounded mutating actions, SPEC-030's require-approval tier system, and SPEC-031's persistent confirmation registry. It enforces policy at the gateway, preserves session integrity, and records decisions durably with tier context. The design keeps the kernel unchanged, relies on existing agentscope machinery, and scales to future write/mutating tools by gating them behind the same confirmation surface with risk-tier enforcement.
@@ -711,10 +795,14 @@ The integration provides a five-layer security model: deny-by-default policy bun
 
 **v0.23.1 Critical Enhancement**: The canonical tool name resolution fix resolves TOOL_NOT_FOUND errors for approved mutating tool invocations by implementing a gateway_names mapping between sanitized model-visible names (e.g., `k8s_delete_pod`) and canonical dotted names (e.g., `k8s.delete_pod`) required by the gateway registry. This ensures that the signed execution envelope carries the correct tool name that the gateway registry can resolve, fixing the regression where approved mutating calls would fail at the final invocation step despite passing all previous approval and verification gates.
 
+**v0.33.1 Critical Enhancement**: Flow summary propagation now preserves browser-flow headline metadata (skill_id, origin, title, description, risk_class) throughout the entire pipeline from stream frames to final card rendering. This ensures consistent workflow framing across both live operator cards and durable confirmation records, addressing a live test issue where the operator's confirmation card rendered without its browser-flow description while the approver inbox card showed it correctly. The fix includes AgentStreamEvent schema updates (v9), defensive flow_summary coercion, and portal decoder enhancements to parse and display the headline consistently.
+
 **New Capability**: The addition of the pending-confirmation endpoint, RISK_LEVEL_ACTIONS mapping, and approvals inbox enables sophisticated approval workflows where the platform gateway can make informed tier enforcement decisions based on authoritative parked batch metadata, including the original session owner and derived policy actions from tool risk levels.
 
 **New Capability**: The approvals inbox provides cross-session discovery for designated approvers with metadata-only exposure, enabling operators to manage parked confirmations across multiple sessions without exposing owner transcript content.
 
 **New Capability**: Persistent confirmation cards in owner transcripts survive re-login, page reloads, pod restarts, and replica boundaries, providing complete auditability of approval workflows with decider attribution and timestamps.
+
+**New Capability**: Flow summary propagation ensures that browser-bound web-check flows carry consistent workflow context (skill intent, origin, risk class) from the initial ASK through to final card rendering, enabling operators to understand the broader workflow context beyond individual tool actions.
 
 [No sources needed since this section summarizes without analyzing specific files]

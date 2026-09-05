@@ -14,6 +14,8 @@
 - [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
 - [useChatStream.ts](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts)
 - [models.ts](file://products/operator-portal/web-ui/app/src/stream/models.ts)
+- [decoder.ts](file://products/operator-portal/web-ui/app/src/stream/decoder.ts)
+- [transcript.ts](file://products/operator-portal/web-ui/app/src/chat/transcript.ts)
 - [global.css](file://products/operator-portal/web-ui/app/src/theme/global.css)
 - [SettingsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx)
 - [AuditView.tsx](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx)
@@ -21,15 +23,17 @@
 - [constants.ts](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts)
 - [AuditView.test.tsx](file://products/operator-portal/web-ui/app/src/views/__tests__/AuditView.test.tsx)
 - [tokens.ts](file://products/operator-portal/web-ui/app/src/theme/tokens.ts)
+- [agent-stream-event.schema.json](file://shared/shared-contracts/schemas/agent-stream-event.schema.json)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated Chat Workspace section to document enhanced confirmation card display with flow headline rendering and metadata visualization
-- Added comprehensive documentation for browser flow context including skill title, description, target origin, and risk class display
-- Enhanced visual styling documentation with background highlighting and tags for origin/risk classification
-- Updated confirmation card architecture section with new FlowSummary interface and metadata handling
-- Added CSS styling references for the enhanced confirmation card presentation
+- Updated AgentStreamEvent schema v9 documentation to include flow_summary field support for browser flow headline information
+- Enhanced confirmation card system documentation with comprehensive flow context rendering capabilities
+- Added detailed documentation for FlowSummary interface and metadata handling across live and durable views
+- Updated visual styling documentation with enhanced background highlighting, origin tags, and risk classification displays
+- Expanded browser flow context documentation including skill intent, target origin, workflow descriptions, and risk classifications
+- Enhanced integration points documentation covering flow metadata propagation through the entire confirmation pipeline
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -48,7 +52,7 @@ The Operator Portal is the operator-facing web application for platform administ
 
 Key capabilities include:
 - Chat and streaming responses with tool evidence and inline human-in-the-loop confirmations
-- **Enhanced confirmation cards with browser flow context showing skill titles, descriptions, target origins, and risk classifications with visual styling**
+- **Enhanced confirmation cards with browser flow context showing skill titles, descriptions, target origins, and risk classifications with visual styling and flow headline rendering**
 - Incident management with triage reports and live runs
 - Approval queue with pending decision badges and actions
 - **Enhanced read-only audit trail with sophisticated tabbed interface (Events and Summary tabs), shared filter toolbar, CSV export with truncation warnings, comprehensive summary analytics with drill-down capabilities, critical hook ordering stability for sign-out/token refresh scenarios, and automatic recovery from stale session transitions**
@@ -242,12 +246,19 @@ GW-->>CV : Resume stream with decision
 - [README.md:43-126](file://products/operator-portal/README.md#L43-L126)
 
 ### Enhanced Confirmation Cards with Browser Flow Context
-**Updated** The confirmation card system has been significantly enhanced to provide rich browser flow context when operators encounter human-in-the-loop approval requests. This enhancement addresses SPEC-051 R-6 requirements for improved operator understanding of automated workflow intent.
+**Updated** The confirmation card system has been significantly enhanced with AgentStreamEvent schema v9 support for flow_summary fields, enabling consistent workflow framing across both live and durable confirmation views. This enhancement addresses SPEC-051 R-6 requirements for improved operator understanding of automated workflow intent during human-in-the-loop interactions.
 
-#### Flow Summary Interface and Metadata
-- **FlowSummary Interface**: New typed interface providing structured metadata about browser automation flows including skill identification, target origin, human-readable titles, descriptions, and risk classification
+#### AgentStreamEvent Schema v9 - Flow Summary Support
+- **Flow Summary Field**: New optional `flow_summary` field on confirmation_request frames carrying bound browser-flow headline information including skill_id, origin, title, description, and risk_class
+- **Schema Definition**: The field is defined as an object with additionalProperties false, ensuring strict validation of flow metadata structure
+- **Backward Compatibility**: Field is nullable and absent for non-browser cards, maintaining compatibility with existing confirmation scenarios
+- **Type Safety**: Full TypeScript support ensures compile-time validation of flow metadata structure throughout the confirmation pipeline
+
+#### FlowSummary Interface and Metadata Processing
+- **Structured Metadata**: FlowSummary interface provides typed access to browser flow context including skill identification, target origin, human-readable titles, descriptions, and risk classification
 - **Metadata Sources**: Flow context is populated from skill frontmatter and runtime analysis, providing operators with meaningful workflow descriptions rather than raw tool invocations
 - **Conditional Rendering**: Flow headline displays only when relevant metadata is available, gracefully degrading to tool-level details when flow context is absent
+- **Data Transformation**: Decoder functions handle snake_case to camelCase conversion between wire format and view models
 
 #### Visual Enhancement Features
 - **Background Highlighting**: Flow headline section uses subtle background highlighting (`rgba(127,127,127,0.08)`) with left border accent to visually distinguish workflow context from individual tool calls
@@ -258,7 +269,8 @@ GW-->>CV : Resume stream with decision
 #### Integration with Existing Card Architecture
 - **Seamless Integration**: Flow headline renders above the existing tool call list, maintaining backward compatibility with non-browser confirmation scenarios
 - **Metadata Propagation**: FlowSummary data flows through the entire confirmation pipeline from stream frames to final card rendering
-- **Type Safety**: Full TypeScript support ensures compile-time validation of flow metadata structure and prevents runtime errors
+- **Durable Record Support**: Flow context is preserved in durable records and replayed consistently across approvals inbox and session detail views
+- **Performance Optimization**: Conditional checks prevent unnecessary DOM manipulation when flow metadata is absent
 
 ```mermaid
 flowchart TD
@@ -277,6 +289,7 @@ ToolDetails --> DecisionButtons["Decision Buttons"]
 **Diagram sources**
 - [ChatView.tsx:388-435](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L388-L435)
 - [models.ts:70-79](file://products/operator-portal/web-ui/app/src/stream/models.ts#L70-L79)
+- [agent-stream-event.schema.json:59-70](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L59-L70)
 
 #### Styling and Presentation
 - **CSS Classes**: Uses `.confirm-flow` class for consistent styling across different confirmation scenarios
@@ -287,8 +300,9 @@ ToolDetails --> DecisionButtons["Decision Buttons"]
 **Section sources**
 - [ChatView.tsx:388-435](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L388-L435)
 - [models.ts:70-79](file://products/operator-portal/web-ui/app/src/stream/models.ts#L70-L79)
-- [useChatStream.ts:44-47](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L44-L47)
-- [global.css:552-604](file://products/operator-portal/web-ui/app/src/theme/global.css#L552-L604)
+- [decoder.ts:39-57](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L39-L57)
+- [transcript.ts:116-133](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L116-L133)
+- [agent-stream-event.schema.json:59-70](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L59-L70)
 
 ### Enhanced Audit Trail with Automatic Recovery Capabilities
 **Updated** The audit trail view has been completely redesigned with an advanced tabbed interface that provides both detailed event inspection and comprehensive summary analytics with interactive drill-down capabilities. The v0.29.3 release includes critical improvements for session lifecycle handling that prevent empty state rendering during stale session transitions, ensuring robust automatic recovery without manual intervention.
@@ -473,6 +487,7 @@ Nginx --> Gateway["Platform Gateway"]
 - **v0.29.3 Stale Session Issues**: If audit view shows empty state after authentication changes, verify that the session object is properly updated; the automatic recovery mechanism should clear latched failures and retry automatically. Check that the initial-load effect is keyed on the session object and triggers on session changes.
 - **Type Safety Issues**: Ensure DrilldownPatch type usage is correct when implementing custom drill-down functionality; verify filter merging maintains type safety.
 - **Confirmation Card Flow Context Issues**: If browser flow headlines aren't displaying, verify that skill frontmatter contains valid title/description fields; check that flow metadata is properly propagated through the confirmation pipeline; ensure CSS classes are applied correctly for visual styling.
+- **AgentStreamEvent Schema v9 Issues**: If flow_summary fields are missing from confirmation cards, verify that the backend is sending the new schema version and that decoder functions are properly parsing the flow metadata.
 
 **Section sources**
 - [AuthContext.tsx:40-85](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L40-L85)
@@ -483,7 +498,7 @@ Nginx --> Gateway["Platform Gateway"]
 - [AuditView.test.tsx:97-131](file://products/operator-portal/web-ui/app/src/views/__tests__/AuditView.test.tsx#L97-L131)
 
 ## Conclusion
-The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface, advanced analytics, and automatic recovery from stale session transitions**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants. The v0.29.3 session lifecycle enhancement adds automatic recovery capabilities that prevent empty state rendering during stale session transitions, eliminating the need for manual refresh operations and providing a more resilient user experience. **The enhanced confirmation card system with browser flow context provides operators with meaningful workflow descriptions, visual styling with background highlighting and tags, and improved situational awareness when approving automated browser actions.**
+The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface, advanced analytics, and automatic recovery from stale session transitions**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants. The v0.29.3 session lifecycle enhancement adds automatic recovery capabilities that prevent empty state rendering during stale session transitions, eliminating the need for manual refresh operations and providing a more resilient user experience. **The enhanced confirmation card system with browser flow context provides operators with meaningful workflow descriptions, visual styling with background highlighting and tags, and improved situational awareness when approving automated browser actions.** The AgentStreamEvent schema v9 enhancement enables consistent flow summary support across both live streaming and durable record scenarios, ensuring operators see the same workflow context regardless of how they encounter confirmation requests.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -533,10 +548,11 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - [index.html:1-14](file://products/operator-portal/web-ui/app/index.html#L1-L14)
 
 ### Enhanced Confirmation Card System
-**Updated** The confirmation card system has been significantly enhanced with browser flow context to provide operators with meaningful workflow descriptions and improved situational awareness when approving automated browser actions.
+**Updated** The confirmation card system has been significantly enhanced with AgentStreamEvent schema v9 support for flow_summary fields, enabling consistent workflow framing across both live and durable confirmation views. This enhancement provides operators with meaningful context about browser automation workflows during human-in-the-loop approval processes.
 
 #### Flow Context Architecture
 - **FlowSummary Interface**: Structured metadata including skill identification, target origin, human-readable titles, descriptions, and risk classification
+- **Schema v9 Support**: Optional flow_summary field on confirmation_request frames carries bound browser-flow headline information
 - **Conditional Rendering**: Flow headline displays only when relevant metadata is available, gracefully degrading to tool-level details
 - **Type Safety**: Full TypeScript support ensures compile-time validation of flow metadata structure
 
@@ -549,13 +565,15 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 #### Integration Features
 - **Seamless Integration**: Renders above existing tool call list while maintaining backward compatibility
 - **Metadata Propagation**: FlowSummary data flows through entire confirmation pipeline from stream frames to final rendering
+- **Durable Record Support**: Flow context preserved in durable records and replayed consistently across approvals inbox and session detail views
 - **Performance Optimization**: Conditional checks prevent unnecessary DOM manipulation when flow metadata is absent
 
 **Section sources**
 - [ChatView.tsx:388-435](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L388-L435)
 - [models.ts:70-79](file://products/operator-portal/web-ui/app/src/stream/models.ts#L70-L79)
-- [useChatStream.ts:44-47](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L44-L47)
-- [global.css:552-604](file://products/operator-portal/web-ui/app/src/theme/global.css#L552-L604)
+- [decoder.ts:39-57](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L39-L57)
+- [transcript.ts:116-133](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L116-L133)
+- [agent-stream-event.schema.json:59-70](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L59-L70)
 
 ### Enhanced Audit Trail Features
 **Completely Redesigned** The audit trail has been completely redesigned with advanced interactive features, further hardened in v0.29.1 for improved table stability and readability, v0.29.2 for critical hook ordering stability during authentication state changes, and v0.29.3 for automatic recovery from stale session transitions.

@@ -11,6 +11,7 @@
 - [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [test_tool_invoke.py](file://products/tool-gateway/tests/test_tool_invoke.py)
+- [agent-session.schema.json](file://shared/shared-contracts/schemas/agent-session.schema.json)
 </cite>
 
 ## Update Summary
@@ -19,7 +20,9 @@
 - Enhanced confirmation request documentation with per-call risk_level support
 - Added details about mutate badge functionality for different tool call types
 - Updated streaming event schema documentation to reflect v6 changes
-- Added examples of risk level validation and coercion behavior
+- **Updated v9 schema compliance section to document optional flow_summary field in confirmation_request frames**
+- **Added comprehensive documentation for defensive coercion logic via _coerce_flow_summary function**
+- **Enhanced examples to include flow_summary handling and validation behavior**
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -36,7 +39,7 @@
 ## Introduction
 This document provides comprehensive API documentation for the Agent Platform service endpoints, focusing on agent orchestration, session management, and provider interactions. It covers REST APIs exposed via the tool gateway and internal services within the agent platform, including authentication using JWT tokens, rate limiting policies, WebSocket streaming for real-time responses, and long-running operations. Practical examples are included to demonstrate agent creation, chat interactions, session handling, and provider configuration. Error codes, retry strategies, and client implementation guidelines across multiple programming languages are also provided.
 
-**Updated** Enhanced with v6 schema compliance features for risk level handling in pending calls, enabling proper risk tagging and mutate badges for different tool call types through improved `_coerce_pending_calls` function.
+**Updated** Enhanced with v6 schema compliance features for risk level handling in pending calls, enabling proper risk tagging and mutate badges for different tool call types through improved `_coerce_pending_calls` function, plus v9 schema compliance for browser-flow headline support in confirmation requests.
 
 ## Project Structure
 The Agent Platform is composed of several key modules:
@@ -72,11 +75,13 @@ Providers --> DeepSeek["DeepSeek Provider"]
 - Authentication & Authorization: Validates JWT tokens and enforces policies.
 - Streaming & WebSockets: Supports real-time event streaming for long-running operations.
 - Risk Level Handling: v6 schema compliance for per-call risk levels in pending confirmations.
+- Browser Flow Headlines: v9 schema compliance for optional flow_summary field in confirmation_request frames.
 
-**Updated** Enhanced with v6 schema compliance for risk level handling in pending calls, supporting read/write/admin risk tiers for better mutation detection in the portal UI.
+**Updated** Enhanced with v6 schema compliance for risk level handling in pending calls, supporting read/write/admin risk tiers for better mutation detection in the portal UI, plus v9 schema compliance for browser-flow headline support.
 
 **Section sources**
 - [routes.py:259-340](file://products/agent-platform/src/agent_service/api/v2/routes.py#L259-L340)
+- [routes.py:497-614](file://products/agent-platform/src/agent_service/api/v2/routes.py#L497-L614)
 - [gateway_tools.py:200-208](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L200-L208)
 
 ## Architecture Overview
@@ -161,14 +166,14 @@ All public endpoints are exposed through the tool gateway under `/api/v2`.
 - Message Schema: See [agent-stream-event.schema.json](file://shared/shared-contracts/schemas/agent-stream-event.schema.json)
 - Authentication: Requires JWT in headers.
 
-**Updated** Enhanced with v6 schema compliance supporting per-call risk levels in confirmation_request events for better mutation detection.
+**Updated** Enhanced with v6 schema compliance supporting per-call risk levels in confirmation_request events for better mutation detection, plus v9 schema compliance for optional flow_summary field carrying browser-flow headline information.
 
 **Section sources**
 - [routes.py:135-165](file://products/agent-platform/src/agent_service/api/v2/routes.py#L135-L165)
-- [agent-stream-event.schema.json:1-101](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L1-L101)
+- [agent-stream-event.schema.json:1-121](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L1-L121)
 
 ### Confirmation Requests and Risk Level Handling
-The system now supports v6 schema compliance for risk level handling in pending calls, enabling proper risk tagging and mutate badges for different tool call types.
+The system supports both v6 schema compliance for risk level handling in pending calls and v9 schema compliance for browser-flow headline support in confirmation requests.
 
 #### Pending Calls with Risk Levels
 - **Risk Level Values**: `read`, `write`, `admin`
@@ -176,24 +181,37 @@ The system now supports v6 schema compliance for risk level handling in pending 
 - **Portal Integration**: Mutate badges displayed for write/admin risk levels
 - **Validation**: Only schema-conformant risk levels are passed through; invalid values are omitted
 
+#### Browser Flow Headlines (v9)
+- **Flow Summary Fields**: `skill_id`, `origin`, `title`, `description`, `risk_class`
+- **Schema Compliance**: Optional flow_summary field on confirmation_request frames
+- **Defensive Coercion**: Malformed summaries degrade gracefully to prevent validation failures
+- **Portal Integration**: Live operator cards render workflow headlines matching durable records
+
 ```mermaid
 flowchart TD
-RawEvent["Raw Kernel Event"] --> CoerceFunction["_coerce_pending_calls()"]
-CoerceFunction --> ValidateRisk{"Valid Risk Level?"}
-ValidateRisk --> |Yes| IncludeRisk["Include risk_level in entry"]
-ValidateRisk --> |No| OmitRisk["Omit risk_level from entry"]
-IncludeRisk --> BuildEntry["Build pending call entry"]
-OmitRisk --> BuildEntry
+RawEvent["Raw Kernel Event"] --> CoerceFunction["_normalize_stream_event()"]
+CoerceFunction --> RiskCheck{"Has pending_calls?"}
+RiskCheck --> |Yes| RiskCoerce["_coerce_pending_calls()"]
+RiskCheck --> |No| FlowCheck{"Has flow_summary?"}
+RiskCoerce --> FlowCheck
+FlowCheck --> |Yes| FlowCoerce["_coerce_flow_summary()"]
+FlowCheck --> |No| BuildEntry["Build event entry"]
+FlowCoerce --> ValidateSummary{"Valid dict with string fields?"}
+ValidateSummary --> |Yes| IncludeSummary["Include flow_summary"]
+ValidateSummary --> |No| OmitSummary["Omit flow_summary"]
+IncludeSummary --> BuildEntry
+OmitSummary --> BuildEntry
 BuildEntry --> SchemaCompliant["Schema-compliant event"]
 ```
 
 **Diagram sources**
-- [routes.py:315-340](file://products/agent-platform/src/agent_service/api/v2/routes.py#L315-L340)
-- [agent-stream-event.schema.json:32-49](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L32-L49)
+- [routes.py:503-614](file://products/agent-platform/src/agent_service/api/v2/routes.py#L503-L614)
+- [agent-stream-event.schema.json:59-70](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L59-L70)
 
 **Section sources**
 - [routes.py:259-340](file://products/agent-platform/src/agent_service/api/v2/routes.py#L259-L340)
-- [test_contract_adapter.py:221-250](file://products/agent-platform/tests/test_contract_adapter.py#L221-L250)
+- [routes.py:497-614](file://products/agent-platform/src/agent_service/api/v2/routes.py#L497-L614)
+- [test_contract_adapter.py:253-330](file://products/agent-platform/tests/test_contract_adapter.py#L253-L330)
 
 ### Provider Interactions
 Providers implement a common interface for LLM interactions with enhanced risk level support.
@@ -260,7 +278,7 @@ end
 - [test_tool_invoke.py:307-340](file://products/tool-gateway/tests/test_tool_invoke.py#L307-L340)
 
 ## Dependency Analysis
-The tool gateway depends on internal services and external providers with enhanced risk level tracking.
+The tool gateway depends on internal services and external providers with enhanced risk level tracking and flow summary support.
 
 ```mermaid
 graph LR
@@ -271,17 +289,19 @@ AgentClient --> AgentService["Agent Platform Service"]
 AgentService --> SessionStore["Session Store"]
 AgentService --> Providers["LLM Providers"]
 Providers --> RiskLevels["Risk Level Tracking"]
+AgentService --> FlowSummary["Flow Summary Coercion"]
 ```
 
-**Updated** Enhanced dependency chain includes risk level tracking for proper mutation detection in confirmation workflows.
+**Updated** Enhanced dependency chain includes risk level tracking for proper mutation detection in confirmation workflows and flow summary coercion for browser-flow headline support.
 
 **Diagram sources**
 - [gateway_tools.py:200-208](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L200-L208)
-- [routes.py:315-340](file://products/agent-platform/src/agent_service/api/v2/routes.py#L315-L340)
+- [routes.py:497-614](file://products/agent-platform/src/agent_service/api/v2/routes.py#L497-L614)
 
 **Section sources**
 - [gateway_tools.py:165-213](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L165-L213)
 - [routes.py:259-340](file://products/agent-platform/src/agent_service/api/v2/routes.py#L259-L340)
+- [routes.py:497-614](file://products/agent-platform/src/agent_service/api/v2/routes.py#L497-L614)
 
 ## Performance Considerations
 - Use connection pooling for LLM provider calls.
@@ -289,8 +309,9 @@ Providers --> RiskLevels["Risk Level Tracking"]
 - Monitor metrics and telemetry for bottleneck identification.
 - Configure rate limiting to prevent abuse.
 - Optimize risk level validation for high-throughput scenarios.
+- **Optimize flow summary coercion to handle malformed data efficiently without performance impact.**
 
-**Updated** Added performance considerations for risk level validation in pending calls processing.
+**Updated** Added performance considerations for risk level validation in pending calls processing and flow summary coercion for browser-flow headlines.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -299,16 +320,17 @@ Common issues and resolutions:
 - Provider Timeouts: Verify provider credentials and network connectivity.
 - Session Loss: Confirm session store availability and persistence settings.
 - Risk Level Validation Errors: Ensure risk_level values conform to schema (read/write/admin).
+- **Flow Summary Validation Errors: Ensure flow_summary contains only contract-defined string fields (skill_id, origin, title, description, risk_class).**
 
-**Updated** Added troubleshooting guidance for risk level validation issues in pending calls.
+**Updated** Added troubleshooting guidance for risk level validation issues in pending calls and flow summary validation errors in confirmation requests.
 
 **Section sources**
-- [test_contract_adapter.py:202-250](file://products/agent-platform/tests/test_contract_adapter.py#L202-L250)
+- [test_contract_adapter.py:202-330](file://products/agent-platform/tests/test_contract_adapter.py#L202-L330)
 
 ## Conclusion
-The Agent Platform API provides a robust framework for agent orchestration, session management, and provider interactions. With strong authentication, policy enforcement, real-time streaming capabilities, and enhanced v6 schema compliance for risk level handling, it supports scalable and secure AI-driven applications with proper mutation detection and confirmation workflows.
+The Agent Platform API provides a robust framework for agent orchestration, session management, and provider interactions. With strong authentication, policy enforcement, real-time streaming capabilities, and enhanced v6 schema compliance for risk level handling plus v9 schema compliance for browser-flow headline support, it supports scalable and secure AI-driven applications with proper mutation detection, confirmation workflows, and consistent operator experience across live and durable views.
 
-**Updated** Enhanced conclusion reflecting v6 schema compliance improvements for risk level handling in pending calls.
+**Updated** Enhanced conclusion reflecting v6 schema compliance improvements for risk level handling in pending calls and v9 schema compliance for browser-flow headline support in confirmation requests.
 
 ## Appendices
 
@@ -326,16 +348,17 @@ The Agent Platform API provides a robust framework for agent orchestration, sess
 - Headers: `Authorization: Bearer <jwt>`
 - Response: Chat response with structured output
 
-#### Handle Confirmation Request with Risk Levels
+#### Handle Confirmation Request with Risk Levels and Flow Summary
 - Event Type: `confirmation_request`
 - Payload includes pending_calls with per-call risk_level fields
-- Portal displays mutate badges for write/admin risk levels
+- **Optional flow_summary with browser-flow headline fields**
+- Portal displays mutate badges for write/admin risk levels and workflow headlines
 
-**Updated** Added example for handling confirmation requests with v6 risk level support.
+**Updated** Added example for handling confirmation requests with v6 risk level support and v9 flow_summary support.
 
 **Section sources**
 - [routes.py:346-438](file://products/agent-platform/src/agent_service/api/v2/routes.py#L346-L438)
-- [agent-stream-event.schema.json:32-49](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L32-L49)
+- [agent-stream-event.schema.json:32-70](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L32-L70)
 
 ### Error Codes and Retry Strategies
 - 401 Unauthorized: Invalid or missing JWT. Retry after refreshing token.
@@ -352,13 +375,15 @@ The Agent Platform API provides a robust framework for agent orchestration, sess
 - Go: Use `net/http` for REST and `gorilla/websocket` for streaming.
 - Java: Use `OkHttp` for REST and `Java WebSocket API` for streaming.
 
-**Updated** Enhanced guidelines for handling v6 schema compliance in client implementations.
+**Updated** Enhanced guidelines for handling v6 schema compliance in client implementations and v9 flow_summary handling.
 
-### Risk Level Handling Examples
+### Risk Level and Flow Summary Handling Examples
 
-#### Schema-Compliant Risk Levels
+#### Schema-Compliant Risk Levels with Flow Summary
 ```json
 {
+  "type": "confirmation_request",
+  "confirm_id": "cf-flow",
   "pending_calls": [
     {
       "call_id": "call-1",
@@ -370,18 +395,34 @@ The Agent Platform API provides a robust framework for agent orchestration, sess
       "tool_name": "k8s.get_pod_logs",
       "risk_level": "read"
     }
-  ]
+  ],
+  "flow_summary": {
+    "skill_id": "browser.check.reset",
+    "origin": "browser-flow",
+    "title": "Reset the check target",
+    "description": "Clears the SPEC-051 Design 1 form and re-runs the check.",
+    "risk_class": "write"
+  }
 }
 ```
 
-#### Portal Mutation Detection
-The portal uses risk_level to display mutate badges:
+#### Portal Mutation Detection and Workflow Headlines
+The portal uses risk_level to display mutate badges and flow_summary for workflow headlines:
 - `read`: No badge (safe operations)
 - `write`: Orange "mutating" badge (requires confirmation)
 - `admin`: Orange "mutating" badge (requires confirmation)
+- **flow_summary**: Displays workflow headline with skill intent, origin, title, description, and risk class
 
-**Updated** Added detailed examples of risk level handling and portal integration.
+#### Defensive Coercion Behavior
+- Non-dict flow_summary degrades to absent (card falls back to plain tool-action rendering)
+- Unknown fields in flow_summary are stripped while valid fields survive
+- Non-string values in flow_summary are ignored
+- Malformed summaries never fail frame validation due to additionalProperties:false constraint
+
+**Updated** Added detailed examples of risk level handling, flow_summary support, and defensive coercion behavior.
 
 **Section sources**
-- [test_contract_adapter.py:221-250](file://products/agent-platform/tests/test_contract_adapter.py#L221-L250)
+- [test_contract_adapter.py:253-330](file://products/agent-platform/tests/test_contract_adapter.py#L253-L330)
+- [routes.py:600-614](file://products/agent-platform/src/agent_service/api/v2/routes.py#L600-L614)
+- [agent-stream-event.schema.json:59-70](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L59-L70)
 - [ChatView.tsx:253-265](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L253-L265)
