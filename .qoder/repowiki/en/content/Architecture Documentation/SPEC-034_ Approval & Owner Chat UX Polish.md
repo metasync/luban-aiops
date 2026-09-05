@@ -12,14 +12,15 @@
 - [global.css](file://products/operator-portal/web-ui/app/src/theme/global.css)
 - [transcript.test.ts](file://products/operator-portal/web-ui/app/src/chat/__tests__/transcript.test.ts)
 - [ApprovalsView.test.tsx](file://products/operator-portal/web-ui/app/src/views/__tests__/ApprovalsView.test.tsx)
+- [ConfirmationCard.test.tsx](file://products/operator-portal/web-ui/app/src/chat/__tests__/ConfirmationCard.test.tsx)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated to reflect dropped changes: underlying implementation rebased from commit 4472199d to 88c80a6b
-- Functional outcome remains unchanged - all five requirements still delivered as specified
-- Documentation updated to reflect current implementation status without modification to content scope
-- Verified all implementation files remain intact and functional after rebase
+- Enhanced confirmation card UX with improved visual hierarchy and better separation of technical details
+- Added CSS styling improvements for `.agent-working`, `.confirm-call-hint`, and `.confirm-call-details` classes
+- Expanded test coverage for confirmation cards including tier badges, execution receipts, and technical detail expanders
+- Updated documentation to reflect the enhanced confirmation card rendering with prose hints and folded technical details
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -27,10 +28,11 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
+6. [Enhanced Confirmation Card UX](#enhanced-confirmation-card-ux)
+7. [Dependency Analysis](#dependency-analysis)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
 
 ## Introduction
 SPEC-034 is a portal-only polish pass for the approval and owner chat experience that has been **delivered** in v0.16.0. It focuses on five usability improvements surfaced during live testing:
@@ -42,7 +44,7 @@ SPEC-034 is a portal-only polish pass for the approval and owner chat experience
 
 These changes do not modify backend contracts or schemas; they are implemented entirely within the operator portal UI with comprehensive test coverage.
 
-**Updated** This document reflects the dropped changes update where the underlying implementation was rebased from commit 4472199d to 88c80a6b, maintaining full functional parity while updating to current implementation status.
+**Updated** This document reflects the enhanced confirmation card UX improvements with better visual hierarchy, CSS styling enhancements, and expanded test coverage for confirmation cards while maintaining all original functionality.
 
 ## Project Structure
 The implementation lives under the operator portal web UI:
@@ -51,7 +53,7 @@ The implementation lives under the operator portal web UI:
 - Approvals inbox, tabs, entry cards, and banner text: `ApprovalsView.tsx`
 - App-level integration of the approvals hook and workspace refresh: `App.tsx`
 - Shared theme tokens and CSS animations: `global.css`
-- Unit and component tests validating behavior: `transcript.test.ts`, `ApprovalsView.test.tsx`
+- Unit and component tests validating behavior: `transcript.test.ts`, `ApprovalsView.test.tsx`, `ConfirmationCard.test.tsx`
 
 ```mermaid
 graph TB
@@ -61,12 +63,14 @@ Chat["ChatView.tsx"]
 Approvals["ApprovalsView.tsx"]
 Transcript["transcript.ts"]
 Styles["global.css"]
+Tests["ConfirmationCard.test.tsx"]
 end
 App --> Chat
 App --> Approvals
 Chat --> Transcript
 Chat --> Styles
 Approvals --> Styles
+Tests --> Chat
 ```
 
 **Diagram sources**
@@ -75,6 +79,7 @@ Approvals --> Styles
 - [ApprovalsView.tsx:253-356](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L253-L356)
 - [transcript.ts:205-222](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L205-L222)
 - [global.css:252-316](file://products/operator-portal/web-ui/app/src/theme/global.css#L252-L316)
+- [ConfirmationCard.test.tsx:1-254](file://products/operator-portal/web-ui/app/src/chat/__tests__/ConfirmationCard.test.tsx#L1-L254)
 
 **Section sources**
 - [spec.md:11-45](file://docs/specs/SPEC-034-approval-owner-ux-polish/spec.md#L11-L45)
@@ -86,6 +91,7 @@ Approvals --> Styles
 - Approvals inbox: exposes records, loading, error, pending count, refresh, and decide; supports an optional `onDecisionApplied` callback to trigger immediate session list refresh.
 - Approvals view layout: renders Pending (default) and History tabs with counts, separated entry cards, and a banner stating the expiry rule.
 - Global styles: defines `.turn-group.turn-arrived` keyframe flash and `.approvals-entry` card styling using shared theme tokens.
+- Enhanced confirmation card: improved visual hierarchy with prose hints for browser actions and folded technical details behind expanders.
 
 **Section sources**
 - [transcript.ts:205-222](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L205-L222)
@@ -254,6 +260,53 @@ Entry --> Card["ConfirmationCardView"]
 - [plan.md:51-56](file://docs/specs/SPEC-034-approval-owner-ux-polish/plan.md#L51-L56)
 - [ApprovalsView.tsx:286-293](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L286-L293)
 
+## Enhanced Confirmation Card UX
+
+### Visual Hierarchy Improvements
+The confirmation card has been enhanced with better visual hierarchy to improve operator comprehension and decision-making:
+
+- **Prose hints for browser actions**: Browser interaction calls now display human-readable labels (like "Reset password button") as prose rather than raw code blocks, making them immediately understandable.
+- **Folded technical details**: Raw per-call arguments are now folded behind a "Technical details" expander, keeping the card face clean while preserving full audit trail access.
+- **Improved agent working indicator**: Enhanced `.agent-working` styling provides better visual feedback when agents resume execution after approvals.
+
+### CSS Styling Enhancements
+Key CSS improvements include:
+
+- **`.agent-working`**: Enhanced styling with proper borders, background, and spacing for the post-approval activity indicator
+- **`.confirm-call-hint`**: Improved typography and color for human-readable action descriptions
+- **`.confirm-call-details`**: Better expander styling with muted summary text and proper spacing
+
+### Test Coverage Expansion
+Comprehensive test coverage ensures the enhanced confirmation card works correctly:
+
+- **Tier badge validation**: Tests verify approver-required vs operator-confirmation badges based on call types
+- **Execution receipt rendering**: Tests cover succeeded, failed, timeout, and rejected execution statuses with digest matching
+- **Technical detail expander**: Tests ensure raw parameters are properly folded while remaining accessible
+- **Role-based permissions**: Tests validate read-only behavior for non-deciders and actionable interfaces for authorized users
+
+```mermaid
+flowchart TD
+Call["Confirmation Call"] --> Type{"Browser Action?"}
+Type --> |Yes| Hint["Display hint as prose"]
+Type --> |No| ToolName["Tool name + risk level"]
+Hint --> Details["Technical details expander"]
+ToolName --> Details
+Details --> Params["Folded parameters"]
+Params --> Audit["Full audit trail preserved"]
+```
+
+**Diagram sources**
+- [ChatView.tsx:437-465](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L437-L465)
+- [global.css:343-357](file://products/operator-portal/web-ui/app/src/theme/global.css#L343-L357)
+- [global.css:603-620](file://products/operator-portal/web-ui/app/src/theme/global.css#L603-L620)
+- [ConfirmationCard.test.tsx:202-253](file://products/operator-portal/web-ui/app/src/chat/__tests__/ConfirmationCard.test.tsx#L202-L253)
+
+**Section sources**
+- [ChatView.tsx:344-515](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L344-L515)
+- [global.css:343-357](file://products/operator-portal/web-ui/app/src/theme/global.css#L343-L357)
+- [global.css:603-620](file://products/operator-portal/web-ui/app/src/theme/global.css#L603-L620)
+- [ConfirmationCard.test.tsx:1-254](file://products/operator-portal/web-ui/app/src/chat/__tests__/ConfirmationCard.test.tsx#L1-L254)
+
 ## Dependency Analysis
 - ChatView depends on:
   - `transcript.ts` for mapping and arrival detection.
@@ -281,12 +334,14 @@ ApprovalsView --> Transport["stream/transport"]
 ApprovalsView --> Card["ConfirmationCardView"]
 App["App.tsx"] --> ApprovalsView
 App --> Workspace
+ConfirmationCardTest["ConfirmationCard.test.tsx"] --> ChatView
 ```
 
 **Diagram sources**
 - [ChatView.tsx:1-49](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L49)
 - [ApprovalsView.tsx:1-25](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L1-L25)
 - [App.tsx:272-402](file://products/operator-portal/web-ui/app/src/App.tsx#L272-L402)
+- [ConfirmationCard.test.tsx:1-254](file://products/operator-portal/web-ui/app/src/chat/__tests__/ConfirmationCard.test.tsx#L1-L254)
 
 **Section sources**
 - [ChatView.tsx:1-49](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L49)
@@ -298,6 +353,7 @@ App --> Workspace
 - Flash animation uses CSS keyframes and respects reduced motion preferences, avoiding heavy JS timers beyond a single timeout per reseed.
 - Session list refresh is triggered explicitly on decisions rather than increasing poll frequency, preserving the 30-second background cadence.
 - Approvals tabs avoid additional network calls by splitting existing records client-side.
+- Enhanced confirmation card rendering maintains performance through efficient conditional rendering and proper React key usage.
 
 ## Troubleshooting Guide
 - No arrival highlight:
@@ -315,6 +371,11 @@ App --> Workspace
   - Verify secondary line shows owner, parked time, and decided info for history entries.
 - Banner missing expiry note:
   - Confirm banner text includes the default confirmation timeout mention.
+- Confirmation card issues:
+  - Verify tier badges render correctly based on call types (tools:mutate vs tools:invoke).
+  - Check that technical details are properly folded behind expanders.
+  - Ensure role-based permissions work correctly for different user types.
+  - Validate execution receipts display proper status indicators and digest match information.
 
 **Section sources**
 - [transcript.test.ts:381-423](file://products/operator-portal/web-ui/app/src/chat/__tests__/transcript.test.ts#L381-L423)
@@ -322,6 +383,7 @@ App --> Workspace
 - [ChatView.tsx:737-765](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L737-L765)
 - [ApprovalsView.tsx:113-182](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L113-L182)
 - [global.css:252-316](file://products/operator-portal/web-ui/app/src/theme/global.css#L252-L316)
+- [ConfirmationCard.test.tsx:1-254](file://products/operator-portal/web-ui/app/src/chat/__tests__/ConfirmationCard.test.tsx#L1-L254)
 
 ## Conclusion
 SPEC-034 delivers focused, portal-only UX enhancements that make approval outcomes more visible and actionable:
@@ -330,7 +392,8 @@ SPEC-034 delivers focused, portal-only UX enhancements that make approval outcom
 - The Approvals view separates actionable work from history with clear tabs and counts.
 - Inbox entries are visually separated and scannable with structured headers.
 - Approvers see the pending-request expiry rule prominently in the banner.
+- Enhanced confirmation cards provide better visual hierarchy with prose hints and folded technical details.
 
 All five requirements have been successfully implemented and delivered in v0.16.0 with comprehensive test coverage, maintaining the platform's goal of polished, operator-friendly workflows without requiring any backend changes.
 
-**Updated** This implementation has been rebased from commit 4472199d to 88c80a6b while maintaining full functional parity. All core components, tests, and user-facing behaviors remain unchanged, ensuring consistent delivery of the approved specification.
+**Updated** This implementation includes enhanced confirmation card UX improvements with better visual hierarchy, CSS styling enhancements for `.agent-working`, `.confirm-call-hint`, and `.confirm-call-details`, and expanded test coverage ensuring robust functionality across all confirmation card scenarios.
