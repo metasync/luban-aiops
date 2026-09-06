@@ -44,3 +44,4 @@ Do not write an ADR for decisions local to a single spec; record those in the sp
 | `ADR-0006` | Contract purpose restated — invariant enforcement, not framework swappability | `accepted` |
 | `ADR-0007` | Enforce one HITL gate per mutating browser flow platform-side | `accepted` |
 | `ADR-0008` | Spec delivery requires requirement-to-test traceability and exercised samples | `accepted` |
+| `ADR-0009` | Graduate troubleshooting sessions into replayable executable skills via a durable authoring trace | `proposed` |
