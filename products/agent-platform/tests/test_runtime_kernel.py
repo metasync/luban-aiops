@@ -1,6 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
+from agentscope.event import RequireUserConfirmEvent
 from agentscope.message import ToolCallBlock
 
 from agent_service.runtime_kernel import AgentKernel
@@ -1164,6 +1165,108 @@ class TestRecordFlowApproval:
         kernel._record_flow_approval(pending, "bob", "ses-rec-5")
 
         assert FLOW_APPROVALS.has_approval("ses-rec-5") is False
+
+
+def _fake_toolkit(*tools):
+    """A minimal toolkit exposing the gateway name/risk maps the kernel reads.
+
+    ``tools`` are ``(sanitized_name, gateway_tool_name, gateway_risk_level)``
+    triples; ``_toolkit_gateway_name_map``/``_toolkit_risk_map`` walk
+    ``tool_groups[].tools[]`` for ``name``/``gateway_tool_name``/
+    ``gateway_risk_level``.
+    """
+    group = SimpleNamespace(
+        tools=[
+            SimpleNamespace(name=name, gateway_tool_name=gw, gateway_risk_level=risk)
+            for (name, gw, risk) in tools
+        ]
+    )
+    return SimpleNamespace(tool_groups=[group])
+
+
+class TestConfirmationFrameFlowHeadline:
+    """SPEC-051 R-6 headline-leak fix: the card's flow headline must describe
+    *this parked batch*. A non-browser batch parked while a browser flow
+    lingers in the session must fall back to action-level rendering — never
+    inherit the stale flow headline (the reset-password headline leaking onto a
+    k8s.delete_pod card). A browser-write batch still carries the headline."""
+
+    def _kernel(self):
+        return AgentKernel(
+            settings=RuntimeSettings(api_key="test-key", hitl_confirm_timeout=600)
+        )
+
+    def test_non_browser_batch_carries_no_flow_summary(self):
+        FLOW_CONTEXTS.clear_all()
+        _record_context("ses-frame-1")  # a lingering "reset password" flow
+        kernel = self._kernel()
+        toolkit = _fake_toolkit(("k8s_delete_pod", "k8s.delete_pod", "write"))
+        event = RequireUserConfirmEvent(
+            reply_id="reply-1",
+            tool_calls=[
+                ToolCallBlock(
+                    id="call-1",
+                    name="k8s_delete_pod",
+                    input='{"pod": "scratch-restart-demo"}',
+                )
+            ],
+        )
+
+        frame = kernel._build_confirmation_frame(
+            event, "ses-frame-1", "alice", toolkit=toolkit
+        )
+
+        assert frame is not None
+        # The leak is fixed: no stale browser-flow headline on an action card.
+        assert "flow_summary" not in frame
+        # The action itself is still surfaced for action-level rendering.
+        assert frame["pending_calls"][0]["tool_name"] == "k8s.delete_pod"
+        assert frame["pending_calls"][0]["risk_level"] == "write"
+
+    def test_browser_write_batch_carries_flow_summary(self):
+        FLOW_CONTEXTS.clear_all()
+        _record_context("ses-frame-2")
+        kernel = self._kernel()
+        toolkit = _fake_toolkit(("web_click", "web.click", "write"))
+        event = RequireUserConfirmEvent(
+            reply_id="reply-1",
+            tool_calls=[
+                ToolCallBlock(id="call-1", name="web_click", input='{"ref": 12}')
+            ],
+        )
+
+        frame = kernel._build_confirmation_frame(
+            event, "ses-frame-2", "alice", toolkit=toolkit
+        )
+
+        assert frame is not None
+        assert frame["flow_summary"]["title"] == "Reset User Password"
+        assert frame["flow_summary"]["skill_id"] == "samples/password-reset"
+        assert frame["flow_summary"]["risk_class"] == "write"
+
+    def test_read_only_browser_batch_carries_no_flow_summary(self):
+        FLOW_CONTEXTS.clear_all()
+        _record_context("ses-frame-3")  # a lingering "reset password" flow
+        kernel = self._kernel()
+        toolkit = _fake_toolkit(("web_snapshot", "web.snapshot", "read"))
+        event = RequireUserConfirmEvent(
+            reply_id="reply-1",
+            tool_calls=[
+                ToolCallBlock(id="call-1", name="web_snapshot", input="{}")
+            ],
+        )
+
+        frame = kernel._build_confirmation_frame(
+            event, "ses-frame-3", "alice", toolkit=toolkit
+        )
+
+        assert frame is not None
+        # A read-tier browser probe is not a browser write, so a lingering
+        # flow's headline must not ride this card — the exact leak class the
+        # gate fixes (framing follows the parked batch, not ambient session
+        # state). Locks the shared predicate against future drift.
+        assert "flow_summary" not in frame
+        assert frame["pending_calls"][0]["tool_name"] == "web.snapshot"
 
 
 class TestSignFlowExecution:

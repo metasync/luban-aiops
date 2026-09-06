@@ -11,6 +11,29 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.34.1 — 2026-09-06
+
+### Fixed
+
+- **Browser-flow headline no longer leaks onto non-browser approval cards
+  (SPEC-051 R-6)** — a live test of v0.34.0 showed a session that first
+  bound a browser flow (`web.navigate(skill_id=…)`) and later parked an
+  unrelated non-browser mutation (`k8s.delete_pod`) rendering that action
+  card with the lingering flow's headline (e.g. "Reset User Password"). The
+  card's `flow_summary` was attached whenever a flow context was bound in
+  the session (`FLOW_CONTEXTS`), with no check that the *parked batch*
+  carried a browser write, so it rode ambient session state rather than the
+  batch. It is now gated on `_tool_names_have_browser_write` — the same
+  write-tier predicate (`BROWSER_WRITE_TOOLS`) that arms flow-unlock
+  authority in `_record_flow_approval`, extracted into one shared helper so
+  card framing and unlock authority can never disagree. A non-browser or
+  read-tier-only batch falls back to action-level rendering; a browser-write
+  batch still carries the headline. Because the durable record is built from
+  the same gated summary, the approver inbox and a re-loaded owner
+  transcript are corrected too. Kernel-only — no contract, policy, audit, or
+  portal change; pinned by `TestConfirmationFrameFlowHeadline` (non-browser,
+  read-tier-only, and browser-write batches).
+
 ## 0.34.0 — 2026-09-05
 
 ### Added

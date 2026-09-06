@@ -1060,16 +1060,35 @@ class AgentKernel:
         # (populated by _drain_trace_queue from web.navigate), not a park-time
         # frame walk — authoritative and correct across turns and frame order.
         # Empty when no flow is bound, so the card falls back to tool-level.
+        #
+        # The headline must describe *this parked batch*: attach the bound
+        # flow's summary only when the batch actually carries a browser write —
+        # the same predicate (_tool_names_have_browser_write) that arms
+        # flow-unlock in _record_flow_approval, so framing and authority can
+        # never disagree. A non-browser batch (k8s.*, etc.) parked while a
+        # browser flow lingers in the session falls back to action-level
+        # rendering instead of inheriting the stale flow headline (the
+        # reset-password headline leaking onto a k8s.delete_pod card).
+        tool_calls = list(getattr(event, "tool_calls", None) or [])
+        gateway_names = self._toolkit_gateway_name_map(toolkit)
         flow_context = FLOW_CONTEXTS.get(session_id)
-        browser_flow = flow_context.summary() if flow_context is not None else {}
+        browser_flow = (
+            flow_context.summary()
+            if flow_context is not None
+            and self._tool_names_have_browser_write(
+                [str(getattr(tc, "name", "") or "") for tc in tool_calls],
+                gateway_names,
+            )
+            else {}
+        )
         pending = CONFIRMATION_REGISTRY.register(
             session_id=session_id,
             user_id=user_name,
             reply_id=str(getattr(event, "reply_id", "") or ""),
-            tool_calls=list(getattr(event, "tool_calls", None) or []),
+            tool_calls=tool_calls,
             timeout=self.settings.hitl_confirm_timeout,
             risk_levels=self._toolkit_risk_map(toolkit),
-            gateway_names=self._toolkit_gateway_name_map(toolkit),
+            gateway_names=gateway_names,
             browser_element_map=browser_element_map,
             browser_flow=browser_flow,
         )
@@ -1562,20 +1581,35 @@ class AgentKernel:
         return "Tool execution requires your confirmation."
 
     @staticmethod
-    def _batch_has_browser_write(pending: PendingConfirmation) -> bool:
-        """True when the parked batch contains a write-tier browser tool (R-1).
+    def _tool_names_have_browser_write(
+        tool_names: list[str], gateway_names: dict[str, str]
+    ) -> bool:
+        """True when any sanitized tool name maps to a write-tier browser tool.
 
+        Single source of truth for the R-1 browser-write predicate, shared by
+        the card-headline gate (``_build_confirmation_frame``) and flow-unlock
+        authority arming (``_record_flow_approval``) so framing and authority
+        can never disagree about whether a batch is a browser-write batch.
         Uses the canonical dotted gateway names captured at park time (the
         model-visible names are sanitized) matched against
-        ``BROWSER_WRITE_TOOLS``. A batch of only non-browser writes
-        (``k8s.*``, etc.) or only read-tier browser probes does not arm
-        flow-unlock.
+        ``BROWSER_WRITE_TOOLS``.
         """
-        for sanitized in pending.tool_names():
-            gateway_name = pending.gateway_names.get(sanitized, sanitized)
+        for sanitized in tool_names:
+            gateway_name = gateway_names.get(sanitized, sanitized)
             if gateway_name in BROWSER_WRITE_TOOLS:
                 return True
         return False
+
+    @staticmethod
+    def _batch_has_browser_write(pending: PendingConfirmation) -> bool:
+        """True when the parked batch contains a write-tier browser tool (R-1).
+
+        A batch of only non-browser writes (``k8s.*``, etc.) or only read-tier
+        browser probes does not arm flow-unlock.
+        """
+        return AgentKernel._tool_names_have_browser_write(
+            pending.tool_names(), pending.gateway_names
+        )
 
     def _record_flow_approval(
         self,

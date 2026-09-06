@@ -7,6 +7,21 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-06-post-live-test-flow-headline-leak-gate.md`
+  - same-area patch (v0.34.1) from a live test of v0.34.0: a session that
+    first bound a browser flow and later parked an unrelated non-browser
+    mutation (`k8s.delete_pod`) rendered that action card wearing the
+    lingering flow's headline, because the card's `flow_summary` was attached
+    on ambient session state (a bound `FLOW_CONTEXTS` entry) with no check
+    that the parked batch carried a browser write. The gate now uses
+    `_tool_names_have_browser_write` — the same write-tier predicate
+    (`BROWSER_WRITE_TOOLS`) that arms flow-unlock in `_record_flow_approval`,
+    extracted into one shared helper so card framing and unlock authority can
+    never disagree; a non-browser or read-tier-only batch falls back to
+    action-level rendering and the durable record (approver inbox + re-loaded
+    owner transcript) is corrected too. Kernel-only, pinned by
+    `TestConfirmationFrameFlowHeadline`; no contract, policy, audit, or
+    portal change
 - `2026-09-05-skill-transparency-and-approval-card-legibility.md`
   - release train (v0.34.0) closing the 2026-09-05 post-live-test feedback
     on the browser-flow approval experience: delivers SPEC-052 (a read-only
