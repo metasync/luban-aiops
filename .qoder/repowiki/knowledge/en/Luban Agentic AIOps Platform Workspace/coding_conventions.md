@@ -1,6 +1,5 @@
-- Each product exposes a FastAPI application via `app.py` and a CLI entrypoint in `main.py`, with `metadata.py` carrying version/build info consumed by the root `validate-version` target.
-- Product packages follow a fixed internal layout: `api/routes` for HTTP endpoints, `core/` for config/runtime/telemetry/metrics/request-context, `schemas/` for Pydantic models, and `services/` for business logic, mirrored by a parallel `tests/` directory.
-- Inter-service payloads are defined once as JSON Schema files under `shared/shared-contracts/schemas/` and referenced by consumers rather than redefined per product.
-- Policy enforcement uses a canonical YAML bundle under `shared/shared-contracts/policies/` that is copied into `products/*/policies/policy-default.yaml` and the dev overlay via `make sync-policy`, keeping policy source-of-truth centralized.
-- Every Python product pins its interpreter via a local `.python-version` file and manages dependencies with `uv`, enabling reproducible per-product environments and container builds.
-- Spec-driven development requires each feature to be authored as a `docs/specs/SPEC-NNN-<name>/` triad of `plan.md`, `spec.md`, and `tasks.md`, with corresponding ADRs in `docs/adr/` and release notes in `docs/agentic-aiops-platform/release-notes/`.
+- Each product follows a uniform layout of `src/<package>/api`, `core`, `schemas`, `services`, optional `tools`/`policies`, plus a sibling `tests/` directory, with `app.py`/`main.py` entry points and a `metadata.py` module.
+- Inter-service boundaries are expressed as JSON Schema files under `shared/shared-contracts/schemas/` rather than inline types, and consumers validate requests/responses against those schemas.
+- Policy configuration is centralized in `shared/shared-contracts/policies/policy-default.yaml` and propagated to consumers via the `make sync-policy` target instead of ad-hoc copies.
+- Per-product Python environments are pinned with a local `.python-version` file alongside a `uv.lock`, keeping interpreter and dependency versions deterministic across containers and CI.
+- Cross-cutting concerns (image building, policy validation, overlay rendering) are implemented as Make targets in the root `Makefile` that delegate to per-product Makefiles under `mk/defaults.mk`, `image.mk`, and `python.mk`.

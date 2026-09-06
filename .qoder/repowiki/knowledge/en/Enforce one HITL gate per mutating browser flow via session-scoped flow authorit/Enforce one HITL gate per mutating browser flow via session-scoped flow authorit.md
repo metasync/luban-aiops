@@ -7,25 +7,27 @@ category: adr
 
 # Enforce one HITL gate per mutating browser flow via session-scoped flow authority
 
-_Source: coding plans from commit period c66ad9a → 7eee39a — records intent at planning time; the implementation may lag or differ._
+_Source: coding plans from commit period 545a4fc → 33e6a7f — records intent at planning time; the implementation may lag or differ._
 
 **Status:** accepted
 
 ## Context
-SPEC-049 R-4 promised that a single approval unlocks the bound flow's interactions for that session, but the kernel parked every write-tier `web.*` tool call as its own approval card. A live password-reset demo exposed this: each mutating browser action triggered a separate card because `GatewayPermissionMiddleware.on_check_permission` had zero flow/session memory and always ASKed for non-allow-listed writes.
+SPEC-049 R-4 promised that a single approval unlocks the bound flow's interactions for that session, but the kernel parked every write-tier tool call independently. The live password-reset demo exposed this: each mutating call produced its own approval card, contradicting the spec and forcing users to approve multiple times.
 
 ## Decision drivers
-- realize SPEC-049 R-4 one-gate-per-flow invariant
-- keep browser write tools off the auto-allow list to preserve the fail-closed signed-execution invariant (SPEC-037/038)
-- bound blast radius with TTL and gateway deviation guards (origin/risk_class/step budget)
+- spec conformance (one gate per mutating flow)
+- fail-closed signed execution invariant
+- no change to static auto-allow list policy
+- bounded blast radius via TTL
 
 ## Considered options
-- **Auto-allow write-tier browser tools in DEFAULT_AUTO_ALLOWED_TOOLS** _(rejected)_ — pros: simplest path to no extra cards; cons: breaks the SPEC-037/038 fail-closed signed-execution invariant; any future write tool would execute without operator consent
-- **Per-action approval cards (status quo / skill-authoring discipline)** _(rejected)_ — pros: no platform change; cons: violates the one-gate invariant; already regressed in production; fragile reliance on skill authors writing exactly one write action
-- **Session-scoped flow authority with kernel-auto-signed envelopes** — pros: honors R-4 letter and intent; each unlocked execution is still individually signed/persisted/audited/receipted; bounded by TTL + gateway guard; hot path unchanged when no approval; cons: trust-model change spanning agent-platform, tool-gateway, and samples; requires new SPEC-051 and ADR-0007
+- **Auto-allow write tools in the gateway allow-list** _(rejected)_ — pros: simplest code path; cons: breaks SPEC-037/038 fail-closed signed-execution invariant; removes operator consent entirely
+- **Per-action approval cards (status quo)** _(rejected)_ — pros: minimal platform changes; cons: violates the one-gate invariant; already regressed in production; user experience degrades with repeated approvals
+- **Skill-authoring-only discipline (rely on authors to emit one action)** _(rejected)_ — pros: zero runtime cost; cons: fragile, unenforced contract that already failed; no way to prevent accidental extra writes
+- **Session-scoped flow authority with kernel-auto-signed envelopes** — pros: realizes SPEC-049 R-4; keeps every write individually signed/persisted/audited; preserves non-browser writes unchanged; bounded by TTL and gateway origin/risk/step guards; cons: adds new FlowApprovalStore, signing helper, and middleware branch; requires reconciling demo pages to a single destructive action
 
 ## Decision
-Implement SPEC-051: after approving the first browser-write card, record a `FlowApproval` (session_id, confirm_id, owner_user_id, decider_user_id, approved_at) in an in-memory `FLOW_APPROVALS` store with a configurable TTL (`AGENT_BROWSER_FLOW_APPROVAL_TTL`). On subsequent `web.*` write calls within that session, `GatewayPermissionMiddleware` uses a `flow_signer` callback to build and inject a fresh SPEC-037 envelope under the approving card's authority, returning ALLOW instead of ASK. Non-browser writes (`k8s.*`) are unaffected. The static auto-allow list stays unchanged — this is runtime session authority, not an allow-list entry.
+Implement a platform-side flow-unlock: after approving the first browser-write card, record a session-scoped FlowApproval (with TTL) so subsequent web.* write calls in that session are ALLOWED and auto-signed under the approving card's authority via a new build_flow_request envelope. Non-browser writes remain unaffected; the static auto-allow list stays unchanged.
 
 ## Consequences
-One operator card per mutating browser flow; subsequent declared steps execute without further cards. Blast radius is bounded by the TTL-bounded session authority plus the existing gateway deviation guard (origin/risk_class/step budget). If a flow exceeds its step budget, the gateway denies it (`BROWSER_FLOW_EXHAUSTED`) rather than re-parking — a minor deviation from R-4's 'escalates to ASK' letter that fails safe. `web.evaluate` is included in flow-unlock and remains subject to pre-execution mutation guard. The hot path is provably inert for turns without a flow approval.
+Each mutating browser flow now has exactly one approval gate. Approvals expire after AGENT_BROWSER_FLOW_APPROVAL_TTL (default 900s). A stale or rebinding session could auto-sign an unexpected flow's first write, but gateway origin/risk-class/step-budget guards still bound execution. Step-budget exhaustion is denied rather than re-parked (fail-closed). No new audit event type or shared-contract schema is introduced.

@@ -27,6 +27,7 @@
 - [SkillContentViewer.tsx](file://products/operator-portal/web-ui/app/src/chat/SkillContentViewer.tsx)
 - [SkillsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SkillsView.tsx)
 - [markdown.ts](file://products/operator-portal/web-ui/app/src/chat/markdown.ts)
+- [markdown.test.ts](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts)
 - [SkillContentViewer.test.tsx](file://products/operator-portal/web-ui/app/src/chat/__tests__/SkillContentViewer.test.tsx)
 - [SkillsView.test.tsx](file://products/operator-portal/web-ui/app/src/views/control/__tests__/SkillsView.test.tsx)
 - [agent-stream-event.schema.json](file://shared/shared-contracts/schemas/agent-stream-event.schema.json)
@@ -34,11 +35,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added new SkillContentViewer component for read-only skill content inspection with Rendered/Raw toggle functionality
-- Enhanced Skills view with lazy View action per row that fetches skill details on-demand
-- Integrated secure markdown rendering with escape-first approach for safe skill content display
-- Added comprehensive testing coverage for both the Skills view and SkillContentViewer components
-- Updated skills API integration to support lazy loading of full skill records
+- Enhanced markdown rendering system with improved CommonMark compliance for skill body content
+- Added sophisticated list region detection to handle wrapped list items and blank-separated ordered lists
+- Implemented new renderParagraphs function for proper paragraph rendering and soft-wrapping
+- Enhanced renderLists function with continuation line folding for better list structure preservation
+- Updated Skills inventory view with lazy loading capabilities and read-only content viewer
+- Added comprehensive testing coverage for markdown rendering edge cases and security validation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -324,6 +326,65 @@ SkipHeadline --> ToolDetails
 - [agent-stream-event.schema.json:59-70](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L59-L70)
 - [sessions.ts:53-66](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L53-L66)
 
+### Enhanced Markdown Rendering System with CommonMark Compliance
+**New** The markdown rendering system has been significantly enhanced to provide improved CommonMark compliance for skill body content, addressing SPEC-052 findings with sophisticated list region detection, enhanced renderLists function, and new renderParagraphs function.
+
+#### Sophisticated List Region Detection
+- **Maximal List Regions**: Each list region spans marker lines, their indented wrapped continuation lines, and blank lines that loosely separate items
+- **Continuation Line Folding**: Indented continuation lines are properly folded into their parent list items using space-joining per CommonMark soft breaks
+- **Blank-Separated Ordered Lists**: Blank-separated ordered items remain in one continuously numbered list instead of restarting at "1" per item
+- **Nested List Support**: Indented sub-bullets nest inside their parent items with proper indentation tracking (two spaces per level, tabs count as one level)
+
+#### Enhanced renderLists Function
+- **Region Grouping**: Groups each maximal list region into one renderListBlock call to maintain proper list structure
+- **Continuation Detection**: Identifies continuation lines as indented text with no marker that is neither a block element nor fenced-code sentinel
+- **Loose List Handling**: Blank lines join regions only when another list line follows, supporting loose list semantics
+- **Indentation Tracking**: Each level remembers the indent its first item carried, so equally indented items stay siblings even when indented under plain paragraphs
+
+#### New renderParagraphs Function
+- **Soft-Wrapping**: Consecutive non-blank text lines collapse into one flowing `<p>` element with space-joining
+- **Block Element Recognition**: Block elements and fenced-code sentinels stay on their own lines and are never nested inside paragraphs
+- **Paragraph Separation**: Blank lines or block elements end paragraphs, maintaining proper document structure
+- **Legacy Fix**: Addresses the old line-by-line pass that emitted one `<p>` per source line, shattering wrapped paragraphs into short blocks
+
+#### CommonMark Compliance Improvements
+- **Wrapped Item Text**: Real skill bodies wrap item text onto indented continuation lines, which are now properly handled
+- **Ordered List Continuity**: Blank-separated ordered items maintain continuous numbering (1, 2, 3...) instead of restarting
+- **Sub-bullet Nesting**: Sub-bullets under multi-line items are properly nested within their parent items
+- **List Termination**: Lists properly end at blank lines before non-indented paragraphs
+
+#### Security and Performance Benefits
+- **Escape-First Approach**: All HTML characters are escaped before any markdown processing occurs, preventing XSS attacks
+- **Code Block Protection**: Fenced code blocks and inline code spans are protected from markdown transformation
+- **Link Validation**: Only http(s) protocol links are allowed; dangerous protocols are stripped
+- **Optimized Processing**: Efficient region detection prevents unnecessary DOM manipulation
+
+```mermaid
+flowchart TD
+Input["Markdown Input"] --> Escape["HTML Escape"]
+Escape --> CodeProtection["Protect Code Blocks"]
+CodeProtection --> ListDetection["Detect List Regions"]
+ListDetection --> RegionGrouping["Group Maximal Regions"]
+RegionGrouping --> ContinuationFolding["Fold Continuation Lines"]
+ContinuationFolding --> ParagraphProcessing["Process Paragraphs"]
+ParagraphProcessing --> FinalOutput["Final HTML Output"]
+```
+
+**Diagram sources**
+- [markdown.ts:102-153](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L102-L153)
+- [markdown.ts:155-182](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L155-L182)
+- [markdown.ts:184-300](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L184-L300)
+
+#### Testing Coverage
+- **SPEC-052 Findings**: Comprehensive tests validate wrapped continuation line folding and blank-separated ordered list handling
+- **Edge Cases**: Tests cover loose items with wrapping, sub-bullet nesting under multi-line items, and proper list termination
+- **Security Validation**: Tests ensure hostile content is properly escaped and not executed
+- **CommonMark Compliance**: Tests verify proper paragraph soft-wrapping and distinct paragraph separation
+
+**Section sources**
+- [markdown.ts:1-301](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L301)
+- [markdown.test.ts:160-228](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L160-L228)
+
 ### Enhanced Skills Inventory with Lazy Loading and Content Viewer
 **New** The Skills inventory view has been enhanced with lazy loading capabilities and a new read-only content viewer component that allows operators to inspect skill contents safely before trusting them to drive tool behavior and HITL gates.
 
@@ -340,7 +401,7 @@ SkipHeadline --> ToolDetails
 - **Safe Link Handling**: Only http(s) links are rendered as clickable URLs; other protocols are displayed as plain text
 - **Bounded Scrolling**: Content area has maximum height with scrollable overflow for large skill documents
 
-#### Markdown Rendering Security
+#### Enhanced Markdown Rendering Security
 - **Escape-First Approach**: All HTML characters are escaped before any markdown processing occurs
 - **Code Block Protection**: Fenced code blocks and inline code spans are protected from markdown transformation
 - **Link Validation**: Only http(s) protocol links are allowed; javascript:, data:, and other dangerous protocols are stripped
@@ -384,7 +445,7 @@ ViewAction --> |No| SkillTable
 **Section sources**
 - [SkillsView.tsx:1-175](file://products/operator-portal/web-ui/app/src/views/control/SkillsView.tsx#L1-L175)
 - [SkillContentViewer.tsx:1-131](file://products/operator-portal/web-ui/app/src/chat/SkillContentViewer.tsx#L1-L131)
-- [markdown.ts:1-198](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L198)
+- [markdown.ts:1-301](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L301)
 - [SkillsView.test.tsx:1-107](file://products/operator-portal/web-ui/app/src/views/control/__tests__/SkillsView.test.tsx#L1-L107)
 - [SkillContentViewer.test.tsx:1-86](file://products/operator-portal/web-ui/app/src/chat/__tests__/SkillContentViewer.test.tsx#L1-L86)
 
@@ -557,6 +618,7 @@ Nginx --> Gateway["Platform Gateway"]
 - **Parsed Element Labels Optimization**: Display hints are conditionally rendered only when available, preventing unnecessary DOM operations for non-browser tools.
 - **Skills View Performance**: Lazy loading of skill details reduces initial page load time and network usage; only fetches full skill records when users explicitly click View.
 - **Markdown Rendering Efficiency**: Escape-first markdown rendering optimizes security without sacrificing performance; code blocks and inline code are protected from transformation overhead.
+- **CommonMark Compliance Optimization**: Enhanced list region detection and paragraph processing improve rendering efficiency while maintaining proper document structure.
 
 [No sources needed since this section provides general guidance]
 
@@ -581,6 +643,7 @@ Nginx --> Gateway["Platform Gateway"]
 - **SkillContentViewer Issues**: If skill content doesn't display properly, verify that the markdown renderer is working correctly; check for XSS protection issues; ensure the Rendered/Raw toggle functions properly.
 - **Markdown Security Issues**: If skill content appears broken or unsafe, verify that the escape-first renderer is properly sanitizing HTML; check that hostile content like script tags are being escaped correctly.
 - **Lazy Loading Performance**: If skills view feels slow, verify that skill details are only being fetched when View is clicked; check for excessive API calls; ensure loading states are displayed appropriately.
+- **CommonMark Rendering Issues**: If skill body content shows incorrect list formatting or paragraph structure, verify that the enhanced markdown renderer is properly handling wrapped continuation lines and blank-separated ordered lists; check that list regions are being detected correctly and continuation lines are being folded into their parent items.
 
 **Section sources**
 - [AuthContext.tsx:40-85](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L40-L85)
@@ -591,9 +654,10 @@ Nginx --> Gateway["Platform Gateway"]
 - [AuditView.test.tsx:97-131](file://products/operator-portal/web-ui/app/src/views/__tests__/AuditView.test.tsx#L97-L131)
 - [SkillsView.test.tsx:94-107](file://products/operator-portal/web-ui/app/src/views/control/__tests__/SkillsView.test.tsx#L94-L107)
 - [SkillContentViewer.test.tsx:65-77](file://products/operator-portal/web-ui/app/src/chat/__tests__/SkillContentViewer.test.tsx#L65-L77)
+- [markdown.test.ts:160-228](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L160-L228)
 
 ## Conclusion
-The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface, advanced analytics, and automatic recovery from stale session transitions**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants. The v0.29.3 session lifecycle enhancement adds automatic recovery capabilities that prevent empty state rendering during stale session transitions, eliminating the need for manual refresh operations and providing a more resilient user experience. **The enhanced confirmation card system with browser flow context and parsed element labels provides operators with meaningful workflow descriptions, visual styling with background highlighting and tags, improved situational awareness when approving automated browser actions, and hidden technical details behind expanders for cleaner presentation.** The AgentStreamEvent schema v9 enhancement enables consistent flow summary support across both live streaming and durable record scenarios, ensuring operators see the same workflow context regardless of how they encounter confirmation requests. **The new Skills inventory enhancements with lazy loading and read-only content viewer provide operators with safe, performant access to skill documentation, enabling informed decisions about trusting skills to drive automated actions while maintaining security through escape-first markdown rendering and comprehensive testing coverage.**
+The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface, advanced analytics, and automatic recovery from stale session transitions**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants. The v0.29.3 session lifecycle enhancement adds automatic recovery capabilities that prevent empty state rendering during stale session transitions, eliminating the need for manual refresh operations and providing a more resilient user experience. **The enhanced confirmation card system with browser flow context and parsed element labels provides operators with meaningful workflow descriptions, visual styling with background highlighting and tags, improved situational awareness when approving automated browser actions, and hidden technical details behind expanders for cleaner presentation.** The AgentStreamEvent schema v9 enhancement enables consistent flow summary support across both live streaming and durable record scenarios, ensuring operators see the same workflow context regardless of how they encounter confirmation requests. **The new Skills inventory enhancements with lazy loading and read-only content viewer provide operators with safe, performant access to skill documentation, enabling informed decisions about trusting skills to drive automated actions while maintaining security through escape-first markdown rendering and comprehensive testing coverage.** **The enhanced markdown rendering system with improved CommonMark compliance addresses SPEC-052 findings by providing sophisticated list region detection, enhanced renderLists function with continuation line folding, and new renderParagraphs function for proper paragraph rendering, ensuring skill body content displays correctly with proper list structure and paragraph formatting.**
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -630,6 +694,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - **Enhanced Audit Interface**: Sophisticated tabbed interface provides intuitive navigation between detailed events and comprehensive summary analytics; shared filter toolbar ensures consistent user experience across tabs; collapsible sections improve information density while maintaining accessibility; v0.29.1 improvements provide more stable table layouts with fixed-width columns; v0.29.2 hook ordering ensures stable rendering during authentication state changes; v0.29.3 automatic recovery prevents empty states during session transitions.
 - **Enhanced Confirmation Cards**: Browser flow context provides meaningful workflow descriptions with visual styling including background highlighting, origin tags, and risk classification indicators; parsed element labels display human-readable descriptions instead of raw technical details; technical implementation details are hidden behind collapsible expanders for cleaner presentation; accessible semantic HTML structure with appropriate heading levels and descriptive text; responsive design adapts to different screen sizes while maintaining readability.
 - **Enhanced Skills Interface**: Lazy loading provides better performance and user experience; read-only content viewer ensures safe inspection of skill contents; Rendered/Raw toggle offers flexibility for different use cases; comprehensive accessibility support with ARIA labels and keyboard navigation; responsive modal design adapts to different screen sizes.
+- **Enhanced Markdown Rendering**: Improved CommonMark compliance ensures proper list structure and paragraph formatting; sophisticated list region detection handles complex skill body content; escape-first rendering maintains security while providing accurate content display; comprehensive testing coverage validates edge cases and security requirements.
 
 **Section sources**
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
@@ -637,6 +702,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - [AuditView.tsx:298-361](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L298-L361)
 - [SkillsView.tsx:121-175](file://products/operator-portal/web-ui/app/src/views/control/SkillsView.tsx#L121-L175)
 - [SkillContentViewer.tsx:45-131](file://products/operator-portal/web-ui/app/src/chat/SkillContentViewer.tsx#L45-L131)
+- [markdown.ts:1-301](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L301)
 
 ### Browser Compatibility
 - Uses modern browser APIs such as Web Speech API for voice input and standard fetch/SSE patterns.
@@ -767,6 +833,37 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 **Section sources**
 - [SkillsView.tsx:1-175](file://products/operator-portal/web-ui/app/src/views/control/SkillsView.tsx#L1-L175)
 - [SkillContentViewer.tsx:1-131](file://products/operator-portal/web-ui/app/src/chat/SkillContentViewer.tsx#L1-L131)
-- [markdown.ts:1-198](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L198)
+- [markdown.ts:1-301](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L301)
 - [SkillsView.test.tsx:1-107](file://products/operator-portal/web-ui/app/src/views/control/__tests__/SkillsView.test.tsx#L1-L107)
 - [SkillContentViewer.test.tsx:1-86](file://products/operator-portal/web-ui/app/src/chat/__tests__/SkillContentViewer.test.tsx#L1-L86)
+
+### Enhanced Markdown Rendering System
+**New** The markdown rendering system has been significantly enhanced to provide improved CommonMark compliance for skill body content, addressing SPEC-052 findings with sophisticated list region detection, enhanced renderLists function, and new renderParagraphs function.
+
+#### CommonMark Compliance Improvements
+- **Sophisticated List Region Detection**: Identifies maximal list regions spanning marker lines, indented wrapped continuation lines, and blank lines that loosely separate items
+- **Enhanced renderLists Function**: Groups list regions properly to maintain continuous numbering and prevent orphaned continuation lines
+- **New renderParagraphs Function**: Soft-wraps consecutive prose lines into flowing paragraphs instead of emitting one `<p>` per source line
+- **Continuation Line Folding**: Properly folds indented continuation lines into their parent list items using space-joining per CommonMark soft breaks
+
+#### List Structure Preservation
+- **Blank-Separated Ordered Lists**: Maintains continuous numbering (1, 2, 3...) for blank-separated ordered items instead of restarting at "1" per item
+- **Nested List Support**: Properly nests indented sub-bullets inside their parent items with correct indentation tracking
+- **Loose List Handling**: Supports loose list semantics where blank lines separate items while maintaining proper list structure
+- **Sub-bullet Nesting**: Handles sub-bullets under multi-line items with proper nesting and continuation line folding
+
+#### Security and Performance Benefits
+- **Escape-First Approach**: All HTML characters are escaped before markdown processing to prevent XSS attacks
+- **Code Block Protection**: Fenced code blocks and inline code spans are protected from markdown transformation
+- **Link Validation**: Only http(s) protocol links are allowed; dangerous protocols are stripped
+- **Optimized Processing**: Efficient region detection prevents unnecessary DOM manipulation while maintaining proper document structure
+
+#### Testing Coverage
+- **SPEC-052 Findings**: Comprehensive tests validate wrapped continuation line folding and blank-separated ordered list handling
+- **Edge Cases**: Tests cover loose items with wrapping, sub-bullet nesting under multi-line items, and proper list termination
+- **Security Validation**: Tests ensure hostile content is properly escaped and not executed
+- **CommonMark Compliance**: Tests verify proper paragraph soft-wrapping and distinct paragraph separation
+
+**Section sources**
+- [markdown.ts:1-301](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L301)
+- [markdown.test.ts:160-228](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L160-L228)
