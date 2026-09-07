@@ -234,12 +234,12 @@ both demos rides the Delivery Gate browser live check below.
 - [x] `make verify` green (all product pytest; overlays; policy; scenarios; version lockstep; the new `validate-secret-vocabulary` leg)
 - [x] portal `npm test` and `npm run build` green
 - [x] version lockstep bumped: `VERSION` + 8 `pyproject.toml` + 8 `metadata.py` + 2 `__init__.py` + per-product `uv.lock` re-locks
-- [ ] `make build` produces the **clean** image that carries the deferred v0.34.1 headline-leak gate (dev-k8s currently runs `0.34.0-dev-k8s-123c4b6-dirty-20260906161715`)
+- [x] `make build` produces the **clean** image that carries the deferred v0.34.1 headline-leak gate (dev-k8s now runs the clean `0.35.0-dev-k8s-a30354d`, no `-dirty` suffix)
 - [x] living state docs updated: `CHANGELOG.md`, a dated release note + the notes README index, `docs/guides/configuration-reference.md` (only if a knob appeared — none planned), `docs/agentic-aiops-platform/authorization-matrix.md` (verify only — no new action), affected RepoWiki pages
 - [x] `docs/specs/README.md` SPEC-054 row → `delivered`
 - [x] `docs/agentic-aiops-platform/delivery-roadmap.md` SPEC-054 backlog row → `delivered` with the shipping version
 - [x] spec.md Status block → `delivered`, release slice fixed to the shipping train, delivery changelog entry appended
-- [ ] browser live check on the canonical dev-k8s deployment: an unbound allowlisted browser write parks a change-request card and executes on approval; a bound flow still collapses to one gate; a flow-killing result leaves no stale auto-signing authority
+- [x] browser live check on the canonical dev-k8s deployment: an unbound allowlisted browser write parks a change-request card and executes on approval; a bound flow still collapses to one gate; a flow-killing result leaves no stale auto-signing authority
 
 Delivery Gate note (local legs, 2026-09-07): `make verify` green end to end
 (all product pytest — agent-platform 854, tool-gateway 330, and the rest;
@@ -267,6 +267,31 @@ diff); `authorization-matrix.md` needs no change (no new policy action); the
 RepoWiki `SPEC-054_ Action-Level Approval and Change Request Card` page already
 describes the delivered implementation and carries no stale status/version
 marker (RepoWiki pages are regenerated via the dedicated "refresh repowiki"
-tooling commit, not hand-flipped). The two remaining boxes — the **clean**
-`make build` image and the `dev-k8s` **browser live check** — are
-cluster-dependent and ride Stage 8g.
+tooling commit, not hand-flipped).
+
+Delivery Gate note (cluster legs, 2026-09-07): `make build` cut the **clean**
+arm64 image `0.35.0-dev-k8s-a30354d` (nine images, no `-dirty` suffix) and
+`make deploy` rolled all nine products onto it in `dev-luban-aiops`. The first
+`dev-k8s` browser live check then surfaced a real defect the local legs could
+not see: when an approver's decision **resumes** a turn that re-parks *another*
+per-action card, `resume_confirmation` attributed the re-parked card to the
+approver (the decider) instead of the session's requester, so the
+platform-gateway's SPEC-030 R-3 tier-2 check read `owner == approver` and
+refused card 2 with a `self_approval` 403 — breaking R-2's "N interactive
+writes park N cards" for any second action. The fix threads the session owner
+through the resume path (`resume_confirmation(..., owner_user_name=…)`,
+supplied from `session.user_id` by the confirm route) so a re-parked card is
+owned by the requester while the decider still signs the resolution and its
+executions; ownerless sessions fall back to the decider. Kernel + route only —
+no contract, policy, audit, or portal change. Three regression tests cover it
+(re-park under the session owner, default-to-decider fallback, confirm-route
+wiring); `make verify` re-ran green (agent-platform 854 → 857). Because the
+v0.35.0 train was still unpushed, the fix folded into v0.35.0 with `VERSION`
+unchanged, shipped as its own `fix:` commit rather than a patch release. The
+clean image was re-cut at `a30354d`, redeployed, and both chat legs re-ran
+green: the **unbound** leg parks two `approval_kind=action` cards each carrying
+a change-request projection and no flow summary, **both** approved by
+`luban-approver` (no `self_approval` 403 — the fix confirmed live) with two
+signed write-tier executions persisted; the **bound** leg collapses to one
+`approval_kind=flow` gate ("resumed turn completed without parking a second
+gate", SPEC-051 one-gate-per-flow) with three signed `web.click` executions.
