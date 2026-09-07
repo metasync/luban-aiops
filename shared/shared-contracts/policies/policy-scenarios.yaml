@@ -116,14 +116,17 @@ api:
     action: approvals:list
     expect: allow
 
-  # allow-operators-documents / -skill-draft / -incident-skill-draft:
-  # operational authoring roles only (documents-create grant pattern).
+  # allow-operators-documents / -skill-draft / -incident-skill-draft /
+  # -skill-graduate: operational authoring roles only (documents-create grant
+  # pattern). session:skill_graduate (SPEC-055) is the higher-trust executable
+  # graduation, granted to the same three roles.
   - roles: ["platform-admin", "approver", "operator"]
     actions:
       - documents:create
       - documents:read
       - session:skill_draft
       - incident:skill_draft
+      - session:skill_graduate
     expect: allow
 
   # Named denials — auditor holds audit:read and nothing else.
@@ -147,6 +150,7 @@ api:
       - documents:read
       - session:skill_draft
       - incident:skill_draft
+      - session:skill_graduate
     expect: deny
 
   # Named denials — observer is denied every mutating, authoring, and
@@ -163,6 +167,7 @@ api:
       - documents:read
       - session:skill_draft
       - incident:skill_draft
+      - session:skill_graduate
     expect: deny
 
   # Named denials — developer stays read-only on sessions and is excluded
@@ -175,6 +180,7 @@ api:
       - documents:read
       - session:skill_draft
       - incident:skill_draft
+      - session:skill_graduate
     expect: deny
 
   # Named denial — operator is not a governance role.

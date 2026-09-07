@@ -81,6 +81,28 @@ class SkillContractTests(unittest.TestCase):
         self.assertNotIn("source_url", dumped)
         jsonschema.validate(dumped, _load_schema())
 
+    def test_executable_flow_skill_validates_against_contract(self) -> None:
+        # SPEC-055 R-3: an executable_flow skill carries a kind discriminator
+        # and an ordered steps replay list, and may declare risk_class=write
+        # without a web_target (decoupled). Credential args are references,
+        # never literals.
+        skill = _skill(
+            kind="executable_flow",
+            risk_class="write",
+            steps=[
+                {"tool": "web.navigate", "args": {"url": "https://app.example"}},
+                {
+                    "tool": "web.fill_credential",
+                    "args": {"credential_set": "admin", "field": "password"},
+                    "expect": "password field populated",
+                },
+            ],
+        )
+        dumped = skill.model_dump(mode="json", exclude_none=True)
+        self.assertEqual(dumped["kind"], "executable_flow")
+        self.assertNotIn("web_target", dumped)
+        jsonschema.validate(dumped, _load_schema())
+
     def test_contract_rejects_invalid_skill_id(self) -> None:
         payload = _skill(skill_id="Not_Valid/ID").model_dump(
             mode="json", exclude_none=True

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/skill.schema.json",
-  "title": "Skill (v1)",
-  "description": "Canonical skill envelope (SPEC-014 R-1). skills-hub builds one envelope per validated Markdown document during federated source sync and stores/serves it verbatim. skill_id is namespaced <source_id>/<slug> where the slug is derived from the file path inside the source (not from frontmatter), so moves within a repo are visible as id changes. body travels in full-record responses (GET by id, store records); list and search responses omit or excerpt it. source_url carries upstream attribution for adapted open-source content.",
+  "title": "Skill (v2)",
+  "description": "Canonical skill envelope (SPEC-014 R-1). skills-hub builds one envelope per validated Markdown document during federated source sync and stores/serves it verbatim. skill_id is namespaced <source_id>/<slug> where the slug is derived from the file path inside the source (not from frontmatter), so moves within a repo are visible as id changes. body travels in full-record responses (GET by id, store records); list and search responses omit or excerpt it. source_url carries upstream attribution for adapted open-source content. v2 (SPEC-055 R-3) adds an optional executable-flow class - a kind discriminator and a machine-readable steps replay list - and decouples risk_class from web_target so a write-class executable flow need not declare a browser target; knowledge skills omit both new keys and validate exactly as v1.",
   "type": "object",
   "required": [
     "skill_id",
@@ -69,13 +69,45 @@
     "risk_class": {
       "type": "string",
       "enum": ["read", "write"],
-      "description": "Declared effect of the flow's interactive steps (SPEC-049 R-3, optional frontmatter key; requires web_target; defaults to read when web_target is present without it)."
+      "description": "Declared effect of the flow's interactive steps (SPEC-049 R-3, optional frontmatter key). For a web-check flow it defaults to read when web_target is present without it. SPEC-055 R-3 decouples it from web_target: a kind=executable_flow skill declares risk_class=write for a mutating replay without a web_target, so the former 'requires web_target' rule no longer holds."
     },
     "flow_intent": {
       "type": "string",
       "minLength": 1,
       "maxLength": 200,
       "description": "Author-written plain sentence describing what the flow's gated mutating step achieves, shown as the lead decision line on the browser confirmation card (SPEC-053 R-1, optional frontmatter key; requires web_target; display-only, never a security input)."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["knowledge", "executable_flow"],
+      "description": "Skill class discriminator (SPEC-055 R-3, optional frontmatter key; absent = knowledge). A knowledge skill grounds answers and never executes; an executable_flow skill carries a machine-readable steps replay list and, when any step mutates, must declare risk_class=write. Additive: a knowledge skill omits it and validates exactly as v1."
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["tool", "args"],
+        "additionalProperties": false,
+        "properties": {
+          "tool": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Canonical dotted gateway tool name the step invokes (e.g. web.navigate, web.fill_credential)."
+          },
+          "args": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Step arguments. Credential values are credential-set references, never literals (SPEC-055 R-3/R-5); replay resolves them via web.fill_credential."
+          },
+          "expect": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Optional post-condition the step asserts before the flow proceeds (SPEC-055 R-3; a display/replay aid, never a security input)."
+          }
+        }
+      },
+      "description": "Ordered replay step list for a kind=executable_flow skill (SPEC-055 R-3, optional frontmatter key; present only for executable flows). Step-count and origin/risk_class bounds are enforced at runtime by graduation blast-radius re-validation and the gateway deviation guard, not by this contract."
     },
     "updated_at": {
       "type": "string",

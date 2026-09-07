@@ -305,3 +305,21 @@ rules:
       actions_any: ["incident:skill_draft"]
     decision:
       outcome: allow
+
+  # Skill graduation (SPEC-055 R-4 / OQ-3): session:skill_graduate gates
+  # graduating a session's captured authoring trace into an executable-flow
+  # skill draft. A higher trust level than session:skill_draft — the output
+  # declares risk_class: write and a machine-readable replay step list, not
+  # knowledge prose — so it is separately authorized and audited rather than
+  # folded into the draft grant (OQ-3). Same operational-role posture: platform
+  # admins, approvers, and operators; developer and read-only-observer denied.
+  - id: allow-operators-skill-graduate
+    domain: action_authz
+    description: Platform admins, approvers, and operators may graduate a session's authoring trace into an executable-flow skill draft.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator"]
+      actions_any: ["session:skill_graduate"]
+    decision:
+      outcome: allow

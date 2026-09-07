@@ -122,6 +122,25 @@ class AuditEventContractTests(unittest.TestCase):
             _load_schema(self.schema_name),
         )
 
+    def test_skill_graduated_event_validates(self) -> None:
+        # SPEC-055 R-4: agent-platform emits skill_graduated when a session's
+        # captured authoring trace is graduated into an executable-flow draft.
+        event = _event(
+            event_type="skill_graduated",
+            service="agent-service",
+            session_id="ses-1",
+            details={
+                "session_id": "ses-1",
+                "mode": "executable_flow",
+                "validation": "passed",
+                "step_count": 4,
+            },
+        )
+        jsonschema.validate(
+            event.model_dump(mode="json", exclude_none=True),
+            _load_schema(self.schema_name),
+        )
+
     def test_document_events_validate(self) -> None:
         # SPEC-039 R-5: agent-service emits document_created /
         # document_published / cross-owner document_read; the model must

@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `approved`
+- status: `in-progress`
 - owner: luban-platform-team
 - created: 2026-09-06
 - approved: 2026-09-07
@@ -492,3 +492,20 @@ recorded in the changelog (the `approved`-spec rule).
   (SPEC-054 is now `delivered`), so R-7 folds in **before** planning. The two
   findings are non-blocking defense-in-depth and ship on SPEC-055's timeline
   rather than an interim 0.35.x patch.
+- 2026-09-08: `plan.md` + `tasks.md` **authored** — the workflow gate cleared
+  when SPEC-054 reached `delivered` at v0.35.0 (the Status block's B-before-C
+  precondition). `plan.md` resolves the items the approved spec delegated,
+  foremost the **R-7 persist-vs-redact reconciliation**: a pre-implementation
+  code read confirmed the signed `args_digest` is computed at resume from the
+  in-memory `PendingConfirmation` (`build_requests` re-parses `tool_calls`),
+  never from the persisted `confirmation_records.pending_calls` JSONB nor the
+  stream frame, and a parked confirmation never survives a restart — so masking
+  is a pure display + persistence projection (redact an action card's raw
+  parameter values in place) with **no contract change** and a byte-identical
+  `args_digest`. It also pins the R-1 dual-backend trace store
+  (`draft → graduated | discarded`, two knobs), the R-3 Skill v1 → v2 additive
+  executable-flow class, R-4 deterministic no-LLM graduation, and R-5
+  browser-only replay (OQ-2 defers the infra binding). `tasks.md` lays out eight
+  stages with an R-1..R-7 → asserting-test delivery gate (ADR-0008).
+  Bookkeeping: `docs/specs/README.md` row `approved` → `in-progress`.
+  **Implementation started; status → `in-progress`.**

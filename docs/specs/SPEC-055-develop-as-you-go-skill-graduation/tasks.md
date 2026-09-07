@@ -9,12 +9,24 @@ against them.
 
 ## Stage 1: Contracts
 
-- [ ] `shared/shared-contracts/schemas/skill.schema.json`: advance **Skill v1 → v2** — add optional `kind` (`enum: ["knowledge", "executable_flow"]`, absent = `knowledge`) and `steps` (ordered array of `{tool, args, expect?}`; `args` credential values are credential-set **references**, never literals) (R-3)
-- [ ] `skill.schema.json`: drop the "requires web_target" clause from the `risk_class` description so `risk_class: write` is valid without a `web_target`; leave the `enum: ["read","write"]` unchanged (R-3)
-- [ ] `shared/shared-contracts/schemas/audit-event.schema.json`: add `skill_graduated` to the `event_type` enum and document its `details` payload (session_id, mode, validation, step_count) in the description ledger (R-4)
-- [ ] `shared/shared-contracts/policies/policy-default.yaml`: add one `session:skill_graduate` action granted to `roles_any: [platform-admin, approver, operator]` (observer excluded), mirroring the `session:skill_draft` grant (R-4 / OQ-3)
-- [ ] `make sync-policy` propagates the new action to all bundle copies; the bundle content-hash (SPEC-048) updates (R-4)
-- [ ] verify `execution-request.schema.json` needs **no** change (a browser replay envelope is byte-identical to a hand-authored flow envelope, `approval_kind: "flow"`) (R-5 / plan §6)
+> **Lockstep refinement (found at implementation):** a shared schema is never edited
+> alone — bidirectional parity tests pin each schema to its consumers, so the schema
+> and its bound declarations ship as **one atomic unit** or `make verify` fails. Three
+> bindings fold into this stage: skills-hub `schemas/skill.py` (`Skill`/`SkillStep`,
+> pulled forward from stage 5), audit-service `schemas/audit.py` (`EventType`), and the
+> portal `views/audit/constants.ts` `EVENT_TYPES` (SPEC-046 vitest drift guard — set
+> **and order** equality, so `skill_graduated` lands last, matching the enum).
+
+- [x] `shared/shared-contracts/schemas/skill.schema.json`: advance **Skill v1 → v2** — add optional `kind` (`enum: ["knowledge", "executable_flow"]`, absent = `knowledge`) and `steps` (ordered array of `{tool, args, expect?}`; `args` credential values are credential-set **references**, never literals) (R-3)
+- [x] `skill.schema.json`: drop the "requires web_target" clause from the `risk_class` description so `risk_class: write` is valid without a `web_target`; leave the `enum: ["read","write"]` unchanged (R-3)
+- [x] **lockstep** skills-hub `schemas/skill.py`: declare `SkillStep` + optional `kind`/`steps` on `Skill` (`test_model_properties_match_contract_properties` asserts property-set equality); add `test_executable_flow_skill_validates_against_contract` (R-3)
+- [x] `shared/shared-contracts/schemas/audit-event.schema.json`: add `skill_graduated` to the `event_type` enum and document its `details` payload (session_id, mode, validation, step_count) in the description ledger (R-4)
+- [x] **lockstep** audit-service `schemas/audit.py`: add `skill_graduated` to the `EventType` Literal (`test_model_enum_values_match_contract` asserts enum equality); add `test_skill_graduated_event_validates` (R-4)
+- [x] **lockstep** portal `views/audit/constants.ts`: append `skill_graduated` to `EVENT_TYPES` (last, matching the schema enum order the drift guard pins) (R-4)
+- [x] `shared/shared-contracts/policies/policy-default.yaml`: add one `session:skill_graduate` action granted to `roles_any: [platform-admin, approver, operator]` (observer excluded), mirroring the `session:skill_draft` grant (R-4 / OQ-3)
+- [x] `policy-scenarios.yaml`: cover `session:skill_graduate` in the operator allow block + the auditor/observer/developer deny blocks (the harness fails verify if a granted pair is uncovered) (R-4)
+- [x] `make sync-policy` propagates the new action to all bundle copies; the bundle content-hash (SPEC-048) updates (R-4)
+- [x] verify `execution-request.schema.json` needs **no** change (a browser replay envelope is byte-identical to a hand-authored flow envelope, `approval_kind: "flow"`) (R-5 / plan §6)
 
 ## Stage 2: agent-platform + portal — R-7 approval-seam secret masking
 
@@ -58,7 +70,7 @@ against them.
 
 ## Stage 5: skills-hub — R-3 executable-flow skill class
 
-- [ ] `schemas/skill.py`: add `kind` + `steps` to the `Skill` model (`extra="forbid"` requires declaration); `steps` as an ordered list of `{tool, args, expect?}` (R-3)
+- [x] `schemas/skill.py`: `kind` + `steps` on the `Skill` model — **done in stage 1** (the contract parity test binds the model to the schema atomically, so it cannot wait for stage 5); stage 5 keeps only ingestion + store (R-3)
 - [ ] `services/ingestion.py`: add `kind`, `steps` to `ALLOWED_KEYS`; relax the `risk_class`-requires-`web_target` rule so `risk_class: write` ingests without a `web_target` (R-3)
 - [ ] `services/ingestion.py`: validate the executable-flow class — step-list shape, `risk_class: write` when any step mutates, credential references resolve to named credential sets — and reject a malformed one on the existing `validate_document` path (R-3)
 - [ ] `services/skill_store.py`: add `kind TEXT` + `steps JSONB` on **both** backends (in-memory + Postgres), idempotent `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, INSERT + row-map (the `flow_intent` precedent) (R-3)

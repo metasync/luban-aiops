@@ -32,6 +32,10 @@ EventType = Literal[
     "document_read",
     "skill_draft_generated",
     "incident_skill_draft_generated",
+    # SPEC-055 R-4: deterministic graduation of a session's captured authoring
+    # trace into an executable-flow skill draft (blast-radius re-validated,
+    # never auto-published).
+    "skill_graduated",
 ]
 
 Outcome = Literal["allow", "deny", "success", "error"]

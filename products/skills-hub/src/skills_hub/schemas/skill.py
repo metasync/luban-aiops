@@ -12,6 +12,22 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class SkillStep(BaseModel):
+    """One ordered replay step of an ``executable_flow`` skill (SPEC-055 R-3).
+
+    ``args`` carries the step's tool arguments; credential values are
+    credential-set references, never literals (replay resolves them via
+    ``web.fill_credential``). ``expect`` is an optional post-condition and a
+    display/replay aid only, never a security input.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool: str = Field(min_length=1, max_length=128)
+    args: dict = Field(default_factory=dict)
+    expect: str | None = Field(default=None, max_length=500)
+
+
 class Skill(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -34,6 +50,13 @@ class Skill(BaseModel):
     # the confirmation card's lead decision line. Requires ``web_target``;
     # display-only (never a security input).
     flow_intent: str | None = Field(default=None, max_length=200)
+    # SPEC-055 R-3: optional executable-flow class. ``kind`` discriminates a
+    # knowledge skill (absent/``knowledge``) from an ``executable_flow`` that
+    # carries a machine-readable replay step list; ``steps`` is that ordered
+    # list, present only for executable flows. Additive — a knowledge skill
+    # omits both and validates exactly as before.
+    kind: str | None = Field(default=None, pattern="^(knowledge|executable_flow)$")
+    steps: list[SkillStep] | None = None
     updated_at: datetime
     body: str = Field(max_length=65536)
 
