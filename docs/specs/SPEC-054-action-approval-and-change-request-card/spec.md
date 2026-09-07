@@ -758,3 +758,24 @@ open.
   the ownerless-session default, and the confirm-route wiring); `make verify`
   green (agent-platform 857). Recorded in the root `CHANGELOG.md` under
   0.35.0 → Fixed.
+- 2026-09-07: **forward cross-reference (no requirement text changed; R-1..R-5
+  stand as delivered/frozen)** — the change-request secret-masking gap this spec
+  recorded and deferred is now scheduled. The Non-Goal "**No masking of the raw
+  parameters already persisted on the durable record**" + OQ-5 (the
+  "**pre-existing** gap" where `pending_calls` persists parameter values
+  unmasked and the "Technical details" expander renders them), together with the
+  generic-projection fail-open the R-3 assembly leaves for an off-vocabulary
+  secret value, are picked up by **SPEC-055 R-7 (approval-seam secret-masking
+  hardening)**, folded into that `approved` spec post-approval on 2026-09-07 by
+  operator agreement. A post-delivery code & doc review re-confirmed both as the
+  same pre-existing gap (not a B regression), which is why they land as the
+  source-side complement of SPEC-055 R-2's secret-safe trace capture rather than
+  a standalone spec — SPEC-055 R-2 already parameterizes secrets at the approval
+  seam reusing the same SPEC-049 R-5 vocabulary, and R-3's structured
+  `{summary, fields[]}` projection was built "so SPEC-055's secret-safe
+  parameterized steps reuse it." R-7 inherits the parked-payload-shape tension
+  this spec named (the signed `args_digest` reads the raw `parameters`) and works
+  it in SPEC-055's `plan.md`. Recorded here so the deferral is not rediscovered
+  as unresolved; the two items ship on SPEC-055's timeline, not an interim
+  0.35.x patch (both non-blocking defense-in-depth over the reference-only
+  `web.fill_credential` floor R-2 shipped).

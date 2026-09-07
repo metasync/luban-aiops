@@ -20,7 +20,8 @@
   gate enforcement), SPEC-037/038 (signed execution requests + isolated worker),
   SPEC-014 (skills and grounded guidance), and **depends on SPEC-054**
   (action-level HITL approval — the exploration/authoring phase that produces the
-  mutations this spec graduates)
+  mutations this spec graduates; **R-7 also hardens SPEC-054 R-3's
+  change-request projection at the approval seam**)
 - sequencing: A (the SPEC-051 R-6 headline-leak patch) landed; B (SPEC-054) is
   the action-approval prerequisite; C (this spec + ADR-0009) is the graduation
   destination. A→B does not conflict with C.
@@ -54,6 +55,10 @@ Three pieces, per ADR-0009:
 This is the largest trust-surface change in the program (skills-hub,
 agent-platform, tool-gateway, execution-runtime), so it is its own spec under
 ADR-0009 with per-requirement tests (ADR-0008), sequenced **after** SPEC-054.
+It also folds in **R-7**, a source-side hardening of the SPEC-054 change-request
+card's secret masking at the approval seam — the record and projection R-2's
+secret-safe trace capture reads from — so the secret-safety guarantee holds
+end-to-end, not only in the derived trace (added post-approval; see Changelog).
 
 ## Motivation
 
@@ -81,6 +86,15 @@ ADR-0009 with per-requirement tests (ADR-0008), sequenced **after** SPEC-054.
 - Why now: SPEC-054 makes per-action mutations (including ad-hoc browser writes)
   possible and well-described; this spec is the destination that makes them
   *reusable*. Sequenced after B so the authoring phase exists to graduate from.
+- Why R-7 rides along (added post-approval): the SPEC-054 delivery review
+  surfaced that the change-request card masks only its **display** projection —
+  raw secret-bearing `parameters` still persist in `pending_calls`, ride the
+  stream frame, and render in the portal expander, and the generic projection
+  fails **open**. R-2 already depends on a secret-safe approval seam (it
+  parameterizes secrets at capture so a literal never reaches the trace store),
+  so hardening the seam's own record and projection is the same concern, not a
+  separate one — splitting it into its own spec would divide one approval-seam
+  secret-safety surface (and the same redaction vocabulary) across two specs.
 
 ## Requirements
 
@@ -215,17 +229,80 @@ This spec is delivered under the ADR-0008 gate.
 
 Acceptance criteria:
 
-- Every R-1..R-5 acceptance criterion maps to at least one automated test
-  recorded in `tasks.md` (authoring-trace store dual-backend round-trip incl.
-  the `postgres` backend; capture-only-on-signed-mutation; secret
+- Every R-1..R-5 and R-7 acceptance criterion maps to at least one automated
+  test recorded in `tasks.md` (authoring-trace store dual-backend round-trip
+  incl. the `postgres` backend; capture-only-on-signed-mutation; secret
   parameterization at capture; `risk_class`-without-`web_target` ingestion;
   executable-flow schema validation; graduation blast-radius refusal + happy
   path + draft-not-published; one-gate replay with per-write signing +
-  credential-set resolution).
+  credential-set resolution; R-7 fail-closed projection masking +
+  no-plaintext-secret on the stream/render surface + `args_digest` invariant
+  preserved after masking).
 - Any shipped `samples/` graduation demo is exercised by its own script in the
   verification path (ADR-0008 exercised-sample rule).
 - `docs/specs/README.md` and `CONTRIBUTING.md` carry the ADR-0008 delivery-gate
   text (unchanged).
+
+### R-7: Approval-seam secret-masking hardening (change-request record + projection)
+
+*(Folded in post-approval — see Changelog 2026-09-07 — picking up the
+change-request secret-masking gaps SPEC-054 recorded and deferred (re-confirmed
+by its delivery review). It is the source-side
+complement of R-1/R-2: those keep a literal secret out of the **derived**
+authoring trace; R-7 keeps it out of the **approval-seam record and the
+change-request projection** the trace is captured from, reusing the same
+SPEC-049 R-5 redaction vocabulary and `web.fill_credential` / credential-set
+indirection. Appended after R-6 because requirement IDs are stable once a spec
+is `approved` — no renumbering.)*
+
+SPEC-054 R-3 masks secrets in the change-request card's **display projection**
+(`change_request`), but the raw `parameters` still persist in the confirmation
+record's `pending_calls`, ride the `confirmation_request` stream frame, and
+render in the portal "Technical details" expander unmasked; and the projection's
+generic field-masking fails **open** (a secret value under an off-vocabulary key
+projects as plaintext). **Both are gaps SPEC-054 recorded and deferred, not
+regressions it introduced:** its Non-Goals carry "**No masking of the raw
+parameters already persisted on the durable record**" (a "**pre-existing** gap…
+fixing it means changing the parked-payload shape that the signed path, the
+durable record, and the portal all read"), its OQ-5 resolved the same question
+to "no, out of scope," and R-3's structured `{summary, fields[]}` projection was
+built "so SPEC-055's secret-safe parameterized steps reuse it." R-7 is the
+requirement that picks up that recorded deferral — closing both without
+disturbing the signed-execution invariant, and inheriting exactly the
+parked-payload-shape tension SPEC-054 named (worked in `plan.md`).
+
+Acceptance criteria:
+
+- **Fail-closed projection masking.** The change-request projection masks a
+  parameter value conservatively when the redaction vocabulary does not
+  positively classify it as non-secret — closing the `_generic_fields` fail-open
+  path so a generically-named secret (an off-vocabulary key) is masked, not
+  projected as plaintext. *(Delivery-review finding #2.)*
+- **No literal secret on the streamed/rendered change-request surface.** The
+  `confirmation_request` frame's display projection and the portal expander
+  present the secret-redacted `change_request` projection, not raw secret-bearing
+  `parameters`, for an action card. *(Finding #1, stream + render legs.)*
+- **Signed-execution invariant preserved.** Redaction is a **projection** only:
+  the `canonical_digest(parameters)` inputs that form the signed `args_digest`
+  (SPEC-037) are unchanged, so resume-time digest verification and signing are
+  unaffected — masking never mutates the signed copy. *(Finding #1's hard
+  constraint.)*
+- **Persisted-record exposure bounded.** The persisted `pending_calls` retains
+  only what the signed-execution mechanism requires; a secret-bearing value that
+  must persist raw for signing is bounded by the reference-only floor below and
+  is never additionally echoed into a display surface. The exact
+  persist-vs-redact reconciliation (projection split vs at-rest handling) is a
+  `plan.md` decision. *(Finding #1, persistence leg.)*
+- **Reference-only credential entry remains the structural floor.**
+  `web.fill_credential` (a credential-set reference) stays the only path that
+  introduces a secret into a browser flow, so a literal secret never reaches
+  `web.type`/`parameters` in the first place; R-7 is defense-in-depth over that
+  already-reference-only design and extends the same discipline to non-browser
+  action parameters.
+- Regression tests pin: (a) an off-vocabulary secret value is masked in the
+  projection (fail-closed), (b) a secret-bearing parameter does not stream/render
+  as plaintext for an action card, and (c) `args_digest` verification still
+  passes after masking (invariant). Mapped in R-6 per ADR-0008.
 
 ## Non-Goals
 
@@ -258,7 +335,11 @@ Acceptance criteria:
     capture at the resume/receipt seam + the graduation endpoint (deterministic
     assembly + blast-radius re-validation) + the replay binding (incl. the
     non-browser flow-binding analog) (`services/`, `runtime_kernel.py`,
-    `api/routes/`, `schemas/v2.py`).
+    `api/routes/`, `schemas/v2.py`); **R-7** hardens the change-request
+    projection + persisted-record secret masking (`services/hitl_confirmations.py`
+    `_generic_fields` fail-closed, `services/secret_params.py` vocabulary,
+    `services/confirmation_records.py` `pending_calls` projection) with the
+    signed `args_digest` inputs unchanged.
   - `products/tool-gateway` — the replay deviation guard for a graduated flow
     (reuses the origin/`risk_class`/step-budget guard); credential-set resolution
     at replay for infra steps (`tools/browser_connector.py`, `tools/`).
@@ -266,7 +347,9 @@ Acceptance criteria:
     verify only unless the infra-binding needs a new envelope variant).
   - `products/operator-portal` — the graduation entry point on a session
     ("Graduate as skill"), the executable-flow draft preview (rendered + raw,
-    SPEC-045 pattern), and replay surfacing (`web-ui/app/src/**`).
+    SPEC-045 pattern), and replay surfacing (`web-ui/app/src/**`); **R-7**
+    presents the secret-redacted `change_request` projection (not raw
+    `parameters`) in the chat card expander (`web-ui/app/src/chat/ChatView.tsx`).
 - samples / shared touched: `shared/shared-contracts/schemas/skill.schema.json`
   (additive executable-flow class); `shared/shared-contracts/policies/
   policy-default.yaml` (one new `session:skill_graduate` action + role
@@ -279,7 +362,10 @@ Acceptance criteria:
   (ADR-0009) — a new executable-skill class that replays captured mutations under
   one gate; one new policy action + one new audit event type; execution safety
   preserved (every replayed write individually signed, gateway-guarded, never
-  auto-allowed); secrets externalized to credential-set references.
+  auto-allowed); secrets externalized to credential-set references. **R-7**
+  tightens the same secret-safety posture at the approval seam (no new policy
+  action, no new audit event type; the signed `args_digest` and execution-safety
+  invariants are preserved — masking is projection-only).
 - living state docs to update on delivery: root `CHANGELOG.md`, `VERSION`
   (+ lockstep constants), `docs/agentic-aiops-platform/release-notes/`,
   `docs/guides/configuration-reference.md` (any new knob: trace retention, step
@@ -377,3 +463,32 @@ recorded in the changelog (the `approved`-spec rule).
   `proposed` → `accepted`, and a new `delivery-roadmap.md` Exploration Backlog row
   added. Implementation remains **sequenced after SPEC-054**: `plan.md`/`tasks.md`
   are authored once B is `delivered`, not at approval.
+- 2026-09-07 (post-approval scope addition): folded into a new **R-7
+  (approval-seam secret-masking hardening)** the two change-request
+  secret-masking gaps SPEC-054 explicitly recorded and deferred (its Non-Goal
+  "No masking of the raw parameters already persisted on the durable record" +
+  OQ-5, re-confirmed by the SPEC-054 delivery review), by operator agreement per
+  the `approved`-spec rule that a requirement changes only by agreement recorded
+  here. Findings: **#1** raw secret-bearing `parameters` persist in
+  `pending_calls`, ride the `confirmation_request` stream frame, and render in
+  the portal expander behind the masked `change_request` projection; **#2** the
+  projection's generic field-masking (`_generic_fields`) fails **open** for an
+  off-vocabulary secret value. Rationale for folding rather than a standalone
+  SPEC-056: R-1/R-2/R-5 already own secret-safety at the approval seam (R-2
+  parameterizes secrets at capture reusing the SPEC-049 R-5 redaction vocabulary
+  + `web.fill_credential`/credential-set indirection; R-5's one-gate replay
+  builds on the SPEC-054 R-3 change-request framing), so the findings are the
+  **source-side complement** of that guarantee — the same surface, vocabulary,
+  and files; a separate spec would split one concern across two. R-7 states the
+  invariant (fail-closed masking; no plaintext secret on the stream/render
+  surface; signed `args_digest` preserved; reference-only `web.fill_credential`
+  floor) and defers the persist-vs-redact reconciliation — the raw `parameters`
+  feed `canonical_digest` = the signed `args_digest` (SPEC-037) — to `plan.md`.
+  Bookkeeping: R-6's traceability list broadened to R-1..R-5 **+ R-7**; Summary,
+  Motivation, and Impact note the addition; `docs/specs/README.md` and
+  `delivery-roadmap.md` SPEC-055 rows broadened (adds "extends SPEC-054 R-3"
+  lineage). No requirement IDs renumbered (stable once `approved`); R-7 is
+  appended with a placement note. `plan.md`/`tasks.md` remain unauthored
+  (SPEC-054 is now `delivered`), so R-7 folds in **before** planning. The two
+  findings are non-blocking defense-in-depth and ship on SPEC-055's timeline
+  rather than an interim 0.35.x patch.
