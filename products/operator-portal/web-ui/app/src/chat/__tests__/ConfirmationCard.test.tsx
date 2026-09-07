@@ -477,3 +477,55 @@ describe("ConfirmationCardView change-request projection (SPEC-054 R-1/R-3)", ()
     expect(screen.getByText("web.click")).toBeTruthy();
   });
 });
+
+describe("ConfirmationCardView R-7 redacted technical details (SPEC-055)", () => {
+  // R-7 render leg. The portal does no client-side masking — it renders the
+  // wire shape the kernel already redacted (the no-plaintext guarantee is proven
+  // kernel-side by the Python R-7b stream/persist test, which parks the literal
+  // secret). This pins that an action card's "Technical details" expander
+  // presents the redacted parameters (keys preserved, values ***) beside the
+  // masked change_request, so the operator's decision surface and its audit
+  // expander agree on the masked value.
+  const secretActionCard: ConfirmationCard = {
+    ...cardOf([
+      {
+        callId: "c-1",
+        toolName: "k8s.rotate_secret",
+        riskLevel: "write",
+        action: "tools:mutate",
+        parameters: { name: "***", password: "***" },
+        changeRequest: {
+          summary: "Confirm k8s.rotate_secret",
+          fields: [
+            { label: "name", value: "***", masked: true },
+            { label: "password", value: "***", masked: true },
+          ],
+        },
+      },
+    ]),
+    approvalKind: "action",
+    message: "Tool execution requires your confirmation.",
+  };
+
+  it("presents masked (***) parameter values in the expander, keys preserved", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    renderCard(secretActionCard);
+    const details = screen.getByText("Technical details").closest("details");
+    expect(details).toBeTruthy();
+    const pre = details!.querySelector("pre.evidence-pre");
+    expect(pre).toBeTruthy();
+    // Keys survive; every secret-bearing value is the mask token.
+    expect(pre!.textContent).toContain("name");
+    expect(pre!.textContent).toContain("password");
+    expect(pre!.textContent).toContain("***");
+  });
+
+  it("renders both change_request fields masked with their flags", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const { container } = renderCard(secretActionCard);
+    const values = container.querySelectorAll(".confirm-change-value");
+    expect(values.length).toBe(2);
+    values.forEach((value) => expect(value.textContent).toContain("***"));
+    expect(screen.getAllByText("masked").length).toBe(2);
+  });
+});

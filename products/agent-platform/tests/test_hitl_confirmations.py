@@ -37,6 +37,7 @@ from agent_service.services.hitl_confirmations import (
     ConfirmationRegistry,
     build_change_request,
     curated_effect_sentence,
+    redact_pending_calls,
 )
 from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
 from agent_service.services.runtime_dependencies import get_runtime_kernel
@@ -55,9 +56,28 @@ SANITIZED_TOOL_CALL = ToolCallBlock(
     id="call-2", name="k8s_delete_pod", input='{"name": "web-1"}'
 )
 
+# SPEC-055 R-7: an uncurated action call whose input carries a literal secret.
+# ``password`` is a vocabulary name; ``name`` is its off-allow-list sibling (only
+# the curated ``k8s.delete_pod`` name/namespace are KNOWN_SAFE_FIELDS). The
+# plaintext value is the fixture's whole point — every R-7 absence assertion
+# below parks it first, so "never leaked" is not vacuous (the SPEC-045 lesson: an
+# absence assertion proves nothing unless the fixture proves the secret was
+# present to begin with).
+SECRET_TOOL_CALL = ToolCallBlock(
+    id="call-secret",
+    name="k8s.rotate_secret",
+    input='{"name": "db", "password": "s3cret-PASSWORD-xyz"}',
+)
+
 
 def _park_event() -> RequireUserConfirmEvent:
     return RequireUserConfirmEvent(reply_id="reply-1", tool_calls=[TOOL_CALL])
+
+
+def _secret_park_event() -> RequireUserConfirmEvent:
+    return RequireUserConfirmEvent(
+        reply_id="reply-1", tool_calls=[SECRET_TOOL_CALL]
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -315,11 +335,14 @@ def test_change_request_curated_web_click_uses_element_label() -> None:
 
 def test_change_request_generic_fallback_for_uncurated_tool() -> None:
     """Every other tool gets a generic lead + label->value fields, so no action
-    card regresses for want of a curated formatter (R-3)."""
+    card regresses for want of a curated formatter (R-3). SPEC-055 R-7: the
+    generic fallback now masks **fail-closed** — ``k8s.restart_service.namespace``
+    is not on the KNOWN_SAFE_FIELDS allow-list, so it masks rather than rendering
+    verbatim (the SPEC-054 mask-if-known-secret posture failed open here)."""
     cr = build_change_request("k8s.restart_service", {"namespace": "ops"})
     assert cr["summary"] == "Confirm k8s.restart_service"
     assert cr["fields"] == [
-        {"label": "namespace", "value": "ops", "masked": False}
+        {"label": "namespace", "value": "***", "masked": True}
     ]
 
 
@@ -348,12 +371,15 @@ def test_change_request_fill_credential_never_emits_a_value() -> None:
 
 def test_change_request_masks_secret_named_parameter() -> None:
     """A secret-bearing parameter name masks its value to ``***`` while keeping
-    the label, so the approver sees a secret is involved without seeing it."""
+    the label, so the approver sees a secret is involved without seeing it.
+    SPEC-055 R-7: ``k8s.rotate_secret`` is uncurated, so BOTH fields mask
+    fail-closed — ``name`` is not on the allow-list either (only the curated
+    ``k8s.delete_pod`` name/namespace are KNOWN_SAFE_FIELDS)."""
     cr = build_change_request(
         "k8s.rotate_secret", {"name": "db", "password": "s3cret-PASSWORD-xyz"}
     )
     by_label = {f["label"]: f for f in cr["fields"]}
-    assert by_label["name"] == {"label": "name", "value": "db", "masked": False}
+    assert by_label["name"] == {"label": "name", "value": "***", "masked": True}
     assert by_label["password"]["value"] == "***"
     assert by_label["password"]["masked"] is True
     assert "s3cret-PASSWORD-xyz" not in json.dumps(cr)
@@ -366,6 +392,22 @@ def test_change_request_masks_web_type_text_opaque_value() -> None:
     assert cr["summary"] == 'Type into "ref 3"'
     assert cr["fields"] == [{"label": "text", "value": "***", "masked": True}]
     assert "hunter2" not in json.dumps(cr)
+
+
+def test_change_request_masks_off_vocabulary_secret_fail_closed() -> None:
+    """SPEC-055 R-7a: the generic projection masks **fail-closed** — a secret
+    under an off-vocabulary, generically-named key (``data`` matches no
+    ``SECRET_PARAM_SUBSTRINGS`` entry) still masks, closing SPEC-054's fail-open
+    path where it projected as plaintext. The fixture carries a realistic
+    literal secret so the absence assertion is not vacuous."""
+    cr = build_change_request(
+        "k8s.apply_config", {"data": "AKIAIOSFODNN7EXAMPLE"}
+    )
+    assert cr["summary"] == "Confirm k8s.apply_config"
+    assert cr["fields"] == [
+        {"label": "data", "value": "***", "masked": True}
+    ]
+    assert "AKIAIOSFODNN7EXAMPLE" not in json.dumps(cr)
 
 
 def test_curated_effect_sentence_none_for_uncurated_tool() -> None:
@@ -411,6 +453,48 @@ def test_pending_calls_payload_omits_change_request_for_flow_and_legacy_kind() -
         assert "change_request" not in pending.pending_calls_payload()[0]
 
 
+# --- SPEC-055 R-7: fail-closed raw-parameter redaction ---
+
+
+def test_redact_pending_calls_masks_action_card_parameters_in_place() -> None:
+    """R-7 finding #1: an action card's raw ``parameters`` redact in place (keys
+    preserved, secret-bearing values -> ``***``) and the SAME list is returned
+    for chaining. A freshly re-read payload — the copy ``build_requests`` digests
+    at resume — stays raw, the R-7c invariant at unit scope: redaction never
+    mutates ``self.tool_calls``."""
+    registry = ConfirmationRegistry()
+    pending = registry.register(
+        "s1", "alice", "r1", [SECRET_TOOL_CALL], 600, approval_kind="action",
+    )
+    payload = pending.pending_calls_payload()
+    returned = redact_pending_calls(pending, payload)
+    assert returned is payload
+    assert payload[0]["parameters"] == {"name": "***", "password": "***"}
+    # The signing input is a fresh parse, untouched by the display redaction.
+    assert pending.pending_calls_payload()[0]["parameters"] == {
+        "name": "db", "password": "s3cret-PASSWORD-xyz",
+    }
+
+
+def test_redact_pending_calls_leaves_flow_and_legacy_payloads_raw() -> None:
+    """R-7 no-regression: redaction gates on the action kind, so a ``flow`` or
+    legacy/None card's payload is returned byte-for-byte unchanged — it renders
+    the headline (flow) or predates the discriminator (legacy) and carries no
+    ``change_request`` sibling (plan §1)."""
+    registry = ConfirmationRegistry()
+    for kind in ("flow", None):
+        pending = registry.register(
+            "s1", "alice", "r1", [SECRET_TOOL_CALL], 600, approval_kind=kind,
+        )
+        payload = pending.pending_calls_payload()
+        snapshot = json.dumps(payload, sort_keys=True)
+        redact_pending_calls(pending, payload)
+        assert json.dumps(payload, sort_keys=True) == snapshot
+        assert payload[0]["parameters"] == {
+            "name": "db", "password": "s3cret-PASSWORD-xyz",
+        }
+
+
 # --- Kernel: park on RequireUserConfirmEvent ---
 
 
@@ -444,6 +528,44 @@ def test_stream_events_parks_and_emits_confirmation_request(monkeypatch):
     record = CONFIRMATION_RECORD_STORE.load_pending_for_session("s1")
     assert record is not None
     assert record["turn_index"] == 0
+
+
+def test_action_card_redacts_secret_on_stream_frame_and_record(monkeypatch):
+    """SPEC-055 R-7b (stream + persist legs): parking an action call whose input
+    carries a literal secret emits a ``confirmation_request`` frame AND writes a
+    durable record whose ``parameters`` mask it to ``***`` — the plaintext never
+    rides the frame or lands at rest beside the masked ``change_request``. The
+    fixture parks the real secret, so the absence assertions are not vacuous."""
+    kernel = _configured_kernel()
+    agent = FakeAgent(events=[_secret_park_event()])
+    _patch_agent(monkeypatch, kernel, agent)
+
+    frames = _drain(
+        kernel.stream_events(
+            message="rotate it",
+            request_id="req-1",
+            session_id="s1",
+            user_name="alice",
+        )
+    )
+    frame = next(
+        f for f in frames if f.get("type") == "confirmation_request"
+    )
+    # k8s.rotate_secret is uncurated => an action card; both the off-allow-list
+    # ``name`` and the secret-named ``password`` mask fail-closed.
+    assert frame["approval_kind"] == "action"
+    assert frame["pending_calls"][0]["parameters"] == {
+        "name": "***", "password": "***",
+    }
+    assert "s3cret-PASSWORD-xyz" not in json.dumps(frame)
+
+    # At-rest leg: the durable record is fed from the same redacted payload.
+    record = CONFIRMATION_RECORD_STORE.load_pending_for_session("s1")
+    assert record is not None
+    assert record["pending_calls"][0]["parameters"] == {
+        "name": "***", "password": "***",
+    }
+    assert "s3cret-PASSWORD-xyz" not in json.dumps(record)
 
 
 def test_parked_record_carries_parking_turn_ordinal(monkeypatch):
@@ -1390,6 +1512,48 @@ def test_resume_approval_signs_and_persists_one_request_per_call(monkeypatch):
     assert requested[0]["details"]["call_id"] == "call-1"
     assert requested[0]["request_id"] == "req-2"
     assert requested[0]["session_id"] == "s1"
+
+
+def test_args_digest_is_invariant_under_action_card_redaction(monkeypatch):
+    """SPEC-055 R-7c (invariant): redaction is a display/at-rest projection only.
+    Approving an action card whose parameters redact on the streamed
+    ``confirmation_result`` frame still signs ``args_digest =
+    canonical_digest(RAW parameters)`` — plaintext secret included — because
+    ``build_requests`` re-reads a fresh ``pending_calls_payload()`` at resume.
+    Masking never mutates the signed copy the gateway verifies against."""
+    kernel = _configured_kernel(execution_signing_key=SIGNING_KEY)
+    agent = ExecutionCapturingAgent()
+    _capture_execution_audits(monkeypatch)
+    _patch_agent(monkeypatch, kernel, agent)
+    pending = CONFIRMATION_REGISTRY.register(
+        "s1", "alice", "reply-1", [SECRET_TOOL_CALL], 600,
+        approval_kind="action",
+    )
+    claimed = CONFIRMATION_REGISTRY.claim("s1", pending.confirm_id, 600)
+    frames = _drain(
+        kernel.resume_confirmation(
+            session_id="s1",
+            pending=claimed,
+            decision="approve",
+            user_name="alice",
+            request_id="req-2",
+            bearer_token="tok-alice",
+        )
+    )
+    result = frames[0]
+    assert result["status"] == "approved"
+    # The echoed result frame is redacted (stream leg)...
+    assert result["pending_calls"][0]["parameters"] == {
+        "name": "***", "password": "***",
+    }
+    assert "s3cret-PASSWORD-xyz" not in json.dumps(result)
+    # ...yet the signed digest binds the RAW arguments, byte-identical to the
+    # pre-redaction value.
+    request = agent.observed_requests["call-secret"]
+    assert request["args_digest"] == canonical_digest(
+        {"name": "db", "password": "s3cret-PASSWORD-xyz"}
+    )
+    assert verify_envelope(request, request["signature"], SIGNING_KEY)
 
 
 def test_resume_denial_constructs_no_execution_requests(monkeypatch):

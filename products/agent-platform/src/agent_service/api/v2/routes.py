@@ -51,6 +51,7 @@ from agent_service.services.execution_records import EXECUTION_RECORD_STORE
 from agent_service.services.hitl_confirmations import (
     ConfirmationExpired,
     ConfirmationNotFound,
+    redact_pending_calls,
 )
 from agent_service.services.incident_client import (
     IncidentClientRejected,
@@ -412,7 +413,13 @@ async def get_pending_confirmation(
             "confirm_id": pending.confirm_id,
             "owner_user_id": pending.user_id,
             "action": pending.highest_action(),
-            "pending_calls": pending.pending_calls_payload(),
+            # SPEC-055 R-7: redact the live batch so this bridge stays
+            # consistent with the durable-record branch below (redacted at
+            # park time). The gateway tier check reads only ``action`` +
+            # ``owner_user_id``, never the parameters.
+            "pending_calls": redact_pending_calls(
+                pending, pending.pending_calls_payload()
+            ),
         }
     # SPEC-031 R-1: the durable record answers the approval bridge when
     # the in-memory registry does not hold the park (a replica that did

@@ -47,6 +47,7 @@ from agent_service.services.hitl_confirmations import (
     CONFIRMATION_REGISTRY,
     PendingConfirmation,
     curated_effect_sentence,
+    redact_pending_calls,
 )
 from agent_service.services.model_catalog import MODEL_CATALOG
 
@@ -1108,6 +1109,15 @@ class AgentKernel:
         # from a single value and the two paths can never diverge.
         pending_calls = pending.pending_calls_payload()
         message = self._confirmation_message(pending_calls)
+        # SPEC-055 R-7: redact secret-bearing raw parameter values on the
+        # single payload that feeds BOTH the durable record below and the
+        # live frame, so an action card never persists or streams a plaintext
+        # secret alongside its masked change_request. Runs AFTER the message
+        # (which reads raw parameters via curated_effect_sentence) and never
+        # touches the fresh payload build_requests re-reads at resume, so the
+        # signed args_digest stays byte-identical. flow/legacy cards are left
+        # as-is (the helper gates on the action kind).
+        redact_pending_calls(pending, pending_calls)
         # SPEC-031 R-1: the durable record is written before the frame
         # below reaches the client, so the card survives re-login and
         # restarts. Best-effort: a store failure degrades to live-only
@@ -1902,7 +1912,12 @@ class AgentKernel:
                 "status": "approved" if confirmed else "denied",
                 # Echo the parked batch so downstream consumers (gateway
                 # audit, portal card) can name the decided tools.
-                "pending_calls": pending.pending_calls_payload(),
+                # SPEC-055 R-7: redact the echoed batch too, so the result
+                # frame never streams a plaintext secret either (the gateway
+                # audit reads only tool_name; signing uses build_requests).
+                "pending_calls": redact_pending_calls(
+                    pending, pending.pending_calls_payload()
+                ),
                 "request_id": request_id,
                 "session_id": session_id,
             }

@@ -18,7 +18,11 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from agent_service.services.secret_params import MASK, should_mask
+from agent_service.services.secret_params import (
+    MASK,
+    redact_parameters,
+    should_mask,
+)
 
 
 class ConfirmationNotFound(LookupError):
@@ -360,6 +364,39 @@ def curated_effect_sentence(
         return None
     parameters = parameters if isinstance(parameters, dict) else {}
     return formatter(parameters, display_hint).get("summary")
+
+
+def redact_pending_calls(
+    pending: PendingConfirmation, payload: list[dict]
+) -> list[dict]:
+    """Mask secret-bearing raw parameter values on a parked-call payload.
+
+    SPEC-055 R-7 finding #1: an ``action`` card rides both the fail-closed
+    ``change_request`` projection *and* the raw ``parameters`` it was built
+    from, so a secret under an off-projection key would still reach the
+    confirmation stream frame and the durable record in plaintext even while
+    the projection masks it. This redacts those raw values **in place** (keys
+    preserved, secret-bearing values -> ``MASK``) on the display/persistence
+    copy of the payload, then returns the same list for chaining.
+
+    Gated on the ``action`` kind: ``flow``/legacy cards render the headline and
+    carry no ``change_request`` (plan §1), so their payload is left as-is.
+
+    Safe by construction against the signed path: ``build_requests`` re-reads a
+    *fresh* ``pending_calls_payload()`` at resume time and digests the raw
+    parameters, so mutating this display copy never shifts ``args_digest``. The
+    card ``message`` must likewise be computed from the raw payload *before*
+    this runs, since ``curated_effect_sentence`` reads ``parameters``.
+    """
+    if pending.approval_kind != "action":
+        return payload
+    for entry in payload:
+        parameters = entry.get("parameters")
+        if isinstance(parameters, dict):
+            entry["parameters"] = redact_parameters(
+                str(entry.get("tool_name") or ""), parameters
+            )
+    return payload
 
 
 def parse_snapshot_elements(snapshot_text: str) -> dict[int, str]:

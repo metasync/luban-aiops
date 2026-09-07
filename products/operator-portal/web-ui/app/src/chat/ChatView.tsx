@@ -515,11 +515,14 @@ export function ConfirmationCardView({
           {call.displayHint ? (
             <div className="confirm-call-hint">{call.displayHint}</div>
           ) : null}
-          {/* Post-live-test #2(c): the raw per-call arguments are audit
-              detail, not what the operator reads to decide. Fold them
-              behind an expander so the card stays readable; the full
-              parameters remain one click away and still travel to the
-              audit trail unchanged. */}
+          {/* Post-live-test #2(c): the per-call arguments are audit detail,
+              not what the operator reads to decide, so they fold behind an
+              expander to keep the card readable. SPEC-055 R-7: for an action
+              card these arrive pre-redacted from the kernel (secret-bearing
+              values → ***, fail-closed), so the expander never shows a
+              plaintext secret beside the masked change_request above; a
+              flow/legacy card carries no change_request and renders as today.
+              Values render as escaped JSX text, never markup. */}
           <details className="confirm-call-details">
             <summary>Technical details</summary>
             <pre className="evidence-pre">

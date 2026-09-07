@@ -30,17 +30,17 @@ against them.
 
 ## Stage 2: agent-platform + portal — R-7 approval-seam secret masking
 
-- [ ] `services/secret_params.py`: add a per-tool `KNOWN_SAFE_FIELDS` allow-list (curated non-secret fields that may render verbatim: `k8s.delete_pod` name/namespace, `web.select` value, `web.fill_credential` credential_set/field, `web.press_key` key, `web.upload_file` filename) (R-7)
-- [ ] `services/secret_params.py`: flip `should_mask` to **mask-unless-known-safe** (fail-closed) — a field not positively on the allow-list masks; the curated `_cr_*` formatters keep deciding their own fields (R-7 finding #2)
-- [ ] `services/hitl_confirmations.py`: `_generic_fields` inherits the fail-closed posture; an off-vocabulary secret value masks, never projects as plaintext (R-7 finding #2)
-- [ ] `services/hitl_confirmations.py`: for an `action`-card entry, redact the raw `parameters` **values in place** (keys preserved, secret-bearing values → `***`) beside the `change_request` projection — the `pending_calls.items` shape is unchanged, so no contract change (R-7 finding #1, stream leg)
-- [ ] `runtime_kernel.py` park site + `services/confirmation_records.py`: the persisted `pending_calls` for an action card carries the redacted entry (no plaintext secret at rest); `flow`/legacy cards unchanged (R-7 finding #1, persistence leg)
-- [ ] confirm `build_requests` / `canonical_digest(parameters)` are untouched — the signed `args_digest` is computed from the in-memory parked call, never the redacted frame/record (R-7 invariant; plan §1)
-- [ ] portal `chat/ChatView.tsx`: the action-card "Technical details" expander presents the `change_request` projection (masked values `***`), not raw secret-bearing `parameters`; a `flow`/legacy card renders unchanged (R-7 finding #1, render leg)
-- [ ] tests: an off-vocabulary secret value is masked in the projection (fail-closed) (R-7a)
-- [ ] tests: a secret-bearing parameter does not stream/render/persist as plaintext for an action card (R-7b)
-- [ ] tests: `args_digest` verification still passes after masking — byte-identical with and without redaction (R-7c, invariant)
-- [ ] tests: a `flow`/legacy card and its persisted record are unchanged by R-7 (R-7 no-regression)
+- [x] `services/secret_params.py`: add a per-tool `KNOWN_SAFE_FIELDS` allow-list (curated non-secret fields that may render verbatim: `k8s.delete_pod` name/namespace, `web.select` value, `web.fill_credential` credential_set/field, `web.press_key` key, `web.upload_file` filename) (R-7)
+- [x] `services/secret_params.py`: flip `should_mask` to **mask-unless-known-safe** (fail-closed) — a field not positively on the allow-list masks; the curated `_cr_*` formatters keep deciding their own fields (R-7 finding #2)
+- [x] `services/hitl_confirmations.py`: `_generic_fields` inherits the fail-closed posture; an off-vocabulary secret value masks, never projects as plaintext (R-7 finding #2)
+- [x] `services/hitl_confirmations.py`: for an `action`-card entry, redact the raw `parameters` **values in place** (keys preserved, secret-bearing values → `***`) beside the `change_request` projection — the `pending_calls.items` shape is unchanged, so no contract change (R-7 finding #1, stream leg)
+- [x] `runtime_kernel.py` park site + `services/confirmation_records.py`: the persisted `pending_calls` for an action card carries the redacted entry (no plaintext secret at rest); `flow`/legacy cards unchanged (R-7 finding #1, persistence leg)
+- [x] confirm `build_requests` / `canonical_digest(parameters)` are untouched — the signed `args_digest` is computed from the in-memory parked call, never the redacted frame/record (R-7 invariant; plan §1)
+- [x] portal `chat/ChatView.tsx`: the action-card "Technical details" expander presents the `change_request` projection (masked values `***`), not raw secret-bearing `parameters`; a `flow`/legacy card renders unchanged (R-7 finding #1, render leg)
+- [x] tests: an off-vocabulary secret value is masked in the projection (fail-closed) (R-7a)
+- [x] tests: a secret-bearing parameter does not stream/render/persist as plaintext for an action card (R-7b)
+- [x] tests: `args_digest` verification still passes after masking — byte-identical with and without redaction (R-7c, invariant)
+- [x] tests: a `flow`/legacy card and its persisted record are unchanged by R-7 (R-7 no-regression)
 
 ## Stage 3: agent-platform — R-1 durable authoring-trace store
 

@@ -4,10 +4,17 @@ The R-3 change-request card promotes a parked call's decision-relevant
 parameters out of the collapsed "Technical details" expander into the
 approval intention, with secret-bearing values masked. Masking runs
 **kernel-side**, where the tool-gateway's known-secret value set
-(``entry.secret_values``, used to mask screenshots) is not available, so
-this module carries the vocabulary the projection needs to mask by name
-plus a per-tool opaque-value list for secrets that sit in
-generically-named fields.
+(``entry.secret_values``, used to mask screenshots) is not available.
+
+SPEC-055 R-7 flips that masking **fail-closed**: a value masks unless its
+``<tool>.<param>`` is positively on the ``KNOWN_SAFE_FIELDS`` allow-list
+(``should_mask``), so a secret under an off-vocabulary, generically-named
+key can never project as plaintext. ``redact_parameters`` applies the same
+posture to the raw ``parameters`` that ride alongside the projection on the
+confirmation frame and the durable record. The name-substring vocabulary
+below is retained as the twinned record of what counts as secret (it anchors
+``is_secret_param`` and the gateway parity check) even though fail-closed
+masking no longer depends on a name match.
 
 This is a deliberate **second copy** of the gateway's masking vocabulary
 (Resolved At Plan Time 2). It is a Python constant rather than a shared
@@ -56,6 +63,26 @@ OPAQUE_VALUE_FIELDS: frozenset[str] = frozenset({
     "web.type.text",
 })
 
+# Per-tool fields whose values are non-secret and may render verbatim in the
+# change-request projection and survive raw-parameter redaction. Keyed
+# ``"<canonical.tool.name>.<param>"``. SPEC-055 R-7 flips masking fail-closed:
+# a field masks unless it is positively listed here, so an off-vocabulary,
+# generically-named secret can never project as plaintext. These mirror the
+# fields the curated ``_cr_*`` formatters already surface in their effect
+# sentences (the pod being deleted, the option selected, the credential set
+# *referenced* — never a credential value), so redacting the raw parameters
+# stays consistent with the projection instead of masking a value the summary
+# already shows.
+KNOWN_SAFE_FIELDS: frozenset[str] = frozenset({
+    "k8s.delete_pod.name",
+    "k8s.delete_pod.namespace",
+    "web.select.value",
+    "web.fill_credential.credential_set",
+    "web.fill_credential.field",
+    "web.press_key.key",
+    "web.upload_file.filename",
+})
+
 
 def is_secret_param(name: str) -> bool:
     """True when a parameter name bears a secret.
@@ -76,10 +103,46 @@ def is_opaque_value(tool_name: str, param_name: str) -> bool:
     return f"{tool_name}.{param_name}" in OPAQUE_VALUE_FIELDS
 
 
+def is_known_safe(tool_name: str, param_name: str) -> bool:
+    """True when this tool's field is positively allow-listed as non-secret.
+
+    The fail-closed complement of ``should_mask``: only fields named in
+    ``KNOWN_SAFE_FIELDS`` may render verbatim (SPEC-055 R-7).
+    """
+    return f"{tool_name}.{param_name}" in KNOWN_SAFE_FIELDS
+
+
 def should_mask(tool_name: str, param_name: str) -> bool:
     """True when a parameter value must be masked in the change request.
 
-    Masking is **by default** for the projection: a value masks when its
-    name is secret-bearing or it sits on the per-tool opaque-value list.
+    **Fail-closed** (SPEC-055 R-7 finding #2): a value masks unless its
+    ``<tool>.<param>`` is positively on the ``KNOWN_SAFE_FIELDS`` allow-list.
+    The earlier mask-if-known-secret posture (``is_secret_param`` or
+    ``is_opaque_value``) failed *open* — a secret under an off-vocabulary,
+    generically-named key projected as plaintext. Name-based masking is now
+    subsumed: a secret-named field is never allow-listed, so it masks.
     """
-    return is_secret_param(param_name) or is_opaque_value(tool_name, param_name)
+    return not is_known_safe(tool_name, param_name)
+
+
+def redact_parameters(tool_name: str, parameters: dict) -> dict:
+    """A display/persistence copy of ``parameters`` with secrets masked.
+
+    SPEC-055 R-7 finding #1: the raw ``parameters`` ride alongside the
+    ``change_request`` projection on the confirmation stream frame and the
+    durable record, so a secret-bearing value would appear in plaintext on
+    both even while the projection masks it. This applies the same fail-closed
+    posture at the top level — every value whose key is not positively
+    known-safe becomes ``MASK``, keys preserved.
+
+    **Never** applied to a signing input: ``build_requests`` re-reads a fresh
+    raw ``pending_calls_payload()`` at resume time and digests that, so the
+    ``args_digest`` a gateway verifies is byte-identical to the pre-redaction
+    value. Redaction is a pure display + at-rest projection.
+    """
+    if not isinstance(parameters, dict):
+        return {}
+    return {
+        str(key): MASK if should_mask(tool_name, str(key)) else value
+        for key, value in parameters.items()
+    }
