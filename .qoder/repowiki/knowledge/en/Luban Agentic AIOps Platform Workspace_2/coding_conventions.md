@@ -1,0 +1,6 @@
+- Each product exposes a `create_app()` factory in `app.py` that configures logging, registers an HTTP middleware that logs method/path/status/duration via `log_event`, includes the API router, and wires metrics/telemetry — mirrored across all Python services.
+- Cross-service contracts are declared as JSON Schema files under `shared/shared-contracts/schemas/` and consumed by products rather than duplicated, keeping service boundaries schema-driven.
+- Policy rules are authored once in `shared/shared-contracts/policies/policy-default.yaml` and propagated to consumers via `make sync-policy`, so both `platform-gateway` and `tool-gateway` evaluate the same canonical bundle.
+- Services pin their Python interpreter version via a local `.python-version` file alongside a `pyproject.toml` + `uv.lock`, enabling reproducible per-product container builds.
+- Product directories follow a uniform layout of `src/<package>/api|core|schemas|services|tools` plus a sibling `tests/` directory, making new products discoverable by convention.
+- Versioning is centralized: a single root `VERSION` file drives coordinated image tags and is enforced by `make validate-version` against per-product versions.
