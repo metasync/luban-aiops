@@ -14,13 +14,12 @@
 
 ## Update Summary
 **Changes Made**
-- Updated all sections to reflect SPEC-054 v0.35.0 delivery status
-- Enhanced browser interaction security model with per-action signed gates
-- Added detailed coverage of explicit approval_kind discriminator
-- Expanded change request card functionality with secret masking
-- Updated architecture diagrams to reflect new enforcement boundaries
-- Added comprehensive coverage of flow authority clearing mechanisms
-- **Critical Bug Fix**: Addressed self-approval blocking issue by adding owner_user_name parameter to ensure re-parked cards are attributed to session owner rather than approver
+- Updated all sections to reflect SPEC-054 v0.35.0 delivery status with successful browser live check validation
+- Enhanced documentation of the critical session owner attribution bug fix resolved during dev-k8s deployment testing
+- Added comprehensive coverage of flow authority clearing mechanisms and BROWSER_FLOW_AUTHORITY_STALE enforcement
+- Expanded change request card functionality with secret masking and curated formatters
+- Updated architecture diagrams to reflect new enforcement boundaries and approval_kind provenance
+- **Critical Enhancement**: Session owner attribution prevents self-approval blocks when tier_2 approvers handle subsequent unbound per-action cards
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -34,7 +33,7 @@
 9. [Conclusion](#conclusion)
 
 ## Introduction
-This document explains the implementation of SPEC-054, which has been **delivered in v0.35.0** as part of the R5 hardening release. The specification makes action-level human-in-the-loop (HITL) approval first-class alongside flow-level approval, introduces an enhanced browser interaction security model with per-action signed gates, and transforms every action confirmation card into a readable change request with secret masking.
+This document explains the implementation of SPEC-054, which has been **successfully delivered in v0.35.0** as part of the R5 hardening release. The specification makes action-level human-in-the-loop (HITL) approval first-class alongside flow-level approval, introduces an enhanced browser interaction security model with per-action signed gates, and transforms every action confirmation card into a readable change request with secret masking.
 
 Key outcomes delivered:
 - Explicit `approval_kind` discriminator on confirmation frames and durable records
@@ -44,6 +43,8 @@ Key outcomes delivered:
 - Flow authority clearing mechanisms prevent stale approvals from outliving gateway bindings
 - Signed execution envelopes carry explicit authority provenance for enforcement
 - **Critical Enhancement**: Session owner attribution prevents self-approval blocks when tier_2 approvers handle subsequent unbound per-action cards
+
+The delivery includes successful browser live check validation and resolution of a critical session owner attribution bug discovered during dev-k8s deployment testing, ensuring seamless multi-step approval workflows where different approvers can handle sequential actions without policy violations.
 
 **Section sources**
 - [spec.md:3-736](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L3-L736)
@@ -399,8 +400,6 @@ BC --> RK
 - **New**: Enhanced flow authority clearing prevents stale state accumulation.
 - **New**: Session owner threading adds negligible overhead but enables complex multi-approver workflows.
 
-[No sources needed since this section provides general guidance]
-
 ## Troubleshooting Guide
 **Updated** Troubleshooting guide now includes issues related to approval_kind, flow authority clearing, and session owner attribution.
 
@@ -423,7 +422,7 @@ Common issues and where to look:
 - [runtime_kernel.py:1920-1933](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1920-L1933)
 
 ## Conclusion
-**Updated** SPEC-054 has been successfully delivered in v0.35.0 as part of the R5 hardening release. The specification elevates action-level approvals to first-class status, enables interactive browser mutations through per-action signed gates on allowlisted origins, improves operator decision-making with secret-masked change requests, and ensures durable parity of the card message across all surfaces.
+**Updated** SPEC-054 has been successfully delivered in v0.35.0 as part of the R5 hardening release with comprehensive validation and critical bug fixes. The specification elevates action-level approvals to first-class status, enables interactive browser mutations through per-action signed gates on allowlisted origins, improves operator decision-making with secret-masked change requests, and ensures durable parity of the card message across all surfaces.
 
 Key achievements:
 - First-class action-level approval alongside flow-level approval
@@ -434,6 +433,4 @@ Key achievements:
 - **Critical Enhancement**: Session owner attribution preventing self-approval blocks in multi-approver workflows
 - All changes are additive and build on existing HITL and signed-execution foundations, keeping the trust boundary intact while expanding safe interactivity
 
-The delivery includes comprehensive testing, contract validation, and backward compatibility measures ensuring smooth adoption across the platform. The critical bug fix for self-approval blocking enables more complex approval workflows where different approvers can handle sequential actions without policy violations.
-
-[No sources needed since this section summarizes without analyzing specific files]
+The delivery includes comprehensive testing, contract validation, and backward compatibility measures ensuring smooth adoption across the platform. The critical bug fix for self-approval blocking enables more complex approval workflows where different approvers can handle sequential actions without policy violations. Successful browser live check validation confirms the robustness of the implementation in real-world deployment scenarios.
