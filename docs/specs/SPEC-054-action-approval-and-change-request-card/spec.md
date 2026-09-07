@@ -733,3 +733,28 @@ open.
   `npm test` 303 and `npm run build` clean; version lockstep **0.35.0** across
   `VERSION` + 8 `pyproject.toml` + 8 `metadata.py` + 2 `__init__.py` + 8
   `uv.lock` re-locks.
+- 2026-09-07: **post-delivery fix, folded into v0.35.0** (no requirement text
+  changed) — the `dev-k8s` browser live check of the unbound per-action sample
+  (`samples/web-checks/adhoc-password-reset/`) surfaced a defect in the N-card
+  path R-2 makes reachable. R-2's criterion that "N interactive writes park N
+  cards", each **individually** approved and signed, requires a second unbound
+  write to park a card its approver is actually allowed to decide. But when an
+  approver's decision resumes a turn that then parks *another* per-action card,
+  `resume_confirmation` passed the approver's identity as the resumed turn's
+  `user_name`, so the re-parked card was attributed `owner_user_id = <approver>`.
+  The platform-gateway's SPEC-030 R-3 tier check then saw `owner == approver` and
+  blocked that same approver from deciding the next card with a `self_approval`
+  403 (tier_2 forbids self-approval) — so a second unbound write could never be
+  approved by the approver who cleared the first. It is newly reachable only
+  because R-2 relaxed unbound writes from a hard `BROWSER_FLOW_NOT_BOUND` deny
+  into a per-action park, so a resumed turn could park again at all. Fix (kernel
+  + route only): `resume_confirmation` now takes the session owner separately
+  (`owner_user_name`, threaded from `session.user_id` by the confirm route) and
+  attributes any re-parked card to the requester, while the approver stays the
+  decider of the card they answered (its resolution, signed executions, and flow
+  authority); it defaults to the decider for an ownerless session, preserving the
+  prior attribution. No contract, policy, audit, or portal change; R-1..R-5 stand
+  as written. Pinned by three regression tests (kernel re-park owner attribution,
+  the ownerless-session default, and the confirm-route wiring); `make verify`
+  green (agent-platform 857). Recorded in the root `CHANGELOG.md` under
+  0.35.0 → Fixed.

@@ -1798,6 +1798,7 @@ class AgentKernel:
         request_id: str,
         bearer_token: str | None = None,
         model_id: str | None = None,
+        owner_user_name: str | None = None,
     ) -> AsyncIterator[dict[str, object]]:
         """Resume a parked reply with the operator's decision (SPEC-020 R-2).
 
@@ -1812,6 +1813,17 @@ class AgentKernel:
         the matching ``confirmation_result`` frame. The confirmer's
         bearer token rides ``DELEGATED_TOKEN`` so the tool-gateway sees
         the approving identity on any resulting invocation.
+
+        ``user_name`` is the DECIDER (the approver who answered this
+        card) and attributes the resolution, the signed executions, and
+        the flow authority. ``owner_user_name`` is the SESSION OWNER
+        (the original requester); SPEC-054 R-2 lets an unbound resumed
+        turn park ANOTHER per-action card, and that new card must be
+        owned by the requester — not the approver who happened to resume
+        the turn — or the tier_2 self-approval rule would block the same
+        approver from deciding the next card. It defaults to ``user_name``
+        when the caller cannot supply the owner (e.g. an ownerless
+        session), preserving the prior attribution.
         """
         from agentscope.event import ConfirmResult, UserConfirmResultEvent
 
@@ -1905,10 +1917,16 @@ class AgentKernel:
                 ):
                     yield decorated
                 # A resumed turn can park again on another ASK-gated tool.
+                # SPEC-054 R-2: attribute the re-parked card to the SESSION
+                # OWNER (the original requester), not the approver whose
+                # confirm resumed this turn — otherwise the tier_2
+                # self-approval rule blocks that same approver from deciding
+                # the next unbound per-action card. ``user_name`` (the
+                # decider) still attributes this card's own resolution above.
                 frame = self._build_confirmation_frame(
                     event,
                     session_id,
-                    user_name,
+                    owner_user_name or user_name,
                     agent.toolkit,
                     turn_index=turn_index,
                     evidence_frames=evidence_frames,

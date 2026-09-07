@@ -283,9 +283,12 @@ for line in sys.stdin:
   fi
   echo "approved ${CARDS} per-action card(s): one card per unbound write, no flow-unlock (SPEC-054 R-2)"
 
-  printf '%s' "$STREAM" | grep -qi 'reset successfully\|Password for' \
-    || fail "the resumed turn did not reach the password-reset confirmation"
-  echo "the confirm stream carried the resumed turn to the password-reset confirmation"
+  # The bounded loop terminated with no further parked card, so the resumed turn
+  # ran to completion. Prove completion durably — never by the model's natural
+  # -language phrasing, which varies run to run — via the session-detail check
+  # below (no pending confirmation; every card action-kind + approved with a
+  # change request; every write-tier execution signed).
+  echo "the resumed turn ran to completion (durable proof via the session detail below)"
 
   # Durable proof: every persisted card is action-kind with a change request
   # and a message, and all its write-tier executions are signed.

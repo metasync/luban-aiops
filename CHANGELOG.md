@@ -70,6 +70,29 @@ Release 1 entries are grouped retrospectively under 0.1.0.
   on drift in either direction, so the two masking vocabularies the
   change-request projection relies on cannot silently diverge.
 
+### Fixed
+
+- **Re-parked confirmation cards are owned by the session requester, not the
+  approver (SPEC-054 R-2)** — the live dev-k8s exercise of the unbound
+  per-action sample surfaced a defect in the N-card path R-2 introduces. When
+  an approver's decision resumes a turn that then parks *another* per-action
+  card, the confirm-resume passed the approver's identity as the resumed
+  turn's `user_name`, so the new card was attributed `owner_user_id =
+  <approver>`. The platform-gateway's SPEC-030 R-3 tier check then saw
+  `owner == approver` and blocked that same approver from deciding the next
+  card with a `self_approval` 403 (tier_2 forbids self-approval) — so a second
+  unbound write could never be approved by the approver who cleared the first,
+  contradicting R-2's "N unbound writes → N approvable cards". It is newly
+  reachable only because R-2 relaxed unbound writes from a hard
+  `BROWSER_FLOW_NOT_BOUND` deny into a per-action park, so a resumed turn could
+  park again at all. `resume_confirmation` now takes the session owner
+  separately (`owner_user_name`, threaded from `session.user_id` by the confirm
+  route) and attributes any re-parked card to the requester, while the approver
+  stays the decider of the card they answered (resolution, signed executions,
+  flow authority). Kernel + route only — no contract, policy, audit, or portal
+  change; pinned by three regression tests (kernel re-park owner attribution,
+  the ownerless-session default, and the confirm-route wiring).
+
 ## 0.34.1 — 2026-09-06
 
 ### Fixed

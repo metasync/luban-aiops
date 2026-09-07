@@ -754,6 +754,56 @@ def test_resume_confirmation_resolves_entry_on_stream_error(monkeypatch):
     assert not CONFIRMATION_REGISTRY.is_parked("s1", 600)
 
 
+def test_resume_confirmation_reparks_new_card_under_session_owner(monkeypatch):
+    """SPEC-054 R-2: an unbound resumed turn can park ANOTHER per-action
+    card; that card must be owned by the SESSION OWNER (the requester), not
+    the approver who resumed the turn. Otherwise the platform-gateway tier_2
+    self-approval rule sees owner == approver and blocks that same approver
+    from deciding the next card, breaking the N-card unbound guarantee."""
+    kernel = _configured_kernel()
+    # The resumed turn parks again on a second ASK-gated tool.
+    agent = FakeAgent(events=[_park_event()])
+    _patch_agent(monkeypatch, kernel, agent)
+    pending = CONFIRMATION_REGISTRY.register("s1", "alice", "reply-1", [TOOL_CALL], 600)
+    claimed = CONFIRMATION_REGISTRY.claim("s1", pending.confirm_id, 600)
+
+    frames = _drain(
+        kernel.resume_confirmation(
+            "s1", claimed, "approve", "bob-approver", "req-x",
+            owner_user_name="alice",
+        )
+    )
+    # The resumed turn re-parked a fresh card and ended the stream.
+    assert any(f.get("type") == "confirmation_request" for f in frames)
+    reparked = CONFIRMATION_REGISTRY.peek_parked("s1")
+    assert reparked is not None
+    assert reparked.confirm_id != pending.confirm_id
+    # Owned by the requester, NOT the approver who resumed the turn — so the
+    # approval bridge's self-approval check compares alice != bob-approver.
+    assert reparked.user_id == "alice"
+    # The durable record (the bridge's fallback source) carries the same owner.
+    record = CONFIRMATION_RECORD_STORE.load_record("s1", reparked.confirm_id)
+    assert record["owner_user_id"] == "alice"
+
+
+def test_resume_confirmation_repark_owner_defaults_to_decider(monkeypatch):
+    """Without an explicit session owner (e.g. an ownerless session), the
+    re-parked card falls back to the resuming identity — the pre-fix
+    attribution — so the owner is never stranded as None."""
+    kernel = _configured_kernel()
+    agent = FakeAgent(events=[_park_event()])
+    _patch_agent(monkeypatch, kernel, agent)
+    pending = CONFIRMATION_REGISTRY.register("s1", "alice", "reply-1", [TOOL_CALL], 600)
+    claimed = CONFIRMATION_REGISTRY.claim("s1", pending.confirm_id, 600)
+
+    _drain(
+        kernel.resume_confirmation("s1", claimed, "approve", "bob-approver", "req-x")
+    )
+    reparked = CONFIRMATION_REGISTRY.peek_parked("s1")
+    assert reparked is not None
+    assert reparked.user_id == "bob-approver"
+
+
 # --- Kernel: expiry closes parked calls via UserInterruptEvent ---
 
 
@@ -953,6 +1003,43 @@ def test_confirm_cross_user_confirmer_reaches_registry(monkeypatch) -> None:
         headers={"X-User-ID": "bob-approver"},
     )
     assert response.status_code == 200
+
+
+def test_confirm_route_threads_session_owner_into_resume(monkeypatch) -> None:
+    """SPEC-054 R-2: the confirm route passes the SESSION OWNER (not the
+    approver) as ``owner_user_name`` so a card the resumed turn re-parks is
+    attributed to the requester, letting a tier_2 approver decide the next
+    unbound per-action card instead of tripping the self-approval block."""
+    client = _client()
+    session = client.post("/api/v2/sessions", headers={"X-User-ID": "alice"})
+    session_id = session.json()["session_id"]
+    pending = _park_registered(session_id)  # owner alice
+
+    kernel = get_runtime_kernel()
+    captured: dict = {}
+
+    async def fake_resume(**kwargs):
+        captured.update(kwargs)
+        yield {
+            "type": "confirmation_result",
+            "confirm_id": pending.confirm_id,
+            "status": "approved",
+        }
+
+    monkeypatch.setattr(kernel, "resume_confirmation", fake_resume)
+    response = client.post(
+        "/api/v2/chat/confirm",
+        json={
+            "session_id": session_id,
+            "confirm_id": pending.confirm_id,
+            "decision": "approve",
+        },
+        headers={"X-User-ID": "bob-approver"},
+    )
+    assert response.status_code == 200
+    # The approver is the decider; the session owner rides along for re-parks.
+    assert captured["user_name"] == "bob-approver"
+    assert captured["owner_user_name"] == "alice"
 
 
 def test_pending_confirmation_endpoint_returns_parked_metadata() -> None:

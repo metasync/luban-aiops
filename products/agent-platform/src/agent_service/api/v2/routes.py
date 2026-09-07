@@ -375,6 +375,11 @@ async def chat_confirm(
             # key revocation) degrades to the default like other turns
             # instead of raising UnknownModelError mid-resume.
             model_id=_resolve_model(None, session.model),
+            # SPEC-054 R-2: a card the resumed turn parks is owned by the
+            # SESSION OWNER (the original requester), not this approver,
+            # so a tier_2 approver can decide the next unbound per-action
+            # card instead of tripping the self-approval block.
+            owner_user_name=session.user_id,
         ):
             event = _normalize_stream_event(
                 chunk, session.session_id, request_id
