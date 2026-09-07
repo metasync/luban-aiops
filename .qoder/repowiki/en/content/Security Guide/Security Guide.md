@@ -14,9 +14,12 @@
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 - [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
+- [SPEC-054-action-approval-and-change-request-card/spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
 - [0007-browser-flow-single-hitl-gate.md](file://docs/adr/0007-browser-flow-single-hitl-gate.md)
+- [0010-signed-execution-envelopes-declare-authority-provenance.md](file://docs/adr/0010-signed-execution-envelopes-declare-authority-provenance.md)
 - [2026-08-27-document-read-audit-integrity.md](file://docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md)
 - [2026-09-04-browser-flow-hitl-gate-enforcement.md](file://docs/agentic-aiops-platform/release-notes/2026-09-04-browser-flow-hitl-gate-enforcement.md)
+- [2026-09-07-action-approval-and-change-request-card.md](file://docs/agentic-aiops-platform/release-notes/2026-09-07-action-approval-and-change-request-card.md)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [documents.py](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py)
 - [test_documents.py](file://products/agent-platform/tests/test_documents.py)
@@ -58,13 +61,13 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced security model documentation with flow-based approval enforcement for browser flows
-- Added coverage of session-scoped flow authorities with TTL-based expiration
-- Documented single-HITL-gate-per-flow invariant implementation
-- Added flow-specific execution signing and audit trail enhancements
-- Updated threat modeling to address cross-flow privilege escalation prevention
-- Enhanced compliance requirements with flow authority audit trails
-- Updated troubleshooting guide with flow approval enforcement diagnostics
+- Enhanced browser interaction security model with per-action signed gates replacing hard-denial policy for unbound browser writes
+- Added comprehensive coverage of staleness backstops including kernel-side authority clearing and signed authority provenance (ADR-0010)
+- Updated flow-based approval enforcement to address cross-flow privilege escalation prevention
+- Documented new BROWSER_FLOW_AUTHORITY_STALE error handling and fail-closed security guarantees
+- Enhanced threat modeling to cover per-action approval scenarios and authority provenance validation
+- Updated compliance requirements with enhanced audit trail capabilities for action-level approvals
+- Expanded troubleshooting guide with new error codes and security validation procedures
 
 ## Table of Contents
 1. Introduction
@@ -79,18 +82,18 @@
 10. Appendices
 
 ## Introduction
-This Security Guide documents the Luban AIOps Platform's enhanced security architecture, threat mitigation strategies, and compliance requirements. The platform now implements a sophisticated security model featuring audience-bound JWTs, delegated token flows, service-to-service identity patterns, deterministic tool output redaction, workload identity service tokens, explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, and a durable audit trail with secure service-to-service authentication. It covers identity and authorization design (OIDC integration, JWT token security, and role-based access control), the authorization matrix across services and resources, secure configuration and secrets management, network security, vulnerability assessment procedures, scanning and penetration testing guidelines, compliance and audit logging, incident response procedures, and secure development practices with security review processes.
+This Security Guide documents the Luban AIOps Platform's enhanced security architecture, threat mitigation strategies, and compliance requirements. The platform now implements a sophisticated security model featuring audience-bound JWTs, delegated token flows, service-to-service identity patterns, deterministic tool output redaction, workload identity service tokens, explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, per-action signed gates for unbound browser interactions, and a durable audit trail with secure service-to-service authentication. It covers identity and authorization design (OIDC integration, JWT token security, and role-based access control), the authorization matrix across services and resources, secure configuration and secrets management, network security, vulnerability assessment procedures, scanning and penetration testing guidelines, compliance and audit logging, incident response procedures, and secure development practices with security review processes.
 
-The platform has been significantly hardened with multiple security enhancements including explicit tool permission allow-listing to prevent unauthorized tool execution, deterministic redaction of tool outputs to prevent credential leakage to external model providers, workload identity service tokens that replace static client secrets with short-lived, Kubernetes-projected tokens validated against cluster OIDC issuers, flow-based approval enforcement ensuring exactly one HITL gate per mutating browser flow, session-scoped flow authorities with time-bounded expiration, and a comprehensive audit trail system that provides immutable records of all platform activities with strong authentication and authorization controls. **Updated**: The platform now implements enhanced flow-based security enforcement where browser flows are secured with exactly one operator decision per mutating flow, with each subsequent write-tier interaction auto-signed under the approved flow's authority while maintaining strict identity scoping and gateway deviation guards.
+The platform has been significantly hardened with multiple security enhancements including explicit tool permission allow-listing to prevent unauthorized tool execution, deterministic redaction of tool outputs to prevent credential leakage to external model providers, workload identity service tokens that replace static client secrets with short-lived, Kubernetes-projected tokens validated against cluster OIDC issuers, flow-based approval enforcement ensuring exactly one HITL gate per mutating browser flow, session-scoped flow authorities with time-bounded expiration, per-action signed gates for unbound browser interactions replacing hard-denial policies, kernel-side authority clearing as staleness backstop, signed authority provenance via ADR-0010, and a comprehensive audit trail system that provides immutable records of all platform activities with strong authentication and authorization controls. **Updated**: The platform now implements enhanced browser interaction security where unbound browser writes park per-action signed gates instead of being hard-denied, with comprehensive staleness backstops including kernel-side authority clearing and signed authority provenance that prevents stale flow authorities from being exploited.
 
 ## Project Structure
 The platform is organized into multiple products and shared components with enhanced security boundaries:
 - Identity Broker: Centralized identity and token issuance/validation service supporting OIDC flows, audience-bound JWT lifecycle management, delegated token operations, and workload identity token validation.
-- Tool Gateway: API gateway enforcing authentication, authorization, policy decisions, secure tool execution orchestration, deterministic output redaction, explicit tool permission allow-listing, and flow deviation guard enforcement with service-to-service identity validation.
+- Tool Gateway: API gateway enforcing authentication, authorization, policy decisions, secure tool execution orchestration, deterministic output redaction, explicit tool permission allow-listing, flow deviation guard enforcement with service-to-service identity validation, and per-action approval enforcement for unbound browser interactions.
 - Audit Service: Durable audit trail storage with secure service-to-service authentication, role-based query access, and retention policies for compliance requirements.
-- Agent Platform: Runtime for agent services with session management, provider integrations, strict audience-scoped permissions, vetted tool auto-approval mechanisms, flow-based approval enforcement with session-scoped authorities, and enhanced document repository with envelope-only listings.
-- Operator Portal: Web UI for operators to manage platform resources with enhanced security controls, flow-semantic confirmation cards, and audited document access.
-- Shared Contracts and Schemas: Common data models and policy specifications used across services with enhanced security schemas.
+- Agent Platform: Runtime for agent services with session management, provider integrations, strict audience-scoped permissions, vetted tool auto-approval mechanisms, flow-based approval enforcement with session-scoped authorities, per-action signed gates for unbound interactions, and enhanced document repository with envelope-only listings.
+- Operator Portal: Web UI for operators to manage platform resources with enhanced security controls, flow-semantic confirmation cards, change-request cards for per-action approvals, and audited document access.
+- Shared Contracts and Schemas: Common data models and policy specifications used across services with enhanced security schemas including authority provenance fields.
 - GitOps and Kubernetes overlays: Declarative deployment configurations including RBAC, policies, and runtime environment variables with least-privilege defaults.
 
 ```mermaid
@@ -117,10 +120,10 @@ end
 
 ## Core Components
 - Identity Broker provides OIDC endpoints, issues and validates audience-bound tokens, supports delegated token flows, exposes identity context APIs with service-to-service authentication, and validates workload identity tokens from Kubernetes projected service accounts.
-- Tool Gateway performs request authentication, token verification with audience validation, policy evaluation, secure tool execution orchestration, deterministic output redaction, flow deviation guard enforcement, and routes requests to downstream services with proper identity propagation.
+- Tool Gateway performs request authentication, token verification with audience validation, policy evaluation, secure tool execution orchestration, deterministic output redaction, flow deviation guard enforcement, per-action approval enforcement for unbound browser interactions, and routes requests to downstream services with proper identity propagation.
 - Audit Service provides durable audit trail storage with secure service-to-service authentication using both static credentials and workload identity, role-based query access control, and retention policies for compliance.
 - Policy Engine evaluates policies against requests and enforces RBAC and fine-grained permissions with service-to-service identity awareness.
-- Agent Platform manages sessions and runtime dependencies for agent workloads with strict audience-scoped permissions, least-privilege execution contexts, explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, and enhanced document repository with envelope-only listings and centralized fetch auditing.
+- Agent Platform manages sessions and runtime dependencies for agent workloads with strict audience-scoped permissions, least-privilege execution contexts, explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, per-action signed gates for unbound browser interactions, kernel-side authority clearing for staleness backstops, and enhanced document repository with envelope-only listings and centralized fetch auditing.
 - Kubernetes RBAC and policy manifests define least-privilege access and runtime constraints with enhanced service identity management.
 
 Key responsibilities:
@@ -129,11 +132,13 @@ Key responsibilities:
 - Secure configuration through environment-driven settings and secrets injection with least-privilege defaults.
 - Explicit tool permission allow-listing preventing unauthorized tool execution while maintaining operational efficiency.
 - Flow-based approval enforcement ensuring exactly one HITL gate per mutating browser flow with session-scoped authorities.
+- **Per-action signed gates for unbound browser interactions** replacing hard-denial policies with operator-approved change requests.
+- **Staleness backstops** including kernel-side authority clearing and signed authority provenance (ADR-0010) preventing exploitation of stale flow authorities.
 - Deterministic tool output redaction preventing credential leakage to external model providers.
 - Workload identity service tokens replacing static client secrets with short-lived, auditable credentials.
 - Comprehensive audit trail with secure ingestion, storage, and query capabilities with role-based access control.
 - **Enhanced document read audit integrity** ensuring cross-owner access to sensitive content is properly recorded through centralized single-document fetch endpoints.
-- **Flow authority audit trails** providing complete visibility into browser flow approvals and auto-signed executions.
+- **Flow authority audit trails** providing complete visibility into browser flow approvals, per-action approvals, and auto-signed executions.
 - Observability and audit logging for security events with enhanced service-to-service communication tracking.
 
 **Section sources**
@@ -146,9 +151,10 @@ Key responsibilities:
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 - [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
+- [SPEC-054-action-approval-and-change-request-card/spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
 
 ## Architecture Overview
-The enhanced security architecture centers on a trust boundary at the Tool Gateway, which authenticates clients, verifies audience-bound tokens, enforces policies with service identity awareness, delegates tokens securely to internal services, applies deterministic redaction to prevent credential leakage, enforces explicit tool permission allow-listing, and maintains flow deviation guards. The Identity Broker acts as the single source of truth for user and service identities, issuing OIDC-compliant tokens with audience scoping, validating workload identity tokens from Kubernetes, and providing introspection endpoints. The Audit Service provides durable, tamper-evident audit trails with secure service-to-service authentication and role-based query access. Policies are declarative and evaluated per-request, enabling dynamic authorization based on roles, scopes, resource attributes, and service identity relationships. **Updated**: The flow-based approval system ensures exactly one HITL gate per mutating browser flow, with session-scoped authorities scoped to flow identity (skill_id + origin) and time-bounded by configurable TTL, eliminating cross-flow privilege escalation while maintaining individual execution signing and audit trails for each unlocked write.
+The enhanced security architecture centers on a trust boundary at the Tool Gateway, which authenticates clients, verifies audience-bound tokens, enforces policies with service identity awareness, delegates tokens securely to internal services, applies deterministic redaction to prevent credential leakage, enforces explicit tool permission allow-listing, maintains flow deviation guards, and implements per-action approval enforcement for unbound browser interactions. The Identity Broker acts as the single source of truth for user and service identities, issuing OIDC-compliant tokens with audience scoping, validating workload identity tokens from Kubernetes, and providing introspection endpoints. The Audit Service provides durable, tamper-evident audit trails with secure service-to-service authentication and role-based query access. Policies are declarative and evaluated per-request, enabling dynamic authorization based on roles, scopes, resource attributes, and service identity relationships. **Updated**: The flow-based approval system ensures exactly one HITL gate per mutating browser flow, with session-scoped authorities scoped to flow identity (skill_id + origin) and time-bounded by configurable TTL, eliminating cross-flow privilege escalation while maintaining individual execution signing and audit trails for each unlocked write. Additionally, unbound browser interactions now park per-action signed gates instead of being hard-denied, with comprehensive staleness backstops including kernel-side authority clearing and signed authority provenance (ADR-0010) that prevent exploitation of stale flow authorities.
 
 ```mermaid
 sequenceDiagram
@@ -158,6 +164,7 @@ participant Broker as "Identity Broker"
 participant Policy as "Policy Engine"
 participant Agent as "Agent Platform"
 participant FlowStore as "Flow Approval Store"
+participant PerAction as "Per-Action Gate Store"
 participant Delegation as "Delegation Service"
 participant Redaction as "Redaction Engine"
 participant AllowList as "Tool Permission Allow-List"
@@ -173,6 +180,8 @@ Delegation-->>Gateway : "Service-Specific Token"
 Gateway->>Agent : "Forward Request with Context"
 Agent->>FlowStore : "Check Session-Scoped Flow Authority"
 FlowStore-->>Agent : "Authority Decision (TTL + Identity Match)"
+Agent->>PerAction : "Check Per-Action Approval (Unbound Path)"
+PerAction-->>Agent : "Approval Decision"
 Agent->>AllowList : "Check Tool Permission (Vetted Allow-List)"
 AllowList-->>Agent : "Permission Decision"
 Agent->>DocStore : "List Documents (Envelope Only)"
@@ -184,6 +193,7 @@ Gateway->>Redaction : "Apply Deterministic Redaction"
 Redaction-->>Gateway : "Sanitized Response"
 Gateway-->>Client : "Final Response"
 Note over Agent,FlowStore : Flow authority scoped to skill_id + origin prevents cross-flow escalation
+Note over Agent,PerAction : Per-action gates provide fail-safe alternative to hard-denial for unbound writes
 ```
 
 **Diagram sources**
@@ -195,6 +205,7 @@ Note over Agent,FlowStore : Flow authority scoped to skill_id + origin prevents 
 - [redaction.py](file://products/tool-gateway/src/api_gateway/tools/redaction.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
 - [auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
 - [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [exchange_service.py](file://products/identity-broker/src/identity_service/services/exchange_service.py)
@@ -209,6 +220,8 @@ Note over Agent,FlowStore : Flow authority scoped to skill_id + origin prevents 
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 - [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
+- [SPEC-054-action-approval-and-change-request-card/spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
+- [0010-signed-execution-envelopes-declare-authority-provenance.md](file://docs/adr/0010-signed-execution-envelopes-declare-authority-provenance.md)
 
 ## Detailed Component Analysis
 
@@ -271,7 +284,7 @@ ExchangeService --> WorkloadClient : "maps"
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 
 ### Tool Gateway: Enhanced Authentication, Authorization, Service Identity Enforcement, and Deterministic Redaction
-The Tool Gateway serves as the primary security enforcement point with enhanced audience validation, service identity awareness, and deterministic output redaction. It validates incoming requests, verifies audience-bound JWTs, evaluates policies with service identity context, forwards authorized requests to downstream services with proper identity propagation, and applies deterministic redaction to prevent credential leakage to external model providers. Policies are defined declaratively and support RBAC, fine-grained rules, and service-to-service identity relationships.
+The Tool Gateway serves as the primary security enforcement point with enhanced audience validation, service identity awareness, and deterministic output redaction. It validates incoming requests, verifies audience-bound JWTs, evaluates policies with service identity context, forwards authorized requests to downstream services with proper identity propagation, and applies deterministic redaction to prevent credential leakage to external model providers. Policies are defined declaratively and support RBAC, fine-grained rules, and service-to-service identity relationships. **Updated**: The gateway now implements per-action approval enforcement for unbound browser interactions, replacing hard-denial policies with operator-approved change requests, and enforces signed authority provenance (ADR-0010) to prevent exploitation of stale flow authorities.
 
 Key aspects:
 - Audience-bound JWT verification and claim extraction with service identity validation.
@@ -282,6 +295,8 @@ Key aspects:
 - Deterministic tool output redaction preventing credential leakage to model providers.
 - Flow deviation guard enforcement ensuring origin allowlist, risk class, and step budget bounds.
 - Fail-closed overflow protection when too much content appears to contain credentials.
+- **Per-action approval enforcement** for unbound browser interactions replacing hard-denial policies.
+- **Signed authority provenance enforcement** preventing stale flow authority exploitation via BROWSER_FLOW_AUTHORITY_STALE errors.
 
 ```mermaid
 flowchart TD
@@ -397,8 +412,49 @@ ReturnEnvelopes --> End
 - [test_documents.py:250-266](file://products/agent-platform/tests/test_documents.py#L250-L266)
 - [2026-08-27-document-read-audit-integrity.md](file://docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md)
 
+### Enhanced Browser Interaction Security: Per-Action Signed Gates and Staleness Backstops
+**New** The platform now implements enhanced browser interaction security with per-action signed gates replacing hard-denial policies for unbound browser writes, along with comprehensive staleness backstops including kernel-side authority clearing and signed authority provenance (ADR-0010). This addresses critical security gaps where previously unbound browser interactions were simply denied, preventing legitimate ad-hoc browser workflows from being approved.
+
+Key aspects:
+- **Per-Action Signed Gates**: Unbound browser writes now park per-action signed gates instead of being hard-denied, allowing operators to approve ad-hoc browser interactions through change-request cards.
+- **Kernel-Side Authority Clearing**: The kernel drops `FLOW_CONTEXTS` and `FLOW_APPROVALS` for a session when it observes flow-killing gateway results, preventing stale flow authorities from outliving their bindings.
+- **Signed Authority Provenance (ADR-0010)**: Every execution-request envelope carries `approval_kind ∈ {action, flow}`, stamped inside the HMAC signature by whichever builder signs it, providing a signed fact rather than an unsigned hint.
+- **BROWSER_FLOW_AUTHORITY_STALE Enforcement**: The gateway enforces provenance on the browser write path, refusing flow-provenance envelopes presented when no flow is bound with structured error codes.
+- **Change-Request Cards**: Per-action approvals present operators with secret-masked change-request cards showing what will be executed, improving transparency and security posture.
+- **Fail-Closed Security**: The relaxation of hard-denial policies ships together with comprehensive staleness backstops that maintain fail-closed security guarantees.
+
+```mermaid
+flowchart TD
+UnboundWrite["Unbound Browser Write"] --> ParkPerAction["Park Per-Action Signed Gate"]
+ParkPerAction --> ChangeRequest["Present Change-Request Card"]
+ChangeRequest --> Approve{"Operator Approves?"}
+Approve --> |No| Deny["Deny Execution"]
+Approve --> |Yes| SignEnvelope["Sign Envelope with approval_kind='action'"]
+SignEnvelope --> Execute["Execute with Gateway Guards"]
+Execute --> KernelClearing["Kernel Monitors for Flow-Killing Errors"]
+KernelClearing --> ClearStores["Clear FLOW_CONTEXTS + FLOW_APPROVALS"]
+ClearStores --> PreventStale["Prevent Stale Authority Exploitation"]
+Deny --> End(["Execution Blocked"])
+Execute --> End
+ClearStores --> End
+```
+
+**Diagram sources**
+- [flow_approvals.py:56-75](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L56-L75)
+- [execution_signing.py:90-105](file://products/agent-platform/src/agent_service/services/execution_signing.py#L90-L105)
+- [execution_signing.py:108-149](file://products/agent-platform/src/agent_service/services/execution_signing.py#L108-L149)
+- [runtime_kernel.py:1417-1449](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1417-L1449)
+
+**Section sources**
+- [SPEC-054-action-approval-and-change-request-card/spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
+- [0010-signed-execution-envelopes-declare-authority-provenance.md](file://docs/adr/0010-signed-execution-envelopes-declare-authority-provenance.md)
+- [flow_approvals.py:56-75](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L56-L75)
+- [execution_signing.py:90-149](file://products/agent-platform/src/agent_service/services/execution_signing.py#L90-L149)
+- [runtime_kernel.py:1417-1449](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1417-L1449)
+- [2026-09-07-action-approval-and-change-request-card.md](file://docs/agentic-aiops-platform/release-notes/2026-09-07-action-approval-and-change-request-card.md)
+
 ### Flow-Based Approval Enforcement: Single HITL Gate Per Browser Flow
-**New** The platform now implements flow-based approval enforcement ensuring exactly one HITL gate per mutating browser flow, addressing critical security gaps where previously every write-tier browser interaction required separate operator approval. This enhancement eliminates cross-flow privilege escalation while maintaining individual execution signing and comprehensive audit trails.
+**Updated** The platform implements flow-based approval enforcement ensuring exactly one HITL gate per mutating browser flow, addressing critical security gaps where previously every write-tier browser interaction required separate operator approval. This enhancement eliminates cross-flow privilege escalation while maintaining individual execution signing and comprehensive audit trails. **Enhanced** with per-action signed gates for unbound interactions and comprehensive staleness backstops.
 
 Key aspects:
 - **Session-Scoped Flow Authorities**: Each approval creates a session-scoped authority keyed on both chat session ID and approved flow identity (skill_id + origin), preventing cross-flow privilege escalation.
@@ -407,13 +463,19 @@ Key aspects:
 - **Auto-Signed Executions**: Subsequent write-tier browser interactions in the same flow are auto-signed under the approving card's authority with fresh execution IDs and argument digests.
 - **Gateway Deviation Guards**: Every unlocked write remains bounded by origin allowlist, declared risk class, and step budget enforcement at the tool gateway.
 - **Flow-Semantic Confirmation Cards**: Operators approve workflow-level actions ("Reset User Password in Admin Portal") rather than bare tool actions, improving operator understanding and security posture.
+- **Per-Action Alternative**: Unbound browser interactions now park per-action signed gates instead of being hard-denied, providing flexibility while maintaining security through change-request cards.
 
 ```mermaid
 flowchart TD
-FirstWrite["First Write-Tier Browser Interaction"] --> ParkCard["Park Confirmation Card"]
+FirstWrite["First Write-Tier Browser Interaction"] --> IsBound{"Flow Bound?"}
+IsBound --> |Yes| ParkCard["Park Confirmation Card"]
+IsBound --> |No| ParkPerAction["Park Per-Action Signed Gate"]
 ParkCard --> Approve{"Operator Approves?"}
+ParkPerAction --> ChangeRequest["Present Change-Request Card"]
 Approve --> |No| Deny["Deny Execution"]
-Approve --> |Yes| RecordAuthority["Record Session-Scoped Flow Authority"]
+ChangeRequest --> ApprovePerAction{"Operator Approves?"}
+ApprovePerAction --> |No| Deny
+ApprovePerAction --> |Yes| RecordAuthority["Record Session-Scoped Flow Authority"]
 RecordAuthority --> NextWrite["Subsequent Write in Same Flow"]
 NextWrite --> CheckAuthority{"Valid Flow Authority?"}
 CheckAuthority --> |No| RePark["Re-Park New Card"]
@@ -432,10 +494,11 @@ Execute --> End
 **Section sources**
 - [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
 - [0007-browser-flow-single-hitl-gate.md](file://docs/adr/0007-browser-flow-single-hitl-gate.md)
-- [flow_approvals.py:1-245](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L245)
+- [flow_approvals.py:1-274](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L274)
 - [runtime_kernel.py:1256-1341](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1256-L1341)
 - [execution_signing.py:101-134](file://products/agent-platform/src/agent_service/services/execution_signing.py#L101-L134)
 - [2026-09-04-browser-flow-hitl-gate-enforcement.md](file://docs/agentic-aiops-platform/release-notes/2026-09-04-browser-flow-hitl-gate-enforcement.md)
+- [2026-09-07-action-approval-and-change-request-card.md](file://docs/agentic-aiops-platform/release-notes/2026-09-07-action-approval-and-change-request-card.md)
 
 ### Explicit Tool Permission Allow-List System
 **Updated** The tool permission auto-approval system has been significantly hardened to address CWE-862 (Incorrect Authorization) vulnerability. Instead of automatically approving any read-only tool, the system now uses an explicit vetted allow-list controlled by the `AGENT_GATEWAY_TOOL_AUTO_ALLOW` environment variable. This ensures that only pre-approved, security-reviewed tools can bypass the interactive permission confirmation process.
@@ -550,7 +613,7 @@ Note over Gateway,Broker : Fallback to Static Secret if Workload Token Unavailab
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 
 ### Agent Platform: Enhanced Session and Runtime Security with Least-Privilege
-**Updated** The Agent Platform manages sessions and runtime dependencies for agent workloads with enhanced security controls including explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, and enhanced document repository with envelope-only listings. It integrates with the identity system to ensure authenticated sessions with audience-scoped permissions and enforces runtime policies with least-privilege execution contexts.
+**Updated** The Agent Platform manages sessions and runtime dependencies for agent workloads with enhanced security controls including explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, per-action signed gates for unbound browser interactions, kernel-side authority clearing for staleness backstops, and enhanced document repository with envelope-only listings. It integrates with the identity system to ensure authenticated sessions with audience-scoped permissions and enforces runtime policies with least-privilege execution contexts.
 
 Key aspects:
 - Session creation and persistence with secure identifiers and audience validation.
@@ -559,6 +622,8 @@ Key aspects:
 - Runtime policy enforcement with audience-scoped permissions and service identity validation.
 - Explicit tool permission allow-listing preventing unauthorized tool execution.
 - **Flow-based approval enforcement** ensuring exactly one HITL gate per mutating browser flow with session-scoped authorities.
+- **Per-action signed gates** for unbound browser interactions replacing hard-denial policies.
+- **Kernel-side authority clearing** preventing stale flow authority exploitation.
 - **Enhanced document repository** with envelope-only listings and centralized fetch auditing.
 - Integration with AgentScope permission system for headless stream compatibility.
 
@@ -566,6 +631,7 @@ Key aspects:
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
 - [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
+- [SPEC-054-action-approval-and-change-request-card/spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
 
 ### Kubernetes RBAC and Policy Manifests: Enhanced Least-Privilege Access
 RBAC and policy manifests enforce least-privilege access at the cluster level with enhanced service identity management. They define roles, bindings, and policy files consumed by the gateway and other services with audience-scoped permissions.
@@ -592,7 +658,9 @@ Security-critical dependencies include:
 - AgentScope permission system for tool permission management with explicit allow-listing.
 - Audit service client for secure audit event emission with authentication.
 - **Flow approval store** for session-scoped browser flow authorities with TTL-based expiration.
+- **Per-action gate store** for unbound browser interaction approvals with change-request cards.
 - **Document store with envelope-only listing capability** for secure document content access.
+- **Authority provenance validation** for signed execution envelopes (ADR-0010).
 
 ```mermaid
 graph TB
@@ -612,10 +680,14 @@ DelegationClient --> IdentityBroker
 RedactionEngine --> PatternMatching["Pattern Matching Library"]
 AgentPlatform --> AllowList["Tool Permission Allow-List"]
 AgentPlatform --> FlowStore["Flow Approval Store"]
+AgentPlatform --> PerActionStore["Per-Action Gate Store"]
 AgentPlatform --> DocStore["Document Store (Envelope-Only)"]
+AgentPlatform --> AuthorityProvenance["Authority Provenance Validator"]
 AllowList --> AgentScope["AgentScope Permission System"]
 FlowStore --> FlowContext["Flow Context Store"]
+PerActionStore --> ChangeRequest["Change-Request Cards"]
 DocStore --> AuditEmitter
+AuthorityProvenance --> ADR0010["ADR-0010 Compliance"]
 AuditEmitter --> AuditService["Audit Service"]
 AuditService --> AuditStore["Audit Store"]
 ```
@@ -630,6 +702,7 @@ AuditService --> AuditStore["Audit Store"]
 - [rbac.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/rbac.yaml)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
 - [audit_emitter.py](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py)
 - [ingest_auth.py](file://products/audit-service/src/audit_service/services/ingest_auth.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -641,6 +714,8 @@ AuditService --> AuditStore["Audit Store"]
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 - [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
+- [SPEC-054-action-approval-and-change-request-card/spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
+- [0010-signed-execution-envelopes-declare-authority-provenance.md](file://docs/adr/0010-signed-execution-envelopes-declare-authority-provenance.md)
 
 ## Performance Considerations
 - Token caching: Cache validated audience-bound tokens and claims to reduce broker calls while maintaining security.
@@ -654,8 +729,11 @@ AuditService --> AuditStore["Audit Store"]
 - Tool permission checking: Minimal overhead for allow-list lookups using frozenset for O(1) membership testing.
 - Audit emission: Fire-and-forget audit delivery with non-blocking threads and timeout protection to prevent request path degradation.
 - **Flow authority checking**: Minimal overhead for session-scoped flow authority lookups using in-memory dictionaries.
+- **Per-action gate checking**: Minimal overhead for unbound interaction approval lookups with change-request card generation.
+- **Authority provenance validation**: Lightweight HMAC verification for approval_kind field with minimal performance impact.
 - **Document listing performance**: Envelope-only listings reduce payload size and improve response times while maintaining security.
 - **Cross-owner read auditing**: Audit event emission is optimized to minimize impact on document fetch performance.
+- **Kernel-side authority clearing**: Efficient store clearing operations triggered by flow-killing errors with minimal overhead.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -675,6 +753,9 @@ Common issues and resolutions:
 - **Flow approval issues**: Verify browser flow approval TTL configuration and check that flow authorities are properly scoped to session and flow identity.
 - **Cross-flow privilege escalation**: Ensure flow context rebinding is detected and writes re-park when flow identity changes.
 - **Flow authority expiration**: Check AGENT_BROWSER_FLOW_APPROVAL_TTL setting and verify approval timestamps for TTL-based expiration.
+- **BROWSER_FLOW_AUTHORITY_STALE errors**: Indicates stale flow authority exploitation attempt; verify flow binding state and authority provenance validation.
+- **Per-action gate approval delays**: Check change-request card rendering and operator approval workflow for unbound browser interactions.
+- **Kernel-side authority clearing failures**: Monitor flow-killing error handling and verify FLOW_CONTEXTS/FLOW_APPROVALS store cleanup.
 
 Recommended diagnostics:
 - Enable verbose logging for auth and policy decisions with service identity context.
@@ -689,6 +770,9 @@ Recommended diagnostics:
 - **Audit document fetch events** to confirm cross-owner access is properly recorded.
 - **Monitor flow approval stores** to verify session-scoped authorities are properly created and expired.
 - **Check flow context rebinding** to ensure cross-flow privilege escalation is prevented.
+- **Monitor per-action gate stores** to verify unbound interaction approvals are properly managed.
+- **Validate authority provenance enforcement** to ensure BROWSER_FLOW_AUTHORITY_STALE errors are properly handled.
+- **Review kernel-side authority clearing** to verify flow-killing errors trigger proper store cleanup.
 
 **Section sources**
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
@@ -697,15 +781,17 @@ Recommended diagnostics:
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 - [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
+- [SPEC-054-action-approval-and-change-request-card/spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
+- [0010-signed-execution-envelopes-declare-authority-provenance.md](file://docs/adr/0010-signed-execution-envelopes-declare-authority-provenance.md)
 
 ## Conclusion
-The Luban AIOps Platform implements an enhanced robust security architecture centered on OIDC-based authentication, audience-bound JWT token security, policy-driven authorization with service identity awareness, explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, deterministic tool output redaction, workload identity service tokens, and a comprehensive audit trail system with secure service-to-service authentication. By enforcing least-privilege access through RBAC, audience-scoped permissions, declarative policies, and explicit tool permission controls, integrating comprehensive observability and audit logging for service-to-service communications, implementing fail-closed credential protection, and providing durable audit trails with role-based access control, the platform provides strong protection against common threats. The addition of delegated token flows, service-to-service identity patterns, explicit tool permission allow-listing, deterministic redaction, workload identity tokens, secure audit trail capabilities, flow-based approval enforcement with single HITL gates per browser flow, and **enhanced document read audit integrity with envelope-only listings** further strengthens the security posture while maintaining operational efficiency. Continuous security scanning, penetration testing, and adherence to compliance standards further enhance the platform's security framework.
+The Luban AIOps Platform implements an enhanced robust security architecture centered on OIDC-based authentication, audience-bound JWT token security, policy-driven authorization with service identity awareness, explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, per-action signed gates for unbound browser interactions, kernel-side authority clearing and signed authority provenance (ADR-0010) as staleness backstops, deterministic tool output redaction, workload identity service tokens, and a comprehensive audit trail system with secure service-to-service authentication. By enforcing least-privilege access through RBAC, audience-scoped permissions, declarative policies, and explicit tool permission controls, integrating comprehensive observability and audit logging for service-to-service communications, implementing fail-closed credential protection, and providing durable audit trails with role-based access control, the platform provides strong protection against common threats. The addition of delegated token flows, service-to-service identity patterns, explicit tool permission allow-listing, deterministic redaction, workload identity tokens, secure audit trail capabilities, flow-based approval enforcement with single HITL gates per browser flow, per-action signed gates replacing hard-denial policies for unbound interactions, kernel-side authority clearing preventing stale flow authority exploitation, signed authority provenance via ADR-0010, and **enhanced document read audit integrity with envelope-only listings** further strengthens the security posture while maintaining operational efficiency. Continuous security scanning, penetration testing, and adherence to compliance standards further enhance the platform's security framework.
 
 ## Appendices
 
 ### Compliance Requirements
 - Align with industry standards for identity management and access control with audience-scoped permissions.
-- Ensure audit logs capture authentication, authorization, service-to-service communications, administrative actions, redaction events, and flow approval decisions.
+- Ensure audit logs capture authentication, authorization, service-to-service communications, administrative actions, redaction events, flow approval decisions, and per-action approval decisions.
 - Maintain encryption for data in transit and at rest where applicable with proper key management.
 - Regularly review and update policies to reflect organizational changes and least-privilege principles.
 - Implement comprehensive service identity management with audience validation and delegation controls.
@@ -717,6 +803,9 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Verify document read audit integrity** to ensure cross-owner access to sensitive content is properly recorded and documented.
 - **Monitor flow approval authorities** to ensure session-scoped authorities expire appropriately and prevent privilege escalation.
 - **Validate flow identity scoping** to prevent cross-flow privilege escalation through flow context rebinding.
+- **Monitor per-action approval workflows** to ensure change-request cards provide adequate transparency for unbound browser interactions.
+- **Validate authority provenance enforcement** to ensure BROWSER_FLOW_AUTHORITY_STALE errors prevent stale flow authority exploitation.
+- **Review kernel-side authority clearing** to ensure flow-killing errors properly clean up stale authorities.
 
 **Section sources**
 - [SECURITY.md](file://SECURITY.md)
@@ -724,6 +813,8 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 - [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
+- [SPEC-054-action-approval-and-change-request-card/spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
+- [0010-signed-execution-envelopes-declare-authority-provenance.md](file://docs/adr/0010-signed-execution-envelopes-declare-authority-provenance.md)
 
 ### Vulnerability Assessment and Penetration Testing
 - Conduct regular automated scans for dependencies and container images with security-focused analysis.
@@ -740,6 +831,10 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Test flow-based approval enforcement** by attempting to escalate privileges across different browser flows.
 - **Validate flow authority expiration** by testing TTL-based expiration and disabled flow-unlock scenarios.
 - **Test cross-flow privilege escalation** by attempting to reuse flow authorities after flow context rebinding.
+- **Test per-action approval enforcement** by attempting to execute unbound browser interactions without proper change-request approval.
+- **Validate authority provenance enforcement** by attempting to forge approval_kind fields in execution envelopes.
+- **Test kernel-side authority clearing** by simulating flow-killing errors and verifying proper cleanup of FLOW_CONTEXTS and FLOW_APPROVALS stores.
+- **Test BROWSER_FLOW_AUTHORITY_STALE handling** by attempting to exploit stale flow authorities.
 - Document findings and remediation steps; track vulnerabilities to closure with security impact assessment.
 - Integrate security checks into CI/CD pipelines for continuous assurance with audience-bound token validation and redaction testing.
 
@@ -749,6 +844,8 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 - [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
+- [SPEC-054-action-approval-and-change-request-card/spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
+- [0010-signed-execution-envelopes-declare-authority-provenance.md](file://docs/adr/0010-signed-execution-envelopes-declare-authority-provenance.md)
 
 ### Secure Development Practices
 - Enforce least privilege in code and configuration with audience-scoped permissions and service identity awareness.
@@ -767,6 +864,10 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Implement flow-based approval security testing** to validate single HITL gate enforcement and flow authority scoping.
 - **Test flow context rebinding** to ensure cross-flow privilege escalation is prevented.
 - **Validate flow authority TTL expiration** to ensure time-bounded authorities expire correctly.
+- **Test per-action approval workflows** to ensure change-request cards provide adequate operator transparency.
+- **Validate authority provenance enforcement** to ensure approval_kind fields cannot be forged or manipulated.
+- **Test kernel-side authority clearing** to ensure flow-killing errors properly trigger store cleanup operations.
+- **Implement comprehensive testing for BROWSER_FLOW_AUTHORITY_STALE handling** to prevent stale flow authority exploitation.
 
 **Section sources**
 - [SPEC-003-identity-trust-hardening/spec.md](file://docs/specs/SPEC-003-identity-trust-hardening/spec.md)
@@ -775,9 +876,11 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 - [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
+- [SPEC-054-action-approval-and-change-request-card/spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
+- [0010-signed-execution-envelopes-declare-authority-provenance.md](file://docs/adr/0010-signed-execution-envelopes-declare-authority-provenance.md)
 
 ### Threat Modeling Updates
-**Updated** The security hardening features address several critical attack vectors, with particular emphasis on tool permission vulnerabilities, flow-based approval enforcement, audit trail integrity, and document content exposure prevention:
+**Updated** The security hardening features address several critical attack vectors, with particular emphasis on tool permission vulnerabilities, flow-based approval enforcement, per-action signed gates for unbound interactions, kernel-side authority clearing, signed authority provenance, audit trail integrity, and document content exposure prevention:
 
 **Credential Leakage Prevention:**
 - Deterministic redaction prevents service-account JWTs, bearer tokens, and basic credentials from reaching external model providers.
@@ -794,6 +897,13 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Environment-controlled allow-list** enables deployment-specific security tuning while maintaining centralized control.
 - **Fail-safe defaults** ensure that unknown tools require explicit confirmation rather than automatic approval.
 - **Integration with existing policy framework** ensures tool permissions complement broader authorization controls.
+
+**Enhanced Browser Interaction Security:**
+- **Per-action signed gates replace hard-denial policies** for unbound browser interactions, providing flexibility while maintaining security through change-request cards.
+- **Kernel-side authority clearing** prevents stale flow authorities from outliving their bindings, eliminating a critical attack vector.
+- **Signed authority provenance (ADR-0010)** provides tamper-proof discrimination between action and flow authorities, preventing exploitation of stale flow contexts.
+- **BROWSER_FLOW_AUTHORITY_STALE enforcement** refuses flow-provenance envelopes when no flow is bound, closing the implicit backstop gap.
+- **Change-request cards** provide operators with transparent, secret-masked views of what will be executed during per-action approvals.
 
 **Flow-Based Approval Security:**
 - **Single HITL gate per browser flow eliminates repeated approval fatigue** while maintaining security through session-scoped authorities.
@@ -813,7 +923,7 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Role-based query access** ensures only authorized users can view audit trails through platform gateway policy enforcement.
 - **Immutable storage design** prevents modification or deletion of audit records once stored.
 - **Service attribution** ensures all audit events are traceable to their originating service.
-- **Flow approval audit trails** provide complete visibility into browser flow approvals and auto-signed executions.
+- **Flow approval audit trails** provide complete visibility into browser flow approvals, per-action approvals, and auto-signed executions.
 
 **Attack Surface Reduction:**
 - Single choke point for redaction eliminates bypass opportunities.
@@ -821,6 +931,9 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - Workload subject registration ensures only authorized service accounts can obtain delegated tokens.
 - **Explicit tool permission controls prevent unauthorized tool execution** even for read-only operations.
 - **Flow-based approval enforcement prevents privilege escalation** across different browser flows.
+- **Per-action approval enforcement provides secure alternative to hard-denial** for unbound browser interactions.
+- **Kernel-side authority clearing prevents stale authority exploitation** through race conditions.
+- **Signed authority provenance prevents forgery of approval_kind fields** through HMAC protection.
 - **Audit service authentication prevents unauthorized audit event ingestion** from untrusted services.
 - **Document repository security prevents content exposure** through unauthorized listing endpoints.
 
@@ -829,10 +942,13 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - [SPEC-009-pre-production-hardening/plan.md](file://docs/specs/SPEC-009-pre-production-hardening/plan.md)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 - [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md)
+- [SPEC-054-action-approval-and-change-request-card/spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
+- [0010-signed-execution-envelopes-declare-authority-provenance.md](file://docs/adr/0010-signed-execution-envelopes-declare-authority-provenance.md)
 - [SECURITY.md](file://SECURITY.md)
 - [0007-browser-flow-single-hitl-gate.md](file://docs/adr/0007-browser-flow-single-hitl-gate.md)
-- [gateway_tools.py:35-96](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L35-L96)
-- [flow_approvals.py:1-245](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L245)
+- [flow_approvals.py:56-75](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L56-L75)
+- [execution_signing.py:90-149](file://products/agent-platform/src/agent_service/services/execution_signing.py#L90-L149)
+- [runtime_kernel.py:1417-1449](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1417-L1449)
 - [routes.py:858-915](file://products/agent-platform/src/agent_service/api/v2/routes.py#L858-L915)
 
 ### Security Configuration Reference
@@ -844,6 +960,10 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 **Flow-Based Approval Controls:**
 - `AGENT_BROWSER_FLOW_APPROVAL_TTL`: Time-to-live for flow-based approval authorities in seconds (default 900). Setting to 0 disables flow-unlock entirely, restoring per-action gating.
 - Flow authorities are automatically scoped to session ID and approved flow identity (skill_id + origin) to prevent cross-flow privilege escalation.
+
+**Per-Action Approval Controls:**
+- **Unbound browser interactions** now park per-action signed gates instead of being hard-denied, with change-request cards providing operator transparency.
+- **Change-request cards** display secret-masked information about what will be executed, improving operator understanding and security posture.
 
 **Identity and Authentication:**
 - Standard OIDC configuration variables for issuer URLs, signing keys, and token lifetimes.
@@ -874,6 +994,11 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Cross-owner read auditing is automatically enabled** for all document fetch operations.
 - **Foreign draft protection prevents enumeration attacks** by returning 404 for unauthorized draft access.
 
+**Authority Provenance Configuration:**
+- **ADR-0010 compliance** ensures all execution envelopes carry signed approval_kind fields.
+- **BROWSER_FLOW_AUTHORITY_STALE enforcement** prevents exploitation of stale flow authorities.
+- **Kernel-side authority clearing** ensures FLOW_CONTEXTS and FLOW_APPROVALS stores are properly cleaned up on flow-killing errors.
+
 **Section sources**
 - [gateway_tools.py:46-61](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L46-L61)
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
@@ -883,3 +1008,5 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - [runtime-secrets.example.env](file://shared/platform-ops/gitops/dev-k8s/base/audit-service/runtime-secrets.example.env)
 - [routes.py:858-915](file://products/agent-platform/src/agent_service/api/v2/routes.py#L858-L915)
 - [SPEC-051-browser-flow-hitl-gate-enforcement/spec.md:117-125](file://docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/spec.md#L117-L125)
+- [SPEC-054-action-approval-and-change-request-card/spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
+- [0010-signed-execution-envelopes-declare-authority-provenance.md](file://docs/adr/0010-signed-execution-envelopes-declare-authority-provenance.md)
