@@ -20,6 +20,7 @@
 - Expanded change request card functionality with secret masking and curated formatters
 - Updated architecture diagrams to reflect new enforcement boundaries and approval_kind provenance
 - **Critical Enhancement**: Session owner attribution prevents self-approval blocks when tier_2 approvers handle subsequent unbound per-action cards
+- **Forward Cross-Reference**: Added explicit reference to SPEC-055 R-7 addressing the recorded deferral for approval-seam secret-masking hardening
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -43,6 +44,7 @@ Key outcomes delivered:
 - Flow authority clearing mechanisms prevent stale approvals from outliving gateway bindings
 - Signed execution envelopes carry explicit authority provenance for enforcement
 - **Critical Enhancement**: Session owner attribution prevents self-approval blocks when tier_2 approvers handle subsequent unbound per-action cards
+- **Forward Cross-Reference**: Recorded deferral for approval-seam secret-masking hardening is now scheduled under SPEC-055 R-7
 
 The delivery includes successful browser live check validation and resolution of a critical session owner attribution bug discovered during dev-k8s deployment testing, ensuring seamless multi-step approval workflows where different approvers can handle sequential actions without policy violations.
 
@@ -431,6 +433,9 @@ Key achievements:
 - Explicit approval_kind discriminator preventing stale state issues
 - Robust flow authority clearing mechanisms preventing security regressions
 - **Critical Enhancement**: Session owner attribution preventing self-approval blocks in multi-approver workflows
+- **Forward Cross-Reference**: Recorded deferral for approval-seam secret-masking hardening is now scheduled under SPEC-055 R-7, representing the source-side complement to existing secret-safety guarantees at the approval seam
 - All changes are additive and build on existing HITL and signed-execution foundations, keeping the trust boundary intact while expanding safe interactivity
 
 The delivery includes comprehensive testing, contract validation, and backward compatibility measures ensuring smooth adoption across the platform. The critical bug fix for self-approval blocking enables more complex approval workflows where different approvers can handle sequential actions without policy violations. Successful browser live check validation confirms the robustness of the implementation in real-world deployment scenarios.
+
+The recorded deferral for approval-seam secret-masking hardening (addressing vulnerabilities where raw secrets were persisting and rendering unmasked in portal technical details) has been successfully folded into SPEC-055 R-7, completing the end-to-end secret-safety guarantee chain from approval seam through graduation trace capture.
