@@ -5,61 +5,76 @@ category: error_handling
 scope:
     - '**'
 source_files:
-    - products/identity-broker/src/identity_service/services/exchange_service.py
-    - products/identity-broker/src/identity_service/api/routes/auth.py
-    - products/platform-gateway/src/platform_gateway/services/policy_engine.py
-    - products/platform-gateway/src/platform_gateway/api/routes/audit.py
-    - products/tool-gateway/src/tool_gateway/services/gateway_service.py
     - products/agent-platform/src/agent_service/api/v2/routes.py
+    - products/tool-gateway/src/tool_gateway/services/gateway_service.py
+    - products/tool-gateway/src/tool_gateway/services/policy_engine.py
+    - products/tool-gateway/src/tool_gateway/services/token_verifier.py
     - products/audit-service/src/audit_service/services/audit_store.py
-    - products/audit-service/src/audit_service/api/routes/ingest.py
-    - products/agent-platform/src/agent_service/app.py
+    - products/audit-service/src/audit_service/services/ingest_auth.py
+    - products/incident-service/src/incident_service/core/config.py
+    - products/platform-gateway/src/platform_gateway/api/routes/audit.py
+    - products/platform-gateway/src/platform_gateway/api/routes/incidents.py
+    - products/platform-gateway/src/platform_gateway/api/routes/tools.py
     - products/platform-gateway/src/platform_gateway/app.py
-    - products/tool-gateway/src/tool_gateway/app.py
+    - products/agent-platform/src/agent_service/app.py
 ---
 
-## What system/approach is used
+## Overview
 
-The platform uses **FastAPI's built-in `HTTPException`** as the universal HTTP error type across all Python services (agent-platform, platform-gateway, identity-broker, audit-service, incident-service, skills-hub, tool-gateway). There is no shared exception base class or centralized error-response middleware; each service defines its own domain exceptions and converts them to `HTTPException` at the route boundary. Telemetry/logging are added via per-service FastAPI `http` request middleware that logs every response status code — there is no global exception handler.
+The Luban AIOps platform is a multi-product Python workspace (agent-platform, platform-gateway, tool-gateway, audit-service, identity-broker, incident-service, execution-runtime, skills-hub). Each product is an independent FastAPI service. There is no shared error-handling library or cross-cutting exception hierarchy; instead, each service defines its own small set of domain-specific `Exception` subclasses and converts them at the API boundary into standardized `fastapi.HTTPException` responses.
 
-## Key files and packages
+## Approach per layer
 
-- `products/identity-broker/src/identity_service/services/exchange_service.py` — defines `ExchangeError(Exception)` carrying a `status_code` and `detail`, raised for credential/token verification failures; routes convert it to `HTTPException(status_code=exc.status_code, detail=exc.detail) from exc`.
-- `products/platform-gateway/src/platform_gateway/services/policy_engine.py` — defines `PolicyLoadError(Exception)` for invalid/unavailable policy bundles; routes raise `HTTPException(status_code=503, detail="policy bundle unavailable")`.
-- `products/tool-gateway/src/tool_gateway/services/gateway_service.py` — raises `HTTPException(401)` for malformed/missing auth headers and `HTTPException(403)` when policy denies an action; also returns `JSONResponse(..., status_code=403)` directly for tool-level denials.
-- `products/audit-service/src/audit_service/services/audit_store.py` — defines `StoreError(Exception)` for store-layer failures; routes return `JSONResponse(status_code=400/401, content={"detail": str(exc)})` rather than using `HTTPException`.
-- `products/agent-platform/src/agent_service/api/v2/routes.py` — raises `HTTPException` for missing `X-User-ID` (401), parked-session conflicts (409), expired confirmations (410), and missing sessions (404).
-- Per-service `app.py` files (`agent_platform`, `platform_gateway`, `tool_gateway`, `identity_broker`, `audit_service`) register an `@app.middleware("http")` that logs `response.status_code` — this is the only cross-cutting error observability hook.
+### 1. Domain-layer exceptions (service-scoped)
+Each service declares narrowly scoped exception classes in the module where they are raised:
 
-## Architecture and conventions
+| Service | Exception types | Purpose |
+|---|---|---|
+| `audit-service` | `StoreError`, `IngestAuthError` | Store operations, ingestion auth failures |
+| `incident-service` | `SettingsError`, `ConnectorConfigError`, `StoreError`, `NormalizationError`, `QueryAuthError`, `TriageError` | Config, connectors, store, normalization, query auth, triage |
+| `tool-gateway` | `PolicyLoadError`, `TokenVerificationError` | Policy bundle load/validation, JWT verification |
+| `agent-platform` | `ConfirmationNotFound`, `ConfirmationExpired`, `UnknownSessionError`, `ForeignSessionDenied`, `DigestInputError`, `NoValidatedTriageReport`, plus client errors from `incident_client` (`IncidentDependencyNotConfigured`, `IncidentNotFound`, `IncidentServiceUnavailable`, `IncidentClientRejected`) and `skills_client` (`SkillsDependencyNotConfigured`, `SkillsServiceUnavailable`, `SkillsClientRejected`) |
 
-1. **Domain exceptions stay in service boundaries.** Each service owns its error types (`ExchangeError`, `PolicyLoadError`, `StoreError`, plus local ones like `IngestAuthError`, `TokenVerificationError`, `ConfirmationNotFound`, `ConfirmationExpired`, `ConfirmationOwnerMismatch`). They are never imported across services; conversion to `HTTPException` happens in the route layer of the same service.
+These exceptions carry only domain context — never HTTP status codes — so callers can decide how to translate them.
 
-2. **Route handlers are the single point of HTTP error mapping.** Routes catch domain exceptions and translate them into `HTTPException` with explicit `status_code` and `detail`. For example, `exchange_service.exchange_token` raises `ExchangeError(detail, status_code)` and `identity_service/api/routes/auth.py` maps it back to `HTTPException(status_code=exc.status_code, detail=exc.detail) from exc`.
+### 2. API boundary: explicit try/except → HTTPException
+Routes catch domain exceptions and map them to `HTTPException(status_code=..., detail=...)`. The canonical pattern appears in `products/agent-platform/src/agent_service/api/v2/routes.py`:
 
-3. **Status-code semantics are consistent across services:**
-   - `401` — missing/malformed `Authorization` header, missing `X-User-ID`, invalid bearer token, expired/expired subject token, unregistered workload subject.
-   - `403` — policy deny (`evaluate()` returning `decision == "deny"`), mutating tool invoked without `tools:mutate` grant, tool result with `denied` status.
-   - `404` — session not found, confirmation not found.
-   - `409` — session has a parked confirmation, duplicate confirmation claim.
-   - `410` — confirmation expired.
-   - `502` — downstream service call failed (audit proxy, OIDC exchange).
-   - `503` — service dependency not configured (audit service not configured, policy bundle unavailable, tool registry not initialised).
-   - `202` — audit ingest accepted asynchronously.
+```python
+except SkillsDependencyNotConfigured as exc:
+    raise HTTPException(status_code=503, detail=str(exc)) from None
+except SkillsServiceUnavailable as exc:
+    raise HTTPException(status_code=502, detail=str(exc)) from None
+except SkillsClientRejected as exc:
+    raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
+```
 
-4. **Fire-and-forget audit emission swallows errors.** In `audit_emitter.py` (present in multiple services), audit ingestion failures raise `RuntimeError` on non-2xx responses but are caught by `except Exception as exc` with a `# noqa: BLE001 — fire-and-forget never propagates` comment, ensuring audit delivery never fails the caller.
+The same pattern is used for `Incident*` client errors, `ConfirmationNotFound`, `ConfirmationExpired`, `UnknownSessionError`, `ForeignSessionDenied`, `DigestInputError`, and `NoValidatedTriageReport`. Downstream services follow the same shape: e.g. `audit-service` routes catch `IngestAuthError` and `StoreError`; `execution-runtime` catches broad `Exception` blocks with comments like `# noqa: BLE001 — malformed bodies reject uniformly` / `durability degrades, never the response`.
 
-5. **No global exception handler.** Services rely on FastAPI's default `HTTPException` handler; there is no custom `exception_handler` registered in any `create_app()`. The only cross-cutting hook is the request-scoped middleware that records `response.status_code` in structured logs.
+### 3. Identity/auth path: early HTTPException
+Authentication and authorization failures raise `HTTPException` directly at the edge, before any domain logic runs:
+- `agent-platform`: missing `X-User-ID` header → `401`.
+- `platform-gateway`: malformed `Authorization` header → `401`; missing token when required → `401`.
+- `tool-gateway`: `resolve_request_identity` raises `401` for malformed bearer, expired/invalid tokens, or missing token when `require_auth=True`; policy deny raises `403` with `{detail, action, reason}`.
 
-6. **Streaming endpoints handle errors inside the generator.** The `/chat/stream` and `/chat/confirm` endpoints wrap kernel calls in async generators; if a `ConfirmationOwnerMismatch` occurs mid-stream, they yield an `AgentStreamEvent(type="error", ...)` frame instead of raising, because HTTP headers have already been sent.
+### 4. No global exception handler
+A grep across all products finds **no** `@app.exception_handler` registrations. Unhandled exceptions therefore fall through to FastAPI's default JSON error response. Services rely on explicit `try/except` blocks in route handlers rather than centralized exception-to-HTTP mapping.
 
-7. **Readiness/liveness degrade gracefully.** `ready_status()` in tool-gateway catches `PolicyLoadError` and returns `{"status": "degraded", ...}` rather than failing the health endpoint; `audit_store.ready()` wraps all checks in `try/except Exception` so readiness never raises.
+### 5. Startup-time validation via exceptions
+Configuration parsing raises typed exceptions to fail fast:
+- `incident-service.core.config.SettingsError` — "Raised when an INCIDENT_* setting is malformed (fail startup fast)."
+- `tool-gateway.services.policy_engine.PolicyLoadError` — raised during YAML parse and rule validation; surfaced on the readiness endpoint as `status: degraded` with `policy_error` string.
 
-## Conventions and constraints
+### 6. Observability integration
+Every service registers a `log_requests` middleware that logs method, path, status code, duration, and request ID. Errors are captured by this middleware; domain exceptions are not swallowed here — they bubble up to produce the final status code that gets logged.
 
-- **Every route must explicitly set `status_code`** on `HTTPException`; bare `raise HTTPException(...)` without a status code is not observed in this codebase.
-- **Domain exceptions carry enough context to map to a precise HTTP status** (e.g., `ExchangeError.__init__(detail, status_code)`); routes do not guess status codes from generic exceptions.
-- **Policy decisions are modeled as data (`PolicyDecision`)** rather than exceptions — `evaluate()` returns a decision object, and callers raise `HTTPException(403)` only when the decision is `deny`. This keeps policy evaluation pure and testable.
-- **Audit events are always emitted even on error paths**, with `outcome` set to `"error"` or `"denied"`; audit failure is intentionally non-fatal.
-- **Telemetry setup failures are swallowed** (`except Exception: LOGGER.exception(...)`) so misconfigured OpenTelemetry does not prevent the service from starting.
-- **No `raise` of bare `Exception` or `BaseException` outside tests** — all failures use typed subclasses of `Exception` (or `ValueError` for configuration parsing), then mapped to HTTP status codes at the boundary.
+## Conventions observed
+
+1. **Domain exceptions stay transport-neutral.** They carry structured context (e.g. `exc.message`, `exc.detail`) but no HTTP status. Only the API layer assigns status codes.
+2. **Status-code mapping is explicit per call site.** Routes contain `except X as exc:` branches that choose between 401, 403, 404, 409, 422, 502, 503 depending on the specific exception type.
+3. **Downstream client errors propagate their own status.** `SkillsClientRejected` and `IncidentClientRejected` expose `status_code`/`message` attributes that the agent-platform routes forward verbatim, preserving the callee's intent.
+4. **Malformed input uses 422.** Unknown model IDs and invalid payloads consistently return 422 rather than generic 400.
+5. **Missing dependencies use 503.** Unconfigured downstream services (`SkillsDependencyNotConfigured`, `IncidentDependencyNotConfigured`, audit/service not configured) return 503.
+6. **Readiness endpoints degrade gracefully.** `tool-gateway`'s `/ready` returns `status: degraded` with `policy_error` instead of failing hard when `PolicyLoadError` occurs.
+7. **No panics/recover.** Python `raise` is used exclusively; there is no `try/finally` teardown around user code paths beyond background task cancellation in the lifespan.
+8. **Request-scoped correlation.** Every error path preserves `request_id` via the `x-request-id` header resolved by `core.request_context.resolve_request_id`, which is then included in log events and audit payloads.

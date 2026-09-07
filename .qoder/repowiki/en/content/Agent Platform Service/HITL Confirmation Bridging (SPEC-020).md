@@ -13,6 +13,7 @@
 - [post-live-check-confirmation-card-flow-headline.md](file://docs/agentic-aiops-platform/release-notes/2026-09-05-post-live-check-confirmation-card-flow-headline.md)
 - [SPEC-053 spec.md](file://docs/specs/SPEC-053-skill-declared-step-intent/spec.md)
 - [SPEC-053 plan.md](file://docs/specs/SPEC-053-skill-declared-step-intent/plan.md)
+- [SPEC-054 spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
@@ -41,13 +42,13 @@
 
 ## Update Summary
 **Changes Made**
-- Added SPEC-053 skill-declared step intent support with `flow_intent` field throughout the browser flow pipeline
-- Enhanced confirmation cards to display plain-text decision line above technical details for browser flow approval workflows
-- Updated stream contract schemas from v9 to v10 to include optional `flow_intent` field in flow_summary
-- Modified skills-hub ingestion and storage to validate and persist `flow_intent` frontmatter declarations
-- Enhanced operator portal components to render authored intent as prominent decision line in confirmation cards
-- Updated tool gateway to carry `flow_intent` through browser flow binding to kernel confirmation frames
-- Added comprehensive validation ensuring `flow_intent` requires `web_target` declaration and stays within 200 character limit
+- Added SPEC-054 action-level approval and change request card support with explicit `approval_kind` discriminator
+- Enhanced confirmation cards to display secret-masked change requests for ad-hoc browser writes outside bound flows
+- Updated stream contract schemas to v10 with optional `approval_kind`, `change_request`, and `message` fields
+- Modified durable confirmation records to persist `approval_kind`, `change_request`, and card message for parity across surfaces
+- Enhanced tool gateway to park ad-hoc browser writes as per-action signed gates instead of hard-denying them
+- Updated operator portal components to render change request layout for action approvals with secret masking
+- Improved headline leak prevention through explicit approval kind discrimination rather than ambient context probing
 
 ## Table of Contents
 1. Introduction
@@ -61,7 +62,7 @@
 9. Conclusion
 
 ## Introduction
-This document explains the Human-in-the-Loop (HITL) confirmation bridging implemented under SPEC-020, enhanced with SPEC-021's bounded mutating actions, SPEC-030's require-approval tier system, SPEC-031's persistent confirmation registry, and SPEC-053's skill-declared step intent. The bridge transforms kernel ASK parking into a portal-visible approval flow with tiered governance, durable state management, and authored workflow intent: tier_1 allows operator self-confirmation for routine destructive actions, while tier_2 requires designated approvers distinct from the requester for critical destructive actions.
+This document explains the Human-in-the-Loop (HITL) confirmation bridging implemented under SPEC-020, enhanced with SPEC-021's bounded mutating actions, SPEC-030's require-approval tier system, SPEC-031's persistent confirmation registry, SPEC-053's skill-declared step intent, and SPEC-054's action-level approval with change request cards. The bridge transforms kernel ASK parking into a portal-visible approval flow with tiered governance, durable state management, authored workflow intent, and first-class action-level approvals: tier_1 allows operator self-confirmation for routine destructive actions, while tier_2 requires designated approvers distinct from the requester for critical destructive actions.
 
 Key outcomes:
 - Kernel ASK events become SSE confirmation_request frames with risk_level metadata and tier requirements.
@@ -80,6 +81,10 @@ Key outcomes:
 - **Flow summary propagation**: Browser-flow headline metadata (skill_id, origin, title, description, risk_class) preserved throughout pipeline from stream frames to final card rendering for consistent workflow framing.
 - **Canonical tool name resolution**: Approved mutating tool invocations correctly resolve to gateway registry using canonical dotted names instead of sanitized model-visible names.
 - **Skill-declared step intent**: Author-written `flow_intent` displayed as prominent decision line above technical details for browser flow approval workflows.
+- **Action-level approval**: Explicit `approval_kind` discriminator distinguishes between flow approvals (bound browser flows) and action approvals (ad-hoc mutations), enabling per-action signed gates for unbound browser writes.
+- **Change request cards**: Action approvals surface decision-relevant parameters as readable change requests with secret masking, promoting them from collapsed technical details to the approval intention.
+- **Durable card-message parity**: Card confirmation messages persist on durable records so approver inbox and owner transcripts render the same message as live operator cards.
+- **Improved headline leak prevention**: Explicit approval kind discrimination prevents non-browser action cards from inheriting stale flow headlines.
 
 **Section sources**
 - [spec.md:11-20](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md#L11-L20)
@@ -89,11 +94,12 @@ Key outcomes:
 - [approval-inbox-persistent-confirmation.md:6-51](file://docs/agentic-aiops-platform/release-notes/2026-08-25-approval-inbox-persistent-confirmation.md#L6-L51)
 - [post-live-check-confirmation-card-flow-headline.md:1-56](file://docs/agentic-aiops-platform/release-notes/2026-09-05-post-live-check-confirmation-card-flow-headline.md#L1-L56)
 - [SPEC-053 spec.md:19-51](file://docs/specs/SPEC-053-skill-declared-step-intent/spec.md#L19-L51)
+- [SPEC-054 spec.md:27-86](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L27-L86)
 - [spec.md:17-31](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md#L17-L31)
 - [spec.md:43-67](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/spec.md#L43-L67)
 
 ## Project Structure
-The feature spans three products plus shared contracts, enhanced with SPEC-021 capabilities, SPEC-030 tier enforcement, SPEC-031 persistent storage, SPEC-053 skill-declared intent, v0.23.1 canonical name resolution, and v0.33.1 flow summary propagation:
+The feature spans three products plus shared contracts, enhanced with SPEC-021 capabilities, SPEC-030 tier enforcement, SPEC-031 persistent storage, SPEC-053 skill-declared intent, SPEC-054 action-level approvals, v0.23.1 canonical name resolution, and v0.33.1 flow summary propagation:
 - Agent platform: runtime park/resume, in-memory registry with risk tracking, v2 routes, schemas, settings, and durable confirmation records store.
 - Platform gateway: confirm proxy route, tiered policy enforcement, audit emission, approval validation, and approvals inbox relay.
 - Tool gateway: risk-tier admission gate, mutating tool registration, tools:mutate enforcement, and browser flow binding with intent propagation.
@@ -180,7 +186,7 @@ AI -.-> AI
 
 ## Core Components
 - **Enhanced Confirmation Registry**: In-memory per-process store keyed by session_id with risk tracking and canonical name mapping; supports register, claim, resolve, expiry, and parked checks with risk tier awareness. Single pending confirmation per session with optional risk metadata and gateway name mapping.
-- **Durable Confirmation Records Store**: Postgres-backed persistence layer that survives pod restarts and maintains consistency across replicas. Implements bounded storage (50 records per session, 30-day inbox history) with automatic cleanup and stale record handling. Now includes flow_summary JSONB column for browser-flow headline preservation.
+- **Durable Confirmation Records Store**: Postgres-backed persistence layer that survives pod restarts and maintains consistency across replicas. Implements bounded storage (50 records per session, 30-day inbox history) with automatic cleanup and stale record handling. Now includes flow_summary JSONB column for browser-flow headline preservation and approval_kind/change_request/message fields for action-level approvals.
 - **Runtime kernel bridge**: Translates RequireUserConfirmEvent into confirmation_request frame with risk_level payload, registers pending calls with risk mapping and canonical name resolution, ends stream without message_end, and resumes via UserConfirmResultEvent on decision. Now persists confirmation lifecycle to durable store before streaming and includes flow_summary in parked records.
 - **Flow Context Management**: Tracks browser flow state including skill_id, origin, title, description, risk_class, and now flow_intent for authored intent display. Provides summary() method that emits complete flow context including the new flow_intent field for card rendering.
 - **Confirm route (agent platform)**: POST /api/v2/chat/confirm validates ownership, claims entry, handles expired/unknown states, streams resumed reply with confirmation_result first. **Updated**: Now uses degraded model resolution to prevent UnknownModelError exceptions and removed session ownership assertion for tier_2 approvers. **Enhanced**: Persists decision outcomes immediately at claim time for race resilience. **New**: Includes flow_summary coercion for schema compliance.
@@ -191,9 +197,12 @@ AI -.-> AI
 - **Stream event normalization**: `_normalize_stream_event` passes flow_summary through defensive `_coerce_flow_summary` that keeps only contract's fields including flow_intent and degrades non-dict summaries to absent.
 - **Portal decoder enhancement**: `toFlowSummary` function parses card-level browser-flow headline from stream frames, returning undefined for non-browser cards so they fall back to plain tool-action rendering. **Updated**: Now includes flowIntent field mapping from flow_intent wire format.
 - **Tiered Policy Engine**: Evaluates actions with deny > require_approval > allow precedence, returns ApprovalSpec with tier information for require_approval decisions.
-- **Risk-tier admission (tool gateway)**: Enforces tools:mutate policy action for write/admin tools, gates k8s.delete_pod behind GATEWAY_MUTATING_TOOLS_ENABLED flag.
+- **Risk-tier admission (tool gateway)**: Enforces tools:mutate policy action for write/admin tools, gates k8s.delete_pod behind GATEWAY_MUTATING_TOOLS_ENABLED.
 - **Skill intent validation**: Validates flow_intent frontmatter declarations requiring web_target presence, enforcing 200 character limits and string type constraints.
-- **Portal card**: Renders confirmation_request as inline card with tier badges ("operator confirmation" vs "approver required"), tool names, parameters, and permission message; posts to gateway confirm and continues SSE stream after decision. **Enhanced**: Supports persistent card rendering from durable records and Approvals view for designated approvers. **New**: Displays authored intent as prominent decision line above technical details when flow_intent is present.
+- **Action-level approval discriminator**: Explicit `approval_kind` field distinguishes between flow approvals (bound browser flows) and action approvals (ad-hoc mutations), enabling per-action signed gates for unbound browser writes on allowlisted origins.
+- **Change request projection**: Secret-masked display projection of decision-relevant parameters for action approvals, promoting them from collapsed technical details to readable change requests.
+- **Card message persistence**: Confirmation card messages persist on durable records ensuring parity between live operator cards and replayed surfaces.
+- **Portal card**: Renders confirmation_request as inline card with tier badges ("operator confirmation" vs "approver required"), tool names, parameters, and permission message; posts to gateway confirm and continues SSE stream after decision. **Enhanced**: Supports persistent card rendering from durable records and Approvals view for designated approvers. **New**: Displays authored intent as prominent decision line above technical details when flow_intent is present. **New**: Renders change request layout for action approvals with secret masking.
 
 **Section sources**
 - [hitl_confirmations.py:34-208](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L34-L208)
@@ -216,7 +225,7 @@ AI -.-> AI
 - [ingestion.py:199-213](file://products/skills-hub/src/skills_hub/services/ingestion.py#L199-L213)
 
 ## Architecture Overview
-End-to-end flow from kernel ASK to portal decision and resumed execution, enhanced with tiered approval enforcement, resilient model resolution, persistent state management, canonical tool name resolution, flow summary propagation, and skill-declared intent display:
+End-to-end flow from kernel ASK to portal decision and resumed execution, enhanced with tiered approval enforcement, resilient model resolution, persistent state management, canonical tool name resolution, flow summary propagation, skill-declared intent display, and action-level approval discrimination:
 
 ```mermaid
 sequenceDiagram
@@ -236,9 +245,9 @@ Hub->>DB : Persist skill with flow_intent
 Note over RK : Stream turn begins
 RK-->>AP : RequireUserConfirmEvent + risk_levels + flow_summary
 AP->>Reg : register(session, user, reply, tool_calls, timeout, risk_levels, gateway_names)
-AP->>Store : save_parked(confirm_id, session_id, owner, pending_calls, action, flow_summary)
+AP->>Store : save_parked(confirm_id, session_id, owner, pending_calls, action, flow_summary, approval_kind, change_request, message)
 Store->>DB : INSERT confirmation_records (with flow_summary JSONB including flow_intent)
-AP-->>Portal : data : {type : "confirmation_request", confirm_id, pending_calls[risk_level, canonical_tool_name], flow_summary{title, description, flow_intent}, message}
+AP-->>Portal : data : {type : "confirmation_request", confirm_id, pending_calls[risk_level, canonical_tool_name], flow_summary{title, description, flow_intent}, approval_kind, change_request, message}
 Portal->>GW : POST /api/v1/chat/confirm {session_id, confirm_id, decision}
 GW->>GW : enforce_policy("chat : confirm")
 alt Decision involves write/admin tool
@@ -354,6 +363,7 @@ Responsibilities:
 - Provide best-effort persistence that degrades gracefully when Postgres is unavailable.
 - Support cross-session queries for approvals inbox with metadata-only exposure.
 - **New**: Include flow_summary JSONB column for browser-flow headline preservation across all surfaces.
+- **New**: Add approval_kind, change_request, and message columns for action-level approval support and card message parity.
 
 Storage design:
 - Uses same Postgres posture as SPEC-016 session store with shared database connection management.
@@ -361,10 +371,11 @@ Storage design:
 - Maintains separation between hot-path in-memory registry and durable record store.
 - **Enhanced**: Startup sweep now uses configurable TTL scoping via AGENT_HITL_CONFIRM_TIMEOUT for precise stale record identification.
 - **New**: flow_summary column migration handled automatically at startup for backward compatibility.
+- **New**: approval_kind, change_request, and message columns added for action-level approval support.
 
 ```mermaid
 flowchart TD
-Park["save_parked(record with flow_summary)"] --> Insert["INSERT confirmation_records (flow_summary JSONB)"]
+Park["save_parked(record with flow_summary, approval_kind, change_request, message)"] --> Insert["INSERT confirmation_records (JSONB columns)"]
 Insert --> Evict{"Over cap?"}
 Evict -- Yes --> Sweep["DELETE oldest records"]
 Evict -- No --> Continue["Continue"]
@@ -424,6 +435,9 @@ Behavior:
 - On RequireUserConfirmEvent, builds confirmation_request frame with risk_level payload, registers pending calls with risk mapping and canonical name resolution, yields frame, and ends stream without message_end.
 - **Enhanced**: Persists confirmation lifecycle to durable store before streaming confirmation_request frame to client.
 - **New**: Includes flow_summary in parked records and confirmation_request frames for browser-flow headline preservation.
+- **New**: Adds approval_kind discriminator to distinguish between flow and action approvals.
+- **New**: Assembles change_request projection from parameters with secret masking for action approvals.
+- **New**: Persists card message for durable parity across surfaces.
 - resume_confirmation sets delegated token, emits confirmation_result first, then streams resumed reply through normalization/evidence pipeline.
 - **Enhanced**: Records resolution outcome to durable store after confirmation_result flows through.
 - Handles chained parks: resumed turns can trigger another ASK, emitting a fresh confirmation_request.
@@ -436,9 +450,15 @@ Start(["Stream Event"]) --> CheckASK{"RequireUserConfirmEvent?"}
 CheckASK -- No --> Normalize["Normalize event"]
 Normalize --> Yield["Yield normalized event"]
 CheckASK -- Yes --> BuildFrame["Build confirmation_request frame with risk_level + flow_summary"]
-BuildFrame --> MapNames["_toolkit_gateway_name_map(toolkit)"]
+BuildFrame --> DetermineKind{"Determine approval_kind"}
+DetermineKind --> FlowCheck{"Browser write + bound flow?"}
+FlowCheck -- Yes --> SetFlow["Set approval_kind = 'flow'"]
+FlowCheck -- No --> SetAction["Set approval_kind = 'action'"]
+SetFlow --> AssembleChangeRequest["Assemble change_request for action approvals"]
+SetAction --> AssembleChangeRequest
+AssembleChangeRequest --> MapNames["_toolkit_gateway_name_map(toolkit)"]
 MapNames --> Register["Register pending confirmation with risk_levels, gateway_names, flow_summary"]
-Register --> Persist["save_parked(confirm_id, session_id, owner, pending_calls, action, flow_summary)"]
+Register --> Persist["save_parked(confirm_id, session_id, owner, pending_calls, action, flow_summary, approval_kind, change_request, message)"]
 Persist --> EndStream["End stream (no message_end)"]
 EndStream --> WaitDecision["Await confirm decision"]
 WaitDecision --> Resume["resume_confirmation(UserConfirmResultEvent)"]
@@ -557,7 +577,7 @@ CheckAllow -- No --> DefaultDeny["Return deny (no matching rule)"]
 
 **Section sources**
 - [policy_engine.py:97-148](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L97-L148)
-- [policy_engine.py:183-220](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L183-L220)
+- [policy_engine.py:183-220](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L183-220)
 - [policy_engine.py:335-389](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L335-389)
 
 ### Agent Platform Confirm Route
@@ -602,7 +622,7 @@ end
 - [routes.py:65-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L227)
 - [routes.py:277-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L277-L294)
 - [hitl_confirmations.py:101-199](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L101-L199)
-- [runtime_kernel.py:708-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L708-L794)
+- [runtime_kernel.py:708-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L708-794)
 
 **Section sources**
 - [routes.py:65-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L227)
@@ -661,11 +681,13 @@ Responsibilities:
 - Return structured 403 responses with risk_level metadata for denied mutations.
 - Maintain backward compatibility with read-only tool surface.
 - **New**: Carry flow_intent through browser flow binding to kernel confirmation frames.
+- **New**: Park ad-hoc browser writes as per-action signed gates instead of hard-denying them.
 
 Browser flow binding:
 - bind_flow method populates FlowState with skill metadata including flow_intent.
 - FlowState.to_dict() includes flow_intent in data["flow"] for kernel consumption.
 - Deviation guard behavior remains unchanged whether flow_intent is present or absent.
+- **New**: Unbound browser writes on allowlisted origins now park for per-action approval instead of being hard-denied.
 
 ```mermaid
 flowchart TD
@@ -676,8 +698,14 @@ CheckGate -- No --> ToolNotFound["Return TOOL_NOT_FOUND"]
 CheckGate -- Yes --> EnforceMutate["Enforce tools:mutate"]
 EnforceMutate --> Decision{"Allow/Deny"}
 Decision -- Deny --> Return403["Return 403 with risk_level"]
-Decision -- Allow --> ExecuteTool["Execute mutating tool"]
-BindFlow["bind_flow(skill)"] --> CreateFlowState["Create FlowState with flow_intent"]
+Decision -- Allow --> CheckBound{"Browser write + bound flow?"}
+CheckBound -- Yes --> ExecuteTool["Execute mutating tool"]
+CheckBound -- No --> CheckAllowlist{"Allowlisted origin?"}
+CheckAllowlist -- Yes --> ParkAction["Park as per-action signed gate"]
+CheckAllowlist -- No --> DenyOrigin["Deny non-allowlisted origin"]
+ParkAction --> ExecuteTool
+ExecuteTool --> BindFlow["bind_flow(skill)"]
+BindFlow --> CreateFlowState["Create FlowState with flow_intent"]
 CreateFlowState --> ToDict["FlowState.to_dict() includes flow_intent"]
 ToDict --> KernelFrame["Carried in data['flow'] to kernel"]
 ```
@@ -702,6 +730,7 @@ Responsibilities:
 - **Enhanced**: Support persistent card rendering from durable records and Approvals view for designated approvers.
 - **New**: Display authored intent as prominent decision line when flow_intent is present, showing skill intent above technical details.
 - **New**: Approvals view for designated approvers with pending/history listing, badge count, and decision panel.
+- **New**: Render change request layout for action approvals with secret masking.
 
 Flow summary rendering:
 - `toFlowSummary` function parses card-level browser-flow headline from stream frames.
@@ -709,6 +738,8 @@ Flow summary rendering:
 - Converts snake_case fields to camelCase for portal consumption (skill_id → skillId, etc.).
 - Preserves all flow context fields including flow_intent → flowIntent.
 - **Updated**: Now maps flow_intent wire field to flowIntent view model for rendered decision line.
+- **New**: Parses approval_kind to determine card rendering mode (flow vs action).
+- **New**: Renders change request projection for action approvals with secret masking.
 
 ```mermaid
 flowchart TD
@@ -721,8 +752,11 @@ CheckTier -- Yes --> CheckTierType{"tier_1 vs tier_2?"}
 CheckTierType -- tier_1 --> RenderTier1Card["Render approval card with 'operator confirmation' badge<br/>Approve/Deny buttons"]
 CheckTierType -- tier_2 --> RenderTier2Card["Render approval card with 'approver required' badge<br/>Show decider roles"]
 CheckTierType --> Decision{"User clicks Approve/Deny"}
-CheckTier -- No --> RenderNormalCard["Render normal approval card<br/>Approve/Deny buttons"]
+CheckTier -- No --> CheckKind{"approval_kind == 'action'?"}
+CheckKind -- Yes --> RenderChangeRequest["Render change request card<br/>with secret-masked parameters"]
+CheckKind -- No --> RenderNormalCard["Render normal approval card<br/>Approve/Deny buttons"]
 RenderNormalCard --> Decision
+RenderChangeRequest --> Decision
 Decision --> Post["POST /api/v1/chat/confirm"]
 Post --> Stream["Read SSE continuation"]
 Stream --> Append["Append to current message stream"]
@@ -748,6 +782,8 @@ Normal --> Done
   - **New**: Session schema includes additive `confirmations` field for persistent card rendering with flow_summary support.
   - **New**: Stream event schema v9 → v10 adds optional flow_intent on flow_summary for browser-flow headline preservation.
   - **New**: Skill schema adds optional flow_intent field requiring web_target declaration.
+  - **New**: Stream event schema v10 adds optional approval_kind, change_request, and message fields for action-level approval support.
+  - **New**: Durable confirmation record schema adds approval_kind, change_request, and message columns for parity across surfaces.
 - Services:
   - Agent platform depends on runtime kernel and registry for park/resume semantics with risk tracking and canonical name resolution.
   - **Enhanced**: Agent platform now depends on durable confirmation records store for persistence with best-effort degradation.
@@ -785,7 +821,7 @@ FLOWCTX --> KERNEL
 ```
 
 **Diagram sources**
-- [agent-stream-event.schema.json:1-121](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L1-L121)
+- [agent-stream-event.schema.json:1-122](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L1-L122)
 - [chat-confirm.schema.json:1-27](file://shared/shared-contracts/schemas/chat-confirm.schema.json#L1-L27)
 - [agent-session.schema.json:127-138](file://shared/shared-contracts/schemas/agent-session.schema.json#L127-L138)
 - [skill.py:15-43](file://products/skills-hub/src/skills_hub/schemas/skill.py#L15-L43)
@@ -803,7 +839,7 @@ FLOWCTX --> KERNEL
 - [decoder.ts:39-125](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L39-L125)
 
 **Section sources**
-- [agent-stream-event.schema.json:1-121](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L1-L121)
+- [agent-stream-event.schema.json:1-122](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L1-L122)
 - [chat-confirm.schema.json:1-27](file://shared/shared-contracts/schemas/chat-confirm.schema.json#L1-L27)
 - [agent-session.schema.json:127-138](file://shared/shared-contracts/schemas/agent-session.schema.json#L127-L138)
 - [skill.py:15-43](file://products/skills-hub/src/skills_hub/schemas/skill.py#L15-L43)
@@ -829,6 +865,9 @@ FLOWCTX --> KERNEL
 - **v0.33.1 Enhancement**: Flow summary coercion is lightweight, filtering only five string fields and degrading non-dict values efficiently.
 - **SPEC-053 Enhancement**: Flow intent validation occurs during skill ingestion, not per-request, minimizing runtime overhead for confirmation processing.
 - **SPEC-053 Enhancement**: Flow intent is stored as simple string field in JSONB, avoiding complex parsing during confirmation rendering.
+- **SPEC-054 Enhancement**: Approval kind determination uses efficient predicate checks rather than expensive ambient context probes.
+- **SPEC-054 Enhancement**: Change request projection is built separately from signed parameters, avoiding signature recalculation overhead.
+- **SPEC-054 Enhancement**: Secret masking uses existing vocabulary reuse, avoiding new redaction logic overhead.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -844,7 +883,7 @@ Common issues and resolutions:
 - **Self-approval blocked**: When tier_2 approval is required, operators cannot approve their own parked calls; use an approver or platform-admin identity.
 - **Invalid policy bundle**: Check for malformed require_approval rules; tier_2 cannot have allow_self_approval=true, and require_approval must be on bridged actions only.
 - **Missing pending confirmation**: Use GET /api/v2/chat/pending-confirmation to inspect parked batch metadata including owner_user_id and derived policy action for troubleshooting tier enforcement issues.
-- **Persistent confirmation not visible**: Check if Postgres backend is available; confirmation records fall back to in-memory when Postgres is unreachable.
+- **Persistent confirmation not visible**: Check if Postgres backend is available; confirmation records fall back to in-memory when Postgres is unavailable.
 - **Concurrent approver conflicts**: Multiple approvers attempting the same confirmation will receive structured "already_resolved" responses instead of errors.
 - **Expired cards appearing**: Stale pending records are marked as expired on startup since parked kernel replies cannot survive process restarts.
 - **Approvals inbox not accessible**: Verify user has `approvals:list` permission; only `approver` and `platform-admin` roles can access the inbox.
@@ -860,6 +899,12 @@ Common issues and resolutions:
   - **Flow intent validation errors**: Verify flow_intent is a non-empty string ≤ 200 characters and skill has web_target declared.
   - **Browser flow card missing intent**: Ensure flow_intent is carried through browser flow binding and kernel confirmation frames.
   - **Portal not showing intent line**: Check that decoder maps flow_intent to flowIntent and ChatView renders the authored intent line.
+- **SPEC-054 Issues**:
+  - **Action approval not parking**: Verify browser write is on allowlisted origin; non-allowlisted origins are still hard-denied.
+  - **Change request not displaying**: Check that change_request projection is being assembled from parameters with proper secret masking.
+  - **Card message missing on replay**: Verify message field is persisted on durable records and that legacy records degrade gracefully.
+  - **Headline leak on action cards**: Ensure approval_kind is explicitly set to 'action' for non-browser flows, preventing flow headline inheritance.
+  - **Ad-hoc browser writes still denied**: Check that origin is on allowlist and that bridging is enabled (AGENT_HITL_CONFIRM_TIMEOUT > 0).
 
 Operational checks:
 - Verify AGENT_HITL_CONFIRM_TIMEOUT > 0 to enable bridging; set to 0 to restore legacy silent-park behavior.
@@ -881,6 +926,7 @@ Operational checks:
 - **v0.23.1 Verification**: Verify that approved mutating tool invocations execute successfully by checking that the signed execution envelope contains canonical dotted tool names (e.g., `k8s.delete_pod`) rather than sanitized names (e.g., `k8s_delete_pod`).
 - **v0.33.1 Verification**: Verify that flow_summary is properly included in confirmation_request frames and that the portal decoder correctly parses browser-flow headlines for consistent workflow framing.
 - **SPEC-053 Verification**: Verify that skills with flow_intent declarations validate successfully and that browser flow cards display the authored intent line prominently above technical details.
+- **SPEC-054 Verification**: Verify that ad-hoc browser writes on allowlisted origins park for per-action approval instead of being hard-denied, and that change request cards display secret-masked parameters appropriately.
 
 **Section sources**
 - [routes.py:65-94](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L94)
@@ -902,9 +948,10 @@ Operational checks:
 - [post-live-check-confirmation-card-flow-headline.md:12-56](file://docs/agentic-aiops-platform/release-notes/2026-09-05-post-live-check-confirmation-card-flow-headline.md#L12-L56)
 - [SPEC-053 spec.md:83-108](file://docs/specs/SPEC-053-skill-declared-step-intent/spec.md#L83-L108)
 - [SPEC-053 plan.md:34-58](file://docs/specs/SPEC-053-skill-declared-step-intent/plan.md#L34-L58)
+- [SPEC-054 spec.md:117-143](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L117-L143)
 
 ## Conclusion
-SPEC-020 delivers a robust, auditable HITL bridge that transforms kernel ASK parking into a portal-driven approval workflow, enhanced with SPEC-021's bounded mutating actions, SPEC-030's require-approval tier system, SPEC-031's persistent confirmation registry, and SPEC-053's skill-declared step intent. It enforces policy at the gateway, preserves session integrity, and records decisions durably with tier context and authored workflow intent. The design keeps the kernel unchanged, relies on existing agentscope machinery, and scales to future write/mutating tools by gating them behind the same confirmation surface with risk-tier enforcement.
+SPEC-020 delivers a robust, auditable HITL bridge that transforms kernel ASK parking into a portal-driven approval workflow, enhanced with SPEC-021's bounded mutating actions, SPEC-030's require-approval tier system, SPEC-031's persistent confirmation registry, SPEC-053's skill-declared step intent, and SPEC-054's action-level approval with change request cards. It enforces policy at the gateway, preserves session integrity, and records decisions durably with tier context and authored workflow intent. The design keeps the kernel unchanged, relies on existing agentscope machinery, and scales to future write/mutating tools by gating them behind the same confirmation surface with risk-tier enforcement.
 
 The integration provides a six-layer security model: deny-by-default policy bundle actions, tool risk tiers with tools:mutate admission gate, agent auto-allow list exclusion for mutating tools, mandatory HITL confirmation with tier enforcement, approval tier validation ensuring appropriate approver identities, and skill-declared intent providing clear operator understanding of what each approval actually achieves. This ensures that no mutating action can execute without explicit human approval at the correct governance level, maintaining the platform's operational safety guarantees while enabling powerful automated remediation capabilities with clear, authored intent communication.
 
@@ -926,6 +973,12 @@ The integration provides a six-layer security model: deny-by-default policy bund
 
 **SPEC-053 Critical Enhancement**: Skill-declared step intent adds an optional `flow_intent` frontmatter field to skills that displays as a prominent plain-text decision line above technical details in browser flow approval cards. This addresses the UX issue where operators saw raw DOM labels and technical arguments instead of authored statements describing what the gated mutation actually achieves. The implementation carries flow_intent through the entire pipeline from skill declaration → skills-hub validation → tool-gateway flow binding → kernel confirmation frames → portal card rendering, ensuring consistent display of the skill author's intent statement.
 
+**SPEC-054 Critical Enhancement**: Action-level approval makes ad-hoc browser writes first-class approval subjects alongside pre-declared flows. The explicit `approval_kind` discriminator distinguishes between flow approvals (bound browser flows with one-gate collapse) and action approvals (per-action signed gates for individual mutations), eliminating the structural ambiguity that caused headline leaks. Ad-hoc browser writes on allowlisted origins now park for per-action approval instead of being hard-denied, enabling interactive web-app troubleshooting workflows.
+
+**SPEC-054 Critical Enhancement**: Change request cards transform action approvals from opaque tool invocations into readable change requests. Decision-relevant parameters are promoted from collapsed technical details to the approval intention with secret masking, allowing operators to understand exactly what they're approving. The projection is display-only and never affects the signed parameters, maintaining security while improving decision quality.
+
+**SPEC-054 Critical Enhancement**: Durable card-message parity ensures that confirmation card messages persist on durable records, so the approver inbox and owner transcripts render the same message as live operator cards. This fixes the issue where card messages would disappear on replayed surfaces, maintaining consistent user experience across all approval surfaces.
+
 **New Capability**: The addition of the pending-confirmation endpoint, RISK_LEVEL_ACTIONS mapping, and approvals inbox enables sophisticated approval workflows where the platform gateway can make informed tier enforcement decisions based on authoritative parked batch metadata, including the original session owner and derived policy actions from tool risk levels.
 
 **New Capability**: The approvals inbox provides cross-session discovery for designated approvers with metadata-only exposure, enabling operators to manage parked confirmations across multiple sessions without exposing owner transcript content.
@@ -935,5 +988,11 @@ The integration provides a six-layer security model: deny-by-default policy bund
 **New Capability**: Flow summary propagation ensures that browser-bound web-check flows carry consistent workflow context (skill intent, origin, risk class) from the initial ASK through to final card rendering, enabling operators to understand the broader workflow context beyond individual tool actions.
 
 **New Capability**: Skill-declared step intent provides authors with a way to communicate the purpose of gated mutations to operators through authored intent statements, improving approval decision quality and reducing cognitive load when reviewing complex browser automation workflows.
+
+**New Capability**: Action-level approval extends the per-action signed-execution mechanism to the browser tool family for unbound writes on allowlisted origins, enabling interactive web-app troubleshooting while maintaining the same security guarantees as non-browser mutations.
+
+**New Capability**: Change request projection promotes decision-relevant parameters from collapsed technical details to readable change requests with secret masking, improving operator understanding of what they're approving without compromising security.
+
+**New Capability**: Explicit approval kind discrimination prevents non-browser action cards from inheriting stale flow headlines, structurally eliminating the headline leak class of defects rather than merely gating them.
 
 [No sources needed since this section summarizes without analyzing specific files]

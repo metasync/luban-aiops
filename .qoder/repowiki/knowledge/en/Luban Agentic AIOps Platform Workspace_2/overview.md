@@ -1,1 +1,0 @@
-Multi-product Python workspace that implements an enterprise agentic AIOps platform with agent runtime, identity broker, policy gateways, skills hub, audit/incident services, and a portal, governed by spec-driven development.
