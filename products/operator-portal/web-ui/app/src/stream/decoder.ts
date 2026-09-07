@@ -1,7 +1,14 @@
 // SSE frame decoder (SPEC-023 R-2). Ports the legacy app.js dispatch 1:1:
 // events are separated by "\n\n", only lines starting with "data: " carry
 // payloads, and the frame kind rides in `type` (or `event`), lowercased.
-import type { DecodedEvent, FlowSummary, PendingCall, StreamFrame } from "./models";
+import type {
+  ChangeRequest,
+  ChangeRequestField,
+  DecodedEvent,
+  FlowSummary,
+  PendingCall,
+  StreamFrame,
+} from "./models";
 
 type RawPayload = Record<string, unknown>;
 
@@ -52,6 +59,37 @@ function toFlowSummary(value: unknown): FlowSummary | undefined {
     flowIntent: asString(record.flow_intent),
     riskClass: asString(record.risk_class),
   };
+}
+
+// SPEC-054 R-3: parse one pending call's change-request projection. Returns
+// undefined unless the payload is an object carrying a string `summary`
+// (mirrors the kernel/routes coercion), so a malformed or absent projection
+// degrades to today's tool-level rendering rather than an empty node. Field
+// rows without a usable label are dropped; a masked row's value already
+// arrives as the mask token from the kernel (the portal never unmasks).
+function toChangeRequest(value: unknown): ChangeRequest | undefined {
+  const record = asRecord(value);
+  const summary = asString(record?.summary);
+  if (!record || summary === undefined) {
+    return undefined;
+  }
+  const fields: ChangeRequestField[] | undefined = Array.isArray(record.fields)
+    ? record.fields
+        .map((row): ChangeRequestField | undefined => {
+          const field = asRecord(row);
+          const label = asString(field?.label);
+          if (!field || label === undefined) {
+            return undefined;
+          }
+          return {
+            label,
+            value: typeof field.value === "string" ? field.value : "",
+            masked: field.masked === true,
+          };
+        })
+        .filter((field): field is ChangeRequestField => field !== undefined)
+    : undefined;
+  return fields && fields.length > 0 ? { summary, fields } : { summary };
 }
 
 function toFrame(payload: RawPayload): StreamFrame | null {
@@ -109,8 +147,13 @@ function toFrame(payload: RawPayload): StreamFrame | null {
         // SPEC-050 follow-up: pass through the element description for
         // browser interaction tools.
         displayHint: asString(record.display_hint),
+        // SPEC-054 R-3: the per-call change-request projection (action cards).
+        changeRequest: toChangeRequest(record.change_request),
       };
     });
+    // SPEC-054 R-1: the parked batch's declared kind; only the two known
+    // values survive, anything else degrades to tool-level rendering.
+    const approvalKind = asString(payload.approval_kind);
     return {
       kind: "confirmation_request",
       confirmId: asString(payload.confirm_id) || "",
@@ -120,6 +163,10 @@ function toFrame(payload: RawPayload): StreamFrame | null {
       // SPEC-051 R-6: the browser-flow headline rides the frame when the
       // parked batch belongs to a bound web-check flow; absent otherwise.
       flowSummary: toFlowSummary(payload.flow_summary),
+      approvalKind:
+        approvalKind === "flow" || approvalKind === "action"
+          ? approvalKind
+          : undefined,
     };
   }
   if (eventType === "confirmation_result") {

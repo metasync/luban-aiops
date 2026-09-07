@@ -220,6 +220,14 @@ async def _execute_and_close(
         # stateful gateway connector on the owner's session across the
         # owner→approver identity switch (correlation, not authority).
         session_id=envelope.get("session_id"),
+        # SPEC-054 R-2 / ADR-0010: the envelope's authority provenance,
+        # verified above by the same HMAC that covers every other field,
+        # forwarded so the gateway can refuse a flow-provenance write
+        # presented with no flow bound. ``verify_envelope`` needed no
+        # change: it signs the canonical JSON of every field present, so
+        # the optional field was already covered. Provenance semantics are
+        # a browser-path concern this worker never evaluates.
+        approval_kind=envelope.get("approval_kind"),
     )
     status = map_result_status(result)
     receipt = build_receipt(envelope, status, result, request_id,

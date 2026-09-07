@@ -247,6 +247,121 @@ describe("decodeEventBlock", () => {
     }
   });
 
+  it("maps approval_kind and the per-call change_request (SPEC-054 R-1/R-3)", () => {
+    const decoded = decodeEventBlock(
+      sseBlock({
+        type: "confirmation_request",
+        confirm_id: "cf-action",
+        message: 'Delete pod "api-1" in namespace "prod"?',
+        approval_kind: "action",
+        pending_calls: [
+          {
+            tool_name: "k8s.delete_pod",
+            call_id: "c-1",
+            risk_level: "write",
+            parameters: { name: "api-1", namespace: "prod" },
+            change_request: {
+              summary: 'Delete pod "api-1" in namespace "prod"',
+              fields: [
+                { label: "name", value: "api-1", masked: false },
+                { label: "token", value: "***", masked: true },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+    expect(decoded?.frame).toMatchObject({
+      kind: "confirmation_request",
+      confirmId: "cf-action",
+      approvalKind: "action",
+      message: 'Delete pod "api-1" in namespace "prod"?',
+      pendingCalls: [
+        {
+          toolName: "k8s.delete_pod",
+          changeRequest: {
+            summary: 'Delete pod "api-1" in namespace "prod"',
+            fields: [
+              { label: "name", value: "api-1", masked: false },
+              { label: "token", value: "***", masked: true },
+            ],
+          },
+        },
+      ],
+    });
+  });
+
+  it("keeps a flow card's approval_kind with no per-call change_request (SPEC-054 R-1)", () => {
+    const decoded = decodeEventBlock(
+      sseBlock({
+        type: "confirmation_request",
+        confirm_id: "cf-flow2",
+        approval_kind: "flow",
+        pending_calls: [
+          { tool_name: "web.click", call_id: "c-1", risk_level: "write" },
+        ],
+        flow_summary: { title: "Reset User Password", risk_class: "write" },
+      }),
+    );
+    expect(decoded?.frame).toMatchObject({
+      kind: "confirmation_request",
+      approvalKind: "flow",
+      pendingCalls: [{ toolName: "web.click", changeRequest: undefined }],
+    });
+  });
+
+  it("keeps a summary-only projection and drops label-less fields (SPEC-054 R-3)", () => {
+    const decoded = decodeEventBlock(
+      sseBlock({
+        type: "confirmation_request",
+        confirm_id: "cf-summary",
+        approval_kind: "action",
+        pending_calls: [
+          {
+            tool_name: "k8s.delete_pod",
+            call_id: "c-1",
+            change_request: {
+              summary: 'Delete pod "api-1"',
+              fields: [{ value: "orphan" }, { label: "name", value: "api-1" }],
+            },
+          },
+        ],
+      }),
+    );
+    expect(decoded?.frame).toMatchObject({
+      kind: "confirmation_request",
+      pendingCalls: [
+        {
+          changeRequest: {
+            summary: 'Delete pod "api-1"',
+            fields: [{ label: "name", value: "api-1", masked: false }],
+          },
+        },
+      ],
+    });
+  });
+
+  it("drops an unknown approval_kind and a malformed change_request (SPEC-054 R-1/R-3)", () => {
+    const decoded = decodeEventBlock(
+      sseBlock({
+        type: "confirmation_request",
+        confirm_id: "cf-odd",
+        approval_kind: "banana",
+        pending_calls: [
+          { tool_name: "web.click", call_id: "c-1", change_request: { nope: true } },
+          { tool_name: "web.type", call_id: "c-2", change_request: "not-an-object" },
+        ],
+      }),
+    );
+    const frame = decoded?.frame;
+    expect(frame?.kind).toBe("confirmation_request");
+    if (frame?.kind === "confirmation_request") {
+      expect(frame.approvalKind).toBeUndefined();
+      expect(frame.pendingCalls[0]?.changeRequest).toBeUndefined();
+      expect(frame.pendingCalls[1]?.changeRequest).toBeUndefined();
+    }
+  });
+
   it("maps confirmation_result frames", () => {
     const decoded = decodeEventBlock(
       sseBlock({ type: "confirmation_result", confirm_id: "cf-1", status: "approved" }),

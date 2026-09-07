@@ -367,6 +367,76 @@ describe("transcriptToTurns browser-flow headline (SPEC-051 R-6)", () => {
   });
 });
 
+// --- Action approval + change-request replay (SPEC-054 R-1/R-3/R-4) ---
+
+describe("transcriptToTurns action approval replay (SPEC-054)", () => {
+  it("replays approval_kind, message, and the per-call change_request", () => {
+    const card = transcriptToTurns(TWO_TURNS, null, [
+      recordOf({
+        approval_kind: "action",
+        message: 'Delete pod "api-1" in namespace "prod"?',
+        pending_calls: [
+          {
+            call_id: "c-1",
+            tool_name: "k8s.delete_pod",
+            parameters: { name: "api-1", namespace: "prod" },
+            risk_level: "write",
+            action: "tools:mutate",
+            change_request: {
+              summary: 'Delete pod "api-1" in namespace "prod"',
+              fields: [
+                { label: "name", value: "api-1", masked: false },
+                { label: "token", value: "***", masked: true },
+              ],
+            },
+          },
+        ],
+      }),
+    ])[1].confirmations[0];
+    expect(card.approvalKind).toBe("action");
+    expect(card.message).toBe('Delete pod "api-1" in namespace "prod"?');
+    expect(card.pendingCalls[0].changeRequest).toEqual({
+      summary: 'Delete pod "api-1" in namespace "prod"',
+      fields: [
+        { label: "name", value: "api-1", masked: false },
+        { label: "token", value: "***", masked: true },
+      ],
+    });
+  });
+
+  it("leaves the SPEC-054 fields undefined for a legacy or flow record", () => {
+    // recordOf() predates the fields: a plain k8s card.
+    const card = transcriptToTurns(TWO_TURNS, null, [recordOf()])[1]
+      .confirmations[0];
+    expect(card.approvalKind).toBeUndefined();
+    expect(card.message).toBeUndefined();
+    expect(card.pendingCalls[0].changeRequest).toBeUndefined();
+    // Explicit nulls (the durable columns' default) map the same way.
+    const nullCard = transcriptToTurns(TWO_TURNS, null, [
+      recordOf({ approval_kind: null, message: null }),
+    ])[1].confirmations[0];
+    expect(nullCard.approvalKind).toBeUndefined();
+    expect(nullCard.message).toBeUndefined();
+  });
+
+  it("drops a change_request whose summary is empty (no empty node)", () => {
+    const card = transcriptToTurns(TWO_TURNS, null, [
+      recordOf({
+        approval_kind: "action",
+        pending_calls: [
+          {
+            call_id: "c-1",
+            tool_name: "web.click",
+            risk_level: "write",
+            change_request: { summary: "" },
+          },
+        ],
+      }),
+    ])[1].confirmations[0];
+    expect(card.pendingCalls[0].changeRequest).toBeUndefined();
+  });
+});
+
 // --- Turn-anchored cards (SPEC-033 R-3) ---
 
 describe("transcriptToTurns card turn anchoring (SPEC-033 R-3)", () => {

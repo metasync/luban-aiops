@@ -5,6 +5,11 @@ reordered input ⇒ same digest, changed value ⇒ different digest), the
 HMAC sign/verify round-trip with tamper rejection, the request builder
 shape (one signed envelope per parked call, digest over the *parked*
 arguments), and both envelopes against their shared-contracts schemas.
+
+SPEC-054 R-2 (ADR-0010) adds the authority-provenance stamp: each builder
+declares ``approval_kind`` inside the signature it signs, so a card-approved
+action and a flow-auto-signed write are distinguishable downstream and
+neither can be passed off as the other.
 """
 
 from __future__ import annotations
@@ -51,6 +56,18 @@ def _parked(calls=None):
     return registry.register("ses-1", "alice", "reply-1", tool_calls, 600)
 
 
+def _two_calls():
+    """A parked batch of two mutating calls (one envelope each)."""
+    return [
+        ToolCallBlock(
+            id="call-1", name="k8s.restart_service", input='{"namespace": "ops"}'
+        ),
+        ToolCallBlock(
+            id="call-2", name="k8s.delete_pod", input='{"name": "web-1"}'
+        ),
+    ]
+
+
 class CanonicalizationTests(unittest.TestCase):
     def test_same_input_same_digest(self) -> None:
         args = {"namespace": "ops", "force": True}
@@ -76,6 +93,36 @@ class CanonicalizationTests(unittest.TestCase):
     def test_canonical_json_has_sorted_keys_no_whitespace(self) -> None:
         serialized = canonical_json({"b": 2, "a": [1, {"d": 4, "c": 3}]})
         self.assertEqual(serialized, '{"a":[1,{"c":3,"d":4}],"b":2}')
+
+    def test_args_digest_identical_with_and_without_change_request(self) -> None:
+        """SPEC-054 R-3: the change-request projection is assembled as a SIBLING
+        of ``parameters`` (never inside it), so ``canonical_digest(parameters)``
+        — the args_digest the envelope signs and the gateway verifies — is
+        byte-identical whether or not an ``action`` card carries the projection.
+        Display-only card content can never perturb the signature."""
+        registry = ConfirmationRegistry()
+        call = ToolCallBlock(
+            id="call-1", name="k8s_delete_pod", input='{"name": "web-1"}'
+        )
+        names = {"k8s_delete_pod": "k8s.delete_pod"}
+        with_projection = registry.register(
+            "ses-1", "alice", "reply-1", [call], 600,
+            gateway_names=names, approval_kind="action",
+        ).pending_calls_payload()[0]
+        without_projection = registry.register(
+            "ses-2", "alice", "reply-1", [call], 600,
+            gateway_names=names, approval_kind=None,
+        ).pending_calls_payload()[0]
+        self.assertIn("change_request", with_projection)
+        self.assertNotIn("change_request", without_projection)
+        self.assertEqual(
+            canonical_digest(with_projection["parameters"]),
+            canonical_digest(without_projection["parameters"]),
+        )
+        self.assertEqual(
+            canonical_digest(with_projection["parameters"]),
+            canonical_digest({"name": "web-1"}),
+        )
 
 
 class SignVerifyTests(unittest.TestCase):
@@ -313,6 +360,97 @@ class BuildFlowRequestTests(unittest.TestCase):
         )
         forged = {**request, "tool_name": "web.evaluate"}
         self.assertFalse(verify_envelope(forged, forged["signature"], KEY))
+
+
+class ApprovalKindProvenanceTests(unittest.TestCase):
+    """ADR-0010 / SPEC-054 R-2: the envelope declares its authority provenance.
+
+    ``approval_kind`` is stamped by whichever builder signs — ``build_requests``
+    for a decision on one parked card, ``build_flow_request`` for a write
+    auto-signed under a session-scoped flow authority — and stamped *before*
+    signing so it sits inside the HMAC. That is what lets the tool-gateway tell
+    the two apart on the browser write path and refuse a stale flow claim,
+    instead of every envelope looking like an individually-approved action.
+    """
+
+    def test_card_builder_stamps_action(self) -> None:
+        for request in build_requests(_parked(_two_calls()), "bob-approver", KEY):
+            self.assertEqual(request["approval_kind"], "action")
+
+    def test_flow_builder_stamps_flow(self) -> None:
+        request = build_flow_request(
+            call_id="call-9",
+            tool_name="web.click",
+            parameters={"ref": 12},
+            flow_approval=_flow_authority(),
+            key=KEY,
+        )
+        self.assertEqual(request["approval_kind"], "flow")
+
+    def test_the_two_builders_never_agree_on_kind(self) -> None:
+        """The discriminator has to actually discriminate: same tool, same
+        session, two authorities — two different signed claims."""
+        card = build_requests(_parked([
+            ToolCallBlock(id="call-9", name="web.click", input='{"ref": 12}'),
+        ]), "bob-approver", KEY)[0]
+        flow = build_flow_request(
+            "call-9", "web.click", {"ref": 12}, _flow_authority(), KEY
+        )
+        self.assertEqual(card["args_digest"], flow["args_digest"])
+        self.assertNotEqual(card["approval_kind"], flow["approval_kind"])
+
+    def test_tampered_kind_rejected(self) -> None:
+        """Forging the provenance invalidates the signature — it is a signed
+        fact, not an unsigned hint the gateway could be talked out of."""
+        request = build_flow_request(
+            "call-9", "web.click", {"ref": 12}, _flow_authority(), KEY
+        )
+        forged = {**request, "approval_kind": "action"}
+        self.assertFalse(verify_envelope(forged, forged["signature"], KEY))
+
+    def test_stripped_kind_rejected(self) -> None:
+        """Removing the field is tampering too: the signature covered it."""
+        request = build_requests(_parked(), "bob-approver", KEY)[0]
+        stripped = {k: v for k, v in request.items() if k != "approval_kind"}
+        self.assertFalse(
+            verify_envelope(stripped, request["signature"], KEY)
+        )
+
+    def test_envelope_predating_the_field_still_verifies(self) -> None:
+        """The contract keeps ``approval_kind`` out of ``required`` so an
+        envelope signed before this slice verifies unchanged — the worker's
+        verification logic did not move, and neither did the signature shape."""
+        legacy = {
+            "execution_id": "e-legacy",
+            "confirm_id": "conf-1",
+            "call_id": "call-1",
+            "session_id": "ses-1",
+            "owner_user_id": "alice",
+            "decider_user_id": "bob",
+            "tool_name": "web.click",
+            "args_digest": canonical_digest({"ref": 12}),
+            "requested_at": "2026-09-07T00:00:00Z",
+        }
+        legacy["signature"] = sign_envelope(legacy, KEY)
+        self.assertTrue(verify_envelope(legacy, legacy["signature"], KEY))
+        jsonschema.validate(
+            legacy, _load_schema("execution-request.schema.json")
+        )
+
+    def test_both_kinds_validate_against_the_contract(self) -> None:
+        schema = _load_schema("execution-request.schema.json")
+        declared = schema["properties"]["approval_kind"]
+        self.assertEqual(declared["enum"], ["action", "flow"])
+        self.assertNotIn("approval_kind", schema["required"])
+        jsonschema.validate(
+            build_requests(_parked(), "bob-approver", KEY)[0], schema
+        )
+        jsonschema.validate(
+            build_flow_request(
+                "call-9", "web.click", {"ref": 12}, _flow_authority(), KEY
+            ),
+            schema,
+        )
 
 
 class BuildReceiptTests(unittest.TestCase):

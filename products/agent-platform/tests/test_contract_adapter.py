@@ -394,6 +394,112 @@ def test_flow_summary_field_parity_across_coercion_and_both_schemas() -> None:
     assert session_props == expected
 
 
+def test_confirmation_request_frame_v11_fields_conform() -> None:
+    """v11 (SPEC-054 R-1/R-3): a parked browser frame carrying every new field
+    — ``approval_kind``, ``flow_summary``, a per-call ``display_hint`` and a
+    secret-masked ``change_request`` — must validate against the stream schema's
+    ``additionalProperties:false``. (The kernel emits ``flow_summary`` and
+    ``change_request`` on mutually-exclusive kinds — that gating is pinned in
+    ``test_runtime_kernel.py``; here we lock the contract's capacity to carry
+    all four so a v11 frame is never rejected.)"""
+    raw = {
+        "type": "confirmation_request",
+        "confirm_id": "cf-v11",
+        "approval_kind": "flow",
+        "flow_summary": {
+            "skill_id": "samples/password-reset",
+            "origin": "http://admin.local",
+            "title": "Reset User Password",
+            "description": "Reset a user's password in the admin portal",
+            "flow_intent": "Submit the password reset for the user.",
+            "risk_class": "write",
+        },
+        "pending_calls": [
+            {
+                "call_id": "call-1",
+                "tool_name": "web.type",
+                "parameters": {"ref": 3, "text": "hunter2"},
+                "display_hint": "Password input",
+                "change_request": {
+                    "summary": 'Type into "Password input"',
+                    "fields": [
+                        {"label": "text", "value": "***", "masked": True}
+                    ],
+                },
+            }
+        ],
+        "message": 'Type into "Password input"',
+    }
+    event = _normalize_stream_event(raw, "ses-1", "req-1")
+    dumped = json.loads(event.model_dump_json(exclude_none=True))
+    assert dumped["approval_kind"] == "flow"
+    call = dumped["pending_calls"][0]
+    assert call["display_hint"] == "Password input"
+    assert call["change_request"]["fields"][0]["masked"] is True
+    # The projection is a sibling of parameters, never nested inside it.
+    assert "change_request" not in call["parameters"]
+    jsonschema.validate(dumped, load_schema("agent-stream-event.schema.json"))
+
+
+def test_change_request_and_approval_kind_coercion_drops_malformed() -> None:
+    """v11 (SPEC-054 R-1/R-3): an out-of-vocabulary ``approval_kind`` degrades
+    to absent (today's tool-level card) and a ``change_request`` without a
+    summary sentence is dropped, so a malformed projection can never fail the
+    frame's ``additionalProperties:false`` validation."""
+    raw = {
+        "type": "confirmation_request",
+        "confirm_id": "cf-bad",
+        "approval_kind": "admin",  # not in the {flow, action} vocabulary
+        "pending_calls": [
+            {
+                "call_id": "c1",
+                "tool_name": "k8s.delete_pod",
+                "change_request": {"fields": []},  # no summary -> dropped
+            }
+        ],
+    }
+    event = _normalize_stream_event(raw, "ses-1", "req-1")
+    dumped = json.loads(event.model_dump_json(exclude_none=True))
+    assert "approval_kind" not in dumped
+    assert "change_request" not in dumped["pending_calls"][0]
+    jsonschema.validate(dumped, load_schema("agent-stream-event.schema.json"))
+
+
+def test_confirmation_record_with_approval_kind_and_message_conforms_to_session_contract() -> None:
+    """v11 (SPEC-054 R-1/R-4): the durable card model carries ``approval_kind``
+    and ``message``, and a pending call carries the ``change_request``
+    projection, so the session-detail contract must allow them — an action card
+    served to the approver inbox / owner transcript would otherwise fail the
+    confirmation item's ``additionalProperties:false``. Locks model<->schema
+    parity for the SPEC-054 record fields."""
+    from agent_service.schemas.v2 import ConfirmationRecordModel
+
+    sentence = 'Delete pod "scratch-restart-demo" in namespace "default"'
+    card = ConfirmationRecordModel(
+        confirm_id="cf-action",
+        session_id="ses-1",
+        owner_user_id="alice",
+        pending_calls=[
+            {
+                "call_id": "c1",
+                "tool_name": "k8s.delete_pod",
+                "parameters": {"name": "scratch-restart-demo"},
+                "change_request": {"summary": sentence},
+            }
+        ],
+        action="tools:mutate",
+        approval_kind="action",
+        message=sentence,
+    )
+    dumped = json.loads(card.model_dump_json())
+    item_schema = load_schema("agent-session.schema.json")["properties"][
+        "confirmations"
+    ]["items"]
+    jsonschema.validate(dumped, item_schema)
+    assert dumped["approval_kind"] == "action"
+    assert dumped["message"] == sentence
+
+
 def test_chat_confirm_request_conforms_to_contract() -> None:
     schema = load_schema("chat-confirm.schema.json")
     jsonschema.validate(

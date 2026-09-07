@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/execution-request.schema.json",
-  "title": "Execution Request (v1)",
-  "description": "Signed execution request constructed when a parked confirmation resumes with approval (SPEC-037 R-1). One envelope per approved parked tool call, built before any invocation happens. The signature is the HMAC-SHA256 hex over the canonical JSON of every other field in the envelope (sorted keys, no insignificant whitespace), keyed by the platform execution-signing key. args_digest is the SHA-256 hex of the canonical JSON of the parked arguments the approver saw on the confirmation card; the invocation boundary recomputes it from the executed arguments and blocks mismatches (SPEC-037 R-3).",
+  "title": "Execution Request (v2)",
+  "description": "Signed execution request constructed when a parked confirmation resumes with approval (SPEC-037 R-1). One envelope per approved parked tool call, built before any invocation happens. The signature is the HMAC-SHA256 hex over the canonical JSON of every other field in the envelope (sorted keys, no insignificant whitespace), keyed by the platform execution-signing key. args_digest is the SHA-256 hex of the canonical JSON of the parked arguments the approver saw on the confirmation card; the invocation boundary recomputes it from the executed arguments and blocks mismatches (SPEC-037 R-3). v2 adds an optional approval_kind declaring the envelope's authority provenance (ADR-0010, SPEC-054 R-2): it is stamped by whichever builder signs, so it sits inside the HMAC and is a signed fact rather than an unsigned hint. It stays out of required so envelopes predating it still verify, and verification logic is unchanged because the signature already covers every field present.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -42,9 +42,14 @@
       "type": "string",
       "description": "The approver who resumed the confirmation (may differ from the owner for tier_2 approvals, SPEC-030 R-3)."
     },
+    "approval_kind": {
+      "type": "string",
+      "enum": ["action", "flow"],
+      "description": "ADR-0010 / SPEC-054 R-2: which authority authorized this execution, stamped by the builder that signed it — build_requests stamps \"action\" (an individually-approved parked call), build_flow_request stamps \"flow\" (auto-signed under a session-scoped flow authority, SPEC-051 R-3). Stamped before signing, so it is covered by the HMAC and cannot be altered without invalidating the envelope. The tool-gateway browser write path enforces it one-directionally and fail-closed: a \"flow\"-provenance envelope presented when no flow is bound is refused BROWSER_FLOW_AUTHORITY_STALE rather than reinterpreted as a per-action approval, while an \"action\" envelope never satisfies a bound-flow-only guard. A declared kind can only ever add a refusal, never remove one — the guard set applied is still selected by the gateway's own flow binding. Optional: envelopes predating v2 omit it and verify unchanged, and the gateway treats an absent value as no extra refusal."
+    },
     "tool_name": {
       "type": "string",
-      "description": "Sanitized tool name of the parked call."
+      "description": "Gateway canonical dotted tool name of the parked call (e.g. k8s.delete_pod, web.click) — the name the registry resolves. Both builders agree on it: build_requests takes it from pending_calls_payload, which canonicalizes the kernel's sanitized name through gateway_names, and build_flow_request is handed gateway_tool_name directly. Described as \"sanitized\" before v2, which was stale prose rather than shipped behavior."
     },
     "args_digest": {
       "type": "string",

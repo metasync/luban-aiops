@@ -20,7 +20,10 @@ that completes SPEC-049 R-4 — one HITL gate per mutating browser flow:
   the next write re-parks: this is what eliminates the ADR-0007 cross-flow
   trade-off rather than merely bounding it. The authority is TTL-bounded
   (``AGENT_BROWSER_FLOW_APPROVAL_TTL``); ``0`` disables flow-unlock entirely
-  (every write parks — the pre-fix posture).
+  (every write parks — the pre-fix posture). SPEC-054 R-2 adds a third
+  invalidation: a flow-killing gateway refusal (``FLOW_KILLING_ERROR_CODES``)
+  or a failed flow-binding ``web.navigate`` drops both stores at once, so the
+  authority can never outlive the binding it was scoped to.
 
 Both stores are deliberately in-memory and per-process, mirroring
 ``CONFIRMATION_REGISTRY``: nothing survives a restart. A dropped context or
@@ -48,6 +51,27 @@ BROWSER_WRITE_TOOLS = frozenset({
     "web.press_key",
     "web.upload_file",
     "web.evaluate",
+})
+
+# Gateway refusal codes that end the bound flow (SPEC-054 R-2). Each of these
+# means the gateway's own flow binding is gone or untrustworthy — the origin
+# deviated, the flow was denied, a redirect was refused, or an envelope claimed
+# a flow authority the gateway no longer has — so the kernel must drop BOTH
+# stores for the session: the reflection (``FLOW_CONTEXTS``) is stale, and the
+# auto-signing authority (``FLOW_APPROVALS``) must not outlive the binding it
+# was scoped to. This is the kernel-side backstop ADR-0010 requires alongside
+# the gateway's own provenance refusal; neither is sufficient alone, because
+# clearing races the next auto-sign while the gateway check does not.
+#
+# ``BROWSER_FLOW_READ_ONLY`` and ``BROWSER_FLOW_EXHAUSTED`` are deliberately
+# absent: the flow is still bound and correctly identified in both cases, so
+# the card headline stays truthful, and the gateway keeps refusing the write on
+# every attempt (fail-closed) without the kernel needing to forget the flow.
+FLOW_KILLING_ERROR_CODES = frozenset({
+    "BROWSER_REDIRECT_NOT_ALLOWED",
+    "BROWSER_FLOW_DENIED",
+    "BROWSER_FLOW_ORIGIN_DEVIATED",
+    "BROWSER_FLOW_AUTHORITY_STALE",
 })
 
 

@@ -45,6 +45,9 @@ export interface ConfirmationCard {
   // live from the confirmation_request frame or replayed from the durable
   // record; undefined for non-browser cards.
   flowSummary?: FlowSummary;
+  // SPEC-054 R-1: the parked batch's declared kind, live from the frame or
+  // replayed from the durable record; undefined for cards predating v11.
+  approvalKind?: "flow" | "action";
 }
 
 export interface ChatTurn {
@@ -205,6 +208,7 @@ export function useChatStream(): ChatStreamApi {
             status: "pending",
             sessionId: sessionIdRef.current,
             flowSummary: frame.flowSummary,
+            approvalKind: frame.approvalKind,
           });
           turn.confirmationPending = true;
           break;

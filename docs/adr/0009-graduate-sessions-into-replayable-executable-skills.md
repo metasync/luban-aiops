@@ -2,9 +2,10 @@
 
 ## Status
 
-`proposed`
+`accepted`
 
 - date: 2026-09-06
+- accepted: 2026-09-07
 - deciders: workspace maintainers
 - related specs: SPEC-055 (develop-as-you-go skill graduation — implements this
   decision), SPEC-054 (action-level HITL approval — the exploration/authoring

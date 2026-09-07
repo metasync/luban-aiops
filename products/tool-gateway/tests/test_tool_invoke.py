@@ -44,6 +44,7 @@ class _EchoTool(BaseTool):
                 "caller": identity.get("username"),
                 "request_id": identity.get("request_id"),
                 "chat_session_id": identity.get("chat_session_id"),
+                "approval_kind": identity.get("approval_kind"),
             },
             evidence=build_evidence("read", "test", 5),
         )
@@ -282,6 +283,60 @@ class ToolInvokeEndpointTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["data"]["chat_session_id"])
+
+    def test_invoke_forwards_approval_kind_to_identity(self) -> None:
+        # SPEC-054 R-2 / ADR-0010: the top-level approval_kind body field (a
+        # trusted provenance handle the execution worker forwards from the
+        # signed envelope) reaches connectors as identity["approval_kind"] so
+        # the browser write path can refuse a stale flow-provenance execution.
+        for kind in ("flow", "action"):
+            with _patch_jwks():
+                response = self.client.post(
+                    "/api/v2/tools/invoke",
+                    json={
+                        "tool_name": "test.echo",
+                        "parameters": {},
+                        "request_id": f"req-kind-{kind}",
+                        "approval_kind": kind,
+                    },
+                    headers={
+                        "Authorization": f"Bearer {_mint_delegated('operator')}",
+                        "x-request-id": f"req-kind-{kind}",
+                    },
+                )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["data"]["approval_kind"], kind)
+
+    def test_invoke_without_approval_kind_leaves_it_absent(self) -> None:
+        # A caller that forwards no provenance yields no approval_kind; the
+        # gateway reads absence as "no extra refusal" (today's behavior).
+        with _patch_jwks():
+            response = self._invoke(
+                _mint_delegated("operator"), "test.echo", {}, "req-no-kind"
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["data"]["approval_kind"])
+
+    def test_invoke_ignores_invalid_approval_kind(self) -> None:
+        # Defensive: a value outside the {flow, action} vocabulary is dropped,
+        # never forwarded — its only permitted effect is a refusal, so an
+        # unexpected value can never widen access.
+        with _patch_jwks():
+            response = self.client.post(
+                "/api/v2/tools/invoke",
+                json={
+                    "tool_name": "test.echo",
+                    "parameters": {},
+                    "request_id": "req-bad-kind",
+                    "approval_kind": "admin",
+                },
+                headers={
+                    "Authorization": f"Bearer {_mint_delegated('operator')}",
+                    "x-request-id": "req-bad-kind",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["data"]["approval_kind"])
 
     def test_invoke_allowed_for_observer(self) -> None:
         # Authorization matrix: read-only-observer may perform tier-0 reads; all

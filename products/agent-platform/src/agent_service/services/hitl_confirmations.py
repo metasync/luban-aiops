@@ -18,6 +18,8 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+from agent_service.services.secret_params import MASK, should_mask
+
 
 class ConfirmationNotFound(LookupError):
     """No pending confirmation matches the session/confirm_id pair."""
@@ -71,6 +73,14 @@ class PendingConfirmation:
     # tool-level rendering. Also the source of the approved flow identity that
     # ``resume_confirmation`` scopes the FlowApproval to (R-1).
     browser_flow: dict = field(default_factory=dict)
+    # SPEC-054 R-1: the card's declared kind, computed once at park time from
+    # the parked batch — ``"flow"`` when the batch carries a browser write and
+    # a flow is bound (so ``browser_flow``/``flow_summary`` is non-empty),
+    # ``"action"`` otherwise. Set by the kernel, never re-derived downstream,
+    # so ``flow_summary`` is present iff ``approval_kind == "flow"`` and the
+    # headline-leak defect class is structurally impossible. ``None`` only for
+    # a low-level registry park that predates the discriminator.
+    approval_kind: str | None = None
     created_at: float = field(default_factory=time.monotonic)
     resolved: bool = False
     # Single-flight guard set by ``claim`` before a decision streams back:
@@ -104,10 +114,23 @@ class PendingConfirmation:
             # SPEC-050 follow-up: add a display hint for browser tools that
             # reference snapshot elements. This is separate from parameters
             # so the args_digest for signing/verification stays unchanged.
+            display_hint = None
             if tool_name in browser_ref_tools and self.browser_element_map:
                 ref = parameters.get("ref")
                 if isinstance(ref, int) and ref in self.browser_element_map:
-                    entry["display_hint"] = self.browser_element_map[ref]
+                    display_hint = self.browser_element_map[ref]
+                    entry["display_hint"] = display_hint
+            # SPEC-054 R-3: an ``action`` card surfaces the decision-relevant
+            # parameters as a secret-masked change request. Assembled as a
+            # SIBLING of ``parameters`` (never inside it), so
+            # ``canonical_digest(parameters)`` — the signed args_digest — is
+            # byte-identical with and without the projection. A ``flow`` card
+            # renders the flow headline instead (R-1), so the projection is
+            # gated on the action kind and a legacy/None kind carries none.
+            if self.approval_kind == "action":
+                entry["change_request"] = build_change_request(
+                    tool_name, parameters, display_hint
+                )
             risk_level = self.risk_levels.get(sanitized)
             if risk_level:
                 entry["risk_level"] = risk_level
@@ -163,6 +186,180 @@ def _parse_parameters(tool_call) -> dict:
     except (TypeError, ValueError):
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+# --- SPEC-054 R-3: the change-request projection ---------------------------
+#
+# A display-only projection of one parked call's decision-relevant parameters,
+# shaped for agent-stream-event.schema.json v11 as
+# ``{"summary": str, "fields"?: [{"label", "value", "masked"?}]}`` and
+# assembled as a SIBLING of ``parameters`` on the payload entry, so the signed
+# ``args_digest`` (``canonical_digest(parameters)``) never sees it. Curated
+# formatters write an effect sentence for the demo-critical mutating tools;
+# every other tool falls through to a generic label->value projection, so no
+# action card regresses for want of a formatter and no formatter blocks the
+# requirement. Secret-bearing values mask to ``***`` with the key preserved
+# (``secret_params``); ``web.fill_credential`` shows ``credential_set`` +
+# ``field`` and NEVER a value (the structural fix is R-2's reference-only
+# credential entry).
+
+
+def _display_value(value: object) -> str:
+    """Render a parameter value as a display string (never for signing)."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True)
+    return str(value)
+
+
+def _cr_field(label: str, value: object, *, masked: bool = False) -> dict:
+    """One label/value row; a masked row keeps the label, hides the value."""
+    return {
+        "label": label,
+        "value": MASK if masked else _display_value(value),
+        "masked": masked,
+    }
+
+
+def _generic_fields(tool_name: str, parameters: dict) -> list[dict]:
+    """Label->value rows for every parameter, masked by default (R-3)."""
+    return [
+        _cr_field(str(key), value, masked=should_mask(tool_name, str(key)))
+        for key, value in parameters.items()
+    ]
+
+
+def _element_label(parameters: dict, display_hint: str | None) -> str:
+    """Human element description when known, else the raw snapshot ref."""
+    if display_hint:
+        return display_hint
+    ref = parameters.get("ref")
+    return f"ref {ref}" if ref is not None else "the target element"
+
+
+def _cr_k8s_delete_pod(parameters: dict, display_hint: str | None) -> dict:
+    name = _display_value(parameters.get("name", ""))
+    namespace = _display_value(parameters.get("namespace") or "default")
+    return {"summary": f'Delete pod "{name}" in namespace "{namespace}"'}
+
+
+def _cr_web_click(parameters: dict, display_hint: str | None) -> dict:
+    return {"summary": f'Click "{_element_label(parameters, display_hint)}"'}
+
+
+def _cr_web_type(parameters: dict, display_hint: str | None) -> dict:
+    # ``text`` sits on the per-tool opaque-value list: masked wholesale, since
+    # a secret typed into a field is invisible to name-based masking (R-3).
+    return {
+        "summary": f'Type into "{_element_label(parameters, display_hint)}"',
+        "fields": [_cr_field("text", parameters.get("text", ""), masked=True)],
+    }
+
+
+def _cr_web_select(parameters: dict, display_hint: str | None) -> dict:
+    value = _display_value(parameters.get("value", ""))
+    return {
+        "summary": (
+            f'Select "{value}" in "{_element_label(parameters, display_hint)}"'
+        ),
+    }
+
+
+def _cr_web_press_key(parameters: dict, display_hint: str | None) -> dict:
+    key = _display_value(parameters.get("key", ""))
+    return {"summary": f'Press key "{key}"'}
+
+
+def _cr_web_upload_file(parameters: dict, display_hint: str | None) -> dict:
+    filename = _display_value(parameters.get("filename", ""))
+    return {
+        "summary": (
+            f'Upload file "{filename}" to '
+            f'"{_element_label(parameters, display_hint)}"'
+        ),
+    }
+
+
+def _cr_web_evaluate(parameters: dict, display_hint: str | None) -> dict:
+    # Arbitrary JS can read masked secrets; never project the expression.
+    return {
+        "summary": "Evaluate a JavaScript expression on the page",
+        "fields": [
+            _cr_field(
+                "expression", parameters.get("expression", ""), masked=True
+            )
+        ],
+    }
+
+
+def _cr_web_fill_credential(parameters: dict, display_hint: str | None) -> dict:
+    # Reference-only: names the credential set and the field, NEVER a value.
+    credential_set = _display_value(parameters.get("credential_set", ""))
+    field_name = _display_value(parameters.get("field", ""))
+    return {
+        "summary": (
+            f'Fill the "{field_name}" of credential set "{credential_set}" '
+            f'into "{_element_label(parameters, display_hint)}"'
+        ),
+        "fields": [
+            _cr_field("credential_set", credential_set),
+            _cr_field("field", field_name),
+        ],
+    }
+
+
+# Curated formatters keyed by canonical dotted gateway tool name: the
+# demo-critical mutating tools (R-3). Every other tool takes the generic
+# fallback below.
+_CHANGE_REQUEST_FORMATTERS = {
+    "k8s.delete_pod": _cr_k8s_delete_pod,
+    "web.click": _cr_web_click,
+    "web.type": _cr_web_type,
+    "web.select": _cr_web_select,
+    "web.press_key": _cr_web_press_key,
+    "web.upload_file": _cr_web_upload_file,
+    "web.evaluate": _cr_web_evaluate,
+    "web.fill_credential": _cr_web_fill_credential,
+}
+
+
+def build_change_request(
+    tool_name: str, parameters: dict, display_hint: str | None = None
+) -> dict:
+    """The display-only change-request projection for one parked call (R-3).
+
+    Always schema-valid (carries ``summary``): a curated tool gets its effect
+    sentence, every other tool a generic ``Confirm <tool>`` lead with masked
+    label->value fields. Assembled as a sibling of ``parameters``, so the
+    signed args_digest is unchanged by it.
+    """
+    parameters = parameters if isinstance(parameters, dict) else {}
+    formatter = _CHANGE_REQUEST_FORMATTERS.get(tool_name)
+    if formatter is not None:
+        return formatter(parameters, display_hint)
+    projection: dict = {"summary": f"Confirm {tool_name}"}
+    fields = _generic_fields(tool_name, parameters)
+    if fields:
+        projection["fields"] = fields
+    return projection
+
+
+def curated_effect_sentence(
+    tool_name: str, parameters: dict, display_hint: str | None = None
+) -> str | None:
+    """The curated effect sentence for a tool, or ``None`` when uncurated.
+
+    The card's informative ``message`` sources from this where it exists
+    (R-3), replacing the generic fallback constant; an uncurated tool yields
+    ``None`` so the message stays the generic constant and the middleware's
+    ASK reason is never wired through verbatim.
+    """
+    formatter = _CHANGE_REQUEST_FORMATTERS.get(tool_name)
+    if formatter is None:
+        return None
+    parameters = parameters if isinstance(parameters, dict) else {}
+    return formatter(parameters, display_hint).get("summary")
 
 
 def parse_snapshot_elements(snapshot_text: str) -> dict[int, str]:
@@ -232,6 +429,7 @@ class ConfirmationRegistry:
         gateway_names: dict | None = None,
         browser_element_map: dict[int, str] | None = None,
         browser_flow: dict | None = None,
+        approval_kind: str | None = None,
     ) -> PendingConfirmation:
         pending = PendingConfirmation(
             confirm_id=str(uuid.uuid4()),
@@ -243,6 +441,7 @@ class ConfirmationRegistry:
             gateway_names=dict(gateway_names or {}),
             browser_element_map=dict(browser_element_map or {}),
             browser_flow=dict(browser_flow or {}),
+            approval_kind=approval_kind,
         )
         self._by_session[session_id] = pending
         return pending

@@ -109,7 +109,7 @@ class AgentChatConfirmRequest(BaseModel):
 
 
 class AgentStreamEvent(BaseModel):
-    """SSE frame payload conforming to agent-stream-event.schema.json (v10).
+    """SSE frame payload conforming to agent-stream-event.schema.json (v11).
 
     v3 added tool_call/tool_result frames for evidence panel rendering
     (SPEC-011 R-1). v4 adds confirmation_request/confirmation_result frames
@@ -128,7 +128,14 @@ class AgentStreamEvent(BaseModel):
     skill-authored sentence describing what the flow's gated mutating step
     achieves, rendered as the card's lead decision line. Additive and
     display-only — ``flow_summary`` stays ``dict[str, Any]`` and the frame
-    shape is unchanged for skills that omit it.
+    shape is unchanged for skills that omit it. v11 adds the optional
+    ``approval_kind`` on confirmation_request frames declaring whether the
+    parked batch is a bound browser ``flow`` or an individually-approved
+    ``action`` (SPEC-054 R-1), so a card's kind is stated rather than inferred
+    from ambient session state, plus an optional display-only ``change_request``
+    projection riding each ``pending_calls`` entry (SPEC-054 R-3) so an action
+    card reads as a secret-masked change request. Both are additive and
+    display-only; a client that ignores them renders today's card.
     """
 
     type: Literal[
@@ -147,6 +154,14 @@ class AgentStreamEvent(BaseModel):
     message: str | None = None
     confirm_id: str | None = None
     pending_calls: list[dict[str, Any]] | None = None
+    # SPEC-054 R-1: the parked batch's declared kind on confirmation_request
+    # frames — ``"flow"`` (a bound browser web-check flow, one gate per
+    # SPEC-051) or ``"action"`` (an individually-approved mutating call).
+    # Derived at park time from the batch, never from ambient session state;
+    # ``flow_summary`` is present iff this is ``"flow"``. Display-driving only
+    # (the signed envelope carries its own provenance, ADR-0010). Absent for
+    # clients predating v11, which fall back to today's tool-level rendering.
+    approval_kind: Literal["flow", "action"] | None = None
     # SPEC-051 R-6: card-level browser-flow headline (skill intent, origin,
     # risk_class) on confirmation_request frames; SPEC-053 R-2 adds the
     # author-written ``flow_intent`` decision line inside it. Mirrors the
@@ -236,6 +251,15 @@ class ConfirmationRecordModel(BaseModel):
     # origin, risk_class) captured at park time; null for non-browser cards
     # and for records that predate the column.
     flow_summary: dict[str, Any] | None = None
+    # SPEC-054 R-1: additive declared kind of the parked batch (``flow`` or
+    # ``action``), captured at park time so a replayed card declares its own
+    # kind rather than inferring it; null for records that predate the column.
+    approval_kind: Literal["flow", "action"] | None = None
+    # SPEC-054 R-4: additive top-line card message, persisted so every surface
+    # rendering from this record (approver inbox, re-loaded owner transcript)
+    # shows the same message the live card did; null for records that predate
+    # the column, which degrade to no message line (never an empty artifact).
+    message: str | None = None
     status: Literal["pending", "approved", "denied", "expired"] = "pending"
     parked_at: str | None = None
     decider_user_id: str | None = None

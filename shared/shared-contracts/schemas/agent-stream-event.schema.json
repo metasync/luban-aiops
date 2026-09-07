@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/agent-stream-event.schema.json",
-  "title": "Agent Stream Event (v9)",
-  "description": "SSE frame payload for GET /api/v2/chat/stream. v3 added tool_call and tool_result event types for evidence panel rendering (SPEC-011 R-1). v4 adds confirmation_request and confirmation_result event types for HITL confirmation bridging (SPEC-020 R-1). v5 adds an optional data field on tool_result frames carrying the full tool payload within the stream size cap. v6 adds an optional risk_level on each pending_calls entry so confirmation cards can surface mutating (write/admin) tool calls (SPEC-021 R-3). v7 adds an optional model field on message_end frames carrying the model id that resolved for the turn (SPEC-024 R-3/R-4). v8 adds an optional action on each pending_calls entry carrying the policy action derived from the risk tier so the tiered require_approval confirmation bridge and portal approval badges can render (SPEC-030 R-3). v9 adds an optional flow_summary on confirmation_request frames carrying the bound browser-flow headline so the live operator card renders the same workflow framing the durable record gives the approver inbox (SPEC-051 R-6).",
+  "title": "Agent Stream Event (v11)",
+  "description": "SSE frame payload for GET /api/v2/chat/stream. v3 added tool_call and tool_result event types for evidence panel rendering (SPEC-011 R-1). v4 adds confirmation_request and confirmation_result event types for HITL confirmation bridging (SPEC-020 R-1). v5 adds an optional data field on tool_result frames carrying the full tool payload within the stream size cap. v6 adds an optional risk_level on each pending_calls entry so confirmation cards can surface mutating (write/admin) tool calls (SPEC-021 R-3). v7 adds an optional model field on message_end frames carrying the model id that resolved for the turn (SPEC-024 R-3/R-4). v8 adds an optional action on each pending_calls entry carrying the policy action derived from the risk tier so the tiered require_approval confirmation bridge and portal approval badges can render (SPEC-030 R-3). v9 adds an optional flow_summary on confirmation_request frames carrying the bound browser-flow headline so the live operator card renders the same workflow framing the durable record gives the approver inbox (SPEC-051 R-6). v10 adds an optional flow_intent inside flow_summary carrying the skill-authored sentence describing what the flow's gated mutating step achieves, rendered as the card's lead decision line (SPEC-053 R-2) — shipped at 0.34.0 but never recorded in this title/ledger, retro-fitted here. v11 adds an optional approval_kind on confirmation_request frames declaring whether the parked batch is a bound browser flow or an individually-approved action, so a card's kind is stated rather than inferred from ambient session state (SPEC-054 R-1), plus an optional display-only change_request projection on each pending_calls entry so an action card reads as a secret-masked change request instead of a bare tool name (SPEC-054 R-3). v11 also declares display_hint, which SPEC-050 already emits on pending_calls entries but never added to this schema (additionalProperties is false, so the omission was a latent contract violation).",
   "type": "object",
   "additionalProperties": false,
   "required": ["type", "session_id", "request_id"],
@@ -52,13 +52,51 @@
           "action": {
             "type": "string",
             "description": "Policy action the parked call maps to, derived from the risk tier at park time (SPEC-030 R-3): read -> tools:invoke, write/admin -> tools:mutate. Absent for tools without a gateway risk tier; the confirm bridge treats absent as the implicit no-rule path."
+          },
+          "display_hint": {
+            "type": "string",
+            "description": "SPEC-050: parsed browser-element label for a parked web.* write (e.g. \"Reset password button\"), rendered as the card's per-call hint. Display-only, never a security input and never part of args_digest. Emitted since 0.32.0; declared here at v11 to close a latent additionalProperties violation."
+          },
+          "change_request": {
+            "type": ["object", "null"],
+            "description": "SPEC-054 R-3: display-only change-request projection for one parked call, promoting the decision-relevant parameters out of the collapsed technical-details expander into the approval intention. Assembled as a sibling of parameters, so args_digest (computed over parameters alone) and therefore the signature and gateway verification are unaffected by it. Secret-bearing values are masked to *** with the key preserved. Absent for tools without a projection and for clients predating v11, which render today's tool-level card.",
+            "additionalProperties": false,
+            "required": ["summary"],
+            "properties": {
+              "summary": {
+                "type": "string",
+                "description": "Short human sentence naming the target and the effect, e.g. 'Delete pod \"scratch-restart-demo\" in namespace \"default\"'. Rendered as the card's lead line."
+              },
+              "fields": {
+                "type": "array",
+                "description": "Optional label/value pairs rendered as a table beneath the summary. Omitted when the projection has nothing worth tabulating beyond the summary.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["label", "value"],
+                  "properties": {
+                    "label": { "type": "string" },
+                    "value": { "type": "string" },
+                    "masked": {
+                      "type": "boolean",
+                      "description": "True when the value was replaced by *** because it is secret-bearing (name-based masking) or sits on a per-tool opaque-value list such as web.type.text. The label is always preserved so the approver can see that a secret is involved without seeing it."
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
     },
+    "approval_kind": {
+      "type": ["string", "null"],
+      "enum": ["flow", "action", null],
+      "description": "SPEC-054 R-1: declares what the parked batch is, on confirmation_request frames. \"flow\" means a bound browser web-check flow collapsing to one gate (SPEC-051); \"action\" means an individually-approved mutating tool call. Derived at park time from the parked batch itself — a browser write in the batch AND a bound flow context — never from ambient session state, which is the structural fix behind the v0.34.1 headline-leak patch. Display-driving only: the signed execution envelope carries its own approval_kind stamped by whichever builder signed it (ADR-0010), and the two agree whenever the kernel's flow view is current. Absent for clients predating v11, which fall back to today's tool-level rendering."
+    },
     "flow_summary": {
       "type": ["object", "null"],
-      "description": "SPEC-051 R-6: card-level browser-flow headline on confirmation_request frames (skill intent, origin, risk_class) so the live operator card renders the same workflow framing as the durable record served to the approver inbox. SPEC-053 R-2 adds flow_intent: the skill-authored sentence describing what the flow's gated mutating step achieves, rendered as the card's lead decision line (display-only, never a security input). Absent for non-browser cards.",
+      "description": "SPEC-051 R-6: card-level browser-flow headline on confirmation_request frames (skill intent, origin, risk_class) so the live operator card renders the same workflow framing as the durable record served to the approver inbox. SPEC-053 R-2 adds flow_intent: the skill-authored sentence describing what the flow's gated mutating step achieves, rendered as the card's lead decision line (display-only, never a security input). Absent for non-browser cards. SPEC-054 R-1: present if and only if approval_kind is \"flow\" — the kernel emits both from the same branch, so an action card can never inherit a lingering flow's headline.",
       "additionalProperties": false,
       "properties": {
         "skill_id": { "type": "string" },

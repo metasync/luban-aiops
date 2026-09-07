@@ -169,6 +169,84 @@ class HappyPathTests(HandoffTestBase):
         self.assertEqual(row["status"], "timeout")
 
 
+class ApprovalKindForwardingTests(HandoffTestBase):
+    """SPEC-054 R-2 / ADR-0010: the worker forwards the provenance it verified.
+
+    The gateway never sees the signed envelope — verification happens here, and
+    the invoke hop carries a plain payload — so R-2's "the gateway enforces
+    provenance on the browser write path" needs the value threaded through. It
+    is a provenance handle, not authority: this route evaluates no provenance
+    semantics, and ``verify_envelope`` needed no change because it already
+    covers every field present.
+    """
+
+    def _post_with_kind(self, client, kind: str | None, *, re_sign: bool = True):
+        envelope = dict(self.envelope)
+        if kind is not None:
+            envelope["approval_kind"] = kind
+        if re_sign:
+            envelope["signature"] = signing.sign_envelope(envelope, KEY)
+        body = dict(self.body)
+        body["request"] = envelope
+        return client.post(HANDOFF_PATH, json=body, headers=self.headers), envelope
+
+    def test_flow_provenance_reaches_the_executor(self) -> None:
+        client = self._start()
+        response, envelope = self._post_with_kind(client, "flow")
+        self.assertEqual(response.status_code, 200)
+        _args, kwargs = self.execute_tool_mock.call_args
+        self.assertEqual(kwargs["approval_kind"], "flow")
+        # The signature covered the field, so verification accepted it as
+        # signed rather than as a body-supplied claim.
+        self.assertTrue(
+            signing.verify_envelope(envelope, envelope["signature"], KEY)
+        )
+
+    def test_action_provenance_reaches_the_executor(self) -> None:
+        client = self._start()
+        response, _envelope = self._post_with_kind(client, "action")
+        self.assertEqual(response.status_code, 200)
+        _args, kwargs = self.execute_tool_mock.call_args
+        self.assertEqual(kwargs["approval_kind"], "action")
+
+    def test_absent_provenance_forwards_none(self) -> None:
+        """An envelope predating the field still verifies and executes; the
+        executor forwards nothing, which the gateway reads as no extra
+        refusal — today's behavior, never a widening."""
+        client = self._start()
+        response = client.post(HANDOFF_PATH, json=self.body, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        _args, kwargs = self.execute_tool_mock.call_args
+        self.assertIsNone(kwargs["approval_kind"])
+
+    def test_forged_provenance_rejected_before_execution(self) -> None:
+        """Flipping the declared kind without re-signing is tampering: the
+        value sits inside the HMAC, so it cannot be talked up from ``action``
+        to ``flow`` (or down) in transit."""
+        client = self._start()
+        response, _envelope = self._post_with_kind(
+            client, "flow", re_sign=False
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["error"]["reason"], "signature_invalid"
+        )
+        self.execute_tool_mock.assert_not_called()
+
+    def test_receipt_shape_is_unchanged_by_the_field(self) -> None:
+        """The receipt closes the request identically whichever builder signed
+        it — provenance is a browser-path concern, not a receipt input."""
+        client = self._start()
+        response, envelope = self._post_with_kind(client, "flow")
+        receipt = response.json()["receipt"]
+        self.assertEqual(receipt["status"], "succeeded")
+        self.assertEqual(receipt["execution_id"], envelope["execution_id"])
+        self.assertNotIn("approval_kind", receipt)
+        self.assertTrue(
+            signing.verify_envelope(receipt, receipt["signature"], KEY)
+        )
+
+
 class RejectionMatrixTests(HandoffTestBase):
     def _post(self, client, body=None, headers=None):
         return client.post(

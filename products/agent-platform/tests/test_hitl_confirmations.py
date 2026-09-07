@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from types import SimpleNamespace
 
@@ -34,6 +35,8 @@ from agent_service.services.hitl_confirmations import (
     ConfirmationExpired,
     ConfirmationNotFound,
     ConfirmationRegistry,
+    build_change_request,
+    curated_effect_sentence,
 )
 from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
 from agent_service.services.runtime_dependencies import get_runtime_kernel
@@ -286,6 +289,128 @@ def test_highest_action_none_without_risk_tiers() -> None:
     assert pending.highest_action() is None
 
 
+# --- SPEC-054 R-3: the change-request projection ---
+
+
+def test_change_request_curated_k8s_delete_pod_summary() -> None:
+    """A curated tool gets its effect sentence as the summary (no fields)."""
+    cr = build_change_request(
+        "k8s.delete_pod", {"name": "scratch-restart-demo", "namespace": "ops"}
+    )
+    assert cr == {
+        "summary": 'Delete pod "scratch-restart-demo" in namespace "ops"'
+    }
+
+
+def test_change_request_curated_web_click_uses_element_label() -> None:
+    """A write-tier ``web.*`` gets a curated sentence; the element label comes
+    from the display_hint when known, else the raw snapshot ref."""
+    assert build_change_request("web.click", {"ref": 12}, "Reset password button") == {
+        "summary": 'Click "Reset password button"'
+    }
+    assert build_change_request("web.click", {"ref": 12}) == {
+        "summary": 'Click "ref 12"'
+    }
+
+
+def test_change_request_generic_fallback_for_uncurated_tool() -> None:
+    """Every other tool gets a generic lead + label->value fields, so no action
+    card regresses for want of a curated formatter (R-3)."""
+    cr = build_change_request("k8s.restart_service", {"namespace": "ops"})
+    assert cr["summary"] == "Confirm k8s.restart_service"
+    assert cr["fields"] == [
+        {"label": "namespace", "value": "ops", "masked": False}
+    ]
+
+
+def test_change_request_fill_credential_never_emits_a_value() -> None:
+    """``web.fill_credential`` is reference-only: it names the credential set
+    and the field but NEVER a secret value — even if a literal ``value`` sneaks
+    into the parameters, the projection ignores it (R-2/R-3)."""
+    cr = build_change_request(
+        "web.fill_credential",
+        {"credential_set": "admin-portal", "field": "password", "ref": 7},
+        "Password input",
+    )
+    assert cr["summary"] == (
+        'Fill the "password" of credential set "admin-portal" into '
+        '"Password input"'
+    )
+    assert {f["label"] for f in cr["fields"]} == {"credential_set", "field"}
+    assert all(f["masked"] is False for f in cr["fields"])
+    # A stray literal value in the parameters never reaches the projection.
+    leaked = build_change_request(
+        "web.fill_credential",
+        {"credential_set": "admin-portal", "field": "password", "value": "s3cret"},
+    )
+    assert "s3cret" not in json.dumps(leaked)
+
+
+def test_change_request_masks_secret_named_parameter() -> None:
+    """A secret-bearing parameter name masks its value to ``***`` while keeping
+    the label, so the approver sees a secret is involved without seeing it."""
+    cr = build_change_request(
+        "k8s.rotate_secret", {"name": "db", "password": "s3cret-PASSWORD-xyz"}
+    )
+    by_label = {f["label"]: f for f in cr["fields"]}
+    assert by_label["name"] == {"label": "name", "value": "db", "masked": False}
+    assert by_label["password"]["value"] == "***"
+    assert by_label["password"]["masked"] is True
+    assert "s3cret-PASSWORD-xyz" not in json.dumps(cr)
+
+
+def test_change_request_masks_web_type_text_opaque_value() -> None:
+    """``web.type.text`` sits on the per-tool opaque-value list — masked
+    wholesale regardless of the generic field name (R-3)."""
+    cr = build_change_request("web.type", {"ref": 3, "text": "hunter2"})
+    assert cr["summary"] == 'Type into "ref 3"'
+    assert cr["fields"] == [{"label": "text", "value": "***", "masked": True}]
+    assert "hunter2" not in json.dumps(cr)
+
+
+def test_curated_effect_sentence_none_for_uncurated_tool() -> None:
+    """The card message sources from the curated sentence where one exists; an
+    uncurated tool yields ``None`` so the message stays the generic constant and
+    the middleware ASK reason is never wired through verbatim (R-3/R-4)."""
+    assert (
+        curated_effect_sentence("k8s.delete_pod", {"name": "web-1"})
+        == 'Delete pod "web-1" in namespace "default"'
+    )
+    assert curated_effect_sentence("k8s.restart_service", {"namespace": "ops"}) is None
+
+
+def test_pending_calls_payload_assembles_change_request_for_action_kind() -> None:
+    """An ``action`` card carries the projection as a SIBLING of ``parameters``
+    (never inside it), so ``canonical_digest(parameters)`` — the signed
+    args_digest — is byte-identical with and without it (R-3)."""
+    registry = ConfirmationRegistry()
+    pending = registry.register(
+        "s1", "alice", "r1", [SANITIZED_TOOL_CALL], timeout=600,
+        gateway_names={"k8s_delete_pod": "k8s.delete_pod"},
+        approval_kind="action",
+    )
+    entry = pending.pending_calls_payload()[0]
+    assert entry["change_request"] == {
+        "summary": 'Delete pod "web-1" in namespace "default"'
+    }
+    assert "change_request" not in entry["parameters"]
+    assert canonical_digest(entry["parameters"]) == canonical_digest(
+        {"name": "web-1"}
+    )
+
+
+def test_pending_calls_payload_omits_change_request_for_flow_and_legacy_kind() -> None:
+    """A ``flow`` card renders the flow headline instead, and a legacy/None kind
+    carries no projection — so the exact-shape payload assertions above (and
+    pre-v11 clients) stay byte-for-byte unchanged (R-1/R-3)."""
+    registry = ConfirmationRegistry()
+    for kind in ("flow", None):
+        pending = registry.register(
+            "s1", "alice", "r1", [TOOL_CALL], timeout=600, approval_kind=kind,
+        )
+        assert "change_request" not in pending.pending_calls_payload()[0]
+
+
 # --- Kernel: park on RequireUserConfirmEvent ---
 
 
@@ -344,6 +469,53 @@ def test_parked_record_carries_parking_turn_ordinal(monkeypatch):
     )
     record = CONFIRMATION_RECORD_STORE.load_pending_for_session("s1")
     assert record["turn_index"] == 2
+
+
+def test_parked_frame_and_durable_record_share_message_and_kind(monkeypatch):
+    """SPEC-054 R-3/R-4: the card message and declared kind are computed ONCE
+    at park time and fed to both the live frame and the durable record, so the
+    operator card and the approver inbox / re-loaded transcript can never
+    diverge. A curated action card carries its effect sentence as the message
+    and the matching change-request projection beside its parameters."""
+    kernel = _configured_kernel()
+    delete_pod = ToolCallBlock(
+        id="call-1",
+        name="k8s_delete_pod",
+        input='{"name": "scratch-restart-demo", "namespace": "default"}',
+    )
+    agent = FakeAgent(
+        events=[
+            RequireUserConfirmEvent(reply_id="reply-1", tool_calls=[delete_pod])
+        ]
+    )
+    agent.toolkit = SimpleNamespace(
+        tool_groups=[
+            SimpleNamespace(
+                tools=[_FakeToolkitTool("k8s_delete_pod", "write", "k8s.delete_pod")]
+            )
+        ]
+    )
+    _patch_agent(monkeypatch, kernel, agent)
+
+    frames = _drain(
+        kernel.stream_events(
+            message="delete it",
+            request_id="req-1",
+            session_id="s1",
+            user_name="alice",
+        )
+    )
+    frame = [f for f in frames if f.get("type") == "confirmation_request"][0]
+    record = CONFIRMATION_RECORD_STORE.load_pending_for_session("s1")
+    sentence = 'Delete pod "scratch-restart-demo" in namespace "default"'
+    # The curated effect sentence is the message on BOTH surfaces (R-4)...
+    assert frame["message"] == sentence
+    assert record["message"] == frame["message"]
+    # ...the declared kind agrees (no bound flow, so this is an action)...
+    assert frame["approval_kind"] == "action"
+    assert record["approval_kind"] == frame["approval_kind"]
+    # ...and the action card carries the projection beside its parameters.
+    assert frame["pending_calls"][0]["change_request"] == {"summary": sentence}
 
 
 def test_confirmation_request_carries_risk_level(monkeypatch):

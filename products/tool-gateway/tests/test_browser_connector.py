@@ -984,10 +984,118 @@ class DeviationGuardTests(unittest.TestCase):
         snap = _run(self.registry.invoke("web.snapshot", {}, IDENTITY))
         self.assertEqual(snap.status, "success")
 
-    def test_click_without_bound_flow_denied(self) -> None:
+    def _navigate_unbound(self, path: str = "/login") -> None:
+        """Land on an allowlisted origin with NO skill bound (ad-hoc session).
+
+        ``web.navigate`` without a ``skill_id`` binds no flow, so the
+        interaction that follows exercises SPEC-054 R-2's unbound
+        park-then-execute path. Refs are minted by the trailing snapshot.
+        """
+        result = _run(
+            self.registry.invoke(
+                "web.navigate", {"url": f"{ALLOWED_ORIGIN}{path}"}, IDENTITY
+            )
+        )
+        self.assertEqual(result.status, "success")
+        entry = self.connector.pool.get("dev.operator")
+        self.assertIsNone(entry.flow)
+        entry.page.add_element(tag="BUTTON", text="Delete pod")
+        snap = _run(self.registry.invoke("web.snapshot", {}, IDENTITY))
+        self.assertEqual(snap.status, "success")
+
+    def test_click_unbound_allowlisted_origin_executes(self) -> None:
+        # SPEC-054 R-2: an ad-hoc write on an allowlisted origin is no longer
+        # hard-denied for lacking a bound flow. The kernel's per-action ASK
+        # gated it upstream; once approved and signed, the gateway executes it.
+        # Replaces test_click_without_bound_flow_denied.
+        self._navigate_unbound()
         result = _run(self.registry.invoke("web.click", {"ref": 1}, IDENTITY))
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.evidence["risk_level"], "write")
+        entry = self.connector.pool.get("dev.operator")
+        self.assertIsNone(entry.flow)  # still no flow bound
+        self.assertEqual(entry.page.elements[0].clicks, 1)
+        # No flow => no step budget is accounted or reported: per-action consent
+        # is the bound (SPEC-055 budgets an accumulated sequence at graduation).
+        self.assertNotIn("steps_used", result.data)
+        self.assertNotIn("steps_budget", result.data)
+
+    def test_click_unbound_off_allowlist_halts_and_denies(self) -> None:
+        # A fresh session sits at about:blank (no allowlisted origin): the
+        # unbound path mirrors gate_capture's live-origin re-check and refuses,
+        # so the deny-by-default allowlist posture is unchanged.
+        result = _run(self.registry.invoke("web.click", {"ref": 1}, IDENTITY))
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "BROWSER_REDIRECT_NOT_ALLOWED")
+        entry = self.connector.pool.get("dev.operator")
+        self.assertIsNone(entry.flow)
+        self.assertIn("about:blank", entry.page.goto_calls)  # page halted
+
+    def test_click_unbound_origin_drift_halts(self) -> None:
+        # A client-side redirect between web.navigate and the interaction lands
+        # the page off the allowlist; the unbound write is halted (about:blank)
+        # and refused rather than executed on the drifted page.
+        self._navigate_unbound()
+        entry = self.connector.pool.get("dev.operator")
+        entry.page.url = "https://evil.external/pwned"  # post-load redirect
+        result = _run(self.registry.invoke("web.click", {"ref": 1}, IDENTITY))
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "BROWSER_REDIRECT_NOT_ALLOWED")
+        self.assertIn("about:blank", entry.page.goto_calls)  # halted
+        self.assertEqual(entry.page.elements[0].clicks, 0)
+
+    def test_unbound_flow_provenance_denied_authority_stale(self) -> None:
+        # ADR-0010 / SPEC-054 R-2: an execution signed under a flow authority
+        # but presented with no flow bound (the flow was cleared) is refused,
+        # never reinterpreted as a per-action approval.
+        self._navigate_unbound()
+        stale = {**IDENTITY, "approval_kind": "flow"}
+        result = _run(self.registry.invoke("web.click", {"ref": 1}, stale))
         self.assertEqual(result.status, "denied")
-        self.assertEqual(result.error["code"], "BROWSER_FLOW_NOT_BOUND")
+        self.assertEqual(result.error["code"], "BROWSER_FLOW_AUTHORITY_STALE")
+        entry = self.connector.pool.get("dev.operator")
+        self.assertEqual(entry.page.elements[0].clicks, 0)
+
+    def test_unbound_action_provenance_executes(self) -> None:
+        # The matching positive: an action-provenance execution on an
+        # allowlisted unbound origin proceeds (the per-action approval path).
+        self._navigate_unbound()
+        action = {**IDENTITY, "approval_kind": "action"}
+        result = _run(self.registry.invoke("web.click", {"ref": 1}, action))
+        self.assertEqual(result.status, "success")
+        self.assertEqual(
+            self.connector.pool.get("dev.operator").page.elements[0].clicks, 1
+        )
+
+    def test_bound_flow_ignores_approval_kind(self) -> None:
+        # One-directional / fail-closed: with a flow bound, approval_kind never
+        # suppresses a bound-flow guard. A read-class binding still refuses a
+        # write even when the envelope claims action provenance.
+        _stub_skill(self.connector, _web_skill("read"))
+        _run(
+            self.registry.invoke(
+                "web.navigate",
+                {"url": f"{ALLOWED_ORIGIN}/login",
+                 "skill_id": "team-a/web/inventoryhealth"},
+                IDENTITY,
+            )
+        )
+        entry = self.connector.pool.get("dev.operator")
+        entry.page.add_element(tag="BUTTON", text="Submit")
+        _run(self.registry.invoke("web.snapshot", {}, IDENTITY))
+        action = {**IDENTITY, "approval_kind": "action"}
+        result = _run(self.registry.invoke("web.click", {"ref": 1}, action))
+        self.assertEqual(result.status, "denied")
+        self.assertEqual(result.error["code"], "BROWSER_FLOW_READ_ONLY")
+
+    def test_bound_flow_provenance_executes_normally(self) -> None:
+        # A flow-provenance execution WITH a flow bound is the normal SPEC-051
+        # auto-signed path: no staleness refusal, the step is accounted.
+        self._bind_write_flow()
+        flow_id = {**IDENTITY, "approval_kind": "flow"}
+        result = _run(self.registry.invoke("web.click", {"ref": 1}, flow_id))
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.data["steps_used"], 1)
 
     def test_click_in_read_flow_denied(self) -> None:
         _stub_skill(self.connector, _web_skill("read"))
@@ -1168,11 +1276,19 @@ class ChatSessionKeyingTests(unittest.TestCase):
             "chat_session_id": "ses-flow-2",
         }
         self._bind_write_flow(owner)
-        # A different chat session is a different flow even for the same
-        # subject: keying is per chat session, never global.
+        # A different chat session is a different browser context: it never
+        # inherits ses-flow-1's bound flow. With no flow and a fresh
+        # about:blank page (off the allowlist), the interaction is refused by
+        # the unbound live-origin re-check — and it never touches the owner's
+        # bound flow or page.
         result = _run(self.registry.invoke("web.click", {"ref": 1}, other))
-        self.assertEqual(result.status, "denied")
-        self.assertEqual(result.error["code"], "BROWSER_FLOW_NOT_BOUND")
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "BROWSER_REDIRECT_NOT_ALLOWED")
+        self.assertIsNone(self.connector.pool.get("ses-flow-2").flow)
+        self.assertIsNotNone(self.connector.pool.get("ses-flow-1").flow)
+        self.assertEqual(
+            self.connector.pool.get("ses-flow-1").page.elements[0].clicks, 0
+        )
 
 
 # --- Snapshot + masking -----------------------------------------------------
@@ -1307,11 +1423,23 @@ class CredentialTests(unittest.TestCase):
         self.assertEqual(result.status, "error")
         self.assertEqual(result.error["code"], "INVALID_PARAMETERS")
 
-    def test_fill_requires_bound_flow(self) -> None:
+    def test_fill_credential_unbound_allowlisted_admitted(self) -> None:
+        # SPEC-054 R-2: the flow-binding precondition is relaxed for read-tier
+        # ref-addressed interactions so an unbound session can reach and
+        # complete a login form. Entry unbound is by reference only
+        # (credential_set + field); it stays read-tier and never admits a write
+        # without a card. Replaces test_fill_requires_bound_flow.
         connector, _ = _make_connector(credential_sets_path=self._tmp.name)
         registry = _registry(connector)
-        page_entry = _run(connector.pool.get_or_create("dev.operator"))
-        page_entry.page.add_element(tag="INPUT", type="password")
+        _run(
+            registry.invoke(
+                "web.navigate", {"url": f"{ALLOWED_ORIGIN}/login"}, IDENTITY
+            )
+        )
+        entry = connector.pool.get("dev.operator")
+        self.assertIsNone(entry.flow)
+        entry.page.add_element(tag="INPUT", type="password")
+        _run(registry.invoke("web.snapshot", {}, IDENTITY))
         result = _run(
             registry.invoke(
                 "web.fill_credential",
@@ -1319,8 +1447,27 @@ class CredentialTests(unittest.TestCase):
                 IDENTITY,
             )
         )
-        self.assertEqual(result.status, "denied")
-        self.assertEqual(result.error["code"], "BROWSER_FLOW_NOT_BOUND")
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.data["filled"], "password")
+        self.assertIsNone(entry.flow)  # still unbound
+        self.assertNotIn(PASSWORD_LITERAL, json.dumps(result.to_dict()))
+
+    def test_fill_credential_unbound_off_allowlist_denied(self) -> None:
+        # The read-tier relaxation is origin-gated: a fresh about:blank session
+        # (off the allowlist) is still refused, mirroring gate_capture.
+        connector, _ = _make_connector(credential_sets_path=self._tmp.name)
+        registry = _registry(connector)
+        entry = _run(connector.pool.get_or_create("dev.operator"))
+        entry.page.add_element(tag="INPUT", type="password")
+        result = _run(
+            registry.invoke(
+                "web.fill_credential",
+                {"ref": 1, "credential_set": "inventory-app", "field": "password"},
+                IDENTITY,
+            )
+        )
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "BROWSER_REDIRECT_NOT_ALLOWED")
 
     def test_password_masked_out_of_screenshot(self) -> None:
         # A legacy target may render a password into a type=text field; the
@@ -1469,14 +1616,38 @@ class WebSelectTests(unittest.TestCase, _BoundFlowMixin):
         self.assertEqual(result.status, "error")
         self.assertEqual(result.error["code"], "BROWSER_SELECT_OPTION_NOT_FOUND")
 
-    def test_select_without_flow_denied(self) -> None:
+    def test_select_unbound_off_allowlist_denied(self) -> None:
+        # Fresh about:blank session: the unbound live-origin re-check refuses.
         result = _run(
             self.registry.invoke(
                 "web.select", {"ref": 1, "value": "x"}, IDENTITY
             )
         )
-        self.assertEqual(result.status, "denied")
-        self.assertEqual(result.error["code"], "BROWSER_FLOW_NOT_BOUND")
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "BROWSER_REDIRECT_NOT_ALLOWED")
+
+    def test_select_unbound_allowlisted_executes(self) -> None:
+        # SPEC-054 R-2: an ad-hoc select on an allowlisted origin executes once
+        # approved upstream — no bound flow required, no step budget accounted.
+        _run(
+            self.registry.invoke(
+                "web.navigate", {"url": f"{ALLOWED_ORIGIN}/edit"}, IDENTITY
+            )
+        )
+        entry = self.connector.pool.get("dev.operator")
+        self.assertIsNone(entry.flow)
+        select_el = entry.page.add_element(
+            tag="SELECT", name="priority", options=["low", "high"]
+        )
+        _run(self.registry.invoke("web.snapshot", {}, IDENTITY))
+        result = _run(
+            self.registry.invoke(
+                "web.select", {"ref": 1, "value": "high"}, IDENTITY
+            )
+        )
+        self.assertEqual(result.status, "success")
+        self.assertEqual(select_el.selects, ["high"])
+        self.assertNotIn("steps_used", result.data)
 
 
 class WebPressKeyTests(unittest.TestCase, _BoundFlowMixin):
@@ -1510,13 +1681,34 @@ class WebPressKeyTests(unittest.TestCase, _BoundFlowMixin):
         self.assertEqual(field.focuses, 1)
         self.assertEqual(page.keyboard.presses, ["Tab"])
 
-    def test_press_key_without_flow_denied(self) -> None:
+    def test_press_key_unbound_off_allowlist_denied(self) -> None:
+        # Fresh about:blank session: the unbound live-origin re-check refuses.
         result = _run(
             self.registry.invoke(
                 "web.press_key", {"key": "Enter"}, IDENTITY
             )
         )
-        self.assertEqual(result.status, "denied")
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "BROWSER_REDIRECT_NOT_ALLOWED")
+
+    def test_press_key_unbound_allowlisted_executes(self) -> None:
+        # SPEC-054 R-2: an ad-hoc keypress on an allowlisted origin executes
+        # once approved upstream — no bound flow, no step budget accounted.
+        _run(
+            self.registry.invoke(
+                "web.navigate", {"url": f"{ALLOWED_ORIGIN}/edit"}, IDENTITY
+            )
+        )
+        entry = self.connector.pool.get("dev.operator")
+        self.assertIsNone(entry.flow)
+        result = _run(
+            self.registry.invoke(
+                "web.press_key", {"key": "Enter"}, IDENTITY
+            )
+        )
+        self.assertEqual(result.status, "success")
+        self.assertEqual(entry.page.keyboard.presses, ["Enter"])
+        self.assertNotIn("steps_used", result.data)
 
 
 class WebExtractTests(unittest.TestCase):

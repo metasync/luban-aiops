@@ -11,6 +11,65 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.35.0 — 2026-09-07
+
+### Added
+
+- **Action-level HITL approval and the change-request confirmation card
+  (SPEC-054)** — makes **action** approval first-class beside **flow**
+  approval. An explicit `approval_kind: flow | action` discriminator on the
+  `confirmation_request` frame and the durable record declares a card's kind
+  rather than inferring it from ambient session state — the structural fix
+  behind the v0.34.1 SPEC-051 R-6 headline-leak patch, with `flow_summary`
+  present iff the kind is `flow` on the same kernel branch so a card's kind
+  and its headline can never disagree. Every action card becomes a
+  secret-masked **change request**: a display-only `{summary, fields[]}`
+  projection assembled as a *sibling* of `parameters` (never inside), so
+  `canonical_digest(parameters)` and the signed `args_digest` stay
+  byte-identical while the approver reads a plain-language intention with
+  decision-relevant fields (secrets masked to `***`) promoted out of the
+  collapsed "Technical details" expander. The card `message` is now computed
+  once at park time and persisted on the durable record, so the approver inbox
+  and a re-loaded owner transcript render exactly the card the live stream
+  showed. Stream contract v9 → v11 (retro-fitting the v10 clause SPEC-053
+  shipped but never recorded and declaring the latent `display_hint` on
+  `pending_calls.items`); additive `execution-request.schema.json` change. No
+  new policy actions, no new audit event types.
+- **Unbound per-action browser-write sample (SPEC-054)** — a new
+  `samples/web-checks/adhoc-password-reset/` tutorial drives the same admin
+  password reset as `web-checks/password-reset` but **ad-hoc, with no bound
+  flow**, so each mutating browser action parks its own per-action
+  change-request card. The runbook deliberately declares no `web_target`, so a
+  flow cannot bind (`SKILL_NOT_WEB_FLOW`) and the unbound path is
+  platform-enforced regardless of model behavior — the unbound counterpart to
+  the bound-flow one-gate sample. Its `demo.sh` exercises the path per
+  ADR-0008.
+
+### Changed
+
+- **Unbound browser writes park per-action instead of hard-denying
+  (SPEC-054 R-2)** — the tool-gateway's `BROWSER_FLOW_NOT_BOUND` hard-deny is
+  relaxed so an ad-hoc browser interaction on an allowlisted origin parks as a
+  per-action signed gate (N unbound writes → N cards; there is no flow-unlock
+  on the unbound path), extending ADR-0007 without reversing it. The
+  relaxation ships **together with** the replacements that keep it fail-closed:
+  the kernel clears `FLOW_CONTEXTS`/`FLOW_APPROVALS` wherever the gateway
+  clears its own binding, and every signed envelope declares its authority
+  provenance under **ADR-0010** — a discriminator stamped inside the HMAC by
+  whichever builder signs, forwarded by the execution-runtime worker as
+  untrusted-as-identity correlation data, and enforced one-directionally by
+  the gateway with a new `BROWSER_FLOW_AUTHORITY_STALE` refusal (a declared
+  kind can only ever add a refusal, never remove one). Read-tier
+  `web.fill_credential` joins the relaxation so unbound credential entry stays
+  reference-only instead of being pushed toward `web.type` with a literal
+  secret in the arguments, the card, the durable record, and the audit trail.
+- **Secret-parameter vocabulary lockstep gate (SPEC-054)** — a new
+  `validate_secret_vocabulary.py` leg joins `make verify`, textually comparing
+  the agent-platform and tool-gateway secret-parameter tuples (the
+  `validate_version.py` pattern, never import-based, fail-closed) and failing
+  on drift in either direction, so the two masking vocabularies the
+  change-request projection relies on cannot silently diverge.
+
 ## 0.34.1 — 2026-09-06
 
 ### Fixed

@@ -451,14 +451,64 @@ export function ConfirmationCardView({
       {card.message ? <div>{card.message}</div> : null}
       {card.pendingCalls.map((call, index) => (
         <div className="confirm-call" key={call.callId ?? index}>
-          <div
-            style={{ display: "flex", alignItems: "center", gap: 8 }}
-          >
-            <strong>{call.toolName ?? call.callId ?? "tool"}</strong>
-            <Tag color={call.riskLevel === "read" ? "default" : "warning"}>
-              {call.riskLevel ?? "unknown"}
-            </Tag>
-          </div>
+          {/* SPEC-054 R-3: an action card's call leads with the change-request
+              projection — the effect sentence the operator approves, then its
+              decision-relevant fields — instead of a bare tool name. Secret
+              values arrive pre-masked (***) from the kernel; every value
+              renders as escaped JSX text, never markup. A flow or legacy call
+              (no projection) keeps today's tool-level header. */}
+          {call.changeRequest ? (
+            <>
+              <div className="confirm-call-summary" style={{ fontWeight: 600 }}>
+                {call.changeRequest.summary}
+              </div>
+              {call.changeRequest.fields &&
+              call.changeRequest.fields.length > 0 ? (
+                <table
+                  className="confirm-change-fields"
+                  style={{
+                    marginTop: 6,
+                    borderCollapse: "collapse",
+                    fontSize: 13,
+                  }}
+                >
+                  <tbody>
+                    {call.changeRequest.fields.map((field, fieldIndex) => (
+                      <tr key={`${field.label}-${fieldIndex}`}>
+                        <td
+                          style={{
+                            opacity: 0.75,
+                            paddingRight: 10,
+                            textAlign: "right",
+                            verticalAlign: "top",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {field.label}
+                        </td>
+                        <td
+                          className="confirm-change-value"
+                          style={{ fontFamily: "var(--font-mono, monospace)" }}
+                        >
+                          {field.value}
+                          {field.masked ? (
+                            <Tag style={{ marginLeft: 6 }}>masked</Tag>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : null}
+            </>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <strong>{call.toolName ?? call.callId ?? "tool"}</strong>
+              <Tag color={call.riskLevel === "read" ? "default" : "warning"}>
+                {call.riskLevel ?? "unknown"}
+              </Tag>
+            </div>
+          )}
           {/* SPEC-050 follow-up: the parsed element label is the one
               human-readable line for a browser interaction, so keep it
               visible as prose rather than buried in a raw code block. */}

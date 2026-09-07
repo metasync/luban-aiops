@@ -537,6 +537,15 @@ def _normalize_stream_event(
         # frames so the live operator card matches the durable record the
         # approver inbox renders; coerced to the contract fields or None.
         flow_summary=_coerce_flow_summary(raw.get("flow_summary")),
+        # SPEC-054 R-1: the parked batch's declared kind rides the
+        # confirmation_request frame so the live card and the durable record
+        # agree without re-inferring from session state; coerced to the
+        # contract enum or None (an absent/legacy kind renders today's card).
+        approval_kind=(
+            raw.get("approval_kind")
+            if raw.get("approval_kind") in ("flow", "action")
+            else None
+        ),
         tool_name=raw.get("tool_name") if isinstance(raw.get("tool_name"), str) else None,
         call_id=raw.get("call_id") if isinstance(raw.get("call_id"), str) else None,
         parameters=(
@@ -602,6 +611,16 @@ def _coerce_pending_calls(value: object) -> list[dict[str, object]] | None:
         display_hint = item.get("display_hint")
         if isinstance(display_hint, str) and display_hint:
             entry["display_hint"] = display_hint
+        # SPEC-054 R-3: an ``action`` card carries the secret-masked
+        # change-request projection as a sibling of ``parameters`` (never
+        # inside it, so args_digest is unaffected). Pass it through when it is
+        # a schema-conformant object — a summary sentence — else omit it so
+        # the card falls back to today's collapsed tool-level detail.
+        change_request = item.get("change_request")
+        if isinstance(change_request, dict) and isinstance(
+            change_request.get("summary"), str
+        ):
+            entry["change_request"] = change_request
         calls.append(entry)
     return calls or None
 

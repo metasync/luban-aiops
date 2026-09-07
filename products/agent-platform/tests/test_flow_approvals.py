@@ -6,6 +6,10 @@ gateway-owned flow binding and yields the R-6 card headline plus the R-1 flow
 identity; ``FlowApprovalStore`` records the operator's approval of a mutating
 flow's first parked write, TTL-bounded and identity-scoped. Both fail safe —
 a dropped/expired authority or a rebind means the next write re-parks.
+
+SPEC-054 R-2 adds the invalidation vocabulary: the gateway refusals that end a
+binding, on which the kernel drops both stores so an authority can never
+outlive the flow it was scoped to.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from agent_service.services.flow_approvals import (
     BROWSER_WRITE_TOOLS,
     FLOW_APPROVALS,
     FLOW_CONTEXTS,
+    FLOW_KILLING_ERROR_CODES,
     FlowApproval,
     FlowApprovalStore,
     FlowContext,
@@ -281,6 +286,53 @@ class BrowserWriteToolsTests(unittest.TestCase):
     def test_non_browser_tools_are_absent(self) -> None:
         self.assertNotIn("k8s.restart_service", BROWSER_WRITE_TOOLS)
         self.assertNotIn("k8s.delete_pod", BROWSER_WRITE_TOOLS)
+
+
+class FlowKillingErrorCodesTests(unittest.TestCase):
+    """SPEC-054 R-2: the vocabulary of gateway refusals that end a flow binding.
+
+    Pinned from both sides — membership (each of these means the gateway has
+    dropped or disowned the flow) and exclusion (each of these leaves the
+    binding intact, so clearing would only cost a one-gated flow an extra
+    approval card).
+    """
+
+    def test_flow_ending_refusals_are_members(self) -> None:
+        for code in (
+            "BROWSER_REDIRECT_NOT_ALLOWED",
+            "BROWSER_FLOW_DENIED",
+            "BROWSER_FLOW_ORIGIN_DEVIATED",
+            "BROWSER_FLOW_AUTHORITY_STALE",
+        ):
+            self.assertIn(code, FLOW_KILLING_ERROR_CODES)
+
+    def test_still_bound_refusals_are_absent(self) -> None:
+        """The flow survives these, correctly identified, and the gateway keeps
+        refusing the write on every attempt — fail-closed without the kernel
+        having to forget the flow."""
+        for code in (
+            "BROWSER_FLOW_READ_ONLY",
+            "BROWSER_FLOW_EXHAUSTED",
+        ):
+            self.assertNotIn(code, FLOW_KILLING_ERROR_CODES)
+
+    def test_ordinary_tool_failures_are_absent(self) -> None:
+        for code in (
+            "BROWSER_ACTION_ERROR",
+            "BROWSER_NAVIGATION_ERROR",
+            "BROWSER_ORIGIN_NOT_ALLOWED",
+            "BROWSER_FLOW_TARGET_MISMATCH",
+            "BROWSER_FLOW_NOT_BOUND",
+            "TOOL_NOT_FOUND",
+        ):
+            self.assertNotIn(code, FLOW_KILLING_ERROR_CODES)
+
+    def test_authority_stale_is_the_adr_0010_provenance_refusal(self) -> None:
+        """The gateway's own provenance check (SPEC-054 R-2) refuses a
+        ``"flow"``-provenance envelope presented with no bound flow; the kernel
+        must treat that as the binding being gone, or it would keep auto-signing
+        into a refusal loop."""
+        self.assertIn("BROWSER_FLOW_AUTHORITY_STALE", FLOW_KILLING_ERROR_CODES)
 
 
 class ModuleSingletonTests(unittest.TestCase):

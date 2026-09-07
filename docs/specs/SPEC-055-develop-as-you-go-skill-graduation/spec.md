@@ -2,11 +2,15 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: luban-platform-team
 - created: 2026-09-06
-- release slice: R5 — Hardening and External Consumption (seventeenth R5 slice;
-  provisional, fixed on approval)
+- approved: 2026-09-07
+- release slice: R5 — Hardening and External Consumption (seventeenth R5 slice)
+- implementation start: gated on SPEC-054 reaching `delivered` (B before C).
+  `plan.md`/`tasks.md` are authored at that point, not at approval, because this
+  spec's capture seam and replay binding are built on the `approval_kind`
+  discriminator and per-action parking that SPEC-054 ships.
 - related ADRs: **ADR-0009** (graduate troubleshooting sessions into replayable
   executable skills via a durable authoring trace — this spec implements it),
   ADR-0007 (one HITL gate per mutating browser flow — **phased**, a graduated
@@ -285,12 +289,22 @@ Acceptance criteria:
 
 ## Open Questions
 
+All five were resolved at approval on 2026-09-07, adopting the recommendation
+recorded in the draft in every case. The original options are retained so the
+decision stays auditable; from here a requirement changes only by agreement,
+recorded in the changelog (the `approved`-spec rule).
+
 - **OQ-1 (trace retention):** what is the authoring-trace retention/lifecycle
   bound? Options: retain until explicitly graduated/discarded (unbounded, needs
   a cap + GC), or a longer fixed window (e.g. 180 days) independent of the
   30-day receipt sweep. Recommendation: retain until `graduated | discarded` with
   a per-session step cap and a configurable idle-GC, so a candidate is not lost
   to the receipt sweep but never grows unbounded.
+  **Resolved:** adopt the recommendation — lifecycle-bound
+  (`draft → graduated | discarded`), never time-bound to the receipt sweep, with
+  the R-1 per-session step cap plus a configurable idle-GC knob documented in the
+  configuration reference on delivery. A fixed window was rejected because it
+  reintroduces precisely the loss the dedicated trace exists to prevent.
 - **OQ-2 (non-browser replay binding):** the flow-binding/one-gate machinery
   (`FlowContext`, `build_flow_request`, the gateway deviation guard) is
   browser-specific today. How should an **infra** executable flow (`k8s.*`) bind
@@ -300,21 +314,47 @@ Acceptance criteria:
   identity so both domains replay under one gate; if that proves too large, ship
   browser replay in SPEC-055 and defer infra replay to a follow-up (infra steps
   meanwhile park per-action via SPEC-054, which fails safe).
+  **Resolved:** take the deferred half of the recommendation, per the operator's
+  direction at approval — this spec ships **browser** replay under one gate, and
+  the generalized binding keyed on skill identity (what an infra `k8s.*`
+  executable flow needs) is targeted at **0.36.0** as its own slice. Until it
+  lands, an infra executable flow's steps park per-action under SPEC-054 R-2,
+  which fails safe and is already the shipped posture. R-5's "non-browser replay
+  binding" criterion is therefore scoped to *asserting* that safe fallback, not
+  to delivering the generalized binding.
 - **OQ-3 (graduation action reuse):** should graduation reuse SPEC-044's
   `session:skill_draft` (since it is also a session→skill draft) or add a distinct
   `session:skill_graduate`? Recommendation: a **distinct** action + audit event,
   because graduating an executable *mutating* artifact is a higher-trust
   operation than drafting knowledge and should be separately authorized and
   audited.
+  **Resolved:** adopt the recommendation — one distinct `session:skill_graduate`
+  action and one distinct `skill_graduated` audit event, role-gated to
+  operator/approver and never observer. Reusing `session:skill_draft` was
+  rejected because it would let a role authorized only for knowledge drafts
+  produce an executable mutating artifact, and would collapse two different trust
+  levels into one audit vocabulary.
 - **OQ-4 (executable-flow schema shape):** the exact replay-step-list schema
   (ordered `{tool, args-with-credential-refs, expect?}`) and whether it lives in
   `skill.schema.json` (Skill v2) or a sibling schema. Recommendation: additive
   fields in `skill.schema.json` under a `kind: executable_flow` discriminator,
   validated by skills-hub ingestion.
+  **Resolved:** adopt the recommendation — additive fields in
+  `skill.schema.json` under a `kind: executable_flow` discriminator (Skill v1 →
+  v2), validated by skills-hub ingestion on the existing path, with the replay
+  step list as an ordered `{tool, args, expect?}` array whose credential values
+  are credential-set **references** and never literals. A sibling schema was
+  rejected: two skill contracts would drift, and ingestion already validates one
+  document shape.
 - **OQ-5 (trace ownership):** confirm the authoring trace is agent-platform-owned
   (capture is at the kernel seam) while the graduated artifact is skills-hub-owned
   (ingested skill) — i.e. the trace is transient authoring state and the skill is
   the durable output. Recommendation: yes; the trace is not a shared contract.
+  **Resolved:** adopt the recommendation — the trace is agent-platform-owned
+  transient authoring state and is **not** a shared contract; the graduated skill
+  is the durable, skills-hub-owned output. This preserves the no-cross-product-
+  import invariant: skills-hub never reads the trace, it ingests the drafted
+  Markdown like any other skill.
 
 ## Changelog
 
@@ -326,3 +366,14 @@ Acceptance criteria:
   blast-radius re-validation, and one-gate secret-safe replay. Sequenced after
   SPEC-054 (the action-approval phase it graduates from); phases ADR-0007 rather
   than reversing it.
+- 2026-09-07: **approved** by the operator, and ADR-0009 accepted the same day.
+  Slice fixed as the seventeenth R5 slice. OQ-1..OQ-5 resolved on the draft's own
+  recorded recommendations, with one operator-directed scoping call: OQ-2 ships
+  browser replay under one gate here and targets the generalized non-browser
+  (infra `k8s.*`) flow binding at **0.36.0**, so R-5's non-browser criterion
+  asserts the safe per-action fallback (SPEC-054 R-2) rather than delivering the
+  generalized binding. No requirement text changed. Bookkeeping:
+  `docs/specs/README.md` row `draft` → `approved`, `docs/adr/README.md` ADR-0009
+  `proposed` → `accepted`, and a new `delivery-roadmap.md` Exploration Backlog row
+  added. Implementation remains **sequenced after SPEC-054**: `plan.md`/`tasks.md`
+  are authored once B is `delivered`, not at approval.

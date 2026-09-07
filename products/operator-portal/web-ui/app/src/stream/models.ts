@@ -65,6 +65,29 @@ export interface PendingCall {
   // interaction tools (web.click, web.type, etc.) so the confirmation card
   // shows what element will be affected, not just the raw ref number.
   displayHint?: string;
+  // SPEC-054 R-3: the display-only change-request projection for an
+  // individually-approved mutating call — the effect sentence the operator
+  // approves plus its decision-relevant fields (secret values arrive
+  // pre-masked from the kernel). Assembled as a sibling of `parameters`, so
+  // it never touches the signed args_digest. Absent on flow cards and on
+  // frames predating v11, which fall back to tool-level rendering.
+  changeRequest?: ChangeRequest;
+}
+
+// SPEC-054 R-3: one label/value row of a change-request projection. A masked
+// row keeps its label but hides the value (rendered as the mask token).
+export interface ChangeRequestField {
+  label: string;
+  value: string;
+  masked?: boolean;
+}
+
+// SPEC-054 R-3: the change-request projection riding an action card's pending
+// call. `summary` is the lead decision line; `fields` is the optional
+// decision-relevant detail table.
+export interface ChangeRequest {
+  summary: string;
+  fields?: ChangeRequestField[];
 }
 
 // SPEC-051 R-6: the card-level browser-flow headline. Mirrors the kernel's
@@ -92,6 +115,12 @@ export interface ConfirmationRequestFrame {
   // the workflow intent (skill title/description + origin) instead of a
   // bare tool action like web.click; absent for non-browser cards.
   flowSummary?: FlowSummary;
+  // SPEC-054 R-1: the parked batch's declared kind — "flow" (a bound browser
+  // web-check flow, one gate per SPEC-051) or "action" (an individually-
+  // approved mutating call). Stated by the kernel at park time, never inferred
+  // from ambient session state; `flowSummary` is present iff this is "flow".
+  // Absent on frames predating v11, which fall back to tool-level rendering.
+  approvalKind?: "flow" | "action";
 }
 
 export interface ConfirmationResultFrame {

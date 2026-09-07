@@ -41,10 +41,12 @@ from agent_service.services.flow_approvals import (
     BROWSER_WRITE_TOOLS,
     FLOW_APPROVALS,
     FLOW_CONTEXTS,
+    FLOW_KILLING_ERROR_CODES,
 )
 from agent_service.services.hitl_confirmations import (
     CONFIRMATION_REGISTRY,
     PendingConfirmation,
+    curated_effect_sentence,
 )
 from agent_service.services.model_catalog import MODEL_CATALOG
 
@@ -1081,6 +1083,14 @@ class AgentKernel:
             )
             else {}
         )
+        # SPEC-054 R-1: the card's declared kind comes from the SAME branch as
+        # the flow headline, so ``approval_kind`` and ``flow_summary`` can never
+        # disagree — ``"flow"`` exactly when a browser-write batch has a bound
+        # flow (``browser_flow`` non-empty), ``"action"`` otherwise. This
+        # subsumes the v0.34.1 headline-leak patch: a non-browser batch parked
+        # while a flow lingers is ``"action"`` and carries no headline, so the
+        # leak class is structurally impossible rather than merely gated.
+        approval_kind = "flow" if browser_flow else "action"
         pending = CONFIRMATION_REGISTRY.register(
             session_id=session_id,
             user_id=user_name,
@@ -1091,7 +1101,13 @@ class AgentKernel:
             gateway_names=gateway_names,
             browser_element_map=browser_element_map,
             browser_flow=browser_flow,
+            approval_kind=approval_kind,
         )
+        # SPEC-054 R-3/R-4: assemble the parked payload and the card message
+        # ONCE here, so the live frame below and the durable record are fed
+        # from a single value and the two paths can never diverge.
+        pending_calls = pending.pending_calls_payload()
+        message = self._confirmation_message(pending_calls)
         # SPEC-031 R-1: the durable record is written before the frame
         # below reaches the client, so the card survives re-login and
         # restarts. Best-effort: a store failure degrades to live-only
@@ -1102,7 +1118,7 @@ class AgentKernel:
                     confirm_id=pending.confirm_id,
                     session_id=session_id,
                     owner_user_id=user_name,
-                    pending_calls=pending.pending_calls_payload(),
+                    pending_calls=pending_calls,
                     action=pending.highest_action(),
                     # SPEC-033 R-1: anchor the durable card under the
                     # parking turn (same ordinal convention as evidence).
@@ -1110,6 +1126,12 @@ class AgentKernel:
                     # SPEC-051 R-6: persist the flow headline so the inbox
                     # and session detail replay the same workflow framing.
                     flow_summary=pending.flow_summary(),
+                    # SPEC-054 R-1/R-4: persist the declared kind and the
+                    # card message from the same values the live frame below
+                    # carries, so a replayed card states its own kind and
+                    # shows the message the operator saw.
+                    approval_kind=approval_kind,
+                    message=message,
                 )
             )
         except Exception as exc:
@@ -1129,11 +1151,18 @@ class AgentKernel:
         frame: dict[str, object] = {
             "type": "confirmation_request",
             "confirm_id": pending.confirm_id,
-            "pending_calls": pending.pending_calls_payload(),
-            "message": self._confirmation_message(event),
+            "pending_calls": pending_calls,
+            "message": message,
+            # SPEC-054 R-1: the declared kind rides the live frame so the
+            # operator card renders the flow headline (``flow``) or the
+            # change-request layout (``action``) from a stated kind rather
+            # than inferred ambient session state.
+            "approval_kind": approval_kind,
         }
         # SPEC-051 R-6: card-level flow headline rendered above the per-call
         # tool detail; absent when no flow is bound (tool-level fallback).
+        # SPEC-054 R-1: emitted from the same branch as approval_kind, so it
+        # is present iff approval_kind == "flow".
         flow_summary = pending.flow_summary()
         if flow_summary is not None:
             frame["flow_summary"] = flow_summary
@@ -1385,6 +1414,91 @@ class AgentKernel:
             return
         FLOW_CONTEXTS.record(session_id, flow)
 
+    @staticmethod
+    def _observe_flow_invalidation(
+        frame: dict[str, object],
+        session_id: str,
+        evidence_frames: list[dict[str, object]],
+    ) -> None:
+        """Drop the session's flow reflection and authority when the binding dies.
+
+        SPEC-054 R-2: ``FLOW_APPROVALS`` auto-signs later browser writes under
+        an authority scoped to the gateway's flow binding, so it must never
+        outlive that binding. Two shapes end it:
+
+        - a refusal in ``FLOW_KILLING_ERROR_CODES`` — the origin deviated, the
+          flow was denied, a redirect was halted, or an envelope claimed a flow
+          authority the gateway no longer holds;
+        - a failed ``web.navigate`` that **was binding** a flow (it carried a
+          ``skill_id``). The gateway nulls ``entry.flow`` on that path only —
+          "A pre-existing flow is left intact — the page did not move" — so a
+          plain in-flow navigation failure keeps the binding, the kernel's
+          reflection stays truthful, and clearing would cost a legitimately
+          one-gated flow an extra approval card (ADR-0007).
+
+        Both stores drop together: a context without an authority re-renders the
+        next card tool-level, and an authority without a context is what the R-1
+        identity guard already refuses to auto-sign, so dropping either alone
+        would only leave the two disagreeing.
+
+        This is the kernel-side half of ADR-0010's two-part backstop and is not
+        sufficient alone — it depends on the kernel draining the refusal before
+        the next write is auto-signed, which is a race. The gateway's own
+        ``approval_kind`` refusal is the enforcement boundary; this keeps the
+        card honest and avoids spending a denied call to find out.
+        """
+        if frame.get("type") != "tool_result":
+            return
+        error = frame.get("error")
+        error = error if isinstance(error, dict) else {}
+        code = str(error.get("code") or "")
+        killed = code in FLOW_KILLING_ERROR_CODES or (
+            frame.get("tool_name") == "web.navigate"
+            and code == "BROWSER_NAVIGATION_ERROR"
+            and AgentKernel._navigate_bound_a_flow(frame, evidence_frames)
+        )
+        if not killed:
+            return
+        FLOW_CONTEXTS.clear(session_id)
+        FLOW_APPROVALS.clear(session_id)
+        LOGGER.info(
+            "browser flow authority cleared",
+            extra={
+                "session_id": session_id,
+                "tool_name": str(frame.get("tool_name") or ""),
+                "error_code": code,
+            },
+        )
+
+    @staticmethod
+    def _navigate_bound_a_flow(
+        frame: dict[str, object],
+        evidence_frames: list[dict[str, object]],
+    ) -> bool:
+        """True when the failed navigate carried a ``skill_id`` (a bind attempt).
+
+        Pairs the result with its ``tool_call`` frame by ``call_id`` — the same
+        backward walk ``_extract_browser_element_map`` uses over the turn's
+        evidence frames, which the drain loop appends to in emission order. An
+        unpaired result (no call frame in this turn) answers ``False``: the
+        kernel declines to guess and leaves the refusal to the gateway, which is
+        the fail-closed boundary either way.
+        """
+        call_id = frame.get("call_id")
+        if not call_id:
+            return False
+        for candidate in reversed(evidence_frames):
+            if (
+                candidate.get("type") == "tool_call"
+                and candidate.get("call_id") == call_id
+            ):
+                parameters = candidate.get("parameters")
+                return (
+                    isinstance(parameters, dict)
+                    and bool(parameters.get("skill_id"))
+                )
+        return False
+
     def _drain_trace_queue(
         self,
         trace_queue: asyncio.Queue,
@@ -1408,6 +1522,12 @@ class AgentKernel:
             # later write in this turn parks (card headline) or auto-signs
             # (identity guard). Single population point for both streams.
             self._observe_flow_binding(decorated, session_id)
+            # SPEC-054 R-2: and the single invalidation point, so a flow-killing
+            # refusal drops the reflection and the auto-signing authority
+            # together before any later write in this turn can ride them.
+            self._observe_flow_invalidation(
+                decorated, session_id, evidence_frames
+            )
             self._observe_tool_result(decorated, execution_requests)
             frames.append(decorated)
         return frames
@@ -1571,13 +1691,27 @@ class AgentKernel:
         return names
 
     @staticmethod
-    def _confirmation_message(event: object) -> str:
-        """Prefer a kernel-provided message; fall back to a deterministic one."""
-        metadata = getattr(event, "metadata", None)
-        if isinstance(metadata, dict):
-            message = metadata.get("message")
-            if isinstance(message, str) and message.strip():
-                return message
+    def _confirmation_message(pending_calls: list[dict[str, object]]) -> str:
+        """The card's informative top-line message (SPEC-054 R-3/R-4).
+
+        Sources from the curated change-request effect sentence where the
+        parked batch has one, so the card explains *what changes*; otherwise
+        falls back to the deterministic generic constant. The gateway
+        middleware's ASK reason is deliberately **not** wired through verbatim:
+        it interpolates the *sanitized* tool name (``web_click``), breaking the
+        dotted-canonical convention, and explains an implementation detail
+        ("outside the auto-approve allow-list") rather than the change (R-3).
+        Computed once at park time and fed to both the live frame and the
+        durable record from that single value, so the two cannot diverge (R-4).
+        """
+        for call in pending_calls:
+            sentence = curated_effect_sentence(
+                str(call.get("tool_name", "")),
+                call.get("parameters") or {},
+                call.get("display_hint"),
+            )
+            if sentence:
+                return sentence
         return "Tool execution requires your confirmation."
 
     @staticmethod
@@ -1627,6 +1761,14 @@ class AgentKernel:
         either way nothing is recorded and every write keeps parking. TTL comes
         from settings; ``0`` records an immediately-expired authority
         (flow-unlock disabled — the pre-fix posture).
+
+        SPEC-054 R-2 adds a third condition: the bound flow must be
+        ``risk_class == "write"``. A read-class binding can never execute an
+        unlocked write — the gateway refuses it ``BROWSER_FLOW_READ_ONLY`` on
+        every attempt — so arming an authority there produced an approval that
+        silently bought nothing while the card claimed a flow gate. The card
+        still renders the read-class binding's headline; only the auto-signing
+        authority is withheld, and each write keeps parking.
         """
         if not self._batch_has_browser_write(pending):
             return
@@ -1634,6 +1776,8 @@ class AgentKernel:
         skill_id = str(browser_flow.get("skill_id") or "")
         origin = str(browser_flow.get("origin") or "")
         if not skill_id and not origin:
+            return
+        if str(browser_flow.get("risk_class") or "") != "write":
             return
         FLOW_APPROVALS.record(
             session_id=session_id,

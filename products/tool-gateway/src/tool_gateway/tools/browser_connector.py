@@ -152,6 +152,11 @@ def origin_of(url: str) -> str | None:
 # never enter results, evidence, or the audit trail in plaintext
 # (SPEC-049 R-5). Matched case-insensitively as a substring of the
 # parameter name, so ``newpw``/``newPassword``/``user_password`` all match.
+#
+# TWIN: products/agent-platform/src/agent_service/services/secret_params.py
+# ``SECRET_PARAM_SUBSTRINGS`` — the SPEC-054 R-3 change-request projection
+# masks by the same vocabulary kernel-side. Keep the two in lockstep; the
+# validate-secret-vocabulary ``make verify`` leg pins them.
 _SECRET_QUERY_PARAMS: tuple[str, ...] = (
     "password", "passwd", "pwd", "newpw", "oldpw", "secret", "token",
     "apikey", "api_key", "accesskey", "access_key", "privatekey",
@@ -420,24 +425,34 @@ class BrowserConnector:
         entry.reset_page_state()
         return None
 
-    def gate_interaction(
-        self, entry: BrowserSessionEntry, tool_name: str, require_write_class: bool
+    async def gate_interaction(
+        self,
+        entry: BrowserSessionEntry,
+        tool_name: str,
+        require_write_class: bool,
+        approval_kind: str | None = None,
     ) -> ToolResult | None:
         """Deviation guard (R-4): an interaction never executes silently.
 
-        Returns a denial result when the flow is absent, read-only but
-        asked for a write-tier action, denied, or exhausted; None when the
-        interaction may proceed. Write-tier calls additionally pass the
+        Returns a denial result when a bound flow is denied, off-origin,
+        read-only but asked for a write-tier action, or exhausted; None when
+        the interaction may proceed. Write-tier calls additionally pass the
         SPEC-020/037 gate upstream before they ever reach this check.
+
+        SPEC-054 R-2: an absent flow is no longer a hard deny. An ad-hoc
+        interaction with no bound flow is gated by ``_gate_unbound_interaction``
+        — a live-origin re-check plus the signed authority-provenance backstop
+        (ADR-0010) — so an allowlisted ad-hoc write parks a per-action card
+        upstream and executes here once approved, while a stale flow-provenance
+        execution is refused. ``approval_kind`` is the provenance the execution
+        worker forwarded from the signed envelope; it is untrusted input whose
+        only permitted effect is a refusal, never a widening.
         """
         risk_level = "write" if require_write_class else "read"
         flow = entry.flow
         if flow is None:
-            return _denied(
-                tool_name, "BROWSER_FLOW_NOT_BOUND",
-                "No web-check flow is bound to this browser session; "
-                "navigate to a skill's declared web_target first.",
-                risk_level,
+            return await self._gate_unbound_interaction(
+                entry, tool_name, risk_level, approval_kind
             )
         if flow.denied:
             return _denied(
@@ -473,6 +488,62 @@ class BrowserConnector:
                 f"The bound flow exceeded its step budget "
                 f"({flow.max_steps} steps); further interactions are "
                 "refused.", risk_level,
+            )
+        return None
+
+    async def _gate_unbound_interaction(
+        self,
+        entry: BrowserSessionEntry,
+        tool_name: str,
+        risk_level: str,
+        approval_kind: str | None,
+    ) -> ToolResult | None:
+        """Substitute guards for an interaction with no bound flow (SPEC-054 R-2).
+
+        With no flow the origin-match, ``risk_class``, and step-budget guards
+        are all inapplicable, so this lifts the live-origin re-check
+        ``gate_capture`` performs for the read tier into the unbound write path:
+        an off-allowlist page is halted and refused, so a client-side redirect
+        between ``web.navigate`` and the interaction cannot land an approved
+        write on a drifted page. On an allowlisted origin the interaction
+        proceeds — the kernel's per-action ASK is what gated it, and no step
+        budget bounds it (per-action consent *is* the bound; SPEC-055 budgets an
+        accumulated sequence at graduation) — unless the signed envelope claims
+        a flow provenance that no longer exists.
+
+        ADR-0010 staleness backstop: a ``flow``-provenance execution presented
+        with no flow bound means the authority outlived the gateway's binding
+        (the flow was cleared on a redirect, on a denial, or on a failed
+        just-bound navigate). It is refused ``BROWSER_FLOW_AUTHORITY_STALE``
+        rather than reinterpreted as a per-action approval — the explicit
+        replacement for the backstop ``BROWSER_FLOW_NOT_BOUND`` accidentally
+        provided. One-directional and fail-closed: an ``action`` or absent
+        provenance never triggers this refusal, and the check can only ever add
+        a refusal, never remove one — the guard set applied is still selected by
+        the gateway's own flow binding, never by this forwarded value.
+        """
+        live_url = entry.active_target.url
+        if not self.is_origin_allowed(live_url):
+            offending = origin_of(live_url) or live_url
+            try:
+                await entry.page.goto("about:blank")
+            except Exception:  # noqa: BLE001 - halt is best effort
+                pass
+            entry.reset_page_state()
+            return make_error_result(
+                tool_name, "BROWSER_REDIRECT_NOT_ALLOWED",
+                f"The current page ('{offending}') is not on the browser "
+                "origin allowlist; the page was halted and the interaction "
+                "refused. Navigate to an allowed target first.",
+                risk_level=risk_level, source_system=SOURCE_SYSTEM,
+            )
+        if approval_kind == "flow":
+            return _denied(
+                tool_name, "BROWSER_FLOW_AUTHORITY_STALE",
+                "This execution was signed under a browser-flow authority, but "
+                "no web-check flow is bound to this session any more; the "
+                "approval is stale and the interaction is refused.",
+                risk_level,
             )
         return None
 
@@ -901,11 +972,16 @@ class _WebInteractionTool(BaseTool):
         self._connector = connector
 
     async def _guarded_handle(
-        self, entry: BrowserSessionEntry, parameters: dict
+        self,
+        entry: BrowserSessionEntry,
+        parameters: dict,
+        approval_kind: str | None = None,
     ) -> tuple[object | None, ToolResult | None]:
         """Deviation guard first, then ref resolution."""
-        gate = self._connector.gate_interaction(
-            entry, self.tool_name, require_write_class=(self.risk_level == "write")
+        gate = await self._connector.gate_interaction(
+            entry, self.tool_name,
+            require_write_class=(self.risk_level == "write"),
+            approval_kind=approval_kind,
         )
         if gate is not None:
             return None, gate
@@ -914,19 +990,24 @@ class _WebInteractionTool(BaseTool):
     def _step_result(
         self, entry: BrowserSessionEntry, start: float, extra: dict | None = None
     ) -> ToolResult:
-        flow = entry.flow
-        assert flow is not None  # guaranteed by the deviation guard
-        flow.steps_used += 1
-        flow.approved = True
         duration_ms = int((time.perf_counter() - start) * 1000)
         data = {
             # Report the frame the interaction actually landed on, not the
             # top-level page, so evidence matches a frame-switched session
             # (SPEC-050 R-9).
             "url": entry.active_target.url,
-            "steps_used": flow.steps_used,
-            "steps_budget": flow.max_steps,
         }
+        flow = entry.flow
+        if flow is not None:
+            # Bound flow: account the step against its budget and record the
+            # execution as evidence of approval (SPEC-051). Unchanged.
+            flow.steps_used += 1
+            flow.approved = True
+            data["steps_used"] = flow.steps_used
+            data["steps_budget"] = flow.max_steps
+        # SPEC-054 R-2: an unbound ad-hoc interaction has no flow to account
+        # against — per-action consent is the bound, so no step budget applies
+        # and none is reported.
         if extra:
             data.update(extra)
         return ToolResult(
@@ -974,7 +1055,9 @@ class WebClickTool(_WebInteractionTool):
         if error is not None:
             return error
         assert entry is not None
-        handle, guard = await self._guarded_handle(entry, parameters)
+        handle, guard = await self._guarded_handle(
+            entry, parameters, identity.get("approval_kind")
+        )
         if guard is not None:
             return guard
         try:
@@ -1039,7 +1122,9 @@ class WebTypeTool(_WebInteractionTool):
                 "Parameter 'text' must be a string.",
                 risk_level="write", source_system=SOURCE_SYSTEM,
             )
-        handle, guard = await self._guarded_handle(entry, parameters)
+        handle, guard = await self._guarded_handle(
+            entry, parameters, identity.get("approval_kind")
+        )
         if guard is not None:
             return guard
         try:
@@ -1137,7 +1222,9 @@ class WebFillCredentialTool(_WebInteractionTool):
                 source_system=SOURCE_SYSTEM,
             )
 
-        handle, guard = await self._guarded_handle(entry, parameters)
+        handle, guard = await self._guarded_handle(
+            entry, parameters, identity.get("approval_kind")
+        )
         if guard is not None:
             return guard
         value = credential[field]
@@ -1220,7 +1307,9 @@ class WebSelectTool(_WebInteractionTool):
                 "Parameter 'value' must be a non-empty string.",
                 risk_level="write", source_system=SOURCE_SYSTEM,
             )
-        handle, guard = await self._guarded_handle(entry, parameters)
+        handle, guard = await self._guarded_handle(
+            entry, parameters, identity.get("approval_kind")
+        )
         if guard is not None:
             return guard
         try:
@@ -1307,9 +1396,11 @@ class WebPressKeyTool(BaseTool):
                 "Parameter 'key' must be a non-empty string.",
                 risk_level="write", source_system=SOURCE_SYSTEM,
             )
-        # Deviation guard (flow binding, origin, step budget).
-        gate = connector.gate_interaction(
+        # Deviation guard (flow binding, origin, step budget) or, when unbound,
+        # the live-origin re-check + provenance backstop (SPEC-054 R-2).
+        gate = await connector.gate_interaction(
             entry, self.tool_name, require_write_class=True,
+            approval_kind=identity.get("approval_kind"),
         )
         if gate is not None:
             return gate
@@ -1336,20 +1427,20 @@ class WebPressKeyTool(BaseTool):
                 risk_level="write", source_system=SOURCE_SYSTEM,
                 duration_ms=duration_ms,
             )
-        flow = entry.flow
-        assert flow is not None
-        flow.steps_used += 1
-        flow.approved = True
         duration_ms = int((time.perf_counter() - start) * 1000)
+        data = {"url": target.url, "key": key}
+        flow = entry.flow
+        if flow is not None:
+            # Bound flow: account the step (SPEC-051). An unbound ad-hoc
+            # keypress has no budget to account against (SPEC-054 R-2).
+            flow.steps_used += 1
+            flow.approved = True
+            data["steps_used"] = flow.steps_used
+            data["steps_budget"] = flow.max_steps
         return ToolResult(
             tool_name=self.tool_name,
             status="success",
-            data={
-                "url": target.url,
-                "key": key,
-                "steps_used": flow.steps_used,
-                "steps_budget": flow.max_steps,
-            },
+            data=data,
             evidence=build_evidence("write", SOURCE_SYSTEM, duration_ms),
         )
 
@@ -1417,7 +1508,9 @@ class WebUploadFileTool(_WebInteractionTool):
                 "Filename must not contain path separators or traversal.",
                 risk_level="write", source_system=SOURCE_SYSTEM,
             )
-        handle, guard = await self._guarded_handle(entry, parameters)
+        handle, guard = await self._guarded_handle(
+            entry, parameters, identity.get("approval_kind")
+        )
         if guard is not None:
             return guard
         # Verify the element is a file input.

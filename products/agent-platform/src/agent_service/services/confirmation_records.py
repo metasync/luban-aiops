@@ -57,6 +57,8 @@ def make_record(
     action: str | None,
     turn_index: int | None = None,
     flow_summary: dict[str, Any] | None = None,
+    approval_kind: str | None = None,
+    message: str | None = None,
 ) -> dict[str, Any]:
     """Shape the parked record written before the request frame flows."""
     return {
@@ -74,6 +76,13 @@ def make_record(
         # and session detail replay the same workflow framing after any
         # re-login. None for non-browser cards and pre-spec records.
         "flow_summary": flow_summary,
+        # SPEC-054 R-1: the declared kind of the parked batch (flow/action) so
+        # a replayed card states its own kind rather than inferring it; and
+        # R-4: the top-line card message, persisted so every surface rendering
+        # from this record shows the same message the live card did. Both None
+        # for records that predate the columns.
+        "approval_kind": approval_kind,
+        "message": message,
         "status": "pending",
         "parked_at": _utc_now_iso(),
         "decider_user_id": None,
@@ -260,7 +269,9 @@ CREATE TABLE IF NOT EXISTS confirmation_records (
     decision        TEXT,
     decided_at      TIMESTAMPTZ,
     turn_index      INTEGER,
-    flow_summary    JSONB
+    flow_summary    JSONB,
+    approval_kind   TEXT,
+    message         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_confirmation_records_session
     ON confirmation_records (session_id, parked_at);
@@ -284,14 +295,29 @@ ALTER TABLE confirmation_records
     ADD COLUMN IF NOT EXISTS flow_summary JSONB
 """
 
+# SPEC-054 R-1/R-4: clusters whose table predates the declared-kind and
+# card-message columns migrate in place at startup; pre-spec rows stay NULL,
+# render with today's tool-level framing (no declared kind) and no message
+# line — never a broken or empty artifact.
+_ADD_APPROVAL_KIND_COLUMN = """
+ALTER TABLE confirmation_records
+    ADD COLUMN IF NOT EXISTS approval_kind TEXT
+"""
+
+_ADD_MESSAGE_COLUMN = """
+ALTER TABLE confirmation_records
+    ADD COLUMN IF NOT EXISTS message TEXT
+"""
+
 _INSERT_PARKED = """
 INSERT INTO confirmation_records (
     confirm_id, session_id, owner_user_id, pending_calls, action,
-    status, parked_at, turn_index, flow_summary
+    status, parked_at, turn_index, flow_summary, approval_kind, message
 )
 VALUES (
     %(confirm_id)s, %(session_id)s, %(owner_user_id)s, %(pending_calls)s,
-    %(action)s, 'pending', now(), %(turn_index)s, %(flow_summary)s
+    %(action)s, 'pending', now(), %(turn_index)s, %(flow_summary)s,
+    %(approval_kind)s, %(message)s
 )
 ON CONFLICT (confirm_id) DO NOTHING
 """
@@ -323,7 +349,7 @@ UPDATE confirmation_records
 _LOAD_FOR_SESSION = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
-       turn_index, flow_summary
+       turn_index, flow_summary, approval_kind, message
   FROM confirmation_records
  WHERE session_id = %(session_id)s
  ORDER BY parked_at ASC
@@ -332,7 +358,7 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
 _LOAD_RECORD = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
-       turn_index, flow_summary
+       turn_index, flow_summary, approval_kind, message
   FROM confirmation_records
  WHERE session_id = %(session_id)s
    AND confirm_id = %(confirm_id)s
@@ -341,7 +367,7 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
 _LOAD_PENDING_FOR_SESSION = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
-       turn_index, flow_summary
+       turn_index, flow_summary, approval_kind, message
   FROM confirmation_records
  WHERE session_id = %(session_id)s
    AND status = 'pending'
@@ -356,7 +382,7 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
 _LOAD_INBOX_PENDING = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
-       turn_index, flow_summary
+       turn_index, flow_summary, approval_kind, message
   FROM confirmation_records
  WHERE status = 'pending'
  ORDER BY parked_at DESC
@@ -366,7 +392,7 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
 _LOAD_INBOX_HISTORY = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
-       turn_index, flow_summary
+       turn_index, flow_summary, approval_kind, message
   FROM confirmation_records
  WHERE status <> 'pending'
    AND decided_at >= now() - make_interval(days => %(history_days)s)
@@ -431,6 +457,8 @@ def _row_to_record(row: Any) -> dict[str, Any]:
         decided_at,
         turn_index,
         flow_summary,
+        approval_kind,
+        message,
     ) = row
     return {
         "confirm_id": confirm_id,
@@ -445,6 +473,8 @@ def _row_to_record(row: Any) -> dict[str, Any]:
         "decided_at": _iso(decided_at),
         "turn_index": turn_index,
         "flow_summary": flow_summary,
+        "approval_kind": approval_kind,
+        "message": message,
     }
 
 
@@ -502,6 +532,8 @@ class PostgresConfirmationRecordStore:
                 cur.execute(_CONFIRMATION_RECORDS_DDL)
                 cur.execute(_ADD_TURN_INDEX_COLUMN)
                 cur.execute(_ADD_FLOW_SUMMARY_COLUMN)
+                cur.execute(_ADD_APPROVAL_KIND_COLUMN)
+                cur.execute(_ADD_MESSAGE_COLUMN)
                 cur.execute(
                     _CLOSE_STALE_PENDING,
                     {"stale_after_seconds": max(stale_after_seconds, 0)},
@@ -529,6 +561,11 @@ class PostgresConfirmationRecordStore:
                             if record.get("flow_summary") is not None
                             else None
                         ),
+                        # SPEC-054 R-1/R-4: the declared kind and the card
+                        # message are plain TEXT; None maps to SQL NULL, so a
+                        # record parked before the columns existed stays valid.
+                        "approval_kind": record.get("approval_kind"),
+                        "message": record.get("message"),
                     },
                 )
                 cur.execute(

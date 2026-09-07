@@ -79,6 +79,12 @@ def build_requests(
     boundary recomputes it from the executed arguments before the
     gateway call goes out (SPEC-037 R-3). Denials never reach this
     builder; the resume path constructs nothing for them.
+
+    ``approval_kind`` is stamped ``"action"`` (ADR-0010, SPEC-054 R-2):
+    this envelope was authorized by one operator decision on one parked
+    card. It is set before signing so it sits inside the HMAC and is a
+    signed fact rather than an unsigned hint the gateway could be talked
+    out of.
     """
     requests: list[dict[str, Any]] = []
     for call in pending.pending_calls_payload():
@@ -89,6 +95,7 @@ def build_requests(
             "session_id": pending.session_id,
             "owner_user_id": pending.user_id,
             "decider_user_id": decider_user_id,
+            "approval_kind": "action",
             "tool_name": call["tool_name"],
             "args_digest": canonical_digest(call["parameters"]),
             "requested_at": _utc_now_iso(),
@@ -118,6 +125,13 @@ def build_flow_request(
     ``args_digest``, single-flight on ``execution_id``) accepts it exactly like
     a card-signed request. ``tool_name`` is the canonical dotted gateway name;
     the tool-gateway deviation guard still bounds the invocation.
+
+    ``approval_kind`` is stamped ``"flow"`` (ADR-0010, SPEC-054 R-2): this
+    envelope rides a session-scoped flow authority rather than a decision on
+    this specific call, so the gateway can tell the two apart and refuse a
+    ``"flow"`` envelope presented when no flow is bound any more
+    (``BROWSER_FLOW_AUTHORITY_STALE``) instead of reinterpreting it as a
+    per-action approval.
     """
     envelope: dict[str, Any] = {
         "execution_id": str(uuid.uuid4()),
@@ -126,6 +140,7 @@ def build_flow_request(
         "session_id": flow_approval.session_id,
         "owner_user_id": flow_approval.owner_user_id,
         "decider_user_id": flow_approval.decider_user_id,
+        "approval_kind": "flow",
         "tool_name": tool_name,
         "args_digest": canonical_digest(parameters),
         "requested_at": _utc_now_iso(),

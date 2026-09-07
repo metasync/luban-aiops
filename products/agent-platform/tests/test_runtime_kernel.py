@@ -1,6 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
 from agentscope.event import RequireUserConfirmEvent
 from agentscope.message import ToolCallBlock
 
@@ -11,7 +12,11 @@ from agent_service.services.execution_signing import (
     canonical_digest,
     verify_envelope,
 )
-from agent_service.services.flow_approvals import FLOW_APPROVALS, FLOW_CONTEXTS
+from agent_service.services.flow_approvals import (
+    FLOW_APPROVALS,
+    FLOW_CONTEXTS,
+    FLOW_KILLING_ERROR_CODES,
+)
 from agent_service.services.hitl_confirmations import CONFIRMATION_REGISTRY
 from agent_service.tools.gateway_tools import (
     CHAT_SESSION_ID,
@@ -1150,6 +1155,45 @@ class TestRecordFlowApproval:
 
         assert FLOW_APPROVALS.get("ses-rec-4") is None
 
+    def test_read_class_binding_records_nothing(self):
+        """SPEC-054 R-2: a ``risk_class == "read"`` binding can never execute an
+        unlocked write — the gateway refuses it BROWSER_FLOW_READ_ONLY on every
+        attempt — so no authority is armed and each write keeps parking. The card
+        still carries the binding's headline; only the auto-signing is withheld."""
+        FLOW_APPROVALS.clear_all()
+        kernel = self._kernel(browser_flow_approval_ttl=900)
+        pending = _register_flow_pending(
+            "ses-rec-6",
+            [ToolCallBlock(id="call-1", name="web_click", input='{"ref": 12}')],
+            {"web_click": "web.click"},
+            {**_BROWSER_FLOW, "risk_class": "read"},
+        )
+
+        kernel._record_flow_approval(pending, "bob-approver", "ses-rec-6")
+
+        assert FLOW_APPROVALS.get("ses-rec-6") is None
+        # The batch really is a browser write, so the withheld authority is the
+        # risk_class condition and not the R-1 predicate.
+        assert kernel._batch_has_browser_write(pending) is True
+
+    def test_binding_without_risk_class_records_nothing(self):
+        """``FlowContext.risk_class`` defaults to ``read``, so a binding that
+        never declared a class arms nothing — the safe default, not a guess."""
+        FLOW_APPROVALS.clear_all()
+        kernel = self._kernel(browser_flow_approval_ttl=900)
+        declared = dict(_BROWSER_FLOW)
+        declared.pop("risk_class")
+        pending = _register_flow_pending(
+            "ses-rec-7",
+            [ToolCallBlock(id="call-1", name="web_click", input='{"ref": 12}')],
+            {"web_click": "web.click"},
+            declared,
+        )
+
+        kernel._record_flow_approval(pending, "bob-approver", "ses-rec-7")
+
+        assert FLOW_APPROVALS.get("ses-rec-7") is None
+
     def test_ttl_zero_records_disabled_authority(self):
         """AGENT_BROWSER_FLOW_APPROVAL_TTL=0 disables flow-unlock: the recorded
         authority is immediately expired (the pre-fix posture)."""
@@ -1185,11 +1229,13 @@ def _fake_toolkit(*tools):
 
 
 class TestConfirmationFrameFlowHeadline:
-    """SPEC-051 R-6 headline-leak fix: the card's flow headline must describe
-    *this parked batch*. A non-browser batch parked while a browser flow
-    lingers in the session must fall back to action-level rendering — never
-    inherit the stale flow headline (the reset-password headline leaking onto a
-    k8s.delete_pod card). A browser-write batch still carries the headline."""
+    """SPEC-051 R-6 headline-leak fix + SPEC-054 R-1 declared kind: the card's
+    flow headline must describe *this parked batch*, and ``approval_kind`` is
+    emitted from the SAME branch, so ``flow_summary`` is present iff the kind is
+    ``"flow"``. A non-browser batch parked while a browser flow lingers must
+    fall back to action-level rendering — never inherit the stale flow headline
+    (the reset-password headline leaking onto a k8s.delete_pod card, the exact
+    v0.34.1 regression). A browser-write batch with a bound flow carries both."""
 
     def _kernel(self):
         return AgentKernel(
@@ -1219,6 +1265,10 @@ class TestConfirmationFrameFlowHeadline:
         assert frame is not None
         # The leak is fixed: no stale browser-flow headline on an action card.
         assert "flow_summary" not in frame
+        # SPEC-054 R-1: the declared kind is "action" — the biconditional
+        # (flow_summary present iff kind == "flow") makes the v0.34.1
+        # headline-leak structurally impossible, not merely gated.
+        assert frame["approval_kind"] == "action"
         # The action itself is still surfaced for action-level rendering.
         assert frame["pending_calls"][0]["tool_name"] == "k8s.delete_pod"
         assert frame["pending_calls"][0]["risk_level"] == "write"
@@ -1243,6 +1293,9 @@ class TestConfirmationFrameFlowHeadline:
         assert frame["flow_summary"]["title"] == "Reset User Password"
         assert frame["flow_summary"]["skill_id"] == "samples/password-reset"
         assert frame["flow_summary"]["risk_class"] == "write"
+        # SPEC-054 R-1: a browser-write batch with a bound flow declares
+        # "flow" and carries the headline — the two ride the same branch.
+        assert frame["approval_kind"] == "flow"
 
     def test_read_only_browser_batch_carries_no_flow_summary(self):
         FLOW_CONTEXTS.clear_all()
@@ -1266,7 +1319,33 @@ class TestConfirmationFrameFlowHeadline:
         # gate fixes (framing follows the parked batch, not ambient session
         # state). Locks the shared predicate against future drift.
         assert "flow_summary" not in frame
+        # SPEC-054 R-1: not a browser write, so the kind is "action".
+        assert frame["approval_kind"] == "action"
         assert frame["pending_calls"][0]["tool_name"] == "web.snapshot"
+
+    def test_browser_write_without_bound_flow_is_action(self):
+        """SPEC-054 R-1/R-2: an ad-hoc browser write with NO flow bound to the
+        session is an individually-approved ``action`` (the park-not-deny path),
+        not a ``flow`` — ``browser_flow`` is empty when no FlowContext exists,
+        so the kind is "action" and no headline rides the card."""
+        FLOW_CONTEXTS.clear_all()  # nothing bound at all
+        kernel = self._kernel()
+        toolkit = _fake_toolkit(("web_click", "web.click", "write"))
+        event = RequireUserConfirmEvent(
+            reply_id="reply-1",
+            tool_calls=[
+                ToolCallBlock(id="call-1", name="web_click", input='{"ref": 12}')
+            ],
+        )
+
+        frame = kernel._build_confirmation_frame(
+            event, "ses-frame-4", "alice", toolkit=toolkit
+        )
+
+        assert frame is not None
+        assert frame["approval_kind"] == "action"
+        assert "flow_summary" not in frame
+        assert frame["pending_calls"][0]["tool_name"] == "web.click"
 
 
 class TestSignFlowExecution:
@@ -1422,4 +1501,270 @@ class TestSignFlowExecution:
 
         assert _run_signer(kernel, tool_call, "web.click", session_id, requests) is None
         assert requests == {}
+
+
+# --- SPEC-054 R-2: flow authority invalidation -------------------------------
+
+
+def _tool_result(tool_name, *, status="error", code=None, call_id="call-1"):
+    """A gateway ``tool_result`` trace frame; ``code`` shapes the ``_denied``
+    envelope (``error={"code", "message"}``) the kernel inspects."""
+    frame = {
+        "type": "tool_result",
+        "tool_name": tool_name,
+        "call_id": call_id,
+        "status": status,
+    }
+    if code is not None:
+        frame["error"] = {"code": code, "message": "refused"}
+    return frame
+
+
+def _navigate_call(call_id="call-nav", **parameters):
+    """The ``tool_call`` frame the middleware emits ahead of the result."""
+    return {
+        "type": "tool_call",
+        "tool_name": "web.navigate",
+        "call_id": call_id,
+        "parameters": parameters,
+    }
+
+
+class TestObserveFlowInvalidation:
+    """SPEC-054 R-2: a flow-killing gateway result drops BOTH the flow
+    reflection and the auto-signing authority for that session, so an authority
+    can never outlive the binding it was scoped to — the kernel-side half of
+    ADR-0010's two-part backstop."""
+
+    def _kernel(self, **overrides):
+        kwargs = dict(
+            api_key="test-key",
+            execution_signing_key=FLOW_SIGNING_KEY,
+            browser_flow_approval_ttl=900,
+        )
+        kwargs.update(overrides)
+        return AgentKernel(settings=RuntimeSettings(**kwargs))
+
+    def _armed(self, session_id):
+        """A session holding a live context and a matching authority."""
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        _record_authority(session_id)
+        _record_context(session_id)
+        assert FLOW_APPROVALS.has_approval(session_id)
+        assert FLOW_CONTEXTS.get(session_id) is not None
+
+    @pytest.mark.parametrize("code", sorted(FLOW_KILLING_ERROR_CODES))
+    def test_flow_killing_refusal_drops_both_stores(self, code):
+        session_id = f"ses-inv-{code.lower()}"
+        self._armed(session_id)
+
+        AgentKernel._observe_flow_invalidation(
+            _tool_result("web.click", code=code), session_id, []
+        )
+
+        assert FLOW_CONTEXTS.get(session_id) is None
+        assert FLOW_APPROVALS.has_approval(session_id) is False
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            # The flow is still bound and correctly identified in both cases, so
+            # the headline stays truthful and the gateway keeps refusing the
+            # write on every attempt without the kernel forgetting the flow.
+            "BROWSER_FLOW_READ_ONLY",
+            "BROWSER_FLOW_EXHAUSTED",
+            # Ordinary tool failures say nothing about the binding.
+            "BROWSER_ACTION_ERROR",
+            "BROWSER_REF_UNKNOWN",
+            "BROWSER_ORIGIN_NOT_ALLOWED",
+            "BROWSER_FLOW_TARGET_MISMATCH",
+            "TOOL_NOT_FOUND",
+        ],
+    )
+    def test_other_refusals_leave_both_stores_alone(self, code):
+        """Over-clearing would cost a legitimately one-gated flow an extra
+        approval card, so the set is pinned from both sides (ADR-0007)."""
+        session_id = f"ses-keep-{code.lower()}"
+        self._armed(session_id)
+
+        AgentKernel._observe_flow_invalidation(
+            _tool_result("web.click", code=code), session_id, []
+        )
+
+        assert FLOW_CONTEXTS.get(session_id) is not None
+        assert FLOW_APPROVALS.has_approval(session_id) is True
+
+    def test_failed_binding_navigate_drops_both_stores(self):
+        """The gateway nulls ``entry.flow`` when a navigate that bound the flow
+        fails to reach its target, so the kernel's reflection is stale."""
+        session_id = "ses-inv-nav-bind"
+        self._armed(session_id)
+        evidence = [_navigate_call(
+            call_id="call-nav",
+            url="http://admin.local/x",
+            skill_id="samples/password-reset",
+        )]
+
+        AgentKernel._observe_flow_invalidation(
+            _tool_result("web.navigate", code="BROWSER_NAVIGATION_ERROR",
+                         call_id="call-nav"),
+            session_id,
+            evidence,
+        )
+
+        assert FLOW_CONTEXTS.get(session_id) is None
+        assert FLOW_APPROVALS.has_approval(session_id) is False
+
+    def test_failed_plain_navigate_keeps_both_stores(self):
+        """A navigate without ``skill_id`` left the gateway's binding intact
+        ("A pre-existing flow is left intact — the page did not move"), so the
+        reflection is still truthful and the authority still valid."""
+        session_id = "ses-inv-nav-plain"
+        self._armed(session_id)
+        evidence = [_navigate_call(call_id="call-nav", url="http://admin.local/x")]
+
+        AgentKernel._observe_flow_invalidation(
+            _tool_result("web.navigate", code="BROWSER_NAVIGATION_ERROR",
+                         call_id="call-nav"),
+            session_id,
+            evidence,
+        )
+
+        assert FLOW_CONTEXTS.get(session_id) is not None
+        assert FLOW_APPROVALS.has_approval(session_id) is True
+
+    def test_unpaired_navigate_failure_keeps_both_stores(self):
+        """No ``tool_call`` frame to pair with ⇒ the kernel declines to guess
+        and leaves the refusal to the gateway, the fail-closed boundary."""
+        session_id = "ses-inv-nav-unpaired"
+        self._armed(session_id)
+
+        AgentKernel._observe_flow_invalidation(
+            _tool_result("web.navigate", code="BROWSER_NAVIGATION_ERROR",
+                         call_id="call-unknown"),
+            session_id,
+            [],
+        )
+
+        assert FLOW_APPROVALS.has_approval(session_id) is True
+
+    def test_successful_navigate_is_not_an_invalidation(self):
+        session_id = "ses-inv-nav-ok"
+        self._armed(session_id)
+
+        AgentKernel._observe_flow_invalidation(
+            _tool_result("web.navigate", status="success"), session_id, []
+        )
+
+        assert FLOW_CONTEXTS.get(session_id) is not None
+        assert FLOW_APPROVALS.has_approval(session_id) is True
+
+    def test_non_result_frames_and_errorless_results_are_ignored(self):
+        """Only a ``tool_result`` carries a gateway refusal; a malformed
+        ``error`` degrades instead of raising."""
+        session_id = "ses-inv-shape"
+        self._armed(session_id)
+        kernel = self._kernel()
+
+        kernel._observe_flow_invalidation(
+            {"type": "tool_call", "tool_name": "web.click",
+             "error": {"code": "BROWSER_FLOW_DENIED"}},
+            session_id,
+            [],
+        )
+        kernel._observe_flow_invalidation(
+            _tool_result("web.click", status="success"), session_id, []
+        )
+        kernel._observe_flow_invalidation(
+            {"type": "tool_result", "tool_name": "web.click",
+             "status": "error", "error": "BROWSER_FLOW_DENIED"},
+            session_id,
+            [],
+        )
+
+        assert FLOW_CONTEXTS.get(session_id) is not None
+        assert FLOW_APPROVALS.has_approval(session_id) is True
+
+    def test_clears_only_the_refusing_session(self):
+        self._armed("ses-inv-a")
+        _record_authority("ses-inv-b")
+        _record_context("ses-inv-b")
+
+        AgentKernel._observe_flow_invalidation(
+            _tool_result("web.click", code="BROWSER_FLOW_ORIGIN_DEVIATED"),
+            "ses-inv-a",
+            [],
+        )
+
+        assert FLOW_APPROVALS.has_approval("ses-inv-a") is False
+        assert FLOW_APPROVALS.has_approval("ses-inv-b") is True
+        assert FLOW_CONTEXTS.get("ses-inv-b") is not None
+
+    def test_cleared_session_no_longer_auto_signs(self, monkeypatch):
+        """The point of clearing: the next ``web.*`` write in the session fails
+        safe (``None`` ⇒ parks for a fresh operator decision) instead of riding
+        an authority whose gateway binding is gone."""
+        _capture_flow_audits(monkeypatch)
+        session_id = "ses-inv-sign"
+        self._armed(session_id)
+        kernel = self._kernel()
+        requests: dict = {}
+        tool_call = ToolCallBlock(id="call-88", name="web_click", input='{"ref": 1}')
+
+        # Sanity: while armed, the write auto-signs.
+        assert _run_signer(kernel, tool_call, "web.click", session_id, requests)
+
+        kernel._observe_flow_invalidation(
+            _tool_result("web.click", code="BROWSER_FLOW_DENIED"), session_id, []
+        )
+        requests.clear()
+
+        assert _run_signer(kernel, tool_call, "web.click", session_id, requests) is None
+        assert requests == {}
+
+    def test_wired_into_the_trace_drain(self):
+        """Pins the call site, not just the method: the live and the resumed
+        stream both drain through ``_drain_trace_queue``, so that is where a
+        refusal has to reach the invalidation path before any later write in the
+        same turn can ride the stale authority."""
+        session_id = "ses-inv-drain"
+        self._armed(session_id)
+        kernel = self._kernel()
+        queue = asyncio.Queue()
+        queue.put_nowait(
+            _tool_result("web.click", code="BROWSER_FLOW_ORIGIN_DEVIATED")
+        )
+
+        frames = kernel._drain_trace_queue(queue, "req-9", session_id, [], {})
+
+        assert len(frames) == 1
+        assert frames[0]["session_id"] == session_id
+        assert FLOW_CONTEXTS.get(session_id) is None
+        assert FLOW_APPROVALS.has_approval(session_id) is False
+
+    def test_drain_records_a_rebind_then_clears_a_refusal(self):
+        """One drain, two frames: a successful navigate records the rebind and a
+        later deviation clears it — the single population point and the single
+        invalidation point stay ordered, so the session ends the turn holding no
+        authority at all."""
+        session_id = "ses-inv-drain-2"
+        self._armed(session_id)
+        kernel = self._kernel()
+        queue = asyncio.Queue()
+        queue.put_nowait({
+            "type": "tool_result",
+            "tool_name": "web.navigate",
+            "call_id": "call-nav",
+            "status": "success",
+            "data": {"flow": {**_BROWSER_FLOW, "skill_id": "samples/other"}},
+        })
+        queue.put_nowait(
+            _tool_result("web.click", code="BROWSER_FLOW_DENIED", call_id="call-2")
+        )
+
+        kernel._drain_trace_queue(queue, "req-9", session_id, [], {})
+
+        assert FLOW_CONTEXTS.get(session_id) is None
+        assert FLOW_APPROVALS.has_approval(session_id) is False
 

@@ -162,6 +162,10 @@ policy-diff: ## Per-(role, action) outcome report: canonical vs CANDIDATE=<path>
 validate-version: ## Validate version lockstep between VERSION, products, and portal
 	@cd products/tool-gateway && uv run python ../../shared/shared-contracts/scripts/validate_version.py ../..
 
+.PHONY: validate-secret-vocabulary
+validate-secret-vocabulary: ## Validate redaction-vocabulary lockstep between agent-platform and tool-gateway
+	@cd products/agent-platform && uv run python ../../shared/shared-contracts/scripts/validate_secret_vocabulary.py ../..
+
 # --- Cross-cutting ----------------------------------------------------------
 
 .PHONY: overlays
@@ -172,7 +176,7 @@ overlays: ## Render every GitOps overlay (kustomize build check)
 	done
 
 .PHONY: verify
-verify: test overlays validate-policy validate-policy-scenarios validate-version ## Verification gate: tests + overlays + policy + scenarios + version lockstep
+verify: test overlays validate-policy validate-policy-scenarios validate-version validate-secret-vocabulary ## Verification gate: tests + overlays + policy + scenarios + version + vocabulary lockstep
 
 .PHONY: deploy
 deploy: ## Deploy the dev-k8s overlay to the current cluster (wraps deploy.sh)

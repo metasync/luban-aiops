@@ -51,3 +51,19 @@ gateway deviation guard, and SPEC-037 signed execution are unchanged; no
 policy action or audit event type changed. This is a correctness follow-on to
 the v0.33.1 live-frame fix, not a change to it. Version lockstep 0.34.1
 validated across all products and the portal; `make verify` green.
+
+## Deployment state
+
+Recorded 2026-09-07 for provenance completeness; the fix itself shipped
+2026-09-06. The clean v0.34.1 image build and dev-k8s deploy were
+**deliberately deferred** and fold into the next spec delivery. The cluster
+already ran this code under the dirty tag
+`0.34.0-dev-k8s-123c4b6-dirty-20260906161715`, so rebuilding for this
+kernel-only patch would have produced no behavioral change in the environment
+used for live verification. It is noted here because a `-dirty-` tag is not
+reproducible from a git ref, and the platform's traceability posture (ADR-0008)
+favors documenting the verification environment's provenance over leaving it
+implied. The next delivery (SPEC-054) rebuilds every image this patch lives in —
+agent-platform among them — which is when the v0.34.1 content lands as a
+properly tagged image. If that delivery slips or is descoped, the clean build is
+owed at the following slice rather than left indefinitely on the dirty tag.

@@ -12,7 +12,8 @@ with `make deploy-samples`; the platform never hard-wires a specific sample.
 
 | Sample | Description |
 |---|---|
-| [web-checks/password-reset](web-checks/password-reset/) | Automate a password reset in a legacy admin panel using browser web-check tools with a single HITL gate |
+| [web-checks/password-reset](web-checks/password-reset/) | Automate a password reset in a legacy admin panel using browser web-check tools with a single HITL gate (a **bound flow**, `approval_kind: flow`) |
+| [web-checks/adhoc-password-reset](web-checks/adhoc-password-reset/) | The same admin reset driven **ad-hoc with no bound flow**, so each mutating browser action parks its own per-action change-request card (`approval_kind: action`) — the unbound counterpart to `password-reset`, demonstrating SPEC-054 |
 
 ## Directory structure
 

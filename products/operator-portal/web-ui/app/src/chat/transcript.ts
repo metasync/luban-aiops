@@ -7,12 +7,14 @@
 // so cards survive re-login; decided records render read-only with
 // decider attribution.
 import type {
+  ConfirmationCallPayload,
   ConfirmationRecord,
   EvidenceFrame,
   EvidenceTurn,
   TranscriptTurn,
 } from "../api/sessions";
 import type {
+  ChangeRequest,
   ExecutionReceipt,
   FlowSummary,
   PendingCall,
@@ -133,6 +135,38 @@ function toFlowSummary(
   };
 }
 
+// SPEC-054 R-3: map the durable record's per-call change-request projection
+// (wire snake_case) to the card view-model. Returns undefined when the
+// projection is absent or lacks a usable summary, so a flow/legacy call falls
+// back to tool-level rendering rather than an empty node. A masked row's value
+// already arrives as the mask token from the kernel (the portal never unmasks).
+function toChangeRequest(
+  projection: ConfirmationCallPayload["change_request"],
+): ChangeRequest | undefined {
+  if (
+    !projection ||
+    typeof projection.summary !== "string" ||
+    projection.summary.length === 0
+  ) {
+    return undefined;
+  }
+  const fields = Array.isArray(projection.fields)
+    ? projection.fields
+        .filter(
+          (field) =>
+            field && typeof field.label === "string" && field.label.length > 0,
+        )
+        .map((field) => ({
+          label: field.label,
+          value: typeof field.value === "string" ? field.value : "",
+          masked: field.masked === true,
+        }))
+    : undefined;
+  return fields && fields.length > 0
+    ? { summary: projection.summary, fields }
+    : { summary: projection.summary };
+}
+
 // Shared by transcript seeding and the approvals inbox (SPEC-031 R-5):
 // both surfaces render the same durable record through one card mapping.
 export function confirmationRecordToCard(
@@ -151,6 +185,9 @@ export function confirmationRecordToCard(
       // SPEC-050 follow-up: pass through the element description for
       // browser interaction tools.
       displayHint: call.display_hint,
+      // SPEC-054 R-3: replay the per-call change-request projection so an
+      // action card renders its change-request layout after a re-login.
+      changeRequest: toChangeRequest(call.change_request),
     }),
   );
   const card: ConfirmationCard = {
@@ -169,6 +206,11 @@ export function confirmationRecordToCard(
     // the same workflow framing the live card showed; absent for
     // non-browser cards and records that predate the field.
     flowSummary: toFlowSummary(record.flow_summary),
+    // SPEC-054 R-1/R-4: replay the declared kind and the persisted top-line
+    // message so the durable card matches the live one; absent for records
+    // that predate the fields.
+    approvalKind: record.approval_kind ?? undefined,
+    message: record.message ?? undefined,
   };
   if (record.status !== "pending") {
     card.note = attributionNote(record);

@@ -44,6 +44,8 @@ def _record(
     parked_at: datetime | None = None,
     turn_index: int | None = None,
     flow_summary: dict | None = None,
+    approval_kind: str | None = None,
+    message: str | None = None,
 ) -> dict:
     record = make_record(
         confirm_id,
@@ -53,6 +55,8 @@ def _record(
         "tools:mutate",
         turn_index=turn_index,
         flow_summary=flow_summary,
+        approval_kind=approval_kind,
+        message=message,
     )
     if parked_at is not None:
         record["parked_at"] = _iso(parked_at)
@@ -113,6 +117,28 @@ class TestInMemoryStore:
         assert rows[1]["flow_summary"] is None
         assert store.load_pending_for_session("ses-1")["flow_summary"] is None
         assert store.load_record("ses-1", "cf-1")["flow_summary"] == summary
+
+    def test_save_and_load_round_trips_approval_kind_and_message(self) -> None:
+        """SPEC-054 R-1/R-4: the declared kind and the top-line card message
+        survive the store, so the inbox and the re-loaded owner transcript
+        replay the same kind and message the live operator card showed; a
+        pre-column (or non-action) card round-trips None for both."""
+        store = InMemoryConfirmationRecordStore()
+        store.save_parked(
+            _record(
+                "cf-1",
+                approval_kind="action",
+                message='Delete pod "web-1" in namespace "default"',
+            )
+        )
+        store.save_parked(_record("cf-2"))
+        rows = store.load_for_session("ses-1")
+        assert rows[0]["approval_kind"] == "action"
+        assert rows[0]["message"] == 'Delete pod "web-1" in namespace "default"'
+        assert rows[1]["approval_kind"] is None
+        assert rows[1]["message"] is None
+        assert store.load_pending_for_session("ses-1")["message"] is None
+        assert store.load_record("ses-1", "cf-1")["approval_kind"] == "action"
 
     def test_mark_resolved_attributes_decider_and_outcome(self) -> None:
         store = InMemoryConfirmationRecordStore()
@@ -407,6 +433,8 @@ class TestPostgresStore:
             datetime(2026, 8, 25, 10, 5, 0, tzinfo=timezone.utc),
             3,
             summary,
+            "flow",
+            "Submit the password reset for the user.",
         )
         store = PostgresConfirmationRecordStore(
             db_url="postgresql://fake", connect=_fake_connect(calls, rows=[row])
@@ -419,11 +447,17 @@ class TestPostgresStore:
         assert record["turn_index"] == 3
         # SPEC-051 R-6: the browser-flow headline maps from the new column.
         assert record["flow_summary"] == summary
+        # SPEC-054 R-1/R-4: the declared kind and the card message map from
+        # their columns, so a replayed card states its own kind and top line.
+        assert record["approval_kind"] == "flow"
+        assert record["message"] == "Submit the password reset for the user."
 
     def test_load_record_maps_legacy_row_without_turn_index(self) -> None:
-        """SPEC-033 R-1 / SPEC-051 R-6: rows parked before the columns existed
-        load with ``turn_index=None`` and ``flow_summary=None`` and keep the
-        legacy newest-turn anchoring."""
+        """SPEC-033 R-1 / SPEC-051 R-6 / SPEC-054 R-1/R-4: rows parked before
+        the columns existed load with ``turn_index=None``, ``flow_summary=None``,
+        ``approval_kind=None`` and ``message=None`` and keep the legacy
+        newest-turn anchoring (render today's tool-level card, no message
+        line — never a broken or empty artifact)."""
         calls: list[dict] = []
         row = (
             "cf-1",
@@ -438,6 +472,8 @@ class TestPostgresStore:
             None,
             None,
             None,
+            None,
+            None,
         )
         store = PostgresConfirmationRecordStore(
             db_url="postgresql://fake", connect=_fake_connect(calls, rows=[row])
@@ -445,6 +481,11 @@ class TestPostgresStore:
         record = store.load_record("ses-1", "cf-1")
         assert record["turn_index"] is None
         assert record["flow_summary"] is None
+        # SPEC-054 R-1/R-4: a pre-column row carries no declared kind and no
+        # message, so the card renders today's tool-level framing (no message
+        # line, never an empty artifact).
+        assert record["approval_kind"] is None
+        assert record["message"] is None
 
     def test_load_record_returns_none_without_row(self) -> None:
         calls: list[dict] = []

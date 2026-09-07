@@ -180,6 +180,19 @@ async def invoke_tool(
         raw_session_id if isinstance(raw_session_id, str) and raw_session_id
         else None
     )
+    # Authority-provenance handle (SPEC-054 R-2 / ADR-0010). Like session_id
+    # it is injected only by trusted internal callers — the execution worker
+    # forwards it from the signed envelope, where it sits inside the HMAC —
+    # never taken from model-controlled ``parameters``. It carries no authority
+    # (identity and policy still ride the bearer token); the browser
+    # connector's write path reads it solely to refuse a flow-provenance
+    # execution when no flow is bound any more. Its only permitted effect is a
+    # refusal, so a value outside the {flow, action} vocabulary is dropped and
+    # can never widen access.
+    raw_approval_kind = body.get("approval_kind")
+    approval_kind = (
+        raw_approval_kind if raw_approval_kind in ("flow", "action") else None
+    )
 
     # Policy enforcement.
     if identity is None:
@@ -287,6 +300,8 @@ async def invoke_tool(
     }
     if chat_session_id is not None:
         identity_dict["chat_session_id"] = chat_session_id
+    if approval_kind is not None:
+        identity_dict["approval_kind"] = approval_kind
     result = await registry.invoke(tool_name, parameters, identity_dict)
 
     # Redaction (SPEC-009 R-1/R-2): applied at the single choke point before

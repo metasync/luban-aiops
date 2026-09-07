@@ -339,3 +339,141 @@ describe("ConfirmationCardView flow-intent lead line (SPEC-053 R-3)", () => {
     expect(intent!.querySelector("img")).toBeNull();
   });
 });
+
+describe("ConfirmationCardView change-request projection (SPEC-054 R-1/R-3)", () => {
+  // An individually-approved mutating call: the card leads with the projected
+  // effect sentence + its decision-relevant fields instead of a bare tool name.
+  function actionCard(call: PendingCall): ConfirmationCard {
+    return {
+      ...cardOf([call]),
+      approvalKind: "action",
+      message: 'Delete pod "api-1" in namespace "prod"?',
+    };
+  }
+
+  it("renders the summary as the lead line and the fields as a table", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const { container } = renderCard(
+      actionCard({
+        callId: "c-1",
+        toolName: "k8s.delete_pod",
+        riskLevel: "write",
+        action: "tools:mutate",
+        parameters: { name: "api-1", namespace: "prod" },
+        changeRequest: {
+          summary: 'Delete pod "api-1" in namespace "prod"',
+          fields: [
+            { label: "name", value: "api-1", masked: false },
+            { label: "namespace", value: "prod", masked: false },
+          ],
+        },
+      }),
+    );
+    const summary = container.querySelector(".confirm-call-summary");
+    expect(summary).toBeTruthy();
+    expect(summary!.textContent).toBe('Delete pod "api-1" in namespace "prod"');
+    expect(container.querySelector("table.confirm-change-fields")).toBeTruthy();
+    expect(screen.getByText("namespace")).toBeTruthy();
+    // The change-request layout replaces the bare tool-name header, but the
+    // Technical details expander stays one click away.
+    expect(screen.queryByText("k8s.delete_pod")).toBeNull();
+    expect(screen.getByText("Technical details")).toBeTruthy();
+  });
+
+  it("renders a masked field's value as *** and flags it masked", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const { container } = renderCard(
+      actionCard({
+        callId: "c-1",
+        toolName: "web.type",
+        riskLevel: "write",
+        action: "tools:mutate",
+        changeRequest: {
+          summary: 'Type into "password field"',
+          fields: [{ label: "text", value: "***", masked: true }],
+        },
+      }),
+    );
+    const value = container.querySelector(".confirm-change-value");
+    expect(value).toBeTruthy();
+    expect(value!.textContent).toContain("***");
+    expect(screen.getByText("masked")).toBeTruthy();
+  });
+
+  it("renders a summary-only projection with no fields table", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const { container } = renderCard(
+      actionCard({
+        callId: "c-1",
+        toolName: "k8s.delete_pod",
+        riskLevel: "write",
+        changeRequest: { summary: 'Delete pod "api-1"' },
+      }),
+    );
+    expect(container.querySelector(".confirm-call-summary")!.textContent).toBe(
+      'Delete pod "api-1"',
+    );
+    expect(container.querySelector("table.confirm-change-fields")).toBeNull();
+  });
+
+  it("escapes markup in the summary so it can never inject HTML", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const { container } = renderCard(
+      actionCard({
+        callId: "c-1",
+        toolName: "web.click",
+        riskLevel: "write",
+        changeRequest: { summary: "<img src=x onerror=alert(1)> Click submit" },
+      }),
+    );
+    const summary = container.querySelector(".confirm-call-summary");
+    expect(summary).toBeTruthy();
+    expect(summary!.textContent).toBe(
+      "<img src=x onerror=alert(1)> Click submit",
+    );
+    expect(summary!.querySelector("img")).toBeNull();
+  });
+
+  it("falls back to the tool-level header when a call carries no projection", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const { container } = renderCard(
+      actionCard({
+        callId: "c-1",
+        toolName: "k8s.restart_pod",
+        riskLevel: "write",
+        action: "tools:mutate",
+      }),
+    );
+    // No projection => no empty change-request node, and today's tool header.
+    expect(container.querySelector(".confirm-call-summary")).toBeNull();
+    expect(container.querySelector("table.confirm-change-fields")).toBeNull();
+    expect(screen.getByText("k8s.restart_pod")).toBeTruthy();
+    expect(screen.getByText("write")).toBeTruthy();
+  });
+
+  it("renders the flow headline for a flow card and no change-request layout", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const { container } = renderCard({
+      ...cardOf([
+        {
+          callId: "c-1",
+          toolName: "web.click",
+          riskLevel: "write",
+          action: "tools:mutate",
+          displayHint: "Reset password button",
+        },
+      ]),
+      approvalKind: "flow",
+      flowSummary: {
+        title: "Reset User Password",
+        flowIntent: "Submit the password reset for the user.",
+        riskClass: "write",
+      },
+    });
+    // A flow card headlines with the workflow intent (SPEC-051/053) and keeps
+    // its tool-level per-call detail — it carries no change-request projection.
+    expect(container.querySelector(".confirm-flow")).toBeTruthy();
+    expect(container.querySelector(".confirm-call-summary")).toBeNull();
+    expect(screen.getByText("web.click")).toBeTruthy();
+  });
+});

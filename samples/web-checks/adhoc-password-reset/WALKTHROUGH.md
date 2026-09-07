@@ -1,0 +1,198 @@
+# Live Walkthrough: Ad-Hoc Password Reset with Per-Action Approval
+
+This guide walks you through the ad-hoc demo step by step against your running
+cluster. You'll see the agent log into a simulated admin panel and reset a
+user's password **without binding a flow** — so the mutating browser action
+parks a **per-action change-request card** (`approval_kind: action`) instead of
+riding a single flow gate.
+
+It is the counterpart to
+[`web-checks/password-reset/WALKTHROUGH.md`](../password-reset/WALKTHROUGH.md),
+which performs the same reset as a **bound flow** with one HITL gate
+(`approval_kind: flow`). Walk through both to see SPEC-054's two approval
+models side by side.
+
+## Prerequisites Check
+
+Everything is already running in your cluster:
+
+| Component | Status |
+|---|---|
+| Cluster (OrbStack) | ✅ Running |
+| Browser connector | ✅ `GATEWAY_BROWSER_ENABLED=true` |
+| Browser sidecar | ✅ 2/2 containers in tool-gateway pod |
+| Admin pages (nginx) | ✅ `browser-check-target` serving `/admin/` |
+| Credential sets | ✅ `browser-check-target` + `admin-portal` loaded |
+| ResetPasswordAdHoc runbook | ✅ In skills-hub at `/skills/samples/` (installed by `make deploy-samples`) |
+
+> **Note:** the runbook declares **no `web_target`** — that is deliberate. A
+> skill without `web_target` cannot bind a browser flow, so the session stays
+> unbound and every write parks its own card. If the runbook is missing, run
+> `make deploy-samples` from the repository root.
+
+## Step 1: Open the Operator Portal
+
+```sh
+kubectl port-forward -n dev-luban-aiops svc/web-ui 8080:8080 &
+```
+
+Then open **http://localhost:8080** in your browser and sign in with the dev
+user (silent OIDC — click "Sign in" if prompted).
+
+## Step 2: Verify the Admin Target Pages
+
+```sh
+kubectl port-forward -n dev-luban-aiops svc/browser-check-target 9090:8080 &
+```
+
+Open **http://localhost:9090/admin/** — the same legacy admin panel the
+password-reset sample uses: a login form, a user table with "Reset password"
+links, and a reset page that pre-fills from URL parameters and waits for a
+"Confirm reset" click.
+
+## Step 3: Start a Chat Session
+
+In the operator portal, click **Chat** in the sidebar. The composer is at the
+bottom.
+
+## Step 4: Ask the Agent to Reset a Password Ad Hoc
+
+Type a message that asks for the reset **without a flow**, e.g.:
+
+```
+Ad-hoc, without binding a flow, reset the password for alice@example.com to
+TempPass-2026! in the admin portal. Follow the ResetPasswordAdHoc runbook but
+do not pass skill_id to web.navigate. Use the admin-portal credential set for
+login.
+```
+
+The agent should:
+1. Read the `ResetPasswordAdHoc` runbook via `skills.get`/`skills.search`
+2. Navigate to the admin login page via `web.navigate` **without `skill_id`**
+   — nothing binds; the session stays unbound
+3. Snapshot the login form via `web.snapshot`
+4. Fill username + password via `web.fill_credential` (read tier, **by
+   reference** — admitted unbound by SPEC-054 R-2; the secret never enters the
+   arguments). The login form auto-submits (legacy SSO) and redirects
+5. Navigate to the reset page with the new password as the `newpw` URL
+   parameter (read tier; the gateway redacts it)
+6. **Click "Confirm reset"** ← an unbound write-tier interaction, so it parks a
+   **per-action** confirmation card
+
+## Step 5: Approve the Per-Action Card
+
+When the agent clicks "Confirm reset", a **change-request card** appears. Unlike
+the password-reset flow card, it does **not** show a flow headline. Instead it
+leads with the **change request** (SPEC-054 R-3):
+
+- A plain-language **summary** of the action ("Click the Confirm reset button")
+- The **decision-relevant fields** promoted out of the collapsed "Technical
+  details" expander, with any secret value masked to `***`
+- The tool (`web.click`) and risk level (**write**) beneath
+
+Under the hood the card carries `approval_kind: "action"` and **no**
+`flow_summary` — the discriminator SPEC-054 R-1 adds so the card states its own
+kind rather than inferring it from ambient session state.
+
+Click **Approve**. Because there is no flow-unlock for unbound writes, **had the
+agent performed more than one write, each would park its own card** — approving
+one never unlocks the next.
+
+After approval the agent clicks "Confirm reset", snapshots the success message,
+and captures a screenshot.
+
+## Step 6: Verify the Result
+
+The agent's final message confirms the reset. To see it in your own browser
+(the connector uses a separate headless browser):
+
+```
+http://localhost:9090/admin/users/?reset=alice@example.com
+http://localhost:9090/admin/users/reset/done/?user=alice@example.com
+```
+
+In the session detail (or the approvals inbox), the durable confirmation record
+carries the **same** `approval_kind: "action"`, the persisted top-line `message`
+(SPEC-054 R-4), and the per-call `change_request` — so a re-login and the
+approver inbox render exactly the card the live stream showed. Every execution
+row carries a signed receipt (SPEC-037), stamped with `action` authority
+provenance (ADR-0010).
+
+## What Just Happened
+
+```
+Operator                  Agent                     Admin Panel
+   │                        │                           │
+   │ "reset alice ad hoc"   │                           │
+   │───────────────────────>│                           │
+   │                        │ web.navigate (NO skill_id)│
+   │                        │──────────────────────────>│  (nothing binds)
+   │                        │ web.snapshot              │
+   │                        │ web.fill_credential (×2)  │  read tier, by
+   │                        │──────────────────────────>│  reference (R-2)
+   │                        │      (login auto-submits) │
+   │                        │ web.navigate (reset URL)  │
+   │                        │──────────────────────────>│
+   │                        │ web.click → ACTION card   │
+   │  ┌──────────────────┐  │  (change request, no flow)│
+   │  │ Approve action   │  │                           │
+   │  └──────────────────┘  │                           │
+   │───────────────────────>│                           │
+   │                        │ web.click (approved,      │
+   │                        │   action-provenance signed)
+   │                        │──────────────────────────>│
+   │                        │ web.snapshot (verify)     │
+   │  "Password reset OK"   │                           │
+   │<───────────────────────│                           │
+```
+
+## Key Observations
+
+1. **Per-action, not per-flow**: with no `web_target` declared, nothing binds,
+   so the write parked an `action`-kind card. N writes would park N cards —
+   there is no flow-unlock on the unbound path (SPEC-054 R-2).
+2. **Unbound login is reachable**: `web.fill_credential` worked **by reference**
+   with no bound flow — previously this was denied `BROWSER_FLOW_NOT_BOUND`,
+   blocking interactive login at the read tier (SPEC-054 gap 3).
+3. **The card is a change request**: the approver saw a plain summary and the
+   decision-relevant fields, secret-masked — not a bare tool name (R-3). The
+   projection is display-only; the signed `args_digest` is unchanged.
+4. **Kind is explicit**: `approval_kind: "action"` rode both the live frame and
+   the durable record, with no `flow_summary` — the same branch computes both,
+   so they cannot disagree (R-1, subsuming the v0.34.1 headline-leak class).
+
+## Running the Demo Script
+
+For a fully automated run (deterministic legs only — no model interaction),
+after `make deploy` and `make deploy-samples`:
+
+```sh
+bash samples/web-checks/adhoc-password-reset/demo/demo.sh
+```
+
+This verifies:
+1. Prerequisites (browser connector, HITL bridging)
+2. Admin pages are served
+3. Credential sets are loaded
+4. The ad-hoc runbook is ingested **and declares no `web_target`** (the unbound
+   guarantee)
+5. All 15 `web.*` tools are registered with correct risk tiers
+
+Add the opt-in chat leg (requires a running agent + the platform-gateway
+port-forward) to drive the live unbound reset and assert every parked card is
+`action`-kind with a change request and every execution signed:
+
+```sh
+RUN_CHAT_LEG=true bash samples/web-checks/adhoc-password-reset/demo/demo.sh
+```
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| Card shows a flow headline / `approval_kind: flow` | The model bound a flow — re-ask ad hoc and ensure no `web_target` skill was navigated with `skill_id` |
+| `SKILL_NOT_WEB_FLOW` on navigate | Expected if `skill_id` was passed for this runbook; retry navigate **without** `skill_id` |
+| "No web.* tools available" | Check `GATEWAY_BROWSER_ENABLED=true` on tool-gateway |
+| "Credential set not found" | Run `sync-browser-credentials.sh` to refresh the secret |
+| "Runbook not found" | Run `make deploy-samples` to pack it into the `skills-samples` ConfigMap |
+| Admin pages 404 | Check `kubectl port-forward` is still running |

@@ -7,6 +7,32 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-07-action-approval-and-change-request-card.md`
+  - release train (v0.35.0) delivering SPEC-054 (sixteenth R5 slice, the B
+    phase of the A→B→C HITL redesign): makes **action** approval first-class
+    beside **flow** approval through an explicit `approval_kind: flow | action`
+    discriminator on the confirmation frame and durable record (computed on one
+    kernel branch with `flow_summary` present iff `flow`, so a card's kind and
+    its headline can never disagree — the structural fix behind the v0.34.1
+    headline-leak patch; stream v9 → v11, retro-fitting SPEC-053's unrecorded
+    v10 clause and declaring the latent `display_hint`); relaxes the gateway's
+    `BROWSER_FLOW_NOT_BOUND` hard-deny so an unbound allowlisted browser write
+    parks a per-action signed gate (N writes → N cards, no flow-unlock),
+    shipped together with the fail-closed replacements (kernel
+    `FLOW_CONTEXTS`/`FLOW_APPROVALS` clearing wherever the gateway clears its
+    binding, reference-only unbound `web.fill_credential`, and the ADR-0010
+    signed authority-provenance discriminator the execution-runtime worker
+    forwards and the gateway enforces one-directionally with a new
+    `BROWSER_FLOW_AUTHORITY_STALE` refusal); turns every action card into a
+    secret-masked **change request** (a display-only `{summary, fields[]}`
+    projection assembled as a sibling of `parameters` so the signed
+    `args_digest` stays byte-identical) with the card `message` persisted for
+    durable inbox/re-login replay parity; and adds a
+    `validate_secret_vocabulary.py` leg to `make verify` plus an unbound
+    per-action browser-write sample (`samples/web-checks/adhoc-password-reset/`,
+    a no-`web_target` runbook so the session stays platform-enforced unbound)
+    exercised by its own `demo.sh` per ADR-0008. No new policy actions, no new
+    audit event types; additive contract change
 - `2026-09-06-post-live-test-flow-headline-leak-gate.md`
   - same-area patch (v0.34.1) from a live test of v0.34.0: a session that
     first bound a browser flow and later parked an unrelated non-browser

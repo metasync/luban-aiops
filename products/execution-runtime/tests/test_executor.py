@@ -110,6 +110,37 @@ class ExecutorTests(unittest.TestCase):
         )
         self.assertNotIn("session_id", self.captured[0]["json"])
 
+    def test_approval_kind_forwarded_in_payload(self) -> None:
+        # SPEC-054 R-2 / ADR-0010: the verified authority provenance rides the
+        # gateway payload so the browser write path can tell a per-action
+        # approval from a write auto-signed under a session-scoped flow
+        # authority, and refuse the latter when no flow is bound any more.
+        for kind in ("action", "flow"):
+            self.outcomes.append(_JsonResponse({"status": "success"}))
+            _run(
+                executor.execute_tool(
+                    _settings(), "web.click", {"ref": 1}, "tok", f"req-{kind}",
+                    session_id="ses-flow-1", approval_kind=kind,
+                )
+            )
+        self.assertEqual(self.captured[0]["json"]["approval_kind"], "action")
+        self.assertEqual(self.captured[1]["json"]["approval_kind"], "flow")
+        # Forwarding it never disturbs the correlation handle beside it.
+        self.assertEqual(self.captured[1]["json"]["session_id"], "ses-flow-1")
+
+    def test_approval_kind_absent_when_envelope_predates_it(self) -> None:
+        # An envelope signed before the field forwards nothing: the gateway
+        # reads absence as "no extra refusal", so today's behavior stays the
+        # default rather than a widening. The field is omitted, never sent empty.
+        self.outcomes.append(_JsonResponse({"status": "success"}))
+        _run(
+            executor.execute_tool(
+                _settings(), "k8s.scale_deployment", {"replicas": 3},
+                "tok", "req-legacy",
+            )
+        )
+        self.assertNotIn("approval_kind", self.captured[0]["json"])
+
     def test_timeout_maps_to_structured_timeout(self) -> None:
         self.outcomes.append(httpx.TimeoutException("slow"))
         result = _run(

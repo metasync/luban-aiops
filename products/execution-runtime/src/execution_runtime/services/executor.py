@@ -27,6 +27,7 @@ async def execute_tool(
     delegated_token: str | None,
     request_id: str,
     session_id: str | None = None,
+    approval_kind: str | None = None,
 ) -> dict[str, Any]:
     """Invoke one tool through the gateway and return the result dict.
 
@@ -63,6 +64,18 @@ async def execute_tool(
     # the bearer token still carries the approving identity.
     if session_id:
         payload["session_id"] = session_id
+    # SPEC-054 R-2 / ADR-0010: forward the authority provenance the handoff
+    # route just verified inside the envelope's HMAC, so the gateway's browser
+    # write path can tell a per-action approval from a write auto-signed under a
+    # session-scoped flow authority — and refuse the latter when no flow is
+    # bound any more (BROWSER_FLOW_AUTHORITY_STALE) instead of reinterpreting it.
+    # It is a provenance handle, not authority: the bearer token still carries
+    # the approving identity, the gateway never sees the signed envelope, and it
+    # treats this value as untrusted input whose only permitted effect is a
+    # refusal. Absent for envelopes predating the field, which the gateway reads
+    # as "no extra refusal" — today's behavior, never a widening.
+    if approval_kind:
+        payload["approval_kind"] = approval_kind
     try:
         async with httpx.AsyncClient(
             timeout=settings.gateway_timeout_seconds

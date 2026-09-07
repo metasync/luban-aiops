@@ -41,6 +41,19 @@ export interface EvidenceTurn {
   frames: EvidenceFrame[];
 }
 
+// SPEC-054 R-3: the display-only change-request projection on a durable
+// record's parked call (wire shape mirrors the live frame's projection).
+export interface ConfirmationChangeRequestField {
+  label: string;
+  value: string;
+  masked?: boolean;
+}
+
+export interface ConfirmationChangeRequest {
+  summary: string;
+  fields?: ConfirmationChangeRequestField[];
+}
+
 // Durable confirmation lifecycle record (SPEC-031 R-1/R-2): the owner's
 // transcript cards and the approver inbox share this wire shape.
 // pending_calls follows the parked confirmation_request payload.
@@ -53,6 +66,9 @@ export interface ConfirmationCallPayload {
   // SPEC-050 follow-up: human-readable element description for browser
   // interaction tools (web.click, web.type, etc.).
   display_hint?: string;
+  // SPEC-054 R-3: the per-call change-request projection persisted at park
+  // time (action cards); absent for flow cards and legacy records.
+  change_request?: ConfirmationChangeRequest;
 }
 
 // SPEC-051 R-6: the card-level browser-flow headline on the durable
@@ -85,6 +101,13 @@ export interface ConfirmationRecord {
   // existed. Both the session-detail and inbox surfaces carry it so the
   // approvals inbox replays the same workflow framing.
   flow_summary?: ConfirmationFlowSummary | null;
+  // SPEC-054 R-1: the parked batch's declared kind captured at park time;
+  // absent/null for records parked before the field existed.
+  approval_kind?: "flow" | "action" | null;
+  // SPEC-054 R-4: the card's top-line message, computed once at park time and
+  // persisted so a re-login and the approver inbox render the same lead line
+  // the live card showed; absent/null for legacy records.
+  message?: string | null;
   status: "pending" | "approved" | "denied" | "expired";
   parked_at?: string | null;
   decider_user_id?: string | null;
