@@ -7,6 +7,7 @@
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 - [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
 </cite>
@@ -19,6 +20,7 @@
 - Expanded change request card functionality with secret masking
 - Updated architecture diagrams to reflect new enforcement boundaries
 - Added comprehensive coverage of flow authority clearing mechanisms
+- **Critical Bug Fix**: Addressed self-approval blocking issue by adding owner_user_name parameter to ensure re-parked cards are attributed to session owner rather than approver
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -41,6 +43,7 @@ Key outcomes delivered:
 - Durable card-message parity across live stream, approver inbox, and reloaded transcripts
 - Flow authority clearing mechanisms prevent stale approvals from outliving gateway bindings
 - Signed execution envelopes carry explicit authority provenance for enforcement
+- **Critical Enhancement**: Session owner attribution prevents self-approval blocks when tier_2 approvers handle subsequent unbound per-action cards
 
 **Section sources**
 - [spec.md:3-736](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L3-L736)
@@ -61,6 +64,7 @@ HC["hitl_confirmations.py"]
 CR["confirmation_records.py"]
 FA["flow_approvals.py"]
 ES["execution_signing.py"]
+RT["routes.py"]
 end
 subgraph "Tool Gateway"
 BC["browser_connector.py"]
@@ -70,6 +74,7 @@ RK --> CR
 RK --> FA
 RK --> ES
 RK --> BC
+RT --> RK
 HC --> CR
 FA --> RK
 ES --> RK
@@ -81,6 +86,7 @@ ES --> RK
 - [confirmation_records.py:1-744](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L1-L744)
 - [flow_approvals.py:1-274](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L274)
 - [execution_signing.py:1-175](file://products/agent-platform/src/agent_service/services/execution_signing.py#L1-L175)
+- [routes.py:297-389](file://products/agent-platform/src/agent_service/api/v2/routes.py#L297-L389)
 - [browser_connector.py:1-800](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L1-L800)
 
 **Section sources**
@@ -107,23 +113,24 @@ These behaviors reuse existing per-action approval and signed execution paths an
 - [spec.md:144-368](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L144-L368)
 
 ## Architecture Overview
-The approval flow spans the agent platform kernel, HITL registry, durable store, execution signing, and tool gateway enforcement boundaries with enhanced staleness protection.
+The approval flow spans the agent platform kernel, HITL registry, durable store, execution signing, and tool gateway enforcement boundaries with enhanced staleness protection and session owner attribution.
 
 ```mermaid
 sequenceDiagram
 participant Client as "Operator / Portal"
+participant Routes as "Confirm Route"
 participant Kernel as "AgentKernel"
 participant Registry as "ConfirmationRegistry"
 participant Store as "ConfirmationRecordStore"
 participant Signer as "ExecutionSigner"
 participant GW as "BrowserConnector"
-Client->>Kernel : "Chat turn with mutating call"
-Kernel->>GW : "Invoke tool (web.* or k8s.*) with identity/risk"
-GW-->>Kernel : "Risk tier + tool metadata"
+Client->>Routes : "Confirm (approve/deny)"
+Routes->>Kernel : "resume_confirmation(owner_user_name=session.owner)"
 Kernel->>Registry : "Register PendingConfirmation with approval_kind"
 Registry->>Store : "save_parked(record)"
 Kernel-->>Client : "SSE confirmation_request frame"
-Client->>Kernel : "Confirm (approve/deny)"
+Client->>Routes : "Confirm (approve/deny)"
+Routes->>Kernel : "claim + resolve with owner_user_name"
 Kernel->>Registry : "claim + resolve"
 Registry->>Store : "mark_resolved(status, decider, decision)"
 Kernel->>Signer : "build_requests() with approval_kind='action'"
@@ -135,7 +142,8 @@ Kernel-->>Client : "Stream completion"
 ```
 
 **Diagram sources**
-- [runtime_kernel.py:409-443](file://products/agent-platform/src/agent_service/runtime_kernel.py#L409-L443)
+- [routes.py:297-389](file://products/agent-platform/src/agent_service/api/v2/routes.py#L297-L389)
+- [runtime_kernel.py:1792-1974](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1792-L1974)
 - [hitl_confirmations.py:208-349](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L208-L349)
 - [confirmation_records.py:511-545](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L511-L545)
 - [execution_signing.py:70-105](file://products/agent-platform/src/agent_service/services/execution_signing.py#L70-L105)
@@ -262,6 +270,39 @@ Portal-->>Portal : "confirmationRecordToCard sets card.message"
 **Section sources**
 - [spec.md:334-368](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L334-L368)
 
+### Session Owner Attribution and Self-Approval Prevention - Critical Enhancement
+**New** A critical enhancement addresses the self-approval blocking issue that prevented tier_2 approvers from deciding subsequent unbound per-action cards.
+
+- **Problem**: When a tier_2 approver resumed a parked confirmation, any subsequent per-action cards would be attributed to the approver rather than the original session owner, triggering self-approval blocks.
+- **Solution**: Added `owner_user_name` parameter to `resume_confirmation` method that threads the session owner into the resume call, ensuring re-parked cards are attributed to the original requester.
+- **Implementation**: The confirm route now passes `session.user_id` as `owner_user_name` to `kernel.resume_confirmation()`, allowing tier_2 approvers to decide subsequent unbound per-action cards without triggering self-approval blocks.
+- **Impact**: Enables seamless multi-step approval workflows where different approvers can handle sequential actions without policy violations.
+
+```mermaid
+sequenceDiagram
+participant Approver as "Tier 2 Approver"
+participant Routes as "Confirm Route"
+participant Kernel as "AgentKernel"
+participant Session as "Session Store"
+Note over Approver,Session : Before Fix : Re-parked cards attributed to approver
+Note over Approver,Session : After Fix : Re-parked cards attributed to session owner
+Approver->>Routes : "Confirm session #123"
+Routes->>Session : "Get session.owner_id"
+Routes->>Kernel : "resume_confirmation(owner_user_name=owner_id)"
+Kernel->>Kernel : "_build_confirmation_frame(owner_user_name)"
+Kernel-->>Approver : "Process next action"
+Note over Kernel : If another action parks,<br/>it's attributed to session owner<br/>not the approver
+```
+
+**Diagram sources**
+- [routes.py:365-383](file://products/agent-platform/src/agent_service/api/v2/routes.py#L365-L383)
+- [runtime_kernel.py:1792-1974](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1792-L1974)
+- [runtime_kernel.py:1920-1933](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1920-L1933)
+
+**Section sources**
+- [routes.py:365-383](file://products/agent-platform/src/agent_service/api/v2/routes.py#L365-L383)
+- [runtime_kernel.py:1792-1974](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1792-L1974)
+
 ### Flow Authority and Context (Supporting R-1/R-2) - Enhanced
 **Updated** Flow authority management now includes enhanced clearing mechanisms to prevent stale approvals.
 
@@ -311,13 +352,14 @@ FlowApproval --> FlowKillingCodes : "cleared on these errors"
 - [flow_approvals.py:1-274](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L274)
 
 ## Dependency Analysis
-**Updated** Dependencies now include the execution signing service for approval_kind provenance.
+**Updated** Dependencies now include the execution signing service for approval_kind provenance and enhanced session owner threading.
 
 - runtime_kernel.py composes middlewares and integrates HITL registration, durable record creation, flow approval state, and execution signing.
 - hitl_confirmations.py maintains the in-memory registry of pending confirmations and serializes payloads for the confirmation_request frame.
 - confirmation_records.py provides in-memory and Postgres backends for durable confirmation lifecycle storage.
 - flow_approvals.py holds session-scoped flow context and approval authority used by the kernel to decide flow vs action framing.
 - execution_signing.py stamps approval_kind on both per-action and flow-signed envelopes.
+- routes.py enhances the confirm endpoint to thread session owner information into resume calls.
 - browser_connector.py enforces origin allowlist, flow binding, and deviation guard; write-tier calls ride the upstream HITL and signed execution path.
 
 ```mermaid
@@ -327,6 +369,7 @@ RK --> CR["confirmation_records.py"]
 RK --> FA["flow_approvals.py"]
 RK --> ES["execution_signing.py"]
 RK --> BC["browser_connector.py"]
+RT["routes.py"] --> RK
 HC --> CR
 FA --> RK
 ES --> RK
@@ -339,6 +382,7 @@ BC --> RK
 - [confirmation_records.py:1-744](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L1-L744)
 - [flow_approvals.py:1-274](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L274)
 - [execution_signing.py:1-175](file://products/agent-platform/src/agent_service/services/execution_signing.py#L1-L175)
+- [routes.py:297-389](file://products/agent-platform/src/agent_service/api/v2/routes.py#L297-L389)
 - [browser_connector.py:1-800](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L1-L800)
 
 **Section sources**
@@ -353,11 +397,12 @@ BC --> RK
 - Secret masking and snapshot element parsing are lightweight operations scoped to confirmation payloads.
 - **New**: Execution signing adds minimal overhead but provides crucial security guarantees through HMAC signatures.
 - **New**: Enhanced flow authority clearing prevents stale state accumulation.
+- **New**: Session owner threading adds negligible overhead but enables complex multi-approver workflows.
 
 [No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
-**Updated** Troubleshooting guide now includes issues related to approval_kind and flow authority clearing.
+**Updated** Troubleshooting guide now includes issues related to approval_kind, flow authority clearing, and session owner attribution.
 
 Common issues and where to look:
 - Missing card message on durable surfaces: verify message persistence path and mapping in the durable record and portal model.
@@ -366,12 +411,16 @@ Common issues and where to look:
 - Confirmation not resuming: inspect single-flight claim/resume logic and TTL handling in the registry.
 - **New**: Flow authority stale errors: check for `BROWSER_FLOW_AUTHORITY_STALE` refusals indicating stale flow-provenance envelopes.
 - **New**: Approval_kind mismatch: verify that execution envelopes carry the correct approval_kind value matching the actual authorization source.
+- **New**: Self-approval blocking: ensure session owner is properly threaded through resume calls when tier_2 approvers handle multiple actions.
+- **New**: Multi-step approval failures: verify that re-parked cards are attributed to session owner rather than the current approver.
 
 **Section sources**
 - [hitl_confirmations.py:208-349](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L208-L349)
 - [confirmation_records.py:491-545](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L491-L545)
 - [browser_connector.py:423-477](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L423-L477)
 - [flow_approvals.py:70-75](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L70-L75)
+- [routes.py:365-383](file://products/agent-platform/src/agent_service/api/v2/routes.py#L365-L383)
+- [runtime_kernel.py:1920-1933](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1920-L1933)
 
 ## Conclusion
 **Updated** SPEC-054 has been successfully delivered in v0.35.0 as part of the R5 hardening release. The specification elevates action-level approvals to first-class status, enables interactive browser mutations through per-action signed gates on allowlisted origins, improves operator decision-making with secret-masked change requests, and ensures durable parity of the card message across all surfaces.
@@ -382,8 +431,9 @@ Key achievements:
 - Human-readable change request projections with secret masking
 - Explicit approval_kind discriminator preventing stale state issues
 - Robust flow authority clearing mechanisms preventing security regressions
+- **Critical Enhancement**: Session owner attribution preventing self-approval blocks in multi-approver workflows
 - All changes are additive and build on existing HITL and signed-execution foundations, keeping the trust boundary intact while expanding safe interactivity
 
-The delivery includes comprehensive testing, contract validation, and backward compatibility measures ensuring smooth adoption across the platform.
+The delivery includes comprehensive testing, contract validation, and backward compatibility measures ensuring smooth adoption across the platform. The critical bug fix for self-approval blocking enables more complex approval workflows where different approvers can handle sequential actions without policy violations.
 
 [No sources needed since this section summarizes without analyzing specific files]

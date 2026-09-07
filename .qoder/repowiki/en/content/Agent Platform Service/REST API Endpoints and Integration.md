@@ -35,6 +35,13 @@
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Updated confirm route documentation to reflect enhanced session owner threading for proper handling of multiple unbound per-action cards
+- Added detailed explanation of self-approval blocking prevention mechanism
+- Enhanced confirmation workflow documentation with new owner attribution logic
+- Updated examples to demonstrate multi-card approval scenarios
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
@@ -206,6 +213,24 @@ Example flows:
 - [agent-chat-response.schema.json](file://shared/shared-contracts/schemas/agent-chat-response.schema.json)
 - [agent-session.schema.json](file://shared/shared-contracts/schemas/agent-session.schema.json)
 
+### Confirmation Workflow Enhancement
+**Updated** The confirm route has been enhanced to properly thread session owner information into resume_confirmation calls, enabling proper handling of multiple unbound per-action cards and preventing self-approval blocking scenarios.
+
+The enhanced confirmation workflow now includes:
+
+#### Session Owner Threading
+When a tier_2 approver confirms a parked action, the system now passes the session owner (original requester) separately from the decider (approver). This prevents the approver from being blocked from approving subsequent actions due to self-approval rules.
+
+#### Multi-Card Approval Support
+For scenarios where a resumed turn parks another per-action card, the new card is attributed to the session owner rather than the approver who resumed the turn. This allows the same approver to approve multiple sequential actions without triggering self-approval blocks.
+
+#### Self-Approval Prevention
+The enhancement specifically addresses cases where an approver's decision resumes a turn that then parks another per-action card. Previously, this would attribute the new card to the approver, causing the platform-gateway's tier check to block that same approver from deciding the next card with a `self_approval` 403 error.
+
+**Section sources**
+- [routes.py:297-390](file://products/agent-platform/src/agent_service/api/v2/routes.py#L297-L390)
+- [runtime_kernel.py:1792-1989](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1792-L1989)
+
 ### Session Management Operations
 Session endpoints manage lifecycle and state:
 - Create session: Initialize a new session and return a session identifier.
@@ -323,6 +348,7 @@ Common issues and resolutions:
 - Provider errors: Confirm credentials and network connectivity; inspect provider logs.
 - Session errors: Validate session IDs and state; check persistence backend availability.
 - Rate limiting: Review rate limit headers and adjust client retry strategies.
+- **Confirmation approval issues**: When encountering self-approval blocking (403 errors), verify that the session owner is properly threaded through the confirmation workflow.
 
 Error response format:
 - Standardized JSON body with error code, message, and optional details.
@@ -365,6 +391,7 @@ The Agent Platform v2 API provides robust REST endpoints for agent chat, session
 - Agent chat: Send a chat request, handle streaming events, and process final result.
 - Session management: Create a session, perform interactions, and terminate when done.
 - Provider configuration: List providers, configure credentials, and validate connectivity.
+- **Multi-card approvals**: Handle scenarios where a single approver needs to approve multiple sequential actions without self-approval blocking.
 
 **Section sources**
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
