@@ -204,6 +204,15 @@ class RuntimeSettings:
     skills_client_id: str = "agent-service"
     skills_client_secret: str | None = None
     skills_client_timeout_seconds: float = 10.0
+    # Authoring-trace bounds (SPEC-055 R-1): the per-session step cap that
+    # keeps one long session from growing an unbounded trace, and the idle
+    # window after which a still-``draft`` trace is reclaimed. Retention is
+    # lifecycle-bound, deliberately *not* tied to the 30-day
+    # execution-record sweep — a session authored now stays graduable after
+    # its signed receipts are gone, and a terminal (graduated/discarded)
+    # trace is never swept. 0 idle days disables the idle-GC entirely.
+    authoring_trace_max_steps: int = 100
+    authoring_trace_idle_days: int = 180
 
     @staticmethod
     def default_provider_options(provider: RuntimeProvider) -> RuntimeProviderOptions:
@@ -283,6 +292,11 @@ class RuntimeSettings:
             raise ValueError(
                 "AGENT_SKILLS_CLIENT_TIMEOUT_SECONDS must be > 0."
             )
+        # Authoring-trace bounds validation (SPEC-055 R-1).
+        if self.authoring_trace_max_steps < 1:
+            raise ValueError("AGENT_AUTHORING_TRACE_MAX_STEPS must be >= 1.")
+        if self.authoring_trace_idle_days < 0:
+            raise ValueError("AGENT_AUTHORING_TRACE_IDLE_DAYS must be >= 0.")
         try:
             from zoneinfo import ZoneInfo
 
@@ -457,6 +471,12 @@ class RuntimeSettings:
             skills_client_secret=_optional_str("AGENT_SKILLS_CLIENT_SECRET"),
             skills_client_timeout_seconds=float(
                 os.getenv("AGENT_SKILLS_CLIENT_TIMEOUT_SECONDS", "10")
+            ),
+            authoring_trace_max_steps=int(
+                os.getenv("AGENT_AUTHORING_TRACE_MAX_STEPS", "100")
+            ),
+            authoring_trace_idle_days=int(
+                os.getenv("AGENT_AUTHORING_TRACE_IDLE_DAYS", "180")
             ),
         )
 

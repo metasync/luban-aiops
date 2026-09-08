@@ -225,6 +225,36 @@ def test_skills_client_settings_validation():
         RuntimeSettings(skills_client_timeout_seconds=0.0)
 
 
+def test_authoring_trace_settings_defaults(monkeypatch):
+    """SPEC-055 R-1: the authoring-trace bounds default to a 100-step
+    per-session cap and a 180-day idle window. Retention is lifecycle-bound
+    — deliberately not the 30-day execution-record sweep — so a session
+    authored now stays graduable after its signed receipts are gone."""
+    monkeypatch.delenv("AGENT_AUTHORING_TRACE_MAX_STEPS", raising=False)
+    monkeypatch.delenv("AGENT_AUTHORING_TRACE_IDLE_DAYS", raising=False)
+    settings = RuntimeSettings.from_env()
+    assert settings.authoring_trace_max_steps == 100
+    assert settings.authoring_trace_idle_days == 180
+
+
+def test_authoring_trace_settings_read_env(monkeypatch):
+    monkeypatch.setenv("AGENT_AUTHORING_TRACE_MAX_STEPS", "25")
+    monkeypatch.setenv("AGENT_AUTHORING_TRACE_IDLE_DAYS", "30")
+    settings = RuntimeSettings.from_env()
+    assert settings.authoring_trace_max_steps == 25
+    assert settings.authoring_trace_idle_days == 30
+
+
+def test_authoring_trace_settings_validation():
+    with pytest.raises(ValueError, match="MAX_STEPS must be >= 1"):
+        RuntimeSettings(authoring_trace_max_steps=0)
+    with pytest.raises(ValueError, match="IDLE_DAYS must be >= 0"):
+        RuntimeSettings(authoring_trace_idle_days=-1)
+    # 0 idle days is valid: it disables the idle-GC rather than sweeping
+    # every draft trace on sight.
+    assert RuntimeSettings(authoring_trace_idle_days=0).authoring_trace_idle_days == 0
+
+
 def test_model_discovery_settings_validation():
     with pytest.raises(ValueError, match="REFRESH_SECONDS must be >= 1"):
         RuntimeSettings(model_discovery_refresh_seconds=0)
