@@ -17,6 +17,10 @@ from agent_service.services.audit_emitter import (
     build_audit_event,
     emit_audit_event,
 )
+from agent_service.services.authoring_trace import (
+    AUTHORING_TRACE_STORE,
+    make_trace_step,
+)
 from agent_service.services.confirmation_records import (
     CONFIRMATION_RECORD_STORE,
     make_record as make_confirmation_record,
@@ -46,10 +50,12 @@ from agent_service.services.flow_approvals import (
 from agent_service.services.hitl_confirmations import (
     CONFIRMATION_REGISTRY,
     PendingConfirmation,
+    RISK_LEVEL_ACTIONS,
     curated_effect_sentence,
     redact_pending_calls,
 )
 from agent_service.services.model_catalog import MODEL_CATALOG
+from agent_service.services.secret_params import parameterize_for_trace
 
 LOGGER = logging.getLogger(__name__)
 MAX_CACHED_AGENTS = 1000
@@ -1275,9 +1281,41 @@ class AgentKernel:
                 )
             return {}, REASON_SIGNING_UNAVAILABLE
         requests_by_call: dict[str, dict] = {}
+        # The signed envelope carries an ``args_digest``, never the raw
+        # arguments, so the authoring-trace capture below has to be handed
+        # them separately (SPEC-055 R-2). One read of the parked payload
+        # yields both the arguments and the risk tier the toolkit
+        # snapshotted at park time; it is raw at resume because
+        # ``redact_parameters`` is a display/at-rest projection applied to
+        # copies, never to a signing input.
+        calls_by_id: dict[str, dict] = {
+            str(call.get("call_id")): call
+            for call in pending.pending_calls_payload()
+        }
         for request in build_requests(pending, decider_user_id, key):
             requests_by_call[request["call_id"]] = request
             self._persist_execution_request(request)
+            call = calls_by_id.get(str(request["call_id"])) or {}
+            # Being *signed* is not the same as being a mutation, so the
+            # trace gate is the tier rather than the signature. A read-tier
+            # call reaches this seam whenever it is off the middleware's
+            # curated auto-allow list — an unvetted read tool parks and is
+            # signed like any other ASK-gated call — and it is not a replay
+            # step: a graduated flow declares ``risk_class: write``, so a
+            # read in its step list would either fail R-4's planned
+            # re-validation (stage 6) or mislabel the read as a write. The
+            # platform's single risk→action mapping decides, so this seam
+            # and the policy bridge cannot disagree about what a mutation
+            # is; a call with no known tier is not captured either, which
+            # degrades to "no graduation candidate" — the outcome R-2
+            # already accepts for a store failure — rather than polluting a
+            # store that outlives every receipt. The flow-unlock site needs
+            # no such gate: it is reachable only through
+            # ``BROWSER_WRITE_TOOLS``.
+            if RISK_LEVEL_ACTIONS.get(call.get("risk_level")) == "tools:mutate":
+                self._capture_authoring_step(
+                    request, dict(call.get("parameters") or {})
+                )
             self._emit_execution_event(
                 "execution_requested",
                 "success",
@@ -1311,6 +1349,66 @@ class AgentKernel:
                 exc,
             )
 
+    def _capture_authoring_step(self, envelope: dict, parameters: dict) -> None:
+        """Best-effort authoring-trace append (SPEC-055 R-2).
+
+        Runs at the same seam as ``_persist_execution_request`` and on the
+        same already-signed envelope, so a trace step exists only for a
+        *mutating* call a human authorized (per-action, SPEC-054) or
+        admitted under a flow authority (SPEC-051) **and** a key signed —
+        never for a parked, denied or read-tier call, and never for an
+        unsigned one (a missing signing key rejects the batch before this
+        seam is reached). The tier gate lives at the two call sites, not
+        here: the per-action site reads the parked call's snapshotted
+        ``risk_level``, and the flow-unlock site is reachable only through
+        ``BROWSER_WRITE_TOOLS``. Both approval kinds append, so a mixed
+        session yields one coherent ordered trace; the store assigns the
+        position, because only the store sees the whole sequence.
+
+        Same posture as the write beside it: a trace failure degrades
+        graduation candidacy — the session simply produces no candidate —
+        and never blocks the mutation's execution, its signed request, or
+        its receipt. Called *after* ``_persist_execution_request`` so the
+        tamper evidence is durable before the derived trace is attempted.
+
+        The arguments are parameterized here, before the write: the store
+        persists exactly what it is given, and a trace outlives the receipts
+        that would otherwise be the only copy of those arguments, so a
+        literal credential must never reach it. Only ``execution_id`` /
+        ``confirm_id`` *references* are stored — the signed request, receipt
+        and outcome stay in ``execution_records``, so the trace never
+        duplicates tamper evidence (ADR-0009).
+        """
+        session_id = str(envelope.get("session_id") or "")
+        if not session_id:
+            return
+        tool_name = str(envelope.get("tool_name") or "")
+        execution_id = str(envelope.get("execution_id") or "")
+        try:
+            AUTHORING_TRACE_STORE.append_step(
+                make_trace_step(
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    # The signed envelope carries an ``args_digest``, never
+                    # the raw arguments, so the caller hands them in from the
+                    # same in-memory copy the signer digested.
+                    args=parameterize_for_trace(tool_name, parameters),
+                    # Date the step from the signature, not from the append:
+                    # ``requested_at`` is the moment the mutation was
+                    # authorized, and it is already in the trace store's
+                    # canonical ``%Y-%m-%dT%H:%M:%SZ`` form.
+                    captured_at=str(envelope.get("requested_at") or ""),
+                    execution_id=execution_id or None,
+                    confirm_id=str(envelope.get("confirm_id") or "") or None,
+                )
+            )
+        except Exception as exc:
+            LOGGER.warning(
+                "authoring trace capture failed for %s: %s",
+                execution_id or session_id,
+                exc,
+            )
+
     def _sign_flow_execution(
         self, tool_call: object, gateway_tool_name: str
     ) -> dict | None:
@@ -1326,8 +1424,9 @@ class AgentKernel:
         guard that eliminates the ADR-0007 cross-flow window); the execution
         state is not armed (``EXECUTION_REQUESTS`` is not a dict); or no signing
         key is provisioned. Each unlocked write is still individually signed,
-        persisted, and audited (``execution_requested``), and the tool-gateway
-        deviation guard still bounds it on invocation.
+        persisted, audited (``execution_requested``), and appended to the
+        session's authoring trace, and the tool-gateway deviation guard still
+        bounds it on invocation.
         """
         from agent_service.tools.gateway_tools import (
             CHAT_SESSION_ID,
@@ -1379,6 +1478,11 @@ class AgentKernel:
         # _handoff_execution presents it to the worker.
         requests[call_id] = envelope
         self._persist_execution_request(envelope)
+        # Same seam as the card path, so a session mixing per-action writes
+        # and flow-unlocked writes yields one ordered trace (SPEC-055 R-2).
+        # ``parameters`` here is the very object just digested into
+        # ``envelope["args_digest"]``.
+        self._capture_authoring_step(envelope, parameters)
         audit_context = EXECUTION_AUDIT_CONTEXT.get() or {}
         self._emit_execution_event(
             "execution_requested",

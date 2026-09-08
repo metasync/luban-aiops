@@ -21,6 +21,7 @@ from agent_service.app import create_app
 from agent_service.runtime_kernel import AgentKernel
 from agent_service.runtime_settings import RuntimeSettings
 from agent_service.services import session_service
+from agent_service.services.authoring_trace import AUTHORING_TRACE_STORE
 from agent_service.services.confirmation_records import (
     CONFIRMATION_RECORD_STORE,
     make_record,
@@ -41,6 +42,7 @@ from agent_service.services.hitl_confirmations import (
 )
 from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
 from agent_service.services.runtime_dependencies import get_runtime_kernel
+from agent_service.services.secret_params import TRACE_CREDENTIAL_PLACEHOLDER
 from agent_service.tools.gateway_tools import (
     EXECUTION_REJECTION,
     EXECUTION_REQUESTS,
@@ -69,6 +71,20 @@ SECRET_TOOL_CALL = ToolCallBlock(
     input='{"name": "db", "password": "s3cret-PASSWORD-xyz"}',
 )
 
+# SPEC-055 R-2: a credential entering a flow as a *reference* to a named
+# credential set rather than as a literal — the structural fix this stage
+# exists to protect. Here it stands in for a read-tier parked call, pinning
+# the capture gate's exclusion of one; the projection-level guarantee that
+# this reference survives ``parameterize_for_trace`` verbatim (which is what
+# makes ``is_known_safe``'s precedence over the name vocabulary load-bearing,
+# since ``is_secret_param`` matches "credential" as a substring) is pinned
+# against the projection itself in test_secret_params.py.
+CREDENTIAL_TOOL_CALL = ToolCallBlock(
+    id="call-cred",
+    name="web.fill_credential",
+    input='{"credential_set": "admin-portal", "field": "password"}',
+)
+
 
 def _park_event() -> RequireUserConfirmEvent:
     return RequireUserConfirmEvent(reply_id="reply-1", tool_calls=[TOOL_CALL])
@@ -89,12 +105,19 @@ def _clean_registry():
     executions = getattr(EXECUTION_RECORD_STORE, "_by_key", None)
     if executions is not None:
         executions.clear()
+    # SPEC-055 R-2: the approval seam also appends to the authoring trace, so
+    # the same isolation applies to it.
+    traces = getattr(AUTHORING_TRACE_STORE, "_by_session", None)
+    if traces is not None:
+        traces.clear()
     yield
     CONFIRMATION_REGISTRY._by_session.clear()
     if records is not None:
         records.clear()
     if executions is not None:
         executions.clear()
+    if traces is not None:
+        traces.clear()
 
 
 def _configured_kernel(**overrides) -> AgentKernel:
@@ -1465,9 +1488,13 @@ def _capture_execution_audits(monkeypatch) -> list:
     return events
 
 
-def _approve_parked(monkeypatch, kernel, agent, request_id="req-2"):
+def _approve_parked(
+    monkeypatch, kernel, agent, request_id="req-2", risk_levels=None
+):
     _patch_agent(monkeypatch, kernel, agent)
-    pending = CONFIRMATION_REGISTRY.register("s1", "alice", "reply-1", [TOOL_CALL], 600)
+    pending = CONFIRMATION_REGISTRY.register(
+        "s1", "alice", "reply-1", [TOOL_CALL], 600, risk_levels=risk_levels,
+    )
     claimed = CONFIRMATION_REGISTRY.claim("s1", pending.confirm_id, 600)
     return _drain(
         kernel.resume_confirmation(
@@ -1573,6 +1600,9 @@ def test_resume_denial_constructs_no_execution_requests(monkeypatch):
     assert agent.observed_requests is None
     assert agent.observed_rejection is None
     assert EXECUTION_RECORD_STORE.load_for_session("s1") == []
+    # SPEC-055 R-2: a trace is a by-product of an *approved* mutation, so a
+    # denial appends nothing.
+    assert AUTHORING_TRACE_STORE.load_for_session("s1") == []
     assert audits == []
 
 
@@ -1588,6 +1618,9 @@ def test_resume_missing_signing_key_rejects_fail_closed(monkeypatch):
     assert agent.observed_requests is None
     assert agent.observed_rejection == "signing_unavailable"
     assert EXECUTION_RECORD_STORE.load_for_session("s1") == []
+    # SPEC-055 R-2: the fail-closed rejection happens before the capture
+    # seam, so an *unsigned* mutation never enters an authoring trace.
+    assert AUTHORING_TRACE_STORE.load_for_session("s1") == []
 
     rejected = [a for a in audits if a["event_type"] == "execution_rejected"]
     assert len(rejected) == 1
@@ -1683,4 +1716,194 @@ def test_resume_timeout_result_signs_timeout_receipt(monkeypatch):
     completed = [a for a in audits if a["event_type"] == "execution_completed"]
     assert completed[0]["outcome"] == "error"
     assert completed[0]["details"]["status"] == "timeout"
+
+
+# --- SPEC-055 R-2: authoring-trace capture at the approval seam --------------
+
+
+def _approve_call(monkeypatch, kernel, agent, tool_call, **register_kwargs):
+    """Approve one parked call through the real ``resume_confirmation`` seam."""
+    _patch_agent(monkeypatch, kernel, agent)
+    pending = CONFIRMATION_REGISTRY.register(
+        "s1", "alice", "reply-1", [tool_call], 600, **register_kwargs
+    )
+    claimed = CONFIRMATION_REGISTRY.claim("s1", pending.confirm_id, 600)
+    return _drain(
+        kernel.resume_confirmation(
+            session_id="s1",
+            pending=claimed,
+            decision="approve",
+            user_name="alice",
+            request_id="req-2",
+            bearer_token="tok-alice",
+        )
+    )
+
+
+def _risk_snapshot(*tool_calls, level="write"):
+    """A park-time risk-tier snapshot, keyed the way the registry looks it up.
+
+    ``pending_calls_payload`` reads ``risk_levels[tool_call.name]``, and in
+    production that name is the sanitized gateway name while these fixtures
+    use both forms — so keying off the call itself keeps the snapshot honest
+    whichever form a fixture parks. Without it a parked call carries no tier
+    at all, which the R-2 capture gate treats as "not a known mutation".
+    """
+    return {call.name: level for call in tool_calls}
+
+
+def test_resume_approval_appends_a_trace_step_beside_the_record(monkeypatch):
+    """SPEC-055 R-2: capture happens at the same resume seam that writes
+    ``execution_records``, as a by-product of the already-signed mutation —
+    so an approved per-action write yields exactly one replayable step next
+    to exactly one durable record."""
+    kernel = _configured_kernel(execution_signing_key=SIGNING_KEY)
+    agent = ExecutionCapturingAgent()
+    _capture_execution_audits(monkeypatch)
+
+    frames = _approve_parked(
+        monkeypatch, kernel, agent, risk_levels=_risk_snapshot(TOOL_CALL)
+    )
+    request = agent.observed_requests["call-1"]
+
+    rows = AUTHORING_TRACE_STORE.load_for_session("s1")
+    assert len(rows) == 1
+    step = rows[0]
+    assert step["session_id"] == "s1"
+    assert step["position"] == 1
+    assert step["tool_name"] == "k8s.restart_service"
+    # The replayable argument the receipt only ever hashed.
+    assert step["args"] == {"namespace": "ops"}
+    assert step["execution_id"] == request["execution_id"]
+    assert step["confirm_id"] == frames[0]["confirm_id"]
+    assert step["captured_at"] == request["requested_at"]
+    assert step["status"] == "draft"
+    # One record, one step: the two stores stay 1:1 at this seam.
+    records = EXECUTION_RECORD_STORE.load_for_session("s1")
+    assert [row["execution_id"] for row in records] == [step["execution_id"]]
+
+
+def test_resume_approval_parameterizes_a_literal_secret_at_capture(monkeypatch):
+    """SPEC-055 R-2: a literal secret is parameterized *before* the trace
+    write, so it never reaches a store that outlives the receipts which are
+    otherwise its only copy — while the signed digest stays bound to the raw
+    arguments the gateway verifies against."""
+    kernel = _configured_kernel(execution_signing_key=SIGNING_KEY)
+    agent = ExecutionCapturingAgent()
+    _capture_execution_audits(monkeypatch)
+
+    _approve_call(
+        monkeypatch,
+        kernel,
+        agent,
+        SECRET_TOOL_CALL,
+        approval_kind="action",
+        risk_levels=_risk_snapshot(SECRET_TOOL_CALL),
+    )
+
+    rows = AUTHORING_TRACE_STORE.load_for_session("s1")
+    assert len(rows) == 1
+    assert rows[0]["args"] == {
+        # ``password`` is on the name vocabulary ⇒ a credential-reference
+        # placeholder; ``name`` is off-vocabulary for this tool ⇒ it rides
+        # verbatim so the trace stays replayable.
+        "name": "db",
+        "password": TRACE_CREDENTIAL_PLACEHOLDER,
+    }
+    assert "s3cret-PASSWORD-xyz" not in json.dumps(rows)
+    # The signed copy is untouched: parameterization is a trace projection,
+    # never a signing input (the R-7c invariant, from the other side).
+    request = agent.observed_requests["call-secret"]
+    assert request["args_digest"] == canonical_digest(
+        {"name": "db", "password": "s3cret-PASSWORD-xyz"}
+    )
+    assert verify_envelope(request, request["signature"], SIGNING_KEY)
+
+
+def test_a_read_tier_parked_call_is_never_captured(monkeypatch):
+    """SPEC-055 R-2: a read-tier call is never captured, and being *signed*
+    is not what makes a call a mutation. A read tool parks whenever it is off
+    the middleware's curated auto-allow list, so it reaches this seam
+    approved and signed — the park-time tier snapshot is what excludes it.
+
+    ``web.fill_credential`` is the exemplar on purpose, and it carries a
+    consequence stages 6 and 7 have to absorb: it is read-tier *and* on the
+    default auto-allow list, so under the default configuration a
+    credential-set reference step never enters a trace at all. A graduated
+    flow therefore replays the mutations with no way to authenticate, and
+    the credential reference is what the human completing the draft supplies
+    at merge time (spec.md R-4: graduation produces a draft for human review
+    and merge, never an auto-published skill). Recorded in tasks.md as an
+    R-4/R-5 input.
+    """
+    kernel = _configured_kernel(execution_signing_key=SIGNING_KEY)
+    agent = ExecutionCapturingAgent()
+    _capture_execution_audits(monkeypatch)
+
+    _approve_call(
+        monkeypatch,
+        kernel,
+        agent,
+        CREDENTIAL_TOOL_CALL,
+        approval_kind="action",
+        risk_levels=_risk_snapshot(CREDENTIAL_TOOL_CALL, level="read"),
+    )
+
+    # Approved, signed and durably recorded like any other call...
+    request = agent.observed_requests["call-cred"]
+    assert verify_envelope(request, request["signature"], SIGNING_KEY)
+    assert len(EXECUTION_RECORD_STORE.load_for_session("s1")) == 1
+    # ...but it is not a mutation, so it is not a replay step.
+    assert AUTHORING_TRACE_STORE.load_for_session("s1") == []
+    assert AUTHORING_TRACE_STORE.trace_status("s1") is None
+
+
+def test_a_trace_store_failure_never_blocks_execution_or_the_receipt(
+    monkeypatch,
+):
+    """SPEC-055 R-2: capture is best-effort and fail-safe. A trace store that
+    raises degrades to "no graduation candidate" — the resumed stream still
+    approves, the signed request still reaches the tool boundary, and the
+    ``execution_records`` row still closes with a signed receipt."""
+    class BrokenTraceStore:
+        backend_name = "broken"
+
+        def append_step(self, step):
+            raise RuntimeError("trace store down")
+
+    monkeypatch.setattr(
+        "agent_service.runtime_kernel.AUTHORING_TRACE_STORE", BrokenTraceStore()
+    )
+    kernel = _configured_kernel(execution_signing_key=SIGNING_KEY)
+    tool_frame = {
+        "type": "tool_result",
+        "call_id": "call-1",
+        "tool_name": "k8s.restart_service",
+        "status": "success",
+        "output": {"restarted": True},
+    }
+    agent = ToolResultAgent([tool_frame])
+    audits = _capture_execution_audits(monkeypatch)
+
+    # The tier has to be a known mutation, or the gate never reaches the
+    # broken store and this test would pass vacuously.
+    frames = _approve_parked(
+        monkeypatch, kernel, agent, risk_levels=_risk_snapshot(TOOL_CALL)
+    )
+
+    # The mutation still executed and was still receipted.
+    assert frames[0]["status"] == "approved"
+    assert any(
+        f == {**tool_frame, "request_id": "req-2", "session_id": "s1"}
+        for f in frames
+    )
+    rows = EXECUTION_RECORD_STORE.load_for_session("s1")
+    assert [row["status"] for row in rows] == ["succeeded"]
+    assert rows[0]["digest_match"] is True
+    receipt = rows[0]["receipt"]
+    assert verify_envelope(receipt, receipt["signature"], SIGNING_KEY)
+    assert {a["event_type"] for a in audits} == {
+        "execution_requested",
+        "execution_completed",
+    }
 

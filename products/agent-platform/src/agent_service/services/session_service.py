@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from agent_service.core.metrics import record_session_created
 from agent_service.schemas.api import SessionRecord
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
+from agent_service.services.authoring_trace import AUTHORING_TRACE_STORE
 from agent_service.services.confirmation_records import CONFIRMATION_RECORD_STORE
 from agent_service.services.evidence_store import EVIDENCE_STORE
 from agent_service.services.execution_records import EXECUTION_RECORD_STORE
@@ -180,5 +181,24 @@ def delete_session(session_id: str, user_id: str | None = None) -> bool:
         except Exception:
             # Execution records live and die with their session too
             # (SPEC-037 R-4); cleanup is best-effort.
+            pass
+        # The authoring trace is session-scoped work product, so it follows
+        # the session even when it is terminal (SPEC-055 R-1/R-2). Its
+        # lifecycle protection is against *time* — the idle-GC never reclaims
+        # a graduated trace and a later approval never reopens one — not
+        # against the owner deleting the session it was authored in, which
+        # would otherwise leave durable argument copies behind for a session
+        # that no longer exists, forever: a terminal trace is by definition
+        # exempt from the sweep. Deleting a graduated trace does destroy the
+        # provenance of whatever draft it produced, because a graduation
+        # draft is ephemeral (previewed and downloaded for a human merge,
+        # never persisted by the platform), so the operator's window to keep
+        # it closes at the delete. That is the trade every sibling store here
+        # already makes — a deleted session takes its agent state, evidence,
+        # confirmation records and execution receipts with it.
+        try:
+            AUTHORING_TRACE_STORE.delete_session(session_id)
+        except Exception:
+            # Trace cleanup is best-effort; the session is gone.
             pass
     return deleted

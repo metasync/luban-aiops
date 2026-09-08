@@ -58,15 +58,75 @@ against them.
 
 ## Stage 4: agent-platform — R-2 capture at the approval seam
 
-- [ ] `runtime_kernel.py`: a `_capture_authoring_step(...)` helper called beside `_persist_execution_request` at the per-action signing site (`_prepare_executions`) (R-2)
-- [ ] `runtime_kernel.py`: the same helper called at the flow-unlock signing site (`_sign_flow_execution`), so both approval kinds append to one coherent ordered trace (R-2)
-- [ ] secret-safe parameterization **at capture**: credential values replaced by credential-set references / placeholders (reuse `secret_params` vocabulary + the `web.fill_credential` indirection) before the write — no literal secret reaches the store (R-2)
-- [ ] the step stores `execution_id` / `confirm_id` references and does **not** duplicate the signed receipt or outcome (those stay in `execution_records`) (R-2)
-- [ ] best-effort + fail-safe: wrapped like `_persist_execution_request` — a trace failure degrades to "no graduation candidate", never blocks the mutation's execution or its `execution_records`/receipt path (R-2)
-- [ ] tests: a step is captured only for a signed mutation at **both** sites; a read-tier call is never captured (R-2)
-- [ ] tests: a mixed session (per-action + flow-unlock writes) yields one ordered trace (R-2)
-- [ ] tests: secret values are parameterized at capture — no literal in the stored `args` (R-2)
-- [ ] tests: a trace-store failure never blocks execution or the `execution_records`/receipt write (R-2)
+- [x] `runtime_kernel.py`: a `_capture_authoring_step(...)` helper called beside `_persist_execution_request` at the per-action signing site (`_prepare_executions`) (R-2)
+- [x] `runtime_kernel.py`: the same helper called at the flow-unlock signing site (`_sign_flow_execution`), so both approval kinds append to one coherent ordered trace (R-2)
+- [x] secret-safe parameterization **at capture**: credential values replaced by credential-set references / placeholders (reuse `secret_params` vocabulary + the `web.fill_credential` indirection) before the write — no literal secret reaches the store (R-2)
+- [x] the step stores `execution_id` / `confirm_id` references and does **not** duplicate the signed receipt or outcome (those stay in `execution_records`) (R-2)
+- [x] best-effort + fail-safe: wrapped like `_persist_execution_request` — a trace failure degrades to "no graduation candidate", never blocks the mutation's execution or its `execution_records`/receipt path (R-2)
+- [x] tests: a step is captured only for a signed **mutating** call at both sites; a read-tier call is signed and recorded but never captured, and a call with no classified tier is not captured either (R-2)
+- [x] tests: a mixed session (per-action + flow-unlock writes) yields one ordered trace (R-2)
+- [x] tests: secret values are parameterized at capture — no literal in the stored `args` (R-2)
+- [x] tests: a trace-store failure never blocks execution or the `execution_records`/receipt write (R-2)
+
+> Implementation-found refinements (stage 4):
+> - `services/secret_params.py` gained `TRACE_CREDENTIAL_PLACEHOLDER`, `is_secret_value()`
+>   and `parameterize_for_trace()` rather than reusing R-7's `should_mask`/`redact_parameters`.
+>   Fail-closed masking would placeholder every off-allow-list argument (`web.click.selector`,
+>   `web.navigate.url`, `k8s.restart_service.namespace`), making every trace un-graduable —
+>   R-2 would ship non-functional. The trace predicate targets *credential values* (vocabulary
+>   + opaque fields, allow-list exempt); the residual fail-open-on-capture gap is **bounded** at the
+>   other end by R-4's planned blast-radius re-validation (stage 6, not yet implemented), which is to
+>   refuse a trace still carrying a `TRACE_CREDENTIAL_PLACEHOLDER` — see the "bounded, not closed"
+>   bullet below for what that does and does not detect.
+> - `services/session_service.py`: `delete_session` now cascades `AUTHORING_TRACE_STORE.delete_session`
+>   (absent from plan §R-2's affected-file list, but every sibling per-session store is wired there
+>   and omitting it would leak durable argument copies for a deleted session). A terminal trace
+>   cascades too — the lifecycle guard is against *time*, not against its owner deleting the session.
+> - the signed envelope carries `args_digest` but **not** the raw parameters, so `_prepare_executions`
+>   reads `pending.pending_calls_payload()` once for both the arguments and the park-time risk tier
+>   (`redact_parameters` is a display/at-rest projection applied to copies, never a signing input, so
+>   the payload is raw at resume); `_sign_flow_execution` already has them in scope.
+> - **being signed is not being a mutation.** `DEFAULT_AUTO_ALLOWED_TOOLS` is a *curated subset* —
+>   auto-allow needs `is_read_only` **AND** membership — so an unvetted read tool (`elastic.search_logs`)
+>   parks, gets approved and gets signed like any write. The per-action capture is therefore gated on
+>   `RISK_LEVEL_ACTIONS.get(risk_level) == "tools:mutate"`, reusing the platform's single risk→action
+>   mapping so the seam and the policy bridge cannot disagree about what a mutation is. It fails
+>   **closed** on an unclassified tier rather than open on `!= "read"`: the flow site is already
+>   positively gated by `BROWSER_WRITE_TOOLS`, the trace store outlives every receipt, and the
+>   degradation (no graduation candidate) is the one R-2 already accepts for a store failure.
+> - `web.evaluate.expression` joined `OPAQUE_VALUE_FIELDS`. Arbitrary JS can read a masked secret off
+>   the page and can *be* the mutation (`document.querySelector('#pw').value = '<literal>'`), it is
+>   write-tier and in `BROWSER_WRITE_TOOLS`, and `_cr_web_evaluate` already refuses to project it on a
+>   card — without the entry the trace projection was the one place a JS-embedded literal survived,
+>   into a store that outlives every receipt. The nesting walker now takes the tool name so the
+>   per-tool opaque fields hold below the top level too; `KNOWN_SAFE_FIELDS` deliberately does **not**
+>   descend (at depth, failing closed costs only replayability).
+> - **R-4/R-5 input:** `web.fill_credential` is read-tier *and* on the default auto-allow list *and*
+>   absent from `BROWSER_WRITE_TOOLS`, so under the default configuration a credential-set reference
+>   step never enters a trace at all. A graduated browser flow therefore replays its mutations with no
+>   recorded way to authenticate, and the credential reference is what the human completing the draft
+>   supplies at merge time — consistent with spec.md R-4 (graduation produces a draft for human review
+>   and merge, never an auto-published skill). Consequence: a trace carries **no** reference to resolve
+>   a placeholder *against*, so R-4 cannot "resolve" one — it must surface each placeholder as a hole
+>   in the draft for the human to fill, and R-5 must refuse to replay a flow with one still unresolved.
+> - **R-4/R-5 input:** `TRACE_CREDENTIAL_PLACEHOLDER` is a bare string. It records that a hole exists
+>   but not *which* credential set fills it, nor which tool/field it came from once the step is read
+>   back. Two related costs land on stage 6/7: (a) the per-tool opaque fields (`web.type.text`,
+>   `web.evaluate.expression`) placeholder **unconditionally, by name, regardless of value**, so a
+>   non-secret value typed through them is lost too — and since R-4 refuses a trace carrying a
+>   placeholder, one `web.type` of a search string would refuse the *whole* trace, the same
+>   "un-graduable" outcome `is_secret_value` exists to avoid; (b) the draft preview cannot name the
+>   hole. Open decision for stage 5/6: keep the bare string (R-4 treats a placeholder as a hole the
+>   human fills in the draft, not a pre-draft refusal) or make it self-describing, e.g.
+>   `{"__credential_ref__": {"tool": …, "field": …}}` — which stage 5's step schema and stage 7's
+>   replay substitution would both have to absorb, so it is cheaper to decide before stage 5 lands.
+> - `is_secret_value`'s residual fail-open gap is **bounded, not closed**: R-4's planned re-validation
+>   detects *placeholders*, so a literal under a name the vocabulary does not know produces no
+>   placeholder and is not detectable by that check. Until stage 6 lands the vocabulary is the only
+>   control. The vocabulary + the per-tool opaque fields are the boundary.
+> - new `tests/test_secret_params.py`: the R-2 projection is a pure function with no confirmation
+>   frame to ride, and most of what it pins is the *deliberate divergence* from R-7's fail-closed
+>   posture (R-7's own predicates stay asserted through the frame in `test_hitl_confirmations.py`).
 
 ## Stage 5: skills-hub — R-3 executable-flow skill class
 

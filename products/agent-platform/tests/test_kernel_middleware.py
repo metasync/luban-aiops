@@ -482,7 +482,14 @@ class FlowUnlockPermissionTests(unittest.TestCase):
     def test_read_only_browser_probe_uses_allow_list_not_flow_signer(self) -> None:
         """A read-tier probe (web.navigate) is auto-allowed by the static
         read-only allow-list before the flow branch; the signer is never
-        consulted, so flow-unlock cannot widen read-tier behavior."""
+        consulted, so flow-unlock cannot widen read-tier behavior.
+
+        SPEC-055 R-2 rides on the same fact: the authoring-trace append lives
+        *inside* the kernel signer, so an allow-listed read path can never
+        reach it and a read-tier call is never captured. The trace-side half
+        of that chain (no authority ⇒ the signer fails safe ⇒ nothing
+        appended) is asserted in ``test_runtime_kernel``'s
+        ``TestAuthoringTraceCapture``."""
         from agentscope.permission import PermissionBehavior
 
         signer, seen = self._recording_signer(None)

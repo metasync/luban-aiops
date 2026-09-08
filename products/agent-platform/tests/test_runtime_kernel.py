@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -7,6 +8,7 @@ from agentscope.message import ToolCallBlock
 
 from agent_service.runtime_kernel import AgentKernel
 from agent_service.runtime_settings import RuntimeSettings
+from agent_service.services.authoring_trace import AUTHORING_TRACE_STORE
 from agent_service.services.execution_records import EXECUTION_RECORD_STORE
 from agent_service.services.execution_signing import (
     canonical_digest,
@@ -18,6 +20,7 @@ from agent_service.services.flow_approvals import (
     FLOW_KILLING_ERROR_CODES,
 )
 from agent_service.services.hitl_confirmations import CONFIRMATION_REGISTRY
+from agent_service.services.secret_params import TRACE_CREDENTIAL_PLACEHOLDER
 from agent_service.tools.gateway_tools import (
     CHAT_SESSION_ID,
     EXECUTION_AUDIT_CONTEXT,
@@ -1024,6 +1027,17 @@ def _register_flow_pending(session_id, tool_calls, gateway_names, browser_flow):
     )
 
 
+def _risk_snapshot(*tool_calls, level="write"):
+    """A park-time risk-tier snapshot, keyed the way the registry looks it up.
+
+    ``pending_calls_payload`` reads ``risk_levels[tool_call.name]``, so keying
+    off the call itself keeps the snapshot honest whichever name form a
+    fixture parks (production parks the sanitized gateway name). The R-2
+    capture gate reads this tier back off the payload.
+    """
+    return {call.name: level for call in tool_calls}
+
+
 def _record_authority(
     session_id,
     *,
@@ -1767,4 +1781,495 @@ class TestObserveFlowInvalidation:
 
         assert FLOW_CONTEXTS.get(session_id) is None
         assert FLOW_APPROVALS.has_approval(session_id) is False
+
+
+# --- SPEC-055 R-2: authoring-trace capture at both signing sites ------------
+
+
+class TestAuthoringTraceCapture:
+    """SPEC-055 R-2: an approved **and signed** mutation appends one
+    replayable, secret-safe step to the session's authoring trace at
+    whichever of the two signing sites produced it, so a mixed session
+    yields one coherent ordered trace. Nothing else appends — not a denial,
+    not an unsigned batch, not a call the park-time tier snapshot does not
+    classify as mutating (read-tier *and* unclassified alike: being signed
+    is not what makes a call a mutation). Capture is best-effort: a store
+    failure degrades graduation candidacy and never the mutation's execution
+    or its ``execution_records`` row.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_trace_store(self):
+        """Isolate the module-level singletons between tests.
+
+        Reaches into the in-memory backends' private maps the way
+        ``test_execution_records._clean_stores`` does: both stores are
+        process-wide singletons, so a leaked session would make another
+        test's ``load_for_session`` non-deterministic — and a leaked
+        ``(confirm_id, call_id)`` key would silently drop a later
+        ``save_request``, since a request persists exactly once.
+        """
+        traces = getattr(AUTHORING_TRACE_STORE, "_by_session", None)
+        records = getattr(EXECUTION_RECORD_STORE, "_by_key", None)
+        CONFIRMATION_REGISTRY._by_session.clear()
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        if traces is not None:
+            traces.clear()
+        if records is not None:
+            records.clear()
+        yield
+        if traces is not None:
+            traces.clear()
+        if records is not None:
+            records.clear()
+
+    def _kernel(self, **overrides):
+        kwargs = dict(
+            api_key="test-key",
+            execution_signing_key=FLOW_SIGNING_KEY,
+            browser_flow_approval_ttl=900,
+        )
+        kwargs.update(overrides)
+        return AgentKernel(settings=RuntimeSettings(**kwargs))
+
+    def _arm_flow(self, session_id):
+        _record_authority(session_id, confirm_id="conf-approving")
+        _record_context(session_id)
+
+    def _flow_write(self, kernel, session_id, call_id, tool, name, raw):
+        """Auto-sign one browser write under the session's flow authority."""
+        requests: dict = {}
+        envelope = _run_signer(
+            kernel,
+            ToolCallBlock(id=call_id, name=name, input=raw),
+            tool,
+            session_id,
+            requests,
+        )
+        assert envelope is not None
+        return envelope
+
+    def _run_batch(
+        self, kernel, session_id, tool_calls, *, confirmed=True, risk_levels=None
+    ):
+        """Drive the per-action signing site directly (the resume path is
+        exercised end to end in ``test_hitl_confirmations``).
+
+        ``risk_levels`` defaults to snapshotting every parked call at the
+        write tier — what ``_toolkit_risk_map`` yields for these tools in
+        production — because the R-2 capture gate reads the tier, and a
+        fixture that parks with no tier at all would exercise the gate's
+        fail-closed branch instead of the seam under test.
+        """
+        pending = CONFIRMATION_REGISTRY.register(
+            session_id,
+            "alice",
+            "reply-1",
+            tool_calls,
+            600,
+            risk_levels=(
+                _risk_snapshot(*tool_calls)
+                if risk_levels is None
+                else risk_levels
+            ),
+        )
+        requests, rejection = kernel._prepare_executions(
+            pending, "bob-approver", confirmed, "req-9", session_id
+        )
+        return requests, rejection, pending
+
+    def test_per_action_approval_appends_one_step_per_signed_call(
+        self, monkeypatch
+    ):
+        """The card path: one signed request ⇒ one replayable step, carrying
+        the arguments a graduation will replay and *references* to the
+        execution and card rather than the receipt."""
+        audits = _capture_flow_audits(monkeypatch)
+        kernel = self._kernel()
+        session_id = "ses-trace-action"
+
+        requests, rejection, pending = self._run_batch(
+            kernel,
+            session_id,
+            [
+                ToolCallBlock(
+                    id="call-1",
+                    name="k8s.restart_service",
+                    input='{"namespace": "ops"}',
+                ),
+                ToolCallBlock(
+                    id="call-2",
+                    name="k8s.scale_deployment",
+                    input='{"namespace": "ops", "replicas": 3}',
+                ),
+            ],
+        )
+
+        assert rejection is None
+        rows = AUTHORING_TRACE_STORE.load_for_session(session_id)
+        assert [row["position"] for row in rows] == [1, 2]
+        assert [row["tool_name"] for row in rows] == [
+            "k8s.restart_service",
+            "k8s.scale_deployment",
+        ]
+        # Replayable arguments, not the digest — this is exactly what
+        # ``execution_records`` cannot give a graduation. ``namespace`` is
+        # off the KNOWN_SAFE_FIELDS allow-list for these two tools, so a
+        # fail-closed projection would have placeholdered it and made the
+        # trace un-graduable; it is off-vocabulary, so it rides verbatim.
+        assert rows[0]["args"] == {"namespace": "ops"}
+        assert rows[1]["args"] == {"namespace": "ops", "replicas": 3}
+        assert TRACE_CREDENTIAL_PLACEHOLDER not in json.dumps(rows)
+        # References only: the exact step shape, so no signature, receipt,
+        # outcome or digest is duplicated out of ``execution_records``
+        # (ADR-0009 — the trace never becomes a second copy of tamper
+        # evidence).
+        assert set(rows[0]) == {
+            "session_id",
+            "position",
+            "tool_name",
+            "args",
+            "execution_id",
+            "confirm_id",
+            "status",
+            "captured_at",
+        }
+        assert [row["execution_id"] for row in rows] == [
+            requests["call-1"]["execution_id"],
+            requests["call-2"]["execution_id"],
+        ]
+        assert {row["confirm_id"] for row in rows} == {pending.confirm_id}
+        # Dated from the signature, not from the append.
+        assert rows[0]["captured_at"] == requests["call-1"]["requested_at"]
+        assert rows[0]["status"] == "draft"
+        # The seam it sits beside is untouched: the durable record and the
+        # audit event both still landed.
+        assert len(EXECUTION_RECORD_STORE.load_for_session(session_id)) == 2
+        assert len(
+            [a for a in audits if a["event_type"] == "execution_requested"]
+        ) == 2
+
+    def test_flow_unlocked_write_appends_a_step(self, monkeypatch):
+        """The flow path: an auto-signed write under a live flow authority
+        appends too, stamped with the approving card's ``confirm_id``
+        (ADR-0007 — one operator decision per flow)."""
+        _capture_flow_audits(monkeypatch)
+        kernel = self._kernel()
+        session_id = "ses-trace-flow"
+        self._arm_flow(session_id)
+
+        envelope = self._flow_write(
+            kernel, session_id, "call-77", "web.click", "web_click",
+            '{"selector": "#submit"}',
+        )
+
+        rows = AUTHORING_TRACE_STORE.load_for_session(session_id)
+        assert len(rows) == 1
+        step = rows[0]
+        assert step["position"] == 1
+        assert step["tool_name"] == "web.click"
+        assert step["args"] == {"selector": "#submit"}
+        assert step["execution_id"] == envelope["execution_id"]
+        assert step["confirm_id"] == "conf-approving"
+        assert step["captured_at"] == envelope["requested_at"]
+
+    def test_a_mixed_session_yields_one_ordered_trace(self, monkeypatch):
+        """Both approval kinds contribute to **one** session-scoped trace, so
+        a troubleshooting session mixing an ad-hoc infra write with
+        flow-unlocked browser writes graduates as one ordered flow rather
+        than two half-traces."""
+        _capture_flow_audits(monkeypatch)
+        kernel = self._kernel()
+        session_id = "ses-trace-mixed"
+
+        self._run_batch(
+            kernel,
+            session_id,
+            [
+                ToolCallBlock(
+                    id="call-1",
+                    name="k8s.restart_service",
+                    input='{"namespace": "ops"}',
+                )
+            ],
+        )
+        self._arm_flow(session_id)
+        # Both flow writes are write-tier members of ``BROWSER_WRITE_TOOLS``,
+        # i.e. the only tools the permission middleware ever routes to the
+        # flow signer — a read-tier probe would never reach this site.
+        self._flow_write(
+            kernel, session_id, "call-2", "web.select", "web_select",
+            '{"selector": "#role", "value": "admin"}',
+        )
+        self._flow_write(
+            kernel, session_id, "call-3", "web.click", "web_click",
+            '{"selector": "#submit"}',
+        )
+
+        rows = AUTHORING_TRACE_STORE.load_for_session(session_id)
+        assert [row["position"] for row in rows] == [1, 2, 3]
+        assert [row["tool_name"] for row in rows] == [
+            "k8s.restart_service",
+            "web.select",
+            "web.click",
+        ]
+        assert {row["session_id"] for row in rows} == {session_id}
+        # One trace with one lifecycle, not one trace per approval kind.
+        assert AUTHORING_TRACE_STORE.trace_status(session_id) == "draft"
+
+    def test_a_flow_write_parameterizes_an_opaque_value(self, monkeypatch):
+        """``web.type.text`` is opaque by tool rather than by name — the
+        residual case of a credential typed straight into a field. It
+        becomes a placeholder while its replayable sibling survives, and the
+        signed digest still binds the raw arguments."""
+        _capture_flow_audits(monkeypatch)
+        kernel = self._kernel()
+        session_id = "ses-trace-opaque"
+        self._arm_flow(session_id)
+
+        envelope = self._flow_write(
+            kernel, session_id, "call-1", "web.type", "web_type",
+            '{"selector": "#pw", "text": "hunter2-SECRET"}',
+        )
+
+        rows = AUTHORING_TRACE_STORE.load_for_session(session_id)
+        assert rows[0]["args"] == {
+            "selector": "#pw",
+            "text": TRACE_CREDENTIAL_PLACEHOLDER,
+        }
+        # The fixture proves the secret was present to begin with, so the
+        # absence assertion is not vacuous.
+        assert "hunter2-SECRET" not in json.dumps(rows)
+        # Parameterization is a trace-store projection, never a signing
+        # input: the digest a gateway verifies against is byte-identical to
+        # the pre-parameterization value.
+        assert envelope["args_digest"] == canonical_digest(
+            {"selector": "#pw", "text": "hunter2-SECRET"}
+        )
+        assert verify_envelope(envelope, envelope["signature"], FLOW_SIGNING_KEY)
+
+    def test_a_flow_write_with_no_live_authority_appends_nothing(self, monkeypatch):
+        """The signer's fail-safe path appends nothing.
+
+        Every ``None`` return in ``_sign_flow_execution`` (no session, no live
+        authority, an identity rebind, unarmed execution state, no key, no
+        call_id) precedes the capture, so a write the kernel declines to sign
+        can never enter a trace — and can never graduate into a flow nothing
+        authorized. This is the trace-side half of the chain
+        ``test_kernel_middleware``'s read-only-probe test points at.
+        """
+        _capture_flow_audits(monkeypatch)
+        kernel = self._kernel()
+        session_id = "ses-trace-no-authority"
+        # Deliberately NOT self._arm_flow(session_id): no authority recorded.
+
+        requests: dict = {}
+        envelope = _run_signer(
+            kernel,
+            ToolCallBlock(id="call-1", name="web_click", input='{"ref": 1}'),
+            "web.click",
+            session_id,
+            requests,
+        )
+
+        assert envelope is None
+        assert requests == {}
+        assert AUTHORING_TRACE_STORE.load_for_session(session_id) == []
+        assert AUTHORING_TRACE_STORE.trace_status(session_id) is None
+
+    def test_a_read_tier_call_is_signed_but_never_captured(self, monkeypatch):
+        """The gate is the tier, not the signature.
+
+        ``elastic.search_logs`` is read-tier but is *not* on the permission
+        middleware's curated ``DEFAULT_AUTO_ALLOWED_TOOLS`` (auto-allow needs
+        read-only AND allow-listed), so it parks, gets approved and gets
+        signed exactly like a mutation — and must still not enter a trace.
+        Signing alone would have captured it, which is why the per-action
+        site gates on the park-time tier snapshot.
+        """
+        audits = _capture_flow_audits(monkeypatch)
+        kernel = self._kernel()
+        session_id = "ses-trace-read"
+        read_call = ToolCallBlock(
+            id="call-1", name="elastic.search_logs", input='{"query": "error"}'
+        )
+
+        requests, rejection, _ = self._run_batch(
+            kernel,
+            session_id,
+            [read_call],
+            risk_levels=_risk_snapshot(read_call, level="read"),
+        )
+
+        # Signed, persisted and audited like any other approved call...
+        assert rejection is None
+        assert set(requests) == {"call-1"}
+        assert len(EXECUTION_RECORD_STORE.load_for_session(session_id)) == 1
+        assert len(
+            [a for a in audits if a["event_type"] == "execution_requested"]
+        ) == 1
+        # ...but it is not a mutation, so it is not a replay step.
+        assert AUTHORING_TRACE_STORE.load_for_session(session_id) == []
+        assert AUTHORING_TRACE_STORE.trace_status(session_id) is None
+
+    def test_a_mixed_tier_batch_captures_only_the_mutations(self, monkeypatch):
+        """One card can park a read beside a write; the trace keeps only the
+        write, and the surviving step's ``position`` counts captured steps
+        rather than signed ones."""
+        _capture_flow_audits(monkeypatch)
+        kernel = self._kernel()
+        session_id = "ses-trace-mixed-tier"
+        read_call = ToolCallBlock(
+            id="call-1", name="elastic.search_logs", input='{"query": "error"}'
+        )
+        write_call = ToolCallBlock(
+            id="call-2",
+            name="k8s.restart_service",
+            input='{"namespace": "ops"}',
+        )
+
+        requests, rejection, _ = self._run_batch(
+            kernel,
+            session_id,
+            [read_call, write_call],
+            risk_levels={read_call.name: "read", write_call.name: "write"},
+        )
+
+        assert rejection is None
+        assert set(requests) == {"call-1", "call-2"}
+        rows = AUTHORING_TRACE_STORE.load_for_session(session_id)
+        assert [row["tool_name"] for row in rows] == ["k8s.restart_service"]
+        assert rows[0]["position"] == 1
+
+    def test_a_call_with_no_known_tier_is_never_captured(self, monkeypatch):
+        """The gate fails closed on an *unclassified* tier.
+
+        A parked call carries no ``risk_level`` when the toolkit snapshot has
+        no entry for it, and ``RISK_LEVEL_ACTIONS`` maps no such key — so the
+        gate treats it as "not a known mutation". Chosen over ``!= "read"``
+        deliberately: the flow site is positively gated by
+        ``BROWSER_WRITE_TOOLS``, the trace store outlives every receipt, and
+        the degradation (no graduation candidate) is one R-2 already accepts
+        for a store failure.
+        """
+        _capture_flow_audits(monkeypatch)
+        kernel = self._kernel()
+        session_id = "ses-trace-unclassified"
+        call = ToolCallBlock(
+            id="call-1", name="k8s.restart_service", input='{"namespace": "ops"}'
+        )
+
+        # Register with no risk snapshot at all: the payload entry carries no
+        # ``risk_level`` key, which is the unclassified case.
+        pending = CONFIRMATION_REGISTRY.register(
+            session_id, "alice", "reply-1", [call], 600
+        )
+        assert "risk_level" not in pending.pending_calls_payload()[0]
+
+        requests, rejection = kernel._prepare_executions(
+            pending, "bob-approver", True, "req-9", session_id
+        )
+
+        assert rejection is None
+        assert set(requests) == {"call-1"}
+        assert len(EXECUTION_RECORD_STORE.load_for_session(session_id)) == 1
+        assert AUTHORING_TRACE_STORE.load_for_session(session_id) == []
+
+    def test_a_denied_batch_appends_no_step(self, monkeypatch):
+        """A trace is a by-product of an *approved* mutation: a denial
+        constructs no request, so it appends no step."""
+        _capture_flow_audits(monkeypatch)
+        kernel = self._kernel()
+        session_id = "ses-trace-denied"
+
+        requests, rejection, _ = self._run_batch(
+            kernel,
+            session_id,
+            [
+                ToolCallBlock(
+                    id="call-1",
+                    name="k8s.restart_service",
+                    input='{"namespace": "ops"}',
+                )
+            ],
+            confirmed=False,
+        )
+
+        assert (requests, rejection) == ({}, None)
+        assert AUTHORING_TRACE_STORE.load_for_session(session_id) == []
+
+    def test_an_unsigned_batch_appends_no_step(self, monkeypatch):
+        """No signing key ⇒ the batch is rejected fail-closed *before* the
+        capture seam, so an unsigned mutation never enters a trace and can
+        never graduate into a flow nothing authorized."""
+        audits = _capture_flow_audits(monkeypatch)
+        kernel = self._kernel(execution_signing_key=None)
+        session_id = "ses-trace-unsigned"
+
+        requests, rejection, _ = self._run_batch(
+            kernel,
+            session_id,
+            [
+                ToolCallBlock(
+                    id="call-1",
+                    name="k8s.restart_service",
+                    input='{"namespace": "ops"}',
+                )
+            ],
+        )
+
+        assert requests == {}
+        assert rejection == "signing_unavailable"
+        assert len(
+            [a for a in audits if a["event_type"] == "execution_rejected"]
+        ) == 1
+        assert AUTHORING_TRACE_STORE.load_for_session(session_id) == []
+
+    def test_a_trace_store_failure_never_blocks_the_execution_record(
+        self, monkeypatch
+    ):
+        """Best-effort + fail-safe at **both** sites: a store that raises
+        degrades to "no graduation candidate" while the signed request, the
+        durable ``execution_records`` row and the audit all still land."""
+        audits = _capture_flow_audits(monkeypatch)
+
+        class BrokenTraceStore:
+            backend_name = "broken"
+
+            def append_step(self, step):
+                raise RuntimeError("trace store down")
+
+        monkeypatch.setattr(
+            "agent_service.runtime_kernel.AUTHORING_TRACE_STORE",
+            BrokenTraceStore(),
+        )
+        kernel = self._kernel()
+        session_id = "ses-trace-broken"
+
+        requests, rejection, _ = self._run_batch(
+            kernel,
+            session_id,
+            [
+                ToolCallBlock(
+                    id="call-1",
+                    name="k8s.restart_service",
+                    input='{"namespace": "ops"}',
+                )
+            ],
+        )
+        self._arm_flow(session_id)
+        envelope = self._flow_write(
+            kernel, session_id, "call-2", "web.click", "web_click", '{"ref": 1}'
+        )
+
+        assert rejection is None
+        assert set(requests) == {"call-1"}
+        assert envelope is not None
+        # The tamper evidence is unaffected by the derived trace failing.
+        rows = EXECUTION_RECORD_STORE.load_for_session(session_id)
+        assert [row["status"] for row in rows] == ["requested", "requested"]
+        assert len(
+            [a for a in audits if a["event_type"] == "execution_requested"]
+        ) == 2
 

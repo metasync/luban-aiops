@@ -361,3 +361,63 @@ def test_delete_session_clears_browser_flow_stores(monkeypatch):
     assert contexts.get(created.session_id) is None
     assert approvals.has_approval(created.session_id) is False
 
+
+def test_delete_session_cascades_the_authoring_trace(monkeypatch):
+    """SPEC-055 R-1/R-2: the authoring trace is session-scoped work product,
+    so it follows the session into deletion — a *terminal* trace included.
+    Its lifecycle protection is against time (the idle-GC never reclaims a
+    graduated trace, and a later approval never reopens one), not against the
+    owner deleting the session it was authored in, which would otherwise leave
+    durable argument copies behind for a session that no longer exists.
+    Deleting is the owner's call and is lossy by design: a graduated draft is
+    still unmerged at this point, so nothing outside the session holds the
+    trace yet."""
+    from agent_service.services.authoring_trace import (
+        InMemoryAuthoringTraceStore,
+        make_trace_step,
+    )
+
+    monkeypatch.setattr(session_service, "SESSION_STORE", InMemorySessionStore())
+    monkeypatch.setattr(
+        session_service, "AGENT_STATE_STORE", InMemoryAgentStateStore()
+    )
+    traces = InMemoryAuthoringTraceStore()
+    monkeypatch.setattr(session_service, "AUTHORING_TRACE_STORE", traces)
+
+    graduated = session_service.create_session("alice")
+    surviving = session_service.create_session("alice")
+    for session in (graduated, surviving):
+        assert traces.append_step(
+            make_trace_step(
+                session_id=session.session_id,
+                tool_name="k8s.restart_service",
+                args={"namespace": "ops"},
+                captured_at="2026-09-08T10:00:00Z",
+                execution_id="exe-1",
+                confirm_id="cf-1",
+            )
+        ) is True
+    assert traces.close_trace(graduated.session_id, "graduated") is True
+
+    assert session_service.delete_session(graduated.session_id, "alice") is True
+    assert traces.load_for_session(graduated.session_id) == []
+    assert traces.trace_status(graduated.session_id) is None
+    # A session-scoped cascade, not a store-wide one.
+    assert len(traces.load_for_session(surviving.session_id)) == 1
+
+
+def test_delete_session_survives_authoring_trace_failure(monkeypatch):
+    monkeypatch.setattr(session_service, "SESSION_STORE", InMemorySessionStore())
+
+    class BrokenTraceStore:
+        def delete_session(self, session_id):
+            raise RuntimeError("trace store down")
+
+    monkeypatch.setattr(
+        session_service, "AUTHORING_TRACE_STORE", BrokenTraceStore()
+    )
+
+    created = session_service.create_session("alice")
+    # Fail-open: trace cleanup never fails the session delete.
+    assert session_service.delete_session(created.session_id, "alice") is True
+

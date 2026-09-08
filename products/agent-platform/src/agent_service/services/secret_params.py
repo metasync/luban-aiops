@@ -25,9 +25,18 @@ unmounted, whereas a constant has no such failure mode. The twin lives in
 ``_SECRET_QUERY_PARAMS``; ``shared/shared-contracts/scripts/
 validate_secret_vocabulary.py`` (a ``make verify`` leg) fails the build if
 the two tuples diverge as sets, so the copies cannot drift silently.
+
+SPEC-055 R-2 reuses this vocabulary for a third purpose: parameterizing
+the arguments an authoring trace stores, so a literal credential never
+reaches a store that outlives the receipts which would otherwise be its
+only copy. That projection uses a *different* predicate
+(``is_secret_value``) than the fail-closed display masking above — see its
+docstring for why the two postures diverge.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 # Parameter-name substrings whose values are secret-bearing and must never
 # enter a change-request projection in plaintext. Matched case-insensitively
@@ -49,6 +58,28 @@ SECRET_PARAM_SUBSTRINGS: tuple[str, ...] = (
 # seeing it (SPEC-049 R-5 posture, reused by SPEC-054 R-3).
 MASK = "***"
 
+# The placeholder the authoring trace substitutes for a credential value
+# (SPEC-055 R-2). Deliberately **not** ``MASK``: ``MASK`` tells an approver
+# "a secret is here and withheld", while a trace placeholder tells a
+# graduation "this argument has to be supplied from a credential-set
+# reference at replay time". It is a hole the operator must fill. R-4's
+# blast-radius re-validation (stage 6, **not yet implemented**) is planned to
+# require every credential resolved to a credential-set reference, which
+# makes a trace still carrying one a deterministic refusal; until it lands
+# the vocabulary below is the only control. The placeholder is loud either
+# way, where a ``***`` in stored replay arguments would be indistinguishable
+# from a value the flow is supposed to type literally.
+#
+# Two costs are accepted here and are recorded as R-4/R-5 inputs in tasks.md:
+# the per-tool opaque fields (``web.type.text``, ``web.evaluate.expression``)
+# placeholder *unconditionally, by name*, so a non-secret value typed through
+# them is lost too; and the placeholder is a bare string carrying no record
+# of *which* credential set should fill it, because no ``credential_set``
+# reference ever reaches a trace under the default configuration (see
+# ``is_secret_value``). The reference is supplied by the human completing the
+# draft at merge time.
+TRACE_CREDENTIAL_PLACEHOLDER = "<credential-reference>"
+
 # Per-tool opaque-value fields, keyed ``"<canonical.tool.name>.<param>"``:
 # masked wholesale regardless of parameter name. Name-based masking is
 # necessary but not sufficient — a secret in a generically-named field is
@@ -61,6 +92,16 @@ MASK = "***"
 # directly into a field.
 OPAQUE_VALUE_FIELDS: frozenset[str] = frozenset({
     "web.type.text",
+    # Arbitrary JS can read a masked secret off the page and can *be* the
+    # mutation (``document.querySelector('#pw').value = '<literal>'`` is how
+    # an agent fills a credential when it does not use
+    # ``web.fill_credential``), so the expression is opaque by tool exactly
+    # like ``web.type.text``. ``_cr_web_evaluate`` already refuses to project
+    # it on a change-request card for the same reason; without this entry the
+    # trace projection would be the one place a literal JS-embedded
+    # credential survives, into a store that outlives every receipt
+    # (SPEC-055 R-2).
+    "web.evaluate.expression",
 })
 
 # Per-tool fields whose values are non-secret and may render verbatim in the
@@ -146,3 +187,101 @@ def redact_parameters(tool_name: str, parameters: dict) -> dict:
         str(key): MASK if should_mask(tool_name, str(key)) else value
         for key, value in parameters.items()
     }
+
+
+# ---------------------------------------------------------------------------
+# Authoring-trace parameterization (SPEC-055 R-2)
+# ---------------------------------------------------------------------------
+
+
+def is_secret_value(tool_name: str, param_name: str) -> bool:
+    """True when this field's *value* is credential-bearing (SPEC-055 R-2).
+
+    Deliberately **not** ``should_mask``, and the divergence is the point.
+    ``should_mask`` is fail-closed because a display/at-rest projection's
+    only cost for a false positive is a less informative card. The
+    authoring trace has a different cost curve: an argument the trace
+    cannot keep is an argument a graduated flow cannot replay, so applying
+    the allow-list-only posture here would placeholder every off-list field
+    (``web.click.selector``, ``web.navigate.url``,
+    ``k8s.restart_service.namespace``) and make every trace un-graduable —
+    R-2 would ship non-functional. This predicate therefore targets
+    *credential values specifically*: the SPEC-049 R-5 name vocabulary plus
+    the per-tool opaque fields, minus the positively-known-safe allow-list.
+
+    The gap that leaves is **bounded, not closed**, and it matters to be
+    precise about which half R-4 covers. ``revalidate_blast_radius`` (stage 6
+    / R-4, **not yet implemented**) is planned to refuse a trace still
+    carrying ``TRACE_CREDENTIAL_PLACEHOLDER``, so a credential this
+    vocabulary *recognizes* could never graduate unresolved. A literal under
+    a name the vocabulary does not know produces no placeholder and is
+    therefore **not** detectable by that check either. Until stage 6 lands
+    the vocabulary below is the only control on what a trace stores. What
+    carries the residual risk is that vocabulary's breadth — the name
+    substrings plus the per-tool opaque fields, both of which grow as new
+    secret shapes are found (see ``web.evaluate.expression``) — and the fact
+    that graduation produces a draft a human reviews and merges, never an
+    auto-published skill.
+    """
+    if is_known_safe(tool_name, param_name):
+        # Must precede the vocabulary check: ``is_secret_param`` matches
+        # "credential" as a substring, so the allow-listed
+        # ``web.fill_credential.credential_set`` *reference* — the one field
+        # that is the structural fix R-2 is supposed to preserve — would
+        # otherwise be placeholdered into uselessness.
+        return False
+    return is_secret_param(param_name) or is_opaque_value(tool_name, param_name)
+
+
+def _parameterize_nested(tool_name: str, value: Any) -> Any:
+    """Parameterize credential values below the top level of an argument.
+
+    Both the name vocabulary and the per-tool opaque fields apply at depth:
+    a nested ``{"form": {"text": ...}}`` handed to ``web.type`` carries the
+    same secret as a top-level one, and "the store persists exactly what it
+    is given" does not get more forgiving one level down.
+
+    The ``KNOWN_SAFE_FIELDS`` exemption does **not** descend. Its entries
+    name curated *top-level* fields (``k8s.delete_pod.name``), so a nested
+    field that happens to share the name inherits no exemption — the
+    conservative direction, since at depth this can only placeholder more
+    than a top-level-only reading would, never less.
+    """
+    if isinstance(value, dict):
+        return {
+            str(key): (
+                TRACE_CREDENTIAL_PLACEHOLDER
+                if is_secret_param(str(key))
+                or is_opaque_value(tool_name, str(key))
+                else _parameterize_nested(tool_name, item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_parameterize_nested(tool_name, item) for item in value]
+    return value
+
+
+def parameterize_for_trace(tool_name: str, parameters: Any) -> dict:
+    """A secret-safe copy of ``parameters`` for the authoring trace (R-2).
+
+    Recurses into nested dicts and lists, unlike ``redact_parameters`` which
+    only needs the top level because a change-request card projects
+    top-level arguments. A trace is what a graduated flow will *replay*, so
+    a credential nested one level down would ride along verbatim into a
+    store that outlives the receipts which are otherwise its only copy.
+
+    Returns a fresh dict; the caller's ``parameters`` is never mutated, so
+    this cannot perturb the ``args_digest`` a gateway verifies against.
+    """
+    if not isinstance(parameters, dict):
+        return {}
+    safe: dict[str, Any] = {}
+    for key, value in parameters.items():
+        name = str(key)
+        safe[name] = (
+            TRACE_CREDENTIAL_PLACEHOLDER
+            if is_secret_value(tool_name, name)
+            else _parameterize_nested(tool_name, value)
+        )
+    return safe
