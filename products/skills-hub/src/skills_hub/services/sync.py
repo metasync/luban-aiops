@@ -58,6 +58,14 @@ def _rejection_category(reason: str) -> str:
         return "duplicate_slug"
     if "body exceeds" in lowered:
         return "size"
+    # SPEC-055 R-3: the step list is the second size-bounded artifact, so its
+    # two resource ceilings (step count, encoded bytes) belong in this bucket
+    # rather than falling through to ``frontmatter``. Gated on ``steps`` so the
+    # neighbouring "more than N tags" bound stays where it always was.
+    if "steps" in lowered and (
+        "exceed" in lowered or "more than" in lowered
+    ):
+        return "size"
     if "unreadable" in lowered:
         return "unreadable"
     if "slug" in lowered:

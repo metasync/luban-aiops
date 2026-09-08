@@ -170,7 +170,9 @@ CREATE TABLE IF NOT EXISTS skills (
     body        TEXT NOT NULL,
     web_target  TEXT,
     risk_class  TEXT,
-    flow_intent TEXT
+    flow_intent TEXT,
+    kind        TEXT,
+    steps       JSONB
 );
 -- SPEC-049 R-3: web-check declaration columns; the idempotent ALTERs
 -- migrate tables created before 0.31.0 (CREATE TABLE IF NOT EXISTS never
@@ -180,6 +182,12 @@ ALTER TABLE skills ADD COLUMN IF NOT EXISTS risk_class TEXT;
 -- SPEC-053 R-1: optional card-level flow intent; idempotent ALTER migrates
 -- tables created before it existed (existing rows get NULL -> omitted).
 ALTER TABLE skills ADD COLUMN IF NOT EXISTS flow_intent TEXT;
+-- SPEC-055 R-3: executable-flow class (Skill v2). ``kind`` discriminates the
+-- class and ``steps`` holds the ordered replay list; both idempotent ALTERs
+-- migrate tables created before them, and existing rows get NULL — a
+-- knowledge skill with no replay list, i.e. exactly the v1 shape.
+ALTER TABLE skills ADD COLUMN IF NOT EXISTS kind TEXT;
+ALTER TABLE skills ADD COLUMN IF NOT EXISTS steps JSONB;
 CREATE INDEX IF NOT EXISTS idx_skills_source_id
     ON skills (source_id);
 -- The GIN expression must only use IMMUTABLE functions; array_to_string /
@@ -195,12 +203,12 @@ _INSERT = """
 INSERT INTO skills (
     skill_id, source_id, source_path, source_ref, title, description,
     tags, version, source_url, updated_at, body, web_target, risk_class,
-    flow_intent
+    flow_intent, kind, steps
 ) VALUES (
     %(skill_id)s, %(source_id)s, %(source_path)s, %(source_ref)s,
     %(title)s, %(description)s, %(tags)s, %(version)s, %(source_url)s,
     %(updated_at)s, %(body)s, %(web_target)s, %(risk_class)s,
-    %(flow_intent)s
+    %(flow_intent)s, %(kind)s, %(steps)s
 )
 ON CONFLICT (skill_id) DO UPDATE SET
     source_path = EXCLUDED.source_path,
@@ -214,13 +222,15 @@ ON CONFLICT (skill_id) DO UPDATE SET
     body = EXCLUDED.body,
     web_target = EXCLUDED.web_target,
     risk_class = EXCLUDED.risk_class,
-    flow_intent = EXCLUDED.flow_intent
+    flow_intent = EXCLUDED.flow_intent,
+    kind = EXCLUDED.kind,
+    steps = EXCLUDED.steps
 """
 
 _ROW_COLUMNS = (
     "skill_id, source_id, source_path, source_ref, title, description, "
     "tags, version, source_url, updated_at, body, web_target, risk_class, "
-    "flow_intent"
+    "flow_intent, kind, steps"
 )
 
 # The tsvector half mirrors idx_skills_search exactly so the GIN index can
@@ -242,6 +252,10 @@ ConnectFactory = Callable[[], AsyncIterator[Any]]
 
 
 def _row_to_skill(row: dict[str, Any]) -> Skill:
+    # ``steps`` comes back from JSONB as a Python list; the isinstance guard
+    # keeps a NULL column (and anything a driver hands back un-decoded) on the
+    # knowledge-skill path instead of raising inside the read.
+    steps = row["steps"]
     return Skill(
         skill_id=row["skill_id"],
         source_id=row["source_id"],
@@ -257,6 +271,8 @@ def _row_to_skill(row: dict[str, Any]) -> Skill:
         web_target=row["web_target"],
         risk_class=row["risk_class"],
         flow_intent=row["flow_intent"],
+        kind=row["kind"],
+        steps=steps if isinstance(steps, list) else None,
     )
 
 
@@ -303,6 +319,8 @@ class PostgresSkillStore:
         self, source_id: str, records: Sequence[Skill]
     ) -> int:
         """Atomic per-source swap: delete + insert inside one transaction."""
+        from psycopg.types.json import Jsonb
+
         async with self._connect() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
@@ -311,6 +329,12 @@ class PostgresSkillStore:
                 )
                 for skill in records:
                     payload = skill.model_dump(mode="json")
+                    # SPEC-055 R-3: ``steps`` is JSONB, and psycopg adapts a
+                    # bare list/dict only through the explicit ``Jsonb``
+                    # wrapper (the SPEC-051 "cannot adapt type 'dict'"
+                    # lesson). An absent step list stays SQL NULL rather than
+                    # JSON ``null`` so both backends round-trip identically.
+                    steps = payload.get("steps")
                     await cur.execute(
                         _INSERT,
                         {
@@ -328,6 +352,10 @@ class PostgresSkillStore:
                             "web_target": payload.get("web_target"),
                             "risk_class": payload.get("risk_class"),
                             "flow_intent": payload.get("flow_intent"),
+                            "kind": payload.get("kind"),
+                            "steps": (
+                                Jsonb(steps) if steps is not None else None
+                            ),
                         },
                     )
             await conn.commit()

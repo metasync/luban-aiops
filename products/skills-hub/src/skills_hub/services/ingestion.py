@@ -5,10 +5,17 @@ document against the skill contract (``shared/shared-contracts/skill-format.md``
 and returns the validated records plus a per-document rejection list. A source
 with zero valid documents still produces an (empty) snapshot — "reject the
 document, keep the source healthy".
+
+SPEC-055 R-3 advances the contract to Skill v2: an optional ``kind``
+discriminator plus a machine-readable ``steps`` replay list, and ``risk_class``
+decoupled from ``web_target`` so a non-browser mutating skill (e.g. ``k8s.*``)
+can declare ``write``. Both additions are strictly additive — a knowledge skill
+carries neither key and validates exactly as it did under v1.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -31,6 +38,41 @@ MAX_VERSION_CHARS = 64
 MAX_SOURCE_URL_CHARS = 2048
 MAX_WEB_TARGET_CHARS = 2048
 MAX_FLOW_INTENT_CHARS = 200
+# SPEC-055 R-3: executable-flow step-list bounds. ``MAX_STEPS`` is a resource
+# ceiling, not the policy bound. It sits above the two step counts that exist
+# today — the R-1 authoring-trace cap (``AGENT_AUTHORING_TRACE_MAX_STEPS``,
+# default 100) and the gateway's per-flow budget
+# (``DEFAULT_BROWSER_FLOW_MAX_STEPS``, default 20) — so a draft graduated from
+# a default-configured trace is never rejected by it. Both of those are
+# operator-tunable and this one is not, so the ordering is a coupling to
+# preserve rather than an invariant: raising the trace cap past 200 would make
+# a long trace un-graduable here (it fails safe — the draft is rejected, not
+# truncated). R-4's blast-radius bound (stage 6, **not yet implemented**) is
+# planned to sit below this ceiling too: graduality is a policy decision, this
+# is only the resource limit.
+# ``MAX_STEPS_BYTES`` matches the body cap — ``steps`` is the first frontmatter
+# key whose size the per-key char caps do not already bound, and it lands in
+# one JSONB column and rides list responses.
+MAX_STEPS = 200
+MAX_STEPS_BYTES = 65536
+MAX_STEP_TOOL_CHARS = 128
+MAX_STEP_EXPECT_CHARS = 500
+# A credential hole left by R-2's capture-time parameterization. A hole records
+# that a credential was withheld, not which named set fills it, so it is *not* a
+# credential-set reference and this document is the boundary where the artifact
+# becomes executable. Twin of agent-platform's
+# ``secret_params.TRACE_CREDENTIAL_PLACEHOLDER`` — a deliberate second copy, as
+# products never import each other. The copy is *enforced*, not just
+# documented: the ``validate-secret-vocabulary`` leg of ``make verify``
+# extracts both literals and fails the build on divergence
+# (``shared/shared-contracts/scripts/validate_secret_vocabulary.py``), and the
+# contract in ``shared/shared-contracts/skill-format.md`` names both sides.
+CREDENTIAL_HOLE = "<credential-reference>"
+CREDENTIAL_FILL_TOOL = "web.fill_credential"
+BROWSER_TOOL_PREFIX = "web."
+EXECUTABLE_FLOW_KIND = "executable_flow"
+VALID_KINDS = ("knowledge", EXECUTABLE_FLOW_KIND)
+STEP_KEYS = {"tool", "args", "expect"}
 ALLOWED_KEYS = {
     "title",
     "description",
@@ -45,6 +87,10 @@ ALLOWED_KEYS = {
     # SPEC-053 R-1: optional author-written intent for the flow's gated
     # mutating step, shown as the confirmation card's lead decision line.
     "flow_intent",
+    # SPEC-055 R-3: optional executable-flow class — a ``kind`` discriminator
+    # and the machine-readable replay step list it carries.
+    "kind",
+    "steps",
 }
 VALID_RISK_CLASSES = ("read", "write")
 SKIPPED_BASENAMES = {"readme.md", "notice", "notice.md"}
@@ -181,17 +227,20 @@ def _validate_frontmatter(
             )
 
     risk_class = frontmatter.get("risk_class")
-    if risk_class is not None:
-        if not isinstance(risk_class, str) or risk_class not in VALID_RISK_CLASSES:
-            return Rejection(
-                source_id,
-                rel_path,
-                "risk_class must be one of: read, write",
-            )
-        if web_target is None:
-            return Rejection(
-                source_id, rel_path, "risk_class requires a web_target declaration"
-            )
+    if risk_class is not None and (
+        not isinstance(risk_class, str) or risk_class not in VALID_RISK_CLASSES
+    ):
+        return Rejection(
+            source_id,
+            rel_path,
+            "risk_class must be one of: read, write",
+        )
+    # SPEC-055 R-3: ``risk_class`` no longer requires a ``web_target``. The
+    # pairing was a browser-flow assumption, and a non-browser mutating skill
+    # (``k8s.*`` steps) has no entry URL to declare. Relaxing it is safe on the
+    # consuming side because the gateway's flow binding already fails closed on
+    # a missing target (``SKILL_NOT_WEB_FLOW``), so such a skill simply cannot
+    # bind a browser flow — it is served for grounding and replays per action.
 
     # SPEC-053 R-1: optional author-written intent for the flow's gated
     # mutating step (card-level, display-only). Requires ``web_target`` like
@@ -213,10 +262,202 @@ def _validate_frontmatter(
                 source_id, rel_path, "flow_intent requires a web_target declaration"
             )
 
+    # SPEC-055 R-3: the executable-flow class. Validated against the whole
+    # frontmatter because it is a *set* of declarations that have to agree —
+    # ``kind`` + ``steps`` + the ``risk_class``/``web_target`` they imply.
+    rejection = _validate_steps(source_id, rel_path, frontmatter)
+    if rejection is not None:
+        return rejection
+
     if len(body.encode("utf-8")) > MAX_BODY_BYTES:
         return Rejection(source_id, rel_path, "body exceeds 64 KiB")
 
     return frontmatter, body
+
+
+def _carries_credential_hole(value: object) -> bool:
+    """True when a step argument still holds an unresolved credential hole."""
+    if isinstance(value, str):
+        return CREDENTIAL_HOLE in value
+    if isinstance(value, dict):
+        return any(_carries_credential_hole(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_carries_credential_hole(item) for item in value)
+    return False
+
+
+def _validate_step(
+    source_id: str, rel_path: str, index: int, step: object
+) -> Rejection | None:
+    """Validate one replay step; None when it is well formed.
+
+    Mirrors ``schemas/skill.py``'s ``SkillStep`` (``extra="forbid"``) and the
+    contract's step object (``additionalProperties: false``), so a document the
+    contract accepts is a document the envelope can carry.
+    """
+    where = f"step {index}"
+    if not isinstance(step, dict):
+        return Rejection(source_id, rel_path, f"{where} must be a mapping")
+    unknown = sorted(str(key) for key in set(step) - STEP_KEYS)
+    if unknown:
+        return Rejection(
+            source_id, rel_path, f"{where}: unknown step keys: {', '.join(unknown)}"
+        )
+
+    tool = step.get("tool")
+    if not isinstance(tool, str) or not tool.strip():
+        return Rejection(source_id, rel_path, f"{where}: 'tool' is required")
+    if len(tool) > MAX_STEP_TOOL_CHARS:
+        return Rejection(
+            source_id, rel_path, f"{where}: tool exceeds {MAX_STEP_TOOL_CHARS} chars"
+        )
+
+    args = step.get("args")
+    if not isinstance(args, dict):
+        return Rejection(
+            source_id, rel_path, f"{where}: 'args' is required and must be a mapping"
+        )
+    # ``json.dumps`` is the exact encoding the ``steps`` JSONB column applies,
+    # so validating with it means "accepted here" and "storable there" cannot
+    # diverge. It is not a formality: YAML parses an unquoted date into a
+    # ``datetime.date``, which no JSON encoder accepts — without this check the
+    # document would ingest and then fail the Postgres write at sync time.
+    try:
+        json.dumps(args)
+    except (TypeError, ValueError):
+        return Rejection(
+            source_id,
+            rel_path,
+            f"{where}: args must be JSON-compatible "
+            "(mappings, lists, strings, numbers, booleans, null)",
+        )
+
+    expect = step.get("expect")
+    if expect is not None and (
+        not isinstance(expect, str) or len(expect) > MAX_STEP_EXPECT_CHARS
+    ):
+        return Rejection(
+            source_id,
+            rel_path,
+            f"{where}: expect must be a string ≤ {MAX_STEP_EXPECT_CHARS} chars",
+        )
+
+    # Credential values are credential-set *references*, never literals
+    # (SPEC-055 R-3). Both checks are vocabulary-free — skills-hub cannot see
+    # the gateway's platform-managed credential store, so "resolves to a named
+    # credential set" is structural here: a step that fills a credential must
+    # *name* the set and the field, and no argument may still carry R-2's
+    # unresolved-hole marker (a hole names nothing).
+    if tool == CREDENTIAL_FILL_TOOL:
+        set_name = args.get("credential_set")
+        if not isinstance(set_name, str) or not set_name.strip():
+            return Rejection(
+                source_id,
+                rel_path,
+                f"{where}: {CREDENTIAL_FILL_TOOL} must reference a named "
+                "'credential_set'",
+            )
+        field_name = args.get("field")
+        if not isinstance(field_name, str) or not field_name.strip():
+            return Rejection(
+                source_id, rel_path, f"{where}: {CREDENTIAL_FILL_TOOL} needs a 'field'"
+            )
+    if _carries_credential_hole(args):
+        return Rejection(
+            source_id,
+            rel_path,
+            f"{where}: args carry an unresolved credential hole "
+            f"({CREDENTIAL_HOLE}); a step must reference a named credential set",
+        )
+    return None
+
+
+def _validate_steps(
+    source_id: str, rel_path: str, frontmatter: dict
+) -> Rejection | None:
+    """Validate the executable-flow class (SPEC-055 R-3); None when valid.
+
+    Additive by construction: a document with neither ``kind`` nor ``steps``
+    returns None immediately and validates exactly as it did under v1.
+
+    An ``executable_flow`` must declare ``risk_class: write`` unconditionally.
+    That is the fail-closed reading of "write when any step mutates": a step
+    list is a replay of *approved mutations* (R-2's tier gate makes a read-tier
+    call structurally incapable of entering a trace), so for every flow the
+    platform produces the conditional and the unconditional rule coincide — and
+    for a hand-authored one, skills-hub holds no per-tool risk vocabulary to
+    check a ``read`` claim against, while declaring ``write`` costs only that
+    the flow replays under R-5's single gate and the gateway's write-class
+    guard. A read-only browser flow needs no step list: the SPEC-049
+    ``web_target`` + ``risk_class: read`` class already serves it.
+    """
+    kind = frontmatter.get("kind")
+    steps = frontmatter.get("steps")
+    if kind is not None and (not isinstance(kind, str) or kind not in VALID_KINDS):
+        return Rejection(
+            source_id,
+            rel_path,
+            f"kind must be one of: {', '.join(VALID_KINDS)}",
+        )
+    if steps is not None and kind != EXECUTABLE_FLOW_KIND:
+        # ``steps`` is the executable-flow replay list, so a step list without
+        # the discriminator is a malformed document rather than an implicit
+        # executable flow — the class is declared, never inferred.
+        return Rejection(
+            source_id, rel_path, f"steps requires kind: {EXECUTABLE_FLOW_KIND}"
+        )
+    if kind != EXECUTABLE_FLOW_KIND:
+        # Absent or ``knowledge``: no replay list to check. A ``steps`` key
+        # reaching here without the discriminator was rejected above, so a
+        # knowledge skill can never smuggle one in.
+        return None
+
+    if not isinstance(steps, list) or not steps:
+        return Rejection(
+            source_id,
+            rel_path,
+            f"kind: {EXECUTABLE_FLOW_KIND} requires a non-empty steps list",
+        )
+    if len(steps) > MAX_STEPS:
+        return Rejection(source_id, rel_path, f"more than {MAX_STEPS} steps")
+    if frontmatter.get("risk_class") != "write":
+        return Rejection(
+            source_id,
+            rel_path,
+            f"kind: {EXECUTABLE_FLOW_KIND} requires risk_class: write",
+        )
+
+    browser_step = False
+    for index, step in enumerate(steps, start=1):
+        rejection = _validate_step(source_id, rel_path, index, step)
+        if rejection is not None:
+            return rejection
+        if str(step["tool"]).startswith(BROWSER_TOOL_PREFIX):
+            browser_step = True
+    if browser_step and frontmatter.get("web_target") is None:
+        # R-3 decouples ``risk_class`` from ``web_target``, not browser replay
+        # from it: the gateway binds a flow — and with it the origin guard and
+        # the step budget — from the declared target, so a ``web.*`` step with
+        # no target declares a flow that cannot be bound or bounded.
+        return Rejection(
+            source_id, rel_path, "a web.* step requires a web_target declaration"
+        )
+    try:
+        encoded_steps = json.dumps(steps)
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        # Unreachable today: every step was JSON-checked above. Kept so a
+        # future step-shape change degrades to a rejection rather than raising
+        # inside the sync loop (same posture as the frontmatter YAML guard).
+        return Rejection(source_id, rel_path, "steps must be JSON-compatible")
+    # Measured on the authored list, which is a close proxy for the stored one
+    # rather than a byte-identical twin: ``model_dump`` materializes an
+    # ``expect: null`` the author may have omitted (~16 bytes a step). The
+    # served list response is smaller again, since ``summary()`` excludes None.
+    if len(encoded_steps) > MAX_STEPS_BYTES:
+        return Rejection(
+            source_id, rel_path, f"steps exceed {MAX_STEPS_BYTES // 1024} KiB"
+        )
+    return None
 
 
 def validate_document(raw: str) -> tuple[bool, str | None]:
@@ -308,6 +549,8 @@ def ingest_directory(
                 web_target=frontmatter.get("web_target"),
                 risk_class=frontmatter.get("risk_class"),
                 flow_intent=frontmatter.get("flow_intent"),
+                kind=frontmatter.get("kind"),
+                steps=frontmatter.get("steps"),
                 updated_at=updated_at,
                 body=body.lstrip("\n"),
             )

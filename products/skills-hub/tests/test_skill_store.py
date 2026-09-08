@@ -35,6 +35,8 @@ def _skill(
     web_target=None,
     risk_class=None,
     flow_intent=None,
+    kind=None,
+    steps=None,
 ) -> Skill:
     return Skill(
         skill_id=skill_id,
@@ -47,8 +49,36 @@ def _skill(
         web_target=web_target,
         risk_class=risk_class,
         flow_intent=flow_intent,
+        kind=kind,
+        steps=steps,
         updated_at=NOW,
         body=body,
+    )
+
+
+# SPEC-055 R-3: a graduated browser flow's replay list — credential values are
+# references to a named credential set, never literals.
+EXECUTABLE_STEPS = [
+    {"tool": "web.navigate", "args": {"url": "https://admin.internal/login"}},
+    {
+        "tool": "web.fill_credential",
+        "args": {"ref": 1, "credential_set": "admin-portal", "field": "password"},
+    },
+    {
+        "tool": "web.click",
+        "args": {"selector": "#submit"},
+        "expect": "the user list renders",
+    },
+]
+
+
+def _executable_skill(skill_id: str = "a/reset-password") -> Skill:
+    return _skill(
+        skill_id,
+        web_target="https://admin.internal/login",
+        risk_class="write",
+        kind="executable_flow",
+        steps=EXECUTABLE_STEPS,
     )
 
 
@@ -143,6 +173,38 @@ class InMemoryStoreTests(unittest.TestCase):
             skill.summary()["flow_intent"],
             "Submit the password reset for the user.",
         )
+
+    def test_get_round_trips_executable_flow_steps(self) -> None:
+        # SPEC-055 R-3: the in-memory backend stores whole Skill objects, so
+        # the replay list round-trips for free — which is exactly why the
+        # Postgres backend's explicit column persistence needs its own test
+        # (the SPEC-050 dual-backend field-drop lesson).
+        _run(self.store.replace_source("a", [_executable_skill()]))
+        skill = _run(self.store.get("a/reset-password"))
+        self.assertIsNotNone(skill)
+        self.assertEqual(skill.kind, "executable_flow")
+        self.assertEqual([step.tool for step in skill.steps], [
+            "web.navigate", "web.fill_credential", "web.click",
+        ])
+        # Order and arguments are the replay contract; a re-sorted or
+        # arg-stripped list would replay the wrong flow.
+        self.assertEqual(
+            skill.steps[1].args,
+            {"ref": 1, "credential_set": "admin-portal", "field": "password"},
+        )
+        self.assertEqual(skill.steps[2].expect, "the user list renders")
+        self.assertEqual(skill.summary()["kind"], "executable_flow")
+
+    def test_a_knowledge_skill_omits_the_new_keys(self) -> None:
+        # Additive: the v1 shape is byte-identical, so no existing consumer
+        # sees a ``kind``/``steps`` key it did not ask for.
+        _run(self.store.replace_source("a", [_skill("a/knowledge")]))
+        skill = _run(self.store.get("a/knowledge"))
+        self.assertIsNotNone(skill)
+        self.assertIsNone(skill.kind)
+        self.assertIsNone(skill.steps)
+        self.assertNotIn("kind", skill.summary())
+        self.assertNotIn("steps", skill.summary())
 
     def test_ready_and_close_are_noops(self) -> None:
         self.assertTrue(_run(self.store.ready()))
@@ -268,12 +330,72 @@ class PostgresStoreAdapterTests(unittest.TestCase):
             "Submit the password reset for the user.",
         )
 
+    def test_replace_source_persists_executable_flow_columns(self) -> None:
+        # SPEC-055 R-3: ``kind``/``steps`` must survive the Postgres
+        # round-trip on both the INSERT params and the column list, or the
+        # deployed backend silently serves a knowledge skill for a graduated
+        # flow — and R-5 replay then has no step list to drive.
+        from psycopg.types.json import Jsonb
+
+        calls: list[dict] = []
+        store = PostgresSkillStore(
+            "postgresql://fake", connect=self._fake_connect(calls)
+        )
+        _run(store.replace_source("a", [_executable_skill()]))
+        insert = calls[1]
+        self.assertIn("kind", insert["sql"])
+        self.assertIn("steps", insert["sql"])
+        self.assertEqual(insert["params"]["kind"], "executable_flow")
+        # ``steps`` is JSONB: psycopg adapts a bare list only through the
+        # explicit ``Jsonb`` wrapper ("cannot adapt type 'list'").
+        self.assertIsInstance(insert["params"]["steps"], Jsonb)
+        # The column stores the envelope's own dump, so a step that does not
+        # declare ``expect`` materializes it as JSON null. Both backends still
+        # read the step back as ``expect=None``, and ``summary()``'s
+        # ``exclude_none`` keeps the served shape identical either way.
+        self.assertEqual(
+            insert["params"]["steps"].obj,
+            [
+                {
+                    "tool": "web.navigate",
+                    "args": {"url": "https://admin.internal/login"},
+                    "expect": None,
+                },
+                {
+                    "tool": "web.fill_credential",
+                    "args": {
+                        "ref": 1,
+                        "credential_set": "admin-portal",
+                        "field": "password",
+                    },
+                    "expect": None,
+                },
+                {
+                    "tool": "web.click",
+                    "args": {"selector": "#submit"},
+                    "expect": "the user list renders",
+                },
+            ],
+        )
+
+    def test_replace_source_keeps_a_knowledge_skill_steps_null(self) -> None:
+        # An absent step list is SQL NULL, never JSON ``null``: the row-map
+        # guard reads NULL back as ``None``, so the two backends agree.
+        calls: list[dict] = []
+        store = PostgresSkillStore(
+            "postgresql://fake", connect=self._fake_connect(calls)
+        )
+        _run(store.replace_source("a", [_skill("a/knowledge")]))
+        self.assertIsNone(calls[1]["params"]["kind"])
+        self.assertIsNone(calls[1]["params"]["steps"])
+
     def test_get_maps_web_flow_columns(self) -> None:
         calls: list[dict] = []
         row = (
             "a/check", "a", "check.md", "local", "T", "summary",
             None, None, None, NOW, "body",
             "http://target:8080/", "write", "Submit the reset.",
+            None, None,
         )
         store = PostgresSkillStore(
             "postgresql://fake", connect=self._fake_connect(calls, rows=[row])
@@ -284,11 +406,32 @@ class PostgresStoreAdapterTests(unittest.TestCase):
         self.assertEqual(skill.risk_class, "write")
         self.assertEqual(skill.flow_intent, "Submit the reset.")
 
+    def test_get_maps_executable_flow_columns(self) -> None:
+        # JSONB decodes to a Python list, which the model coerces back into
+        # ``SkillStep`` objects — the shape R-5 replay reads.
+        calls: list[dict] = []
+        row = (
+            "a/reset-password", "a", "reset.md", "local", "T", "summary",
+            None, None, None, NOW, "body",
+            "https://admin.internal/login", "write", None,
+            "executable_flow", EXECUTABLE_STEPS,
+        )
+        store = PostgresSkillStore(
+            "postgresql://fake", connect=self._fake_connect(calls, rows=[row])
+        )
+        skill = _run(store.get("a/reset-password"))
+        self.assertIsNotNone(skill)
+        self.assertEqual(skill.kind, "executable_flow")
+        self.assertEqual(len(skill.steps), 3)
+        self.assertEqual(skill.steps[0].tool, "web.navigate")
+        self.assertEqual(skill.steps[2].expect, "the user list renders")
+
     def test_search_uses_full_text_prefilter(self) -> None:
         calls: list[dict] = []
         row = (
             "a/hit", "a", "hit.md", "local", "Pod", "summary",
             ["pod"], None, None, NOW, "pod body", None, None, None,
+            None, None,
         )
         store = PostgresSkillStore(
             "postgresql://fake", connect=self._fake_connect(calls, rows=[row])

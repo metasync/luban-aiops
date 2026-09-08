@@ -78,6 +78,13 @@ MASK = "***"
 # reference ever reaches a trace under the default configuration (see
 # ``is_secret_value``). The reference is supplied by the human completing the
 # draft at merge time.
+#
+# The literal is a cross-product twin: skills-hub re-declares it as
+# ``ingestion.CREDENTIAL_HOLE`` to refuse an executable-flow document still
+# carrying one (SPEC-055 R-3). Renaming it here would silently disable that
+# check rather than fail anything, so the ``validate-secret-vocabulary`` leg of
+# ``make verify`` extracts both and fails the build on divergence — never
+# change one alone.
 TRACE_CREDENTIAL_PLACEHOLDER = "<credential-reference>"
 
 # Per-tool opaque-value fields, keyed ``"<canonical.tool.name>.<param>"``:

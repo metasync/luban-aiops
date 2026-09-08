@@ -12,10 +12,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from skills_hub.services.ingestion import (
+    MAX_STEPS,
+    MAX_STEPS_BYTES,
     ingest_directory,
     slug_from_path,
     validate_document,
 )
+from skills_hub.services.sync import _rejection_category
 
 NOW = datetime(2026, 8, 15, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -250,11 +253,22 @@ class WebFlowDeclarationTests(unittest.TestCase):
         self.assertEqual(len(result.rejections), 1)
         self.assertIn("risk_class must be one of", result.rejections[0].reason)
 
-    def test_risk_class_without_web_target_rejected(self) -> None:
-        _write(self.root, "web/Bad.md", self._doc("risk_class: write\n"))
+    def test_risk_class_without_web_target_ingests(self) -> None:
+        # SPEC-055 R-3 relaxes the pairing: a non-browser mutating skill
+        # (a ``k8s.*`` flow) has no entry URL to declare, so ``risk_class``
+        # stands alone. Safe on the consuming side because the gateway's flow
+        # binding already fails closed on a missing target
+        # (``SKILL_NOT_WEB_FLOW``) — this cannot smuggle in a browser flow.
+        # Replaces test_risk_class_without_web_target_rejected.
+        _write(
+            self.root, "infra/RestartService.md", self._doc("risk_class: write\n")
+        )
         result = self._ingest()
-        self.assertEqual(len(result.rejections), 1)
-        self.assertIn("risk_class requires a web_target", result.rejections[0].reason)
+        self.assertEqual(result.rejections, [])
+        (skill,) = result.records
+        self.assertEqual(skill.risk_class, "write")
+        self.assertIsNone(skill.web_target)
+        self.assertEqual(skill.summary()["risk_class"], "write")
 
     def test_malformed_web_target_rejected(self) -> None:
         for bad_target in (
@@ -440,6 +454,302 @@ class FlowIntentDeclarationTests(unittest.TestCase):
         valid, reason = validate_document(bad)
         self.assertFalse(valid)
         self.assertIn("flow_intent requires a web_target", reason or "")
+
+
+# SPEC-055 R-3: an executable-flow replay list as authored in frontmatter.
+# Credential values are *references* to a named credential set, never literals
+# — the gateway resolves a set from platform configuration at replay time.
+FLOW_STEPS_YAML = (
+    "steps:\n"
+    "  - tool: web.navigate\n"
+    '    args: {url: "https://admin.internal/login"}\n'
+    "  - tool: web.fill_credential\n"
+    "    args: {ref: 1, credential_set: admin-portal, field: password}\n"
+    "  - tool: web.click\n"
+    '    args: {selector: "#submit"}\n'
+    "    expect: the user list renders\n"
+)
+FLOW_DECLARATION = (
+    "kind: executable_flow\n"
+    "web_target: https://admin.internal/login\n"
+    "risk_class: write\n"
+)
+
+
+class ExecutableFlowTests(unittest.TestCase):
+    """SPEC-055 R-3: the ``kind`` / ``steps`` executable-flow class.
+
+    Strictly additive over v1 — a knowledge skill declares neither key and
+    validates exactly as before — and enforced on the same
+    ``_validate_frontmatter`` path SPEC-044's draft check rides, so a
+    malformed flow is rejected identically at sync time and at draft time.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _ingest(self):
+        return ingest_directory("team-a", self.root, "local", NOW)
+
+    def _ingest_one(self, extra_frontmatter: str):
+        _write(self.root, "flow/Reset.md", self._doc(extra_frontmatter))
+        return self._ingest()
+
+    @staticmethod
+    def _doc(extra_frontmatter: str) -> str:
+        return (
+            "---\ntitle: Reset User Password\ndescription: Reset a password.\n"
+            f"{extra_frontmatter}---\n\nReplay the reset.\n"
+        )
+
+    def test_a_valid_executable_flow_round_trips(self) -> None:
+        result = self._ingest_one(FLOW_DECLARATION + FLOW_STEPS_YAML)
+        self.assertEqual(result.rejections, [])
+        (skill,) = result.records
+        self.assertEqual(skill.kind, "executable_flow")
+        # Order is the replay contract, so it survives as authored.
+        self.assertEqual(
+            [step.tool for step in skill.steps],
+            ["web.navigate", "web.fill_credential", "web.click"],
+        )
+        self.assertEqual(
+            skill.steps[1].args,
+            {"ref": 1, "credential_set": "admin-portal", "field": "password"},
+        )
+        self.assertEqual(skill.steps[2].expect, "the user list renders")
+        summary = skill.summary()
+        self.assertEqual(summary["kind"], "executable_flow")
+        self.assertEqual(len(summary["steps"]), 3)
+
+    def test_a_non_browser_flow_declares_write_without_a_web_target(self) -> None:
+        # The decoupling R-3 exists for: an infra flow has no entry URL to
+        # declare and still has to be able to say that it mutates.
+        result = self._ingest_one(
+            "kind: executable_flow\n"
+            "risk_class: write\n"
+            "steps:\n"
+            "  - tool: k8s.restart_service\n"
+            "    args: {namespace: inventory, name: api}\n"
+        )
+        self.assertEqual(result.rejections, [])
+        (skill,) = result.records
+        self.assertIsNone(skill.web_target)
+        self.assertEqual(skill.steps[0].tool, "k8s.restart_service")
+
+    def test_a_browser_step_without_a_web_target_is_rejected(self) -> None:
+        # R-3 decouples ``risk_class`` from ``web_target``, not browser replay
+        # from it: the gateway binds the flow — origin guard and step budget
+        # included — from the declared target, so a ``web.*`` step with none
+        # declares a flow that cannot be bound or bounded.
+        result = self._ingest_one(
+            "kind: executable_flow\nrisk_class: write\n" + FLOW_STEPS_YAML
+        )
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn(
+            "web.* step requires a web_target", result.rejections[0].reason
+        )
+
+    def test_a_flow_that_does_not_declare_write_is_rejected(self) -> None:
+        # Unconditional for the class: a step list is a replay of approved
+        # mutations (R-2's tier gate keeps read-tier calls out of a trace),
+        # and skills-hub holds no per-tool risk vocabulary to check a ``read``
+        # claim against. Fail closed on the declaration instead.
+        for declared in ("", "risk_class: read\n"):
+            with self.subTest(risk_class=declared or "absent"):
+                result = self._ingest_one(
+                    "kind: executable_flow\n"
+                    "web_target: https://admin.internal/login\n"
+                    f"{declared}{FLOW_STEPS_YAML}"
+                )
+                self.assertEqual(len(result.rejections), 1)
+                self.assertIn(
+                    "requires risk_class: write", result.rejections[0].reason
+                )
+
+    def test_a_flow_without_a_step_list_is_rejected(self) -> None:
+        for steps_yaml in ("", "steps: []\n", "steps: not-a-list\n"):
+            with self.subTest(steps=steps_yaml or "absent"):
+                result = self._ingest_one(FLOW_DECLARATION + steps_yaml)
+                self.assertEqual(len(result.rejections), 1)
+                self.assertIn(
+                    "non-empty steps list", result.rejections[0].reason
+                )
+
+    def test_steps_without_the_discriminator_are_rejected(self) -> None:
+        # The class is declared, never inferred: a step list on an ordinary
+        # knowledge document would otherwise make it executable by accident.
+        for kind in ("", "kind: knowledge\n"):
+            with self.subTest(kind=kind or "absent"):
+                result = self._ingest_one(
+                    "web_target: https://admin.internal/login\n"
+                    "risk_class: write\n"
+                    f"{kind}{FLOW_STEPS_YAML}"
+                )
+                self.assertEqual(len(result.rejections), 1)
+                self.assertIn("steps requires kind", result.rejections[0].reason)
+
+    def test_an_unknown_kind_is_rejected(self) -> None:
+        result = self._ingest_one("kind: runbook\n")
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn("kind must be one of", result.rejections[0].reason)
+
+    def test_malformed_steps_are_rejected(self) -> None:
+        cases = {
+            "not a mapping": "steps:\n  - web.navigate\n",
+            "unknown key": "steps:\n  - tool: web.navigate\n    args: {}\n    retry: 3\n",
+            "missing tool": "steps:\n  - args: {}\n",
+            "blank tool": 'steps:\n  - tool: "  "\n    args: {}\n',
+            "missing args": "steps:\n  - tool: web.navigate\n",
+            "args not a mapping": "steps:\n  - tool: web.navigate\n    args: []\n",
+            "non-string expect": (
+                "steps:\n  - tool: web.navigate\n    args: {}\n    expect: 3\n"
+            ),
+        }
+        for label, steps_yaml in cases.items():
+            with self.subTest(case=label):
+                result = self._ingest_one(FLOW_DECLARATION + steps_yaml)
+                self.assertEqual(len(result.rejections), 1, label)
+                self.assertIn("step 1", result.rejections[0].reason)
+
+    def test_an_oversize_tool_or_expect_is_rejected(self) -> None:
+        result = self._ingest_one(
+            FLOW_DECLARATION + f"steps:\n  - tool: {'t' * 129}\n    args: {{}}\n"
+        )
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn("tool exceeds 128 chars", result.rejections[0].reason)
+
+        result = self._ingest_one(
+            FLOW_DECLARATION
+            + "steps:\n  - tool: web.navigate\n    args: {}\n"
+            f"    expect: {'e' * 501}\n"
+        )
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn("expect must be a string", result.rejections[0].reason)
+
+    def test_a_credential_step_must_name_a_set(self) -> None:
+        # "Credential references resolve to named credential sets" is
+        # structural at this boundary: skills-hub cannot see the gateway's
+        # platform-managed store, so what it requires is that the step *names*
+        # a set and a field instead of carrying a value.
+        for label, args in (
+            ("no set", "{ref: 1, field: password}"),
+            ("blank set", '{ref: 1, credential_set: "  ", field: password}'),
+            ("no field", "{ref: 1, credential_set: admin-portal}"),
+        ):
+            with self.subTest(case=label):
+                result = self._ingest_one(
+                    FLOW_DECLARATION
+                    + "steps:\n  - tool: web.fill_credential\n"
+                    f"    args: {args}\n"
+                )
+                self.assertEqual(len(result.rejections), 1, label)
+                self.assertIn(
+                    "web.fill_credential", result.rejections[0].reason
+                )
+
+    def test_an_unresolved_credential_hole_is_rejected(self) -> None:
+        # R-2 replaces a literal credential with ``<credential-reference>``
+        # and R-4 refuses to graduate a trace still carrying one. Ingestion is
+        # the third line: a hole names no set, so a document reaching the
+        # catalog with one would be an executable flow whose credential can
+        # never be resolved at replay.
+        for label, args in (
+            ("top level", '{selector: "#pw", text: "<credential-reference>"}'),
+            ("nested", '{form: {text: "<credential-reference>"}}'),
+            # ``args`` values may be lists, so the walker's list branch is a
+            # live path and a hole hidden in one must not slip past.
+            ("in a list", '{values: ["<credential-reference>"]}'),
+        ):
+            with self.subTest(case=label):
+                result = self._ingest_one(
+                    FLOW_DECLARATION
+                    + "steps:\n  - tool: web.type\n"
+                    f"    args: {args}\n"
+                )
+                self.assertEqual(len(result.rejections), 1, label)
+                self.assertIn(
+                    "unresolved credential hole", result.rejections[0].reason
+                )
+
+    def test_a_yaml_date_in_args_is_rejected(self) -> None:
+        # YAML parses an unquoted date into ``datetime.date``, which no JSON
+        # encoder accepts. Without this check the document would ingest and
+        # then fail the ``steps`` JSONB write at sync time — turning a
+        # reportable rejection into a broken source.
+        result = self._ingest_one(
+            FLOW_DECLARATION
+            + "steps:\n  - tool: web.navigate\n    args: {until: 2026-09-08}\n"
+        )
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn("JSON-compatible", result.rejections[0].reason)
+
+    def test_an_unbounded_step_list_is_rejected(self) -> None:
+        too_many = "".join(
+            f"  - tool: web.navigate\n    args: {{n: {index}}}\n"
+            for index in range(MAX_STEPS + 1)
+        )
+        result = self._ingest_one(FLOW_DECLARATION + f"steps:\n{too_many}")
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn(f"more than {MAX_STEPS} steps", result.rejections[0].reason)
+        # End to end, on the reason ingestion actually rendered rather than a
+        # transcription of it: both step ceilings must reach the rejection
+        # counter's ``size`` bucket, which is what fails if the wording moves.
+        self.assertEqual(_rejection_category(result.rejections[0].reason), "size")
+
+        # The byte ceiling is the other half of the bound: ``steps`` is the
+        # first frontmatter key the per-key char caps do not size, and it
+        # lands in one JSONB column and rides every list response. The count
+        # is a literal rather than a derived one: it only has to be comfortably
+        # past the ceiling at ~4 KiB a step, and deriving it from the cap would
+        # tie the fixture to the pad width for no gain.
+        pad = "p" * 4000
+        wide = "".join(
+            f'  - tool: web.navigate\n    args: {{pad: "{pad}"}}\n'
+            for _ in range(20)
+        )
+        result = self._ingest_one(FLOW_DECLARATION + f"steps:\n{wide}")
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn(
+            f"steps exceed {MAX_STEPS_BYTES // 1024} KiB",
+            result.rejections[0].reason,
+        )
+        self.assertEqual(_rejection_category(result.rejections[0].reason), "size")
+
+    def test_a_knowledge_skill_validates_exactly_as_before(self) -> None:
+        # No regression: the v1 document ingests unchanged and its envelope
+        # carries neither new key (``summary()`` excludes None), so no
+        # consumer sees a field it did not ask for.
+        _write(self.root, "alerts/KubePodNotReady.md", VALID_DOC)
+        result = self._ingest()
+        self.assertEqual(result.rejections, [])
+        (skill,) = result.records
+        self.assertIsNone(skill.kind)
+        self.assertIsNone(skill.steps)
+        self.assertNotIn("kind", skill.summary())
+        self.assertNotIn("steps", skill.summary())
+        self.assertEqual(validate_document(VALID_DOC), (True, None))
+
+    def test_validate_document_parity(self) -> None:
+        # SPEC-044's draft check shares ``_validate_frontmatter``, so a
+        # graduation draft is refused by the same rules — and with the same
+        # reason vocabulary — it would be ingested under.
+        self.assertEqual(
+            validate_document(self._doc(FLOW_DECLARATION + FLOW_STEPS_YAML)),
+            (True, None),
+        )
+        valid, reason = validate_document(
+            self._doc(
+                "kind: executable_flow\n"
+                "web_target: https://admin.internal/login\n"
+                f"{FLOW_STEPS_YAML}"  # no risk_class: write
+            )
+        )
+        self.assertFalse(valid)
+        self.assertIn("requires risk_class: write", reason or "")
 
 
 if __name__ == "__main__":

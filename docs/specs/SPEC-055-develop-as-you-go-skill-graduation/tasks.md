@@ -120,6 +120,7 @@ against them.
 >   human fills in the draft, not a pre-draft refusal) or make it self-describing, e.g.
 >   `{"__credential_ref__": {"tool": …, "field": …}}` — which stage 5's step schema and stage 7's
 >   replay substitution would both have to absorb, so it is cheaper to decide before stage 5 lands.
+>   **Resolved in stage 5: kept bare** — see the stage-5 refinement note.
 > - `is_secret_value`'s residual fail-open gap is **bounded, not closed**: R-4's planned re-validation
 >   detects *placeholders*, so a literal under a name the vocabulary does not know produces no
 >   placeholder and is not detectable by that check. Until stage 6 lands the vocabulary is the only
@@ -131,14 +132,107 @@ against them.
 ## Stage 5: skills-hub — R-3 executable-flow skill class
 
 - [x] `schemas/skill.py`: `kind` + `steps` on the `Skill` model — **done in stage 1** (the contract parity test binds the model to the schema atomically, so it cannot wait for stage 5); stage 5 keeps only ingestion + store (R-3)
-- [ ] `services/ingestion.py`: add `kind`, `steps` to `ALLOWED_KEYS`; relax the `risk_class`-requires-`web_target` rule so `risk_class: write` ingests without a `web_target` (R-3)
-- [ ] `services/ingestion.py`: validate the executable-flow class — step-list shape, `risk_class: write` when any step mutates, credential references resolve to named credential sets — and reject a malformed one on the existing `validate_document` path (R-3)
-- [ ] `services/skill_store.py`: add `kind TEXT` + `steps JSONB` on **both** backends (in-memory + Postgres), idempotent `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, INSERT + row-map (the `flow_intent` precedent) (R-3)
-- [ ] confirm a `read`-class skill still never executes mutating tools; only a `write`-class executable flow can replay, and only under R-5's one gate (R-3)
-- [ ] tests: `risk_class: write` **without** `web_target` ingests (the relaxed rule) (R-3)
-- [ ] tests: a `kind: executable_flow` skill with a valid step list ingests and round-trips on **both** store backends (R-3)
-- [ ] tests: a malformed step list / a missing `risk_class: write` on a mutating flow / an unresolvable credential reference is rejected (R-3)
-- [ ] tests: a knowledge skill (no `kind`/`steps`) validates exactly as today — no existing skill breaks (R-3)
+- [x] `services/ingestion.py`: add `kind`, `steps` to `ALLOWED_KEYS`; relax the `risk_class`-requires-`web_target` rule so `risk_class: write` ingests without a `web_target` (R-3)
+- [x] `services/ingestion.py`: validate the executable-flow class — step-list shape, `risk_class: write` when any step mutates, credential references resolve to named credential sets — and reject a malformed one on the existing `validate_document` path (R-3)
+- [x] `services/skill_store.py`: add `kind TEXT` + `steps JSONB` on **both** backends (in-memory + Postgres), idempotent `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, INSERT + row-map (the `flow_intent` precedent) (R-3)
+- [x] confirm a `read`-class skill still never executes mutating tools; only a `write`-class executable flow can replay, and only under R-5's one gate (R-3)
+- [x] tests: `risk_class: write` **without** `web_target` ingests (the relaxed rule) (R-3)
+- [x] tests: a `kind: executable_flow` skill with a valid step list ingests and round-trips on **both** store backends (R-3)
+- [x] tests: a malformed step list / a missing `risk_class: write` on a mutating flow / an unresolvable credential reference is rejected (R-3)
+- [x] tests: a knowledge skill (no `kind`/`steps`) validates exactly as today — no existing skill breaks (R-3)
+
+> Implementation-found refinements (stage 5):
+> - `shared/shared-contracts/skill-format.md` advances **v1 → v2** (absent from plan §R-3's
+>   affected-file list, which named only `skill.schema.json`). It is the human-readable half of the
+>   same contract and still read "`risk_class` … requires `web_target`" — the exact rule R-3 removes —
+>   so shipping the code without it would leave the doc authors lint against contradicting the
+>   validator. Adds the `kind`/`steps` key rows, an "Executable-flow skills (v2)" section with the
+>   step table and the class rules, and the step size caps. Four further files beyond plan §R-3's
+>   list are touched, each for a reason recorded in its own bullet below:
+>   `shared/shared-contracts/scripts/validate_secret_vocabulary.py` (the twin-literal drift guard),
+>   `services/sync.py` (the rejection-metrics bucket), agent-platform's
+>   `tests/test_secret_vocabulary.py` (that script's self-test, extended to cover the second coupling
+>   in both directions — it materializes a synthetic tree, so it fails closed on a new required
+>   literal until the tree carries it), and — comment only — agent-platform's
+>   `services/secret_params.py` (the back-reference that makes the guard discoverable from the side a
+>   rename would start on).
+> - **`risk_class: write` is required unconditionally for `kind: executable_flow`**, which is the
+>   fail-closed reading of "`write` when any step mutates". A step list is a replay of *approved
+>   mutations* — R-2's tier gate makes a read-tier call structurally incapable of entering a trace —
+>   so for every flow the platform produces the conditional and unconditional rules coincide; for a
+>   hand-authored one, skills-hub holds no per-tool risk vocabulary to check a `read` claim against
+>   (the authoritative `risk_level` lives in the gateway's tool definitions), while declaring `write`
+>   costs only that the flow replays under R-5's one gate and the gateway's write-class guard. A
+>   read-only browser flow needs no step list: the SPEC-049 `web_target` + `risk_class: read` class
+>   already serves it.
+> - **A `web.*` step still requires a `web_target`.** R-3 decouples `risk_class` from `web_target`,
+>   not browser *replay* from it: the gateway binds the flow — and with it the origin guard and the
+>   step budget — from the declared target (`bind_flow` fails closed with `SKILL_NOT_WEB_FLOW`
+>   without one), so a browser step list with no target declares a flow that cannot be bound or
+>   bounded. Non-browser (`k8s.*`) flows need none, which is what the decoupling buys. Relaxing the
+>   `risk_class`/`web_target` pairing is safe for the same reason — the consuming side already fails
+>   closed.
+> - **"credential references resolve to named credential sets" is structural at this boundary.**
+>   skills-hub cannot see the gateway's platform-managed credential store (a secret-mounted JSON file
+>   resolved at call time), so what ingestion can and does require is that a `web.fill_credential`
+>   step *names* the set and the field, and that no step argument still carries R-2's unresolved-hole
+>   marker `<credential-reference>` — a hole names no set, so such a flow could never authenticate at
+>   replay. This **resolves the stage-4 open decision: the placeholder stays a bare string.** A
+>   self-describing marker would only ever have carried `{tool, field}` (the trace records no set to
+>   resolve against — see the stage-4 `web.fill_credential` note), and R-4 can name the hole at
+>   draft-render time from the step's own position, so the extra shape would buy nothing and stage 7's
+>   substitution stays a string comparison. The literal is a declared cross-product twin
+>   (`ingestion.CREDENTIAL_HOLE` ↔ `secret_params.TRACE_CREDENTIAL_PLACEHOLDER`, products do not
+>   import each other) and is documented in `skill-format.md` — and, because documentation alone left
+>   the coupling **one-directional** (renaming the marker on the agent-platform side would have
+>   silently disabled the ingestion check rather than failing anything), it is now *enforced*:
+>   `shared/shared-contracts/scripts/validate_secret_vocabulary.py` extracts both literals and fails
+>   the `validate-secret-vocabulary` leg of `make verify` on divergence. That script already pinned
+>   the SPEC-054 vocabulary twin the same textual way, so this reuses the mechanism rather than
+>   inventing plumbing. Verified in both directions by that leg's own self-test, which was extended
+>   to materialize the skills-hub twin in its synthetic tree (agree / each side renamed / each side
+>   missing the literal / a prose mention of the name not mistaken for the assignment / a
+>   triple-quoted or f-string assignment not mistaken for a literal). The extractor treats an empty
+>   extraction as **absent**: the pattern stops at the first quote, so a triple-quoted assignment on
+>   *both* sides would otherwise compare equal and pass vacuously — and an empty marker is
+>   independently a bug, since the empty string is a substring of every string and the ingestion
+>   check would then reject every document.
+> - **The rejection-metrics bucket is pinned end to end, not just by transcription.** Deriving the
+>   reason strings from ingestion's constants tracks a *cap* change but not a *wording* change, so
+>   `test_ingestion.py` also asserts `_rejection_category(...) == "size"` on the reason a real
+>   oversize document actually produced. The two strings ingestion renders as literals (rather than
+>   from a constant) stay literal in the derived test too — "deriving" them would pin strings
+>   ingestion never emits.
+> - **Step `args` are validated with `json.dumps`** — the exact encoding the `steps` JSONB column
+>   applies, so "accepted at validation" and "storable in Postgres" cannot diverge. Not a formality:
+>   YAML parses an unquoted date into `datetime.date`, which no JSON encoder accepts, so without the
+>   check such a document would ingest and then break the sync write. `steps` is also the first
+>   frontmatter key the per-key char caps do not bound, so it gets a resource ceiling (≤ 200 steps,
+>   ≤ 64 KiB serialized) deliberately *above* the two step counts that exist today — the R-1 trace
+>   cap (default 100) and the gateway's flow budget (default 20) — so the ceiling is never the thing
+>   that decides graduality. R-4's policy bound (stage 6, **not yet implemented**) is planned to sit
+>   below it too. Both existing counts are operator-tunable and `MAX_STEPS` is not, so the ordering is
+>   a coupling to preserve rather than an invariant: raising `AGENT_AUTHORING_TRACE_MAX_STEPS` past
+>   200 would make a long trace un-graduable here (failing safe — rejected, never truncated).
+> - **A new size ceiling needs a metrics bucket.** `sync._rejection_category` mapped only
+>   `"body exceeds"` to `size`, so `"steps exceed 64 KiB"` and `"more than 200 steps"` fell through to
+>   `frontmatter` and the rejection counter under-counted size rejections. Broadened, gated on
+>   `steps` so the neighbouring `"more than 10 tags"` bound — which shares the `more than` prefix —
+>   stays where it always was. The label set remains bounded (the counter's cardinality guard).
+> - `steps` persists as SQL `NULL` (never JSON `null`) when absent, and the row-map guards with
+>   `isinstance(steps, list)`, so a pre-R-3 row reads back as exactly the v1 envelope shape and
+>   `summary()`/detail `exclude_none` keep the served payload byte-identical for knowledge skills.
+>   The column stores the envelope's own dump, so a step that omits `expect` materializes it as JSON
+>   null — both backends read it back as `expect=None`.
+> - **read-class confirmation:** R-3 adds a *declaration*, not an execution path. The guards that keep
+>   a read-class skill from mutating are unchanged and already asserted in their own suites — the
+>   gateway's `BROWSER_FLOW_READ_ONLY` denial on a write-tier interaction in a read-class flow
+>   (`browser_connector.py`, `test_browser_connector.py`) and the kernel's write-class-only flow
+>   signing (`runtime_kernel.py`, `test_runtime_kernel.py` / `test_flow_approvals.py`). Ingestion adds
+>   the third: it cannot produce a read-class executable flow at all.
+> - stage 6 inherits R-3's validation for free: `_validate_skill_markdown` →
+>   `POST /skills/validate` → `validate_document` → the same `_validate_frontmatter` these rules live
+>   in, so a graduation draft is refused by the rules it will be ingested under.
 
 ## Stage 6: agent-platform + portal — R-4 graduation
 

@@ -163,7 +163,7 @@ validate-version: ## Validate version lockstep between VERSION, products, and po
 	@cd products/tool-gateway && uv run python ../../shared/shared-contracts/scripts/validate_version.py ../..
 
 .PHONY: validate-secret-vocabulary
-validate-secret-vocabulary: ## Validate redaction-vocabulary lockstep between agent-platform and tool-gateway
+validate-secret-vocabulary: ## Validate secret-literal lockstep (agent-platform / tool-gateway / skills-hub)
 	@cd products/agent-platform && uv run python ../../shared/shared-contracts/scripts/validate_secret_vocabulary.py ../..
 
 # --- Cross-cutting ----------------------------------------------------------

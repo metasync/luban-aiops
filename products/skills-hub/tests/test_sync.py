@@ -13,9 +13,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from skills_hub.core.config import SkillsSettings, SourceSpec
+from skills_hub.services import ingestion
 from skills_hub.services import sync as sync_module
 from skills_hub.services.skill_store import InMemorySkillStore
-from skills_hub.services.sync import SyncManager, _with_token
+from skills_hub.services.sync import (
+    SyncManager,
+    _rejection_category,
+    _with_token,
+)
 
 VALID_DOC = """---
 title: KubePodNotReady
@@ -347,6 +352,75 @@ class SyncSpanTests(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertNotIn("sekrit", messages[0])
         self.assertIn("***", messages[0])
+
+
+class RejectionCategoryTests(unittest.TestCase):
+    """The rejection counter's label is a bounded observability bucket.
+
+    SPEC-055 R-3 added a second size-bounded artifact (the step list), so its
+    two resource ceilings join the body's in ``size`` — while the neighbouring
+    per-field and tag-count bounds stay ``frontmatter``, which is what keeps
+    the bucket meaning "the document was too big" rather than "a number in it
+    was".
+
+    Reason strings are derived from ingestion's own constants wherever
+    ingestion derives them, so a cap change moves these with it; the two that
+    ingestion renders as literals stay literal here too, rather than being
+    "derived" into strings ingestion never emits. The wording itself is pinned
+    end to end in ``test_ingestion.py``, which asserts the bucket on the reason
+    a real oversize document actually produced.
+    """
+
+    def test_artifact_size_ceilings_are_bucketed_as_size(self) -> None:
+        for reason in (
+            "body exceeds 64 KiB",
+            f"steps exceed {ingestion.MAX_STEPS_BYTES // 1024} KiB",
+            f"more than {ingestion.MAX_STEPS} steps",
+        ):
+            with self.subTest(reason=reason):
+                self.assertEqual(_rejection_category(reason), "size")
+
+    def test_field_and_tag_bounds_stay_frontmatter(self) -> None:
+        # "more than N tags" shares its prefix with "more than N steps"; the
+        # ``steps`` gate is what keeps the two apart.
+        for reason in (
+            f"more than {ingestion.MAX_TAGS} tags",
+            "tag exceeds 64 chars",
+            f"step 1: tool exceeds {ingestion.MAX_STEP_TOOL_CHARS} chars",
+            "step 2: expect must be a string \u2264 "
+            f"{ingestion.MAX_STEP_EXPECT_CHARS} chars",
+            f"steps requires kind: {ingestion.EXECUTABLE_FLOW_KIND}",
+            f"kind: {ingestion.EXECUTABLE_FLOW_KIND} requires risk_class: write",
+            f"kind: {ingestion.EXECUTABLE_FLOW_KIND} requires a non-empty "
+            "steps list",
+            "a web.* step requires a web_target declaration",
+        ):
+            with self.subTest(reason=reason):
+                self.assertEqual(
+                    _rejection_category(reason), "frontmatter", reason
+                )
+
+    def test_the_other_labels_are_unchanged(self) -> None:
+        # Reason strings as ingestion actually renders them.
+        self.assertEqual(
+            _rejection_category(
+                "duplicate slug 'alerts/x' (already defined by alerts/x.md)"
+            ),
+            "duplicate_slug",
+        )
+        self.assertEqual(
+            _rejection_category(
+                "unreadable document: 'utf-8' codec can't decode byte 0xff"
+            ),
+            "unreadable",
+        )
+        self.assertEqual(
+            _rejection_category("path does not produce a slug"), "path"
+        )
+        self.assertEqual(
+            _rejection_category("source directory not found: /srv/skills"),
+            "missing_source",
+        )
 
 
 if __name__ == "__main__":
