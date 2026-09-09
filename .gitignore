@@ -28,6 +28,11 @@ __pycache__/
 # and ignored prevents the coordinated IMAGE_TAG from gaining `-dirty`.
 .*.log
 
+# Dot-prefixed per-session scratch SQL (`.sqlcheck-*.sql`) — the real-database
+# migration checks a spec's `tasks.md` cites as evidence, so they stay on disk
+# for the reader but out of git, for the same IMAGE_TAG reason as the logs.
+.sqlcheck-*.sql
+
 # Local verification screenshots captured by browser-based checks.
 *.png
 
