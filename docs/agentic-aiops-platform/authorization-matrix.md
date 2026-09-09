@@ -440,7 +440,30 @@ export (`GET /api/v1/audit/export`) — both riding the existing
 read-only-observer receive the standard audited policy 403). No new
 policy action and no new event type are introduced, and the auditor
 read-only invariant is unchanged: both surfaces query envelope columns
-only and never aggregate over event payloads. The full approval model —
+only and never aggregate over event payloads. Since v0.36.0 (SPEC-055) one
+new action gates skill graduation: `session:skill_graduate` authorizes
+turning a session's captured authoring trace into an executable-flow draft,
+and it is deliberately **not** folded into `session:skill_draft` — the
+artifact declares `risk_class: write` and a machine-readable replay step list
+rather than knowledge prose, so it is a higher trust level and is separately
+authorized (SPEC-055 OQ-3). It follows the same operational-role grant
+pattern as its authoring siblings: `platform-admin`, `approver`, and
+`operator` hold it; `developer`, `read-only-observer`, and `auditor` receive
+the standard audited policy 403. One grant covers both graduated-session
+entry points — the chat header's **Graduate as skill** and the mid-session
+**Declare target** route — while declaring a target at session *birth* rides
+`session:create`, so any role that may open a session may scope it but only a
+graduation-capable one may ever export it. Ownership stays enforced by the
+anti-enumeration 404, and graduation never auto-publishes: the draft *is* the
+ephemeral response, for a human to review and merge into their own skills
+repo, with nothing persisted server-side. Each export is recorded once as a
+`skill_graduated` audit event whose `details` carry the session, the mode, the
+step count, the `web_target` scope in force and the declaration-ordering
+verdict — the declare-target route is deliberately unaudited at the gateway
+(a declaration is a scope, not an operational act) and `session_created`
+records only a boolean `skill_target_declared` flag rather than the URL, so
+that event is where a reviewer learns which origin a graduated flow is bound
+to. The full approval model —
 policy actions, risk-tier admission, the agent auto-allow list, and HITL
 confirmation — is documented in the
 [Approval and HITL Governance Guide](../guides/approval-and-hitl.md).

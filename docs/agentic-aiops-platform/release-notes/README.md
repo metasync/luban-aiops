@@ -7,6 +7,47 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-09-develop-as-you-go-skill-graduation.md`
+  - release train (v0.36.0) delivering SPEC-055 (seventeenth R5 slice, the C
+    phase of the A→B→C HITL redesign, implementing **ADR-0009**): lets an
+    operator **graduate a troubleshooting session** into a replayable
+    executable-flow skill. Adds a dual-backend durable **authoring trace**
+    keyed by session with a `draft → graduated | discarded` lifecycle and a
+    retention policy independent of the 30-day `execution_records` sweep,
+    captured as a by-product of each already-approved *and* already-signed
+    mutation at **both** signing sites (per-action and flow-unlock), gated on
+    the platform's single risk→action mapping so it fails closed on an
+    unclassified tier, with secrets parameterized at capture and a
+    best-effort/fail-safe store; advances the skill contract **Skill v1 → v2**
+    additively with an optional `kind` and `steps` replay list and relaxes
+    ingestion so `risk_class: write` is valid **without** a `web_target` (a
+    `web.*` step still requires one, and an executable flow must declare
+    `write` unconditionally); adds deterministic no-model **graduation**
+    (`POST /api/v1/sessions/{id}/skill-graduate`) whose
+    `revalidate_blast_radius` runs before the draft exists and checks the
+    recorded **declared target** (an authorization scope named before
+    mutating) against every step's **observed origin** (what the gateway
+    reported the mutation landed on, recorded at the receipt seam and only for
+    a `succeeded` result), producing a previewable, downloadable **draft for
+    human merge** that is never auto-published and persisted nowhere
+    server-side; gates it with one new policy action
+    (`session:skill_graduate`, deliberately not folded into
+    `session:skill_draft`) and one new audit event type (`skill_graduated`);
+    replays a graduated browser flow under SPEC-051's **one** gate with no new
+    executor, its `steps` list never an input to that gate (budget from the
+    gateway knob, `FlowState` declaring no `kind`/`steps`), credentials
+    resolved from credential-set references at replay, while an infra
+    executable flow's steps park per-action (the asserted OQ-2 fallback); and
+    closes the two approval-seam secret-masking gaps SPEC-054 recorded and
+    deferred (**R-7**) — `should_mask` flipped to fail closed against a curated
+    `KNOWN_SAFE_FIELDS` allow-list, and an `action` card's raw `parameters`
+    redacted in place so nothing plaintext persists, streams, or renders in the
+    expander, with no contract change and a byte-identical signed `args_digest`
+    — plus `web.evaluate.expression` joining `OPAQUE_VALUE_FIELDS`. Three new
+    knobs, one new `samples/web-checks/skill-graduation/` demo exercised by its
+    own `demo.sh` per ADR-0008, and a portal test-harness drain for a React 19
+    + jsdom scheduler-teardown race that made a fully passing vitest suite exit
+    non-zero
 - `2026-09-07-action-approval-and-change-request-card.md`
   - release train (v0.35.0) delivering SPEC-054 (sixteenth R5 slice, the B
     phase of the A→B→C HITL redesign): makes **action** approval first-class

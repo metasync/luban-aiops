@@ -2,17 +2,21 @@
 
 ## Status
 
-- status: `in-progress`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-09-06
 - approved: 2026-09-07
-- release slice: R5 — Hardening and External Consumption (seventeenth R5 slice)
-- implementation start: gated on SPEC-054 reaching `delivered` (B before C).
-  `plan.md`/`tasks.md` are authored at that point, not at approval, because this
-  spec's capture seam and replay binding are built on the `approval_kind`
-  discriminator and per-action parking that SPEC-054 ships.
+- delivered: 2026-09-09 (v0.36.0)
+- release slice: R5 — Hardening and External Consumption (seventeenth R5
+  slice, v0.36.0)
+- implementation start: was gated on SPEC-054 reaching `delivered` (B before
+  C). `plan.md`/`tasks.md` were authored at that point rather than at
+  approval, because this spec's capture seam and replay binding are built on
+  the `approval_kind` discriminator and per-action parking that SPEC-054
+  ships.
 - related ADRs: **ADR-0009** (graduate troubleshooting sessions into replayable
-  executable skills via a durable authoring trace — this spec implements it),
+  executable skills via a durable authoring trace — **implemented by this
+  delivery**, stays `accepted`),
   ADR-0007 (one HITL gate per mutating browser flow — **phased**, a graduated
   flow replays under one gate), ADR-0008 (spec delivery traceability gate);
   lineage: extends SPEC-044 (skill authoring export — knowledge-only draft),
@@ -22,9 +26,15 @@
   (action-level HITL approval — the exploration/authoring phase that produces the
   mutations this spec graduates; **R-7 also hardens SPEC-054 R-3's
   change-request projection at the approval seam**)
-- sequencing: A (the SPEC-051 R-6 headline-leak patch) landed; B (SPEC-054) is
-  the action-approval prerequisite; C (this spec + ADR-0009) is the graduation
-  destination. A→B does not conflict with C.
+- sequencing: the A→B→C program is complete. A (the SPEC-051 R-6 headline-leak
+  patch) landed at v0.34.1; B (SPEC-054, the action-approval prerequisite)
+  landed at v0.35.0; C (this spec + ADR-0009, the graduation destination) is
+  this delivery at v0.36.0. A→B did not conflict with C.
+- deferred follow-up: **OQ-2's generalized non-browser (infra `k8s.*`) flow
+  binding** is not delivered here — an infra executable flow's steps park
+  per-action under SPEC-054 R-2, which fails safe and is asserted as such by
+  R-5's tests. It is anchored to its own follow-up train in
+  `delivery-roadmap.md`.
 
 ## Summary
 
@@ -524,3 +534,74 @@ recorded in the changelog (the `approved`-spec rule).
   stages with an R-1..R-7 → asserting-test delivery gate (ADR-0008).
   Bookkeeping: `docs/specs/README.md` row `approved` → `in-progress`.
   **Implementation started; status → `in-progress`.**
+- 2026-09-09: **delivered** (v0.36.0, seventeenth R5 slice). All seven
+  requirements shipped across the eight-stage plan; no requirement text
+  changed. **R-1** — `AuthoringTraceStore` (`Protocol` + `InMemory` +
+  `Postgres` + factory), every schema field on both backends, lifecycle
+  `draft → graduated | discarded` with retention independent of the 30-day
+  execution sweep, a per-session cap and an idle-GC that never sweeps a
+  terminal row. **R-2** — capture at both signing sites (per-action and
+  flow-unlock) beside `_persist_execution_request`, gated on
+  `RISK_LEVEL_ACTIONS[tier] == "tools:mutate"` so it fails **closed** on an
+  unclassified tier (being signed is not being a mutation: an unvetted read
+  tool parks, is approved and is signed like any write), best-effort and
+  fail-safe, with secrets parameterized at capture and `delete_session`
+  cascading the trace. **R-3** — `skill.schema.json` **v1 → v2** (additive
+  `kind`/`steps`), `risk_class` accepted without a `web_target`, ingestion
+  validation on the existing `validate_document` path, `kind TEXT` + `steps
+  JSONB` on both store backends, and `skill-format.md` v1 → v2 beside the
+  schema. Two tightenings recorded in `tasks.md`: `risk_class: write` is
+  required **unconditionally** for `kind: executable_flow`, and a `web.*` step
+  still requires a `web_target`. **R-4** — the stage-6a refinement stands as
+  delivered: the **declared target** (`authoring_trace_target`) and the
+  **observed origin** (`authoring_trace.flow_origin`) are two recorded things,
+  the origin captured at the receipt seam for a `succeeded` result only and the
+  declaration stored as origin **and path** with query, fragment and userinfo
+  stripped. `POST /api/v1/sessions/{id}/skill-graduate` renders the draft
+  deterministically — no model call, no skeleton — after
+  `revalidate_blast_radius` (five guards) runs and refuses `409` naming every
+  guard the trace failed; gated by the new `session:skill_graduate` action,
+  audited once as `skill_graduated`, lifecycle flipped to `graduated`, and
+  never auto-published. **R-5** — verification, not construction: a graduated
+  browser flow binds through the existing SPEC-051 path, and its `steps` list is
+  never an input to its own gate, guaranteed structurally twice over
+  (`bind_flow` reads five named fields and takes its budget from the gateway
+  knob; `FlowState` declares no `kind`/`steps` at all). Credentials resolve at
+  replay from credential-set references; executable-flow writes join no
+  auto-allow list. A review finding hardened `_sign_flow_execution` with its own
+  `BROWSER_WRITE_TOOLS` guard, so the function enforces the browser-only scope
+  its contract always claimed rather than relying on its single gated call
+  site. **R-6** — the R-1..R-7 → asserting-test mapping is recorded in
+  `tasks.md`, and `samples/web-checks/skill-graduation/` (`README.md` +
+  `WALKTHROUGH.md` + `demo/demo.sh`, six deterministic legs plus four opt-in
+  chat acts) exercises the loop in the verification path; the two sibling
+  web-check demos are byte-identical and green. **R-7** — `should_mask` flipped
+  to fail closed against a curated `KNOWN_SAFE_FIELDS` allow-list, an `action`
+  card's raw `parameters` redacted in place at the park site, on the durable
+  record and on the stream frame, the portal expander presenting the masked
+  projection, `web.evaluate.expression` added to `OPAQUE_VALUE_FIELDS` with the
+  nesting walker taking the tool name, and the signed `args_digest` proven
+  byte-identical with and without redaction. **OQ-2 did not ship** and is
+  re-anchored to its own `delivery-roadmap.md` backlog row rather than silently
+  carried: an infra executable flow's steps park per-action under SPEC-054 R-2,
+  which fails safe and is asserted. Three new knobs
+  (`AGENT_AUTHORING_TRACE_MAX_STEPS` 100, `AGENT_AUTHORING_TRACE_IDLE_DAYS`
+  180, `AGENT_SKILL_GRADUATION_MAX_STEPS` 20) are documented in
+  `docs/guides/configuration-reference.md`, and `authorization-matrix.md`
+  carries the new action. `make verify` green at 0.36.0 (2424 python tests
+  across the eight products — agent-platform 1142, tool-gateway 336,
+  platform-gateway 354, skills-hub 184, audit-service 138, incident-service
+  137, execution-runtime 73, identity-broker 60 — four kustomize overlays, 18
+  policy rules, 137 api + 19 tools scenarios with every granted pair covered,
+  version lockstep, and all three secret-vocabulary agreements); portal
+  `npm test` 342 across 29 files and `npm run build` clean; version lockstep
+  **0.36.0** across `VERSION` + 8 `pyproject.toml` + 8 `metadata.py` + 2
+  `__init__.py` + 8 `uv.lock` re-locks. Landing the portal suite took one
+  test-harness fix recorded in the release note (a React 19 + jsdom
+  scheduler-teardown race that made a fully passing vitest run exit non-zero);
+  it touches no product behavior, which is why it is not in `CHANGELOG.md`.
+  Bookkeeping: `docs/specs/README.md` row `in-progress` → `delivered`,
+  `delivery-roadmap.md` row rewritten to `Delivered 2026-09-09 (0.36.0)` with
+  the new OQ-2 backlog row, `docs/adr/README.md` ADR-0009 stays `accepted`,
+  this Status block, and a `## 0.36.0` section in `CHANGELOG.md` plus the dated
+  release note. **Status → `delivered`.**

@@ -11,6 +11,222 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.36.0 — 2026-09-09
+
+### Added
+
+- **Develop-as-you-go skill graduation (SPEC-055)** — the **C** phase of the
+  operator-approved A→B→C HITL redesign and the implementation of **ADR-0009**
+  (the seventeenth R5 slice). An operator who troubleshoots a live problem
+  through chat, approving each mutation as it parks (SPEC-054), can now
+  **graduate that session** into a replayable executable-flow skill: the
+  platform captures the ordered, secret-safe parameterized step sequence as a
+  by-product of each already-approved *and* already-signed mutation,
+  re-validates the captured blast radius, and emits a **draft for a human to
+  review and merge** into their own skills repo — never an auto-published
+  skill, preserving SPEC-044's "the platform drafts, humans merge". Once
+  merged and ingested, the flow replays under SPEC-051's **one** HITL gate
+  with every write still individually signed, persisted, audited, receipted,
+  and gateway-guarded. Shared contracts, agent-platform, skills-hub,
+  platform-gateway, tool-gateway and the portal are touched;
+  execution-runtime is **verify-only** (a browser replay envelope is
+  byte-identical to a hand-authored flow envelope, `approval_kind: "flow"`).
+- **Durable authoring-trace store and its capture seam (SPEC-055 R-1/R-2)** —
+  a new `AuthoringTraceStore` with `InMemory` and `Postgres` backends records,
+  per session, the ordered position, the canonical tool name, the
+  **secret-safe parameterized** arguments, and *references* to the originating
+  `execution_id`/`confirm_id` — it never duplicates the signed receipt or the
+  outcome, which stay in `execution_records`. Every schema field exists on
+  **both** backends (the skills-hub `web_target`/`risk_class` lesson: a field
+  on one backend only is silently dropped in production). Its lifecycle is
+  `draft → graduated | discarded` with a retention policy **independent of**
+  the 30-day execution sweep, so a session authored now is still graduable
+  after its receipts are gone. Capture happens at the same resume/receipt seam
+  that writes `execution_records`, at **both** signing sites (the per-action
+  one and the flow-unlock one), so a mixed troubleshooting session yields one
+  coherent ordered trace; read-tier calls are never captured, and because
+  *being signed is not being a mutation* the per-action site is gated on the
+  platform's single risk→action mapping (`tools:mutate`) and so fails
+  **closed** on an unclassified tier. Capture is best-effort: a trace-store
+  failure degrades to "no graduation candidate" and never blocks the
+  mutation's execution or its receipt path. Deleting a session cascades its
+  trace, terminal or not. Two new knobs — `AGENT_AUTHORING_TRACE_MAX_STEPS`
+  (per-session step cap, default `100`) and `AGENT_AUTHORING_TRACE_IDLE_DAYS`
+  (idle-GC of still-`draft` traces, default `180`, `0` disables; a terminal
+  trace is never swept).
+- **Executable-flow skill class (SPEC-055 R-3)** — the skill contract advances
+  **Skill v1 → v2** additively: an optional `kind`
+  (`knowledge | executable_flow`, absent = `knowledge`) and an optional ordered
+  `steps` list of `{tool, args, expect?}` whose `args` carry credential-set
+  **references**, never literals. `risk_class: read|write` is now accepted
+  **without** a `web_target`, so a non-browser mutating skill (one that runs
+  `k8s.*`) can declare that it mutates — the explicit mechanism the operator
+  asked for, mirroring a tool's risk attribute rather than inferring
+  mutating-ness from a browser declaration. skills-hub ingestion validates the
+  class on the existing `validate_document` path SPEC-044 drafts against
+  (`risk_class: write` required unconditionally for an executable flow; a
+  `web.*` step still requires a `web_target`; credential references must
+  resolve to named credential sets) and rejects a malformed one, and
+  `skill_store` carries `kind TEXT` + `steps JSONB` on **both** backends. A
+  knowledge skill with no `kind`/`steps` validates exactly as today, so no
+  existing skill breaks. `shared/shared-contracts/skill-format.md` advances
+  v1 → v2 alongside the schema, since it is the human-readable half of the same
+  contract and still documented the rule R-3 removes.
+- **Graduation with blast-radius re-validation (SPEC-055 R-4)** —
+  `POST /api/v1/sessions/{session_id}/skill-graduate` assembles the
+  executable-flow draft **deterministically** from the trace, with no model
+  call and no facts-only skeleton fallback: it renders what the session
+  actually did, or it refuses. `revalidate_blast_radius` runs *before* the
+  draft exists and re-applies at graduation the guards the tool-gateway applies
+  at replay — the step budget (`AGENT_SKILL_GRADUATION_MAX_STEPS`, default
+  `20`), every **observed origin** inside the declared target's origin, a
+  write-class declaration with no read-tier step in it, and no unresolved
+  credential placeholder — plus a graduation-only **fifth** guard that refuses
+  an argument *shaped* like a secret literal. That one is the only guard
+  reading a shape rather than a fact the trace records, and it over-catches
+  deliberately (a `web.select` option reading `Basic Authentication` is refused
+  too, and cannot be told apart from a real `Authorization` value at this
+  layer): a false refusal costs an operator a re-author, a false accept
+  publishes a credential into the one artifact a human merges into a
+  repository. A trace that fails answers `409` naming **every** guard that
+  refused and the steps responsible, rather than only the first — reporting one
+  would send the operator back for a second round-trip.
+  "Target/origin" is two *recorded* things rather than one inferred one: the
+  **declared target** (`authoring_trace_target`, one row per session) is the
+  web target the operator names when opening a develop-as-you-go session,
+  declared *before* mutating so it is an authorization scope rather than a
+  claim fitted to the trace afterwards, and the **observed origin**
+  (`authoring_trace.flow_origin`) is what the gateway reported each captured
+  mutation actually landed on, recorded at the receipt seam and only for a
+  `succeeded` result — corroborating a failed write's intended URL would let a
+  mutation that never happened count toward graduation. A step with no
+  observed origin is *unverified*, not drifted, and refuses. The declaration is
+  stored as origin **and path** (a path narrowing is part of the scope
+  `bind_flow` enforces, so collapsing it would silently widen the graduated
+  skill to every path on the host) with query, fragment and `user:password@`
+  userinfo stripped by `skill_target_scope` — a target pasted from an address
+  bar is exactly where a session token rides, into a table that outlives every
+  receipt.
+- **One new policy action and one new audit event type (SPEC-055 R-4 / OQ-3)** —
+  `session:skill_graduate` gates graduation and is deliberately **not** folded
+  into `session:skill_draft`: the artifact declares `risk_class: write` and a
+  machine-readable replay step list rather than knowledge prose, so it is a
+  higher trust level and is separately authorized. It follows the
+  operational-role grant pattern of its authoring siblings —
+  `platform-admin`, `approver` and `operator` hold it; `developer`,
+  `read-only-observer` and `auditor` receive the standard audited policy 403 —
+  and one grant covers both graduated-session entry points (the chat header's
+  **Graduate as skill** and the mid-session **Declare target** route).
+  Declaring a target at session *birth* rides `session:create` alone, because
+  it is inert: it grants nothing and only narrows what a later graduation may
+  emit, so dual-gating it would refuse session creation over an inert field.
+  Each export is recorded once as a `skill_graduated` event whose `details`
+  carry the session, the mode, the step count, the `web_target` scope in force
+  and the declaration-ordering verdict; the declare-target route is
+  deliberately unaudited at the gateway (a declaration is a scope, not an
+  operational act) and `session_created` records only a boolean
+  `skill_target_declared` flag rather than the URL, so `skill_graduated` is
+  where a reviewer learns which origin a graduated flow is bound to.
+- **Skill-graduation sample (SPEC-055 R-6)** — a new
+  `samples/web-checks/skill-graduation/` tutorial (`README.md` +
+  `WALKTHROUGH.md` + `demo/demo.sh`) drives the whole loop against the same
+  admin portal as its two siblings: author a session of individually-approved
+  mutations, graduate it, merge the draft by hand, then replay the merged flow
+  under **one** gate and compare the two sessions' card counts side by side —
+  collapsing N per-action cards into one flow gate is the whole point of
+  graduation. It is the only web-check sample that ships **no `skill/`
+  directory**, deliberately, since the skill is the artifact the demo
+  *produces* and a hand-written one would beg the question; consequently
+  `deploy-samples.sh` cannot discover it, so act 3 patches the
+  `skills-samples` ConfigMap directly under the same `<sample-leaf>-<file>.md`
+  key convention and the `cleanup()` trap removes that key on exit (a
+  write-class executable flow left behind would be indistinguishable from a
+  properly merged one). Its `demo.sh` runs six deterministic legs plus four
+  opt-in chat acts per ADR-0008, and the two sibling demos' chat legs stay
+  byte-identical and green.
+
+### Changed
+
+- **A graduated flow replays under one gate, and its step list is never an
+  input to that gate (SPEC-055 R-5)** — replay needed **no new executor**: once
+  ingested, a graduated executable flow is an ordinary `web_target` +
+  `risk_class: write` skill and binds through the existing SPEC-051 path
+  (`_observe_flow_binding` → `_record_flow_approval` → `_sign_flow_execution` →
+  `build_flow_request`), parking one `flow`-kind card whose subsequent writes
+  are each individually signed and receipted. Its `steps` list is the replay
+  contract the *agent* follows under the single gate, never an input *to* the
+  gate — were it one, a skill author could widen their own blast radius by
+  writing a longer step list. That indistinguishability is now guaranteed
+  structurally twice over: `bind_flow` reads only
+  `web_target`/`risk_class`/`title`/`description`/`flow_intent` and takes its
+  budget from the gateway's `GATEWAY_BROWSER_FLOW_MAX_STEPS` knob rather than
+  from `len(steps)`, and `FlowState` declares no `kind`/`steps` field at all,
+  so `to_dict()` emits a fixed envelope and `FlowContextStore.record` drops
+  anything else. Credentials resolve **at replay time** from the named
+  credential sets a step references, so a graduated skill is shareable
+  precisely because it carries no literal secret. Executable-flow writes join
+  **no** auto-allow list, and the gateway deviation guard (origin allowlist,
+  declared `risk_class`, step budget) bounds a replayed write identically to a
+  hand-authored one — a replay past budget or off-allowlist fails closed.
+- **Operator-portal graduation entry points (SPEC-055 R-4)** — the chat header
+  gains a role-gated **Graduate as skill** action beside the SPEC-044 draft
+  button, plus a mid-session **Declare target** route for a session opened
+  without one, and a session created with a target surfaces it. The graduated
+  draft opens in the SPEC-045 preview pattern (rendered Markdown ⇄ raw source,
+  a mode badge, download), because the draft *is* the ephemeral response — the
+  platform persists nothing server-side for a human to merge later.
+- **The deferred OQ-2 infra binding stays deferred** — because today's flow
+  binding is browser-specific, a non-browser (`k8s.*`) executable flow's steps
+  park **per-action** under SPEC-054 R-2 rather than collapsing to one gate.
+  That is the asserted safe fallback, not a gap: it fails safe, joins no
+  auto-allow list, and the generalized binding is anchored to its own
+  follow-up train in `delivery-roadmap.md`.
+
+### Fixed
+
+- **Change-request masking now fails closed (SPEC-055 R-7)** — the projection
+  SPEC-054 R-3 shipped masked by name and fell back to a generic path that
+  failed **open**, so a secret under an off-vocabulary key projected as
+  plaintext. `secret_params.should_mask` is flipped to *mask unless positively
+  known safe*, with a new curated per-tool `KNOWN_SAFE_FIELDS` allow-list for
+  the fields that may render verbatim (`k8s.delete_pod` name/namespace,
+  `web.select` value, `web.fill_credential` credential_set/field,
+  `web.press_key` key, `web.upload_file` filename), and `_generic_fields`
+  inherits the same posture. This closes a gap SPEC-054 recorded and deferred,
+  not a regression it introduced.
+- **No plaintext secret on the durable record, the stream frame, or the portal
+  expander (SPEC-055 R-7)** — for an `action`-kind card the raw `parameters`
+  values are now redacted **in place** (keys preserved, secret-bearing values →
+  `***`) beside the `change_request` projection, so nothing plaintext persists
+  in `confirmation_records.pending_calls`, rides the `confirmation_request`
+  frame, or renders in the "Technical details" expander, which now presents the
+  masked projection. `flow` and legacy cards are unchanged. This is the other
+  half of the same recorded SPEC-054 deferral (its Non-Goal "No masking of the
+  raw parameters already persisted on the durable record" + OQ-5), and it ships
+  with **no contract change** and a byte-identical signed `args_digest`: the
+  digest is computed at resume from the in-memory `PendingConfirmation`
+  (`build_requests` re-parses `tool_calls`), never from the persisted JSONB or
+  the frame, and a parked confirmation never survives a restart — so masking is
+  a pure display + persistence projection.
+- **`web.evaluate.expression` joins the opaque-value vocabulary (SPEC-055 R-2)** —
+  arbitrary JS can read a masked secret off the page and can *be* the mutation
+  (`document.querySelector('#pw').value = '<literal>'`); it is write-tier, in
+  `BROWSER_WRITE_TOOLS`, and `_cr_web_evaluate` already refused to project it
+  on a card, so without this entry the trace projection was the one place a
+  JS-embedded literal survived — into a store that outlives every receipt. The
+  nesting walker now takes the tool name so per-tool opaque fields hold below
+  the top level too.
+- **The flow auto-signer now enforces its own browser-write scope (SPEC-055
+  R-5)** — `_sign_flow_execution`'s contract is "auto-sign one unlocked
+  *browser* write", but what made that true was its single gated call site:
+  calling the signer directly with `k8s.scale_deployment` under a live browser
+  flow authority returned a full signed envelope, a durable execution record
+  and an `execution_requested` audit event for a mutation no operator decision
+  covered. Not reachable in production as it stood, which is precisely the
+  problem — the invariant rested on a call site staying disciplined. The
+  `BROWSER_WRITE_TOOLS` guard is now inside the signer, so the scope is
+  enforced by the function that declares it.
+
 ## 0.35.0 — 2026-09-07
 
 ### Added
