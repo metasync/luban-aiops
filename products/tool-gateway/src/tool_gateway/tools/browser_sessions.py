@@ -60,15 +60,33 @@ class FlowState:
     """Skill-declared web-check flow bound to a session (SPEC-049 R-4).
 
     ``approved`` is set at bind time for ``read``-class flows (they run
-    under ``tools:invoke`` with no extra gate) and recorded when the first
-    interaction of a ``write``-class flow executes — an interaction can
-    only reach the gateway through the SPEC-020/037 confirmation and
-    signing path, so its execution is evidence of approval, not a gate the
-    deviation guard re-checks (the guard consults bound/denied/origin/
-    risk_class/steps). ``denied`` is a reserved gateway-side kill-switch
-    the guard honors, but the HITL path enforces denial upstream — the
-    SPEC-020 bridge refuses the write so it never reaches the gateway to
-    flip this flag — so it is not currently set in production.
+    under ``tools:invoke`` with no extra gate) and recorded when a
+    step-accounting interaction of a ``write``-class flow executes. Read it
+    as evidence of approval only for a **write-tier** interaction: those
+    reach the gateway through the SPEC-020/037 confirmation and signing
+    path, so their execution does imply a decision.
+
+    The set that *accounts* is not the set that is write-tier, and the two
+    differ by one member each way. ``_WebInteractionTool._step_result`` and
+    ``WebPressKeyTool`` are the only sites that increment ``steps_used`` and
+    set this flag — the five interaction subclasses plus ``web.press_key``,
+    which is ``web.fill_credential`` (read-tier: auto-allowed with no
+    operator decision, so the flag is not evidence of one) in place of
+    ``web.evaluate`` (write-tier, but it rides ``gate_capture`` and accounts
+    neither a step nor the flag).
+
+    Neither asymmetry bites, because nothing reads the flag: the deviation
+    guard consults bound/denied/origin/risk_class/steps, and the kernel
+    drops the key — ``FlowContext`` declares no ``approved`` field and
+    ``FlowContextStore.record`` reads eight named keys. So re-emitting it on
+    a later in-flow ``web.navigate`` is inert; note that ``to_dict()``'s one
+    call site is gated on a *bound* flow, not on this navigate being the one
+    that bound it, so a plain in-flow navigate does re-publish it after
+    interactions have set it. It is not a gate for that reason. ``denied``
+    is a reserved gateway-side kill-switch the guard honors, but the HITL
+    path enforces denial upstream — the SPEC-020 bridge refuses the write so
+    it never reaches the gateway to flip this flag — so it is not currently
+    set in production.
     """
 
     skill_id: str

@@ -241,8 +241,11 @@ class GatewayPermissionMiddleware(MiddlewareBase):
         # the static read-only allow-list above, and never for non-browser
         # writes (k8s.*, etc.). The signer returns None (fail-safe → ASK) when
         # no live authority exists, the signing key/execution state is unset,
-        # or the bound flow's identity no longer matches the approval (a
-        # rebind). The tool-gateway deviation guard still bounds the write.
+        # the bound flow's identity no longer matches the approval (a rebind),
+        # or the tool name is outside BROWSER_WRITE_TOOLS — the same set this
+        # branch tests, checked again there so the scope does not rest on this
+        # call site staying the only one (SPEC-055 R-5). The tool-gateway
+        # deviation guard still bounds the write.
         gateway_tool_name = getattr(tool, "gateway_tool_name", None)
         if (
             self._flow_signer is not None

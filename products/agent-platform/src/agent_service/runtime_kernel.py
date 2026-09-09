@@ -1420,12 +1420,13 @@ class AgentKernel:
         signed execution envelope — injecting it into the shared
         ``EXECUTION_REQUESTS`` map so the tool closure verifies and hands off
         exactly like a card-approved call — or ``None`` to fail safe and let the
-        write park. ``None`` (→ ASK) whenever: the session id is absent; no live
-        flow authority exists (TTL lapse or ``ttl <= 0`` disable); the bound
-        ``FlowContext`` identity no longer matches the approval (a rebind — the
-        guard that eliminates the ADR-0007 cross-flow window); the execution
-        state is not armed (``EXECUTION_REQUESTS`` is not a dict); or no signing
-        key is provisioned. Each unlocked write is still individually signed,
+        write park. ``None`` (→ ASK) whenever: the tool is not a browser write;
+        the session id is absent; no live flow authority exists (TTL lapse or
+        ``ttl <= 0`` disable); the bound ``FlowContext`` identity no longer
+        matches the approval (a rebind — the guard that eliminates the ADR-0007
+        cross-flow window); the execution state is not armed
+        (``EXECUTION_REQUESTS`` is not a dict); or no signing key is
+        provisioned. Each unlocked write is still individually signed,
         persisted, audited (``execution_requested``), and appended to the
         session's authoring trace, and the tool-gateway deviation guard still
         bounds it on invocation.
@@ -1435,6 +1436,23 @@ class AgentKernel:
             EXECUTION_AUDIT_CONTEXT,
             EXECUTION_REQUESTS,
         )
+
+        if gateway_tool_name not in BROWSER_WRITE_TOOLS:
+            # SPEC-055 R-5: enforce this function's own stated scope — "one
+            # unlocked *browser* write" — rather than inheriting it from the
+            # middleware that happens to be its only caller today. A browser
+            # flow authority is scoped to a web target the operator approved;
+            # auto-signing an infra mutation under it would execute a write no
+            # decision of theirs covers, which is the one thing the OQ-2
+            # per-action fallback must never do. Ahead of every side effect
+            # below — the ``EXECUTION_REQUESTS`` injection, the durable
+            # execution record, the authoring-trace step and the
+            # ``execution_requested`` audit — so a refused name leaves no
+            # trace of a request that was never made. (The lookups it also
+            # precedes are pure reads every other ``None`` path takes too;
+            # the side effects are what the position buys.) Fail-safe:
+            # ``None`` parks the call, exactly as an absent authority would.
+            return None
 
         session_id = CHAT_SESSION_ID.get()
         if not session_id:

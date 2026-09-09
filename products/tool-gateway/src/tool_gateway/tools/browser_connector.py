@@ -4,8 +4,22 @@ Drives the pod's chromium-headless-shell sidecar over CDP through a
 stateful session pool and registers a small, fixed tool surface:
 
   read tier   web.navigate, web.snapshot, web.screenshot,
-              web.fill_credential
-  write tier  web.click, web.type
+              web.fill_credential, web.extract, web.wait_for,
+              web.hover, web.scroll, web.switch_frame
+  write tier  web.click, web.type, web.select, web.press_key,
+              web.upload_file, web.evaluate
+
+The per-tool ``risk_level`` beside each ``ToolDefinition`` is the authority;
+this list is orientation. The write tier is the same six names as
+agent-platform's ``flow_approvals.BROWSER_WRITE_TOOLS``, which is what gates
+flow-unlock and what SPEC-055's graduation re-validation derives read-tier
+from — so the two must not drift. A seventh write tool added here without
+being added there degrades safe in both consumers, but not silently:
+graduation re-validation refuses the draft because it cannot explain a
+``web.*`` step outside the write set, and upstream the tool loses flow-unlock
+so its writes park per-action instead of riding one gate. It can never be
+auto-allowed by drifting: the allow-list branch is gated on ``is_read_only``
+(the SPEC-021 R-3 invariant), which a mutating tool cannot satisfy.
 
 Enforcement surfaces (all server-side, never model-trusted):
 
@@ -18,11 +32,20 @@ Enforcement surfaces (all server-side, never model-trusted):
 - Flow binding + deviation guard (R-4): ``web.navigate`` with a
   ``skill_id`` validates the skill's ``web_target``/``risk_class``
   declaration against skills-hub and binds the flow to the session.
-  Interactions only execute inside a bound, approved, unexhausted flow —
-  anything else is denied, never run silently. Write-tier interactions
-  additionally ride the existing SPEC-020 confirmation bridge and SPEC-037
-  signed execution upstream of the gateway, so an interaction that
-  executes here is evidence of operator approval (recorded on the flow).
+  Inside a bound flow an interaction only executes on-origin, under a
+  ``write`` ``risk_class`` if it is write-tier, and within the step budget —
+  anything else is denied, never run silently. Since SPEC-054 R-2 an
+  *unbound* interaction is not a hard deny either: it re-checks the live
+  origin and the signed envelope's authority provenance
+  (``_gate_unbound_interaction``), so an ad-hoc write executes once its
+  per-action card was approved. Write-tier interactions ride the SPEC-020
+  confirmation bridge and SPEC-037 signed execution upstream of the gateway
+  either way; read-tier ones are auto-allowed with no operator decision.
+  That includes ``web.fill_credential``, which nonetheless shares the write
+  tier's step accounting — so ``flow.approved`` is neither set by every
+  write-tier tool (``web.evaluate`` rides ``gate_capture`` and accounts
+  nothing) nor evidence of a decision for every tool that sets it. No guard
+  reads the flag; see ``FlowState`` for the two sets and why that is safe.
 - Credential sets (R-5): login values resolve from a secret-mounted file
   at fill time; they never appear in results, snapshots, or logs.
 
@@ -999,8 +1022,17 @@ class _WebInteractionTool(BaseTool):
         }
         flow = entry.flow
         if flow is not None:
-            # Bound flow: account the step against its budget and record the
-            # execution as evidence of approval (SPEC-051). Unchanged.
+            # Bound flow: account the step against its budget (SPEC-051).
+            # Every ref-addressed interaction is accounted whatever its tier,
+            # so ``web.fill_credential`` — read-tier for *approval* (D-3) but
+            # still touching the page — spends budget too. That is the
+            # conservative direction (a flow gets fewer writes than its budget
+            # advertises, never more), and it means the credential-reference
+            # steps a human adds when merging a SPEC-055 graduated draft come
+            # out of the same ``GATEWAY_BROWSER_FLOW_MAX_STEPS`` the mutations
+            # do. ``approved`` records the execution as evidence of a decision;
+            # see ``FlowState`` for why that reading holds for the write tier
+            # and is merely harmless for this one read-tier subclass.
             flow.steps_used += 1
             flow.approved = True
             data["steps_used"] = flow.steps_used

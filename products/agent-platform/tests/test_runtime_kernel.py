@@ -2585,3 +2585,338 @@ class TestObserveStepOrigin:
             "flow_origin"
         ] == "https://admin.internal"
 
+
+# --- SPEC-055 R-5: replaying a graduated executable flow --------------------
+
+# The flow dict a graduated *browser* executable flow rides back on
+# ``web.navigate``'s ``data["flow"]`` once a human merges the R-4 draft and
+# skills-hub ingests it: the declaration a hand-authored browser flow already
+# had. There is no ``kind`` and no ``steps`` key here because the gateway's
+# ``FlowState`` declares neither — ``GraduatedFlowReplayTests`` in tool-gateway
+# pins that at the seam where the skill record is actually read. ``title`` and
+# ``description`` are the strings ``build_executable_flow_draft`` derives, so
+# this is a graduated flow and not merely a renamed one.
+_GRADUATED_FLOW = {
+    "skill_id": "team-a/web/inventoryhealth",
+    "origin": "https://inventory.internal:8443",
+    "risk_class": "write",
+    "title": "https://inventory.internal:8443 executable flow",
+    "description": (
+        "Replays 3 approved mutating step(s) captured from an operator "
+        "session against https://inventory.internal:8443/login: web.select, "
+        "web.type, web.click."
+    ),
+    # Deliberately empty: the renderer never synthesizes a decision line,
+    # because inventing a sentence the trace did not say is the composition
+    # R-4 forbids. A human may add one at merge time.
+    "flow_intent": "",
+    "steps_used": 0,
+    # The gateway's GATEWAY_BROWSER_FLOW_MAX_STEPS, not len(steps).
+    "max_steps": 20,
+    "approved": False,
+}
+
+# The v2 replay contract, as skills-hub stores it and ``skills.get`` returns
+# it verbatim. Three steps against a twenty-step budget, so any code that read
+# the budget off this list would be visibly wrong.
+_GRADUATED_STEPS = [
+    {"tool": "web.select", "args": {"selector": "#role", "value": "admin"}},
+    {"tool": "web.type", "args": {"ref": 2, "text": "maintenance window"}},
+    {"tool": "web.click", "args": {"ref": 1}},
+]
+
+
+def _navigate_result(flow):
+    """The ``tool_result`` frame ``_observe_flow_binding`` reads."""
+    return {
+        "type": "tool_result",
+        "tool_name": "web.navigate",
+        "call_id": "call-nav",
+        "status": "success",
+        "data": {"url": f"{_GRADUATED_FLOW['origin']}/login", "flow": flow},
+    }
+
+
+class TestGraduatedFlowReplay:
+    """R-5: a graduated browser executable flow binds and one-gates through the
+    SPEC-051 path that already shipped — no new executor anywhere in the chain.
+
+    The claim is *indistinguishability*. Once ingested, a graduated flow is an
+    ordinary ``web_target`` + ``risk_class: write`` skill, and its ``steps``
+    list is the replay contract the **agent** follows under the single gate,
+    not an input to the gate. Were it an input, a skill author could widen
+    their own blast radius by writing a longer step list — which is why the
+    assertions below compare whole payloads rather than spot-checking fields.
+    """
+
+    def _kernel(self, **overrides):
+        kwargs = dict(
+            api_key="test-key",
+            execution_signing_key=FLOW_SIGNING_KEY,
+            browser_flow_approval_ttl=900,
+            hitl_confirm_timeout=600,
+        )
+        kwargs.update(overrides)
+        return AgentKernel(settings=RuntimeSettings(**kwargs))
+
+    def test_a_graduated_binding_records_the_context_a_declaration_records(self):
+        """The kernel's single population point cannot tell the two apart.
+
+        Asserted twice over, because either half alone leaves a way in: the
+        context recorded from a graduated binding equals the one a
+        hand-authored declaration produces, *and* injecting keys the gateway's
+        flow envelope should not carry — which today's gateway does not do for
+        ``kind``/``steps``, but a future one might — changes nothing, because
+        ``FlowContextStore.record`` reads eight named keys and drops the rest.
+
+        ``approved`` is injected deliberately and is not hypothetical: the
+        gateway really does re-publish it as ``True`` on any later in-flow
+        ``web.navigate`` (``to_dict()``'s one call site is gated on a *bound*
+        flow, not on this navigate being the one that bound it), after
+        interactions have set it. That it cannot reach a ``FlowContext`` is the
+        fact that makes the flag inert, so it is pinned rather than documented.
+        """
+        session_id = "ses-r5-ctx"
+        FLOW_CONTEXTS.clear_all()
+        AgentKernel._observe_flow_binding(
+            _navigate_result(dict(_GRADUATED_FLOW)), session_id
+        )
+        declared = FLOW_CONTEXTS.get(session_id)
+
+        FLOW_CONTEXTS.clear_all()
+        AgentKernel._observe_flow_binding(
+            _navigate_result(
+                {
+                    **_GRADUATED_FLOW,
+                    "kind": "executable_flow",
+                    "steps": _GRADUATED_STEPS,
+                    "approved": True,
+                }
+            ),
+            session_id,
+        )
+        graduated = FLOW_CONTEXTS.get(session_id)
+
+        assert declared is not None and graduated is not None
+        assert graduated.identity() == declared.identity()
+        assert graduated.summary() == declared.summary()
+        # The budget is the gateway's, not the step list's length (3 != 20).
+        assert graduated.max_steps == declared.max_steps == 20
+        assert not hasattr(graduated, "kind")
+        assert not hasattr(graduated, "steps")
+        assert not hasattr(graduated, "approved")
+
+    def test_a_graduated_flow_collapses_to_one_gate_then_signs_each_write(
+        self, monkeypatch
+    ):
+        """Boxes 1 + 6, driving the four functions plan.md §5 names, in order.
+
+        ``_observe_flow_binding`` → one ``flow``-kind card → ``_record_flow_approval``
+        → ``_sign_flow_execution``/``build_flow_request``. Nothing new is
+        constructed along the way, which *is* the finding: R-5 needed no
+        executor, no envelope variant and no guard of its own.
+        """
+        audits = _capture_flow_audits(monkeypatch)
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        kernel = self._kernel()
+        session_id = "ses-r5-chain"
+
+        # 1. Bind: the graduated flow arrives on web.navigate's result.
+        AgentKernel._observe_flow_binding(
+            _navigate_result(dict(_GRADUATED_FLOW)), session_id
+        )
+        assert FLOW_CONTEXTS.get(session_id) is not None
+
+        # 2. Park: the flow's first write collapses to ONE flow-kind card.
+        toolkit = _fake_toolkit(
+            ("web_select", "web.select", "write"),
+            ("web_type", "web.type", "write"),
+            ("web_click", "web.click", "write"),
+        )
+        frame = kernel._build_confirmation_frame(
+            RequireUserConfirmEvent(
+                reply_id="reply-1",
+                tool_calls=[
+                    ToolCallBlock(
+                        id="call-1", name="web_select",
+                        input='{"selector": "#role", "value": "admin"}',
+                    )
+                ],
+            ),
+            session_id,
+            "alice",
+            toolkit=toolkit,
+        )
+        assert frame is not None
+        assert frame["approval_kind"] == "flow"
+        assert frame["flow_summary"]["title"] == _GRADUATED_FLOW["title"]
+        assert frame["flow_summary"]["risk_class"] == "write"
+        # One gate for the whole flow: the card names the step being unlocked,
+        # not the three-step contract behind it.
+        assert len(frame["pending_calls"]) == 1
+        assert "steps" not in json.dumps(frame["flow_summary"])
+
+        # 3. Approve: the one decision arms the session's flow authority.
+        pending = CONFIRMATION_REGISTRY.peek_parked(session_id)
+        assert pending is not None
+        assert FLOW_APPROVALS.get(session_id) is None  # not armed before
+        kernel._record_flow_approval(pending, "bob-approver", session_id)
+        approval = FLOW_APPROVALS.get(session_id)
+        assert approval is not None
+        assert approval.identity() == FLOW_CONTEXTS.get(session_id).identity()
+
+        # 4. Replay: every subsequent write auto-signs under that one decision.
+        requests: dict = {}
+        envelopes = [
+            _run_signer(
+                kernel,
+                ToolCallBlock(
+                    id=call_id, name=sanitized, input=json.dumps(arguments)
+                ),
+                gateway_name,
+                session_id,
+                requests,
+            )
+            for call_id, sanitized, gateway_name, arguments in (
+                ("call-2", "web_type", "web.type", {"ref": 2, "text": "window"}),
+                ("call-3", "web_click", "web.click", {"ref": 1}),
+            )
+        ]
+
+        assert all(envelope is not None for envelope in envelopes)
+        first, second = envelopes
+        for envelope in (first, second):
+            assert envelope["approval_kind"] == "flow"
+            # One operator decision per flow (ADR-0007): both reuse the
+            # approving card's correlation and identity.
+            assert envelope["confirm_id"] == pending.confirm_id
+            assert envelope["owner_user_id"] == "alice"
+            assert envelope["decider_user_id"] == "bob-approver"
+            assert verify_envelope(
+                envelope, envelope["signature"], FLOW_SIGNING_KEY
+            )
+        # ...but each write is still its own execution, with its own digest.
+        assert first["execution_id"] != second["execution_id"]
+        assert first["args_digest"] == canonical_digest({"ref": 2, "text": "window"})
+        assert second["args_digest"] == canonical_digest({"ref": 1})
+        # Injected by call_id, so the tool closure verifies and hands each off
+        # exactly like a card-approved call.
+        assert requests["call-2"] is first
+        assert requests["call-3"] is second
+        # Durable + audited per write, exactly like a card-signed request.
+        rows = EXECUTION_RECORD_STORE.load_for_session(session_id)
+        assert [row["status"] for row in rows] == ["requested", "requested"]
+        assert {row["execution_id"] for row in rows} == {
+            first["execution_id"], second["execution_id"]
+        }
+        requested = [a for a in audits if a["event_type"] == "execution_requested"]
+        assert len(requested) == 2
+        # And each joins the same ordered trace R-2 captures (SPEC-055 R-2),
+        # so a replay is itself graduable.
+        traced = AUTHORING_TRACE_STORE.load_for_session(session_id)
+        assert [step["tool_name"] for step in traced] == ["web.type", "web.click"]
+
+    def test_an_infra_executable_flow_step_parks_per_action(self, monkeypatch):
+        """Box 7: the OQ-2 safe fallback, asserted rather than delivered.
+
+        An infra executable flow (``kind: executable_flow``, ``k8s.*`` steps,
+        no ``web_target``) has no binding seam at all — ``web.navigate`` is the
+        only one and it refuses ``SKILL_NOT_WEB_FLOW`` — so no authority is
+        ever armed and each step parks individually under SPEC-054 R-2. Pinned
+        from both ends: the card declares ``action``, and a *live* browser
+        authority does not leak onto the infra write.
+        """
+        _capture_flow_audits(monkeypatch)
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        kernel = self._kernel()
+        session_id = "ses-r5-infra"
+        toolkit = _fake_toolkit(
+            ("k8s_scale_deployment", "k8s.scale_deployment", "write")
+        )
+        event = RequireUserConfirmEvent(
+            reply_id="reply-1",
+            tool_calls=[
+                ToolCallBlock(
+                    id="call-1", name="k8s_scale_deployment",
+                    input='{"name": "api", "replicas": 3}',
+                )
+            ],
+        )
+
+        frame = kernel._build_confirmation_frame(
+            event, session_id, "alice", toolkit=toolkit
+        )
+
+        assert frame is not None
+        assert frame["approval_kind"] == "action"
+        assert "flow_summary" not in frame
+        pending = CONFIRMATION_REGISTRY.peek_parked(session_id)
+        kernel._record_flow_approval(pending, "bob-approver", session_id)
+        # Approving it arms nothing, so the NEXT infra step parks again — one
+        # card per step, which is the fallback's whole cost and its whole safety.
+        assert FLOW_APPROVALS.get(session_id) is None
+
+    def test_the_flow_signer_refuses_a_non_browser_tool_name(self, monkeypatch):
+        """Box 7's other half: the signer enforces its own scope.
+
+        ``_sign_flow_execution``'s contract is "auto-sign one unlocked *browser
+        write*". What made that true until now was its single caller —
+        ``GatewayPermissionMiddleware`` checks ``BROWSER_WRITE_TOOLS`` before
+        consulting the signer (pinned in ``test_kernel_middleware``). Call-site
+        discipline is one refactor from a hole: a second caller, or a middleware
+        reordering, would let a live browser authority auto-sign an infra
+        mutation with no per-action decision behind it — exactly what the OQ-2
+        fallback must never do, and the one way an executable flow could
+        self-admit a step nobody approved.
+        """
+        audits = _capture_flow_audits(monkeypatch)
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        kernel = self._kernel()
+        session_id = "ses-r5-signer-scope"
+        # A live, identity-matched browser authority: every precondition the
+        # signer checks except the tool's own name.
+        _record_authority(session_id)
+        _record_context(session_id)
+        assert FLOW_APPROVALS.has_approval(session_id)
+
+        requests: dict = {}
+        infra = _run_signer(
+            kernel,
+            ToolCallBlock(
+                id="call-infra", name="k8s_scale_deployment",
+                input='{"name": "api", "replicas": 5}',
+            ),
+            "k8s.scale_deployment",
+            session_id,
+            requests,
+        )
+
+        assert infra is None  # fails safe ⇒ the step parks per-action
+        # All four side effects the guard sits ahead of, not just the return
+        # value: no injected request, no durable execution record, and no
+        # ``execution_requested`` audit line describing a request that was
+        # never made.
+        assert requests == {}
+        assert EXECUTION_RECORD_STORE.load_for_session(session_id) == []
+        assert audits == []
+
+        # Control: the same authority still signs a browser write, so the
+        # refusal above is the tool scope and not a broken signer — and the
+        # empty audit list above is a real observation, not a capture that
+        # never fired.
+        browser = _run_signer(
+            kernel,
+            ToolCallBlock(id="call-web", name="web_click", input='{"ref": 1}'),
+            "web.click",
+            session_id,
+            requests,
+        )
+        assert browser is not None
+        assert browser["tool_name"] == "web.click"
+        assert requests["call-web"] is browser
+        assert [a["event_type"] for a in audits] == ["execution_requested"]
+        assert audits[0]["details"]["call_id"] == "call-web"
+

@@ -529,3 +529,93 @@ describe("ConfirmationCardView R-7 redacted technical details (SPEC-055)", () =>
     expect(screen.getAllByText("masked").length).toBe(2);
   });
 });
+
+describe("ConfirmationCardView graduated-flow replay (SPEC-055 R-5)", () => {
+  // The portal half of R-5's "indistinguishable once ingested" claim: a flow
+  // graduated from an operator session replays through the SAME card shape as
+  // a hand-declared one, so an operator replaying it sees "one decision about
+  // this workflow" — never "N decisions about N DOM actions".
+  //
+  // The strings below are not invented for the test. ``title``/``description``
+  // are what agent-platform's ``build_executable_flow_draft`` derives when the
+  // operator supplies no title at graduation, mapped by ``decoder.toFlowSummary``.
+  const graduatedFlowSummary = {
+    skillId: "team-a/web/inventoryhealth",
+    origin: "https://inventory.internal:8443",
+    title: "https://inventory.internal:8443 executable flow",
+    description:
+      "Replays 2 approved mutating step(s) captured from an operator session " +
+      "against https://inventory.internal:8443/login: web.type, web.click.",
+    // Deliberately absent-as-empty: the graduation renderer's YAML frontmatter
+    // emits title/description/tags/web_target/risk_class/kind/steps and NO
+    // flow_intent, so ``FlowContext.flow_intent`` stays "". Synthesizing a
+    // decision line here would be the composition R-4 forbids — a sentence the
+    // captured trace never said. A human may add one at merge time.
+    flowIntent: "",
+    riskClass: "write",
+  };
+
+  // One gate parks ONE card whose batch may hold several writes; every later
+  // write in the replay is auto-signed under that approval and never parks.
+  function graduatedReplayCard(): ConfirmationCard {
+    return {
+      ...cardOf([
+        {
+          callId: "c-1",
+          toolName: "web.type",
+          riskLevel: "write",
+          action: "tools:mutate",
+          displayHint: "Quantity field",
+        },
+        {
+          callId: "c-2",
+          toolName: "web.click",
+          riskLevel: "write",
+          action: "tools:mutate",
+          displayHint: "Save changes button",
+        },
+      ]),
+      approvalKind: "flow",
+      flowSummary: graduatedFlowSummary,
+    };
+  }
+
+  it("headlines the replay with the derived scope and no invented intent line", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const { container } = renderCard(graduatedReplayCard());
+    // The flow frame admits on title/origin — a graduated card carries no
+    // flowIntent, so this is the guard that keeps the headline from vanishing
+    // and the card from degrading to bare per-call rendering.
+    expect(container.querySelector(".confirm-flow")).toBeTruthy();
+    expect(screen.getByText(graduatedFlowSummary.title)).toBeTruthy();
+    // The step count and the tool names are the operator's replay scope.
+    expect(screen.getByText(graduatedFlowSummary.description)).toBeTruthy();
+    expect(screen.getByText("write flow")).toBeTruthy();
+    // No decision line the trace never said.
+    expect(container.querySelector(".confirm-flow-intent")).toBeNull();
+  });
+
+  it("offers one decision for the whole replay, not one per mutating step", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const { container } = renderCard(graduatedReplayCard());
+    // What the RENDERER contributes to the one-gate claim, and all it can
+    // contribute: `ConfirmationCardView` never reads `card.approvalKind`, so
+    // it cannot distinguish a flow card from an action one. The wire guarantee
+    // that a flow-kind card's calls carry no `change_request` projection is
+    // kernel-side (`hitl_confirmations` emits it only for
+    // `approval_kind == "action"`) and is pinned where the shape is parsed —
+    // `decoder.test.ts` asserts a "flow" frame decodes with
+    // `changeRequest: undefined`. Asserting the projection nodes are absent
+    // here would only restate that this fixture sets no `changeRequest`.
+    //
+    // The per-call detail still renders as audit context — both steps named...
+    expect(container.querySelectorAll(".confirm-call").length).toBe(2);
+    expect(screen.getByText("web.type")).toBeTruthy();
+    expect(screen.getByText("web.click")).toBeTruthy();
+    // ...but the batch yields exactly ONE decision surface, not one per
+    // mutating step. This is the discriminating half: a renderer that put
+    // Approve/Deny beside each call would fail it.
+    expect(screen.getAllByText("Approve").length).toBe(1);
+    expect(screen.getAllByText("Deny").length).toBe(1);
+  });
+});

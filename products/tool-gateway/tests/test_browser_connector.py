@@ -2156,5 +2156,280 @@ class WebUploadFileTests(unittest.TestCase, _BoundFlowMixin):
         self.assertEqual(result.error["code"], "BROWSER_UPLOAD_FILE_NOT_FOUND")
 
 
+# --- SPEC-055 R-5: replaying a graduated executable flow --------------------
+
+# What a graduated executable flow looks like once a human merges the R-4
+# draft and skills-hub ingests it: the declaration a hand-authored browser
+# flow already had (``web_target`` + ``risk_class`` + frontmatter), PLUS the
+# v2 ``kind`` and ``steps`` stage 5 added. The title/description are the ones
+# ``build_executable_flow_draft`` derives, so this fixture is a graduated
+# skill and not merely a skill with two extra keys.
+GRADUATED_TITLE = "https://inventory.internal:8443 executable flow"
+GRADUATED_DESCRIPTION = (
+    "Replays 3 approved mutating step(s) captured from an operator session "
+    "against https://inventory.internal:8443/login: web.select, web.type, "
+    "web.click."
+)
+GRADUATED_STEPS = [
+    {"tool": "web.select", "args": {"selector": "#role", "value": "admin"}},
+    {"tool": "web.type", "args": {"ref": 2, "text": "maintenance window"}},
+    {"tool": "web.click", "args": {"ref": 1}},
+]
+
+
+def _graduated_skill(steps: list[dict] | None = None) -> dict:
+    """An ingested executable-flow skill record (``kind`` + ``steps``)."""
+    skill = _web_skill(
+        "write", title=GRADUATED_TITLE, description=GRADUATED_DESCRIPTION
+    )
+    skill["kind"] = "executable_flow"
+    skill["steps"] = GRADUATED_STEPS if steps is None else steps
+    return skill
+
+
+def _declared_skill() -> dict:
+    """The same declaration, hand-authored: no ``kind``, no ``steps``."""
+    return _web_skill(
+        "write", title=GRADUATED_TITLE, description=GRADUATED_DESCRIPTION
+    )
+
+
+class GraduatedFlowReplayTests(unittest.TestCase):
+    """R-5: a graduated *browser* executable flow replays through the SPEC-051
+    path with no new executor, and the gateway bounds it identically.
+
+    The claim is one of *indistinguishability*. ``steps`` is the replay
+    contract the **agent** follows under the single gate; nothing on the
+    gateway's binding or guard path reads it, so a skill author cannot widen
+    their own blast radius by writing a longer step list. Asserted as
+    whole-dict equality rather than field-by-field, because a field-by-field
+    comparison would pass even if the graduated binding contributed an extra
+    key — and an extra key is exactly the knob that must not exist.
+    """
+
+    def _bind(self, skill: dict, *, flow_max_steps: int = 20,
+              allow_origins: tuple[str, ...] = (ALLOWED_ORIGIN,),
+              credential_sets_path: str = ""):
+        """Bind ``skill`` in a fresh connector; return ``(connector, registry,
+        navigate_result)``."""
+        connector, _ = _make_connector(
+            flow_max_steps=flow_max_steps,
+            allow_origins=allow_origins,
+            credential_sets_path=credential_sets_path,
+        )
+        registry = _registry(connector)
+        _stub_skill(connector, skill)
+        result = _run(
+            registry.invoke(
+                "web.navigate",
+                {
+                    "url": f"{ALLOWED_ORIGIN}/login",
+                    "skill_id": "team-a/web/inventoryhealth",
+                },
+                IDENTITY,
+            )
+        )
+        return connector, registry, result
+
+    def test_a_graduated_flow_binds_the_same_flow_dict_as_a_declaration(self) -> None:
+        _connector, _registry_a, graduated = self._bind(_graduated_skill())
+        _connector, _registry_b, declared = self._bind(_declared_skill())
+
+        self.assertEqual(graduated.status, "success")
+        self.assertEqual(declared.status, "success")
+        self.assertEqual(graduated.data["flow"], declared.data["flow"])
+
+    def test_the_step_list_never_reaches_the_flow_binding(self) -> None:
+        """The mechanism behind the equality above, pinned separately.
+
+        ``FlowState`` declares no ``kind``/``steps`` field and ``to_dict()``
+        emits a fixed nine-key envelope, so the replay contract cannot ride
+        ``web.navigate``'s ``data["flow"]`` to the kernel either. Equality
+        alone could pass by coincidence (two skills missing the same
+        frontmatter); this asserts *why* it holds, and would fail on a
+        ``FlowState`` that gained a ``steps`` field even if ``to_dict()``
+        still omitted it.
+        """
+        connector, _registry, result = self._bind(_graduated_skill())
+
+        self.assertEqual(result.status, "success")
+        flow = connector.pool.get("dev.operator").flow
+        self.assertNotIn("kind", flow.to_dict())
+        self.assertNotIn("steps", flow.to_dict())
+        self.assertFalse(hasattr(flow, "kind"))
+        self.assertFalse(hasattr(flow, "steps"))
+
+    def test_the_step_list_cannot_buy_a_larger_step_budget(self) -> None:
+        """Box: a replay past step budget fails closed.
+
+        The budget is ``GATEWAY_BROWSER_FLOW_MAX_STEPS`` (here 2), not
+        ``len(steps)`` (here 5). Were it the latter, a skill author would set
+        their own blast radius by writing more steps — the one knob R-5 must
+        not hand them. The two writes inside the budget land; the third is
+        refused rather than re-parked, so an over-long replay degrades to a
+        denial and never to a silent continuation.
+        """
+        connector, registry, bind = self._bind(
+            _graduated_skill(
+                steps=GRADUATED_STEPS
+                + [{"tool": "web.click", "args": {"ref": 1}}] * 2
+            ),
+            flow_max_steps=2,
+        )
+
+        self.assertEqual(bind.status, "success")
+        self.assertEqual(bind.data["flow"]["max_steps"], 2)
+        page = connector.pool.get("dev.operator").page
+        page.add_element(tag="BUTTON", text="Submit")
+        self.assertEqual(
+            _run(registry.invoke("web.snapshot", {}, IDENTITY)).status, "success"
+        )
+        for expected in (1, 2):
+            result = _run(registry.invoke("web.click", {"ref": 1}, IDENTITY))
+            self.assertEqual(result.status, "success")
+            self.assertEqual(result.data["steps_used"], expected)
+        exhausted = _run(registry.invoke("web.click", {"ref": 1}, IDENTITY))
+        self.assertEqual(exhausted.status, "denied")
+        self.assertEqual(exhausted.error["code"], "BROWSER_FLOW_EXHAUSTED")
+        self.assertEqual(page.elements[0].clicks, 2)
+
+    def test_the_deviation_guard_bounds_both_kinds_identically(self) -> None:
+        """Box: the guard bounds a replayed executable-flow write identically.
+
+        Both bindings drift to a *second allowlisted* origin without rebinding
+        and then attempt a write. Same refusal code, same zero clicks — the
+        guard reads the bound origin, not the skill's provenance.
+        """
+        other = "https://other.internal:8443"
+        for label, skill in (
+            ("declared", _declared_skill()),
+            ("graduated", _graduated_skill()),
+        ):
+            with self.subTest(binding=label):
+                connector, registry, bind = self._bind(
+                    skill, allow_origins=(ALLOWED_ORIGIN, other)
+                )
+                self.assertEqual(bind.status, "success")
+                drift = _run(
+                    registry.invoke(
+                        "web.navigate", {"url": f"{other}/admin"}, IDENTITY
+                    )
+                )
+                self.assertEqual(drift.status, "success")
+                entry = connector.pool.get("dev.operator")
+                self.assertIsNotNone(entry.flow)  # still bound to the first
+                entry.page.add_element(tag="BUTTON", text="Delete")
+                _run(registry.invoke("web.snapshot", {}, IDENTITY))
+                result = _run(registry.invoke("web.click", {"ref": 1}, IDENTITY))
+                self.assertEqual(result.status, "denied")
+                self.assertEqual(
+                    result.error["code"], "BROWSER_FLOW_ORIGIN_DEVIATED"
+                )
+                self.assertEqual(entry.page.elements[0].clicks, 0)
+
+    def test_an_executable_flow_without_a_web_target_binds_nothing(self) -> None:
+        """Box: the infra (non-browser) binding is deferred (OQ-2) — asserted.
+
+        ``web.navigate`` is the only binding seam the platform has, and it
+        requires ``web_target``. So ``kind: executable_flow`` is *not* a
+        binding: an infra executable flow has no flow to bind, no authority to
+        arm, and each of its steps can therefore only reach the gateway as an
+        individually-approved per-action write (SPEC-054 R-2). That is the safe
+        fallback R-5 claims, and this is the check that says the generalized
+        binding genuinely does not exist yet rather than existing untested.
+        """
+        connector, _ = _make_connector()
+        registry = _registry(connector)
+        _stub_skill(
+            connector,
+            {
+                "skill_id": "team-a/infra/scaleup",
+                "kind": "executable_flow",
+                "risk_class": "write",
+                "steps": [
+                    {
+                        "tool": "k8s.scale_deployment",
+                        "args": {"name": "api", "replicas": 3},
+                    }
+                ],
+            },
+        )
+
+        result = _run(
+            registry.invoke(
+                "web.navigate",
+                {
+                    "url": f"{ALLOWED_ORIGIN}/login",
+                    "skill_id": "team-a/infra/scaleup",
+                },
+                IDENTITY,
+            )
+        )
+
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "SKILL_NOT_WEB_FLOW")
+        # Nothing bound: the refusal is structural, not a flow left stale.
+        self.assertIsNone(connector.pool.get("dev.operator").flow)
+
+    def test_a_credential_step_replays_by_reference_only(self) -> None:
+        """Box: credentials resolve at replay from the named sets — never literals.
+
+        ``CredentialTests`` pins the single call; this pins the *replay
+        sequence*, which is the shape a graduated flow actually has. R-4 never
+        emits a credential step (``web.fill_credential`` is read-tier, so a
+        trace cannot hold one, and an unresolved hole refuses), so the
+        reference step here stands for the one a human adds at merge time. What
+        must hold is that the literal reaches the page and nothing else: not
+        the fill's result, and not the flow-bound write that follows it.
+        """
+        import tempfile
+
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+        json.dump(
+            {"inventory-app": {"username": "svc-check", "password": PASSWORD_LITERAL}},
+            tmp,
+        )
+        tmp.close()
+        self.addCleanup(os.unlink, tmp.name)
+
+        connector, registry, bind = self._bind(
+            _graduated_skill(), credential_sets_path=tmp.name
+        )
+        self.assertEqual(bind.status, "success")
+        page = connector.pool.get("dev.operator").page
+        page.add_element(tag="BUTTON", text="Submit")
+        password = page.add_element(tag="INPUT", type="password", name="password")
+        _run(registry.invoke("web.snapshot", {}, IDENTITY))
+
+        filled = _run(
+            registry.invoke(
+                "web.fill_credential",
+                {"ref": 2, "credential_set": "inventory-app", "field": "password"},
+                IDENTITY,
+            )
+        )
+        write = _run(registry.invoke("web.click", {"ref": 1}, IDENTITY))
+
+        self.assertEqual(filled.status, "success")
+        self.assertEqual(filled.data["filled"], "password")
+        self.assertEqual(filled.data["credential_set"], "inventory-app")
+        self.assertEqual(password.fills, [PASSWORD_LITERAL])  # reached the page
+        self.assertEqual(write.status, "success")
+        for result in (filled, write):
+            self.assertNotIn(PASSWORD_LITERAL, json.dumps(result.to_dict()))
+        # Pinned because it is a surprise, not because it is wanted: the fill
+        # is read-tier for *approval* (D-3) but shares ``_WebInteractionTool``'s
+        # step accounting, so it spends one of the write flow's budget — and
+        # the human-added credential reference steps R-4's refusal names as the
+        # remedy spend it too. The direction is conservative (fewer writes than
+        # the budget advertises, never more), so it fails safe; what it costs is
+        # honesty in ``steps_budget``, and a tight
+        # ``GATEWAY_BROWSER_FLOW_MAX_STEPS`` can be exhausted by reference steps
+        # rather than mutations. Recorded in tasks.md stage 7 rather than
+        # silently absorbed (the plan.md §6 precedent).
+        self.assertEqual(filled.data["steps_used"], 1)
+        self.assertEqual(write.data["steps_used"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

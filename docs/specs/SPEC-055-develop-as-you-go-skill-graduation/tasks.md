@@ -523,15 +523,152 @@ against them.
 
 ## Stage 7: agent-platform + tool-gateway + portal — R-5 replay
 
-- [ ] verify a graduated **browser** executable flow binds and one-gates through the existing SPEC-051 path (`_observe_flow_binding` → `_record_flow_approval` → `_sign_flow_execution` → `build_flow_request`) with no new executor (R-5)
-- [ ] verify the gateway deviation guard (origin allowlist, declared `risk_class`, step budget) bounds a replayed executable-flow write identically to a hand-authored flow; executable-flow writes join **no** auto-allow list (R-5)
-- [ ] verify credentials resolve at replay from the named credential sets via `web.fill_credential` references — never literals (R-5)
-- [ ] confirm execution-runtime is **verify only** — a browser replay envelope (`approval_kind: "flow"`) verifies and forwards unchanged (R-5 / plan §6)
-- [ ] the infra (non-browser) executable-flow binding is **deferred** to its own 0.36.0-era slice (OQ-2) — not delivered here (R-5)
-- [ ] tests: a graduated browser executable flow collapses to **one** `flow`-kind gate; each subsequent write is individually signed (`build_flow_request`) + receipted (R-5)
-- [ ] tests: an infra executable-flow write parks **per-action** (SPEC-054 R-2) and joins no auto-allow list — the OQ-2 safe fallback asserted (R-5)
-- [ ] tests: a replay past step budget or off-allowlist fails closed (R-5)
-- [ ] portal tests: replay surfacing renders the flow headline + change-request framing (R-5)
+- [x] verify a graduated **browser** executable flow binds and one-gates through the existing SPEC-051 path (`_observe_flow_binding` → `_record_flow_approval` → `_sign_flow_execution` → `build_flow_request`) with no new executor (R-5)
+- [x] verify the gateway deviation guard (origin allowlist, declared `risk_class`, step budget) bounds a replayed executable-flow write identically to a hand-authored flow; executable-flow writes join **no** auto-allow list (R-5)
+- [x] verify credentials resolve at replay from the named credential sets via `web.fill_credential` references — never literals (R-5)
+- [x] confirm execution-runtime is **verify only** — a browser replay envelope (`approval_kind: "flow"`) verifies and forwards unchanged (R-5 / plan §6)
+- [x] the infra (non-browser) executable-flow binding is **deferred** to its own 0.36.0-era slice (OQ-2) — not delivered here (R-5)
+- [x] tests: a graduated browser executable flow collapses to **one** `flow`-kind gate; each subsequent write is individually signed (`build_flow_request`) + receipted (R-5)
+- [x] tests: an infra executable-flow write parks **per-action** (SPEC-054 R-2) and joins no auto-allow list — the OQ-2 safe fallback asserted (R-5)
+- [x] tests: a replay past step budget or off-allowlist fails closed (R-5)
+- [x] portal tests: replay surfacing renders the flow headline + change-request framing (R-5)
+
+> **Refinement notes (stage 7, R-5 replay verification).**
+> - **R-5's claim is one of *indistinguishability*, and it is guaranteed structurally twice over.**
+>   Once ingested, a graduated executable flow is an ordinary `web_target` + `risk_class: write` skill;
+>   its `steps` list is the replay contract the *agent* follows under the single gate, never an input
+>   *to* the gate — were it an input, a skill author could widen their own blast radius by writing a
+>   longer step list. Verified by tracing all five seams rather than by assertion: `bind_flow` reads
+>   only `web_target`/`risk_class`/`title`/`description`/`flow_intent` and takes `max_steps` from the
+>   gateway knob; `FlowState` declares no `kind`/`steps` field at all, so `to_dict()` emits a fixed
+>   9-key envelope; `_observe_flow_binding` passes that dict on unchanged; `FlowContextStore.record`
+>   reads 8 named keys and drops everything else; `build_flow_request` emits a fixed 10-key signed
+>   payload plus its signature, with nothing step-derived. **Either half alone would leave a way
+>   in**, so both are pinned by test — at the gateway (it strips) and at the kernel (it would strip
+>   anyway, proved by injecting `kind` and
+>   `steps` into the flow dict and asserting `not hasattr`). The budget test is the discriminating one:
+>   a 5-step flow bound with `flow_max_steps=2` gets `max_steps == 2`, two writes land, the third is
+>   `BROWSER_FLOW_EXHAUSTED`.
+> - **Review finding (High): `_sign_flow_execution` enforced its own stated scope only by call-site
+>   discipline — and a direct test drove an infra mutation straight through it.** The function's
+>   contract is "auto-sign one unlocked ***browser*** write", but what made that true was its single
+>   caller: `GatewayPermissionMiddleware.on_check_permission` checks `gateway_tool_name in
+>   BROWSER_WRITE_TOOLS` before consulting the signer. Calling the signer directly with
+>   `k8s.scale_deployment` under a live browser flow authority returned a **full signed envelope** —
+>   `approval_kind: "flow"`, a durable `EXECUTION_RECORD_STORE` row, an `execution_requested` audit
+>   event — for a mutation no operator decision of theirs covers. Not reachable in production today
+>   (one call site, gated), which is precisely the problem: the invariant rested on a call site staying
+>   the only one, one refactor or middleware reordering from a hole. This is the OQ-2 fallback's worst
+>   case — an executable flow self-admitting a step nobody approved — so it was closed at the seam
+>   rather than left at the caller: a first-position, unconditional `BROWSER_WRITE_TOOLS` guard
+>   returning `None`, placed ahead of the function's four *side effects* — the `EXECUTION_REQUESTS`
+>   injection, the durable execution record, the authoring-trace step and the `execution_requested`
+>   audit — so a refused name leaves no trace of a request never made. The position buys nothing
+>   against the pure reads it also precedes (every other `None` path takes those too), and the code
+>   comment now says exactly that rather than claiming more. `None` parks the call exactly as an
+>   absent authority would, so the guard is fail-safe and is zero behavior change for every current
+>   caller (full agent-platform suite: 1142 passed). It cannot reject a legitimate browser write
+>   either: the middleware passes `tool.gateway_tool_name`, the dotted canonical form
+>   `BROWSER_WRITE_TOOLS` holds, so the sanitized `web_click` form never reaches the guard. Both
+>   checks now name each other in comments so neither gets deleted as redundant, and the test carries
+>   a control asserting the same authority still signs `web.click` — so the refusal is the tool scope
+>   and not a broken signer, and the control also proves the empty-audit assertion above it is a real
+>   observation rather than a capture that never fired. Review confirmed the test discriminates by
+>   mutation: widening `BROWSER_WRITE_TOOLS` to admit `k8s.scale_deployment` reproduces the exact
+>   signed-envelope failure the finding describes. Precedent for fixing
+>   in-stage rather than deferring: 6a's userinfo credential vector, 6b's leak guard.
+> - **`web.fill_credential` is read-tier for *approval* but shares the write tier's step accounting.**
+>   Found by a credential-reference replay test, not by reading. It is one of the five
+>   `_WebInteractionTool` subclasses and the only read-tier one, so it increments `steps_used` and sets
+>   `flow.approved = True` while being auto-allowed with no operator decision. Dispositioned as two
+>   separate consequences rather than one bug. **`steps_used` is observable** (surfaced beside
+>   `steps_budget` on every interaction result) and **conservative**: the credential-reference step
+>   R-4's refusal names as the remedy comes out of the same `GATEWAY_BROWSER_FLOW_MAX_STEPS` the
+>   mutations do, so a flow lands *fewer* writes than its budget advertises, never more — it fails
+>   safe. What it costs is honesty in `steps_budget`, and a tight budget can be exhausted by reference
+>   steps rather than mutations; pinned by test with a comment saying it is pinned because it is a
+>   surprise, not because it is wanted. **`flow.approved` is unobservable**, but not for the reason
+>   first written here: a review caught that "`to_dict()` runs once, at bind time, before any
+>   interaction" is **false**. Its one call site is gated on `entry.flow is not None`, not on this
+>   navigate being the one that bound the flow, so a plain in-flow `web.navigate` re-publishes the
+>   envelope *after* interactions have set `approved: true` and advanced `steps_used` — and
+>   `_observe_flow_binding` re-records it. The conclusion survives on a different fact: the key is
+>   dropped at both ends. The gateway's `gate_interaction` reads `denied`/origin/`risk_class`/
+>   `steps_used` but never `approved`; the kernel's `FlowContext` declares no `approved` field and
+>   `FlowContextStore.record` reads 8 named keys. Because that second half is now load-bearing rather
+>   than incidental, it is pinned by test — `approved: True` injected into the flow dict beside
+>   `kind`/`steps`, then `not hasattr(context, "approved")` — instead of left as a doc claim.
+>   Worth recording because the false premise was
+>   load-bearing for a deliberate no-op, and a future reader relying on "only ever pre-interaction"
+>   would be wrong. So the flip is documentation-grade
+>   and was **not** changed: altering shipped SPEC-051/054 guard behavior inside an R-5 replay-
+>   verification commit is out of scope, and there is no observable behavior to fix. What changed is
+>   the claim (below). Flagged here per plan §6's precedent rather than silently absorbed.
+> - **Three false documentation claims in tool-gateway that the tests exposed, and would have
+>   shipped.** The `browser_connector` module docstring's read tier listed 4 of 9 tools and its write
+>   tier listed `web.click, web.type` where the real set is the six names in agent-platform's
+>   `flow_approvals.BROWSER_WRITE_TOOLS` — directly contradicting 6b's own "the complete write subset"
+>   claim; its "Interactions only execute inside a bound, approved, unexhausted flow" was stale
+>   post-SPEC-054 R-2, which made an *unbound* browser write park for a decision rather than be
+>   refused; and `FlowState.approved`'s docstring asserted the flag universally (the finding above).
+>   All three rewritten — and the `approved` rewrite needed a second pass, because "recorded when an
+>   interaction of a `write`-class flow executes" over-generalized in the other direction: the set
+>   that *accounts* and the set that is write-tier differ by one member each way,
+>   `web.fill_credential` (read-tier, accounts) in place of `web.evaluate` (write-tier, rides
+>   `gate_capture`, accounts neither). The docstring now names both sets instead of implying they
+>   coincide. The docstring also names the cross-product coupling explicitly — a
+>   seventh write tool added to the gateway without being added to `BROWSER_WRITE_TOOLS` degrades
+>   **safe but not silent** in both consumers: graduation re-validation refuses the draft as an
+>   unexplained read-tier `web.*` step, and upstream it loses flow-unlock so its writes park
+>   per-action. It can never be auto-allowed by drifting, because the allow-list branch is gated on
+>   `is_read_only` (the SPEC-021 R-3 invariant) — a first draft of this note claimed it "would be
+>   read-tier to both", which is true of graduation and false of flow-unlock. Same
+>   one-thing-measured-in-two-places class as the three basis bugs
+>   recorded in stage 6.
+> - **The graduation renderer emits no `flow_intent`, so a replayed graduated card has no lead
+>   decision line.** `_yaml_frontmatter` writes `title`, `description`, `tags?`, `web_target?`,
+>   `risk_class`, `kind`, `steps` — no `flow_intent` — so on replay `FlowContext.flow_intent` is `""`
+>   and the portal's SPEC-053 R-3 `.confirm-flow-intent` node never renders. Deliberate and not a gap
+>   to close: synthesizing a decision line would be a sentence the captured trace never said, the exact
+>   composition R-4 forbids. The card headlines instead with the derived `title`
+>   (`"<origin> executable flow"`) and the step-count `description`; a human may add a `flow_intent` at
+>   merge time, beside the two steps 6b's runbook already asks for. The portal's frame guard admits on
+>   `title || origin || flowIntent`, so the headline survives the absence — pinned by test, because the
+>   pre-existing coverage had a hand-authored `flowIntent` and a single-call flow card separately but
+>   never the graduated combination. What the new tests assert is the portal-visible half of the
+>   one-gate claim, and a review narrowed it to what the renderer can actually discriminate:
+>   `ConfirmationCardView` **never reads `card.approvalKind`** (it appears in `decoder.ts`,
+>   `models.ts`, `useChatStream.ts` and `transcript.ts` and nowhere in `ChatView.tsx`), so the portal
+>   cannot tell a flow card from an action one. A first draft asserted zero `.confirm-call-summary`
+>   nodes on a multi-call flow card; that was fixture-determined rather than discriminating — the
+>   change-request nodes are gated solely on `call.changeRequest`, which the fixture never sets, so
+>   the assertion passed identically for `approvalKind: "action"` and a pre-existing test already
+>   asserted the same two properties for exactly that. Dropped. The wire-level invariant is real and
+>   stays pinned where the shape is parsed: `hitl_confirmations` emits `change_request` only when
+>   `approval_kind == "action"`, and `decoder.test.ts` asserts a `"flow"` frame decodes with
+>   `changeRequest: undefined`. What the renderer *does* contribute, and what the test now pins, is
+>   that a **multi-call** batch yields two `.confirm-call` audit rows but exactly one Approve/Deny
+>   pair — a per-call-button renderer would fail it — plus the sibling test's `.confirm-flow` truthy
+>   with `.confirm-flow-intent` null, which does exercise the `title || origin || flowIntent`
+>   admission guard against an empty `flowIntent`. Together: an operator replaying a graduated flow
+>   sees "one decision about this workflow" and not "N decisions about N DOM actions".
+> - **Box 4 needed no new test, and is recorded as verified rather than ticked silently.**
+>   execution-runtime's `approval_kind` forwarding is already pinned both ways
+>   (`test_executor.py::test_approval_kind_forwarded_in_payload`,
+>   `::test_approval_kind_absent_when_envelope_predates_it`) and its provenance handling is covered
+>   (`test_handoff.py::test_flow_provenance_reaches_the_executor`,
+>   `::test_forged_provenance_rejected_before_execution`, plus the receipt-omits-provenance case).
+>   Since `build_flow_request` emits a fixed 10-key signed payload plus its signature, with nothing
+>   step-derived, a graduated
+>   flow's replay envelope is byte-shaped like a declared one and there is nothing for R-5 to add —
+>   which is the point of plan §6 naming this leg verify-only.
+> - **OQ-2's fallback is asserted, not delivered.** `web.navigate` is the only binding seam and
+>   requires a `web_target`, so `kind: executable_flow` alone binds nothing: an infra executable flow
+>   gets `SKILL_NOT_WEB_FLOW`, `pool[...].flow` stays `None`, and every `k8s.*` write parks its own
+>   per-action card under SPEC-054 R-2 with no flow authority armed. Two tests pin this — the gateway
+>   side (nothing binds) and the kernel side (an infra step parks, and the signer refuses the name per
+>   the High finding above). The generalized non-browser binding remains deferred to its own
+>   0.36.0-era slice.
 
 ## Stage 8: Samples
 
