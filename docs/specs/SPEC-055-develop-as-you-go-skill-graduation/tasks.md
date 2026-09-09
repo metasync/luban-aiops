@@ -672,9 +672,151 @@ against them.
 
 ## Stage 8: Samples
 
-- [ ] new interactive graduation demo under `samples/` — author a session of approved mutations → graduate → human-merge → replay under one gate (R-6)
-- [ ] the sample's own demo script exercises it in the verification path (ADR-0008 exercised-sample rule) (R-6)
-- [ ] the password-reset + adhoc-password-reset `demo.sh` chat legs stay green **unchanged** (the one-gate and per-action paths do not regress) (R-6)
+- [x] new interactive graduation demo under `samples/` — author a session of approved mutations → graduate → human-merge → replay under one gate (R-6)
+- [x] the sample's own demo script exercises it in the verification path (ADR-0008 exercised-sample rule) (R-6)
+- [x] the password-reset + adhoc-password-reset `demo.sh` chat legs stay green **unchanged** (the one-gate and per-action paths do not regress) (R-6)
+
+Stage 8 note: the new sample is `samples/web-checks/skill-graduation/`
+(`README.md` + `WALKTHROUGH.md` + `demo/demo.sh`), the third web-check sample on
+the same admin portal and the only one that ships **no `skill/` directory** —
+deliberately, since the skill is the artifact the demo *produces* and a
+hand-written one would beg the question. Consequence, documented in both files:
+`deploy-samples.sh` discovers samples by `find -type d -name skill`, so this one
+is invisible to the installer and `SAMPLE=web-checks/skill-graduation` exits
+non-zero saying so; act 3 therefore patches the `skills-samples` ConfigMap
+directly under the same `<sample-leaf>-<file>.md` key convention, and the
+`cleanup()` trap removes that key on exit (a write-class executable flow left
+behind would be indistinguishable from a properly merged one) unless
+`KEEP_GRADUATED_SKILL=true`.
+
+`demo.sh` runs six deterministic legs — connector + HITL bridging + the four
+SPEC-055/SPEC-051 knobs with the `graduation budget <= replay budget`
+relationship, admin pages served, `admin-portal` credential set loaded, fifteen
+`web.*` tools with risk tiers, a declared target is first-wins / reported as the
+scope in force / stripped of query + fragment + userinfo, and graduation posture
+(an observer is denied **both** the graduate and the mid-session declare route
+with `403`; an untouched session is refused `409` naming the missing-trace
+guard) — plus four opt-in acts under `RUN_CHAT_LEG=true`. Act 1's bounded
+approve-loop (≤8) requires every parked frame to be `approval_kind: action` with
+no `flow_summary` and a `change_request.summary`, then reads the durable detail
+for the count of write-tier executions that both **succeeded** and carry a signed
+receipt; act 2 asserts `mode: graduated`,
+`validation: passed`, `step_count` **equal to that durable count**, `web_target`
+equal to the declared scope, `declaration: preceded`, the frontmatter's
+`kind`/`risk_class`/`web_target`/`tags`, one `web.*` `- tool:` line per step,
+**no** synthesized `flow_intent` or `expect:` (the composition R-4 forbids), and
+no secret anywhere in the artifact; act 3 finds the merged skill by the
+`graduated` tag, asserts the id derivation `deploy-samples.sh` and this sample
+owe each other, and asserts the v2 `kind`/`steps` round-tripped through the real
+store (behind a bounded retry, because `rollout status` reports *readiness* and
+skills-hub's readiness gates on the store alone while each source sync runs as a
+background task 300s apart — asserting once would misreport a platform that is
+merely mid-cycle as one that failed to ingest); act 4 requires exactly one
+`flow`-kind card headed by the graduated skill with no per-call change-request
+projection, no second card after the approval, and one durable card whose every
+write-tier execution **succeeded** and carries a signed receipt.
+Acts 1 and 4 stay **count- and tool-agnostic** (they loop the six-name
+`WRITE_TIER` set rather than naming a first tool, and act 2's expected step
+count is read from the durable session detail rather than predicted) because the
+model may batch both resets into one card or park two. That agnosticism is *not*
+tolerance of `web.type` / `web.evaluate`, and this is where the sample differs
+from SPEC-054's `adhoc-password-reset`: there the choice of write tool changes
+nothing, whereas here either one is captured with its value withheld
+(`OPAQUE_VALUE_FIELDS` names `web.type.text` and `web.evaluate.expression`),
+which is an unresolved credential hole act 2 refuses to export — so the demo's
+own prompt forbids both and the README says out loud why.
+
+Validated locally, since sample demos sit in neither `make verify` nor `make e2e`
+(which names three scripts under `shared/platform-ops/e2e/` explicitly —
+`skills-demo.sh`, `incident-demo.sh`, `mutating-demo.sh` — and none of them is a
+sample demo) — the same posture
+SPEC-054's stage 8 recorded, so ADR-0008 rule 2's **second** branch applies and
+no Makefile change is warranted: `sh -n` clean; act 2's assertion block passes
+against **real** `build_executable_flow_draft` output (a two-step `web.click`
+trace with `flow_origin` on the declared target and a preceding `declared_at` →
+`step_count=2`, `declaration=preceded`, `web_target` echoed,
+`suggested_filename=batch-password-reset-graduation-demo.md`); act 4's block
+passes on synthetic SSE and **fails on both negative controls** (two cards →
+"parked 2 cards before approval, expected exactly one"; `approval_kind: action`
+→ "expected flow"); skills-hub's real `validate_document` returns `valid=True`
+on the rendered draft and derives
+`samples/skill-graduation-batch-password-reset-graduation-demo`, matching the
+demo's prediction. Re-run after the review fixes recorded below, and widened
+from "does the happy path pass" to "does each guard actually fire": all nineteen
+embedded `python3 -c` blocks compile as Python with no stray quote, backtick or
+`$` in their bodies (any of which the surrounding shell string would eat), and
+every edited block was driven against fixtures plus negative controls — act 1's
+count (1, 2 and 3 writes) and nine refusals including the new `failed` and
+`timeout` ones; act 2's fifteen against real renderer output, including a
+credential hole placed in the frontmatter (which also proves the scoping is
+load-bearing: the rendered *body* genuinely carries the marker in its merge
+advisory); act 4's six stream-frame and ten durable-detail refusals; and leg 5's
+re-derived scope, separately confirmed to agree with the platform's own
+`skill_target_scope`. The live `dev-k8s` exercise of all four acts rides the
+Delivery Gate browser live check below.
+
+Two defects that local exercise surfaced, both fixed. (1) The runbook body names
+`<credential-reference>` in its *own* merge advisory, so a document-wide
+"no unresolved hole" assertion would have failed every genuine draft; it is now
+scoped to the frontmatter, which is the right scope twice over — it holds the
+authoritative replay copy, and it is what ingestion scans
+(`_carries_credential_hole` reads step args, never prose). (2) Three overclaims in
+the script's own prose: the gateway port-forward is **not** chat-leg-only (legs
+5-6 declare targets and attempt graduations), `GATEWAY_URL` likewise, and the
+knobs are not read "rather than assumed at their code defaults" — dev-k8s leaves
+all four unset, so the fallbacks *are* those defaults and what leg 1 earns is
+the relationship check plus a floor check, not the numbers. Leg 6 also records
+the gating asymmetry it tests: the mid-session declare route rides
+`session:skill_graduate` with graduation, while declaring at **birth** rides
+`session:create`, so any authenticated role may scope their own session but only
+a graduate-capable one may ever graduate it.
+
+Every portal label, icon, dialog title, refusal string, status code, role grant
+and knob named in the two documents was checked against the source rather than
+trusted, which found two inaccuracies, both fixed: the walkthrough said an
+operator's own **Approve** answers `self_approval`, but `_enforce_approval_tier`
+runs the decider-role check first, so an `operator` deterministically gets
+`not_a_designated_approver` and `self_approval` is a *decider's* answer on a
+session they own; and it listed two of the three shapes that leave a trace step
+with no observed origin, omitting a gateway that reported no URL. Step 7's
+copy-pasteable merge command was also run against a fixture whose values carry a
+quote and a backslash, to prove the embedded `json.dumps` survives the
+surrounding shell string and that `~/Downloads` still expands inside it.
+
+A CodeReview pass over the three new files (production code excluded — this
+stage ships none) found one High and three Medium findings, all applied. The
+High one was a false causal claim: the README attributed acts 1 and 4's
+tool-agnosticism to the model mixing `web.click` and `web.evaluate`
+non-deterministically, contradicting three other places in the same sample. The
+real reason is batching and card count, and `web.evaluate` is precisely what is
+*not* tolerated here — `OPAQUE_VALUE_FIELDS` withholds its `expression`, so a
+captured one kills act 2. Of the Mediums: `http()` did not guard curl's own exit
+status, so a missing gateway port-forward aborted the script silently under
+`set -e` right after a leg header, and the fix names the remedy without
+interpolating `$@` (a live bearer token); act 3 asserted an eventually-consistent
+read once, immediately after `rollout status`, which reports readiness while
+ingestion is a background sync (now the bounded retry described above); and acts
+1 and 4 asserted a *signed* receipt without asserting the execution *succeeded*,
+which would have counted a `failed` or `timeout` write whose trace step the
+kernel leaves without an observed origin — act 2 would then have refused the
+whole draft with a message about the declared target, blaming the wrong act.
+The Lows applied are the ones visible in the script's comments and messages: leg
+5's scope check now re-derives the expected value independently instead of
+comparing against a constant the same script declared, the `declaration` verdict
+message distinguishes its three platform answers, the two step-count seams are
+labelled best-effort so an off-by-one reads as a degraded store rather than a
+graduation bug, and the `Sup3rSecret` / `admin-portal` needles are labelled the
+regression guards they are rather than passed off as live coverage. One Low was
+deliberately **not** applied: `curl -u` puts a dev-only client secret on argv,
+inherited verbatim from both sibling demos, and changing it here alone would
+create an unexplained divergence.
+
+Box 3 is satisfied by construction and verified rather than assumed:
+`git diff --stat HEAD -- samples/web-checks/password-reset
+samples/web-checks/adhoc-password-reset` is empty, so both scripts are
+byte-identical, and the platform paths their chat legs assert (bound-flow one
+gate, unbound per-action cards, signed receipts) are covered by the stage-7
+green suites.
 
 ## Delivery Gate
 

@@ -14,6 +14,7 @@ with `make deploy-samples`; the platform never hard-wires a specific sample.
 |---|---|
 | [web-checks/password-reset](web-checks/password-reset/) | Automate a password reset in a legacy admin panel using browser web-check tools with a single HITL gate (a **bound flow**, `approval_kind: flow`) |
 | [web-checks/adhoc-password-reset](web-checks/adhoc-password-reset/) | The same admin reset driven **ad-hoc with no bound flow**, so each mutating browser action parks its own per-action change-request card (`approval_kind: action`) — the unbound counterpart to `password-reset`, demonstrating SPEC-054 |
+| [web-checks/skill-graduation](web-checks/skill-graduation/) | Author that same reset **ad hoc**, then **graduate** the approved mutations into an executable-flow skill and replay it under one gate — N `action` cards to author, 1 `flow` card thereafter, demonstrating SPEC-055. Ships **no `skill/`**: the skill is the artifact the demo produces |
 
 ## Directory structure
 
@@ -24,15 +25,20 @@ samples/
 └── <category>/
     └── <sample-name>/
         ├── README.md           # Tutorial walkthrough
+        ├── WALKTHROUGH.md      # Live, click-by-click run against a cluster (optional)
         ├── skill/              # Skill document(s) — installed by `make deploy-samples`
         ├── demo/               # Demo/test script(s)
         └── target/             # Sample-specific target infrastructure (optional)
 ```
 
-Not every sample needs all subdirectories. Infrastructure shared with the
-platform or other samples (browser target pages, NetworkPolicy, credential
-sets) lives in the platform's GitOps directory and is referenced from the
-sample's README — the dependency arrow is always tutorial → platform, never
+Not every sample needs all subdirectories. `skill/` may even be absent by
+design: `web-checks/skill-graduation` ships none because its skill is the
+artifact the demo *produces*, and `deploy-samples.sh` discovers samples by
+`find -type d -name skill`, so such a sample is simply invisible to the
+installer (and `SAMPLE=<that-sample>` exits non-zero saying so). Infrastructure
+shared with the platform or other samples (browser target pages, NetworkPolicy,
+credential sets) lives in the platform's GitOps directory and is referenced from
+the sample's README — the dependency arrow is always tutorial → platform, never
 the reverse. Sample skills need no GitOps wiring at all: `make deploy-samples`
 installs them into a generic `samples` source (see below).
 
@@ -70,7 +76,8 @@ survives subsequent `make deploy` runs.
 
 1. Create a directory under the appropriate category
 2. Add a `README.md` explaining the automation pattern
-3. Add the skill document under `skill/`
+3. Add the skill document under `skill/` — unless the sample's point is that
+   the platform produces it, in which case say so in the README
 4. Add a demo script under `demo/`
 5. If your sample needs its own target infrastructure, add it under `target/`
    (shared infra used by more than one consumer stays in platform GitOps)
